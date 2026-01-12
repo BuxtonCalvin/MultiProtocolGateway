@@ -75,6 +75,10 @@ class modbus_base(transport_base):
         # Note: Connection and analyze_protocol will be called after subclass initialization is complete
 
     def init_after_connect(self):
+        #analyze protocol if enabled
+        if self.analyze_protocol_enabled:
+            self.analyze_protocol()
+
         #from transport_base settings
         if self.write_enabled:
             self.enable_write()
