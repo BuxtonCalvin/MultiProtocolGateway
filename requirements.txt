@@ -1,7 +1,8 @@
-pymodbus==3.7.0
+pymodbus
 paho-mqtt
 pyserial
 python-can
 influxdb
 sqlalchemy-timescaledb
 psycopg2-binary
+tzlocal
