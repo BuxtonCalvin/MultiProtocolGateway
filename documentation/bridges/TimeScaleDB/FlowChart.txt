@@ -1,0 +1,350 @@
++------------------+      +------------------+      +-------------------------+
+| Modbus TCP Poll  | ---> |  ProtocolGateway | ---> | TimescaleDB Output     |
+| (transport.modbus) |    |  (bridge router) |      | (timescaledb_out)       |
++------------------+      +------------------+      +-------------------------+
+                                                          |
+                                                          v
+                                                TimescaleDB Wide Table
+                                                (device_metrics_wide)
+
+
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│  0. Load Config + Registry Map                                             │
+└────────────────────────────────────────────────────────────────────────────┘
+protocol_gateway.py
+    |
+    |-- loads config.cfg
+    |
+    |-- loads registry_map:
+    |       registry_map = RegistryMap.from_json(file)
+    |       registry map contains ALL potential Modbus variables
+    |
+    |-- loads variable_mask (optional):
+    |       mask = { var_name: True/False }
+    |
+    |-- compute final scraper variable list:
+    |
+    |       final_vars = [
+    |           v for v in registry_map.entries
+    |           if mask.get(v.name, True) == True
+    |       ]
+    |
+    |-- final_vars now determines EXACTLY which registers will be scraped
+    |
+    '-> pass final_vars into modbus_tcp transport
+
+
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│  1. Modbus Transport Setup                                                 │
+└────────────────────────────────────────────────────────────────────────────┘
+classes/transports/modbus_tcp.py: __init__()
+    |
+    |-- receives final_vars from gateway
+    |-- builds internal read plan:
+    |
+    |     for each variable v in final_vars:
+    |          create read descriptor (address, function code, decoding rules)
+    |
+    |-- combine variables into optimized register block reads
+
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│  2. Polling Loop (Thread: _poll_worker)                                    │
+└────────────────────────────────────────────────────────────────────────────┘
+modbus_tcp._poll_worker()
+    |
+    |-- LOOP:
+    |       |
+    |       |-- for each read-block in optimized-plan:
+    |       |       raw = client.read_holding_registers(...)
+    |       |       decoded = decode according to registry_map entries
+    |       |
+    |       '-- produce output dict:
+    |               {
+    |                   "device_id": "...",
+    |                   "timestamp": <ts>,
+    |                   "variables": {
+    |                       <var_name>: <value>,   # ONLY variables allowed by variable_mask
+    |                       ...
+    |                   }
+    |               }
+    |
+    '-----> send to ProtocolGateway.on_message()
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│  3. Bridge Router (ProtocolGateway)                                        │
+└────────────────────────────────────────────────────────────────────────────┘
+protocol_gateway.on_message(packet)
+    |
+    |-- find which transport is the bridge target:
+    |       ex: modbus_tcp → transport.timescaledb
+    |
+    '---> call:
+            timescaledb_out.write(packet)
+
+┌────────────────────────────────────────────────────────────────────────────┐
+│  4. TimescaleDB Output Transport                                           │
+└────────────────────────────────────────────────────────────────────────────┘
+timescaledb_out.write(packet)
+    |
+    |-- for each enabled variable:
+    |         MetricPoint(device_id, timestamp, variable_name, value)
+    |
+    '-- enqueue into batch_queue
+
+
+
+
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  1. Gateway Startup                                                          │
+└──────────────────────────────────────────────────────────────────────────────┘
+protocol_gateway.py
+    |
+    |-- load config
+    |-- dynamically import "classes.transports.modbus_tcp"
+    |-- dynamically import "classes.transports.timescaledb_out"
+    |
+    |-- instantiate modbus_tcp( cfg )
+    |-- instantiate timescaledb_out( cfg )
+           |
+           |-- timescaledb_out.__init__()
+                 |
+                 |-- start flush thread
+                 |-- start autorefresh thread
+                 |-- does NOT connect yet (connect() called later)
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  2. Modbus Polling Loop (Separate Thread)                                    │
+└──────────────────────────────────────────────────────────────────────────────┘
+modbus_tcp._poll_worker()
+    |
+    |-- poll device → decode registers → build "data packet" dict
+          e.g. { ts: 1710000000, pointName: "V1", value: 234.1 }
+    |
+    |-- send packet to ProtocolGateway.on_message()
+
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  3. Bridge Routing                                                            │
+└──────────────────────────────────────────────────────────────────────────────┘
+protocol_gateway.on_message()
+    |
+    |-- find output transports where:
+           output.match_name == bridge_target
+           (ex: "transport.timescaledb")
+    |
+    |-- call:
+           timescaledb_out.write( data_dict_from_modbus )
+
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  4. Timescale Output: Write → Queue                                          │
+└──────────────────────────────────────────────────────────────────────────────┘
+timescaledb_out.write()
+    |
+    |-- convert Modbus message → internal MetricPoint structure
+    |
+    |-- put MetricPoint into batch_queue
+          (thread-safe queue.Queue())
+
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  5. Flush Worker Thread                                                      │
+└──────────────────────────────────────────────────────────────────────────────┘
+timescaledb_out._flush_worker()   (always running, daemon thread)
+    LOOP:
+        |
+        |-- dequeue up to batch_size points
+        |
+        |-- call:
+               _flush_batch_wide( points )
+
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  6. Wide Table Writer (device_metrics_wide)                                  │
+└──────────────────────────────────────────────────────────────────────────────┘
+timescaledb_out._flush_batch_wide()
+    |
+    |-- ensure table exists: device_metrics_wide
+    |
+    |-- detect unknown metric keys
+    |-- ALTER TABLE ADD COLUMN IF NOT EXISTS <metric> float8
+    |
+    |-- build row:
+          device_id   = <bridge/device identifier>
+          ts          = timestamp of sample
+          <metric1>   = value
+          <metric2>   = value
+    |
+    |-- INSERT INTO device_metrics_wide( device_id, ts, metric... )
+    |
+    |-- COMMIT
+
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  7. On Error → Backlog + Reconnect                                           │
+└──────────────────────────────────────────────────────────────────────────────┘
+if INSERT/connection fails:
+    |
+    |-- _add_to_backlog() for each failed point
+    |-- _trigger_reconnect()
+          |
+          |-- spawn reconnect thread (only one allowed)
+          |
+          |-- reconnect sequence:
+                 connect()
+                 flush_backlog()
+                 resume normal flush loop
+
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  8. Data Ends Up in TimescaleDB Wide Table                                   │
+└──────────────────────────────────────────────────────────────────────────────┘
+device_metrics_wide
+    id bigserial PK
+    device_id    text
+    ts           timestamptz
+    voltage      float8
+    current      float8
+    temp         float8
+    ...
+
+
+
+ ┌─────────────────────┐
+ │ polled registers    │
+ │ ModbusTCP device    │
+ └─────────┬───────────┘
+           │ decoded values
+           v
+ ┌──────────────────────┐
+ │ modbus_tcp transport │
+ │ _poll_worker thread  │
+ └─────────┬────────────┘
+           │ messages
+           v
+ ┌─────────────────────────┐
+ │ ProtocolGateway.on_msg  │
+ │ (bridge router)         │
+ └──────────┬──────────────┘
+            │ send to output
+            v
+ ┌────────────────────────────┐
+ │ timescaledb_out.write      │
+ │ → push into Queue()        │
+ └───────────┬────────────────┘
+             │ queued metrics
+             v
+ ┌────────────────────────────┐
+ │ _flush_worker thread       │
+ │ dequeue batch              │
+ └───────────┬────────────────┘
+             │ batch of points
+             v
+ ┌────────────────────────────┐
+ │ _flush_batch_wide          │
+ │   ensure wide columns      │
+ │   build INSERT             │
+ └───────────┬────────────────┘
+             │ SQL INSERT
+             v
+ ┌────────────────────────────┐
+ │ TimescaleDB                │
+ │ device_metrics_wide table  │
+ └────────────────────────────┘
+
+
+
+| Thread                            | Purpose                                   | Source File                     |
+| --------------------------------- | ----------------------------------------- | ------------------------------- |
+| **Main thread**                   | Loads config, instantiates transports     | `protocol_gateway.py`           |
+| **Modbus Poll Thread**            | Scrapes device registers repeatedly       | `modbus_tcp._poll_worker`       |
+| **Gateway Router Thread**         | (runs in main) dispatches messages        | built-in                        |
+| **Timescale Flush Thread**        | Writes batches to DB                      | `timescaledb_out._flush_worker` |
+| **Timescale Auto-Refresh Thread** | (optional) rebuilds metadata periodically | `_run_autorefresh_thread`       |
+| **Timescale Reconnect Thread**    | Spawns only on failure                    | `_attempt_reconnect`            |
+
+
+
+
+1. protocol_gateway.py
+       load config
+       instantiate transports
+
+2. classes/transports/modbus_tcp.py
+       _poll_worker() thread
+       poll device
+       parse registers
+       build point dict
+       call gateway.on_message()
+
+3. protocol_gateway.py
+       on_message()
+       resolve bridge target
+       call timescaledb_out.write()
+
+4. classes/transports/timescaledb_out.py
+       write()
+       build MetricPoint
+       enqueue into batch_queue
+
+5. classes/transports/timescaledb_out.py
+       _flush_worker() thread
+       dequeue N points
+       call _flush_batch_wide()
+
+6. classes/transports/timescaledb_out.py
+       _flush_batch_wide()
+       ensure columns exist
+       INSERT rows into device_metrics_wide
+       COMMIT
+
+7. (optional error path)
+       backlog storage
+       reconnect thread
+       flush_backlog()
+
+
+          ┌────────────────────────────┐
+CONFIG →  │ registry_map.json          │
+          └───────────────┬────────────┘
+                          │ load all variables
+                          v
+                 ┌───────────────────────────────┐
+                 │ variable_mask from config     │
+                 └───────────────┬───────────────┘
+                                 │ apply filter
+                                 v
+                     ┌──────────────────────────┐
+                     │ final_vars (enabled)     │
+                     └──────────────┬───────────┘
+                                    │
+           ┌────────────────────────┴────────────────────────┐
+           │     Modbus transport builds optimized read      │
+           │       only for entries in final_vars            │
+           └────────────────────────┬────────────────────────┘
+                                    │ sampled values
+                                    v
+                         ┌──────────────────────────┐
+                         │ gateway.on_message()     │
+                         └──────────────┬───────────┘
+                                        │ forwarded
+                                        v
+                            ┌────────────────────────┐
+                            │ timescaledb_out.write │
+                            └─────────────┬────────┘
+                                          │ batch queue
+                                          v
+                           ┌───────────────────────────┐
+                           │ _flush_worker thread      │
+                           └───────────────┬───────────┘
+                                           │ batch
+                                           v
+                             ┌────────────────────────────┐
+                             │ _flush_batch_wide()        │
+                             │ ensure wide-table columns  │
+                             │ insert values              │
+                             └────────────────────────────┘
