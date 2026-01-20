@@ -1,14 +1,9 @@
 import inspect
+from configparser import SectionProxy
+
+from pymodbus.client import ModbusTcpClient
 
 from classes.protocol_settings import Registry_Type, protocol_settings
-
-#compatability
-try:
-    from pymodbus.client.sync import ModbusTcpClient
-except ImportError:
-    from pymodbus.client import ModbusTcpClient
-
-from configparser import SectionProxy
 
 from .modbus_base import modbus_base
 
@@ -50,7 +45,7 @@ class modbus_tcp(modbus_base):
         if "unit" not in kwargs:
             kwargs = {"unit": 1, **kwargs}
 
-        #compatability
+        #compatibility
         if self.pymodbus_slave_arg != "unit":
             kwargs["slave"] = kwargs.pop("unit")
 

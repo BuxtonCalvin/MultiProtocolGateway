@@ -20,17 +20,14 @@ from .transport_base import TransportWriteMode, transport_base
 
 if TYPE_CHECKING:
     from configparser import SectionProxy
-    try:
-        from pymodbus.client.sync import BaseModbusClient
-    except ImportError:
-        from pymodbus.client import BaseModbusClient
+
+    from pymodbus.client import ModbusBaseClient
 
 
 class modbus_base(transport_base):
 
-
     #this is specifically static
-    clients : dict[str, "BaseModbusClient"] = {}
+    clients : dict[str, "ModbusBaseClient"] = {}
     ''' str is identifier, dict of clients when multiple transports use the same ports '''
 
     #non-static here for reference, type hinting, python bs ect...
@@ -49,6 +46,7 @@ class modbus_base(transport_base):
 
     send_holding_register : bool = True
     send_input_register : bool = True
+
 
     def __init__(self, settings : "SectionProxy", protocolSettings : "protocol_settings" = None):
         super().__init__(settings)
@@ -161,7 +159,6 @@ class modbus_base(transport_base):
                 self._log.warning("enable write - WARNING - RELAXED MODE (due to validation error)")
             else:
                 self._log.error("enable write FAILED - WRITE DISABLED")
-
 
 
     def write_data(self, data : dict[str, str], from_transport : transport_base) -> None:
@@ -403,7 +400,7 @@ class modbus_base(transport_base):
         #current_registers = self.read_modbus_registers(start=entry.register, end=entry.register, registry_type=registry_type)
         #current_value = current_registers[entry.register]
         current_value = info[entry.variable_name]
-        
+
 
         #handle codes
         value = self.protocolSettings.get_code_by_value(entry, value, fallback=value)
