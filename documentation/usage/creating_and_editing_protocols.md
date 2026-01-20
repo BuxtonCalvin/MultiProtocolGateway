@@ -8,8 +8,8 @@ The .csv files hold the registry or address definitions.
 
 # CSV
 
-CSV = comma seperated values... spreadsheets. 
-delimeter for csv can be , or ; ( not both )
+CSV = comma separated values... spreadsheets.
+delimiter for csv can be , or ; ( not both )
 
 | variable name | data type | register| documented name|description|writable|values | read interval |
 | -- | -- | -- | -- | -- | -- | -- | -- |
@@ -19,7 +19,7 @@ delimeter for csv can be , or ; ( not both )
 provides a user-friendly name to work with, while retaining the original documented name; since a lot of variable names are up to interpretation. 
 
 ### documented name
-Original variable name provided from protocol documention; when variable name is not specified, this name is used.
+Original variable name provided from protocol documentation; when variable name is not specified, this name is used.
 
 ### data type
 Defines the expected data type for the register / map entry
@@ -97,8 +97,8 @@ the format for these flags is json. these flags / codes can also be defined via 
 provides a per register read interval; the minimum value is the configured transport read interval.
 
 #x for read_interval from transport config * #
-#s for plainold seconds
-#ms for miliseconds
+#s for plain old seconds
+#ms for milliseconds
 
 for example:
 ``` 
