@@ -477,7 +477,7 @@ class timescaledb(transport_base):
         Connect to DB, build device_metrics_wide table from metrics data, and ensure schema/hypertable/policies exist.
         If from_transport data provided, ensure device_info insert for that transport.
         """
-        self._log.info(f"[TimescaleDB] Version: {self.__version__}")
+        # self._log.info(f"[TimescaleDB] Version: {self.__version__}")
         try:
         # 1 create database if missing.  Connect to standard default "postgres" database first to then check/create target database structure.
 
