@@ -51,10 +51,8 @@ jobs:
         with:
           context: .
           push: true
+          # Use the normalized outputs from the 'prep' step
           tags: |
-            # Tag with branch name
-            ${{ secrets.DOCKER_USERNAME }}/${{ github.event.repository.name }}:${{ steps.get_branch.outputs.branch }}
-            # Tag with branch name and date
-            ${{ secrets.DOCKER_USERNAME }}/${{ github.event.repository.name }}:${{ steps.get_branch.outputs.branch }}-${{ steps.date.outputs.NOW }}
-            # Tag with 'latest' ONLY if the branch is main
-            ${{ github.ref == 'refs/heads/main' && format('{0}/{1}:latest', secrets.DOCKER_USERNAME, github.event.repository.name) || '' }}
+            ${{ secrets.DOCKER_USERNAME }}/${{ steps.prep.outputs.repo }}:${{ steps.prep.outputs.branch }}
+            ${{ secrets.DOCKER_USERNAME }}/${{ steps.prep.outputs.repo }}:${{ steps.prep.outputs.branch }}-${{ steps.prep.outputs.date }}
+            ${{ github.ref == 'refs/heads/main' && format('{0}/{1}:latest', secrets.DOCKER_USERNAME, steps.prep.outputs.repo) || '' }}
