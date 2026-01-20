@@ -15,6 +15,18 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+      
+      # 1. Normalize repository and branch names to lowercase
+      - name: Prepare Docker Metadata
+        id: prep
+        run: |
+          # Convert repo name and branch to lowercase
+          REPO_LC=$(echo "${{ github.event.repository.name }}" | tr '[:upper:]' '[:lower:]')
+          BRANCH_LC=$(echo "${{ github.ref_name }}" | tr '[:upper:]' '[:lower:]' | sed 's/\//-/g')
+          
+          echo "repo=${REPO_LC}" >> $GITHUB_OUTPUT
+          echo "branch=${BRANCH_LC}" >> $GITHUB_OUTPUT
+          echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT        
 
       - name: Get current date for tag
         id: date
