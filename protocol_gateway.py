@@ -214,9 +214,22 @@ class Protocol_Gateway:
                     to_transport.write_data({entry.variable_name : data}, transport)
                     break
 
+    def force_reconnect_by_name(self, name: str) -> None:
+        """
+        Search for a transport by name and flag it for reconnection.
+        The 'run' loop will see 'connected=False' and call connect() on next tick.
+        """
+        for transport in self.__transports:
+            # Checking against transport_name as defined in your transport_base
+            if transport.transport_name == name:
+                transport.connected = False
+                # Reset the last_read_time to force an immediate read after connect
+                transport.last_read_time = 0
+                break
+
     def run(self):
         """
-        run method, starts ModBus connection and mqtt connection
+        run method, starts ModBus connection and bridge connection
         """
 
         self.__running = True
