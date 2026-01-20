@@ -20,10 +20,10 @@ if sys.version_info < (3, 9):
 
 import argparse
 import logging
-import os
 import sys
 import traceback
 from configparser import ConfigParser, NoOptionError
+from pathlib import Path
 
 from classes.protocol_settings import protocol_settings, registry_map_entry
 from classes.transports.transport_base import transport_base
@@ -95,7 +95,7 @@ class CustomConfigParser(ConfigParser):
     def getfloat(self, section, option, *args, **kwargs): #bypass fallback bug
         value = self.get(section, option, *args, **kwargs)
         return float(value) if value is not None else None
-    
+
     def getboolean(self, section, option, *args, **kwargs): #bypass fallback bug
         value = self.get(section, option, *args, **kwargs)
         return strtobool(value)
@@ -125,10 +125,25 @@ class Protocol_Gateway:
         handler.setFormatter(formatter)
         self.__log.addHandler(handler)
 
-        self.config_file = os.path.dirname(os.path.realpath(__file__)) + "/growatt2mqtt.cfg"
-        newcfg = os.path.dirname(os.path.realpath(__file__)) + "/"+ config_file
-        if os.path.isfile(newcfg):
-            self.config_file = newcfg
+        # self.config_file = os.path.dirname(os.path.realpath(__file__)) + "/growatt2mqtt.cfg"
+        # if config_file:
+        #     if os.path.isabs(config_file):
+        #         newcfg = config_file
+        #     else:
+        #         newcfg = os.path.dirname(os.path.realpath(__file__)) + "/" + config_file #"/" error on windows
+        #
+        # if os.path.isfile(newcfg):
+        #     self.config_file = newcfg
+
+        base_dir: Path = Path(__file__).resolve().parent
+
+        default_cfg: Path = base_dir / "growatt2mqtt.cfg"
+        alternate_cfg: Path = base_dir / config_file
+
+        if alternate_cfg.is_file():
+            self.config_file = alternate_cfg
+        else:
+            self.config_file = default_cfg
 
         #logging.basicConfig()
         #pymodbus_log = logging.getLogger('pymodbus')
@@ -237,10 +252,6 @@ class Protocol_Gateway:
                 self.__log.error(err)
 
             time.sleep(0.07) #change this in future. probably reduce to allow faster reads.
-
-
-
-
 
 
 def main(args=None):

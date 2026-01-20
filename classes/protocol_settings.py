@@ -1,6 +1,5 @@
 import ast
 import csv
-import glob
 import itertools
 import json
 import logging
@@ -9,6 +8,7 @@ import re
 import time
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 from typing import TYPE_CHECKING, Union
 
 from defs.common import strtoint
@@ -277,24 +277,38 @@ class protocol_settings:
         self.transport_settings = transport_settings
 
         #load variable mask
+        file_path_m = self.find_protocol_file("variable_mask.txt")
         self.variable_mask = []
-        if os.path.isfile("variable_mask.txt"):
-            with open("variable_mask.txt") as f:
-                for line in f:
-                    if line[0] == "#": #skip comment
-                        continue
-
-                    self.variable_mask.append(line.strip().lower())
+        if file_path_m is not None and os.path.isfile(file_path_m):
+            try:
+                with open(file_path_m, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        clean_line = line.strip().lower()
+                        # Skip all empty lines or comments
+                        if not clean_line or clean_line.startswith('#'):
+                            continue
+                        self.variable_mask.append(clean_line)
+            except Exception as e:
+                self._log.error(f"Error reading file: {e}")
+        else:
+            self._log.warning(f"File {file_path_m} Path, variable_mask.txt not found. Skipping...")
 
         #load variable screen
+        file_path_s: str = self.find_protocol_file("variable_screen.txt")
         self.variable_screen = []
-        if os.path.isfile("variable_screen.txt"):
-            with open("variable_screen.txt") as f:
-                for line in f:
-                    if line[0] == "#": #skip comment
-                        continue
-
-                    self.variable_screen.append(line.strip().lower())
+        if file_path_s is not None and os.path.isfile(file_path_s):
+            try:
+                with open(file_path_s, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        clean_line = line.strip().lower()
+                        # Skip all empty lines or comments
+                        if not clean_line or clean_line.startswith('#'):
+                            continue
+                        self.variable_mask.append(clean_line)
+            except Exception as e:
+                self._log.error(f"Error reading file: {e}")
+        else:
+            self._log.warning(f"File {file_path_s} Path, variable_screen.txt not found. Skipping...")
 
         self.load__json() #load first, so priority to json codes
 
@@ -334,10 +348,10 @@ class protocol_settings:
                 return item
 
         return None
-    
+
     def get_code_by_value(self, entry : registry_map_entry, value : str, fallback=None) -> str:
         ''' case insensitive '''
-        
+
         value = value.strip().lower()
 
         if entry.variable_name+"_codes" in self.codes:
@@ -345,7 +359,7 @@ class protocol_settings:
             for code, val in codes.items():
                 if value == val.lower():
                     return code
-                
+
         return fallback
 
     def load__json(self, file : str = "", settings_dir : str = ""):
@@ -358,8 +372,8 @@ class protocol_settings:
         path = self.find_protocol_file(file, settings_dir)
 
         #if path does not exist; nothing to load. skip.
-        if not path:
-            self._log.error("ERROR: '"+file+"' not found")
+        if path is None:
+            self._log.error(f"ERROR: '{file}' not found")
             return
 
         with open(path) as f:
@@ -807,6 +821,7 @@ class protocol_settings:
         3 If the next register starts exactly where the previous one ends → merge
         4 If there is a gap → start a new range
         5 Produce a minimal set of (start_register, total_length) ranges'''
+
         max_batch_size = 45 #see manual; says max batch is 45
 
         if "batch_size" in self.settings:
@@ -848,22 +863,35 @@ class protocol_settings:
         return ranges
 
 
-    def find_protocol_file(self, file : str, base_dir : str = "" ) -> str:
 
-        path = base_dir + "/" + file
-        if os.path.exists(path):
-            return path
 
+
+    def find_protocol_file(self, file: str, base_dir: str = "") -> str:
+        # use Path object to allow MS windows path.
+        # protocol_settings.py is two folders to root parent  ie. parent.parent
+        # code uses Path objects to return a path string similar to original code
+        # but formatted per OS.
+
+        # 1. Establish absolute base directory (using Path for logic)
+        base_path = Path(__file__).resolve().parent.parent / base_dir
+
+        # 2. Check direct path
+        path = base_path / file
+        if path.exists():
+            return str(path)  # Convert to string before returning
+
+        # 3. Check suffix-based subfolder
         suffix = file.split("_", 1)[0]
+        path = base_path / suffix / file
+        if path.exists():
+            return str(path)
 
-        path = base_dir + "/" + suffix +"/" + file
-        if os.path.exists(path):
-            return path
-
-        #find file by name, recurisvely. last resort
-        search_pattern = os.path.join(base_dir, "**", file)
-        matches = glob.glob(search_pattern, recursive=True)
-        return matches[0] if matches else None
+        # 4. Recursive search (last resort)
+        try:
+            # rglob returns Path objects; convert the first match to a string
+            return str(next(base_path.rglob(file)))
+        except StopIteration:
+            return None
 
 
     def load_registry_map(self, registry_type : Registry_Type, file : str = "", settings_dir : str = ""):
