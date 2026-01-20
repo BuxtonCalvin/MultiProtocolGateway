@@ -6,7 +6,7 @@ import serial
 
 
 class serial_frame_client():
-    ''' basic serial client implenting a empty SOI/EOI frame'''
+    ''' basic serial client implementing an empty SOI/EOI frame'''
     client : serial.Serial
     running : bool = False
     soi : bytes
@@ -23,7 +23,7 @@ class serial_frame_client():
     timeout : float = 5
     ''' timeout in seconds '''
 
-    #region asyncronous
+    #region asynchronous
     asynchronous : bool = False
     ''' if set, runs main loop'''
 
@@ -35,7 +35,7 @@ class serial_frame_client():
 
     callback_lock : threading.Lock = threading.Lock()
     '''lock for callback'''
-    #endregion asyncronous
+    #endregion asynchronous
 
 
     def __init__(self, port : str , baud : int , soi : bytes, eoi : bytes, **kwrgs) -> None:

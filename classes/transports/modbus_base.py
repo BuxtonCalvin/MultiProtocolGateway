@@ -38,10 +38,10 @@ class modbus_base(transport_base):
     ''' delay adjustment every error. todo: add a setting for this '''
 
     modbus_delay_setting : float = 0.85
-    '''time inbetween requests, unmodified'''
+    '''time in between requests, unmodified'''
 
     modbus_delay : float = 0.85
-    '''time inbetween requests'''
+    '''time in between requests'''
 
     analyze_protocol_enabled : bool = False
     analyze_protocol_save_load : bool = False
@@ -79,7 +79,7 @@ class modbus_base(transport_base):
         if self.write_enabled:
             self.enable_write()
 
-        #if sn is empty, attempt to autoread it
+        #if sn is empty, attempt to auto-read it
         if not self.device_serial_number:
             self.device_serial_number = self.read_serial_number()
             self.update_identifier()
@@ -123,7 +123,7 @@ class modbus_base(transport_base):
                 sn2 = sn2 + str(data_bytes.decode("utf-8"))
                 sn3 = str(data_bytes.decode("utf-8")) + sn3
 
-            time.sleep(self.modbus_delay*2) #sleep inbetween requests so modbus can rest
+            time.sleep(self.modbus_delay*2) #sleep in between requests so modbus can rest
 
         self._log.debug(f"Serial number sn2: {sn2}")
         self._log.debug(f"Serial number sn3: {sn3}")
@@ -176,7 +176,7 @@ class modbus_base(transport_base):
                     self.write_variable(entry, value, Registry_Type.HOLDING)
                     break
 
-        time.sleep(self.modbus_delay) #sleep inbetween requests so modbus can rest
+        time.sleep(self.modbus_delay) #sleep in between requests so modbus can rest
 
     def read_data(self) -> dict[str, str]:
         info = {}
@@ -223,7 +223,7 @@ class modbus_base(transport_base):
             if value.variable_name in info:
                 evaluate = True
 
-                if value.concatenate and value.register != value.concatenate_registers[0]: #only eval concated values once
+                if value.concatenate and value.register != value.concatenate_registers[0]: #only eval concatenated values once
                     evaluate = False
 
                 if evaluate:
@@ -305,7 +305,7 @@ class modbus_base(transport_base):
 
         #very well possible the registers will be incomplete due to different hardware sizes
         #so dont assume they are set / complete
-        #we'll see about the behaviour. if it glitches, this could be a way to determine protocol.
+        #we'll see about the behavior. if it glitches, this could be a way to determine protocol.
 
 
         input_register_score : dict[str, int] = {}
@@ -348,7 +348,7 @@ class modbus_base(transport_base):
         for name, protocol in protocols.items():
             input_register_score[name] = 0
             holding_register_score[name] = 0
-            #very rough percentage. tood calc max possible score.
+            #very rough percentage. todo calc max possible score.
             input_valid_count[name] = 0
             holding_valid_count[name] = 0
 
@@ -491,7 +491,7 @@ class modbus_base(transport_base):
 
 
     def read_variable(self, variable_name : str, registry_type : Registry_Type, entry : registry_map_entry = None):
-        ##clean for convinecne
+        ##clean for convenience
         if variable_name:
             variable_name = variable_name.strip().lower().replace(" ", "_")
 
@@ -564,11 +564,11 @@ class modbus_base(transport_base):
             except ModbusIOException as e:
                 self._log.error("ModbusIOException: " + str(e))
                 # In pymodbus 3.7+, ModbusIOException doesn't have error_code attribute
-                # Treat all ModbusIOException as retryable errors
+                # Treat all ModbusIOException as retry-able errors
                 isError = True
 
 
-            if register is None or isinstance(register, bytes) or (hasattr(register, 'isError') and register.isError()) or isError: #sometimes weird errors are handled incorrectly and response is a ascii error string
+            if register is None or isinstance(register, bytes) or (hasattr(register, 'isError') and register.isError()) or isError: #sometimes weird errors are handled incorrectly and response is an ascii error string
                 if register is None:
                     self._log.error("No response received from modbus device")
                 elif isinstance(register, bytes):

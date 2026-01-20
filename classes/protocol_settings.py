@@ -187,7 +187,7 @@ class registry_map_entry:
     register : int
     register_bit : int
     register_byte : int
-    ''' byte offset for canbus ect... '''
+    ''' byte offset for canbus etc... '''
 
     variable_name : str
     documented_name : str
@@ -213,7 +213,7 @@ class registry_map_entry:
     ''' entry specific byte order little | big | '' '''
 
     read_command : bytes = None
-    ''' for transports/protocols that require sending a command ontop of "register" '''
+    ''' for transports/protocols that require sending a command on top of "register" '''
 
     read_interval : int = 1000
     ''' how often to read register in ms'''
@@ -408,7 +408,7 @@ class protocol_settings:
             transport_read_interval = self.transport_settings.getint("read_interval", transport_read_interval)
 
 
-        if not os.path.exists(path): #return empty is file doesnt exist.
+        if not os.path.exists(path): #return empty if file doesn't exist.
             return registry_map
 
 
@@ -716,7 +716,7 @@ class protocol_settings:
 
             first_row = re.sub(r"\s+" + re.escape(delimeter) +"|" + re.escape(delimeter) +r"\s+", delimeter, first_row) #trim values
 
-            csvfile = itertools.chain([first_row], csvfile) #add clean header to begining of iterator
+            csvfile = itertools.chain([first_row], csvfile) #add clean header to beginning of iterator
 
             # Create a CSV reader object
             reader = csv.DictReader(csvfile, delimiter=delimeter)
@@ -726,7 +726,7 @@ class protocol_settings:
                 process_row(row)
 
             if overrides is not None:
-                # Add any unmatched overrides as new entries... probably need to add some better error handling to ensure entry isnt empty ect...
+                # Add any unmatched overrides as new entries... probably need to add some better error handling to ensure entry isn't empty ect...
                 for key in override_keys:
                     applied = False
                     for key_value, override_row in overrides[key].items():
@@ -768,7 +768,7 @@ class protocol_settings:
 
                         combined_item.documented_name = combined_item.documented_name[:-2].strip()
 
-                        if not combined_item.unit: #fix inconsistsent documentation
+                        if not combined_item.unit: #fix inconsistent documentation
                             combined_item.unit = registry_map[index].unit
                             combined_item.unit_mod = registry_map[index].unit_mod
 
@@ -798,7 +798,15 @@ class protocol_settings:
 
     def calculate_registry_ranges(self, map : list[registry_map_entry], max_register : int, init : bool = False, timestamp: int = 0) -> list[tuple]:
 
-        ''' read optimization; calculate which ranges to read'''
+        ''' read optimization; calculate which ranges to read
+        to allow the Modbus driver to combine multiple registers into a single Modbus read operation
+        (function 0x03/0x04), reducing round-trips.
+
+        1 Sort registry entries by starting register address
+        2 Walk through them sequentially
+        3 If the next register starts exactly where the previous one ends → merge
+        4 If there is a gap → start a new range
+        5 Produce a minimal set of (start_register, total_length) ranges'''
         max_batch_size = 45 #see manual; says max batch is 45
 
         if "batch_size" in self.settings:
@@ -1081,7 +1089,7 @@ class protocol_settings:
             end_bit = flag_size + start_bit
 
             offset : int = 0
-            #calculate current offset for mutliregiter values, were assuming concatenate registers is in order, 0 being the first / lowest
+            #calculate current offset for multi register values, were assuming concatenate registers is in order, 0 being the first / lowest
             #offset should always be >= 0
             if entry.concatenate:
                 offset : int = entry.register - entry.concatenate_registers[0]
@@ -1283,7 +1291,7 @@ class protocol_settings:
             def replace_vars(match):
                 try:
                     maths = match.group("maths")
-                    maths = re.sub(r"\s", "", maths) #remove spaces, because ast.parse doesnt like them
+                    maths = re.sub(r"\s", "", maths) #remove spaces, because ast.parse doesn't like them
 
                     # Parse the expression safely
                     tree = ast.parse(maths, mode="eval")

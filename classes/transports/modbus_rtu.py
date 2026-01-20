@@ -34,7 +34,7 @@ class modbus_rtu(modbus_base):
         if not self.port:
             raise ValueError("Port is not valid / not found")
 
-        print("Serial Port : " + self.port + " = ", get_usb_serial_port_info(self.port)) #print for config convience
+        print("Serial Port : " + self.port + " = ", get_usb_serial_port_info(self.port)) #print for config convenience
 
         if "baud" in self.protocolSettings.settings:
             self.baudrate = strtoint(self.protocolSettings.settings["baud"])
@@ -44,7 +44,7 @@ class modbus_rtu(modbus_base):
         address : int = settings.getint("address", 0)
         self.addresses = [address]
 
-        # pymodbus compatability; unit was renamed to address
+        # pymodbus compatibility; unit was renamed to address
         if "slave" in inspect.signature(ModbusSerialClient.read_holding_registers).parameters:
             self.pymodbus_slave_arg = "slave"
 
@@ -80,7 +80,7 @@ class modbus_rtu(modbus_base):
         if "unit" not in kwargs:
             kwargs = {"unit": int(self.addresses[0]), **kwargs}
 
-        #compatability
+        #compatibility
         if self.pymodbus_slave_arg != "unit":
             kwargs["slave"] = kwargs.pop("unit")
 
@@ -96,7 +96,7 @@ class modbus_rtu(modbus_base):
         if "unit" not in kwargs:
             kwargs = {"unit": self.addresses[0], **kwargs}
 
-        #compatability
+        #compatibility
         if self.pymodbus_slave_arg != "unit":
             kwargs["slave"] = kwargs.pop("unit")
 

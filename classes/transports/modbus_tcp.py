@@ -26,12 +26,12 @@ class modbus_tcp(modbus_base):
 
         self.port = settings.getint("port", self.port)
 
-        # pymodbus compatability; unit was renamed to address
+        # pymodbus compatibility; unit was renamed to address
         if "slave" in inspect.signature(ModbusTcpClient.read_holding_registers).parameters:
             self.pymodbus_slave_arg = "slave"
 
         client_str = self.host+"("+str(self.port)+")"
-        #check if client is already initialied
+        #check if client is already initialized
         if client_str in modbus_base.clients:
             self.client = modbus_base.clients[client_str]
             return
@@ -61,7 +61,7 @@ class modbus_tcp(modbus_base):
         if "unit" not in kwargs:
             kwargs = {"unit": 1, **kwargs}
 
-        #compatability
+        #compatibility
         if self.pymodbus_slave_arg != "unit":
             kwargs["slave"] = kwargs.pop("unit")
 

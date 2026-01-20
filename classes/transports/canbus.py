@@ -153,7 +153,7 @@ class canbus(transport_base):
                 self._log.info(f"Received message: {msg.arbitration_id:X}, data: {msg.data}")
 
                 with self.lock:
-                    #convert bytearray to bytes; were working with bytes.
+                    #convert bytearray to bytes; we're working with bytes.
                     self.cache[msg.arbitration_id] = (bytes(msg.data), time.time())
 
                 #time.sleep(1) no need for sleep because recv is blocking
@@ -209,7 +209,7 @@ class canbus(transport_base):
                 sn2 = sn2 + str(data_bytes.decode("utf-8"))
                 sn3 = str(data_bytes.decode("utf-8")) + sn3
 
-            time.sleep(self.modbus_delay*2) #sleep inbetween requests so modbus can rest
+            time.sleep(self.modbus_delay*2) #sleep in between requests so modbus can rest
 
         print(sn2)
         print(sn3)
@@ -245,7 +245,7 @@ class canbus(transport_base):
         if not info:
             self._log.info("Register/Cache is Empty; no new information reported.")
             if currentTime - self.emptyTime > self.watchDogTime:
-                self._log.error("Register/Cache has been empty for over " + str(self.watchDogTime) + "seconds. watchdog qutting application. ")
+                self._log.error("Register/Cache has been empty for over " + str(self.watchDogTime) + "seconds. watchdog quitting application. ")
                 quit() #quit application, service should be configured to restart
 
         else:
@@ -257,7 +257,7 @@ class canbus(transport_base):
 
     def read_variable(self, variable_name : str, registry_type : Registry_Type, entry : registry_map_entry = None):
         ''' read's variable from cache'''
-        ##clean for convinecne
+        ##clean for convenience
         if variable_name:
             variable_name = variable_name.strip().lower().replace(" ", "_")
 

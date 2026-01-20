@@ -17,11 +17,11 @@ class TransportWriteMode(Enum):
     READ = 0x00
     ''' READ ONLY '''
     WRITE = 0x01
-    ''' Standard Write Mode, ALL SAFTIES IN PLACE'''
+    ''' Standard Write Mode, ALL SAFETIES IN PLACE'''
     RELAXED = 0x02
     ''' less strict - initial protocol validation skipped'''
     UNSAFE = 0x03
-    ''' skip all safties '''
+    ''' skip all safeties '''
 
     @classmethod
     def fromString(cls, name : str):
@@ -143,11 +143,11 @@ class transport_base:
         ''' general purpose write function for between transports'''
         pass
 
-    #lets convert this to dict[str, registry_map_entry]
+    #let's convert this to dict[str, registry_map_entry]
     def read_data(self) -> dict[str,str]:
         '''
         general purpose read function for between transports;
-        return type may be changed to dict[str, registrsy_map_entry]. still thinking about this
+        return type may be changed to dict[str, registry_map_entry]. still thinking about this
         '''
         pass
 

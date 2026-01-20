@@ -65,7 +65,7 @@ class serial_pylon(transport_base):
             raise ValueError("Port is not set")
 
         self.port = find_usb_serial_port(self.port)
-        print("Serial Port : " + self.port + " = "+get_usb_serial_port_info(self.port)) #print for config convience
+        print("Serial Port : " + self.port + " = "+get_usb_serial_port_info(self.port)) #print for config convenience
 
         self.baudrate = settings.getint("baudrate", 9600)
 
@@ -126,7 +126,7 @@ class serial_pylon(transport_base):
         return info
 
     def read_variable(self, variable_name : str, entry : "registry_map_entry" = None, attribute : str = "info"):
-        ##clean for convinecne
+        ##clean for convenience
         if variable_name:
             variable_name = variable_name.strip().lower().replace(" ", "_")
 
@@ -140,7 +140,7 @@ class serial_pylon(transport_base):
 
 
         if entry:
-            #entry.concatenate this protocol probably doesnt require concatenate, since info is variable length.
+            #entry.concatenate this protocol probably doesn't require concatenate, since info is variable length.
             command = entry.register #CID1 and CID2 combined creates a single ushort
             self.send_command(command)
             frame = self.client.read()
@@ -185,7 +185,7 @@ class serial_pylon(transport_base):
         data.infolength = frame_data[8:12]
         data.info = frame_data[12:]
 
-        #on return, cid2 holds a return error code. so reads are time sensitive. will have to write syncronis functions in client
+        #on return, cid2 holds a return error code. so reads are time sensitive. will have to write synchronize functions in client
         #fromByte
         returnCode = return_codes.fromByte(data.cid2)
         if returnCode != return_codes.NORMAL:

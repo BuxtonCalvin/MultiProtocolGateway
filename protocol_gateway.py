@@ -192,7 +192,7 @@ class Protocol_Gateway:
 
 
     def on_message(self, transport : transport_base, entry : registry_map_entry, data : str):
-        ''' message recieved from a transport! '''
+        ''' message received from a transport! '''
         for to_transport in self.__transports:
             if to_transport.transport_name != transport.transport_name:
                 if to_transport.transport_name == transport.bridge or transport.transport_name == to_transport.bridge:
@@ -215,7 +215,7 @@ class Protocol_Gateway:
                 for transport in self.__transports:
                     if transport.read_interval > 0 and now - transport.last_read_time  > transport.read_interval:
                         transport.last_read_time = now
-                        #preform read
+                        #perform read
                         if not transport.connected:
                             transport.connect() #reconnect
                         else: #transport is connected
