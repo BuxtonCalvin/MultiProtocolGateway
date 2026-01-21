@@ -53,6 +53,5 @@ jobs:
           push: true
           # Use the normalized outputs from the 'prep' step
           tags: |
-            ${{ secrets.DOCKER_USERNAME }}/${{ steps.prep.outputs.repo }}:${{ steps.prep.outputs.branch }}
             ${{ secrets.DOCKER_USERNAME }}/${{ steps.prep.outputs.repo }}:${{ steps.prep.outputs.branch }}-${{ steps.prep.outputs.date }}
             ${{ github.ref == 'refs/heads/main' && format('{0}/{1}:latest', secrets.DOCKER_USERNAME, steps.prep.outputs.repo) || '' }}
