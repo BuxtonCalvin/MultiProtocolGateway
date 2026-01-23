@@ -20,8 +20,8 @@ if sys.version_info < (3, 9):
 
 import argparse
 import logging
+import logging.handlers
 import sys
-import traceback
 from configparser import ConfigParser, NoOptionError
 from pathlib import Path
 
@@ -105,8 +105,88 @@ class Protocol_Gateway:
     """
     Main class, implementing the Growatt / Inverters to MQTT functionality
     """
+    _logging_initialized = False
+
+    @classmethod
+    def _setup_logging(cls, cfg) -> None:
+        """
+        created to eliminate multi gig log file sizes in docker as logging.StreamHandler(sys.stdout) results in a
+        json file that can quickly grow quiet large.
+
+        Args:
+            cfg : passed the config.cfg file for settings.
+        """
+        if cls._logging_initialized:
+            return
+
+        # Read logging config
+        level_name: str = cfg.get("logging", "level", fallback="INFO").upper()
+        level: int = getattr(logging, level_name, logging.INFO)
+
+        log_dir = Path(cfg.get("logging", "log_dir", fallback="logs"))
+        log_file: str = cfg.get("logging", "log_file", fallback="PPG.log")
+
+        rotation: str = cfg.get("logging", "rotation", fallback="weekly").lower()
+        backup_count: int = cfg.getint("logging", "backup_count", fallback=4)
+        # fallback specific weekday rotation on a Monday
+        when: str = cfg.get("logging", "when", fallback="W0")
+        interval: int = cfg.getint("logging", "interval", fallback=1)
+        max_bytes: int = cfg.getint("logging", "max_bytes", fallback=100 * 1024 * 1024)
+
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_path = log_dir / log_file
+
+        # ---- Choose handler ----
+        if rotation == "weekly":
+            handler = logging.handlers.TimedRotatingFileHandler(
+                filename=log_path,
+                when=when,
+                interval=interval,
+                backupCount=backup_count,
+                utc=True,
+            )
+
+        elif rotation == "daily":
+            handler = logging.handlers.TimedRotatingFileHandler(
+                filename=log_path,
+                when="D",
+                interval=1,
+                backupCount=backup_count,
+                utc=True,
+            )
+
+        elif rotation == "size":
+            handler = logging.handlers.RotatingFileHandler(
+                filename=log_path,
+                maxBytes=max_bytes,
+                backupCount=backup_count,
+            )
+
+        else:
+            # Fallback: console only
+            handler = logging.StreamHandler()
+
+        formatter = logging.Formatter(
+            "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+        )
+        handler.setFormatter(formatter)
+
+        # ---- Root logger wiring ----
+        root = logging.getLogger()
+        root.setLevel(level)
+        root.handlers.clear()
+        root.addHandler(handler)
+
+        # Optional console logging
+        if cfg.getboolean("logging", "console", fallback=False):
+            console = logging.StreamHandler()
+            console.setFormatter(formatter)
+            root.addHandler(console)
+
+        cls._logging_initialized = True
+
     __log = None
-    # log level, available log levels are CRITICAL, FATAL, ERROR, WARNING, INFO, DEBUG
+    # log level, available log levels are CRITICAL, FATAL, ERROR, WARNING, INFO, DEBUG, EXCEPTION
     __log_level = "DEBUG"
 
     __running : bool = False
@@ -118,22 +198,6 @@ class Protocol_Gateway:
     config_file : str
 
     def __init__(self, config_file : str):
-        self.__log = logging.getLogger("invertermodbustomqqt_log")
-        handler = logging.StreamHandler(sys.stdout)
-        #self.__log.setLevel(logging.DEBUG)
-        formatter = logging.Formatter("[%(asctime)s]  {%(filename)s:%(lineno)d}  %(levelname)s - %(message)s")
-        handler.setFormatter(formatter)
-        self.__log.addHandler(handler)
-
-        # self.config_file = os.path.dirname(os.path.realpath(__file__)) + "/growatt2mqtt.cfg"
-        # if config_file:
-        #     if os.path.isabs(config_file):
-        #         newcfg = config_file
-        #     else:
-        #         newcfg = os.path.dirname(os.path.realpath(__file__)) + "/" + config_file #"/" error on windows
-        #
-        # if os.path.isfile(newcfg):
-        #     self.config_file = newcfg
 
         base_dir: Path = Path(__file__).resolve().parent
 
@@ -145,22 +209,22 @@ class Protocol_Gateway:
         else:
             self.config_file = default_cfg
 
-        #logging.basicConfig()
         #pymodbus_log = logging.getLogger('pymodbus')
         #pymodbus_log.setLevel(logging.DEBUG)
         #pymodbus_log.addHandler(handler)
 
-        self.__log.info("Loading...")
-
         self.__settings = CustomConfigParser()
         self.__settings.read(self.config_file)
+
+        self._setup_logging(self.__settings)
+        self.__log: logging.Logger = logging.getLogger(__name__)
 
         ##[general]
         self.__log_level = self.__settings.get("general","log_level", fallback="INFO")
 
         log_level = getattr(logging, self.__log_level, logging.INFO)
         self.__log.setLevel(log_level)
-        logging.basicConfig(level=log_level)
+        self.__log.info("Loading...")
 
         for section in self.__settings.sections():
             transport_cfg = self.__settings[section]
@@ -261,7 +325,8 @@ class Protocol_Gateway:
                                         break
 
             except Exception as err:
-                traceback.print_exc()
+                #traceback.print_exc()
+                self.__log.exception("Unhandled exception in main loop")
                 self.__log.error(err)
 
             time.sleep(0.07) #change this in future. probably reduce to allow faster reads.

@@ -423,7 +423,7 @@ class timescaledb(transport_base):
         self._stop_event: threading.Event = getattr(self, "_stop_event", threading.Event())
 
         # init runtime backoff settings for connection attempts
-        self._reconnect_lock: lock = threading.Lock()     # prevents multiple concurrent reconnect triggers
+        self._reconnect_lock: lock = threading.Lock()     # prevents multiple concurrent TSDB reconnect triggers
         self._reconnect_thread_running = False      # guard to prevent duplicate reconnect threads
         self._stop_reconnect_event:  threading.Event = getattr(self, "_stop_reconnect_event", threading.Event())
 
@@ -436,7 +436,6 @@ class timescaledb(transport_base):
         # Use RLock to allow nested calls within the same thread
         # Protects the SQLAlchemy Metadata and Table Identifiers (the "structure" of the Wide Table).
         self._schema_lock: RLock = threading.RLock()
-
 
         # persistent backlog file and path, both the file path and the in-memory backlog file are initialized here
         self.backlog_file_path: Path = self.backlog_storage_path / f"{self.backlog_file_name}.jsonl"
@@ -458,26 +457,17 @@ class timescaledb(transport_base):
         try:
             self.connect_tsdb(transport_base)
         except Exception as e:
-            self._log.error(f"[TimescaleDB] Initial connect failed: {e}")
+            self._log.error(f"Initial connect failed: {e}")
             self._set_tsdb_connected(False, "Initial connect was not successful")  # noqa: FBT003
 
-    # used for reconnecting transport_base
-    # def connect(self):
-    #     self.transport_connected = False
-    #     self.connected = transport_base.client.connect()
-    #     super().connect()
-
-    # @property
-    # def transport_connected(self) -> bool:
-    #     # Dynamically checks the transport's state every time you access the attribute
-    #     return self.from_transport.connected
+        self.request_upstream_reconnect: Callable[[], None] | None = None
 
     def connect_tsdb(self, from_transport: transport_base) -> None:
         """
         Connect to DB, build device_metrics_wide table from metrics data, and ensure schema/hypertable/policies exist.
         If from_transport data provided, ensure device_info insert for that transport.
         """
-        # self._log.info(f"[TimescaleDB] Version: {self.__version__}")
+        #self._log.info(f"Version: {self.__version__}")
         try:
         # 1 create database if missing.  Connect to standard default "postgres" database first to then check/create target database structure.
 
@@ -488,33 +478,33 @@ class timescaledb(transport_base):
             try:
                 self._create_engine()
             except Exception as e:
-                self._log.error(f"[TimescaleDB] Engine creation error: {e}")
+                self._log.error(f"Engine creation error: {e}")
 
         # 3 create ORM tables. DeviceInfo, and stub columns for DeviceMetricsWide.  MetricCatalog for dynamic column names.
             try:
                 self._create_tables()
 
             except Exception as e:
-                self._log.error(f"[TimescaleDB] ORM table creation error: {e}")
+                self._log.error(f"ORM table creation error: {e}")
 
         # 4 Write device information metadata for single device/transport on startup if from_transport provided.
           # multi-device support is via multiple transport instances with unique device identifiers where device_info_id is captured during batch writes.
             try:
                 self.device_info_id: int = self._ensure_device_info()
             except Exception as e:
-                self._log.error(f"[TimescaleDB] Device Information Data write failed: {e}")
+                self._log.error(f"Device Information Data write failed: {e}")
 
         # 5 If needed, create dynamic columns for metrics in device_metrics_wide and add metrics to metric_catalog table
              # Using the registry_map from protocol_settings to get metric names.  No live data access here.
             try:
                 self._determine_wide_table()
             except Exception as e:
-                self._log.error(f"[TimescaleDB] Determine wide/narrow table failed: {e}")
+                self._log.error(f"Determine wide/narrow table failed: {e}")
 
             try:
                 self._start_flush_thread()
             except Exception as e:
-                self._log.error(f"[TimescaleDB] thread start failed: {e}")
+                self._log.error(f"thread start failed: {e}")
 
             # initialize rollup class.
             if self.rollup_policy.get("enable_rollups", True):
@@ -539,20 +529,20 @@ class timescaledb(transport_base):
                 if self.enable_persistent_storage:
                     self.backlog.replay_to_queue()
             except Exception as e:
-                self._log.error(f"[TimescaleDB] Persistent storage failed: {e}")
+                self._log.error(f"Persistent storage failed: {e}")
 
             # start _refresh_rollup_thread after connect completes successfully
             if self.rollup_policy.get("enable_rollups", True) and self.tsdb_connected:
-                self._log.info("[TimescaleDB] Rollups are enabled.")
+                self._log.info("Rollups are enabled.")
 
                 if not self.rollup_policy.get("enable_auto_refresh", True):
-                    self._log.info("[TimescaleDB] Auto rollup refresh is disabled.")
+                    self._log.info("Auto rollup refresh is disabled.")
                     return
                 self.rollup_mgr.start_auto_refresh()
 
         except Exception as e:
             self._set_tsdb_connected(False, "Connect unsuccessful")  # noqa: FBT003
-            self._log.error(f"[TimescaleDB] connect() failed: {e}")
+            self._log.error(f"connect() failed: {e}")
             raise
 
     # Centralize state transitions for tsdb_connected helper
@@ -561,7 +551,7 @@ class timescaledb(transport_base):
             if self.tsdb_connected != conn_value:
                 self.tsdb_connected: bool = conn_value
                 self.rollup_policy["tsdb_connected"] = conn_value
-                self._log.info(f"[TimescaleDB] tsdb_connected -> {conn_value} ({con_reason})")
+                self._log.info(f"tsdb_connected -> {conn_value} ({con_reason})")
 
 
     # -------------------------
@@ -573,7 +563,7 @@ class timescaledb(transport_base):
         The method must clear self._reconnect_thread_running before returning.
         """
         try:
-            self._log.warning("[TimescaleDB] Auto-reconnect: connection lost, attempting to reconnect...")
+            self._log.warning("Auto-reconnect: connection lost, attempting to reconnect...")
 
             attempts: int = self.reconnect_attempts if getattr(self, "reconnect_attempts", None) is not None else 5
             delay: int = self.reconnect_delay if getattr(self, "reconnect_delay", None) is not None else 5
@@ -583,16 +573,16 @@ class timescaledb(transport_base):
             attempt_no = 0
             while (attempts <= 0) or (attempt_no < attempts):  # attempts <= 0 => unlimited attempts
                 if self._stop_reconnect_event.is_set():
-                    self._log.info("[TimescaleDB] Auto-reconnect: stop requested, exiting reconnect loop.")
+                    self._log.info("Auto-reconnect: stop requested, exiting reconnect loop.")
                     break
 
                 attempt_no += 1
-                self._log.info(f"[TimescaleDB] Reconnect attempt {attempt_no}{'' if attempts <= 0 else f'/{attempts}'} — waiting {delay}s before connect.")
+                self._log.info(f"Reconnect attempt {attempt_no}{'' if attempts <= 0 else f'/{attempts}'} — waiting {delay}s before connect.")
                 # Wait but allow early exit on stop
                 waited = 0.0
                 while waited < delay:
                     if self._stop_reconnect_event.is_set():
-                        self._log.info("[TimescaleDB] Auto-reconnect: stop requested during delay.")
+                        self._log.info("Auto-reconnect: stop requested during delay.")
                         break
                     sleep_chunk: float = min(1.0, delay - waited)
                     time.sleep(sleep_chunk)
@@ -608,13 +598,13 @@ class timescaledb(transport_base):
                     self._set_tsdb_connected(True, "reconnect successful")  # noqa: FBT003
                 except Exception as e:
                     self._set_tsdb_connected(False, "reconnect unsuccessful")  # noqa: FBT003
-                    self._log.warning(f"[TimescaleDB] Reconnect attempt {attempt_no} failed during connect(): {e}")
+                    self._log.warning(f"Reconnect attempt {attempt_no} failed during connect(): {e}")
 
                 with self._reconnect_lock:
                     tsdb_connected: bool = self.tsdb_connected
 
                 if tsdb_connected:
-                    self._log.info("[TimescaleDB] Auto-reconnect: connection re-established.")
+                    self._log.info("Auto-reconnect: connection re-established.")
 
                     # Immediately try to flush backlog — don't let exceptions prevent thread exit
                     try:
@@ -622,7 +612,7 @@ class timescaledb(transport_base):
                             with self._backlog_lock:
                                 self.backlog.replay_to_queue()
                     except Exception as e:
-                        self._log.error(f"[TimescaleDB] Auto-reconnect: backlog flush failed after reconnect: {e}")
+                        self._log.error(f"Auto-reconnect: backlog flush failed after reconnect: {e}")
 
                     break  # success: exit loop
 
@@ -635,15 +625,15 @@ class timescaledb(transport_base):
             if not getattr(self, "tsdb_connected", False):
                 # Final log if exhausted
                 if attempts > 0 and attempt_no >= attempts:
-                    self._log.error("[TimescaleDB] Auto-reconnect: exhausted reconnect attempts. Will continue buffering to backlog.")
+                    self._log.error("Auto-reconnect: exhausted reconnect attempts. Will continue buffering to backlog.")
                 else:
-                    self._log.info("[TimescaleDB] Auto-reconnect: stopped without establishing connection.")
+                    self._log.info("Auto-reconnect: stopped without establishing connection.")
 
         finally:
             # clear the thread-running guard so a future outage can spawn a new reconnect thread
             with self._reconnect_lock:
                 self._reconnect_thread_running = False
-            self._log.debug("[TimescaleDB] Auto-reconnect thread exiting.")
+            self._log.debug("Auto-reconnect thread exiting.")
 
 
     def _trigger_reconnect(self) -> None:
@@ -667,7 +657,7 @@ class timescaledb(transport_base):
             self._set_tsdb_connected(False, "Connect unsuccessful")  # noqa: FBT003
             self._stop_reconnect_event.clear()
             threading.Thread(target=self._attempt_reconnect, daemon=True).start()
-            self._log.info("[TimescaleDB] Reconnect thread started.")
+            self._log.info("Reconnect thread started.")
 
     def _stop_thread_reconnect(self) -> None:
         """
@@ -675,7 +665,7 @@ class timescaledb(transport_base):
         """
         if hasattr(self, "_stop_reconnect_event"):
             self._stop_reconnect_event.set()
-            self._log.info("[TimescaleDB] reconnect thread stopped.")
+            self._log.info("reconnect thread stopped.")
 
     # -------------------------
     # 1. Ensure the database exists
@@ -685,29 +675,29 @@ class timescaledb(transport_base):
         (or whatever the user names the metrics database) if missing.  Datname = Database name in postgres.
         """
         try:
-            self._log.debug(f"[TimescaleDB] Checking database '{self.database}' existence")
+            self._log.debug(f"Checking database '{self.database}' existence")
             default_url: str = f"postgresql+psycopg2://{self.username}:{self.password}@{self.host}:{self.port}/postgres"
             try:
-                self._log.debug(f"[TimescaleDB] Connecting to default 'postgres' database at {self.host}:{self.port} as user '{self.username}'")
+                self._log.debug(f"Connecting to default 'postgres' database at {self.host}:{self.port} as user '{self.username}'")
                 default_engine: Engine = create_engine(default_url, isolation_level="AUTOCOMMIT", pool_pre_ping=True)
 
             except OperationalError as e:
                 self._set_tsdb_connected(False, "Connect unsuccessful")  # noqa: FBT003
-                self._log.error(f"[TimescaleDB] OperationalError during engine/session creation during database creation: {e}")
+                self._log.error(f"OperationalError during engine/session creation during database creation: {e}")
                 raise
 
             with default_engine.connect() as conn:
                 row: Row[Any] | None = conn.execute(text("SELECT 1 FROM pg_database WHERE datname = :d"), {"d": self.database}).fetchone()
                 if not row:
-                    self._log.info(f"[TimescaleDB] Database '{self.database}' not found — creating")
+                    self._log.info(f"Database '{self.database}' not found — creating")
                     conn.execute(text(f'CREATE DATABASE "{self.database}"'))
                     conn.execute(text('CREATE EXTENSION IF NOT EXISTS timescaledb_toolkit'))
-                    self._log.info(f"[TimescaleDB] Database '{self.database}' created")
+                    self._log.info(f"Database '{self.database}' created")
                 else:
-                    self._log.debug(f"[TimescaleDB] Database '{self.database}' already exists")
+                    self._log.debug(f"Database '{self.database}' already exists")
             default_engine.dispose()
         except Exception as e:
-            self._log.error(f"[TimescaleDB] Failed to verify/create database '{self.database}': {e}")
+            self._log.error(f"Failed to verify/create database '{self.database}': {e}")
             raise
     # -------------------------
     # 2. Create SQLAlchemy engine
@@ -720,17 +710,17 @@ class timescaledb(transport_base):
 
         url: str = f"postgresql+psycopg2://{self.username}:{self.password}@{self.host}:{self.port}/{self.database}"
         try:
-            self._log.debug(f"[TimescaleDB] Connecting to database '{self.database}' at {self.host}:{self.port} as user '{self.username}'")
+            self._log.debug(f"Connecting to database '{self.database}' at {self.host}:{self.port} as user '{self.username}'")
             self.engine: Engine = create_engine(url, pool_pre_ping=True, future=True, pool_recycle=3600)
             SessionGlobal.configure(bind=self.engine, expire_on_commit=False)
             self.SessionFactory: Callable[..., Session] = SessionGlobal
             with self.engine.connect() as conn:   # make sure connection works
                 conn.execute(text("SELECT 1"))
             self._set_tsdb_connected(True, "Connect successful")  # noqa: FBT003
-            self._log.info(f"[TimescaleDB] Connected to database '{self.database}'")
+            self._log.info(f"Connected to database '{self.database}'")
         except OperationalError as e:
             self._set_tsdb_connected(False, "Connect unsuccessful")  # noqa: FBT003
-            self._log.error(f"[TimescaleDB] OperationalError during engine creation: {e}")
+            self._log.error(f"OperationalError during engine creation: {e}")
             raise
 
     # -------------------------
@@ -746,7 +736,7 @@ class timescaledb(transport_base):
                 tsdb_connected: bool = self.tsdb_connected
 
             if not tsdb_connected or not session:
-                self._log.debug("[TimescaleDB] Cannot create tables, not tsdb_connected")
+                self._log.debug("Cannot create tables, not tsdb_connected")
                 return
 
             try:
@@ -755,9 +745,9 @@ class timescaledb(transport_base):
                     session.execute(text("CREATE INDEX IF NOT EXISTS device_metrics_wide_pkey ON device_metrics_wide (m_time DESC, device_info_id);"))
                     session.execute(text("CREATE INDEX IF NOT EXISTS device_metrics_narrow_pkey ON device_metrics_narrow (m_time DESC, device_info_id, metric_name);"))
                     session.commit()
-                self._log.info("[TimescaleDB] ORM tables created/ensured")
+                self._log.info("ORM tables created/ensured")
             except Exception as e:
-                self._log.error(f"[TimescaleDB] ORM table creation error: {e}")
+                self._log.error(f"ORM table creation error: {e}")
 
     # -------------------------
     #  4. Write device information metadata
@@ -778,11 +768,11 @@ class timescaledb(transport_base):
                 tsdb_connected: bool = self.tsdb_connected
             if not tsdb_connected or not session:
                 deviceID = 0
-                self._log.debug("[TimescaleDB] device_info unknown, skipping insert, returning error ID 0")
+                self._log.debug("device_info unknown, skipping insert, returning error ID 0")
 
                 return deviceID
             else:
-                self._log.debug("[TimescaleDB] Ensuring device_info record exists")
+                self._log.debug("Ensuring device_info record exists")
             try:
                 # pull device info from transport user settings configuration
                 existing: DeviceInfo = (
@@ -798,18 +788,18 @@ class timescaledb(transport_base):
                 ).scalar_one_or_none()
                 )
             except SQLAlchemyError as e:
-                self._log.error(f"[TimescaleDB] _ensure_device_info error: {e}")
+                self._log.error(f"_ensure_device_info error: {e}")
                 try:
                     session.rollback()
                 except SQLAlchemyError:
-                    self._log.debug("[TimescaleDB] Ensuring device_info rollback failed")
+                    self._log.debug("Ensuring device_info rollback failed")
                 raise
 
             if existing:
-                self._log.debug("[TimescaleDB] Exact device_info exists — skipping insert")
+                self._log.debug("Exact device_info exists — skipping insert")
                 return existing.device_info_id
             else:
-                self._log.debug("[TimescaleDB] device_info not found — inserting new record")
+                self._log.debug("device_info not found — inserting new record")
             try:
                 dev = DeviceInfo(
                     device_identifier=self.device_identifier,
@@ -823,7 +813,7 @@ class timescaledb(transport_base):
 
                 session.add(dev)
                 session.commit()
-                self._log.info(f"[TimescaleDB] Inserted DeviceInfo for {self.device_identifier}")
+                self._log.info(f"Inserted DeviceInfo for {self.device_identifier}")
 
                 if dev.device_info_id is None:
                     raise ValueError("Failed to retrieve device_info_id after insert.")  # noqa: TRY301
@@ -831,11 +821,11 @@ class timescaledb(transport_base):
                     return dev.device_info_id
 
             except SQLAlchemyError as e:
-                self._log.error(f"[TimescaleDB] device_info insert error: {e}")
+                self._log.error(f"device_info insert error: {e}")
                 try:
                     session.rollback()
                 except SQLAlchemyError:
-                    self._log.debug("[TimescaleDB] inserting new record failed, rollback failed")
+                    self._log.debug("inserting new record failed, rollback failed")
                 raise
 
     def _determine_wide_table(self) -> None:
@@ -849,31 +839,31 @@ class timescaledb(transport_base):
             self.current_metric_count: int = metric_count
 
             if metric_count == 0 or not metric_start_names:
-                self._log.error(f"[TimescaleDB] Detected {metric_count} metrics — no metric names detected. ")
+                self._log.error(f"Detected {metric_count} metrics — no metric names detected. ")
                 raise ValueError("No metric names detected.")  # noqa: TRY301
 
             # too many metrics for wide table; use only narrow storage
             elif metric_count >= 200:
                 self.wide_table_flag = False
-                self._log.warning(f"[TimescaleDB] Detected {metric_count} metrics exceeds 200 column limit; will use narrow metric storage.")
+                self._log.warning(f"Detected {metric_count} metrics exceeds 200 column limit; will use narrow metric storage.")
             else:  # 200 or fewer metrics; create dynamic columns
-                self._log.info(f"[TimescaleDB] Detected {metric_count} metrics; creating columns.")
+                self._log.info(f"Detected {metric_count} metrics; creating columns.")
                 # ensure dynamic columns for metrics in device_metrics and metric_catalog.
                 self.wide_table_flag: bool = self._ensure_columns_for_metrics(metric_start_names)
 
                 if not self.wide_table_flag:
-                    self._log.error("[TimescaleDB] Failed to ensure metric columns despite valid metric names.")
+                    self._log.error("Failed to ensure metric columns despite valid metric names.")
                     raise ValueError("Failed to ensure metric columns.")  # noqa: TRY301
 
         except ValueError as e:
 
-            self._log.error(f"[TimescaleDB] No metric names detected: {e}")
+            self._log.error(f"No metric names detected: {e}")
             return  # Exit connect early if no metrics are detected  or column creation failed
 
         except Exception as e:
             # Catch any general exceptions that occurred during any step above
 
-            self._log.error(f"[TimescaleDB] device_metrics_wide table columns creation error: {e}")
+            self._log.error(f"device_metrics_wide table columns creation error: {e}")
 
     # -------------------------
     #  5a. Get metric's names from registry map
@@ -919,11 +909,11 @@ class timescaledb(transport_base):
                 tsdb_connected: bool = self.tsdb_connected
 
             if not tsdb_connected or not session:
-                self._log.error("[TimescaleDB] Cannot create columns — not tsdb_connected.")
+                self._log.error("Cannot create columns — not tsdb_connected.")
                 return False
 
             if not metric_start_names:
-                self._log.info("[TimescaleDB] No metric column names were detected")
+                self._log.info("No metric column names were detected")
                 return False
 
             try:
@@ -976,11 +966,11 @@ class timescaledb(transport_base):
                     self._cache_wide_table_columns()  # cache existing wide table columns for fast lookup validation during writes
                     self._sync_single_table_schema()  #  resync ORM table after dynamic column changes
 
-                    self._log.info(f"[TimescaleDB] Ensured {len(metric_start_names)} metric columns.")
+                    self._log.info(f"Ensured {len(metric_start_names)} metric columns.")
                     return True  # noqa: TRY300
 
             except Exception as e:
-                self._log.error(f"[TimescaleDB] _ensure_columns_for_metrics failed (rolled back): {e}")
+                self._log.error(f"_ensure_columns_for_metrics failed (rolled back): {e}")
                 return False
 
     #5c. advisory lock for schema changes
@@ -1051,7 +1041,7 @@ class timescaledb(transport_base):
         table_name = DeviceMetricsWide.__tablename__
 
         with self._schema_lock:
-            self._log.info(f"[TimescaleDB] Resyncing schema for {table_name}...")
+            self._log.info(f"Resyncing schema for {table_name}...")
 
             # 1. Unbind the old table from metadata
             old_table = Base.metadata.tables.get(table_name)
@@ -1071,7 +1061,7 @@ class timescaledb(transport_base):
 
             # 4. Refresh the column cache used for validation
             self._cache_wide_table_columns()
-            self._log.info(f"[TimescaleDB] Schema resync complete for {table_name}")
+            self._log.info(f"Schema resync complete for {table_name}")
 
 
     # # 10g
@@ -1082,7 +1072,7 @@ class timescaledb(transport_base):
         if self._flush_thread.is_alive():
             return
         self._flush_thread.start()
-        self._log.debug("[TimescaleDB] Flush thread started.")
+        self._log.debug("Flush thread started.")
 
     # using inherited transport_base.write_data method
 
@@ -1133,7 +1123,7 @@ class timescaledb(transport_base):
             return new_data  # noqa: TRY300
 
         except (TypeError, ValueError):
-            self._log.warning(f"[TimescaleDB] Invalid metric value encountered in: {datacopy}")
+            self._log.warning(f"Invalid metric value encountered in: {datacopy}")
 
 
     # Flush worker thread to handle data writes to the database.
@@ -1158,7 +1148,7 @@ class timescaledb(transport_base):
                 datacopy: dict | None = self._flush_queue.get(block=True)
 
                 if datacopy is None or datacopy is True:
-                    self._log.info("[TimescaleDB] Shutdown sentinel received. Exiting flush worker.")
+                    self._log.info("Shutdown sentinel received. Exiting flush worker.")
                     self._flush_queue.task_done()
                     break # Exit the loop cleanly and immediately
 
@@ -1183,7 +1173,7 @@ class timescaledb(transport_base):
                 }
                 is_stale, time_read, metrics = self._is_stale_data(final_data)
                 if is_stale:
-                    self._log.debug("[TimescaleDB] Stale data detected, skipping DB write.")
+                    self._log.debug("Stale data detected, skipping DB write.")
                     continue
 
                 if self._stop_event.is_set():
@@ -1207,7 +1197,7 @@ class timescaledb(transport_base):
 
                 except (SQLAlchemyError, ValueError) as e:
                     session.rollback()
-                    self._log.warning("[TimescaleDB] metrics data write failed.")
+                    self._log.warning("metrics data write failed.")
 
                     # Only backlog if setting enabled and DB is down
                     with self._reconnect_lock:
@@ -1272,19 +1262,19 @@ class timescaledb(transport_base):
             session.execute(insert(DeviceMetricsNarrow), narrow_mappings)
 
         except SQLAlchemyError as e:
-            self._log.exception(f"[TimescaleDB] Narrow flush failed: {e}")
+            self._log.exception(f"Narrow flush failed: {e}")
 
             try:
                 session.rollback()
             except SQLAlchemyError as e2:
-                self._log.exception(f"[TimescaleDB] Narrow flush rollback failed: {e2}")
+                self._log.exception(f"Narrow flush rollback failed: {e2}")
 
             # Add new_data to backlog only for the narrow table failure
             try:
                 # since this is a copy of final_data, we have already completely processed the data.
                 self.backlog.enqueue(back_data)
             except Exception as e2:
-                self._log.error(f"[TimescaleDB] Failed to add narrow point to backlog: {e2}")
+                self._log.error(f"Failed to add narrow point to backlog: {e2}")
 
             # === Auto Reconnect handling ===
             self._set_tsdb_connected(False, "Connect unsuccessful")  # noqa: FBT003
@@ -1398,6 +1388,13 @@ class timescaledb(transport_base):
         self.stale_event_count += 1
         self.last_stale_event_ts: datetime = current_time
 
+        # 4. Trigger reconnect
+        if self.request_upstream_reconnect:
+            try:
+               self.request_upstream_reconnect()
+            except Exception:
+                self._log.exception("Failed requesting upstream reconnect")
+
         # Send Notification
         try:
             if getattr(self, "enable_pushover", False):
@@ -1405,17 +1402,7 @@ class timescaledb(transport_base):
                     f"Attempt {self.stale_event_count} of {self.max_stale_attempts}.")
                 self._send_pushover_message(title="Inverter Data Stale", message=msg)
         except Exception:
-            self._log.exception("[TimescaleDB] Failed sending Pushover notification.")
-
-        # Perform Reconnect in Thread
-        #try:
-            # self.connected = False
-            # NOTE this is an attempt to reconnect to the inverter at the transport_base level.
-            # need a mechanism to inform the transport_base to reconnect.
-            # threading.Thread(target=self._attempt_base_reconnect, daemon=True).start()
-        #except Exception:
-         #   self._log.exception("[TimescaleDB] Failed to start base reconnect thread.")
-
+            self._log.exception("Failed sending Pushover notification.")
 
     def normalize(self, text: str) -> str:
         # Keeps only letters and numbers
@@ -1446,7 +1433,7 @@ class timescaledb(transport_base):
             user: str = self.pushover_user
 
             if not token or not user:
-                self._log.error("[TimescaleDB] Pushover enabled but missing token or user key.")
+                self._log.error("Pushover enabled but missing token or user key.")
                 return
 
             requests.post(
@@ -1460,29 +1447,29 @@ class timescaledb(transport_base):
                 timeout=5
             )
 
-            self._log.info("[TimescaleDB] Pushover notification sent.")
+            self._log.info("Pushover notification sent.")
 
         except Exception:
-            self._log.exception("[TimescaleDB] Failed to send Pushover notification.")
+            self._log.exception("Failed to send Pushover notification.")
 
 
     # -------------------------
     # Close / cleanup
     # -------------------------
     def close(self) -> None:
-        self._log.debug("[TimescaleDB] Closing transport")
+        self._log.debug("Closing transport")
 
         if self.rollup_mgr:
             try:
                 self.rollup_mgr.stop_auto_refresh()
             except Exception as e:
-                self._log.error(f"[TimescaleDB] Error stopping auto refresh thread: {e}")
+                self._log.error(f"Error stopping auto refresh thread: {e}")
                 self.rollup_mgr = None
 
         try:
             self._stop_thread_reconnect()
         except Exception as e:
-            self._log.error(f"[TimescaleDB] Error stopping reconnect thread: {e}")
+            self._log.error(f"Error stopping reconnect thread: {e}")
         # Stop flush thread
         try:
             self._stop_event.set()
@@ -1492,16 +1479,16 @@ class timescaledb(transport_base):
                 self._flush_thread.join(timeout=5.0)
 
         except Exception as e:
-            self._log.error(f"[TimescaleDB] Error stopping flush thread: {e}")
+            self._log.error(f"Error stopping flush thread: {e}")
 
         except Exception as e:
-            self._log.error(f"[TimescaleDB] Error closing tsdb_session: {e}")
+            self._log.error(f"Error closing tsdb_session: {e}")
 
         try:
             if self.engine:
                 self.engine.dispose()
         except Exception as e:
-            self._log.error(f"[TimescaleDB] Error disposing engine: {e}")
+            self._log.error(f"Error disposing engine: {e}")
 
     def __del__(self) -> None:
         try:
@@ -1510,9 +1497,9 @@ class timescaledb(transport_base):
         except Exception as e:
             if hasattr(self, '_log'):
                 try:
-                    self._log.error(f"[TimescaleDB] Exception in __del__: {e}")
+                    self._log.error(f"Exception in __del__: {e}")
                 except Exception:
-                    self._log.error(f"[TimescaleDB] Exception in __del__: {e}")
+                    self._log.error(f"Exception in __del__: {e}")
 
 class RollupManager:
     """ summary logic
@@ -1524,6 +1511,11 @@ class RollupManager:
         3 RollupManager calls _flush_queue.join() (it pauses here).
         4 _flush_worker finishes writing everything to the Hypertable and calls task_done() for each.
         5 RollupManager resumes and calls refresh_continuous_aggregate.
+
+        Backlog Safety: The _refresh_rollup_loop wraps replay_to_queue() in the _backlog_lock and waits for completion via .join().
+        Attribute Persistence: All granular intervals (e.g., hourly_compress_after_interval) are mapped from the rollup_policy in __init__.
+        Live State: tsdb_connected and current_metric_count are implemented as @property to track the timescaledb class state in real-time.
+        SQL Execution: The SET LOCAL work_mem uses the single-quote fix to prevent f-string placeholder errors.
     """
 
     def __init__(
@@ -1614,22 +1606,22 @@ class RollupManager:
     # 1 Hypertable & Policies
         try:
             self.ensure_hypertables()
-            self._log.info("[TimescaleDB] Hypertable check/creation complete")
+            self._log.info("Hypertable check/creation complete")
         except Exception as e:
-            self._log.error(f"[TimescaleDB] Hypertable creation failed: {e}")
+            self._log.error(f"Hypertable creation failed: {e}")
 
     # 2 Enable compression (if configured)
         try:
             if self.enable_compression:
                 self.ensure_compression_enabled()
         except Exception as e:
-            self._log.error(f"[TimescaleDB] Enable compression failed: {e}")
+            self._log.error(f"Enable compression failed: {e}")
 
     # 3 Add retention policy
         try:
             self.ensure_retention_policy()
         except Exception as e:
-            self._log.error(f"[TimescaleDB] Add retention policy failed: {e}")
+            self._log.error(f"Add retention policy failed: {e}")
 
     # 4 Setup continuous aggregate rollups
         if self.enable_rollups:
@@ -1637,23 +1629,23 @@ class RollupManager:
             try:
                 self.setup_with_retry()
             except Exception as e:
-                self._log.error(f"[TimescaleDB] Aggregate Rollup setup failed: {e}")
+                self._log.error(f"Aggregate Rollup setup failed: {e}")
             # 4b
             try:
                 self.refresh_rollups(force_full=True)
             except Exception as e:
-                self._log.error(f"[TimescaleDB] Rollup refresh failed: {e}")
+                self._log.error(f"Rollup refresh failed: {e}")
 
     # 5 Start the rollup thread.  Called from TimescaleDB class upon connection to the database.
     def start_auto_refresh(self) -> None:
 
         if self._refresh_rollup_thread and self._refresh_rollup_thread.is_alive():
-            self._log.debug("[TimescaleDB] Auto refresh thread already running.")
+            self._log.debug("Auto refresh thread already running.")
             return
         else:
             # start _refresh_rollup_thread after connect completes successfully
             self._refresh_rollup_thread.start()
-            self._log.debug("[TimescaleDB] Auto rollup refresh thread started.")
+            self._log.debug("Auto rollup refresh thread started.")
 
     # -------------------------
     # 6. Hypertable creation
@@ -1681,10 +1673,10 @@ class RollupManager:
                         params
                     )
                 session.commit()
-                self._log.debug(f"[TimescaleDB] Hypertable creation ensured for: {', '.join(tables)}")
+                self._log.debug(f"Hypertable creation ensured for: {', '.join(tables)}")
 
         except SQLAlchemyError as e:
-            self._log.error("[TimescaleDB] Failed to ensure hypertables: %s", e)
+            self._log.error("Failed to ensure hypertables: %s", e)
 
 
     # -------------------------
@@ -1694,10 +1686,10 @@ class RollupManager:
         """Enable TimescaleDB compression on device_metrics_narrow and device_metrics_wide tables.
         """
         with self.SessionFactory() as session:
-            self._log.info("[TimescaleDB] Setting up compression policy")
+            self._log.info("Setting up compression policy")
 
             if not session:
-                    self._log.error("[TimescaleDB] Cannot set up compression — not tsdb_connected.")
+                    self._log.error("Cannot set up compression — not tsdb_connected.")
                     return
             # Enable TimescaleDB compression on device_metrics_narrow.
             try:
@@ -1710,13 +1702,13 @@ class RollupManager:
                 )
                 session.execute(text(sql))
                 session.commit()
-                self._log.debug("[TimescaleDB] _enable_compression_narrow executed")
+                self._log.debug("_enable_compression_narrow executed")
             except SQLAlchemyError as e:
-                self._log.error(f"[TimescaleDB] _enable_compression_narrow error device_metrics_narrow: {e}")
+                self._log.error(f"_enable_compression_narrow error device_metrics_narrow: {e}")
                 try:
                     session.rollback()
                 except SQLAlchemyError as e2:
-                    self._log.error(f"[TimescaleDB] _enable_compression_narrow rollback error: {e2}")
+                    self._log.error(f"_enable_compression_narrow rollback error: {e2}")
 
             # Enable TimescaleDB compression on device_metrics_wide.
             if self.wide_table_flag:
@@ -1730,13 +1722,13 @@ class RollupManager:
                     )
                     session.execute(text(sql))
                     session.commit()
-                    self._log.debug("[TimescaleDB] _enable_compression_wide executed")
+                    self._log.debug("_enable_compression_wide executed")
                 except SQLAlchemyError as e:
-                    self._log.error(f"[TimescaleDB] _enable_compression_wide error device_metrics_wide: {e}")
+                    self._log.error(f"_enable_compression_wide error device_metrics_wide: {e}")
                     try:
                         session.rollback()
                     except SQLAlchemyError as e2:
-                        self._log.error(f"[TimescaleDB] _enable_compression_wide rollback error: {e2}")
+                        self._log.error(f"_enable_compression_wide rollback error: {e2}")
 
             with session.begin():
                 for  chunk_interval in [
@@ -1761,7 +1753,7 @@ class RollupManager:
         with self.SessionFactory() as session:
 
             if not session:
-                    self._log.error("[TimescaleDB] Cannot add compression policy — not tsdb_connected.")
+                    self._log.error("Cannot add compression policy — not tsdb_connected.")
                     return
 
             try:
@@ -1769,13 +1761,13 @@ class RollupManager:
 
                 session.execute(text(sql))
 
-                self._log.debug(f"[TimescaleDB] _add_compression_policy {source} for {chunk_interval} executed")
+                self._log.debug(f"_add_compression_policy {source} for {chunk_interval} executed")
             except SQLAlchemyError as e:
-                self._log.error(f"[TimescaleDB] _add_compression_policy {source} for {chunk_interval} error: {e}")
+                self._log.error(f"_add_compression_policy {source} for {chunk_interval} error: {e}")
                 try:
                     session.rollback()
                 except SQLAlchemyError as e2:
-                    self._log.error(f"[TimescaleDB] _add_compression_policy {source} for {chunk_interval} rollback error: {e2}")
+                    self._log.error(f"_add_compression_policy {source} for {chunk_interval} rollback error: {e2}")
 
     # -------------------------
     # 9. Add retention policy
@@ -1786,7 +1778,7 @@ class RollupManager:
         """
         with self.SessionFactory() as session:
             if not session:
-                    self._log.error("[TimescaleDB] Cannot add retention policies — not tsdb_connected.")
+                    self._log.error("Cannot add retention policies — not tsdb_connected.")
                     return
 
             drop_after: str = self.drop_after
@@ -1798,13 +1790,13 @@ class RollupManager:
                 session.execute(text(sql1))
                 session.execute(text(sql2))
                 session.commit()
-                self._log.debug("[TimescaleDB] _add_retention_policy_narrow executed")
+                self._log.debug("_add_retention_policy_narrow executed")
             except SQLAlchemyError as e:
-                self._log.error(f"[TimescaleDB] _add_retention_policy_narrow error: {e}")
+                self._log.error(f"_add_retention_policy_narrow error: {e}")
                 try:
                     session.rollback()
                 except SQLAlchemyError as e2:
-                    self._log.error(f"[TimescaleDB] _add_retention_policy_narrow rollback error: {e2}")
+                    self._log.error(f"_add_retention_policy_narrow rollback error: {e2}")
 
             if self.wide_table_flag:
                 try:
@@ -1814,13 +1806,13 @@ class RollupManager:
                     session.execute(text(sql1b))
                     session.execute(text(sql2b))
                     session.commit()
-                    self._log.debug("[TimescaleDB] _add_retention_policy_wide executed")
+                    self._log.debug("_add_retention_policy_wide executed")
                 except SQLAlchemyError as e:
-                    self._log.error(f"[TimescaleDB] _add_retention_policy_wide error: {e}")
+                    self._log.error(f"_add_retention_policy_wide error: {e}")
                     try:
                         session.rollback()
                     except SQLAlchemyError as e2:
-                        self._log.error(f"[TimescaleDB] _add_retention_policy_wide rollback error: {e2}")
+                        self._log.error(f"_add_retention_policy_wide rollback error: {e2}")
 
     # -------------------------
     # 10 Rollups
@@ -1846,7 +1838,7 @@ class RollupManager:
         Checks if rollups need to be rebuilt and creates them accordingly.
         """
         self.migration_in_progress.set()
-        self._log.info("[TimescaleDB] Pausing flush thread for migration...")
+        self._log.info("Pausing flush thread for migration...")
 
         try:
             with self.SessionFactory() as session:
@@ -1854,10 +1846,10 @@ class RollupManager:
                     tsdb_connected: bool = self.tsdb_connected
 
                 if not tsdb_connected or not session:
-                    self._log.error("[TimescaleDB] Cannot set up rollups — not tsdb_connected.")
+                    self._log.error("Cannot set up rollups — not tsdb_connected.")
                     return
 
-                self._log.info("[TimescaleDB] Starting continuous aggregate setup...")
+                self._log.info("Starting continuous aggregate setup...")
 
                 # 1. Configuration Setup
                 contexts: list[dict[str]] = [
@@ -1902,7 +1894,7 @@ class RollupManager:
 
                 # 3. Purge Phase: If a change is detected, wipe the slate clean in correct order
                 if any_rebuild_needed:
-                    self._log.info("[TimescaleDB] Bucket change detected. Purging all rollups for clean rebuild.")
+                    self._log.info("Bucket change detected. Purging all rollups for clean rebuild.")
                     # This method must drop Weekly -> Daily -> Hourly with sequential commits
                     self._drop_all_continuous_aggregates(session)
                     # Purge orphaned scheduler jobs
@@ -1919,10 +1911,10 @@ class RollupManager:
 
                         # If the view doesn't exist (due to purge or first run), create it
                         if not self._view_exists(session, view_name):
-                            self._log.info(f"[TimescaleDB] Creating {view_name} from {current_source}...")
+                            self._log.info(f"Creating {view_name} from {current_source}...")
                             self._create_narrow_rollup(session, current_source, view_name, bucket, start_offset, chunk_time_interval)
                         else:
-                            self._log.debug(f"[TimescaleDB] View {view_name} is already up to date.")
+                            self._log.debug(f"View {view_name} is already up to date.")
 
                         # Update current_source for Hierarchical Aggregation
                         # Note: Monthly is kept on the source_table
@@ -1931,11 +1923,11 @@ class RollupManager:
                         elif view_key != 'monthly_rollup':
                             current_source = view_name
 
-                self._log.info("[TimescaleDB] Continuous aggregate setup completed successfully.")
+                self._log.info("Continuous aggregate setup completed successfully.")
         finally:
             # 2. Always re-enable flushing, even if migration fails
             self.migration_in_progress.clear()
-            self._log.info("[TimescaleDB] Resuming flush thread.")
+            self._log.info("Resuming flush thread.")
 
 
     # -------------------------
@@ -1949,7 +1941,7 @@ class RollupManager:
         r_settings = self._get_dynamic_settings()
 
         if not session:
-            self._log.error("[TimescaleDB] Cannot create rollup — not connected.")
+            self._log.error("Cannot create rollup — not connected.")
             return
 
         # 1. Set local lock timeout to fail fast if blocked by flush thread.  Set dynamically from settings.
@@ -1997,11 +1989,11 @@ class RollupManager:
 
             # 6. Finalize the view so it is available as a 'source' for the next view in the loop
             session.commit()
-            self._log.info(f"[TimescaleDB] Successfully created hierarchical rollup: {view_name}")
+            self._log.info(f"Successfully created hierarchical rollup: {view_name}")
 
         except Exception as e:
             session.rollback()
-            self._log.error(f"[TimescaleDB] Failed to create {view_name}: {e}")
+            self._log.error(f"Failed to create {view_name}: {e}")
             raise
 
     def _add_aggregate_policy(self, session: Session, view_name: str, bucket_interval: str, start_offset: str, chunk_time_interval: str) -> None:
@@ -2071,11 +2063,11 @@ class RollupManager:
             """))
 
             session.commit()
-            self._log.info(f"[TimescaleDB] Policies applied to {view_name}: Retention={drop_after}, Compression After={compress_after}")
+            self._log.info(f"Policies applied to {view_name}: Retention={drop_after}, Compression After={compress_after}")
 
         except Exception as e:
             session.rollback()
-            self._log.error(f"[TimescaleDB] Failed to apply policies to {view_name}: {e}")
+            self._log.error(f"Failed to apply policies to {view_name}: {e}")
             raise
 
 
@@ -2103,7 +2095,7 @@ class RollupManager:
                 WITH NO DATA;
             """  # noqa: S608
 
-            self._log.debug(f"[TimescaleDB] Executing Wide View DDL for {view_name}")
+            self._log.debug(f"Executing Wide View DDL for {view_name}")
             session.execute(text(sql))
 
             # 3. Commit the view structure before applying policies
@@ -2111,7 +2103,7 @@ class RollupManager:
 
         except Exception as e:
             session.rollback()
-            self._log.error(f"[TimescaleDB] _create_rollup_wide error for {view_name}: {e}")
+            self._log.error(f"_create_rollup_wide error for {view_name}: {e}")
             raise
 
     def _resolve_metric_columns(self, session: Session, agg_func: str) -> List[str]:
@@ -2164,7 +2156,7 @@ class RollupManager:
 
             # 2. Logic: If it doesn't exist, we definitely need to build it
             if not result:
-                self._log.debug(f"[TimescaleDB] Rollup {view_name} does not exist. Rebuild required.")
+                self._log.debug(f"Rollup {view_name} does not exist. Rebuild required.")
                 return True
 
             # 3. Logic: If it exists, check the 'interval' string in the definition
@@ -2176,21 +2168,21 @@ class RollupManager:
 
             if not clean_interval.search(view_def):
                 self._log.info(
-                    f"[TimescaleDB] Config mismatch for {view_name}. "
+                    f"Config mismatch for {view_name}. "
                     f"Expected: {bucket_interval}. Rebuild required."
                 )
                 return True
             else:
                 # 4. Exists and matches config
                 self._log.info(
-                    f"[TimescaleDB] Rollup config matches for {view_name}. "
+                    f"Rollup config matches for {view_name}. "
                     f"Expected: {bucket_interval} and received {expected_interval}. No rebuild required."
                 )
                 return False
 
         except Exception as e:
             # If we can't query the catalog, assume something is wrong and signal a rebuild
-            self._log.error(f"[TimescaleDB] Error checking rebuild status for {view_name}: {e}")
+            self._log.error(f"Error checking rebuild status for {view_name}: {e}")
             return True
 
 
@@ -2260,7 +2252,7 @@ class RollupManager:
             views = result.fetchall()
 
             if not views:
-                self._log.info("[TimescaleDB] No continuous aggregates found to drop.")
+                self._log.info("No continuous aggregates found to drop.")
                 return
 
             # 2. Define Priority: Child views (Weekly) MUST be dropped before Parent views (Daily)
@@ -2280,7 +2272,7 @@ class RollupManager:
             # 3. Iterate and drop each view safely
             for schema, name in sorted_views:
                 full_name = f'"{schema}"."{name}"'
-                self._log.info(f"[TimescaleDB] Purging rollup: {full_name}")
+                self._log.info(f"Purging rollup: {full_name}")
 
                 # 3b. Fail-fast if locked by background flush or refresh jobs
                 session.execute(text(f"SET LOCAL lock_timeout = '{r_settings['lock_timeout']}';"))
@@ -2289,7 +2281,7 @@ class RollupManager:
                 try:
                     session.execute(text(f"ALTER MATERIALIZED VIEW {full_name} SET (timescaledb.compress = false);"))
                 except Exception:
-                    self._log.info(f"[TimescaleDB] View was already uncompressed: {full_name}")
+                    self._log.info(f"View was already uncompressed: {full_name}")
                     pass # Already uncompressed or doesn't support it
 
                 # 5. Remove policies first
@@ -2303,13 +2295,13 @@ class RollupManager:
                 # 7. Critical: Commit after each view
                 # This releases internal metadata locks and allows the next DROP in the stack to succeed.
                 session.commit()
-                self._log.info(f"[TimescaleDB] Successfully purged {full_name}")
+                self._log.info(f"Successfully purged {full_name}")
 
-            self._log.info("[TimescaleDB] Full rollup stack teardown complete.")
+            self._log.info("Full rollup stack teardown complete.")
 
         except Exception as e:
             session.rollback()
-            self._log.error(f"[TimescaleDB] Failed to purge rollup stack: {e}")
+            self._log.error(f"Failed to purge rollup stack: {e}")
             raise
 
     # 10e
@@ -2325,7 +2317,7 @@ class RollupManager:
                 tsdb_connected: bool = self.tsdb_connected
 
             if not tsdb_connected or not session:
-                self._log.error("[TimescaleDB] Cannot refresh rollups — not tsdb_connected.")
+                self._log.error("Cannot refresh rollups — not tsdb_connected.")
                 return
 
             try:
@@ -2348,10 +2340,10 @@ class RollupManager:
                     if self._view_exists(session, view_name):
                         self._refresh_single_rollup(session, view_name, start_offset, force_full)
                     else:
-                        self._log.warning(f"[TimescaleDB] Skipping refresh: {view_name} does not exist.")
+                        self._log.warning(f"Skipping refresh: {view_name} does not exist.")
 
             except Exception as e:
-                self._log.error(f"[TimescaleDB] Rollup refresh failed: {e}")
+                self._log.error(f"Rollup refresh failed: {e}")
 
     def _refresh_single_rollup(self, session: Session, view_name: str, start_offset: str, force_full: bool = False) -> None:
         """
@@ -2366,7 +2358,7 @@ class RollupManager:
         start_time = time.perf_counter()
         mode = "FULL" if force_full else "INCREMENTAL"
 
-        self._log.info(f"[TimescaleDB] Starting {mode} refresh for {view_name}...")
+        self._log.info(f"Starting {mode} refresh for {view_name}...")
 
         # AUTOCOMMIT is mandatory for CALL refresh_continuous_aggregate
         with session.bind.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
@@ -2390,14 +2382,14 @@ class RollupManager:
 
                 # Log the duration in a scannable format
                 self._log.info(
-                    f"[TimescaleDB] {mode} refresh COMPLETED for {view_name}. "
+                    f"{mode} refresh COMPLETED for {view_name}. "
                     f"Duration: {duration_seconds:.2f}s "
                     f"({int(duration_seconds // 60)}m {int(duration_seconds % 60)}s)"
                 )
 
 
             except Exception as e:
-                self._log.error(f"[TimescaleDB] {mode} refresh FAILED for {view_name} after {time.perf_counter() - start_time:.2f}s: {e}")
+                self._log.error(f"{mode} refresh FAILED for {view_name} after {time.perf_counter() - start_time:.2f}s: {e}")
                 raise # Re-raise to let the parent caller decide if it should continue
 
             finally:
@@ -2439,7 +2431,7 @@ class RollupManager:
                             break
 
                         if res.wait_event_type == 'Lock':
-                            self._send_pushover_message(f"⚠️ [TimescaleDB] {view_name} is BLOCKED by a lock.")
+                            self._send_pushover_message(f"⚠️ {view_name} is BLOCKED by a lock.")
 
                         # Sleep in small increments to remain responsive to the stop_signal
                         for _ in range(30):
@@ -2459,7 +2451,7 @@ class RollupManager:
         Background loop: Replays backlog, then refreshes hierarchical aggregates.
         Uses @property tsdb_connected for live state awareness.
         """
-        self._log.info("[TimescaleDB] Background rollup refresh loop started.")
+        self._log.info("Background rollup refresh loop started.")
 
         while not self._stop_refresh_rollup_event.is_set():
             try:
@@ -2469,7 +2461,7 @@ class RollupManager:
                     tsdb_connected: bool = self.tsdb_connected
 
                 if not tsdb_connected:
-                    self._log.debug("[TimescaleDB] Refresh skipped: Database not connected.")
+                    self._log.debug("Refresh skipped: Database not connected.")
                     # Wait 60s or until thread stop event is set
                     self._stop_refresh_rollup_event.wait(timeout=60)
                     continue
@@ -2477,7 +2469,7 @@ class RollupManager:
                 # 2. Migration Gatekeeper
                 # Pause if a schema migration (rebuild) is currently running
                 if self.migration_in_progress.is_set():
-                    self._log.debug("[TimescaleDB] Refresh skipped: Migration in progress.")
+                    self._log.debug("Refresh skipped: Migration in progress.")
                     self._stop_refresh_rollup_event.wait(timeout=30)
                     continue
 
@@ -2487,7 +2479,7 @@ class RollupManager:
                 with self._backlog_lock:
                     count: int = self.backlog.replay_to_queue()
                     if count > 1:
-                        self._log.debug(f"[TimescaleDB] Replayed {count} points. Waiting for flush...")
+                        self._log.debug(f"Replayed {count} points. Waiting for flush...")
                         # Wait for flush worker to finish writing replayed points
                         self._flush_queue.join()
 
@@ -2506,7 +2498,7 @@ class RollupManager:
                     for gran in granularities:
                         view_name = f"{gran}_{prefix}"
 
-                        self._log.debug(f"[TimescaleDB] Refreshing continuous aggregate: {view_name}")
+                        self._log.debug(f"Refreshing continuous aggregate: {view_name}")
 
                         conn.execute(
                             text("CALL refresh_continuous_aggregate(:view, NULL, NULL);"),
@@ -2520,11 +2512,11 @@ class RollupManager:
                     break
 
             except Exception as e:
-                self._log.error(f"[TimescaleDB] Rollup refresh cycle failed: {e}")
+                self._log.error(f"Rollup refresh cycle failed: {e}")
                 # Exponential backoff/safety sleep on error
                 self._stop_refresh_rollup_event.wait(timeout=300)
 
-        self._log.info("[TimescaleDB] Background rollup refresh loop exiting.")
+        self._log.info("Background rollup refresh loop exiting.")
 
     # 10i
     def stop_auto_refresh(self) -> None:
@@ -2533,13 +2525,13 @@ class RollupManager:
         """
         if hasattr(self, "_stop_refresh_rollup_event"):
             self._stop_refresh_rollup_event.set()
-            self._log.info("[TimescaleDB] Auto rollup refresh thread stopped.")
+            self._log.info("Auto rollup refresh thread stopped.")
 
     def _purge_ghost_jobs(self, session: Session) -> None:
         """
         Cleans up aberrant TimescaleDB processes using dynamic type-based thresholds.
         """
-        self._log.info("[TimescaleDB] Initiating dynamic ghost & stale job sweep...")
+        self._log.info("Initiating dynamic ghost & stale job sweep...")
 
         # Define thresholds based on TimescaleDB common job patterns
         # Refresh: Short (30m), Compression/Retention: Long (6h), Others: Standard (1h)
@@ -2592,11 +2584,11 @@ class RollupManager:
             ghosts = session.execute(detect_sql).fetchall()
 
             if not ghosts:
-                self._log.info("[TimescaleDB] All background workers healthy.")
+                self._log.info("All background workers healthy.")
                 return
 
             for job_id, app_name,  issue in ghosts:
-                self._log.warning(f"[TimescaleDB] Purging {issue}: {app_name} (Job {job_id})")
+                self._log.warning(f"Purging {issue}: {app_name} (Job {job_id})")
 
                 # Terminate hanging backend if it still technically exists (Stale case)
                 if issue == 'STALE_EXECUTION':
@@ -2608,7 +2600,7 @@ class RollupManager:
             session.commit()
         except Exception as e:
             session.rollback()
-            self._log.error(f"[TimescaleDB] Sweep failed: {e}")
+            self._log.error(f"Sweep failed: {e}")
 
 
     # 10  may eventually need this method to parse interval strings from settings
@@ -2696,14 +2688,14 @@ class BacklogManager:
                             if now - m_time < timedelta(seconds=self.max_backlog_age):
                                 loaded.append(point)
                         except (json.JSONDecodeError, ValueError) as e:
-                            self._log.info("[TimescaleDB] Skipping corrupted backlog line: %s", e)
+                            self._log.info("Skipping corrupted backlog line: %s", e)
                 self.backlog_points = loaded
                 self._sync_to_disk()
 
-            self._log.info("[TimescaleDB] Loaded %d points from disk", len(loaded))
+            self._log.info("Loaded %d points from disk", len(loaded))
 
         except Exception:
-            self._log.exception("[TimescaleDB] Failed to process backlog file")
+            self._log.exception("Failed to process backlog file")
 
     def enqueue(self, point: dict) -> None:
 
@@ -2722,7 +2714,7 @@ class BacklogManager:
                 return 0
             count: int = len(self.backlog_points)
             if count > 1:
-                self._log.debug(f"[TimescaleDB] Replaying {count} points to flush queue.")
+                self._log.debug(f"Replaying {count} points to flush queue.")
                 for point in self.backlog_points:
                     self._flush_queue.put(point)
                 self.backlog_points.clear()
@@ -2740,7 +2732,7 @@ class BacklogManager:
             with open(self.backlog_file_path, "a") as f:
                 f.write(cleaned_json + "\n")
         except Exception as e:
-            self._log.error(f"[TimescaleDB] Failed to append point to backlog disk: {e}")
+            self._log.error(f"Failed to append point to backlog disk: {e}")
 
     def _sync_to_disk(self) -> None:
         if not self.backlog_file_path:
@@ -2752,4 +2744,4 @@ class BacklogManager:
                     for p in self.backlog_points:
                         f.write(json.dumps(p, default=str) + "\n")
             except Exception as e:
-                self._log.error(f"[TimescaleDB] Failed to sync backlog to disk: {e}")
+                self._log.error(f"Failed to sync backlog to disk: {e}")
