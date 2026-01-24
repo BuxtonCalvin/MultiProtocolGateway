@@ -77,6 +77,8 @@ class transport_base:
     on_message : Callable[["transport_base", registry_map_entry, str], None] = None
     ''' callback, on message received '''
 
+    request_upstream_reconnect: Callable[[], None] | None = None # callback for reconnect.
+
     _log : logging.Logger = None
 
 
@@ -86,11 +88,6 @@ class transport_base:
 
         #apply log level to logger
         self._log_level = getattr(logging, settings.get("log_level", fallback="INFO"), logging.INFO)
-        #short_name : str = __name__[__name__.rfind("."): ] if "." in __name__ else None
-        #self._log : logging.Logger = logging.getLogger(short_name + f"[{self.transport_name}]")
-
-        #base = self.__class__.__module__.split(".")[-1]    optional, but redundant, descriptor
-        #self._log = logging.getLogger(f"{base}[{self.transport_name}]")
         self._log = logging.getLogger(self.transport_name)
         self._log.setLevel(self._log_level)
 
@@ -110,7 +107,6 @@ class transport_base:
                 self.write_mode = TransportWriteMode.fromString(settings.get("write", ""))
                 if self.write_mode != TransportWriteMode.READ:
                     self.write_enabled = True
-
 
             #load a protocol_settings class for every transport; required for adv features. ie, variable timing.
             #must load after settings

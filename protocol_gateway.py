@@ -269,27 +269,61 @@ class Protocol_Gateway:
                     to_transport.init_bridge(from_transport)
                     from_transport.init_bridge(to_transport)
 
+        self._wire_reconnect_hooks()
 
-    def on_message(self, transport : transport_base, entry : registry_map_entry, data : str):
-        ''' message received from a transport! '''
+    def on_message(self, transport: transport_base, entry: registry_map_entry, data: str) -> None:
         for to_transport in self.__transports:
-            if to_transport.transport_name != transport.transport_name:
-                if to_transport.transport_name == transport.bridge or transport.transport_name == to_transport.bridge:
-                    to_transport.write_data({entry.variable_name : data}, transport)
-                    break
+            if to_transport is transport:
+                continue
 
-    def force_reconnect_by_name(self, name: str) -> None:
-        """
-        Search for a transport by name and flag it for reconnection.
-        The 'run' loop will see 'connected=False' and call connect() on next tick.
-        """
-        for transport in self.__transports:
-            # Checking against transport_name as defined in your transport_base
-            if transport.transport_name == name:
-                transport.connected = False
-                # Reset the last_read_time to force an immediate read after connect
-                transport.last_read_time = 0
+            if self._are_bridged(transport, to_transport):
+                to_transport.write_data({entry.variable_name: data}, transport)
                 break
+
+    def _are_bridged(self, a: transport_base, b: transport_base) -> bool:
+        return (
+            a.transport_name == b.bridge
+            or b.transport_name == a.bridge
+        )
+
+    def reconnect_upstream_bridge(self, bridge_name: str) -> None:
+
+        bridge = next(
+            (t for t in self.__transports if t.transport_name == bridge_name),
+            None
+        )
+
+        if not bridge:
+            self.__log.warning(
+                f"Reconnect requested for unknown transport '{bridge_name}'"
+            )
+            return
+
+        for producer_transport in self.__transports:
+            if producer_transport is bridge:
+                continue
+
+            if self._are_bridged(producer_transport, bridge):
+                self.__log.warning(
+                    f"Stale data detected in '{bridge_name}', "
+                    f"reconnecting upstream '{producer_transport.transport_name}'"
+                )
+                producer_transport.connected = False
+                producer_transport.last_read_time = 0
+                return
+
+        self.__log.warning(
+            f"No upstream transport found for '{bridge_name}'"
+        )
+
+    # init the variable request_upstream_reconnect in the __init__ bridge.  If it goes true, reconnect routine triggers.
+    def _wire_reconnect_hooks(self) -> None:
+        for transport in self.__transports:
+            if hasattr(transport, "request_upstream_reconnect"):
+                transport.request_upstream_reconnect = (
+                    lambda name=transport.transport_name:
+                        self.reconnect_upstream_bridge(name)
+                )
 
     def run(self):
         """
