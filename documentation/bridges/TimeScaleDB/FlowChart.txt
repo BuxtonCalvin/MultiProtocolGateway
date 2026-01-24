@@ -1,6 +1,6 @@
 +------------------+      +------------------+      +-------------------------+
 | Modbus TCP Poll  | ---> |  ProtocolGateway | ---> | TimescaleDB Output     |
-| (transport.modbus) |    |  (bridge router) |      | (timescaledb_out)       |
+| (transport.modbus) |    |  (bridge router) |      | (timescaledb)       |
 +------------------+      +------------------+      +-------------------------+
                                                           |
                                                           v
@@ -82,12 +82,12 @@ protocol_gateway.on_message(packet)
     |       ex: modbus_tcp → transport.timescaledb
     |
     '---> call:
-            timescaledb_out.write(packet)
+            timescaledb.write(packet)
 
 ┌────────────────────────────────────────────────────────────────────────────┐
 │  4. TimescaleDB Output Transport                                           │
 └────────────────────────────────────────────────────────────────────────────┘
-timescaledb_out.write(packet)
+timescaledb.write(packet)
     |
     |-- for each enabled variable:
     |         MetricPoint(device_id, timestamp, variable_name, value)
@@ -105,12 +105,12 @@ protocol_gateway.py
     |
     |-- load config
     |-- dynamically import "classes.transports.modbus_tcp"
-    |-- dynamically import "classes.transports.timescaledb_out"
+    |-- dynamically import "classes.transports.timescaledb"
     |
     |-- instantiate modbus_tcp( cfg )
-    |-- instantiate timescaledb_out( cfg )
+    |-- instantiate timescaledb( cfg )
            |
-           |-- timescaledb_out.__init__()
+           |-- timescaledb.__init__()
                  |
                  |-- start flush thread
                  |-- start autorefresh thread
@@ -137,13 +137,13 @@ protocol_gateway.on_message()
            (ex: "transport.timescaledb")
     |
     |-- call:
-           timescaledb_out.write( data_dict_from_modbus )
+           timescaledb.write( data_dict_from_modbus )
 
 
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │  4. Timescale Output: Write → Queue                                          │
 └──────────────────────────────────────────────────────────────────────────────┘
-timescaledb_out.write()
+timescaledb.write()
     |
     |-- convert Modbus message → internal MetricPoint structure
     |
@@ -154,7 +154,7 @@ timescaledb_out.write()
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │  5. Flush Worker Thread                                                      │
 └──────────────────────────────────────────────────────────────────────────────┘
-timescaledb_out._flush_worker()   (always running, daemon thread)
+timescaledb._flush_worker()   (always running, daemon thread)
     LOOP:
         |
         |-- dequeue up to batch_size points
@@ -166,7 +166,7 @@ timescaledb_out._flush_worker()   (always running, daemon thread)
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │  6. Wide Table Writer (device_metrics_wide)                                  │
 └──────────────────────────────────────────────────────────────────────────────┘
-timescaledb_out._flush_batch_wide()
+timescaledb._flush_batch_wide()
     |
     |-- ensure table exists: device_metrics_wide
     |
@@ -233,7 +233,7 @@ device_metrics_wide
             │ send to output
             v
  ┌────────────────────────────┐
- │ timescaledb_out.write      │
+ │ timescaledb.write      │
  │ → push into Queue()        │
  └───────────┬────────────────┘
              │ queued metrics
@@ -263,7 +263,7 @@ device_metrics_wide
 | **Main thread**                   | Loads config, instantiates transports     | `protocol_gateway.py`           |
 | **Modbus Poll Thread**            | Scrapes device registers repeatedly       | `modbus_tcp._poll_worker`       |
 | **Gateway Router Thread**         | (runs in main) dispatches messages        | built-in                        |
-| **Timescale Flush Thread**        | Writes batches to DB                      | `timescaledb_out._flush_worker` |
+| **Timescale Flush Thread**        | Writes batches to DB                      | `timescaledb._flush_worker` |
 | **Timescale Auto-Refresh Thread** | (optional) rebuilds metadata periodically | `_run_autorefresh_thread`       |
 | **Timescale Reconnect Thread**    | Spawns only on failure                    | `_attempt_reconnect`            |
 
@@ -284,19 +284,19 @@ device_metrics_wide
 3. protocol_gateway.py
        on_message()
        resolve bridge target
-       call timescaledb_out.write()
+       call timescaledb.write()
 
-4. classes/transports/timescaledb_out.py
+4. classes/transports/timescaledb.py
        write()
        build MetricPoint
        enqueue into batch_queue
 
-5. classes/transports/timescaledb_out.py
+5. classes/transports/timescaledb.py
        _flush_worker() thread
        dequeue N points
        call _flush_batch_wide()
 
-6. classes/transports/timescaledb_out.py
+6. classes/transports/timescaledb.py
        _flush_batch_wide()
        ensure columns exist
        INSERT rows into device_metrics_wide
@@ -334,7 +334,7 @@ CONFIG →  │ registry_map.json          │
                                         │ forwarded
                                         v
                             ┌────────────────────────┐
-                            │ timescaledb_out.write │
+                            │ timescaledb.write │
                             └─────────────┬────────┘
                                           │ batch queue
                                           v

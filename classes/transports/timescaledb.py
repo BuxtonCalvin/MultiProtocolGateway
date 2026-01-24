@@ -1,5 +1,5 @@
 """
-timescaledb_out transport bridge module (with rollup continuous aggregates) and persistent disk backlog.
+timescaledb transport bridge module (with rollup continuous aggregates) and persistent disk backlog.
 
 Features:
  - Auto-create database (default "solar", configurable)
@@ -1094,7 +1094,7 @@ class timescaledb(transport_base):
 
         # 3. Proceed only if there is "real" data
         self._log.debug(f"Data: {data}")
-        self._log.debug(f"writing data from [{from_transport.transport_name}] to timescaledb_out bridge")
+        self._log.debug(f"writing data from [{from_transport.transport_name}] to timescaledb bridge")
 
         # Safe to copy now that we know it's a dict
         self._flush_queue.put(data.copy())
