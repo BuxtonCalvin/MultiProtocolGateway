@@ -1082,12 +1082,14 @@ class protocol_settings:
             val = registry[entry.register]
 
             # Convert the combined unsigned value to a signed integer if necessary
-            if val & (1 << 15):  # Check if the sign bit (bit 31) is set
+            if val & (1 << 15):  # Check if the sign bit (bit 15) is set
                 # Perform two's complement conversion to get the signed integer
                 value = val - (1 << 16)
             else:
                 value = val
-            value = -value
+            # As most inverters produce the correct value, the value needs to be flipped conditionally,
+            # perhaps by a suffix/prefix in the data type in the CSV.
+            #value = -value
         elif entry.data_type == Data_Type.INT: #read int
             if entry.register + 1 not in registry:
                 return
