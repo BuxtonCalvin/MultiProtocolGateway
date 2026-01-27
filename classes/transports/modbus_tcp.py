@@ -20,6 +20,8 @@ class modbus_tcp(modbus_base):
     pymodbus_slave_arg = "unit"
 
     def __init__(self, settings : SectionProxy, protocolSettings : protocol_settings = None):
+        super().__init__(settings, protocolSettings=protocolSettings)
+
         self.host = settings.get("host", "")
         if not self.host:
             raise ValueError("Host is not set")
@@ -30,7 +32,7 @@ class modbus_tcp(modbus_base):
         if "slave" in inspect.signature(ModbusTcpClient.read_holding_registers).parameters:
             self.pymodbus_slave_arg = "slave"
 
-        client_str = self.host+"("+str(self.port)+")"
+        client_str = self.host+"-tcp-"+str(self.port)
         #check if client is already initialied
         with self._clients_lock:
             if client_str in modbus_base.clients:
@@ -44,7 +46,6 @@ class modbus_tcp(modbus_base):
         with self._clients_lock:
             modbus_base.clients[client_str] = self.client
 
-        super().__init__(settings, protocolSettings=protocolSettings)
 
     def write_register(self, register : int, value : int, **kwargs):
         if not self.write_enabled:

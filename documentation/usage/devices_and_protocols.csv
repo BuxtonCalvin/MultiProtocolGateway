@@ -4,7 +4,8 @@ AOLithium,51.2V 100Ah,victron_gx_generic_canbus,CanBus,https://github.com/HotNoo
 EG4,EG4 18kPV,eg4_v58,ModBus,
 EG4,EG4 3000EHV ,eg4_3000ehv_v1 ,ModBus,
 EG4,EG4 6000XP ,eg4_v58,ModBus,
-EG4,MPPT100-48HV – unconfirmed,eg4_3000ehv_v1 ,ModBus,
+EG4,EG4 12000XP ,eg4_v58,ModBus, 
+EG4,MPPT100-48HV â€“ unconfirmed,eg4_3000ehv_v1 ,ModBus,
 Growatt,SPF 12000T DVM-US MPV,v0.14,ModBus,
 Growatt,SPF 5000 ,v0.14,ModBus,
 Growatt,SPF 6000 ,v0.14,ModBus,
@@ -14,3 +15,4 @@ SOK,48v100ah,pace_bms_v1.3 ,ModBus,https://github.com/HotNoob/PythonProtocolGate
 SolArk,Untested,solark_v1.1 ,ModBus,
 SRNE,ASF48100S200-H ,srne_v3.9,ModBus,
 SRNE,HF2430U60-100 ,srne_v3.9,ModBus,
+Next Power,Victor NM-Eco-6.2KW Plus,next_power_victor_nm_re,CanBus,https://github.com/HotNoob/PythonProtocolGateway/issues/113

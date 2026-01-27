@@ -387,7 +387,11 @@ class modbus_base(transport_base):
     def init_after_connect(self):
         # Use transport lock to prevent concurrent access during initialization
         with self._transport_lock:
-            #from transport_base settings
+            #analyze protocol if enabled
+            if self.analyze_protocol_enabled:
+                self.analyze_protocol()
+
+        #from transport_base settings
             if self.write_enabled:
                 self.enable_write()
 
