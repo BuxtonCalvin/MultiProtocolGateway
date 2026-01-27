@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - TSDB
       - Test
       - v1/*  # Matches any branch starting with v1
   workflow_dispatch: 
@@ -54,4 +55,4 @@ jobs:
           # Use the normalized outputs from the 'prep' step
           tags: |
             ${{ secrets.DOCKER_USERNAME }}/${{ steps.prep.outputs.repo }}:${{ steps.prep.outputs.branch }}-${{ steps.prep.outputs.date }}
-            ${{ github.ref == 'refs/heads/main' && format('{0}/{1}:latest', secrets.DOCKER_USERNAME, steps.prep.outputs.repo) || '' }}
+            ${{ github.ref == 'refs/heads/TSDB' && format('{0}/{1}:latest', secrets.DOCKER_USERNAME, steps.prep.outputs.repo) || '' }}
