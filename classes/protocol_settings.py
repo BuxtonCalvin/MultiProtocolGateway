@@ -1,4 +1,5 @@
 import ast
+import copy
 import csv
 import itertools
 import json
@@ -6,7 +7,6 @@ import logging
 import os
 import re
 import time
-import copy
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -838,7 +838,7 @@ class protocol_settings:
         # Debug: log the parameters
         import logging
         log = logging.getLogger(__name__)
-        log.debug(f"calculate_registry_ranges: max_register={max_register}, max_batch_size={max_batch_size}, map_size={len(map)}, init={init}")
+        log.debug(f"calculate_registry_ranges: max_register={max_register}, max_batch_size={max_batch_size}, map_size={len(map)}, init={init}")  # noqa: G004
 
         start = -max_batch_size
         ranges : list[tuple] = []
@@ -1375,35 +1375,35 @@ class protocol_settings:
         """Custom deep copy implementation to handle non-copyable attributes"""
         # Create a new instance
         new_instance = protocol_settings.__new__(protocol_settings)
-        
+
         # Copy basic attributes
         new_instance.protocol = self.protocol
         new_instance.settings_dir = self.settings_dir
         new_instance.transport_settings = self.transport_settings
         new_instance.byteorder = self.byteorder
-        
+
         # Copy dictionaries and lists
         new_instance.variable_mask = copy.deepcopy(self.variable_mask, memo)
         new_instance.variable_screen = copy.deepcopy(self.variable_screen, memo)
         new_instance.codes = copy.deepcopy(self.codes, memo)
         new_instance.settings = copy.deepcopy(self.settings, memo)
-        
+
         # Copy registry maps with deep copy of entries
         new_instance.registry_map = {}
         for registry_type, entries in self.registry_map.items():
             new_instance.registry_map[registry_type] = copy.deepcopy(entries, memo)
-        
+
         new_instance.registry_map_size = copy.deepcopy(self.registry_map_size, memo)
         new_instance.registry_map_ranges = copy.deepcopy(self.registry_map_ranges, memo)
-        
+
         # Copy transport
         new_instance.transport = self.transport
-        
+
         # Recreate logger (not copyable)
         new_instance._log_level = self._log_level
         new_instance._log = logging.getLogger(__name__)
         new_instance._log.setLevel(new_instance._log_level)
-        
+
         return new_instance
 
 #settings = protocol_settings('v0.14')
