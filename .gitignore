@@ -39,3 +39,5 @@ inflxudb_backlog/*
 
 #ignore dumps for dev
 tools/dumps/*
+.python-version
+uv.lock
