@@ -6,8 +6,8 @@ Main module for Growatt / Inverters ModBus RTU data to MQTT
 
 import importlib
 import sys
-import time
 import threading
+import time
 
 # Check if Python version is greater than 3.9
 if sys.version_info < (3, 9):
@@ -28,7 +28,6 @@ from pathlib import Path
 
 from classes.protocol_settings import protocol_settings, registry_map_entry
 from classes.transports.transport_base import transport_base
-from defs.common import strtobool
 
 __logo = """
 
@@ -103,25 +102,21 @@ class CustomConfigParser(ConfigParser):
         value = self.get(section, option, *args, **kwargs)
         return float(value) if value is not None else None
 
-    def getboolean(self, section, option, *args, **kwargs): #bypass fallback bug
-        value = self.get(section, option, *args, **kwargs)
-        return strtobool(value)
-
     def getboolean(self, section, option, *args, **kwargs): #bypass fallback bug and handle case-insensitive boolean values
         value = self.get(section, option, *args, **kwargs)
         if value is None:
             return None
-        
+
         # Convert to string and handle case-insensitive boolean values
         value_str = str(value).lower().strip()
-        
+
         # Handle various boolean representations
         if value_str in ('true', 'yes', 'on', '1', 'enable', 'enabled'):
             return True
         elif value_str in ('false', 'no', 'off', '0', 'disable', 'disabled'):
             return False
         else:
-            raise ValueError(f'Not a boolean: {value}')
+            raise ValueError(f'Not a boolean: {value}')  # noqa: EM102
 
 
 class Protocol_Gateway:
@@ -219,22 +214,22 @@ class Protocol_Gateway:
     ''' transport_base is for type hinting. this can be any transport'''
 
     config_file : str
-    
+
     # Simple read completion tracking
     __read_completion_tracker : dict[str, bool] = {}
     ''' Track which transports have completed their current read cycle '''
     __read_tracker_lock : threading.Lock = None
-    
+
     # Concurrency control
     __disable_concurrency : bool = False
     ''' When true, transports read sequentially instead of concurrently.
         Concurrent mode (false) is recommended for multiple devices with same address
         as it prevents timing interference between rapid sequential reads. '''
-    
+
     # Transport timing control
     __transport_delay_offset : float = 0.5
     ''' Additional delay between different transports to prevent conflicts '''
-    
+
     # Sequential transport delay
     __sequential_delay : float = 1.0
     ''' Delay between sequential transport reads to prevent device confusion '''
@@ -263,7 +258,7 @@ class Protocol_Gateway:
 
         ##[general]
         self.__log_level = self.__settings.get("general","log_level", fallback="INFO")
-        
+
         # Read concurrency setting - default to sequential (disabled) for better stability
         self.__disable_concurrency = self.__settings.getboolean("general", "disable_concurrency", fallback=True)
         self.__log.info(f"Concurrency mode: {'Sequential' if self.__disable_concurrency else 'Concurrent'}")
@@ -319,7 +314,7 @@ class Protocol_Gateway:
                 if to_transport.bridge == from_transport.transport_name:
                     to_transport.init_bridge(from_transport)
                     from_transport.init_bridge(to_transport)
-        
+
         # Initialize read completion tracking
         self.__read_tracker_lock = threading.Lock()
         for transport in self.__transports:
@@ -343,7 +338,7 @@ class Protocol_Gateway:
             if not transport.connected:
                 self.__log.info(f"Transport {transport.transport_name} not connected, connecting...")
                 transport.connect()
-            
+
             self.__log.debug(f"Starting read cycle for {transport.transport_name}")
             info = transport.read_data()
 
@@ -353,19 +348,19 @@ class Protocol_Gateway:
                 return
 
             self.__log.debug(f"Transport {transport.transport_name} completed read cycle with {len(info)} fields")
-            
+
             # Write to output transports immediately (as before)
             if transport.bridge:
                 for to_transport in self.__transports:
                     if to_transport.transport_name == transport.bridge:
                         to_transport.write_data(info, transport)
                         break
-            
+
             self._mark_read_complete(transport)
-                
+
         except Exception as err:
             self.__log.error(f"Error processing transport {transport.transport_name}: {err}")
-            traceback.print_exc()
+            # traceback.print_exc()
             self._mark_read_complete(transport)
 
     def _mark_read_complete(self, transport):
@@ -444,37 +439,37 @@ class Protocol_Gateway:
             try:
                 now = time.time()
                 ready_transports = []
-                
+
                 # Find all transports that are ready to read
                 for transport in self.__transports:
                     if transport.read_interval > 0 and now - transport.last_read_time > transport.read_interval:
                         transport.last_read_time = now
                         ready_transports.append(transport)
-                
+
                 # Reset read completion tracker for this cycle
                 if ready_transports:
                     self._reset_read_completion_tracker()
                     self.__log.debug(f"Starting read cycle for {len(ready_transports)} transports: {[t.transport_name for t in ready_transports]}")
-                
+
                 # Process transports based on concurrency setting
                 if self.__disable_concurrency:
                     # Sequential processing - process transports one by one
                     for i, transport in enumerate(ready_transports):
                         self.__log.debug(f"Processing {transport.transport_name} sequentially ({i+1}/{len(ready_transports)})")
-                        
+
                         # Process current transport
                         self._process_transport_read(transport)
-                        
+
                         # Add delay between transports to prevent device confusion
                         if i < len(ready_transports) - 1:  # Don't delay after the last transport
                             self.__log.debug(f"Waiting {self.__sequential_delay} seconds before next transport...")
                             time.sleep(self.__sequential_delay)
-                    
+
                     # Log completion status for sequential mode
                     completion_status = self._get_read_completion_status()
                     completed = [name for name, status in completion_status.items() if status]
                     self.__log.debug(f"Sequential read cycle completed. Completed transports: {completed}")
-                    
+
                 else:
                     # Concurrent processing - process transports in parallel
                     if len(ready_transports) > 1:
@@ -484,16 +479,16 @@ class Protocol_Gateway:
                             thread.daemon = True
                             thread.start()
                             threads.append(thread)
-                        
+
                         # Wait for all threads to complete
                         for thread in threads:
                             thread.join()
-                        
+
                         # Log completion status
                         completion_status = self._get_read_completion_status()
                         completed = [name for name, status in completion_status.items() if status]
                         self.__log.debug(f"Concurrent read cycle completed. Completed transports: {completed}")
-                        
+
                     elif len(ready_transports) == 1:
                         # Single transport - process directly
                         self._process_transport_read(ready_transports[0])
