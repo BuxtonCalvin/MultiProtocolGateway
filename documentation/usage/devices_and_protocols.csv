@@ -1,7 +1,7 @@
 Brand,Model,Protocol,Transport,ReadMe
 AOLithium,51.2V 100Ah,voltronic_bms_2020_03_25,ModBus,https://github.com/HotNoob/PythonProtocolGateway/blob/main/documentation/devices/AOLithium.md
 AOLithium,51.2V 100Ah,victron_gx_generic_canbus,CanBus,https://github.com/HotNoob/PythonProtocolGateway/blob/main/documentation/devices/AOLithium.md
-EG4,EG4 18kPV,eg4_v58,ModBus,
+EG4,EG4 18kPV,eg4_18kpv,ModBus,
 EG4,EG4 3000EHV ,eg4_3000ehv_v1 ,ModBus,
 EG4,EG4 6000XP ,eg4_v58,ModBus,
 EG4,EG4 12000XP ,eg4_v58,ModBus, 

@@ -56,7 +56,7 @@ class mqtt(transport_base):
         self.reconnect_delay = settings.getint("reconnect_delay", fallback=7)
         #self.max_precision = settings.getint('max_precision', fallback=self.max_precision)
 
-        if not isinstance( self.reconnect_delay , int) or self.reconnect_delay < 1: #minumum 1 second
+        if not isinstance( self.reconnect_delay , int) or self.reconnect_delay < 1: #minimum 1 second
             self.reconnect_delay = 1
 
         self.reconnect_attempts = settings.getint("reconnect_attempts", fallback=21)
@@ -77,7 +77,7 @@ class mqtt(transport_base):
             warnings.warn("MQTT Password is empty", RuntimeWarning)
 
         #init client
-        #compatability with newer lib
+        #compatibility with newer lib
         if hasattr(paho.mqtt.client, "CallbackAPIVersion"):
             self.client = MQTTClient(paho.mqtt.client.CallbackAPIVersion.VERSION1)
         else:
@@ -138,7 +138,7 @@ class mqtt(transport_base):
                 self._log.warning("Reconnection failed. Retrying in "+str(self.reconnect_delay)+" second(s)...")
                 time.sleep(self.reconnect_delay)
 
-        #failed to reonnect
+        #failed to reconnect
         self._log.critical("Failed to Reconnect, Too many attempts")
         self.__reconnecting = 0
         quit() #exit, service should restart entire script
@@ -162,7 +162,7 @@ class mqtt(transport_base):
 
         self._log.info(f"write data from [{from_transport.transport_name}] to mqtt transport")
         self._log.info(data)
-        #have to send this every loop, because mqtt doesnt disconnect when HA restarts. HA bug.
+        #have to send this every loop, because mqtt doesn't disconnect when HA restarts. HA bug.
         info = self.client.publish(self.base_topic + "/" + from_transport.device_identifier + "/availability","online", qos=0,retain=True)
         if info.rc == MQTT_ERR_NO_CONN:
             self.connected = False
@@ -254,7 +254,7 @@ class mqtt(transport_base):
 
             writePrefix = ""
             if from_transport.write_enabled and ( item.write_mode == WriteMode.WRITE or item.write_mode == WriteMode.WRITEONLY ):
-                writePrefix = "" #home assistant doesnt like write prefix
+                writePrefix = "" #home assistant doesn't like write prefix
 
             disc_payload["state_topic"] = self.base_topic + "/" +from_transport.device_identifier + writePrefix+ "/"+clean_name
 

@@ -1,6 +1,5 @@
 import ast
 import csv
-import glob
 import itertools
 import json
 import logging
@@ -10,6 +9,7 @@ import time
 import copy
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 from typing import TYPE_CHECKING, Union
 
 from defs.common import strtoint
@@ -188,7 +188,7 @@ class registry_map_entry:
     register : int
     register_bit : int
     register_byte : int
-    ''' byte offset for canbus ect... '''
+    ''' byte offset for canbus etc... '''
 
     variable_name : str
     documented_name : str
@@ -214,7 +214,7 @@ class registry_map_entry:
     ''' entry specific byte order little | big | '' '''
 
     read_command : bytes = None
-    ''' for transports/protocols that require sending a command ontop of "register" '''
+    ''' for transports/protocols that require sending a command on top of "register" '''
 
     read_interval : int = 1000
     ''' how often to read register in ms'''
@@ -281,24 +281,38 @@ class protocol_settings:
         self.transport_settings = transport_settings
 
         #load variable mask
+        file_path_m = self.find_protocol_file("variable_mask.txt")
         self.variable_mask = []
-        if os.path.isfile("variable_mask.txt"):
-            with open("variable_mask.txt") as f:
-                for line in f:
-                    if line[0] == "#": #skip comment
-                        continue
-
-                    self.variable_mask.append(line.strip().lower())
+        if file_path_m is not None and os.path.isfile(file_path_m):
+            try:
+                with open(file_path_m, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        clean_line = line.strip().lower()
+                        # Skip all empty lines or comments
+                        if not clean_line or clean_line.startswith('#'):
+                            continue
+                        self.variable_mask.append(clean_line)
+            except Exception as e:
+                self._log.error(f"Error reading file: {e}")
+        else:
+            self._log.warning(f"File {file_path_m} Path, variable_mask.txt not found. Skipping...")
 
         #load variable screen
+        file_path_s: str = self.find_protocol_file("variable_screen.txt")
         self.variable_screen = []
-        if os.path.isfile("variable_screen.txt"):
-            with open("variable_screen.txt") as f:
-                for line in f:
-                    if line[0] == "#": #skip comment
-                        continue
-
-                    self.variable_screen.append(line.strip().lower())
+        if file_path_s is not None and os.path.isfile(file_path_s):
+            try:
+                with open(file_path_s, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        clean_line = line.strip().lower()
+                        # Skip all empty lines or comments
+                        if not clean_line or clean_line.startswith('#'):
+                            continue
+                        self.variable_mask.append(clean_line)
+            except Exception as e:
+                self._log.error(f"Error reading file: {e}")
+        else:
+            self._log.warning(f"File {file_path_s} Path, variable_screen.txt not found. Skipping...")
 
         self.load__json() #load first, so priority to json codes
 
@@ -338,10 +352,10 @@ class protocol_settings:
                 return item
 
         return None
-    
+
     def get_code_by_value(self, entry : registry_map_entry, value : str, fallback=None) -> str:
         ''' case insensitive '''
-        
+
         value = value.strip().lower()
 
         if entry.variable_name+"_codes" in self.codes:
@@ -349,7 +363,7 @@ class protocol_settings:
             for code, val in codes.items():
                 if value == val.lower():
                     return code
-                
+
         return fallback
 
     def load__json(self, file : str = "", settings_dir : str = ""):
@@ -362,8 +376,8 @@ class protocol_settings:
         path = self.find_protocol_file(file, settings_dir)
 
         #if path does not exist; nothing to load. skip.
-        if not path:
-            self._log.error("ERROR: '"+file+"' not found")
+        if path is None:
+            self._log.error(f"ERROR: '{file}' not found")
             return
 
         with open(path) as f:
@@ -412,7 +426,7 @@ class protocol_settings:
             transport_read_interval = self.transport_settings.getint("read_interval", transport_read_interval)
 
 
-        if not os.path.exists(path): #return empty is file doesnt exist.
+        if not os.path.exists(path): #return empty if file doesn't exist.
             return registry_map
 
 
@@ -721,7 +735,7 @@ class protocol_settings:
 
             first_row = re.sub(r"\s+" + re.escape(delimeter) +"|" + re.escape(delimeter) +r"\s+", delimeter, first_row) #trim values
 
-            csvfile = itertools.chain([first_row], csvfile) #add clean header to begining of iterator
+            csvfile = itertools.chain([first_row], csvfile) #add clean header to beginning of iterator
 
             # Create a CSV reader object
             reader = csv.DictReader(csvfile, delimiter=delimeter)
@@ -731,7 +745,7 @@ class protocol_settings:
                 process_row(row)
 
             if overrides is not None:
-                # Add any unmatched overrides as new entries... probably need to add some better error handling to ensure entry isnt empty ect...
+                # Add any unmatched overrides as new entries... probably need to add some better error handling to ensure entry isn't empty ect...
                 for key in override_keys:
                     applied = False
                     for key_value, override_row in overrides[key].items():
@@ -773,7 +787,7 @@ class protocol_settings:
 
                         combined_item.documented_name = combined_item.documented_name[:-2].strip()
 
-                        if not combined_item.unit: #fix inconsistsent documentation
+                        if not combined_item.unit: #fix inconsistent documentation
                             combined_item.unit = registry_map[index].unit
                             combined_item.unit_mod = registry_map[index].unit_mod
 
@@ -803,7 +817,16 @@ class protocol_settings:
 
     def calculate_registry_ranges(self, map : list[registry_map_entry], max_register : int, init : bool = False, timestamp: int = 0) -> list[tuple]:
 
-        ''' read optimization; calculate which ranges to read'''
+        ''' read optimization; calculate which ranges to read
+        to allow the Modbus driver to combine multiple registers into a single Modbus read operation
+        (function 0x03/0x04), reducing round-trips.
+
+        1 Sort registry entries by starting register address
+        2 Walk through them sequentially
+        3 If the next register starts exactly where the previous one ends → merge
+        4 If there is a gap → start a new range
+        5 Produce a minimal set of (start_register, total_length) ranges'''
+
         max_batch_size = 45 #see manual; says max batch is 45
 
         if "batch_size" in self.settings:
@@ -850,22 +873,35 @@ class protocol_settings:
         return ranges
 
 
-    def find_protocol_file(self, file : str, base_dir : str = "" ) -> str:
 
-        path = base_dir + "/" + file
-        if os.path.exists(path):
-            return path
 
+
+    def find_protocol_file(self, file: str, base_dir: str = "") -> str:
+        # use Path object to allow MS windows path.
+        # protocol_settings.py is two folders to root parent  ie. parent.parent
+        # code uses Path objects to return a path string similar to original code
+        # but formatted per OS.
+
+        # 1. Establish absolute base directory (using Path for logic)
+        base_path = Path(__file__).resolve().parent.parent / base_dir
+
+        # 2. Check direct path
+        path = base_path / file
+        if path.exists():
+            return str(path)  # Convert to string before returning
+
+        # 3. Check suffix-based subfolder
         suffix = file.split("_", 1)[0]
+        path = base_path / suffix / file
+        if path.exists():
+            return str(path)
 
-        path = base_dir + "/" + suffix +"/" + file
-        if os.path.exists(path):
-            return path
-
-        #find file by name, recurisvely. last resort
-        search_pattern = os.path.join(base_dir, "**", file)
-        matches = glob.glob(search_pattern, recursive=True)
-        return matches[0] if matches else None
+        # 4. Recursive search (last resort)
+        try:
+            # rglob returns Path objects; convert the first match to a string
+            return str(next(base_path.rglob(file)))
+        except StopIteration:
+            return None
 
 
     def load_registry_map(self, registry_type : Registry_Type, file : str = "", settings_dir : str = ""):
@@ -1057,12 +1093,14 @@ class protocol_settings:
             val = registry[entry.register]
 
             # Convert the combined unsigned value to a signed integer if necessary
-            if val & (1 << 15):  # Check if the sign bit (bit 31) is set
+            if val & (1 << 15):  # Check if the sign bit (bit 15) is set
                 # Perform two's complement conversion to get the signed integer
                 value = val - (1 << 16)
             else:
                 value = val
-            value = -value
+            # As most inverters produce the correct value, the value needs to be flipped conditionally,
+            # perhaps by a suffix/prefix in the data type in the CSV.
+            #value = -value
         elif entry.data_type == Data_Type.INT: #read int
             if entry.register + 1 not in registry:
                 return
@@ -1092,7 +1130,7 @@ class protocol_settings:
             end_bit = flag_size + start_bit
 
             offset : int = 0
-            #calculate current offset for mutliregiter values, were assuming concatenate registers is in order, 0 being the first / lowest
+            #calculate current offset for multi register values, were assuming concatenate registers is in order, 0 being the first / lowest
             #offset should always be >= 0
             if entry.concatenate:
                 offset : int = entry.register - entry.concatenate_registers[0]
@@ -1295,7 +1333,7 @@ class protocol_settings:
             def replace_vars(match):
                 try:
                     maths = match.group("maths")
-                    maths = re.sub(r"\s", "", maths) #remove spaces, because ast.parse doesnt like them
+                    maths = re.sub(r"\s", "", maths) #remove spaces, because ast.parse doesn't like them
 
                     # Parse the expression safely
                     tree = ast.parse(maths, mode="eval")

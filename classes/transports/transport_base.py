@@ -1,5 +1,5 @@
-import logging
 import copy
+import logging
 from enum import Enum
 from typing import TYPE_CHECKING, Callable
 
@@ -18,11 +18,11 @@ class TransportWriteMode(Enum):
     READ = 0x00
     ''' READ ONLY '''
     WRITE = 0x01
-    ''' Standard Write Mode, ALL SAFTIES IN PLACE'''
+    ''' Standard Write Mode, ALL SAFETIES IN PLACE'''
     RELAXED = 0x02
     ''' less strict - initial protocol validation skipped'''
     UNSAFE = 0x03
-    ''' skip all safties '''
+    ''' skip all safeties '''
 
     @classmethod
     def fromString(cls, name : str):
@@ -77,9 +77,12 @@ class transport_base:
     _needs_reconnection : bool = False
 
     on_message : Callable[["transport_base", registry_map_entry, str], None] = None
-    ''' callback, on message recieved '''
+    ''' callback, on message received '''
+
+    request_upstream_reconnect: Callable[[], None] | None = None # callback for reconnect.
 
     _log : logging.Logger = None
+
 
     def __init__(self, settings : "SectionProxy") -> None:
 
@@ -87,9 +90,7 @@ class transport_base:
 
         #apply log level to logger
         self._log_level = getattr(logging, settings.get("log_level", fallback="INFO"), logging.INFO)
-        short_name : str = __name__[__name__.rfind("."): ] if "." in __name__ else None
-        self._log : logging.Logger = logging.getLogger(short_name + f"[{self.transport_name}]")
-
+        self._log = logging.getLogger(self.transport_name)
         self._log.setLevel(self._log_level)
 
         self.type = self.__class__.__name__
@@ -109,7 +110,6 @@ class transport_base:
                 self.write_mode = TransportWriteMode.fromString(settings.get("write", ""))
                 if self.write_mode != TransportWriteMode.READ:
                     self.write_enabled = True
-
 
             #load a protocol_settings class for every transport; required for adv features. ie, variable timing.
             #must load after settings
@@ -158,11 +158,11 @@ class transport_base:
         ''' general purpose write function for between transports'''
         pass
 
-    #lets convert this to dict[str, registry_map_entry]
+    #let's convert this to dict[str, registry_map_entry]
     def read_data(self) -> dict[str,str]:
         '''
         general purpose read function for between transports;
-        return type may be changed to dict[str, registrsy_map_entry]. still thinking about this
+        return type may be changed to dict[str, registry_map_entry]. still thinking about this
         '''
         pass
 

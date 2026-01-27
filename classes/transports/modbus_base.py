@@ -95,10 +95,61 @@ from .transport_base import TransportWriteMode, transport_base
 
 if TYPE_CHECKING:
     from configparser import SectionProxy
-    try:
-        from pymodbus.client.sync import BaseModbusClient
-    except ImportError:
-        from pymodbus.client import BaseModbusClient
+
+    from pymodbus.client import ModbusBaseClient
+
+
+@dataclass
+class RegisterFailureTracker:
+    """Tracks register read failures and manages soft disabling"""
+    register_range: tuple[int, int]  # (start, end) register range
+    registry_type: Registry_Type
+    failure_count: int = 0
+    last_failure_time: float = 0
+    last_success_time: float = 0
+    disabled_until: float = 0  # Unix timestamp when disabled until
+    _lock: threading.Lock = None
+    
+    def __post_init__(self):
+        if self._lock is None:
+            self._lock = threading.Lock()
+    
+    def record_failure(self, max_failures: int = 5, disable_duration_hours: int = 12):
+        """Record a failed read attempt"""
+        with self._lock:
+            current_time = time.time()
+            self.failure_count += 1
+            self.last_failure_time = current_time
+            
+            # If we've had enough failures, disable for specified duration
+            if self.failure_count >= max_failures:
+                self.disabled_until = current_time + (disable_duration_hours * 3600)
+                return True  # Indicates this range should be disabled
+            return False
+    
+    def record_success(self):
+        """Record a successful read attempt"""
+        with self._lock:
+            current_time = time.time()
+            self.last_success_time = current_time
+            # Reset failure count on success
+            self.failure_count = 0
+            self.disabled_until = 0
+    
+    def is_disabled(self) -> bool:
+        """Check if this register range is currently disabled"""
+        with self._lock:
+            if self.disabled_until == 0:
+                return False
+            return time.time() < self.disabled_until
+    
+    def get_remaining_disable_time(self) -> float:
+        """Get remaining time until re-enabled (0 if not disabled)"""
+        with self._lock:
+            if self.disabled_until == 0:
+                return 0
+            remaining = self.disabled_until - time.time()
+            return max(0, remaining)
 
 
 @dataclass
@@ -156,9 +207,8 @@ class RegisterFailureTracker:
 
 class modbus_base(transport_base):
 
-
     #this is specifically static
-    clients : dict[str, "BaseModbusClient"] = {}
+    clients : dict[str, "ModbusBaseClient"] = {}
     ''' str is identifier, dict of clients when multiple transports use the same ports '''
     
     # Threading locks for concurrency control
@@ -395,7 +445,7 @@ class modbus_base(transport_base):
             if self.write_enabled:
                 self.enable_write()
 
-            #if sn is empty, attempt to autoread it
+            #if sn is empty, attempt to auto-read it
             if not self.device_serial_number:
                 self._log.info(f"Reading serial number for transport {self.transport_name} on port {getattr(self, 'port', 'unknown')}")
                 self.device_serial_number = self.read_serial_number()
@@ -499,7 +549,7 @@ class modbus_base(transport_base):
                 sn2 = sn2 + str(data_bytes.decode("utf-8"))
                 sn3 = str(data_bytes.decode("utf-8")) + sn3
 
-            time.sleep(self.modbus_delay*2) #sleep inbetween requests so modbus can rest
+            time.sleep(self.modbus_delay*2) #sleep in between requests so modbus can rest
 
         self._log.debug(f"Serial number sn2: {sn2}")
         self._log.debug(f"Serial number sn3: {sn3}")
@@ -539,7 +589,6 @@ class modbus_base(transport_base):
                 self._log.error("enable write FAILED - WRITE DISABLED")
 
 
-
     def write_data(self, data : dict[str, str], from_transport : transport_base) -> None:
         # Use transport lock to prevent concurrent access to this transport instance
         with self._transport_lock:
@@ -558,7 +607,7 @@ class modbus_base(transport_base):
                 if entry:
                     self.write_variable(entry, value, Registry_Type.HOLDING)
 
-            time.sleep(self.modbus_delay) #sleep inbetween requests so modbus can rest
+        time.sleep(self.modbus_delay) #sleep in between requests so modbus can rest
 
     def read_data(self) -> dict[str, str]:
         # Use transport lock to prevent concurrent access to this transport instance
@@ -644,7 +693,7 @@ class modbus_base(transport_base):
             if value.variable_name in info:
                 evaluate = True
 
-                if value.concatenate and value.register != value.concatenate_registers[0]: #only eval concated values once
+                if value.concatenate and value.register != value.concatenate_registers[0]: #only eval concatenated values once
                     evaluate = False
 
                 if evaluate:
@@ -726,7 +775,7 @@ class modbus_base(transport_base):
 
         #very well possible the registers will be incomplete due to different hardware sizes
         #so dont assume they are set / complete
-        #we'll see about the behaviour. if it glitches, this could be a way to determine protocol.
+        #we'll see about the behavior. if it glitches, this could be a way to determine protocol.
 
 
         input_register_score : dict[str, int] = {}
@@ -769,7 +818,7 @@ class modbus_base(transport_base):
         for name, protocol in protocols.items():
             input_register_score[name] = 0
             holding_register_score[name] = 0
-            #very rough percentage. tood calc max possible score.
+            #very rough percentage. todo calc max possible score.
             input_valid_count[name] = 0
             holding_valid_count[name] = 0
 
@@ -824,7 +873,7 @@ class modbus_base(transport_base):
         #current_registers = self.read_modbus_registers(start=entry.register, end=entry.register, registry_type=registry_type)
         #current_value = current_registers[entry.register]
         current_value = info[entry.variable_name]
-        
+
 
         #handle codes
         value = self.protocolSettings.get_code_by_value(entry, value, fallback=value)
@@ -912,7 +961,7 @@ class modbus_base(transport_base):
 
 
     def read_variable(self, variable_name : str, registry_type : Registry_Type, entry : registry_map_entry = None):
-        ##clean for convinecne
+        ##clean for convenience
         if variable_name:
             variable_name = variable_name.strip().lower().replace(" ", "_")
 
@@ -991,11 +1040,11 @@ class modbus_base(transport_base):
             except ModbusIOException as e:
                 self._log.error(f"ModbusIOException for {self.transport_name}: " + str(e))
                 # In pymodbus 3.7+, ModbusIOException doesn't have error_code attribute
-                # Treat all ModbusIOException as retryable errors
+                # Treat all ModbusIOException as retry-able errors
                 isError = True
 
 
-            if register is None or isinstance(register, bytes) or (hasattr(register, 'isError') and register.isError()) or isError: #sometimes weird errors are handled incorrectly and response is a ascii error string
+            if register is None or isinstance(register, bytes) or (hasattr(register, 'isError') and register.isError()) or isError: #sometimes weird errors are handled incorrectly and response is an ascii error string
                 if register is None:
                     self._log.error("No response received from modbus device")
                 elif isinstance(register, bytes):

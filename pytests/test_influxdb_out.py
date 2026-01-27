@@ -5,10 +5,10 @@ Test for InfluxDB output transport
 
 import time
 import unittest
-from protocol_gateway import CustomConfigParser as ConfigParser
 from unittest.mock import MagicMock, Mock, patch
 
 from classes.transports.influxdb_out import influxdb_out
+from protocol_gateway import CustomConfigParser as ConfigParser
 
 
 class TestInfluxDBOut(unittest.TestCase):

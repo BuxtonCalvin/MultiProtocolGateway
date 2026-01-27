@@ -14,7 +14,7 @@ or
 the section header is dual purpose and acts as naming mechanism for parameters like "bridge"
 
 ## Protocol
-Transports using ambigious open ended protocols, such as ModBus, Canbus, or register / address based protocols require a map to be defined. this is done so in the /protocols/ folder through csv tables. 
+Transports using ambiguous open ended protocols, such as ModBus, Canbus, or register / address based protocols require a map to be defined. this is done so in the /protocols/ folder through csv tables. 
 
 ```
 protocol = v0.14
@@ -22,7 +22,7 @@ protocol = v0.14
 
 see [Protocol Wiki](https://github.com/HotNoob/PythonProtocolGateway/wiki/Protocols) for more on this. 
 
-Other transport protocols such as MQTT, do not require this configuration, as the variable names are provided during transmision and therefore do not need interpretation. 
+Other transport protocols such as MQTT, do not require this configuration, as the variable names are provided during transmission and therefore do not need interpretation. 
 
 ### Reading
 Some transports are Event based, such as MQTT, while others are require active reading. 
@@ -33,23 +33,23 @@ read_interval = 10
 ```
 
 ### Writing
-For ambigious sensitive protocols/transports such as ModBus, a safety mechanism is in place to help prevent "bricking" your devices or causing potentially catostrophic damages.
+For ambiguous sensitive protocols/transports such as ModBus, a safety mechanism is in place to help prevent "bricking" your devices or causing potentially catastrophic damages.
 
 In order to write, the configuration csv file must be at least 90% verifiable. Alternatively a manual verification method will be implemented in the future. This mainly entails that the current values in the writeable register ( probably holding ), be within the value range specified in the csv. 
 
 
 #### Write Safety Modes
 ``` write = false ```
-default value; writting is disabled
+default value; writing is disabled
 
 ``` write = true ```
-default "write" behaviour; includes all validations / safties.
+default "write" behavior; includes all validations / safeties.
 
 ```write = relaxed ``` ( dangerous - make sure you have the right protocol )
  skips the initial ( score % ) / bulk validation
 
 ``` write = unsafe ``` ( very dangerous )
-skips all write safties. 
+skips all write safeties. 
 
 
 Finally, to write, "read" data on any bridged transport. In most cases this will likely be MQTT. 
@@ -120,7 +120,7 @@ bridge = transport.mqtt
 ```
 
 ### write_enabled 
-write_enabled allows writting to this transport if enabled. 
+write_enabled allows writing to this transport if enabled. 
 many protocols have this disabled by default and require accurate registry maps to enable writing, as misconfiguration can have fatal unintended consequences. 
 by default mqtt allows writing.
 ```
@@ -397,7 +397,7 @@ The hardware ids format is:
 [vendor id:product id:serial number:location]
 ```
 
-for convience the hardware ids are outputted during script startup.
+for convenience the hardware ids are outputted during script startup.
 ```
 Serial Port : COM11 = [0x1a86:0x7523::1-4]
 ```
@@ -440,7 +440,7 @@ protocol_version =
 
 port = 
 bustype = socketcan
-buadrate = 
+baudrate = 
 
 ```
 
@@ -462,7 +462,7 @@ candlelight utilizes socketcan, slcan is can over serial.
 here is some extra reading material to help on using a usb canbus adapter: https://canable.io/getting-started.html
 
 ### candlelight / socketcan
-This adapter will appear as a gs_usb device, and the can inteface will appear as an ip interface
+This adapter will appear as a gs_usb device, and the can interface will appear as an ip interface
 
 ``` ip link show ```
 

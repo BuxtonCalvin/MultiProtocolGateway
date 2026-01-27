@@ -41,3 +41,7 @@ inflxudb_backlog/*
 tools/dumps/*
 .python-version
 uv.lock
+
+ruff.toml
+pytests/test_timescaledb_out.py
+
