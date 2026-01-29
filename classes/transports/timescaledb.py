@@ -1481,9 +1481,6 @@ class timescaledb(transport_base):
         except Exception as e:
             self._log.error(f"Error stopping flush thread: {e}")
 
-        except Exception as e:
-            self._log.error(f"Error closing tsdb_session: {e}")
-
         try:
             if self.engine:
                 self.engine.dispose()
@@ -1545,7 +1542,7 @@ class RollupManager:
         self.backlog: 'BacklogManager'  = backlog
         self._reconnect_lock: threading.Lock = reconnect_lock
 
-        self._refresh_rollup_thread = threading.Thread(target=self. _refresh_rollup_loop, daemon=True)
+        self._refresh_rollup_thread = threading.Thread(target=self._refresh_rollup_loop, daemon=True)
         self._stop_refresh_rollup_event: threading.Event = getattr(self, "_stop_refresh_rollup_event", threading.Event())
 
         self.performance_tiers: dict[str, dict[str, Any]] = {
@@ -1634,7 +1631,7 @@ class RollupManager:
             try:
                 self.refresh_rollups(force_full=True)
             except Exception as e:
-                self._log.error(f"Rollup refresh failed: {e}")
+                self._log.error(f"Refresh Rollup failed: {e}")
 
     # 5 Start the rollup thread.  Called from TimescaleDB class upon connection to the database.
     def start_auto_refresh(self) -> None:
@@ -2353,8 +2350,6 @@ class RollupManager:
 
         stop_signal = self._start_refresh_watchdog(view_name)
 
-        self._start_refresh_watchdog(view_name)
-
         start_time = time.perf_counter()
         mode = "FULL" if force_full else "INCREMENTAL"
 
@@ -2726,7 +2721,7 @@ class BacklogManager:
             return
         json_string = json.dumps(point, default=str)
         # trap of errata "true" in points.
-        cleaned_json = re.sub(r'true', '', json_string, flags=re.IGNORECASE)
+        cleaned_json: str = re.sub(r'^true', '', json_string, flags=re.IGNORECASE | re.MULTILINE)
         try:
             self.backlog_file_path.parent.mkdir(parents=True, exist_ok=True)
             with open(self.backlog_file_path, "a") as f:
