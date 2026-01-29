@@ -1,15 +1,9 @@
 import inspect
-
-from classes.protocol_settings import Registry_Type, protocol_settings
-
-try:
-    from pymodbus.client.sync import ModbusSerialClient
-except ImportError:
-    from pymodbus.client import ModbusSerialClient
-
-
 from configparser import SectionProxy
 
+from pymodbus.client import ModbusSerialClient
+
+from classes.protocol_settings import Registry_Type, protocol_settings
 from defs.common import find_usb_serial_port, get_usb_serial_port_info, strtoint
 
 from .modbus_base import modbus_base
@@ -79,13 +73,7 @@ class modbus_rtu(modbus_base):
             modbus_base.clients[client_str] = self.client
 
     def read_registers(self, start, count=1, registry_type : Registry_Type = Registry_Type.INPUT, **kwargs):
-
-        if "unit" not in kwargs:
-            kwargs = {"unit": int(self.addresses[0]), **kwargs}
-
-        #compatibility
-        if self.pymodbus_slave_arg != "unit":
-            kwargs["slave"] = kwargs.pop("unit")
+        kwargs = self._get_correct_device_arg(kwargs)
 
         # Use port-specific lock for thread-safe access
         port_lock = self._get_port_lock()
@@ -98,13 +86,7 @@ class modbus_rtu(modbus_base):
     def write_register(self, register : int, value : int, **kwargs):
         if not self.write_enabled:
             return
-
-        if "unit" not in kwargs:
-            kwargs = {"unit": self.addresses[0], **kwargs}
-
-        #compatibility
-        if self.pymodbus_slave_arg != "unit":
-            kwargs["slave"] = kwargs.pop("unit")
+        kwargs = self._get_correct_device_arg(kwargs)
 
         # Use port-specific lock for thread-safe access
         port_lock = self._get_port_lock()

@@ -1,13 +1,13 @@
 from configparser import SectionProxy
 
-from pymodbus.client.sync import ModbusUdpClient
+from pymodbus.client.udp import ModbusUdpClient
 
 from classes.protocol_settings import Registry_Type, protocol_settings
 
-from .transport_base import transport_base
+from .modbus_base import modbus_base
 
 
-class modbus_udp(transport_base):
+class modbus_udp(modbus_base):
     port : int = 502
     host : str = ""
     client : ModbusUdpClient
@@ -22,18 +22,20 @@ class modbus_udp(transport_base):
         self.port = settings.getint("port", self.port)
 
         client_str = self.host+"-udp-"+str(self.port)
-        #check if client is already initialied
+        #check if client is already initialized
         if client_str in modbus_base.clients:
             self.client = modbus_base.clients[client_str]
             return
 
         self.client = ModbusUdpClient(host=self.host, port=self.port, timeout=7, retries=3)
-        
+
         #add to clients
         modbus_base.clients[client_str] = self.client
 
 
     def read_registers(self, start, count=1, registry_type : Registry_Type = Registry_Type.INPUT, **kwargs):
+        kwargs = self._get_correct_device_arg(kwargs)
+
         if registry_type == Registry_Type.INPUT:
             return self.client.read_input_registers(start, count=count, **kwargs)
         elif registry_type == Registry_Type.HOLDING:

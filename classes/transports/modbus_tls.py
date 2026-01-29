@@ -1,13 +1,13 @@
 from configparser import SectionProxy
 
-from pymodbus.client.sync import ModbusTlsClient
+from pymodbus.client import ModbusTlsClient
 
 from classes.protocol_settings import Registry_Type, protocol_settings
 
-from .transport_base import transport_base
+from .modbus_base import modbus_base
 
 
-class modbus_udp(transport_base):
+class modbus_tls(modbus_base):
     port : int = 502
     host : str = ""
 
@@ -38,7 +38,7 @@ class modbus_udp(transport_base):
         self.hostname = settings.get("hostname", self.host)
 
         client_str = self.host+"-tls-"+str(self.port)
-        #check if client is already initialied
+        #check if client is already initialized
         if client_str in modbus_base.clients:
             self.client = modbus_base.clients[client_str]
             return
@@ -55,6 +55,8 @@ class modbus_udp(transport_base):
         modbus_base.clients[client_str] = self.client
 
     def read_registers(self, start, count=1, registry_type : Registry_Type = Registry_Type.INPUT, **kwargs):
+        kwargs = self._get_correct_device_arg(kwargs)
+
         if registry_type == Registry_Type.INPUT:
             return self.client.read_input_registers(start, count=count, **kwargs)
         elif registry_type == Registry_Type.HOLDING:
