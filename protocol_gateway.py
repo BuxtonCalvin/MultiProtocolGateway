@@ -221,9 +221,10 @@ class Protocol_Gateway:
     __read_tracker_lock : threading.Lock = None
 
     # Concurrency control
-    __disable_concurrency : bool = False
-    ''' When true, transports read sequentially instead of concurrently.
-        Concurrent mode (false) is recommended for multiple devices with same address
+    __enable_concurrency : bool = False
+    ''' When false, transports read sequentially instead of concurrently.
+        Most users will have only one transport so disable.
+        Concurrent mode (true) is recommended for multiple devices with same address
         as it prevents timing interference between rapid sequential reads. '''
 
     # Transport timing control
@@ -260,12 +261,12 @@ class Protocol_Gateway:
         self.__log_level = self.__settings.get("general","log_level", fallback="INFO")
 
         # Read concurrency setting - default to sequential (disabled) for better stability
-        self.__disable_concurrency = self.__settings.getboolean("general", "disable_concurrency", fallback=True)
-        self.__log.info(f"Concurrency mode: {'Sequential' if self.__disable_concurrency else 'Concurrent'}")
+        self.__enable_concurrency = self.__settings.getboolean("general", "enable_concurrency", fallback=False)
+        self.__log.info(f"Concurrency mode: {'Concurrent' if self.__enable_concurrency else 'Sequential'}")
 
         # Read sequential delay setting
         self.__sequential_delay = self.__settings.getfloat("general", "sequential_delay", fallback=1.0)
-        if self.__disable_concurrency:
+        if not self.__enable_concurrency:
             self.__log.info(f"Sequential delay between transports: {self.__sequential_delay} seconds")
 
         log_level = getattr(logging, self.__log_level, logging.INFO)
@@ -331,7 +332,7 @@ class Protocol_Gateway:
                 to_transport.write_data({entry.variable_name: data}, transport)
                 break
 
-    def _process_transport_read(self, transport):
+    def _process_transport_read(self, transport) -> None:
         """Process a single transport read operation"""
         try:
             # Always ensure transport is connected before reading
@@ -452,25 +453,7 @@ class Protocol_Gateway:
                     self.__log.debug(f"Starting read cycle for {len(ready_transports)} transports: {[t.transport_name for t in ready_transports]}")
 
                 # Process transports based on concurrency setting
-                if self.__disable_concurrency:
-                    # Sequential processing - process transports one by one
-                    for i, transport in enumerate(ready_transports):
-                        self.__log.debug(f"Processing {transport.transport_name} sequentially ({i+1}/{len(ready_transports)})")
-
-                        # Process current transport
-                        self._process_transport_read(transport)
-
-                        # Add delay between transports to prevent device confusion
-                        if i < len(ready_transports) - 1:  # Don't delay after the last transport
-                            self.__log.debug(f"Waiting {self.__sequential_delay} seconds before next transport...")
-                            time.sleep(self.__sequential_delay)
-
-                    # Log completion status for sequential mode
-                    completion_status = self._get_read_completion_status()
-                    completed = [name for name, status in completion_status.items() if status]
-                    self.__log.debug(f"Sequential read cycle completed. Completed transports: {completed}")
-
-                else:
+                if self.__enable_concurrency:
                     # Concurrent processing - process transports in parallel
                     if len(ready_transports) > 1:
                         threads = []
@@ -492,6 +475,23 @@ class Protocol_Gateway:
                     elif len(ready_transports) == 1:
                         # Single transport - process directly
                         self._process_transport_read(ready_transports[0])
+                else:
+                    # Sequential processing - process transports one by one
+                    for i, transport in enumerate(ready_transports):
+                        self.__log.debug(f"Processing {transport.transport_name} sequentially ({i+1}/{len(ready_transports)})")
+
+                        # Process current transport
+                        self._process_transport_read(transport)
+
+                        # Add delay between transports to prevent device confusion
+                        if i < len(ready_transports) - 1:  # Don't delay after the last transport
+                            self.__log.debug(f"Waiting {self.__sequential_delay} seconds before next transport...")
+                            time.sleep(self.__sequential_delay)
+
+                    # Log completion status for sequential mode
+                    completion_status = self._get_read_completion_status()
+                    completed = [name for name, status in completion_status.items() if status]
+                    # self.__log.debug(f"Sequential read cycle completed. Completed transports: {completed}")
 
             except Exception as err:
                 #traceback.print_exc()

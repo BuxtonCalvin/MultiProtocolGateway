@@ -12,7 +12,7 @@ class modbus_tcp(modbus_base):
     port : str = 502
     host : str = ""
     client : ModbusTcpClient
-    pymodbus_slave_arg = "unit"
+    pymodbus_slave_arg: str = "unit"  # default legacy device arg
 
     def __init__(self, settings : SectionProxy, protocolSettings : protocol_settings = None):
         super().__init__(settings, protocolSettings=protocolSettings)
@@ -22,10 +22,6 @@ class modbus_tcp(modbus_base):
             raise ValueError("Host is not set")
 
         self.port = settings.getint("port", self.port)
-
-        # pymodbus compatibility; unit was renamed to address
-        if "slave" in inspect.signature(ModbusTcpClient.read_holding_registers).parameters:
-            self.pymodbus_slave_arg = "slave"
 
         client_str = self.host+"-tcp-"+str(self.port)
         #check if client is already initialized
@@ -45,13 +41,7 @@ class modbus_tcp(modbus_base):
     def write_register(self, register : int, value : int, **kwargs):
         if not self.write_enabled:
             return
-
-        if "unit" not in kwargs:
-            kwargs = {"unit": 1, **kwargs}
-
-        #compatibility
-        if self.pymodbus_slave_arg != "unit":
-            kwargs["slave"] = kwargs.pop("unit")
+        kwargs = self._get_correct_device_arg(kwargs)
 
         # Use port-specific lock for thread-safe access
         port_lock = self._get_port_lock()
@@ -60,12 +50,7 @@ class modbus_tcp(modbus_base):
 
     def read_registers(self, start, count=1, registry_type : Registry_Type = Registry_Type.INPUT, **kwargs):
 
-        if "unit" not in kwargs:
-            kwargs = {"unit": 1, **kwargs}
-
-        #compatibility
-        if self.pymodbus_slave_arg != "unit":
-            kwargs["slave"] = kwargs.pop("unit")
+        kwargs = self._get_correct_device_arg(kwargs)
 
         # Use port-specific lock for thread-safe access
         port_lock = self._get_port_lock()
