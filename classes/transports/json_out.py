@@ -5,7 +5,6 @@ from typing import TextIO
 
 from defs.common import strtobool
 
-from ..protocol_settings import Registry_Type, WriteMode, registry_map_entry
 from .transport_base import transport_base
 
 
@@ -16,7 +15,7 @@ class json_out(transport_base):
     append_mode: bool = False
     include_timestamp: bool = True
     include_device_info: bool = True
-    
+
     file_handle: TextIO = None
 
     def __init__(self, settings: SectionProxy):
@@ -25,14 +24,14 @@ class json_out(transport_base):
         self.append_mode = strtobool(settings.get("append_mode", fallback=self.append_mode))
         self.include_timestamp = strtobool(settings.get("include_timestamp", fallback=self.include_timestamp))
         self.include_device_info = strtobool(settings.get("include_device_info", fallback=self.include_device_info))
-        
+
         self.write_enabled = True  # JSON output is always write-enabled
         super().__init__(settings)
 
     def connect(self):
         """Initialize the output file handle"""
         self._log.info("json_out connect")
-        
+
         if self.output_file.lower() == "stdout":
             self.file_handle = sys.stdout
         else:
@@ -44,7 +43,7 @@ class json_out(transport_base):
                 self._log.error(f"Failed to open output file {self.output_file}: {e}")
                 self.connected = False
                 return
-        
+
         self.connected = True
 
     def write_data(self, data: dict[str, str], from_transport: transport_base):
@@ -57,7 +56,7 @@ class json_out(transport_base):
 
         # Prepare the JSON output structure
         output_data = {}
-        
+
         # Add device information if enabled
         if self.include_device_info:
             output_data["device"] = {
@@ -68,21 +67,21 @@ class json_out(transport_base):
                 "serial_number": from_transport.device_serial_number,
                 "transport": from_transport.transport_name
             }
-        
+
         # Add timestamp if enabled
         if self.include_timestamp:
             import time
             output_data["timestamp"] = time.time()
-        
+
         # Add the actual data
         output_data["data"] = data
-        
+
         # Convert to JSON
         if self.pretty_print:
             json_string = json.dumps(output_data, indent=2, ensure_ascii=False)
         else:
             json_string = json.dumps(output_data, ensure_ascii=False)
-        
+
         # Write to file
         try:
             if self.output_file.lower() != "stdout":
@@ -100,10 +99,11 @@ class json_out(transport_base):
         """Initialize bridge - not needed for JSON output"""
         pass
 
-    def __del__(self):
+    def __del__(self) -> None:
         """Cleanup file handle on destruction"""
         if self.file_handle and self.output_file.lower() != "stdout":
             try:
                 self.file_handle.close()
-            except:
-                pass 
+            except Exception as e:
+                self._log.error(f"Failed to cleanup file handle to output: {e}")
+                pass

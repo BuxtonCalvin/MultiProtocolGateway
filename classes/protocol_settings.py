@@ -873,9 +873,6 @@ class protocol_settings:
         return ranges
 
 
-
-
-
     def find_protocol_file(self, file: str, base_dir: str = "") -> str:
         # use Path object to allow MS windows path.
         # protocol_settings.py is two folders to root parent  ie. parent.parent
@@ -883,7 +880,7 @@ class protocol_settings:
         # but formatted per OS.
 
         # 1. Establish absolute base directory (using Path for logic)
-        base_path = Path(__file__).resolve().parent.parent / base_dir
+        base_path: Path = Path(__file__).resolve().parent.parent / base_dir
 
         # 2. Check direct path
         path = base_path / file
@@ -891,8 +888,8 @@ class protocol_settings:
             return str(path)  # Convert to string before returning
 
         # 3. Check suffix-based subfolder
-        suffix = file.split("_", 1)[0]
-        path = base_path / suffix / file
+        suffix: str = file.split("_", 1)[0]
+        path: Path = base_path / suffix / file
         if path.exists():
             return str(path)
 

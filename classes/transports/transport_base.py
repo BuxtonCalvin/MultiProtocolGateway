@@ -118,7 +118,7 @@ class transport_base:
                 # Create a deep copy of protocol settings to avoid shared state between transports
                 original_protocol_settings = protocol_settings(self.protocol_version, transport_settings=settings)
                 self.protocolSettings = copy.deepcopy(original_protocol_settings)
-                
+
                 # Update the transport settings reference in the copy
                 self.protocolSettings.transport_settings = settings
 

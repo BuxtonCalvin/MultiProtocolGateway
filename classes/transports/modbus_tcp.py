@@ -1,4 +1,3 @@
-import inspect
 from configparser import SectionProxy
 
 from pymodbus.client import ModbusTcpClient

@@ -71,7 +71,7 @@ def setup_vcan(interface=VCAN_IFACE) -> bool:
         return True
     except subprocess.CalledProcessError as e:
         print(f"Failed to set up {interface}: {e}")
-    
+
     return False
 
 
