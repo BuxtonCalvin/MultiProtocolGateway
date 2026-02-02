@@ -72,12 +72,12 @@ from sqlalchemy.orm import (
 from sqlalchemy.orm.session import Session
 from tzlocal import get_localzone_name
 
-from classes.protocol_settings import registry_map_entry
-
-from ..protocol_settings import (
+from classes.protocol_settings import (
     Registry_Type,
-    protocol_settings,  # Registry_Type and data helpers
+    protocol_settings,
+    registry_map_entry,
 )
+
 from .transport_base import transport_base
 
 SessionGlobal: Callable[..., Session] = sessionmaker(

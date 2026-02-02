@@ -1,14 +1,16 @@
 # TimescaleDB Module for Python Protocol Gateway
 
+---
+
 ## Overview
 
 The TimescaleDB module is a **transform / sink transport** for the Python Protocol Gateway.  
 Its primary responsibility is to:
 
-- Receive telemetry data from an upstream scraper transport (e.g. Modbus TCP inverter)
+- Receive telemetry data from an upstream scraper transport (e.g. Modbus TCP connected inverter)
 - Persist time-series data into a **TimescaleDB (PostgreSQL)** backend
 - Detect **stale data conditions**
-- Trigger **automatic upstream reconnects** when data stops flowing
+- Trigger **automatic upstream and downstream reconnects** when data stops flowing
 - Enable downstream visualization and analytics via **Grafana**
 
 The module does **not** scrape data itself. Instead, it acts as a consumer of bridged data streams and focuses on persistence, monitoring, and reliability.
@@ -17,7 +19,7 @@ The module does **not** scrape data itself. Instead, it acts as a consumer of br
 
 ## Architecture Overview
 
-```
+``` text
 [ Inverter / Device ]
           |
           v
@@ -44,39 +46,26 @@ The module does **not** scrape data itself. Instead, it acts as a consumer of br
 
 - Converts incoming measurements into normalized rows
 - Writes data into hypertables optimized for time-series workloads
-- Maintains metadata for devices and variables
+- Maintains metadata for scraped devices
 - Detects stale data conditions
 - Requests upstream reconnects when stale data persists
-- Backlog data during database outages and replay on recovery
+- Backlogs data during database outages and replays that data on database recovery
 - Provide Grafana-ready metrics for visualization
 
 ### Stale Data Handling
 
 The module tracks:
+
 - Time since last successful write
 - Number of reconnect attempts
 - Retry backoff interval
 
 When data becomes stale:
+
 1. A reconnect is requested from the Protocol Gateway
 2. The upstream scraper transport is reset and a reconnection is tried
 3. Scraping resumes automatically if the device is reachable
 
-
-## 3. Data Flow Architecture
-
-Inverter / Device
-↓
-Transport (modbus_tcp, serial, mqtt, etc.)
-↓
-Protocol Gateway
-↓
-TimescaleDB Module
-↓
-TimescaleDB (Hypertables)
-↓
-Grafana Dashboards
----
 ---
 
 ## 4. Database Schemas
@@ -86,73 +75,92 @@ Grafana Dashboards
 One row per metric per timestamp.
 
 | Column | Description |
-|------|-------------|
+| ------ | ------------ |
 | m_time | Timestamp |
 | device_info_id | Device identifier |
 | metric | Metric name |
 | value | Metric value |
 
-**Benefits**
+#### Narrow Table Benefits
+
 - Ideal for Grafana
 - Flexible schema
 - Efficient aggregation
 
----
-
-### 4.2 Wide Table (Optional)
+### 4.2 Wide Table (If Less than 200 metrics chosen in the PPG filters)
 
 One row per timestamp with multiple metric columns.
 
 | Column | Description |
-|------|-------------|
+| ------ | ------------- |
 | m_time | Timestamp |
 | device_info_id | Device identifier |
 | inverter_power | Example metric |
 | grid_voltage | Example metric |
+| panel_voltage | Example metric |
+| etc. | etc. |
 
-**Benefits**
+#### Wide Table Benefits
+
 - Faster inserts
 - Easier CSV/SQL exports
 
-## 6. Example SQL Queries
+---
 
-### 6.1 Power Over Time
+## 5. Example SQL Queries
+
+### 5.1 Power Over Time
 
 ```sql
 SELECT
   time_bucket('1 minute', m_time) AS t,
-  avg(value) AS power
-FROM metrics_narrow
-WHERE metric = 'inverter_power'
+  avg(metric_value) AS power
+FROM public.device_metrics_narrow
+WHERE metric_name = 'pload'
 GROUP BY t
 ORDER BY t;
+```
 
-6.2 Daily Energy Estimate
+### 5.2 Daily Energy Estimate
+
+```sql
 SELECT
   date_trunc('day', m_time) AS day,
-  sum(value) * 1/60 AS kwh
-FROM metrics_narrow
-WHERE metric = 'inverter_power'
-GROUP BY day;
+  sum(metric_value) * 1/60 AS kwh
+FROM public.device_metrics_narrow
+WHERE metric_name = 'pload'
+GROUP BY day
+ORDER BY day;
+```
 
-6.3 Device Health (Last Seen)
+### 5.3 Device Health (Last Seen)
+
+```sql
 SELECT
   device_info_id,
   max(m_time) AS last_seen
-FROM metrics_narrow
+FROM device_metrics_narrow
 GROUP BY device_info_id;
+```
 
-## Docker Compose Installation
+### 5.4 All metrics from public.device_metrics_wide
 
-### Images Used
-
-- **TimescaleDB HA:** `timescaledb-ha:pg18`
-- **Protocol Gateway:** `buxtoncalvin/pythonprotocolgateway:test`
-- **Grafana:** `grafana/grafana:latest`
+```sql
+SELECT * FROM public.device_metrics_wide
+ORDER BY m_time ASC, device_info_id ASC 
+```
 
 ---
 
-## Example docker-compose.yml
+## 6. Docker Compose Installation
+
+### 6.1 Images Used
+
+- **TimescaleDB HA:** `timescaledb-ha:pg18`
+- **Protocol Gateway:** `buxtoncalvin/pythonprotocolgateway:latest`
+- **Grafana:** `grafana/grafana:latest`
+
+### 6.2 Example docker-compose.yml
 
 ```yaml
 version: "3.9"
@@ -161,145 +169,215 @@ services:
   timescaledb:
     image: timescale/timescaledb-ha:pg18
     environment:
-      POSTGRES_PASSWORD: example
-      POSTGRES_USER: postgres
-      POSTGRES_DB: telemetry
+      POSTGRES_PASSWORD: your-password
+      POSTGRES_USER: your-user-name
+      POSTGRES_DB: solar (or your database name)
     ports:
-      - "5432:5432"
+      # we change the access port here to allow for other postgres dbs
+      - "5431:5432"
     volumes:
-      - tsdb_data:/var/lib/postgresql/data
-
-  protocol-gateway:
-    image: buxtoncalvin/pythonprotocolgateway:test
-    depends_on:
-      - timescaledb
+      - home/tsdb_data:/var/lib/postgresql/data
+  
+  # name your containers to whatever you want.  The TimescaleDB module sits on top of PPG
+  18kPV_timescaledb:
+    container_name: 18kPV_timescaledb
+    image: buxtoncalvin/pythonprotocolgateway:latest
+    restart: always
+    security_opt:
+      - apparmor:unconfined
+    environment:
+      - TZ=America/Los_Angeles
     volumes:
-      - ./config.cfg:/app/config.cfg
-    command: ["python", "protocol_gateway.py", "--config", "config.cfg"]
+      - /home/pythonprotocolgateway4/cfg/config.cfg:/app/config.cfg
+      - /home/pythonprotocolgateway4/cfg/variable_mask.txt:/app/variable_mask.txt
+      - /home/pythonprotocolgateway4/cfg/variable_screen.txt:/app/variable_screen.txt
+      - /home/pythonprotocolgateway4/cfg/eg4_18kpv.input_registry_map.csv:/app/protocols/eg4/eg4_18kpv.input_registry_map.csv
+      - /home/pythonprotocolgateway4/cfg/eg4_18kpv.holding_registry_map.csv:/app/protocols/eg4/eg4_18kpv.holding_registry_map.csv
+      - /home/pythonprotocolgateway4/cfg/eg4_18kpv.json:/app/protocols/eg4/eg4_18kpv.json
+    logging:
+    driver: "json-file"
+    options:
+      max-size: "10m" 
+      max-file: "3"  
 
   grafana:
+    container_name: grafana
     image: grafana/grafana:latest
+    restart: always
+    security_opt:
+      - apparmor:unconfined
     ports:
-      - "3000:3000"
+      - 3000:3000
+    env_file:
+      - '/home/grafana/env.grafana'
+    environment:
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_SECURITY_ALLOW_EMBEDDING=true
+      - GF_DATABASE_USER=
+      - GF_DATABASE_PASSWORD=
+    user: '1000'    
     depends_on:
-      - timescaledb
+      - timescaledb  
 
 volumes:
   tsdb_data:
 ```
-8. Grafana Setup
 
-Open Grafana: http://localhost:3000
-
-Login: admin / admin
-
-Add data source:
-
-Type: PostgreSQL
-
-Host: timescaledb:5432
-
-Database: metrics
-
-User: postgres
-
-Password: postgres
-
-SSL: disabled
-
-Enable TimescaleDB option
-
-Create panels using SQL queries
 ---
 
-## Configuration File
+## General configuration
+
+### 6.3 Grafana Setup
+
+```text
+
+- Open Grafana: <http://localhost:3000>
+- Login: admin / admin   or your username/password
+- Add data source:
+- Type: PostgreSQL
+- Host: timescaledb:5431
+- Database: metrics
+- User: your-TSDB user-name
+- Password: your-TSDB-password
+- SSL: disabled
+- Enable TimescaleDB option
+- Create panels using SQL queries
+
+```
+
+### 6.4 PPG Configuration File General (config.cfg)
 
 ```ini
+[general]
+log_level = DEBUG
+# enable for multi inverter reads.
+enable_concurrency = false
+
 [logging]
+log_dir = logs
+log_file = gateway.log
 level = INFO
-rotation = weekly
-backup_count = 4
+# weekly | daily | size
+rotation = weekly         
+# Monday rollover
+when = W0                  
+interval = 1
+# keep 4 weeks
+backup_count = 4           
+# 100MB (only if size-based)
+max_bytes = 104857600      
 console = true
 ```
-9. TimescaleDB Module Configuration (config.cfg)
-9.1 Example Configuration
-[timescaledb]
-enabled = true
 
-host = timescaledb
-port = 5432
-database = metrics
-username = postgres
-password = postgres
+#### Example transport Scraper
 
-# Schema options
-wide_table = true
-narrow_table = true
+```ini
 
-# Write behavior
-batch_size = 100
-flush_interval_seconds = 1
+[transport.modbus_tcp] 
+log_level = DEBUG
+transport = modbus_tcp
+protocol_version = eg4_18kpv
+analyze_protocol = false
+write = false
+host = 10.17.2.65
+port = 502
+#  Here you are telling PPG to use the timescaledb module for you data output.
+bridge = transport.timescaledb
+read_interval = 15
+```
 
-# Stale detection
-stale_after_seconds = 300
-max_stale_attempts = 3
-retry_delay_minutes = 5
+### 6.5 TimescaleDB Module Configuration (config.cfg)
 
-# Backlog
+#### Example timescaledb transport Configuration
+
+```ini
+
+[transport.timescaledb]
+log_level = DEBUG
+transport = timescaledb
+host = 10.17.2.42
+port = 5431
+database = solar1
+username =  your_user_name_here
+password = your_password_here
+
+# TimescaleDB Device settings.  Changing any of these three will create a new device in the database
+manufacturer = EG4
+model = 18KPV
+serial_number = 4066670076
+
+## All of the below are optional and are set to defaults if not specified
+# force float coerces all values obtained to be of the float type
+force_float = true
+
+# persistent backlog settings
 enable_persistent_storage = true
-backlog_path = /data/backlog
+backlog_storage_path = timescaledb_backlog
+backlog_file_name = no_connect_backlog
 
-# Notifications
-enable_pushover = false
-pushover_user_key =
-pushover_api_token =
+# max data points to store in backlog
+max_backlog_size = 10000
+
+# seconds-->  equal to 24 hours
+max_backlog_age = 86400
+
+# TSDB Connection monitoring settings
+reconnect_attempts = 5
+
+# minutes
+reconnect_delay = 5
+
+# Exponential backoff settings (reconnect delay increases exponentially on each failure)
+use_exponential_backoff = true
+
+# minutes --> 5 hours
+max_reconnect_delay = 300
+
+## hypertable and rollup options
+# changing rollup settings after data has been written, will result in automatic view deletions and rebuilds
+drop_after = 1 year
+migrate_data = True
+enable_rollups = True
+enable_compression = True
+
+hourly_rollup_bucket =  1 hour
+hourly_rollup_start = 3 hours
+hourly_chunk_time_interval = 1 day
+hourly_compress_after_interval = 2 days
+
+daily_rollup_bucket =  1 day
+daily_rollup_start = 3 days
+daily_chunk_time_interval = 7 days
+daily_compress_after_interval = 2 weeks
+
+weekly_rollup_bucket =  1 week
+weekly_rollup_start = 3 weeks
+weekly_chunk_time_interval = 1 month
+weekly_compress_after_interval = 2 months
+
+monthly_rollup_bucket =  1 month
+monthly_rollup_start = 3 months
+monthly_chunk_time_interval = 4 months
+monthly_compress_after_interval = 6 months
+
+# stale data cleanup settings minutes --> 5 hours
+stale_data_timeout = 300
+
+# pushover settings / leave blank and disable if you don't use pushover
+enable_pushover = True
+pushover_token = your_token_here
+pushover_user = your_user_key_here
+```
+
 ---
 
-
-
-10. Configuration Options Explained
-Option	Description
-wide_table	Enable wide table writes
-narrow_table	Enable narrow table writes
-batch_size	Rows per DB transaction
-flush_interval_seconds	Queue drain frequency
-stale_after_seconds	Stale threshold
-max_stale_attempts	Max reconnect attempts
-retry_delay_minutes	Delay between retries
-enable_persistent_storage	Disk backlog when DB down
-
-11. Operational Behavior
-
-Normal: continuous inserts, low latency
-
-DB outage: data queued/backlogged
-
-Transport failure: stale detection → reconnect
-
-Recovery: backlog replay, counters reset
-
-12. When to Use This Module
-
-Use the TimescaleDB module when you need:
-
-Reliable time-series persistence
-
-Grafana-ready analytics
-
-Automatic scraper recovery
-
-Long-term historical analysis
-
-Edge gateway resiliency
-
-13. Summary
+## Summary
 
 The TimescaleDB module provides a production-grade ingestion and monitoring layer that integrates cleanly with the Python Protocol Gateway. It is designed to be predictable, observable, and resilient — pairing naturally with inverter telemetry, industrial sensors, and edge data collection workloads.
-## Summary
 
 The TimescaleDB module provides:
 
 - Reliable time-series persistence
 - Automatic stale data detection
 - Self-healing reconnect behavior
-- First-class support for Grafana visualization
+- Support for Grafana visualization

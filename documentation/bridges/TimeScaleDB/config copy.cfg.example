@@ -1,5 +1,21 @@
 [general]
 log_level = DEBUG
+enable_concurrency = false
+
+[logging]
+log_dir = logs
+log_file = gateway.log
+level = INFO
+# weekly | daily | size
+rotation = weekly         
+# Monday rollover
+when = W0                  
+interval = 1
+# keep 4 weeks
+backup_count = 4           
+# 100MB (only if size-based)
+max_bytes = 104857600      
+console = true
 
 [transport.modbus_tcp] 
 log_level = DEBUG
@@ -51,7 +67,7 @@ use_exponential_backoff = true
 max_reconnect_delay = 300
 
 # hypertable and rollup options
-# changing rollup settings after data has been written, will reult in automatic view deletions and rebuilds
+# changing rollup settings after data has been written, will result in automatic view deletions and rebuilds
 drop_after = 1 year
 migrate_data = True
 enable_rollups = True
