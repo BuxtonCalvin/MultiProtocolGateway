@@ -70,14 +70,14 @@ When data becomes stale:
 
 ## 4. Database Schemas
 
-### 4.1 Narrow Table (Recommended)
+### 4.1 Narrow Table
 
 One row per metric per timestamp.
 
 | Column | Description |
 | ------ | ------------ |
 | m_time | Timestamp |
-| device_info_id | Device identifier |
+| device_info_id | Device identifier ID |
 | metric | Metric name |
 | value | Metric value |
 
@@ -87,14 +87,14 @@ One row per metric per timestamp.
 - Flexible schema
 - Efficient aggregation
 
-### 4.2 Wide Table (If Less than 200 metrics chosen in the PPG filters)
+### 4.2 Wide Table (If Less than 200 metrics chosen via the PPG variable filters)
 
 One row per timestamp with multiple metric columns.
 
 | Column | Description |
 | ------ | ------------- |
 | m_time | Timestamp |
-| device_info_id | Device identifier |
+| device_info_id | Device identifier ID |
 | inverter_power | Example metric |
 | grid_voltage | Example metric |
 | panel_voltage | Example metric |
@@ -104,6 +104,37 @@ One row per timestamp with multiple metric columns.
 
 - Faster inserts
 - Easier CSV/SQL exports
+
+### 4.3 Device Info Table
+
+| Column | Description |
+| ------ | ------------- |
+| device_info_id | Device Identifier ID |
+| device_identifier | Device or Inverter Identifier ** |
+| device_serial_number | Device or Inverter Serial Number ** |
+| device_name | Device of Inverter Informal Name ** |
+| device_manufacturer | Device or Inverter Manufacturer |
+| device_model | Device or Inverter Model |
+| device_firmware | Device or Inverter Firmware |
+| device_location | Device or Inverter Location |
+| transport | Device or Inverter Scraper Transport |
+
+** =  Determines uniqueness of the Device.
+
+### 4.4 Metric Catalog
+
+| Column | Description |
+| ------ | ------------- |
+| id | Metric Unique ID |
+| metric_name | Metric Name as shown in the PPG Registry |
+| clean_column_name | Metric Name sanitized for SQL |
+| data_type | Metric Data Type (default Double Precision) |
+| created_at | Table Add Date |
+| notes | metric name descriptions |
+
+Here is a screen shot of how the schema looks in PGadmin.  The tables reside in the public folder.
+
+![alt text](image-1.png)
 
 ---
 
@@ -154,11 +185,12 @@ ORDER BY m_time ASC, device_info_id ASC
 
 ## 6. Docker Compose Installation
 
-### 6.1 Images Used
+### 6.1 Images Used in the stack
 
-- **TimescaleDB HA:** `timescaledb-ha:pg18`
-- **Protocol Gateway:** `buxtoncalvin/pythonprotocolgateway:latest`
-- **Grafana:** `grafana/grafana:latest`
+- **TimescaleDB HA:** `timescaledb-ha:pg18`  The Timescale DB Application
+- **Protocol Gateway:** `buxtoncalvin/pythonprotocolgateway:latest` The PPG application/inverter scraper
+- **Grafana:** `grafana/grafana:latest`   The graphing application
+- **PostGres Admin:** `dpage/pgadmin4:latest` The database administration application
 
 ### 6.2 Example docker-compose.yml
 
@@ -188,12 +220,12 @@ services:
     environment:
       - TZ=America/Los_Angeles
     volumes:
-      - /home/pythonprotocolgateway4/cfg/config.cfg:/app/config.cfg
-      - /home/pythonprotocolgateway4/cfg/variable_mask.txt:/app/variable_mask.txt
-      - /home/pythonprotocolgateway4/cfg/variable_screen.txt:/app/variable_screen.txt
-      - /home/pythonprotocolgateway4/cfg/eg4_18kpv.input_registry_map.csv:/app/protocols/eg4/eg4_18kpv.input_registry_map.csv
-      - /home/pythonprotocolgateway4/cfg/eg4_18kpv.holding_registry_map.csv:/app/protocols/eg4/eg4_18kpv.holding_registry_map.csv
-      - /home/pythonprotocolgateway4/cfg/eg4_18kpv.json:/app/protocols/eg4/eg4_18kpv.json
+      - /home/ppg/cfg/config.cfg:/app/config.cfg
+      - /home/ppg/cfg/variable_mask.txt:/app/variable_mask.txt
+      - /home/ppg/cfg/variable_screen.txt:/app/variable_screen.txt
+      - /home/ppg/cfg/eg4_18kpv.input_registry_map.csv:/app/protocols/eg4/eg4_18kpv.input_registry_map.csv
+      - /home/ppg/cfg/eg4_18kpv.holding_registry_map.csv:/app/protocols/eg4/eg4_18kpv.holding_registry_map.csv
+      - /home/ppg/cfg/eg4_18kpv.json:/app/protocols/eg4/eg4_18kpv.json
     logging:
     driver: "json-file"
     options:
@@ -213,14 +245,33 @@ services:
     environment:
       - GF_AUTH_ANONYMOUS_ENABLED=true
       - GF_SECURITY_ALLOW_EMBEDDING=true
-      - GF_DATABASE_USER=
-      - GF_DATABASE_PASSWORD=
+      - GF_DATABASE_USER=your-user-name
+      - GF_DATABASE_PASSWORD=your-password
     user: '1000'    
     depends_on:
-      - timescaledb  
+      - timescaledb
+    volumes:
+      - /home/grafana:/var/lib/grafana      
 
-volumes:
-  tsdb_data:
+  postgres_admin:
+    image: dpage/pgadmin4:latest 
+    container_name: pgadmin
+    restart: always
+    security_opt:
+      - apparmor:unconfined     
+    environment:
+    PGADMIN_DEFAULT_EMAIL: Blah@Gmail.Com
+    PGADMIN_DEFAULT_USER: your-user-name
+    PGADMIN_DEFAULT_PASSWORD: your-password
+    PGADMIN_DISABLE_POSTFIX: true
+    volumes:
+      - /home/pgadmin:/var/lib/pgadmin
+    ports:
+      #  set the port to 8181 to avoid typical port 80 conflicts
+      - "8181:80" 
+    depends_on:
+      - timescaledb     
+
 ```
 
 ---
@@ -302,9 +353,15 @@ username =  your_user_name_here
 password = your_password_here
 
 # TimescaleDB Device settings.  Changing any of these three will create a new device in the database
-manufacturer = EG4
-model = 18KPV
+device_name = 18KPV1
 serial_number = 4066670076
+device_identifier = Main Inverter
+
+# Additional Device descriptors
+manufacturer = EG4
+model = 18kPV
+device_firmware = 46543224
+location = Basement
 
 ## All of the below are optional and are set to defaults if not specified
 # force float coerces all values obtained to be of the float type

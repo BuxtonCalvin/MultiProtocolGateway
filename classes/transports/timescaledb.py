@@ -1,4 +1,17 @@
 """
+timescaledb transport bridge module is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+any later version.
+
+timescaledb transport bridge module is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You can find a copy of the GNU Affero General Public License in the documentation/bridge/timescaledb folder.
+If not, see <https://www.gnu.org>.
+
 timescaledb transport bridge module (with rollup continuous aggregates) and persistent disk backlog.
 
 Features:
@@ -150,9 +163,8 @@ class MetricCatalog(Base):
     metric_name: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     clean_column_name: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     data_type: Mapped[str] = mapped_column(Text, default='double precision')
-    # func.now() is a SQL function, keep it as it is
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),  default=lambda: datetime.now().astimezone(), onupdate=lambda: datetime.now().astimezone())
-
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
 # TimescaleDB transport bridge class
 class timescaledb(transport_base):
@@ -176,7 +188,8 @@ class timescaledb(transport_base):
     device_manufacturer: str = "Inverter Manufacturer"
     device_model: str = "Inverter Model"
     device_serial_number: str = "0001"
-    device_name: str = "Buxton TimeScaleDB PPG Bridge"
+    device_name: str = "TimeScaleDB PPG Bridge"
+    scrape_transport: str = None
     force_float: bool = True
 
     flush_timeout: int = 15
@@ -270,7 +283,7 @@ class timescaledb(transport_base):
             - database (str): Database name (default: "solar")
             - username (str): Database username
             - password (str): Database password
-            - device_name (str): Name for the bridge (default: "Buxton TimeScaleDB Bridge")
+            - device_name (str): Name for the bridge (default: "TimeScaleDB PPG Bridge")
             - force_float (bool): Force metric values to float (default: True)
             - flush_timeout (int): Seconds between batch flushes (default: 15) matches read_interval of source transport
             - enable_persistent_storage (bool): Enable disk backlog (default: True)
@@ -320,8 +333,9 @@ class timescaledb(transport_base):
         self.device_manufacturer: str = settings.get("manufacturer", fallback=self.device_manufacturer)
         self.device_model: str = settings.get("model", fallback=self.device_model)
         self.device_serial_number: str = settings.get("serial_number", fallback=self.device_serial_number)
-        self.device_identifier = f"{self.normalize(self.device_model)}_{self.normalize(self.device_serial_number)}"
-        # self.device_name: str = settings.get("device", fallback="TimescaleDB_Bridge")
+        self.device_identifier: str = settings.get("device_identifier", fallback= f"{self.normalize(self.device_model)}_{self.normalize(self.device_serial_number)}")
+        self.device_name: str = settings.get("device_name", fallback="TimescaleDB PPG Bridge")
+        self.device_location: str = settings.get("location", fallback="Home")
 
         # load reconnect/backoff settings
         self.use_exponential_backoff = settings.getboolean("use_exponential_backoff", fallback=self.use_exponential_backoff)
@@ -775,15 +789,13 @@ class timescaledb(transport_base):
                 self._log.debug("Ensuring device_info record exists")
             try:
                 # pull device info from transport user settings configuration
+                # check for existing record with exact match on all fields
                 existing: DeviceInfo = (
                     session.execute(
                     select(DeviceInfo).where(
                         (DeviceInfo.device_identifier == self.device_identifier) &
                         (DeviceInfo.device_name == self.device_name) &
-                        (DeviceInfo.device_manufacturer == self.device_manufacturer) &
-                        (DeviceInfo.device_model == self.device_model) &
-                        (DeviceInfo.device_serial_number == self.device_serial_number) &
-                        (DeviceInfo.transport == self.transport_name)
+                        (DeviceInfo.device_serial_number == self.device_serial_number)
                     )
                 ).scalar_one_or_none()
                 )
@@ -807,7 +819,9 @@ class timescaledb(transport_base):
                     device_manufacturer=self.device_manufacturer,
                     device_model=self.device_model,
                     device_serial_number=self.device_serial_number,
-                    transport=self.transport_name,
+                    #device_firmware=self.device_firmware,
+                    device_location=self.device_location,
+                    transport=self.scrape_transport,
                     created_at=datetime.now().astimezone(),
                 )
 
@@ -834,7 +848,7 @@ class timescaledb(transport_base):
         """
         try:
             #5a get metric names from registry_map
-            metric_start_names: list = self._registry_metric_names()
+            metric_start_names: list[tuple[str, str]] = self._registry_metric_names()
             metric_count: int = len(metric_start_names)
             self.current_metric_count: int = metric_count
 
@@ -882,7 +896,7 @@ class timescaledb(transport_base):
         # ])
 
         return sorted([
-            entry.variable_name
+            (entry.variable_name, getattr(entry, 'note', ''))
             for registry_type in (Registry_Type.INPUT, Registry_Type.HOLDING)
             for entry in self.registry_metrics[registry_type]
             if hasattr(entry, 'variable_name')
@@ -922,7 +936,7 @@ class timescaledb(transport_base):
                         # advisory lock to serialize schema changes
                         self._schema_advisory_lock(session)
 
-                        for m in metric_start_names:
+                        for m, n in metric_start_names:
                             # 1. Check for existing mapping
                             row_value: Any | None = session.execute(
                                 text("SELECT clean_column_name FROM metric_catalog WHERE metric_name = :m"),
@@ -933,7 +947,7 @@ class timescaledb(transport_base):
                                 self.metric_mapping[m] = row_value
                                 continue
 
-                            # 2. Clean name and ensure column exists in WIDE table
+                            # 2. Clean name and ensure column exists in wide table
                             col: str = self._clean_column_name(m)
 
                             # check if column name (cleaned metric name) exists in postgres information_schema
@@ -944,21 +958,25 @@ class timescaledb(transport_base):
 
                             # add column if missing.  Initial column creation should be alphabetic due to sorted metric names.
                             # per postgres docs, subsequent columns added after first init are appended to the end of the table.
+                            # ie if you want a new column in the middle of the table, you must manually delete the table contents.
+                            # and restart PPG to recreate the table with the new column in the desired location.
                             if not exists_wide:
                                 session.execute(text(
                                     f"ALTER TABLE device_metrics_wide ADD COLUMN IF NOT EXISTS {col} double precision;"
                                 ))
                             params: dict = {
-                                'm': m,
-                                'col': col,
-                                'dtype': 'double precision',
-                                'col_date': datetime.now().astimezone()
+                                'm': m, # metric_name
+                                'col': col, # clean_column_name
+                                'dtype': 'double precision', # data_type default to double precision for now
+                                'col_date': datetime.now().astimezone(),
+                                'n': n # Add the note here
                             }
 
                             session.execute(text("""
-                                INSERT INTO metric_catalog (metric_name, clean_column_name, data_type, created_at)
-                                VALUES (:m, :col, :dtype, :col_date)
-                                ON CONFLICT (metric_name) DO UPDATE SET clean_column_name = EXCLUDED.clean_column_name
+                                INSERT INTO metric_catalog (metric_name, clean_column_name, data_type, created_at, notes)
+                                VALUES (:m, :col, :dtype, :col_date, :n)
+                                ON CONFLICT (metric_name) DO UPDATE SET clean_column_name = EXCLUDED.clean_column_name,
+                                notes = EXCLUDED.notes
                             """), params)
 
                             self.metric_mapping[m] = col
@@ -1091,6 +1109,7 @@ class timescaledb(transport_base):
         if not data:
             self._log.debug("Received empty data dictionary. Skipping.")
             return
+        self.scrape_transport = from_transport.transport_name
 
         # 3. Proceed only if there is "real" data
         self._log.debug(f"Data: {data}")
@@ -1283,7 +1302,7 @@ class timescaledb(transport_base):
 
     def _is_stale_data(self, row: dict) -> tuple[bool, datetime | None, dict | None]:
         """
-        Updates stale-data state tracking using fully coerced transport data.
+        Updates stale-data state tracking using transport data.
 
         If the incoming row's metric dictionary is identical to the previously
         observed row, this method maintains or initializes the stale-data timer.
@@ -2109,7 +2128,7 @@ class RollupManager:
         - If reading from hypertable: uses stats_agg(column)
         - If reading from another view: uses rollup(stats_summary_column)
         """
-        # 1. Fetch all clean column names from your catalog
+        # 1. Fetch all clean column names from the catalog
         result = session.execute(text("SELECT clean_column_name FROM metric_catalog ORDER BY clean_column_name"))
         column_names = list(result.scalars())
 
