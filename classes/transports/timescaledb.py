@@ -63,6 +63,7 @@ from sqlalchemy import (
     Row,
     Table,
     Text,
+    TextClause,
     create_engine,
     engine,
     insert,
@@ -259,16 +260,16 @@ class timescaledb(transport_base):
     pushover_user: str = None
 
     # stale data settings and fields
-    stale_data_timeout = 300       # seconds before considering data stale for incomplete batch cleanup
+    stale_data_timeout: int = 300       # seconds before considering data stale for incomplete batch cleanup
     stale_data_last_row: Optional[Dict[str, Any]] = None  # last row of metrics for stale data detection
     stale_data_start_ts: Optional[datetime] = None # timestamp when stale data period started
     is_stale_data: bool = False  # flag indicating if stale data condition is active
-    stale_event_count = 0
-    last_stale_event_ts = None
-    max_stale_attempts = 3
-    retry_delay_mins = 5
-    schema_needs_refresh = True  # flag to indicate if ORM schema refresh is needed after reconnect or column changes
-    current_metric_count = 0
+    stale_event_count: int = 0
+    last_stale_event_ts: Optional[datetime] = None
+    max_stale_attempts: int = 3
+    retry_delay_mins: int = 5
+    schema_needs_refresh: bool = True  # flag to indicate if ORM schema refresh is needed after reconnect or column changes
+    current_metric_count: int = 0
 
     def __init__(self, settings: SectionProxy) -> None:
         """
@@ -429,8 +430,8 @@ class timescaledb(transport_base):
         # -------------------------
 
         # Initialize async flush queue and worker thread.  Start it here so it's ready at full init.
-        self._flush_queue: queue = queue.Queue(maxsize=0)
-        self._flush_thread = threading.Thread(target=self._flush_worker, daemon=True)
+        self._flush_queue: queue.Queue = queue.Queue(maxsize=0)
+        self._flush_thread = threading.Thread(target=self._flush_worker, daemon=True, name="FlushWorker")
         self._flush_lock: lock = threading.Lock()
         self._flush_event: threading.Event = getattr(self, "_flush_event", threading.Event())
         # event used to stop all threads
@@ -670,7 +671,7 @@ class timescaledb(transport_base):
             # set tsdb_connected False immediately to cause upstream to stop DB work
             self._set_tsdb_connected(False, "Connect unsuccessful")  # noqa: FBT003
             self._stop_reconnect_event.clear()
-            threading.Thread(target=self._attempt_reconnect, daemon=True).start()
+            threading.Thread(target=self._attempt_reconnect, daemon=True, name= "TSDB ReconnectThread").start()
             self._log.info("Reconnect thread started.")
 
     def _stop_thread_reconnect(self) -> None:
@@ -1056,13 +1057,13 @@ class timescaledb(transport_base):
         Resyncs the SQLAlchemy ORM mapping after dynamic column changes.
         Uses a lock to prevent the flush worker from using a half-reflected table.
         """
-        table_name = DeviceMetricsWide.__tablename__
+        table_name: str = DeviceMetricsWide.__tablename__
 
         with self._schema_lock:
             self._log.info(f"Resyncing schema for {table_name}...")
 
             # 1. Unbind the old table from metadata
-            old_table = Base.metadata.tables.get(table_name)
+            old_table: Table  = Base.metadata.tables.get(table_name)
             if old_table is not None:
                 Base.metadata.remove(old_table)
 
@@ -1181,7 +1182,7 @@ class timescaledb(transport_base):
                 # pre-process data to coerce floating point as values
 
                 # # Apply SQL-safe renaming. New dictionary via comprehension/force floats
-                new_data = self._prepare_final_data(datacopy)
+                new_data: dict = self._prepare_final_data(datacopy)
                 if not new_data:
                     continue
 
@@ -1190,6 +1191,9 @@ class timescaledb(transport_base):
                     "device_info_id": self.device_info_id,
                     "m_time": datetime.now().astimezone()
                 }
+                is_stale: bool
+                time_read: float
+                metrics: dict
                 is_stale, time_read, metrics = self._is_stale_data(final_data)
                 if is_stale:
                     self._log.debug("Stale data detected, skipping DB write.")
@@ -1207,7 +1211,7 @@ class timescaledb(transport_base):
                         with session.begin():
                             self._flush_batch_narrow(final_data, session)
                             if self.wide_table_flag:
-                                valid_row = self._validate_wide_row(new_data)  # validate wide row without timestamp before insert
+                                valid_row: bool = self._validate_wide_row(new_data)  # validate wide row without timestamp before insert
                                 if valid_row:
                                     stmt: Insert = insert(DeviceMetricsWide.__table__).values(**final_data)
                                     session.execute(stmt)
@@ -1224,7 +1228,7 @@ class timescaledb(transport_base):
 
                     if self.enable_persistent_storage and not tsdb_connected:
                         # Check if we can get the lock
-                        acquired = self._backlog_lock.acquire(blocking=False)
+                        acquired: bool = self._backlog_lock.acquire(blocking=False)
                         try:
                             if acquired:
                                 self.backlog.enqueue(final_data)
@@ -1561,7 +1565,7 @@ class RollupManager:
         self.backlog: 'BacklogManager'  = backlog
         self._reconnect_lock: threading.Lock = reconnect_lock
 
-        self._refresh_rollup_thread = threading.Thread(target=self._refresh_rollup_loop, daemon=True)
+        self._refresh_rollup_thread = threading.Thread(target=self._refresh_rollup_loop, daemon=True, name="RollupAutoRefreshThread")
         self._stop_refresh_rollup_event: threading.Event = getattr(self, "_stop_refresh_rollup_event", threading.Event())
 
         self.performance_tiers: dict[str, dict[str, Any]] = {
@@ -1573,39 +1577,39 @@ class RollupManager:
         self.if_not_exists = True
 
         # Rollup Settings extracted from rollup_policy
-        self.current_metric_count = self.rollup_policy.get("current_metric_count", 0)
+        self.current_metric_count: int = self.rollup_policy.get("current_metric_count", 0)
         self.anchor_start_time_utc: str = self.rollup_policy.get("anchor_start_time_utc")
-        self.compress_segmentby_narrow= self.rollup_policy.get("compress_segmentby_narrow")
-        self.compress_segmentby_wide= self.rollup_policy.get("compress_segmentby_wide")
-        self.compress_orderby= self.rollup_policy.get("compress_orderby")
-        self.time_column= self.rollup_policy.get("time_column")
-        self.auto_refresh_interval = self.rollup_policy.get("auto_refresh_interval")
+        self.compress_segmentby_narrow: str= self.rollup_policy.get("compress_segmentby_narrow")
+        self.compress_segmentby_wide: str= self.rollup_policy.get("compress_segmentby_wide")
+        self.compress_orderby: str= self.rollup_policy.get("compress_orderby")
+        self.time_column: str= self.rollup_policy.get("time_column")
+        self.auto_refresh_interval: int = self.rollup_policy.get("auto_refresh_interval")
         self.enable_auto_refresh = bool(self.rollup_policy.get("enable_auto_refresh", 0))
         self.enable_rollups = bool(self.rollup_policy.get("enable_rollups", 0))
 
-        self.hourly_chunk_time_interval = self.rollup_policy.get("hourly_chunk_time_interval")
-        self.daily_chunk_time_interval = self.rollup_policy.get("daily_chunk_time_interval")
-        self.weekly_chunk_time_interval = self.rollup_policy.get("weekly_chunk_time_interval")
-        self.monthly_chunk_time_interval = self.rollup_policy.get("monthly_chunk_time_interval")
+        self.hourly_chunk_time_interval: str = self.rollup_policy.get("hourly_chunk_time_interval")
+        self.daily_chunk_time_interval: str = self.rollup_policy.get("daily_chunk_time_interval")
+        self.weekly_chunk_time_interval: str = self.rollup_policy.get("weekly_chunk_time_interval")
+        self.monthly_chunk_time_interval: str = self.rollup_policy.get("monthly_chunk_time_interval")
 
-        self.hourly_compress_after_interval = self.rollup_policy.get("hourly_compress_after_interval")
-        self.daily_compress_after_interval = self.rollup_policy.get("daily_compress_after_interval")
-        self.weekly_compress_after_interval = self.rollup_policy.get("weekly_compress_after_interval")
-        self.monthly_compress_after_interval = self.rollup_policy.get("monthly_compress_after_interval")
+        self.hourly_compress_after_interval: str = self.rollup_policy.get("hourly_compress_after_interval")
+        self.daily_compress_after_interval: str = self.rollup_policy.get("daily_compress_after_interval")
+        self.weekly_compress_after_interval: str = self.rollup_policy.get("weekly_compress_after_interval")
+        self.monthly_compress_after_interval: str = self.rollup_policy.get("monthly_compress_after_interval")
 
-        self.drop_after = self.rollup_policy.get("drop_after")
+        self.drop_after: str = self.rollup_policy.get("drop_after")
         self.migrate_data = bool(self.rollup_policy.get("migrate_data",0))
         self.enable_compression = bool(self.rollup_policy.get("enable_compression",0))
 
-        self.hourly_rollup_bucket = self.rollup_policy.get("hourly_rollup_bucket")
-        self.daily_rollup_bucket = self.rollup_policy.get("daily_rollup_bucket")
-        self.weekly_rollup_bucket = self.rollup_policy.get("weekly_rollup_bucket")
-        self.monthly_rollup_bucket = self.rollup_policy.get("monthly_rollup_bucket")
+        self.hourly_rollup_bucket: str = self.rollup_policy.get("hourly_rollup_bucket")
+        self.daily_rollup_bucket: str = self.rollup_policy.get("daily_rollup_bucket")
+        self.weekly_rollup_bucket: str = self.rollup_policy.get("weekly_rollup_bucket")
+        self.monthly_rollup_bucket: str = self.rollup_policy.get("monthly_rollup_bucket")
 
-        self.hourly_rollup_start = self.rollup_policy.get("hourly_rollup_start")
-        self.daily_rollup_start = self.rollup_policy.get("daily_rollup_start")
-        self.weekly_rollup_start = self.rollup_policy.get("weekly_rollup_start")
-        self.monthly_rollup_start = self.rollup_policy.get("monthly_rollup_start")
+        self.hourly_rollup_start: str = self.rollup_policy.get("hourly_rollup_start")
+        self.daily_rollup_start: str = self.rollup_policy.get("daily_rollup_start")
+        self.weekly_rollup_start: str = self.rollup_policy.get("weekly_rollup_start")
+        self.monthly_rollup_start: str = self.rollup_policy.get("monthly_rollup_start")
 
     @property
     def tsdb_connected(self) -> bool:
@@ -1616,7 +1620,7 @@ class RollupManager:
     def setup_schema(self) -> None:
         """
         Called once during TSDB startup.
-        Safe to call repeatedly (idempotent).
+        Safe to call repeatedly.
         """
 
     # 1 Hypertable & Policies
@@ -1674,7 +1678,7 @@ class RollupManager:
             tables.append("device_metrics_wide")
 
         # 2. shared parameters
-        params = {
+        params: dict[str, Any] = {
             "time_col": getattr(self, "time_column", "m_time"),
             "if_exists": getattr(self, "if_not_exists", True),
             "migrate": getattr(self, "migrate_data", True),
@@ -1901,7 +1905,7 @@ class RollupManager:
                 any_rebuild_needed = False
                 for context in contexts:
                     for view_key, bucket, _, _ in view_configs:
-                        view_name = context["segments"][view_key]
+                        view_name: str = context["segments"][view_key]
                         if self.rollup_needs_rebuild(session, view_name, bucket):
                             any_rebuild_needed = True
                             break
@@ -1918,9 +1922,9 @@ class RollupManager:
 
                 # 4. Creation Phase: Build/Verify Bottom-Up (Hourly -> Daily -> Weekly)
                 for context in contexts:
-                    source_table = context["table_name"]
-                    current_source = source_table  # Reset source for each context (Narrow vs Wide)
-                    rollup_segments = context["segments"]
+                    source_table: str = context["table_name"]
+                    current_source: str = source_table  # Reset source for each context (Narrow vs Wide)
+                    rollup_segments: str = context["segments"]
 
                     for view_key, bucket, start_offset, chunk_time_interval in view_configs:
                         view_name = rollup_segments[view_key]
@@ -1954,7 +1958,7 @@ class RollupManager:
         """
         Creates a continuous aggregate with proper hierarchical logic and locking.
         """
-        r_settings = self._get_dynamic_settings()
+        r_settings: dict = self._get_dynamic_settings()
 
         if not session:
             self._log.error("Cannot create rollup — not connected.")
@@ -2027,9 +2031,9 @@ class RollupManager:
         granularity: str = next((g for g in granularities if g in name_lower), "default")
 
         # Dynamically retrieve the value from self
-        # This replaces the need for self.get() if the values are already stored as attributes
-        compress_after = getattr(self, f"{granularity}_compress_after_interval")
-        drop_after = getattr(self, "drop_after", "2 years")
+        # This replaces the need for self.get() as the values are already stored as attributes
+        compress_after: str = getattr(self, f"{granularity}_compress_after_interval")
+        drop_after: str = getattr(self, "drop_after", "2 years")
 
 
         try:
@@ -2097,7 +2101,7 @@ class RollupManager:
 
             # 2. Build the dynamic SQL
             # We pass agg_func ('stats_agg' or 'rollup') to ensure hierarchical consistency
-            metric_columns = self._resolve_metric_columns(session, agg_func)
+            metric_columns: list = self._resolve_metric_columns(session, agg_func)
 
             sql = f"""
                 CREATE MATERIALIZED VIEW {view_name}
@@ -2129,13 +2133,13 @@ class RollupManager:
         - If reading from another view: uses rollup(stats_summary_column)
         """
         # 1. Fetch all clean column names from the catalog
-        result = session.execute(text("SELECT clean_column_name FROM metric_catalog ORDER BY clean_column_name"))
-        column_names = list(result.scalars())
+        result: engine.Result[Any] = session.execute(text("SELECT clean_column_name FROM metric_catalog ORDER BY clean_column_name"))
+        column_names: List[str] = list(result.scalars())
 
-        metric_expressions = []
+        metric_expressions: list = []
 
         # Check if we are at the base level (reading raw data) or hierarchical (reading an aggregate)
-        is_base_level = agg_func == 'stats_agg(metric_value)'
+        is_base_level: bool = agg_func == 'stats_agg(metric_value)'
 
         for col in column_names:
             if is_base_level:
@@ -2160,50 +2164,70 @@ class RollupManager:
         Checks if a rollup exists and if its bucket matches the current config.
         Returns True if the rollup is missing or configuration is mismatched.
         """
+        # 1. Map friendly terms to PG Interval inputs
+        # This allows 'monthly' -> '1 month', while letting '2 hours' pass through as-is
+        mapping: Dict[str, str] = {
+            "monthly": "1 month",
+            "weekly": "7 days",
+            "daily": "1 day",
+            "hourly": "1 hour"
+        }
+        target_pg_val: str = mapping.get(bucket_interval.lower(), bucket_interval)
+
         try:
-            # 1. Query the TimescaleDB catalog for the view definition
+            # 2. Query the TimescaleDB catalog for the view definition
             # Use a bind parameter :view_name for security and performance
-            check_sql: str = text("""
+            check_sql: TextClause = text("""
                 SELECT view_definition
                 FROM timescaledb_information.continuous_aggregates
                 WHERE view_name = :view_name
             """)
-            result = session.execute(check_sql, {"view_name": view_name}).fetchone()
+            view_def: Optional[str] = session.scalar(check_sql, {"view_name": view_name})
 
-            # 2. Logic: If it doesn't exist, we definitely need to build it
-            if not result:
+            # Logic: If it doesn't exist, we definitely need to build it
+            if not view_def:
                 self._log.debug(f"Rollup {view_name} does not exist. Rebuild required.")
                 return True
 
-            # 3. Logic: If it exists, check the 'interval' string in the definition
-            # We look for the specific time_bucket interval string (e.g., "1 hour")
-            view_def = result.view_definition
+            # 3. If the result exists, extract the 'interval' string from the definition
+            # We use Postgres regex_match to find the first argument of time_bucket()
+            # Pattern looks for: time_bucket('interval_text', ...)
+            extract_sql: TextClause = text("""
+                SELECT (regexp_match(:vdef, 'time_bucket\\(''([^'']+)''', 'i'))[1]
+            """)
+            current_interval_str: Optional[str] = session.scalar(extract_sql, {"vdef": view_def})
 
-            expected_interval: str = self.get_normalized_pg_interval(session, bucket_interval)
-            clean_interval: logging.Pattern[str] = re.compile(re.escape(expected_interval).replace(r'\ ', r'\s+'), re.IGNORECASE)
+            if not current_interval_str:
+                self._log.warning(f"Could not parse time_bucket interval from {view_name} definition.")
+                return True
 
-            if not clean_interval.search(view_def):
+            # 4. Final Comparison: Let PostgreSQL handle the semantic equality
+            # This correctly recognizes that '01:00:00'::interval = '1 hour'::interval
+            match_sql: TextClause = text("SELECT (:current)::interval = (:target)::interval")
+            is_match: bool = session.scalar(match_sql, {"current": current_interval_str, "target": target_pg_val})
+
+            if not is_match:
                 self._log.info(
                     f"Config mismatch for {view_name}. "
-                    f"Expected: {bucket_interval}. Rebuild required."
+                    f"Found: {current_interval_str}, Expected: {target_pg_val}. Rebuild required."
                 )
                 return True
             else:
                 # 4. Exists and matches config
                 self._log.info(
                     f"Rollup config matches for {view_name}. "
-                    f"Expected: {bucket_interval} and received {expected_interval}. No rebuild required."
+                    f"Expected: {bucket_interval} and received {target_pg_val}. No rebuild required."
                 )
                 return False
 
-        except Exception as e:
-            # If we can't query the catalog, assume something is wrong and signal a rebuild
-            self._log.error(f"Error checking rebuild status for {view_name}: {e}")
+        except SQLAlchemyError as e:
+            self._log.error(f"Database error while checking rollup {view_name}: {e}")
+            # Default to True to ensure we don't skip a necessary build on error
             return True
 
 
     # -------------------------
-    #  Determine wide vs narrow table usage
+    #  Determine wide vs narrow table usage for resource settings
     # -------------------------
     def _get_dynamic_settings(self) -> dict:
         """Returns dynamic settings based on the current metric count."""
@@ -2219,33 +2243,6 @@ class RollupManager:
                 return tier
 
         return self.performance_tiers["tier_low"] # Fallback default
-
-    # kluge method to convert to timescaledb internal naming conventions for intervals.
-    def get_normalized_pg_interval(self, session: Session, interval_str: str) -> str:
-        """
-        Normalizes 'monthly', 'hourly', etc., into the exact string
-        found in TimescaleDB's view_definition.
-        """
-        # 1. Map friendly terms to PG Interval inputs
-        mapping: Dict[str, str] = {
-            "monthly": "1 month",
-            "weekly": "7 days",
-            "daily": "1 day",
-            "hourly": "1 hour"
-        }
-
-        # Use mapped value or fallback to the raw interval_str string
-        pg_input: str = mapping.get(interval_str.lower(), interval_str)
-
-        # 2. Let PostgreSQL return its internal string representation
-        # This turns '1 month' -> '1 mon' and '1 hour' -> '01:00:00'
-        normalized_val: str = session.execute(
-            text("SELECT (:val)::interval::text"),
-            {"val": pg_input}
-        ).scalar()
-
-        # 3. Format to match the view_definition style: 'string'::interval
-        return f"'{normalized_val}'::interval"
 
     def _view_exists(self, session: Session, view_name: str) -> bool:
         """Check to see if a continuous aggregate exists in the catalog."""
@@ -2365,11 +2362,11 @@ class RollupManager:
         """
         Refreshes a rollup with duration tracking and performance logging.
         """
-        r_settings = self._get_dynamic_settings()
+        r_settings: dict = self._get_dynamic_settings()
 
-        stop_signal = self._start_refresh_watchdog(view_name)
+        stop_signal: List[bool] = self._start_refresh_watchdog(view_name)
 
-        start_time = time.perf_counter()
+        start_time: float = time.perf_counter()
         mode = "FULL" if force_full else "INCREMENTAL"
 
         self._log.info(f"Starting {mode} refresh for {view_name}...")
@@ -2391,8 +2388,8 @@ class RollupManager:
                         );
                     """))
 
-                end_time = time.perf_counter()
-                duration_seconds = end_time - start_time
+                end_time: float = time.perf_counter()
+                duration_seconds: float = end_time - start_time
 
                 # Log the duration in a scannable format
                 self._log.info(
@@ -2410,20 +2407,21 @@ class RollupManager:
                 # Ensure the watchdog thread stops
                 stop_signal[0] = True
 
-
+    # watchdog refresh management
     def _stop_existing_watchdog(self):
         """Signals the existing watchdog to exit immediately."""
         if hasattr(self, '_current_watchdog_signal') and self._current_watchdog_signal:
             self._current_watchdog_signal[0] = True
             self._current_watchdog_signal = None
 
-    def _start_refresh_watchdog(self, view_name: str):
+    # watchdog thread to monitor long-running refreshes
+    def _start_refresh_watchdog(self, view_name: str) -> List[bool]:
         # 1. Kill any existing watchdog before starting a new one
         self._stop_existing_watchdog()
 
         # 2. Create the new stop signal
-        stop_signal = [False]
-        self._current_watchdog_signal = stop_signal
+        stop_signal: List[bool] = [False]
+        self._current_watchdog_signal: List[bool] = stop_signal
 
         def monitor() -> None:
             # Use a short-lived session specifically for monitoring
@@ -2502,7 +2500,7 @@ class RollupManager:
                 with self.engine.connect() as conn:
                     conn: Connection = conn.execution_options(isolation_level="AUTOCOMMIT")
                     # Apply dynamic session settings from performance tiers
-                    tier = self._get_dynamic_settings()
+                    tier: dict = self._get_dynamic_settings()
                     conn.execute(text(f"SET work_mem = '{tier['work_mem']}';"))
                     conn.execute(text(f"SET lock_timeout = '{tier['lock_timeout']}';"))
 
