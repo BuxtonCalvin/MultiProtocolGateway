@@ -13,6 +13,7 @@ You can find a copy of the GNU Affero General Public License in the documentatio
 If not, see <https://www.gnu.org>.
 
 timescaledb transport bridge module (with rollup continuous aggregates) and persistent disk backlog.
+python > 3.9 is required.
 
 Features:
  - Auto-create database (default "solar", configurable)
@@ -48,7 +49,7 @@ from _thread import RLock, lock
 from configparser import SectionProxy
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, List, Optional, Tuple
 
 import requests
 from sqlalchemy import (
@@ -220,7 +221,7 @@ class timescaledb(transport_base):
     """
 
     # hypertable defaults
-    hypertable_defaults: Dict[str, Any] = {
+    hypertable_defaults: dict[str, Any] = {
         "compress_segmentby_narrow": "device_info_id, metric_name",
         "compress_segmentby_wide": "device_info_id",
         "time_column": "m_time",
@@ -239,7 +240,7 @@ class timescaledb(transport_base):
     }
 
     # rollup defaults, continuous aggregate bucket sizes
-    rollup_defaults: Dict[str, Any] = {
+    rollup_defaults: dict[str, Any] = {
         "hourly_rollup_bucket": "1 hour",
         "hourly_rollup_start": "3 hours",
         "daily_rollup_bucket": "1 day",
@@ -261,7 +262,7 @@ class timescaledb(transport_base):
 
     # stale data settings and fields
     stale_data_timeout: int = 300       # seconds before considering data stale for incomplete batch cleanup
-    stale_data_last_row: Optional[Dict[str, Any]] = None  # last row of metrics for stale data detection
+    stale_data_last_row: Optional[dict[str, Any]] = None  # last row of metrics for stale data detection
     stale_data_start_ts: Optional[datetime] = None # timestamp when stale data period started
     is_stale_data: bool = False  # flag indicating if stale data condition is active
     stale_event_count: int = 0
@@ -298,7 +299,7 @@ class timescaledb(transport_base):
             - stale_data_timeout (int): Seconds before considering data stale for incomplete batch cleanup (default: 300)
             - hypertable_defaults: Dicts for hypertable narrow and wide creation and policies
             - enable_compression (bool): Enable compression on hypertables at startup (default: True)
-            - rollup_defaults: Dict for rollup settings
+            - rollup_defaults: dict for rollup settings
             - enable_auto_refresh (bool): Enable periodic rollup refresh (default: True)
             - auto_refresh_interval (int): Seconds between rollup refreshes (default: 21600)
 
@@ -408,13 +409,13 @@ class timescaledb(transport_base):
         # self.transport_connected: bool = transport_base.connected   # inverter connection state from base class
 
         # load all registry metrics' map.
-        self.registry_metrics: Dict[Registry_Type, List[registry_map_entry]]  = protocol_settings.registry_map
+        self.registry_metrics: dict[Registry_Type, List[registry_map_entry]]  = protocol_settings.registry_map
 
         self._wide_columns: set[str] = set()  # cached set of existing wide table columns for fast lookup
-        self.metric_mapping: Dict[str, str] = {}  # metric_name and clean_column_name mapping dict for raw to safe metric name conversions
+        self.metric_mapping: dict[str, str] = {}  # metric_name and clean_column_name mapping dict for raw to safe metric name conversions
         self.device_info_id = None  # will be set during init with _ensure_device_info insert, and after data scrape, per transport batch (future feature).
         self.wide_table_flag = True  # assume wide table unless too many metrics detected
-        self.metric_lookup: Dict[str, registry_map_entry] = {
+        self.metric_lookup: dict[str, registry_map_entry] = {
             entry.variable_name: entry
             for registry_type in (Registry_Type.INPUT, Registry_Type.HOLDING)
             for entry in self.registry_metrics.get(registry_type, [])
@@ -459,6 +460,7 @@ class timescaledb(transport_base):
         self.backlog = BacklogManager(
             backlog_file_path=self.backlog_file_path,
             max_backlog_age=self.max_backlog_age,
+            max_backlog_size=self.max_backlog_size,
             flush_queue=self._flush_queue,
             flush_event=self._flush_event,
             backlog_lock=self._backlog_lock,
@@ -1254,14 +1256,14 @@ class timescaledb(transport_base):
             finally:
                 session.close()
 
-    def _flush_batch_narrow(self, newData: Dict, session: Session) -> None:
+    def _flush_batch_narrow(self, newData: dict, session: Session) -> None:
         """
             Flush new_data narrow-table metric points to the database.
             Any failed writes will be added to the backlog.
         """
         try:
-            back_data: Dict = newData.copy()  # use for backlog only in case of failure
-            narrow_data: Dict = newData.copy()
+            back_data: dict = newData.copy()  # use for backlog only in case of failure
+            narrow_data: dict = newData.copy()
 
             device_info_id: str =  narrow_data.pop('device_info_id', Optional[int])
             reading_time =  narrow_data.pop('m_time', datetime.now().astimezone())
@@ -1331,7 +1333,7 @@ class timescaledb(transport_base):
             - If different, reset the stale counter.
         """
 
-        stale_limit = timedelta(seconds=self.stale_data_timeout)
+        stale_limit = timedelta(seconds=int(self.stale_data_timeout))
 
         time_read: datetime | None = row.get("m_time")
         if time_read is None:
@@ -1404,7 +1406,7 @@ class timescaledb(transport_base):
         # 2. Check if enough time has passed since the last attempt (if it's not the first one)
         if self.last_stale_event_ts is not None:
             time_since_last_attempt: timedelta = current_time - self.last_stale_event_ts
-            if time_since_last_attempt < timedelta(minutes=self.retry_delay_mins):
+            if time_since_last_attempt < timedelta(minutes=int(self.retry_delay_mins)):
                 return
 
         # 3. Proceed with the attempt
@@ -1584,8 +1586,8 @@ class RollupManager:
         self.compress_orderby: str= self.rollup_policy.get("compress_orderby")
         self.time_column: str= self.rollup_policy.get("time_column")
         self.auto_refresh_interval: int = self.rollup_policy.get("auto_refresh_interval")
-        self.enable_auto_refresh = bool(self.rollup_policy.get("enable_auto_refresh", 0))
-        self.enable_rollups = bool(self.rollup_policy.get("enable_rollups", 0))
+        self.enable_auto_refresh:bool = self.rollup_policy.get("enable_auto_refresh", True)
+        self.enable_rollups = bool(self.rollup_policy.get("enable_rollups", True))
 
         self.hourly_chunk_time_interval: str = self.rollup_policy.get("hourly_chunk_time_interval")
         self.daily_chunk_time_interval: str = self.rollup_policy.get("daily_chunk_time_interval")
@@ -1598,8 +1600,8 @@ class RollupManager:
         self.monthly_compress_after_interval: str = self.rollup_policy.get("monthly_compress_after_interval")
 
         self.drop_after: str = self.rollup_policy.get("drop_after")
-        self.migrate_data = bool(self.rollup_policy.get("migrate_data",0))
-        self.enable_compression = bool(self.rollup_policy.get("enable_compression",0))
+        self.migrate_data = bool(self.rollup_policy.get("migrate_data",True))
+        self.enable_compression = bool(self.rollup_policy.get("enable_compression",True))
 
         self.hourly_rollup_bucket: str = self.rollup_policy.get("hourly_rollup_bucket")
         self.daily_rollup_bucket: str = self.rollup_policy.get("daily_rollup_bucket")
@@ -1614,7 +1616,10 @@ class RollupManager:
     @property
     def tsdb_connected(self) -> bool:
         """Always returns the live connection state from the shared policy dict."""
-        return self.rollup_policy.get("tsdb_connected", False)
+        val: bool = self.rollup_policy.get("tsdb_connected", False)
+        # If val is the boolean False, the expression 'val is True or val == "True"' will return False.
+        # basically tries to capture string "True" as well as boolean True
+        return val is True or val == "True"
 
 
     def setup_schema(self) -> None:
@@ -1659,7 +1664,7 @@ class RollupManager:
     # 5 Start the rollup thread.  Called from TimescaleDB class upon connection to the database.
     def start_auto_refresh(self) -> None:
 
-        if self._refresh_rollup_thread and self._refresh_rollup_thread.is_alive():
+        if self._refresh_rollup_thread.is_alive():
             self._log.debug("Auto refresh thread already running.")
             return
         else:
@@ -2166,7 +2171,7 @@ class RollupManager:
         """
         # 1. Map friendly terms to PG Interval inputs
         # This allows 'monthly' -> '1 month', while letting '2 hours' pass through as-is
-        mapping: Dict[str, str] = {
+        mapping: dict[str, str] = {
             "monthly": "1 month",
             "weekly": "7 days",
             "daily": "1 day",
@@ -2238,7 +2243,7 @@ class RollupManager:
 
         # Check tiers from highest to lowest
         for tier_name in ["tier_high", "tier_medium", "tier_low"]:
-            tier: Dict[str, Any] = self.performance_tiers[tier_name]
+            tier: dict[str, Any] = self.performance_tiers[tier_name]
             if metric_count <= tier["count"]:
                 return tier
 
@@ -2270,7 +2275,7 @@ class RollupManager:
 
             # 2. Define Priority: Child views (Weekly) MUST be dropped before Parent views (Daily)
             # This prevents internal _partial_view dependencies from blocking the drop.
-            priority_map: Dict[str, int] = {"monthly": 4, "weekly": 3, "daily": 2, "hourly": 1}
+            priority_map: dict[str, int] = {"monthly": 4, "weekly": 3, "daily": 2, "hourly": 1}
 
             def get_drop_rank(v_tuple) -> int:
                 name_lower: str = v_tuple[1].lower()
@@ -2658,6 +2663,7 @@ class BacklogManager:
         self,
         backlog_file_path: Optional[Path],
         max_backlog_age: int,
+        max_backlog_size: int,
         flush_queue: queue.Queue,
         flush_event: threading.Event,
         backlog_lock: threading.RLock,
@@ -2666,6 +2672,7 @@ class BacklogManager:
 
         self.backlog_file_path: Path | None = backlog_file_path
         self.max_backlog_age: int = max_backlog_age
+        self.max_backlog_size: int = max_backlog_size
         self._flush_queue: queue.Queue = flush_queue
         self._flush_event: threading.Event = flush_event
         self._backlog_lock: threading.RLock = backlog_lock
@@ -2692,12 +2699,12 @@ class BacklogManager:
                         if not clean:
                             continue
                         try:
-                            point = json.loads(clean)
-                            ts = point.get("m_time")
+                            point: dict[str, Any] = json.loads(clean)
+                            ts: str = point.get("m_time")
                             if not ts:
                                 continue
                             m_time: datetime = datetime.fromisoformat(ts)
-                            if now - m_time < timedelta(seconds=self.max_backlog_age):
+                            if now - m_time < timedelta(seconds=int(self.max_backlog_age)):
                                 loaded.append(point)
                         except (json.JSONDecodeError, ValueError) as e:
                             self._log.info("Skipping corrupted backlog line: %s", e)
@@ -2710,13 +2717,23 @@ class BacklogManager:
             self._log.exception("Failed to process backlog file")
 
     def enqueue(self, point: dict) -> None:
-
         if isinstance(point, list):
             raise TypeError("enqueue() does not accept lists, only single dict or None.")
 
         with self._backlog_lock:
-            self.backlog_points.append(point)
-            self._append_to_disk(point)
+            # 1. Check if we are at or over the limit
+            if len(self.backlog_points) >= self.max_backlog_size:
+                # Drop the oldest point (Index 0) to make room
+                self.backlog_points.pop(0)
+                self._log.warning(f"Max backlog size ({self.max_backlog_size}) reached. Dropped oldest point.")
+                # 2. Since we dropped a point, we must rewrite the file
+                # otherwise the disk file will contain more points than the list.
+                self.backlog_points.append(point)
+                self._sync_to_disk()
+            else:
+                # 3. Normal path: append to list and disk
+                self.backlog_points.append(point)
+                self._append_to_disk(point)
 
     def replay_to_queue(self) -> int:
         """Transfers backlog to queue. Returns count replayed."""
@@ -2725,7 +2742,7 @@ class BacklogManager:
             if not self.backlog_points:
                 return 0
             count: int = len(self.backlog_points)
-            if count > 1:
+            if count > 0:
                 self._log.debug(f"Replaying {count} points to flush queue.")
                 for point in self.backlog_points:
                     self._flush_queue.put(point)
