@@ -339,7 +339,7 @@ read_interval = 15
 
 ### 6.5 TimescaleDB Module Configuration (config.cfg)
 
-#### Example timescaledb transport Configuration
+#### Example timescaledb bridge configuration
 
 ```ini
 
@@ -374,48 +374,27 @@ backlog_file_name = no_connect_backlog
 
 # max data points to store in backlog
 max_backlog_size = 10000
-
 # seconds-->  equal to 24 hours
 max_backlog_age = 86400
 
 # TSDB Connection monitoring settings
 reconnect_attempts = 5
-
 # minutes
 reconnect_delay = 5
-
 # Exponential backoff settings (reconnect delay increases exponentially on each failure)
 use_exponential_backoff = true
-
 # minutes --> 5 hours
 max_reconnect_delay = 300
 
 ## hypertable and rollup options
 # changing rollup settings after data has been written, will result in automatic view deletions and rebuilds
-drop_after = 1 year
 migrate_data = True
-enable_rollups = True
 enable_compression = True
-
-hourly_rollup_bucket =  1 hour
-hourly_rollup_start = 3 hours
-hourly_chunk_time_interval = 1 day
-hourly_compress_after_interval = 2 days
-
-daily_rollup_bucket =  1 day
-daily_rollup_start = 3 days
-daily_chunk_time_interval = 7 days
-daily_compress_after_interval = 2 weeks
-
-weekly_rollup_bucket =  1 week
-weekly_rollup_start = 3 weeks
-weekly_chunk_time_interval = 1 month
-weekly_compress_after_interval = 2 months
-
-monthly_rollup_bucket =  1 month
-monthly_rollup_start = 3 months
-monthly_chunk_time_interval = 4 months
-monthly_compress_after_interval = 6 months
+enable_rollups = True
+# Seconds between rollup refreshes (6 hours)
+auto_refresh_interval = 21600
+enable_auto_refresh = True
+drop_after = 1 year
 
 # stale data cleanup settings minutes --> 5 hours
 stale_data_timeout = 300

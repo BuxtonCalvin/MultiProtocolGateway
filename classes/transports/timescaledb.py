@@ -9,7 +9,7 @@ but WITHOUT ANY WARRANTY; without even the implied warranty of
 MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU Affero General Public License for more details.
 
-You can find a copy of the GNU Affero General Public License in the documentation/bridge/timescaledb folder.
+You can find a copy of the GNU Affero General Public License in the documentation/bridges/timescaledb folder.
 If not, see <https://www.gnu.org>.
 
 timescaledb transport bridge module (with rollup continuous aggregates) and persistent disk backlog.
@@ -17,23 +17,24 @@ python > 3.9 is required.
 
 Features:
  - Auto-create database (default "solar", configurable)
- - device_info (multi unique devices) (for future multi-device/transport support)
+ - device_info (multi unique transport scraper devices) (for future multi-device/transport support)
  - device_metrics_wide hypertable
  - device_metrics_narrow hypertable
  - Hypertable compression & retention (idempotent)
- - Continuous aggregates rollups: hourly_rollup, daily_rollup, weekly_rollup, monthly_rollup (configurable)
+ - Continuous aggregates rollups: hourly_rollup, daily_rollup, weekly_rollup, monthly_rollup with hierarchical dependencies and policies
  - Async flushing + persistent disk backlog
  - OS-local timestamps
 
 Terminology:
 Continuous Aggregates	The official TimescaleDB feature name. It's an automatically and incrementally updated
     materialized SQL view that pre-computes aggregate data (e.g., averages, sums over a minute, hour, day, week or month)
-    from raw data and stores it in a separate hypertable.
+    from raw data and stores it in a separate hypertable view.
 
-Continuous Rollups	    This term refers to the process of downsampling data into successively
+Continuous Rollups	 This term refers to the process of downsampling data into successively
     coarser time granularities (e.g., from raw data to hourly summaries, then to daily summaries, then to weekly summaries,
     then to monthly summaries). This is achieved using the hierarchical continuous aggregates feature,
-    where a continuous aggregate based on the output of a previous one is created.
+    where a continuous aggregate based on the output of a previous one is created. For example, a daily rollup continuous
+    aggregate would be defined based on the hourly rollup continuous aggregate, and so on.
 
 """
 import asyncio
@@ -210,50 +211,16 @@ class timescaledb(transport_base):
     max_reconnect_delay: int = 300
     tsdb_connected = False
 
-
-    """
-    Rollup Type
-        refresh rollup    start_offset   compress_after   reason
-        1 Hour	          3 hours	     1 day	          Allows a 3-hour window for late data before locking it via compression.
-        1 Day	          3 days	     7 days	          Ensures daily rollups are finalized before compressing.
-        1 Week	          2 weeks	     1 month	      Larger window helps capture any delayed source data updates.
-        1 Month	          2 months	     3 months	      Maximum safety for long-term historical accuracy.
-    """
-
-    # hypertable defaults
-    hypertable_defaults: dict[str, Any] = {
-        "compress_segmentby_narrow": "device_info_id, metric_name",
-        "compress_segmentby_wide": "device_info_id",
-        "time_column": "m_time",
-        "compress_orderby": "m_time DESC",
-        "hourly_chunk_time_interval": "1 day",
-        "hourly_compress_after_interval": "2 days",
-        "daily_chunk_time_interval": "7 days",
-        "daily_compress_after_interval": "2 weeks",
-        "weekly_chunk_time_interval": "1 month",
-        "weekly_compress_after_interval": "2 months",
-        "monthly_chunk_time_interval": "4 months",
-        "monthly_compress_after_interval": "6 months",
-        "drop_after": "1 year",
-        "migrate_data": True,
-        "enable_compression": True,  # enable compression on hypertables at startup
-    }
-
-    # rollup defaults, continuous aggregate bucket sizes
-    rollup_defaults: dict[str, Any] = {
-        "hourly_rollup_bucket": "1 hour",
-        "hourly_rollup_start": "3 hours",
-        "daily_rollup_bucket": "1 day",
-        "daily_rollup_start": "3 days",
-        "weekly_rollup_bucket": "1 week",
-        "weekly_rollup_start": "3 weeks",
-        "monthly_rollup_bucket": "1 month",
-        "monthly_rollup_start": "2 months",
-        "anchor_start_time_utc": "2000-01-01 00:00:00+00",  # default anchor time for rollup alignment
-        "enable_rollups": True,
-        "auto_refresh_interval": 21600,  # seconds (default 6 hours), auto-refresh rollup
-        "enable_auto_refresh": True,  # whether to auto-refresh rollups periodically
-    }
+    ### Hypertable and rollup settings defaults.  These can be overridden by settings SectionProxy, but defaults are provided here for clarity.
+    # whether to attempt to migrate existing data when creating hypertables and rollups.  Set to False to skip migration and start fresh with new schema.
+    migrate_data: bool = True
+    # whether to enable compression on hypertables at startup.
+    #Compression policies are created regardless, but this controls whether existing data is compressed on init.
+    enable_compression: bool = True
+    enable_rollups = True  # whether to create continuous aggregate rollups on init and start the auto-refresh thread.
+    auto_refresh_interval: int = 21600  # seconds (default 6 hours), auto-refresh rollup
+    enable_auto_refresh: bool = True  # whether to auto-refresh rollups periodically
+    drop_after: str = "1 year"  # default retention policy for raw data in tables and views, can be overridden by settings SectionProxy
 
     # Pushover settings
     enable_pushover: bool = True
@@ -357,41 +324,20 @@ class timescaledb(transport_base):
         self.max_backlog_size = settings.getint("max_backlog_size", fallback=self.max_backlog_size)
         self.max_backlog_age: int = settings.getint("max_backlog_age", fallback=self.max_backlog_age)
 
-        # hypertable / rollup options
+        # hypertable / rollup options that are user defined.  These are sent to the rollup manager
+        # which will handle the hypertable and rollup creation and maintenance based on these settings.
 
         self.rollup_policy: dict[str,Any] = {
             # Hypertable Settings
             "current_metric_count": self.current_metric_count,
             "tsdb_connected": self.tsdb_connected,
-            "compress_segmentby_narrow": self.hypertable_defaults["compress_segmentby_narrow"],
-            "compress_segmentby_wide": self.hypertable_defaults["compress_segmentby_wide"],
-            "time_column": self.hypertable_defaults["time_column"],
-            "compress_orderby": self.hypertable_defaults["compress_orderby"],
-            "anchor_start_time_utc": self.rollup_defaults["anchor_start_time_utc"],
-            "hourly_chunk_time_interval": settings.get("hourly_chunk_time_interval", fallback=self.hypertable_defaults["hourly_chunk_time_interval"]),
-            "daily_chunk_time_interval": settings.get("daily_chunk_time_interval", fallback=self.hypertable_defaults["daily_chunk_time_interval"]),
-            "weekly_chunk_time_interval": settings.get("weekly_chunk_time_interval", fallback=self.hypertable_defaults["weekly_chunk_time_interval"]),
-            "monthly_chunk_time_interval": settings.get("monthly_chunk_time_interval", fallback=self.hypertable_defaults["monthly_chunk_time_interval"]),
-            "hourly_compress_after_interval": settings.get("hourly_compress_after_interval", fallback=self.hypertable_defaults["hourly_compress_after_interval"]),
-            "daily_compress_after_interval": settings.get("daily_compress_after_interval", fallback=self.hypertable_defaults["daily_compress_after_interval"]),
-            "weekly_compress_after_interval": settings.get("weekly_compress_after_interval", fallback=self.hypertable_defaults["weekly_compress_after_interval"]),
-            "monthly_compress_after_interval": settings.get("monthly_compress_after_interval", fallback=self.hypertable_defaults["monthly_compress_after_interval"]),
-            "drop_after": settings.get("drop_after", fallback=self.hypertable_defaults["drop_after"]),
-            "migrate_data": settings.getboolean("migrate_data", fallback=str(self.hypertable_defaults["migrate_data"])),
-            "enable_compression": settings.getboolean("enable_compression", fallback=str(self.hypertable_defaults["enable_compression"])),
-
+            "drop_after": settings.get("drop_after", fallback=self.drop_after),
+            "migrate_data": settings.getboolean("migrate_data", fallback=str(self.migrate_data)),
+            "enable_compression": settings.getboolean("enable_compression", fallback=str(self.enable_compression)),
             # Rollup Settings
-            "hourly_rollup_bucket": settings.get("hourly_rollup_bucket", fallback=self.rollup_defaults["hourly_rollup_bucket"]),
-            "daily_rollup_bucket": settings.get("daily_rollup_bucket", fallback=self.rollup_defaults["daily_rollup_bucket"]),
-            "weekly_rollup_bucket": settings.get("weekly_rollup_bucket", fallback=self.rollup_defaults["weekly_rollup_bucket"]),
-            "monthly_rollup_bucket": settings.get("monthly_rollup_bucket", fallback=self.rollup_defaults["monthly_rollup_bucket"]),
-            "hourly_rollup_start": settings.get("hourly_rollup_start", fallback=self.rollup_defaults["hourly_rollup_start"]),
-            "daily_rollup_start": settings.get("daily_rollup_start", fallback=self.rollup_defaults["daily_rollup_start"]),
-            "weekly_rollup_start": settings.get("weekly_rollup_start", fallback=self.rollup_defaults["weekly_rollup_start"]),
-            "monthly_rollup_start": settings.get("monthly_rollup_start", fallback=self.rollup_defaults["monthly_rollup_start"]),
-            "auto_refresh_interval": settings.getint("auto_refresh_interval", fallback=self.rollup_defaults["auto_refresh_interval"]),
-            "enable_auto_refresh": settings.getboolean("enable_auto_refresh", fallback=str(self.rollup_defaults["enable_auto_refresh"])),
-            "enable_rollups": settings.getboolean("enable_rollups", fallback=str(self.rollup_defaults["enable_rollups"])),
+            "auto_refresh_interval": settings.getint("auto_refresh_interval", fallback=self.auto_refresh_interval),
+            "enable_auto_refresh": settings.getboolean("enable_auto_refresh", fallback=str(self.enable_auto_refresh)),
+            "enable_rollups": settings.getboolean("enable_rollups", fallback=str(self.enable_rollups)),
         }
 
         # pushover settings
@@ -1522,1127 +1468,6 @@ class timescaledb(transport_base):
                     self._log.error(f"Exception in __del__: {e}")
                 except Exception:
                     self._log.error(f"Exception in __del__: {e}")
-
-class RollupManager:
-    """ summary logic
-        The RollupManger class creates the structures that enable TimescaleDB rollup views.
-        After all structures are built:
-        1 RollupManager wakes up.
-        2 RollupManager tells BacklogManager to put everything into the _flush_queue if backlog data exists.
-            The _flush_queue is the threaded queue object that accepts PPG data obtained from the source transport.
-        3 RollupManager calls _flush_queue.join() (it pauses here).
-        4 _flush_worker finishes writing everything to the Hypertable and calls task_done() for each.
-        5 RollupManager resumes and calls refresh_continuous_aggregate.
-
-        Backlog Safety: The _refresh_rollup_loop wraps replay_to_queue() in the _backlog_lock and waits for completion via .join().
-        Attribute Persistence: All granular intervals (e.g., hourly_compress_after_interval) are mapped from the rollup_policy in __init__.
-        Live State: tsdb_connected and current_metric_count are implemented as @property to track the timescaledb class state in real-time.
-        SQL Execution: The SET LOCAL work_mem uses the single-quote fix to prevent f-string placeholder errors.
-    """
-
-    def __init__(
-        self,
-        rollup_policy: dict,
-        SessionFactory: Callable[..., Session],
-        Engine: engine,
-        wide_table_flag: bool,
-        migration_in_progress: threading.Event,
-        send_pushover_message,
-        log: logging.Logger,
-        backlog_lock: threading.RLock,
-        flush_queue: queue.Queue,
-        backlog: 'BacklogManager',
-        reconnect_lock: threading.Lock
-        ) -> None:
-
-        self.rollup_policy: dict = rollup_policy
-        self.SessionFactory: Callable[..., Session] = SessionFactory
-        self.engine: engine = Engine
-        self.wide_table_flag: bool = wide_table_flag
-        self.migration_in_progress: threading.Event = migration_in_progress
-        self._send_pushover_message = send_pushover_message
-        self._log: logging.Logger = log
-        self._backlog_lock: threading.RLock = backlog_lock
-        self._flush_queue: queue.Queue  = flush_queue
-        self.backlog: 'BacklogManager'  = backlog
-        self._reconnect_lock: threading.Lock = reconnect_lock
-
-        self._refresh_rollup_thread = threading.Thread(target=self._refresh_rollup_loop, daemon=True, name="RollupAutoRefreshThread")
-        self._stop_refresh_rollup_event: threading.Event = getattr(self, "_stop_refresh_rollup_event", threading.Event())
-
-        self.performance_tiers: dict[str, dict[str, Any]] = {
-        "tier_low":    {"count": 50,  "work_mem": "32MB",  "lock_timeout": "10s", "flush_batch_size": 10},
-        "tier_medium": {"count": 100, "work_mem": "64MB",  "lock_timeout": "15s", "flush_batch_size": 20},
-        "tier_high":   {"count": 200, "work_mem": "128MB", "lock_timeout": "30s", "flush_batch_size": 40},
-        }
-
-        self.if_not_exists = True
-
-        # Rollup Settings extracted from rollup_policy
-        self.current_metric_count: int = self.rollup_policy.get("current_metric_count", 0)
-        self.anchor_start_time_utc: str = self.rollup_policy.get("anchor_start_time_utc")
-        self.compress_segmentby_narrow: str= self.rollup_policy.get("compress_segmentby_narrow")
-        self.compress_segmentby_wide: str= self.rollup_policy.get("compress_segmentby_wide")
-        self.compress_orderby: str= self.rollup_policy.get("compress_orderby")
-        self.time_column: str= self.rollup_policy.get("time_column")
-        self.auto_refresh_interval: int = self.rollup_policy.get("auto_refresh_interval")
-        self.enable_auto_refresh:bool = self.rollup_policy.get("enable_auto_refresh", True)
-        self.enable_rollups = bool(self.rollup_policy.get("enable_rollups", True))
-
-        self.hourly_chunk_time_interval: str = self.rollup_policy.get("hourly_chunk_time_interval")
-        self.daily_chunk_time_interval: str = self.rollup_policy.get("daily_chunk_time_interval")
-        self.weekly_chunk_time_interval: str = self.rollup_policy.get("weekly_chunk_time_interval")
-        self.monthly_chunk_time_interval: str = self.rollup_policy.get("monthly_chunk_time_interval")
-
-        self.hourly_compress_after_interval: str = self.rollup_policy.get("hourly_compress_after_interval")
-        self.daily_compress_after_interval: str = self.rollup_policy.get("daily_compress_after_interval")
-        self.weekly_compress_after_interval: str = self.rollup_policy.get("weekly_compress_after_interval")
-        self.monthly_compress_after_interval: str = self.rollup_policy.get("monthly_compress_after_interval")
-
-        self.drop_after: str = self.rollup_policy.get("drop_after")
-        self.migrate_data = bool(self.rollup_policy.get("migrate_data",True))
-        self.enable_compression = bool(self.rollup_policy.get("enable_compression",True))
-
-        self.hourly_rollup_bucket: str = self.rollup_policy.get("hourly_rollup_bucket")
-        self.daily_rollup_bucket: str = self.rollup_policy.get("daily_rollup_bucket")
-        self.weekly_rollup_bucket: str = self.rollup_policy.get("weekly_rollup_bucket")
-        self.monthly_rollup_bucket: str = self.rollup_policy.get("monthly_rollup_bucket")
-
-        self.hourly_rollup_start: str = self.rollup_policy.get("hourly_rollup_start")
-        self.daily_rollup_start: str = self.rollup_policy.get("daily_rollup_start")
-        self.weekly_rollup_start: str = self.rollup_policy.get("weekly_rollup_start")
-        self.monthly_rollup_start: str = self.rollup_policy.get("monthly_rollup_start")
-
-    @property
-    def tsdb_connected(self) -> bool:
-        """Always returns the live connection state from the shared policy dict."""
-        val: bool = self.rollup_policy.get("tsdb_connected", False)
-        # If val is the boolean False, the expression 'val is True or val == "True"' will return False.
-        # basically tries to capture string "True" as well as boolean True
-        return val is True or val == "True"
-
-
-    def setup_schema(self) -> None:
-        """
-        Called once during TSDB startup.
-        Safe to call repeatedly.
-        """
-
-    # 1 Hypertable & Policies
-        try:
-            self.ensure_hypertables()
-            self._log.info("Hypertable check/creation complete")
-        except Exception as e:
-            self._log.error(f"Hypertable creation failed: {e}")
-
-    # 2 Enable compression (if configured)
-        try:
-            if self.enable_compression:
-                self.ensure_compression_enabled()
-        except Exception as e:
-            self._log.error(f"Enable compression failed: {e}")
-
-    # 3 Add retention policy
-        try:
-            self.ensure_retention_policy()
-        except Exception as e:
-            self._log.error(f"Add retention policy failed: {e}")
-
-    # 4 Setup continuous aggregate rollups
-        if self.enable_rollups:
-            # 4a
-            try:
-                self.setup_with_retry()
-            except Exception as e:
-                self._log.error(f"Aggregate Rollup setup failed: {e}")
-            # 4b
-            try:
-                self.refresh_rollups(force_full=True)
-            except Exception as e:
-                self._log.error(f"Refresh Rollup failed: {e}")
-
-    # 5 Start the rollup thread.  Called from TimescaleDB class upon connection to the database.
-    def start_auto_refresh(self) -> None:
-
-        if self._refresh_rollup_thread.is_alive():
-            self._log.debug("Auto refresh thread already running.")
-            return
-        else:
-            # start _refresh_rollup_thread after connect completes successfully
-            self._refresh_rollup_thread.start()
-            self._log.debug("Auto rollup refresh thread started.")
-
-    # -------------------------
-    # 6. Hypertable creation
-    # -------------------------
-    def ensure_hypertables(self) -> None:
-        """Convert base tables into TimescaleDB hypertables."""
-        # 1. The tables that need to be processed
-        tables: List[str] = ["device_metrics_narrow"]
-        if self.wide_table_flag:
-            tables.append("device_metrics_wide")
-
-        # 2. shared parameters
-        params: dict[str, Any] = {
-            "time_col": getattr(self, "time_column", "m_time"),
-            "if_exists": getattr(self, "if_not_exists", True),
-            "migrate": getattr(self, "migrate_data", True),
-        }
-
-        try:
-            with self.SessionFactory() as session:
-                for table in tables:
-
-                    session.execute(
-                        text(f"SELECT create_hypertable('{table}', :time_col, if_not_exists => :if_exists, migrate_data => :migrate)"),
-                        params
-                    )
-                session.commit()
-                self._log.debug(f"Hypertable creation ensured for: {', '.join(tables)}")
-
-        except SQLAlchemyError as e:
-            self._log.error("Failed to ensure hypertables: %s", e)
-
-
-    # -------------------------
-    # 7. Enable compression
-    # -------------------------
-    def ensure_compression_enabled(self) -> None:
-        """Enable TimescaleDB compression on device_metrics_narrow and device_metrics_wide tables.
-        """
-        with self.SessionFactory() as session:
-            self._log.info("Setting up compression policy")
-
-            if not session:
-                    self._log.error("Cannot set up compression — not tsdb_connected.")
-                    return
-            # Enable TimescaleDB compression on device_metrics_narrow.
-            try:
-                sql: str = (
-                    "ALTER TABLE device_metrics_narrow SET ("
-                    "timescaledb.compress, "
-                    f"timescaledb.compress_orderby = '{self.compress_orderby}', "
-                    f"timescaledb.compress_segmentby = '{self.compress_segmentby_narrow}'"
-                    ");"
-                )
-                session.execute(text(sql))
-                session.commit()
-                self._log.debug("_enable_compression_narrow executed")
-            except SQLAlchemyError as e:
-                self._log.error(f"_enable_compression_narrow error device_metrics_narrow: {e}")
-                try:
-                    session.rollback()
-                except SQLAlchemyError as e2:
-                    self._log.error(f"_enable_compression_narrow rollback error: {e2}")
-
-            # Enable TimescaleDB compression on device_metrics_wide.
-            if self.wide_table_flag:
-                try:
-                    sql = (
-                        "ALTER TABLE device_metrics_wide SET ("
-                        "timescaledb.compress, "
-                        f"timescaledb.compress_orderby = '{self.compress_orderby}', "
-                        f"timescaledb.compress_segmentby = '{self.compress_segmentby_wide}'"
-                        ");"
-                    )
-                    session.execute(text(sql))
-                    session.commit()
-                    self._log.debug("_enable_compression_wide executed")
-                except SQLAlchemyError as e:
-                    self._log.error(f"_enable_compression_wide error device_metrics_wide: {e}")
-                    try:
-                        session.rollback()
-                    except SQLAlchemyError as e2:
-                        self._log.error(f"_enable_compression_wide rollback error: {e2}")
-
-            with session.begin():
-                for  chunk_interval in [
-                    (self.hourly_chunk_time_interval),
-                    (self.daily_chunk_time_interval),
-                    (self.weekly_chunk_time_interval),
-                    (self.monthly_chunk_time_interval),
-                ]:
-
-                    # add compression policy
-                    self.ensure_compression_policy("device_metrics_narrow", chunk_interval)
-                    if self.wide_table_flag:
-                        self.ensure_compression_policy("device_metrics_wide", chunk_interval)
-
-            session.commit()
-
-    # -------------------------
-    # 7b. Add compression policy
-    # -------------------------
-    def ensure_compression_policy(self, source, chunk_interval) -> None:
-        """Automatically compress chunks older than chunk_time_interval."""
-        with self.SessionFactory() as session:
-
-            if not session:
-                    self._log.error("Cannot add compression policy — not tsdb_connected.")
-                    return
-
-            try:
-                sql: str = f"SELECT add_compression_policy('{source}', compress_after => INTERVAL '{chunk_interval}', if_not_exists => TRUE);"
-
-                session.execute(text(sql))
-
-                self._log.debug(f"_add_compression_policy {source} for {chunk_interval} executed")
-            except SQLAlchemyError as e:
-                self._log.error(f"_add_compression_policy {source} for {chunk_interval} error: {e}")
-                try:
-                    session.rollback()
-                except SQLAlchemyError as e2:
-                    self._log.error(f"_add_compression_policy {source} for {chunk_interval} rollback error: {e2}")
-
-    # -------------------------
-    # 9. Add retention policy
-    # -------------------------
-    def ensure_retention_policy(self) -> None:
-        """
-        Drop old data automatically after drop_after interval.
-        """
-        with self.SessionFactory() as session:
-            if not session:
-                    self._log.error("Cannot add retention policies — not tsdb_connected.")
-                    return
-
-            drop_after: str = self.drop_after
-
-            try:
-                sql1: str = "SELECT remove_retention_policy('device_metrics_narrow', if_exists => True);"
-                sql2: str = f"SELECT add_retention_policy('device_metrics_narrow', INTERVAL '{drop_after}');"
-
-                session.execute(text(sql1))
-                session.execute(text(sql2))
-                session.commit()
-                self._log.debug("_add_retention_policy_narrow executed")
-            except SQLAlchemyError as e:
-                self._log.error(f"_add_retention_policy_narrow error: {e}")
-                try:
-                    session.rollback()
-                except SQLAlchemyError as e2:
-                    self._log.error(f"_add_retention_policy_narrow rollback error: {e2}")
-
-            if self.wide_table_flag:
-                try:
-                    sql1b: str = "SELECT remove_retention_policy('device_metrics_wide', if_exists => True);"
-                    sql2b: str = f"SELECT add_retention_policy('device_metrics_wide', INTERVAL '{drop_after}');"
-
-                    session.execute(text(sql1b))
-                    session.execute(text(sql2b))
-                    session.commit()
-                    self._log.debug("_add_retention_policy_wide executed")
-                except SQLAlchemyError as e:
-                    self._log.error(f"_add_retention_policy_wide error: {e}")
-                    try:
-                        session.rollback()
-                    except SQLAlchemyError as e2:
-                        self._log.error(f"_add_retention_policy_wide rollback error: {e2}")
-
-    # -------------------------
-    # 10 Rollups
-    # -------------------------
-    def setup_with_retry(self) -> None:
-        max_rollup_retries = 3
-        for attempt in range(max_rollup_retries):
-            try:
-                self.ensure_rollups()
-                break # Success!
-            except Exception as e:
-                if "lock_timeout" in str(e):
-                    self._log.warning(f"Lock timeout on attempt {attempt+1}. Retrying...")
-                    time.sleep(5) # Wait for flush thread to clear
-                else:
-                    raise  # Real error, don't retry
-
-    # 10a
-    def ensure_rollups(self) -> None:
-        """
-        Sets up continuous aggregate rollups based on predefined configurations.
-        Uses a Scan-then-Purge approach to handle hierarchical dependencies safely.
-        Checks if rollups need to be rebuilt and creates them accordingly.
-        """
-        self.migration_in_progress.set()
-        self._log.info("Pausing flush thread for migration...")
-
-        try:
-            with self.SessionFactory() as session:
-                with self._reconnect_lock:
-                    tsdb_connected: bool = self.tsdb_connected
-
-                if not tsdb_connected or not session:
-                    self._log.error("Cannot set up rollups — not tsdb_connected.")
-                    return
-
-                self._log.info("Starting continuous aggregate setup...")
-
-                # 1. Configuration Setup
-                contexts: list[dict[str]] = [
-                    {
-                        "table_name": "device_metrics_narrow",
-                        "segments": {
-                            "hourly_rollup": "hourly_rollup_narrow",
-                            "daily_rollup": "daily_rollup_narrow",
-                            "weekly_rollup": "weekly_rollup_narrow",
-                            "monthly_rollup": "monthly_rollup_narrow",
-                        }
-                    }
-                ]
-                if self.wide_table_flag:
-                    contexts.append({
-                        "table_name": "device_metrics_wide",
-                        "segments": {
-                            "hourly_rollup": "hourly_rollup_wide",
-                            "daily_rollup": "daily_rollup_wide",
-                            "weekly_rollup": "weekly_rollup_wide",
-                            "monthly_rollup": "monthly_rollup_wide",
-                        }
-                    })
-
-                view_configs: List[Tuple[str]] = [
-                    ("hourly_rollup", self.hourly_rollup_bucket, self.hourly_rollup_start, self.hourly_chunk_time_interval),
-                    ("daily_rollup", self.daily_rollup_bucket, self.daily_rollup_start, self.daily_chunk_time_interval),
-                    ("weekly_rollup", self.weekly_rollup_bucket, self.weekly_rollup_start, self.weekly_chunk_time_interval),
-                    ("monthly_rollup", self.monthly_rollup_bucket, self.monthly_rollup_start, self.monthly_chunk_time_interval),
-                ]
-
-                # 2. Scan Phase: Detect if any bucket change exists across the whole stack
-                any_rebuild_needed = False
-                for context in contexts:
-                    for view_key, bucket, _, _ in view_configs:
-                        view_name: str = context["segments"][view_key]
-                        if self.rollup_needs_rebuild(session, view_name, bucket):
-                            any_rebuild_needed = True
-                            break
-                    if any_rebuild_needed:
-                        break
-
-                # 3. Purge Phase: If a change is detected, wipe the slate clean in correct order
-                if any_rebuild_needed:
-                    self._log.info("Bucket change detected. Purging all rollups for clean rebuild.")
-                    # This method must drop Weekly -> Daily -> Hourly with sequential commits
-                    self._drop_all_continuous_aggregates(session)
-                    # Purge orphaned scheduler jobs
-                    self._purge_ghost_jobs(session)
-
-                # 4. Creation Phase: Build/Verify Bottom-Up (Hourly -> Daily -> Weekly)
-                for context in contexts:
-                    source_table: str = context["table_name"]
-                    current_source: str = source_table  # Reset source for each context (Narrow vs Wide)
-                    rollup_segments: str = context["segments"]
-
-                    for view_key, bucket, start_offset, chunk_time_interval in view_configs:
-                        view_name = rollup_segments[view_key]
-
-                        # If the view doesn't exist (due to purge or first run), create it
-                        if not self._view_exists(session, view_name):
-                            self._log.info(f"Creating {view_name} from {current_source}...")
-                            self._create_narrow_rollup(session, current_source, view_name, bucket, start_offset, chunk_time_interval)
-                        else:
-                            self._log.debug(f"View {view_name} is already up to date.")
-
-                        # Update current_source for Hierarchical Aggregation
-                        # Note: Monthly is kept on the source_table
-                        if view_key == 'weekly_rollup':
-                            current_source = source_table
-                        elif view_key != 'monthly_rollup':
-                            current_source = view_name
-
-                self._log.info("Continuous aggregate setup completed successfully.")
-        finally:
-            # 2. Always re-enable flushing, even if migration fails
-            self.migration_in_progress.clear()
-            self._log.info("Resuming flush thread.")
-
-
-    # -------------------------
-    # 10d
-    # -------------------------
-
-    def _create_narrow_rollup(self, session: Session, source: str, view_name: str, bucket_interval: str, start_offset: str, chunk_time_interval: str) -> None:
-        """
-        Creates a continuous aggregate with proper hierarchical logic and locking.
-        """
-        r_settings: dict = self._get_dynamic_settings()
-
-        if not session:
-            self._log.error("Cannot create rollup — not connected.")
-            return
-
-        # 1. Set local lock timeout to fail fast if blocked by flush thread.  Set dynamically from settings.
-        session.execute(text(f"SET LOCAL lock_timeout = '{r_settings['lock_timeout']}';"))
-
-        # 2. Determine Aggregation Mode
-        # If source is another view, we MUST use rollup(). If it's a hypertable, use stats_agg().
-        reading_from_raw = source in ["device_metrics_narrow", "device_metrics_wide"]
-
-        if reading_from_raw:
-            agg_func = "stats_agg(metric_value)"
-            min_func = "metric_value"
-            max_func = "metric_value"
-        else:
-            agg_func = "rollup(stats_summary)"
-            min_func = "min_value"
-            max_func = "max_value"
-
-        try:
-            # 3. Branch for Wide vs Narrow
-            if self.wide_table_flag and "wide" in source:
-                # mapping columns for wide table rollups
-                self._create_wide_rollup(session, source, view_name, bucket_interval, agg_func)
-            else:
-                # 4. Standard Narrow View Creation
-                # Uses 3-arg time_bucket for IANA timezone midnight alignment
-                session.execute(text(f"""
-                    CREATE MATERIALIZED VIEW {view_name}
-                    WITH (timescaledb.continuous = true) AS
-                    SELECT
-                        time_bucket(INTERVAL '{bucket_interval}', m_time, '{machine_timezone}') AS m_time,
-                        device_info_id,
-                        metric_name,
-                        MIN({min_func}) AS min_value,
-                        MAX({max_func}) AS max_value,
-                        {agg_func} AS stats_summary
-                    FROM {source}
-                    GROUP BY 1, 2, 3
-                    WITH NO DATA;
-                """))  # noqa: S608
-
-            # 5. Apply Policies & Index
-            self._add_aggregate_policy(session, view_name, bucket_interval, start_offset, chunk_time_interval)
-
-
-            # 6. Finalize the view so it is available as a 'source' for the next view in the loop
-            session.commit()
-            self._log.info(f"Successfully created hierarchical rollup: {view_name}")
-
-        except Exception as e:
-            session.rollback()
-            self._log.error(f"Failed to create {view_name}: {e}")
-            raise
-
-    def _add_aggregate_policy(self, session: Session, view_name: str, bucket_interval: str, start_offset: str, chunk_time_interval: str) -> None:
-        """
-        Applies refresh, retention, and compression policies to a newly created view
-        using granularity-specific settings from hypertable_policy.
-        """
-        # 1. Map view name to its granularity key for lookup
-        name_lower: str = view_name.lower()
-
-        # Define the supported granularities
-        granularities: List[str] = ["hourly", "daily", "weekly", "monthly"]
-
-        # Find the first matching granularity or use "default"
-        granularity: str = next((g for g in granularities if g in name_lower), "default")
-
-        # Dynamically retrieve the value from self
-        # This replaces the need for self.get() as the values are already stored as attributes
-        compress_after: str = getattr(self, f"{granularity}_compress_after_interval")
-        drop_after: str = getattr(self, "drop_after", "2 years")
-
-
-        try:
-            session.execute(text("SET LOCAL lock_timeout = '10s';"))
-
-            # 2. Add Continuous Aggregate Refresh Policy
-            session.execute(text(f"""
-                SELECT add_continuous_aggregate_policy(
-                    '{view_name}',
-                    start_offset      => INTERVAL '{start_offset}',
-                    end_offset        => INTERVAL '{bucket_interval}',
-                    initial_start     => '{self.anchor_start_time_utc}'::timestamptz,
-                    schedule_interval => INTERVAL '{bucket_interval}',
-                    if_not_exists     => true
-                );
-            """))
-
-            # 3. Add Data Retention Policy (Specific to the view)
-            session.execute(text(f"""
-                SELECT add_retention_policy(
-                    '{view_name}',
-                    drop_after => INTERVAL '{drop_after}',
-                    if_not_exists => true
-                );
-            """))
-
-            # 4. Enable and Configure Compression Policy for the view
-            if self.enable_compression:
-                # For CAGGs, enable compression via ALTER MATERIALIZED VIEW
-                session.execute(text(f"ALTER MATERIALIZED VIEW {view_name} SET (timescaledb.compress = true);"))
-
-                # Add compression policy using the granularity-matched interval
-                session.execute(text(f"""
-                    SELECT add_compression_policy(
-                        '{view_name}',
-                        compress_after => INTERVAL '{compress_after}',
-                        if_not_exists => true
-                    );
-                """))
-
-            # 5. Performance Index
-            safe_view_name: str = view_name.replace('"', '').replace('.', '_')
-            index_name: str = f"idx_{safe_view_name}_time"
-
-            session.execute(text(f"""
-                CREATE INDEX IF NOT EXISTS {index_name} ON {view_name} (m_time DESC);
-            """))
-
-            session.commit()
-            self._log.info(f"Policies applied to {view_name}: Retention={drop_after}, Compression After={compress_after}")
-
-        except Exception as e:
-            session.rollback()
-            self._log.error(f"Failed to apply policies to {view_name}: {e}")
-            raise
-
-
-    def _create_wide_rollup(self, session: Session, source: str, view_name: str, bucket_interval: str, agg_func: str) -> None:
-        """
-        Creates the complex 'wide' materialized view with dynamic column mapping.
-        """
-        try:
-            # 1. Fail-fast locking for the wide table migration
-            session.execute(text("SET LOCAL lock_timeout = '15s';"))
-
-            # 2. Build the dynamic SQL
-            # We pass agg_func ('stats_agg' or 'rollup') to ensure hierarchical consistency
-            metric_columns: list = self._resolve_metric_columns(session, agg_func)
-
-            sql = f"""
-                CREATE MATERIALIZED VIEW {view_name}
-                WITH (timescaledb.continuous = true) AS
-                SELECT
-                    time_bucket(INTERVAL '{bucket_interval}', m_time, '{machine_timezone}') AS m_time,
-                    device_info_id,
-                    {', '.join(metric_columns)}
-                FROM {source}
-                GROUP BY 1, 2
-                WITH NO DATA;
-            """  # noqa: S608
-
-            self._log.debug(f"Executing Wide View DDL for {view_name}")
-            session.execute(text(sql))
-
-            # 3. Commit the view structure before applying policies
-            session.commit()
-
-        except Exception as e:
-            session.rollback()
-            self._log.error(f"_create_rollup_wide error for {view_name}: {e}")
-            raise
-
-    def _resolve_metric_columns(self, session: Session, agg_func: str) -> List[str]:
-        """
-        Generates SQL aggregate expressions for the 'wide' table.
-        - If reading from hypertable: uses stats_agg(column)
-        - If reading from another view: uses rollup(stats_summary_column)
-        """
-        # 1. Fetch all clean column names from the catalog
-        result: engine.Result[Any] = session.execute(text("SELECT clean_column_name FROM metric_catalog ORDER BY clean_column_name"))
-        column_names: List[str] = list(result.scalars())
-
-        metric_expressions: list = []
-
-        # Check if we are at the base level (reading raw data) or hierarchical (reading an aggregate)
-        is_base_level: bool = agg_func == 'stats_agg(metric_value)'
-
-        for col in column_names:
-            if is_base_level:
-                # Base Level: Creating the first aggregate (e.g., Hourly) from the Hypertable
-                # Columns: min_Col, max_Col, stats_summary_Col
-                metric_expressions.append(f"MIN({col}) AS min_{col}")
-                metric_expressions.append(f"MAX({col}) AS max_{col}")
-                metric_expressions.append(f"stats_agg({col}) AS stats_summary_{col}")
-            else:
-                # Hierarchical Level: Creating Daily from Hourly, or Weekly from Daily
-                # We must target the Aliased columns created by the previous view level.
-                # Example: rollup(stats_summary_Volts) AS stats_summary_Volts
-                metric_expressions.append(f"MIN(min_{col}) AS min_{col}")
-                metric_expressions.append(f"MAX(max_{col}) AS max_{col}")
-                metric_expressions.append(f"rollup(stats_summary_{col}) AS stats_summary_{col}")
-
-        return metric_expressions
-
-
-    def rollup_needs_rebuild(self, session: Session, view_name: str, bucket_interval: str) -> bool:
-        """
-        Checks if a rollup exists and if its bucket matches the current config.
-        Returns True if the rollup is missing or configuration is mismatched.
-        """
-        # 1. Map friendly terms to PG Interval inputs
-        # This allows 'monthly' -> '1 month', while letting '2 hours' pass through as-is
-        mapping: dict[str, str] = {
-            "monthly": "1 month",
-            "weekly": "7 days",
-            "daily": "1 day",
-            "hourly": "1 hour"
-        }
-        target_pg_val: str = mapping.get(bucket_interval.lower(), bucket_interval)
-
-        try:
-            # 2. Query the TimescaleDB catalog for the view definition
-            # Use a bind parameter :view_name for security and performance
-            check_sql: TextClause = text("""
-                SELECT view_definition
-                FROM timescaledb_information.continuous_aggregates
-                WHERE view_name = :view_name
-            """)
-            view_def: Optional[str] = session.scalar(check_sql, {"view_name": view_name})
-
-            # Logic: If it doesn't exist, we definitely need to build it
-            if not view_def:
-                self._log.debug(f"Rollup {view_name} does not exist. Rebuild required.")
-                return True
-
-            # 3. If the result exists, extract the 'interval' string from the definition
-            # We use Postgres regex_match to find the first argument of time_bucket()
-            # Pattern looks for: time_bucket('interval_text', ...)
-            extract_sql: TextClause = text("""
-                SELECT (regexp_match(:vdef, 'time_bucket\\(''([^'']+)''', 'i'))[1]
-            """)
-            current_interval_str: Optional[str] = session.scalar(extract_sql, {"vdef": view_def})
-
-            if not current_interval_str:
-                self._log.warning(f"Could not parse time_bucket interval from {view_name} definition.")
-                return True
-
-            # 4. Final Comparison: Let PostgreSQL handle the semantic equality
-            # This correctly recognizes that '01:00:00'::interval = '1 hour'::interval
-            match_sql: TextClause = text("SELECT (:current)::interval = (:target)::interval")
-            is_match: bool = session.scalar(match_sql, {"current": current_interval_str, "target": target_pg_val})
-
-            if not is_match:
-                self._log.info(
-                    f"Config mismatch for {view_name}. "
-                    f"Found: {current_interval_str}, Expected: {target_pg_val}. Rebuild required."
-                )
-                return True
-            else:
-                # 4. Exists and matches config
-                self._log.info(
-                    f"Rollup config matches for {view_name}. "
-                    f"Expected: {bucket_interval} and received {target_pg_val}. No rebuild required."
-                )
-                return False
-
-        except SQLAlchemyError as e:
-            self._log.error(f"Database error while checking rollup {view_name}: {e}")
-            # Default to True to ensure we don't skip a necessary build on error
-            return True
-
-
-    # -------------------------
-    #  Determine wide vs narrow table usage for resource settings
-    # -------------------------
-    def _get_dynamic_settings(self) -> dict:
-        """Returns dynamic settings based on the current metric count."""
-        metric_count: int = getattr(self, 'current_metric_count', 0)
-
-        if not self.wide_table_flag or metric_count > 200:
-            return self.performance_tiers["tier_low"]  # Force narrow table settings
-
-        # Check tiers from highest to lowest
-        for tier_name in ["tier_high", "tier_medium", "tier_low"]:
-            tier: dict[str, Any] = self.performance_tiers[tier_name]
-            if metric_count <= tier["count"]:
-                return tier
-
-        return self.performance_tiers["tier_low"] # Fallback default
-
-    def _view_exists(self, session: Session, view_name: str) -> bool:
-        """Check to see if a continuous aggregate exists in the catalog."""
-        check_sql = text("SELECT 1 FROM timescaledb_information.continuous_aggregates WHERE view_name = :name")
-        return session.execute(check_sql, {"name": view_name}).fetchone() is not None
-
-
-    def _drop_all_continuous_aggregates(self, session: Session) -> None:
-        """
-        Teardown all rollups in correct dependency order (Top-Down) to
-        fix the 'DependentObjectsStillExist' error.
-        """
-        r_settings = self._get_dynamic_settings()
-        try:
-            # 1. Fetch current aggregates
-            result = session.execute(text("""
-                SELECT view_schema, view_name
-                FROM timescaledb_information.continuous_aggregates;
-            """))
-            views = result.fetchall()
-
-            if not views:
-                self._log.info("No continuous aggregates found to drop.")
-                return
-
-            # 2. Define Priority: Child views (Weekly) MUST be dropped before Parent views (Daily)
-            # This prevents internal _partial_view dependencies from blocking the drop.
-            priority_map: dict[str, int] = {"monthly": 4, "weekly": 3, "daily": 2, "hourly": 1}
-
-            def get_drop_rank(v_tuple) -> int:
-                name_lower: str = v_tuple[1].lower()
-                for key, val in priority_map.items():
-                    if key in name_lower:
-                        return val
-                return 0
-
-            # Sort descending: 4 (Weekly) drops first, 1 (Hourly) drops last.
-            sorted_views = sorted(views, key=get_drop_rank, reverse=True)
-
-            # 3. Iterate and drop each view safely
-            for schema, name in sorted_views:
-                full_name = f'"{schema}"."{name}"'
-                self._log.info(f"Purging rollup: {full_name}")
-
-                # 3b. Fail-fast if locked by background flush or refresh jobs
-                session.execute(text(f"SET LOCAL lock_timeout = '{r_settings['lock_timeout']}';"))
-
-                # 4. Disable Compression (Mandatory for a clean drop of compressed CAGGs)
-                try:
-                    session.execute(text(f"ALTER MATERIALIZED VIEW {full_name} SET (timescaledb.compress = false);"))
-                except Exception:
-                    self._log.info(f"View was already uncompressed: {full_name}")
-                    pass # Already uncompressed or doesn't support it
-
-                # 5. Remove policies first
-                session.execute(text(f"SELECT remove_continuous_aggregate_policy('{full_name}', if_exists => true);"))
-                session.execute(text(f"SELECT remove_retention_policy('{full_name}', if_exists => true);"))
-
-                # 6. Acquire Exclusive Lock & Drop
-                session.execute(text(f"LOCK TABLE {full_name} IN ACCESS EXCLUSIVE MODE;"))
-                session.execute(text(f"DROP MATERIALIZED VIEW IF EXISTS {full_name} CASCADE;"))
-
-                # 7. Critical: Commit after each view
-                # This releases internal metadata locks and allows the next DROP in the stack to succeed.
-                session.commit()
-                self._log.info(f"Successfully purged {full_name}")
-
-            self._log.info("Full rollup stack teardown complete.")
-
-        except Exception as e:
-            session.rollback()
-            self._log.error(f"Failed to purge rollup stack: {e}")
-            raise
-
-    # 10e
-
-    def refresh_rollups(self, force_full: bool = False) -> None:
-        """
-        Refreshes rollups in Bottom-Up order (Hourly -> Daily -> Weekly).
-        This ensures parent views have data available from their child sources.
-        Params: force_full (bool): If True, refreshes the entire range of data.
-        """
-        with self.SessionFactory() as session:
-            with self._reconnect_lock:
-                tsdb_connected: bool = self.tsdb_connected
-
-            if not tsdb_connected or not session:
-                self._log.error("Cannot refresh rollups — not tsdb_connected.")
-                return
-
-            try:
-                # 1. Define the refresh sequence: Smallest Grain -> Largest Grain
-                # Monthly is independent (from hypertable), so it can go anywhere.
-                refresh_sequence: List[Tuple[str]] = [
-                    ("hourly_rollup_narrow", self.hourly_rollup_start),
-                    ("hourly_rollup_wide", self.hourly_rollup_start),
-                    ("daily_rollup_narrow", self.daily_rollup_start),
-                    ("daily_rollup_wide", self.daily_rollup_start),
-                    ("weekly_rollup_narrow", self.weekly_rollup_start),
-                    ("weekly_rollup_wide", self.weekly_rollup_start),
-                    ("monthly_rollup_narrow", self.monthly_rollup_start),
-                    ("monthly_rollup_wide", self.monthly_rollup_start),
-                ]
-
-                for view_name, start_offset in refresh_sequence:
-                    # 2. Check if the view exists before refreshing
-                    # (Safety check in case of a partial migration)
-                    if self._view_exists(session, view_name):
-                        self._refresh_single_rollup(session, view_name, start_offset, force_full)
-                    else:
-                        self._log.warning(f"Skipping refresh: {view_name} does not exist.")
-
-            except Exception as e:
-                self._log.error(f"Rollup refresh failed: {e}")
-
-    def _refresh_single_rollup(self, session: Session, view_name: str, start_offset: str, force_full: bool = False) -> None:
-        """
-        Refreshes a rollup with duration tracking and performance logging.
-        """
-        r_settings: dict = self._get_dynamic_settings()
-
-        stop_signal: List[bool] = self._start_refresh_watchdog(view_name)
-
-        start_time: float = time.perf_counter()
-        mode = "FULL" if force_full else "INCREMENTAL"
-
-        self._log.info(f"Starting {mode} refresh for {view_name}...")
-
-        # AUTOCOMMIT is mandatory for CALL refresh_continuous_aggregate
-        with session.bind.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
-            conn.execute(text(f"SET LOCAL work_mem = '{r_settings['work_mem']}';"))
-            try:
-                if force_full:
-                    # Refresh from the beginning of time to now
-                    conn.execute(text(f"CALL refresh_continuous_aggregate('{view_name}', NULL, now());"))
-                else:
-                    # Incremental refresh
-                    conn.execute(text(f"""
-                        CALL refresh_continuous_aggregate(
-                            '{view_name}',
-                            now() - INTERVAL '{start_offset}',
-                            now()
-                        );
-                    """))
-
-                end_time: float = time.perf_counter()
-                duration_seconds: float = end_time - start_time
-
-                # Log the duration in a scannable format
-                self._log.info(
-                    f"{mode} refresh COMPLETED for {view_name}. "
-                    f"Duration: {duration_seconds:.2f}s "
-                    f"({int(duration_seconds // 60)}m {int(duration_seconds % 60)}s)"
-                )
-
-
-            except Exception as e:
-                self._log.error(f"{mode} refresh FAILED for {view_name} after {time.perf_counter() - start_time:.2f}s: {e}")
-                raise # Re-raise to let the parent caller decide if it should continue
-
-            finally:
-                # Ensure the watchdog thread stops
-                stop_signal[0] = True
-
-    # watchdog refresh management
-    def _stop_existing_watchdog(self):
-        """Signals the existing watchdog to exit immediately."""
-        if hasattr(self, '_current_watchdog_signal') and self._current_watchdog_signal:
-            self._current_watchdog_signal[0] = True
-            self._current_watchdog_signal = None
-
-    # watchdog thread to monitor long-running refreshes
-    def _start_refresh_watchdog(self, view_name: str) -> List[bool]:
-        # 1. Kill any existing watchdog before starting a new one
-        self._stop_existing_watchdog()
-
-        # 2. Create the new stop signal
-        stop_signal: List[bool] = [False]
-        self._current_watchdog_signal: List[bool] = stop_signal
-
-        def monitor() -> None:
-            # Use a short-lived session specifically for monitoring
-            with self.SessionFactory() as session:
-                # Check both the signal and the DB state
-                while not stop_signal[0]:
-                    try:
-                        # We check if the refresh is still running
-                        sql: str = text("""
-                            SELECT wait_event_type FROM pg_stat_activity
-                            WHERE query LIKE :pattern
-                            AND state != 'idle'
-                            AND pid != pg_backend_pid()
-                        """)
-                        res = session.execute(sql, {"pattern": f"%refresh_continuous_aggregate%'{view_name}'%"}).fetchone()
-
-                        # If the query is gone from pg_stat_activity, the refresh is done
-                        if not res:
-                            break
-
-                        if res.wait_event_type == 'Lock':
-                            self._send_pushover_message(f"⚠️ {view_name} is BLOCKED by a lock.")
-
-                        # Sleep in small increments to remain responsive to the stop_signal
-                        for _ in range(30):
-                            if stop_signal[0]:
-                                return
-                            time.sleep(1)
-
-                    except Exception:
-                        break
-
-        t = threading.Thread(target=monitor, name=f"Watchdog_{view_name}", daemon=True)
-        t.start()
-        return stop_signal
-
-    def _refresh_rollup_loop(self) -> None:
-        """
-        Background loop: Replays backlog, then refreshes hierarchical aggregates.
-        Uses @property tsdb_connected for live state awareness.
-        """
-        self._log.info("Background rollup refresh loop started.")
-
-        while not self._stop_refresh_rollup_event.is_set():
-            try:
-                # 1. Live Connection Check
-                # Uses the @property to peek into the shared rollup_policy dict
-                with self._reconnect_lock:
-                    tsdb_connected: bool = self.tsdb_connected
-
-                if not tsdb_connected:
-                    self._log.debug("Refresh skipped: Database not connected.")
-                    # Wait 60s or until thread stop event is set
-                    self._stop_refresh_rollup_event.wait(timeout=60)
-                    continue
-
-                # 2. Migration Gatekeeper
-                # Pause if a schema migration (rebuild) is currently running
-                if self.migration_in_progress.is_set():
-                    self._log.debug("Refresh skipped: Migration in progress.")
-                    self._stop_refresh_rollup_event.wait(timeout=30)
-                    continue
-
-                # 3. Drain Backlog Before Refresh
-                # This ensures late/backlogged data is in the hypertable
-                # so the CAGG refresh includes it.
-                with self._backlog_lock:
-                    count: int = self.backlog.replay_to_queue()
-                    if count > 1:
-                        self._log.debug(f"Replayed {count} points. Waiting for flush...")
-                        # Wait for flush worker to finish writing replayed points
-                        self._flush_queue.join()
-
-                # 4. Sequential Hierarchical Refresh
-                # Order: Hourly -> Daily -> Weekly -> Monthly
-                with self.engine.connect() as conn:
-                    conn: Connection = conn.execution_options(isolation_level="AUTOCOMMIT")
-                    # Apply dynamic session settings from performance tiers
-                    tier: dict = self._get_dynamic_settings()
-                    conn.execute(text(f"SET work_mem = '{tier['work_mem']}';"))
-                    conn.execute(text(f"SET lock_timeout = '{tier['lock_timeout']}';"))
-
-                    granularities: List[str] = ["hourly", "daily", "weekly", "monthly"]
-                    prefix = "rollup_wide" if self.wide_table_flag else "rollup_narrow"
-
-                    for gran in granularities:
-                        view_name = f"{gran}_{prefix}"
-
-                        self._log.debug(f"Refreshing continuous aggregate: {view_name}")
-
-                        conn.execute(
-                            text("CALL refresh_continuous_aggregate(:view, NULL, NULL);"),
-                            {"view": view_name}
-                        )
-
-                # 5. Dynamic Sleep
-                # Use the interval from policy (convert seconds to float for wait)
-                wait_time = float(self.auto_refresh_interval)
-                if self._stop_refresh_rollup_event.wait(timeout=wait_time):
-                    break
-
-            except Exception as e:
-                self._log.error(f"Rollup refresh cycle failed: {e}")
-                # Exponential backoff/safety sleep on error
-                self._stop_refresh_rollup_event.wait(timeout=300)
-
-        self._log.info("Background rollup refresh loop exiting.")
-
-    # 10i
-    def stop_auto_refresh(self) -> None:
-        """
-        Cleanly stop the auto rollup refresh thread.
-        """
-        if hasattr(self, "_stop_refresh_rollup_event"):
-            self._stop_refresh_rollup_event.set()
-            self._log.info("Auto rollup refresh thread stopped.")
-
-    def _purge_ghost_jobs(self, session: Session) -> None:
-        """
-        Cleans up aberrant TimescaleDB processes using dynamic type-based thresholds.
-        """
-        self._log.info("Initiating dynamic ghost & stale job sweep...")
-
-        # Define thresholds based on TimescaleDB common job patterns
-        # Refresh: Short (30m), Compression/Retention: Long (6h), Others: Standard (1h)
-        detect_sql = text("""
-            WITH job_thresholds AS (
-                SELECT
-                    j.job_id,
-                    j.application_name,
-                    js.last_run_started_at,
-                    js.last_run_status,
-                    CASE
-                        WHEN j.application_name LIKE 'Refresh Continuous Aggregate%' THEN INTERVAL '30 minutes'
-                        WHEN j.application_name LIKE 'Compression Policy%' THEN INTERVAL '6 hours'
-                        WHEN j.application_name LIKE 'Retention Policy%' THEN INTERVAL '2 hours'
-                        ELSE INTERVAL '1 hour'
-                    END as allowed_duration
-                FROM timescaledb_information.jobs j
-                LEFT JOIN timescaledb_information.job_stats js ON j.job_id = js.job_id
-            )
-            SELECT
-                t.job_id,
-                t.application_name,
-                CASE
-                    -- 1. Orphaned
-                    WHEN (t.application_name LIKE 'Refresh%' OR t.application_name LIKE 'Retention%')
-                        AND NOT EXISTS (
-                            SELECT 1 FROM timescaledb_information.continuous_aggregates c
-                            JOIN timescaledb_information.jobs j2 ON t.job_id = j2.job_id
-                            WHERE j2.hypertable_name = c.view_name
-                        ) THEN 'ORPHANED_METADATA'
-
-                    -- 2. Stale
-                    WHEN t.last_run_status = 'Started' AND t.last_run_started_at < now() - t.allowed_duration
-                        THEN 'STALE_EXECUTION'
-
-                    -- 3. Ghost (PID check via application_name)
-                    WHEN t.last_run_status = 'Started'
-                        AND NOT EXISTS (
-                            SELECT 1 FROM pg_stat_activity p
-                            WHERE p.application_name LIKE '%' || t.job_id || '%'
-                        ) THEN 'GHOST_PROCESS'
-
-                    ELSE NULL
-                END as aberrancy_type
-            FROM job_thresholds t
-            WHERE 1=1; -- Add filter for NOT NULL if needed
-        """)
-
-        try:
-            ghosts = session.execute(detect_sql).fetchall()
-
-            if not ghosts:
-                self._log.info("All background workers healthy.")
-                return
-
-            for job_id, app_name,  issue in ghosts:
-                self._log.warning(f"Purging {issue}: {app_name} (Job {job_id})")
-
-                # Terminate hanging backend if it still technically exists (Stale case)
-                if issue == 'STALE_EXECUTION':
-                    session.execute(text("SELECT pg_terminate_backend(:pid);"))
-
-                # delete_job() terminates any remaining worker and removes the schedule
-                session.execute(text("SELECT delete_job(:job_id);"), {"job_id": job_id})
-
-            session.commit()
-        except Exception as e:
-            session.rollback()
-            self._log.error(f"Sweep failed: {e}")
-
-
-    # 10  may eventually need this method to parse interval strings from settings
-    def _parse_interval_days(self, interval_str: str) -> float:
-        """
-        Convert interval strings like '7 days' or '6 hours' into fractional days.
-        """
-        try:
-            parts: List[str] = interval_str.lower().split()
-            if len(parts) != 2:
-                return 7  # default fallback
-            value = float(parts[0])
-            unit: str = parts[1]
-            if "hour" in unit:
-                return value / 24.0
-            elif "day" in unit:
-                return value * 1
-            elif "week" in unit:
-                return value * 7
-            elif "month" in unit:
-                return value * 30
-            else:
-                return value
-        except Exception:
-            return 7.0
 class BacklogManager:
     """
     Manages persistent backlog storage and replay for TimescaleDB writes.
@@ -2774,3 +1599,1309 @@ class BacklogManager:
                         f.write(json.dumps(p, default=str) + "\n")
             except Exception as e:
                 self._log.error(f"Failed to sync backlog to disk: {e}")
+
+
+class RollupManager:
+    """ summary logic
+        The RollupManger class creates the structures that enable TimescaleDB rollup views.
+        After all structures are built:
+        1 RollupManager wakes up.
+        2 RollupManager tells BacklogManager to put everything into the _flush_queue if backlog data exists.
+            The _flush_queue is the threaded queue object that accepts PPG data obtained from the source transport.
+        3 RollupManager calls _flush_queue.join() (it pauses here).
+        4 _flush_worker finishes writing everything to the Hypertable and calls task_done() for each.
+        5 RollupManager resumes and calls refresh_continuous_aggregate.
+
+        Backlog Safety: The _refresh_rollup_loop wraps replay_to_queue() in the _backlog_lock and waits for completion via .join().
+        Attribute Persistence: All granular intervals (e.g., hourly_compress_after_interval) are mapped from the rollup_policy in __init__.
+        Live State: tsdb_connected and current_metric_count are implemented as @property to track the timescaledb class state in real-time.
+        SQL Execution: The SET LOCAL work_mem uses the single-quote fix to prevent f-string placeholder errors.
+    """
+
+    def __init__(
+        self,
+        rollup_policy: dict,
+        SessionFactory: Callable[..., Session],
+        Engine: engine,
+        wide_table_flag: bool,
+        migration_in_progress: threading.Event,
+        send_pushover_message,
+        log: logging.Logger,
+        backlog_lock: threading.RLock,
+        flush_queue: queue.Queue,
+        backlog: BacklogManager,
+        reconnect_lock: threading.Lock
+        ) -> None:
+
+        self.rollup_policy: dict = rollup_policy
+        self.SessionFactory: Callable[..., Session] = SessionFactory
+        self.engine: engine = Engine
+        self.wide_table_flag: bool = wide_table_flag
+        self.migration_in_progress: threading.Event = migration_in_progress
+        self._send_pushover_message = send_pushover_message
+        self._log: logging.Logger = log
+        self._backlog_lock: threading.RLock = backlog_lock
+        self._flush_queue: queue.Queue  = flush_queue
+        self.backlog: 'BacklogManager'  = backlog
+        self._reconnect_lock: threading.Lock = reconnect_lock
+
+        self._refresh_rollup_thread = threading.Thread(target=self._refresh_rollup_loop, daemon=True, name="RollupAutoRefreshThread")
+        self._stop_refresh_rollup_event: threading.Event = getattr(self, "_stop_refresh_rollup_event", threading.Event())
+
+        self.performance_tiers: dict[str, dict[str, Any]] = {
+        "tier_low":    {"count": 50,  "work_mem": "32MB",  "lock_timeout": "10s", "flush_batch_size": 10},
+        "tier_medium": {"count": 100, "work_mem": "64MB",  "lock_timeout": "15s", "flush_batch_size": 20},
+        "tier_high":   {"count": 200, "work_mem": "128MB", "lock_timeout": "30s", "flush_batch_size": 40},
+        }
+
+        """
+        Rollup Type
+            refresh rollup    start_offset   compress_after   reason
+            1 Hour	          3 hours	     1 day	          Allows a 3-hour window for late data before locking it via compression.
+            1 Day	          3 days	     7 days	          Ensures daily rollups are finalized before compressing.
+            1 Week	          2 weeks	     1 month	      Larger window helps capture any delayed source data updates.
+            1 Month	          2 months	     3 months	      Maximum safety for long-term historical accuracy.
+        """
+
+        # hypertable defaults
+        self.hypertable_defaults: dict[str, Any] = {
+            "compress_segmentby_narrow": "device_info_id, metric_name",
+            "compress_segmentby_wide": "device_info_id",
+            "time_column": "m_time",
+            "compress_orderby": "m_time DESC",
+            "hourly_chunk_time_interval": "1 day",
+            "hourly_compress_after_interval": "2 days",
+            "daily_chunk_time_interval": "7 days",
+            "daily_compress_after_interval": "2 weeks",
+            "weekly_chunk_time_interval": "1 month",
+            "weekly_compress_after_interval": "2 months",
+            "monthly_chunk_time_interval": "4 months",
+            "monthly_compress_after_interval": "6 months",
+        }
+
+        # rollup defaults, continuous aggregate bucket sizes
+        self.rollup_defaults: dict[str, Any] = {
+            "hourly_rollup_bucket": "1 hour",
+            "hourly_rollup_start": "3 hours",
+            "daily_rollup_bucket": "1 day",
+            "daily_rollup_start": "3 days",
+            "weekly_rollup_bucket": "1 week",
+            "weekly_rollup_start": "3 weeks",
+            "monthly_rollup_bucket": "1 month",
+            "monthly_rollup_start": "2 months",
+            "anchor_start_time_utc": "2000-01-01 00:00:00+00",  # default anchor time for rollup alignment
+        }
+
+        self.if_not_exists = True
+
+        # Rollup /Hypertable Settings extracted from rollup_policy  (user can override defaults via rollup_policy)
+        self.current_metric_count: int = self.rollup_policy.get("current_metric_count", 0)
+        self.auto_refresh_interval: int = self.rollup_policy.get("auto_refresh_interval")
+        self.enable_auto_refresh:bool = self.rollup_policy.get("enable_auto_refresh", True)
+        self.enable_rollups = bool(self.rollup_policy.get("enable_rollups", True))
+        self.drop_after: str = self.rollup_policy.get("drop_after")
+        self.migrate_data = bool(self.rollup_policy.get("migrate_data",True))
+        self.enable_compression = bool(self.rollup_policy.get("enable_compression",True))
+
+        # Compression settings
+        self.compress_segmentby_narrow: str= self.hypertable_defaults.get("compress_segmentby_narrow")
+        self.compress_segmentby_wide: str= self.hypertable_defaults.get("compress_segmentby_wide")
+        self.compress_orderby: str= self.hypertable_defaults.get("compress_orderby")
+        self.time_column: str= self.hypertable_defaults.get("time_column")
+
+        self.hourly_chunk_time_interval: str = self.hypertable_defaults.get("hourly_chunk_time_interval")
+        self.daily_chunk_time_interval: str = self.hypertable_defaults.get("daily_chunk_time_interval")
+        self.weekly_chunk_time_interval: str = self.hypertable_defaults.get("weekly_chunk_time_interval")
+        self.monthly_chunk_time_interval: str = self.hypertable_defaults.get("monthly_chunk_time_interval")
+
+        self.hourly_compress_after_interval: str = self.hypertable_defaults.get("hourly_compress_after_interval")
+        self.daily_compress_after_interval: str = self.hypertable_defaults.get("daily_compress_after_interval")
+        self.weekly_compress_after_interval: str = self.hypertable_defaults.get("weekly_compress_after_interval")
+        self.monthly_compress_after_interval: str = self.hypertable_defaults.get("monthly_compress_after_interval")
+
+        # Rollup view settings
+        self.anchor_start_time_utc: str = self.rollup_defaults.get("anchor_start_time_utc")
+
+        self.hourly_rollup_bucket: str = self.rollup_defaults.get("hourly_rollup_bucket")
+        self.daily_rollup_bucket: str = self.rollup_defaults.get("daily_rollup_bucket")
+        self.weekly_rollup_bucket: str = self.rollup_defaults.get("weekly_rollup_bucket")
+        self.monthly_rollup_bucket: str = self.rollup_defaults.get("monthly_rollup_bucket")
+
+        self.hourly_rollup_start: str = self.rollup_defaults.get("hourly_rollup_start")
+        self.daily_rollup_start: str = self.rollup_defaults.get("daily_rollup_start")
+        self.weekly_rollup_start: str = self.rollup_defaults.get("weekly_rollup_start")
+        self.monthly_rollup_start: str = self.rollup_defaults.get("monthly_rollup_start")
+
+    @property
+    def tsdb_connected(self) -> bool:
+        """Always returns the live connection state from the shared policy dict.
+            This allows the RollupManager to react immediately to changes in TSDB connection status,
+            which is critical for coordinating rollup refreshes and backlog replays.
+        """
+        val: bool = self.rollup_policy.get("tsdb_connected", False)
+        # If val is the boolean False, the expression 'val is True or val == "True"' will return False.
+        # basically tries to capture string "True" as well as boolean True if somehow the config was passed as a string.
+        if val is True or val == "True":
+
+            return val is True
+        else:
+            return False
+
+
+    def setup_schema(self) -> None:
+        """
+        This method orchestrates the entire schema setup process, including hypertable creation,
+        compression setup, retention policy, and continuous aggregate rollup creation.
+        Called once during TSDB startup.
+        """
+
+    # 1 Hypertable & Policies
+        try:
+            self.ensure_hypertables()
+            self._log.info("Hypertable check/creation complete")
+        except Exception as e:
+            self._log.error(f"Hypertable creation failed: {e}")
+
+    # 2 Enable compression (if configured)
+        try:
+            if self.enable_compression:
+                self.ensure_compression_enabled()
+        except Exception as e:
+            self._log.error(f"Enable compression failed: {e}")
+
+    # 3 Add retention policy
+        try:
+            self.ensure_retention_policy()
+        except Exception as e:
+            self._log.error(f"Add retention policy failed: {e}")
+
+    # 4 Setup continuous aggregate rollups
+        if self.enable_rollups:
+            # 4a
+            try:
+                self.setup_with_retry()
+            except Exception as e:
+                self._log.error(f"Aggregate Rollup setup failed: {e}")
+            # 4b
+            try:
+                self.refresh_rollups(force_full=True)
+            except Exception as e:
+                self._log.error(f"Refresh Rollup failed: {e}")
+
+    # 5 Start the rollup thread.  Called from TimescaleDB class upon connection to the database.
+    def start_auto_refresh(self) -> None:
+
+        if self._refresh_rollup_thread.is_alive():
+            self._log.debug("Auto refresh thread already running.")
+            return
+        else:
+            # start _refresh_rollup_thread after connect completes successfully
+            self._refresh_rollup_thread.start()
+            self._log.debug("Auto rollup refresh thread started.")
+
+    # -------------------------
+    # 6. Hypertable creation
+    # -------------------------
+    def ensure_hypertables(self) -> None:
+        """Convert base tables into TimescaleDB hypertables.
+           If the hypertables already exist, this function will do nothing due to the 'if_not_exists' flag.
+           If wide_table_flag is False, only device_metrics_narrow will be processed.
+        """
+        # 1. The tables that need to be processed
+        tables: List[str] = ["device_metrics_narrow"]
+        if self.wide_table_flag:
+            tables.append("device_metrics_wide")
+
+        # 2. shared parameters
+        params: dict[str, Any] = {
+            "time_col": getattr(self, "time_column", "m_time"),
+            "if_exists": getattr(self, "if_not_exists", True),
+            "migrate": getattr(self, "migrate_data", True),
+        }
+
+        try:
+            with self.SessionFactory() as session:
+                for table in tables:
+
+                    session.execute(
+                        text(f"SELECT create_hypertable('{table}', :time_col, if_not_exists => :if_exists, migrate_data => :migrate)"),
+                        params
+                    )
+                session.commit()
+                self._log.debug(f"Hypertable creation ensured for: {', '.join(tables)}")
+
+        except SQLAlchemyError as e:
+            self._log.error("Failed to ensure hypertables: %s", e)
+
+
+    # -------------------------
+    # 7. Enable compression
+    # -------------------------
+    def ensure_compression_enabled(self) -> None:
+        """
+        Enable TimescaleDB compression on device_metrics_narrow and device_metrics_wide tables.
+        """
+        with self.SessionFactory() as session:
+            self._log.info("Setting up compression policy")
+
+            if not session:
+                    self._log.error("Cannot set up compression — not tsdb_connected.")
+                    return
+            # Enable TimescaleDB compression on device_metrics_narrow.
+            try:
+                sql: str = (
+                    "ALTER TABLE device_metrics_narrow SET ("
+                    "timescaledb.compress, "
+                    f"timescaledb.compress_orderby = '{self.compress_orderby}', "
+                    f"timescaledb.compress_segmentby = '{self.compress_segmentby_narrow}'"
+                    ");"
+                )
+                session.execute(text(sql))
+                session.commit()
+                self._log.debug("_enable_compression_narrow executed")
+            except SQLAlchemyError as e:
+                self._log.error(f"_enable_compression_narrow error device_metrics_narrow: {e}")
+                try:
+                    session.rollback()
+                except SQLAlchemyError as e2:
+                    self._log.error(f"_enable_compression_narrow rollback error: {e2}")
+
+            # Enable TimescaleDB compression on device_metrics_wide.
+            if self.wide_table_flag:
+                try:
+                    sql = (
+                        "ALTER TABLE device_metrics_wide SET ("
+                        "timescaledb.compress, "
+                        f"timescaledb.compress_orderby = '{self.compress_orderby}', "
+                        f"timescaledb.compress_segmentby = '{self.compress_segmentby_wide}'"
+                        ");"
+                    )
+                    session.execute(text(sql))
+                    session.commit()
+                    self._log.debug("_enable_compression_wide executed")
+                except SQLAlchemyError as e:
+                    self._log.error(f"_enable_compression_wide error device_metrics_wide: {e}")
+                    try:
+                        session.rollback()
+                    except SQLAlchemyError as e2:
+                        self._log.error(f"_enable_compression_wide rollback error: {e2}")
+
+            with session.begin():
+                for  chunk_interval in [
+                    (self.hourly_chunk_time_interval),
+                    (self.daily_chunk_time_interval),
+                    (self.weekly_chunk_time_interval),
+                    (self.monthly_chunk_time_interval),
+                ]:
+
+                    # add compression policy
+                    self.ensure_compression_policy("device_metrics_narrow", chunk_interval)
+                    if self.wide_table_flag:
+                        self.ensure_compression_policy("device_metrics_wide", chunk_interval)
+
+            session.commit()
+
+    # -------------------------
+    # 7b. Add compression policy
+    # -------------------------
+    def ensure_compression_policy(self, source, chunk_interval) -> None:
+        """Automatically compress chunks older than chunk_time_interval.
+        Parameters:
+            source (str): The hypertable to which the compression policy will be applied (e.g. "device_metrics_narrow").
+            chunk_interval (str): The time interval after which chunks should be compressed (e.g. "1 day", "7 days").
+        """
+        with self.SessionFactory() as session:
+
+            if not session:
+                    self._log.error("Cannot add compression policy — not tsdb_connected.")
+                    return
+
+            try:
+                sql: str = f"SELECT add_compression_policy('{source}', compress_after => INTERVAL '{chunk_interval}', if_not_exists => TRUE);"
+
+                session.execute(text(sql))
+
+                self._log.debug(f"_add_compression_policy {source} for {chunk_interval} executed")
+            except SQLAlchemyError as e:
+                self._log.error(f"_add_compression_policy {source} for {chunk_interval} error: {e}")
+                try:
+                    session.rollback()
+                except SQLAlchemyError as e2:
+                    self._log.error(f"_add_compression_policy {source} for {chunk_interval} rollback error: {e2}")
+
+    # -------------------------
+    # 9. Add retention policy
+    # -------------------------
+    def ensure_retention_policy(self) -> None:
+        """
+        Drop old data automatically after drop_after interval.
+        This method first removes any existing retention policy to ensure that changes to the drop_after interval are applied correctly.
+        """
+        with self.SessionFactory() as session:
+            if not session:
+                    self._log.error("Cannot add retention policies — not tsdb_connected.")
+                    return
+
+            drop_after: str = self.drop_after
+
+            try:
+                sql1: str = "SELECT remove_retention_policy('device_metrics_narrow', if_exists => True);"
+                sql2: str = f"SELECT add_retention_policy('device_metrics_narrow', INTERVAL '{drop_after}');"
+
+                session.execute(text(sql1))
+                session.execute(text(sql2))
+                session.commit()
+                self._log.debug("_add_retention_policy_narrow executed")
+            except SQLAlchemyError as e:
+                self._log.error(f"_add_retention_policy_narrow error: {e}")
+                try:
+                    session.rollback()
+                except SQLAlchemyError as e2:
+                    self._log.error(f"_add_retention_policy_narrow rollback error: {e2}")
+
+            if self.wide_table_flag:
+                try:
+                    sql1b: str = "SELECT remove_retention_policy('device_metrics_wide', if_exists => True);"
+                    sql2b: str = f"SELECT add_retention_policy('device_metrics_wide', INTERVAL '{drop_after}');"
+
+                    session.execute(text(sql1b))
+                    session.execute(text(sql2b))
+                    session.commit()
+                    self._log.debug("_add_retention_policy_wide executed")
+                except SQLAlchemyError as e:
+                    self._log.error(f"_add_retention_policy_wide error: {e}")
+                    try:
+                        session.rollback()
+                    except SQLAlchemyError as e2:
+                        self._log.error(f"_add_retention_policy_wide rollback error: {e2}")
+
+    # -------------------------
+    # 10 Rollups
+    # -------------------------
+    def setup_with_retry(self) -> None:
+        """_summary_
+         This method wraps the ensure_rollups() call with retry Logic to handle potential lock timeouts that can occur if the flush
+            thread is actively writing to the source tables while we attempt to set up or refresh continuous aggregates.
+            If a lock timeout is detected, the method will wait for 5 seconds and retry, up to a maximum of 3 attempts.
+            This allows the flush thread to complete its current batch and release locks before we try again, improving
+            the chances of a successful rollup setup without manual intervention.
+            If the error is not a lock timeout, it will be raised immediately without retrying, as it likely indicates
+            a different issue that needs attention.
+
+        """
+        max_rollup_retries = 3
+        for attempt in range(max_rollup_retries):
+            try:
+                self.ensure_rollups()
+                break # Success!
+            except Exception as e:
+                if "lock_timeout" in str(e):
+                    self._log.warning(f"Lock timeout on attempt {attempt+1}. Retrying...")
+                    time.sleep(5) # Wait for flush thread to clear
+                else:
+                    raise  # Real error, don't retry
+
+    # 10a
+    def ensure_rollups(self) -> None:
+        """
+        Sets up continuous aggregate rollups based on predefined configurations.
+        Uses a Scan-then-Purge approach to handle hierarchical dependencies safely.
+        Checks if rollups need to be rebuilt and creates them accordingly.
+        The method scans existing rollup views to determine if any bucket interval changes have occurred.
+        If a change is detected, it purges all rollups in the correct order (weekly -> daily -> hourly) to ensure
+        a clean slate for rebuilding. After purging, it creates or verifies each rollup view from the
+        bottom up (hourly -> daily -> weekly) to maintain hierarchical integrity.
+        The entire process is wrapped in a migration lock to pause the flush thread and prevent conflicts during schema changes.
+
+        """
+        self.migration_in_progress.set()
+        self._log.info("Pausing flush thread for migration...")
+
+        try:
+            with self.SessionFactory() as session:
+                with self._reconnect_lock:
+                    tsdb_connected: bool = self.tsdb_connected
+
+                if not tsdb_connected or not session:
+                    self._log.error("Cannot set up rollups — not tsdb_connected.")
+                    return
+
+                self._log.info("Starting continuous aggregate setup...")
+
+                # 1. Configuration Setup
+                contexts: list[dict[str]] = [
+                    {
+                        "table_name": "device_metrics_narrow",
+                        "segments": {
+                            "hourly_rollup": "hourly_rollup_narrow",
+                            "daily_rollup": "daily_rollup_narrow",
+                            "weekly_rollup": "weekly_rollup_narrow",
+                            "monthly_rollup": "monthly_rollup_narrow",
+                        }
+                    }
+                ]
+                if self.wide_table_flag:
+                    contexts.append({
+                        "table_name": "device_metrics_wide",
+                        "segments": {
+                            "hourly_rollup": "hourly_rollup_wide",
+                            "daily_rollup": "daily_rollup_wide",
+                            "weekly_rollup": "weekly_rollup_wide",
+                            "monthly_rollup": "monthly_rollup_wide",
+                        }
+                    })
+
+                view_configs: List[Tuple[str]] = [
+                    ("hourly_rollup", self.hourly_rollup_bucket, self.hourly_rollup_start, self.hourly_chunk_time_interval),
+                    ("daily_rollup", self.daily_rollup_bucket, self.daily_rollup_start, self.daily_chunk_time_interval),
+                    ("weekly_rollup", self.weekly_rollup_bucket, self.weekly_rollup_start, self.weekly_chunk_time_interval),
+                    ("monthly_rollup", self.monthly_rollup_bucket, self.monthly_rollup_start, self.monthly_chunk_time_interval),
+                ]
+
+                # 2. Scan Phase: Detect if any bucket change exists across the whole stack
+                any_rebuild_needed = False
+                for context in contexts:
+                    for view_key, bucket, _, _ in view_configs:
+                        view_name: str = context["segments"][view_key]
+                        if self.rollup_needs_rebuild(session, view_name, bucket):
+                            any_rebuild_needed = True
+                            break
+                    if any_rebuild_needed:
+                        break
+
+                # 3. Purge Phase: If a change is detected, wipe the slate clean in correct order
+                if any_rebuild_needed:
+                    self._log.info("Bucket change detected. Purging all rollups for clean rebuild.")
+                    # This method must drop Weekly -> Daily -> Hourly with sequential commits
+                    self._drop_all_continuous_aggregates(session)
+                    # Purge orphaned scheduler jobs
+                    self._purge_ghost_jobs(session)
+
+                # 4. Creation Phase: Build/Verify Bottom-Up (Hourly -> Daily -> Weekly)
+                for context in contexts:
+                    source_table: str = context["table_name"]
+                    current_source: str = source_table  # Reset source for each context (Narrow vs Wide)
+                    rollup_segments: str = context["segments"]
+
+                    for view_key, bucket, start_offset, chunk_time_interval in view_configs:
+                        view_name = rollup_segments[view_key]
+
+                        # If the view doesn't exist (due to purge or first run), create it
+                        if not self._view_exists(session, view_name):
+                            self._log.info(f"Creating {view_name} from {current_source}...")
+                            self._create_narrow_rollup(session, current_source, view_name, bucket, start_offset, chunk_time_interval)
+                        else:
+                            self._log.debug(f"View {view_name} is already up to date.")
+
+                        # Update current_source for Hierarchical Aggregation
+                        # Note: Monthly is kept on the source_table
+                        if view_key == 'weekly_rollup':
+                            current_source = source_table
+                        elif view_key != 'monthly_rollup':
+                            current_source = view_name
+
+                self._log.info("Continuous aggregate setup completed successfully.")
+        finally:
+            # 2. Always re-enable flushing, even if migration fails
+            self.migration_in_progress.clear()
+            self._log.info("Resuming flush thread.")
+
+
+    # -------------------------
+    # 10d
+    # -------------------------
+
+    def _create_narrow_rollup(self, session: Session, source: str, view_name: str, bucket_interval: str, start_offset: str, chunk_time_interval: str) -> None:
+        """
+        Creates a continuous aggregate with proper hierarchical logic and locking.
+        Parameters:
+            session: Active database session for executing SQL commands.
+            source: The source table or view from which to aggregate (e.g., "device_metrics_narrow" or a previous rollup view).
+            view_name: The name of the continuous aggregate view to create.
+            bucket_interval: The time bucket size for aggregation (e.g., "1 hour", "1 day").
+            start_offset: The offset for the continuous aggregate policy (e.g., "3 hours", "3 days").
+            chunk_time_interval: The chunk time interval for compression policy (e.g., "1 day", "7 days").
+
+        """
+        r_settings: dict = self._get_dynamic_settings()
+
+        if not session:
+            self._log.error("Cannot create rollup — not connected.")
+            return
+
+        # 1. Set local lock timeout to fail fast if blocked by flush thread.  Set dynamically from settings.
+        session.execute(text(f"SET LOCAL lock_timeout = '{r_settings['lock_timeout']}';"))
+
+        # 2. Determine Aggregation Mode
+        # If source is another view, we MUST use rollup(). If it's a hypertable, use stats_agg().
+        reading_from_raw = source in ["device_metrics_narrow", "device_metrics_wide"]
+
+        if reading_from_raw:
+            agg_func = "stats_agg(metric_value)"
+            min_func = "metric_value"
+            max_func = "metric_value"
+        else:
+            agg_func = "rollup(stats_summary)"
+            min_func = "min_value"
+            max_func = "max_value"
+
+        try:
+            # 3. Branch for Wide vs Narrow
+            if self.wide_table_flag and "wide" in source:
+                # mapping columns for wide table rollups
+                self._create_wide_rollup(session, source, view_name, bucket_interval, agg_func)
+            else:
+                # 4. Standard Narrow View Creation
+                # Uses 3-arg time_bucket for IANA timezone midnight alignment
+                session.execute(text(f"""
+                    CREATE MATERIALIZED VIEW {view_name}
+                    WITH (timescaledb.continuous = true) AS
+                    SELECT
+                        time_bucket(INTERVAL '{bucket_interval}', m_time, '{machine_timezone}') AS m_time,
+                        device_info_id,
+                        metric_name,
+                        MIN({min_func}) AS min_value,
+                        MAX({max_func}) AS max_value,
+                        {agg_func} AS stats_summary
+                    FROM {source}
+                    GROUP BY 1, 2, 3
+                    WITH NO DATA;
+                """))  # noqa: S608
+
+            # 5. Apply Policies & Index
+            self._add_aggregate_policy(session, view_name, bucket_interval, start_offset, chunk_time_interval)
+
+
+            # 6. Finalize the view so it is available as a 'source' for the next view in the loop
+            session.commit()
+            self._log.info(f"Successfully created hierarchical rollup: {view_name}")
+
+        except Exception as e:
+            session.rollback()
+            self._log.error(f"Failed to create {view_name}: {e}")
+            raise
+
+    def _add_aggregate_policy(self, session: Session, view_name: str, bucket_interval: str, start_offset: str) -> None:
+        """
+        Applies refresh, retention, and compression policies to a newly created view
+        using granularity-specific settings from hypertable_policy.
+        Parameters:
+            session: Active database session for executing SQL commands.
+            view_name: The name of the continuous aggregate view to which policies will be applied.
+            bucket_interval: The time bucket size for the continuous aggregate (e.g., "1 hour", "1 day").
+            start_offset: The offset for the continuous aggregate policy (e.g., "3 hours", "3 days").
+        """
+        # 1. Map view name to its granularity key for lookup
+        name_lower: str = view_name.lower()
+
+        # Define the supported granularities
+        granularities: List[str] = ["hourly", "daily", "weekly", "monthly"]
+
+        # Find the first matching granularity or use "default"
+        granularity: str = next((g for g in granularities if g in name_lower), "default")
+
+        # Dynamically retrieve the value from self
+        # This replaces the need for self.get() as the values are already stored as attributes
+        compress_after: str = getattr(self, f"{granularity}_compress_after_interval")
+        drop_after: str = getattr(self, "drop_after", "1 year")  # Default retention if not specified
+
+
+        try:
+            session.execute(text("SET LOCAL lock_timeout = '10s';"))
+
+            # 2. Add Continuous Aggregate Refresh Policy
+            session.execute(text(f"""
+                SELECT add_continuous_aggregate_policy(
+                    '{view_name}',
+                    start_offset      => INTERVAL '{start_offset}',
+                    end_offset        => INTERVAL '{bucket_interval}',
+                    initial_start     => '{self.anchor_start_time_utc}'::timestamptz,
+                    schedule_interval => INTERVAL '{bucket_interval}',
+                    if_not_exists     => true
+                );
+            """))
+
+            # 3. Add Data Retention Policy (Specific to the view)
+            session.execute(text(f"""
+                SELECT add_retention_policy(
+                    '{view_name}',
+                    drop_after => INTERVAL '{drop_after}',
+                    if_not_exists => true
+                );
+            """))
+
+            # 4. Enable and Configure Compression Policy for the view
+            if self.enable_compression:
+                # For CAGGs, enable compression via ALTER MATERIALIZED VIEW
+                session.execute(text(f"ALTER MATERIALIZED VIEW {view_name} SET (timescaledb.compress = true);"))
+
+                # Add compression policy using the granularity-matched interval
+                session.execute(text(f"""
+                    SELECT add_compression_policy(
+                        '{view_name}',
+                        compress_after => INTERVAL '{compress_after}',
+                        if_not_exists => true
+                    );
+                """))
+
+            # 5. Performance Index
+            safe_view_name: str = view_name.replace('"', '').replace('.', '_')
+            index_name: str = f"idx_{safe_view_name}_time"
+
+            session.execute(text(f"""
+                CREATE INDEX IF NOT EXISTS {index_name} ON {view_name} (m_time DESC);
+            """))
+
+            session.commit()
+            self._log.info(f"Policies applied to {view_name}: Retention={drop_after}, Compression After={compress_after}")
+
+        except Exception as e:
+            session.rollback()
+            self._log.error(f"Failed to apply policies to {view_name}: {e}")
+            raise
+
+
+    def _create_wide_rollup(self, session: Session, source: str, view_name: str, bucket_interval: str, agg_func: str) -> None:
+        """
+        Creates the complex 'wide' materialized view with dynamic column mapping.
+        Parameters:
+            session: Active database session for executing SQL commands.
+            source: The source table or view from which to aggregate (e.g., "device_metrics_wide" or a previous wide rollup view).
+            view_name: The name of the continuous aggregate view to create.
+            bucket_interval: The time bucket size for aggregation (e.g., "1 hour", "1 day").
+            agg_func: The aggregate function to use for the stats_summary column
+                (e.g., "stats_agg(metric_value)" or "rollup(stats_summary)"), determined by whether the source
+                is a raw hypertable or another view.
+        """
+        try:
+            # 1. Fail-fast locking for the wide table migration
+            session.execute(text("SET LOCAL lock_timeout = '15s';"))
+
+            # 2. Build the dynamic SQL
+            # We pass agg_func ('stats_agg' or 'rollup') to ensure hierarchical consistency
+            metric_columns: list = self._resolve_metric_columns(session, agg_func)
+
+            sql = f"""
+                CREATE MATERIALIZED VIEW {view_name}
+                WITH (timescaledb.continuous = true) AS
+                SELECT
+                    time_bucket(INTERVAL '{bucket_interval}', m_time, '{machine_timezone}') AS m_time,
+                    device_info_id,
+                    {', '.join(metric_columns)}
+                FROM {source}
+                GROUP BY 1, 2
+                WITH NO DATA;
+            """  # noqa: S608
+
+            self._log.debug(f"Executing Wide View DDL for {view_name}")
+            session.execute(text(sql))
+
+            # 3. Commit the view structure before applying policies
+            session.commit()
+
+        except Exception as e:
+            session.rollback()
+            self._log.error(f"_create_rollup_wide error for {view_name}: {e}")
+            raise
+
+    def _resolve_metric_columns(self, session: Session, agg_func: str) -> List[str]:
+        """
+        Generates SQL aggregate expressions for the 'wide' table.
+        - If reading from hypertable: uses stats_agg(column)
+        - If reading from another view: uses rollup(stats_summary_column)
+        This method dynamically fetches all metric columns from the catalog and constructs the appropriate aggregate expressions
+        based on the aggregation level, ensuring that the wide rollups maintain hierarchical consistency regardless of the source.
+        """
+        # 1. Fetch all clean column names from the catalog
+        result: engine.Result[Any] = session.execute(text("SELECT clean_column_name FROM metric_catalog ORDER BY clean_column_name"))
+        column_names: List[str] = list(result.scalars())
+
+        metric_expressions: list = []
+
+        # Check if we are at the base level (reading raw data) or hierarchical (reading an aggregate)
+        is_base_level: bool = agg_func == 'stats_agg(metric_value)'
+
+        for col in column_names:
+            if is_base_level:
+                # Base Level: Creating the first aggregate (e.g., Hourly) from the Hypertable
+                # Columns: min_Col, max_Col, stats_summary_Col
+                metric_expressions.append(f"MIN({col}) AS min_{col}")
+                metric_expressions.append(f"MAX({col}) AS max_{col}")
+                metric_expressions.append(f"stats_agg({col}) AS stats_summary_{col}")
+            else:
+                # Hierarchical Level: Creating Daily from Hourly, or Weekly from Daily
+                # We must target the Aliased columns created by the previous view level.
+                # Example: rollup(stats_summary_Volts) AS stats_summary_Volts
+                metric_expressions.append(f"MIN(min_{col}) AS min_{col}")
+                metric_expressions.append(f"MAX(max_{col}) AS max_{col}")
+                metric_expressions.append(f"rollup(stats_summary_{col}) AS stats_summary_{col}")
+
+        return metric_expressions
+
+
+    def rollup_needs_rebuild(self, session: Session, view_name: str, bucket_interval: str) -> bool:
+        """
+        Checks if a rollup exists and if its bucket matches the current config.
+        Returns True if the rollup is missing or configuration is mismatched.
+        Parameters:
+            session: Active database session for executing SQL commands.
+            view_name: The name of the continuous aggregate view to check.
+            bucket_interval: The expected time bucket size for the view (e.g., "1 hour", "1 day").
+        returns:
+            bool: True if the rollup needs to be rebuilt (missing or config mismatch),
+                  False if it exists and matches the expected bucket interval.
+        """
+        # 1. Map friendly terms to PG Interval inputs
+        # This allows 'monthly' -> '1 month', while letting '2 hours' pass through as-is
+        mapping: dict[str, str] = {
+            "monthly": "1 month",
+            "weekly": "7 days",
+            "daily": "1 day",
+            "hourly": "1 hour"
+        }
+        target_pg_val: str = mapping.get(bucket_interval.lower(), bucket_interval)
+
+        try:
+            # 2. Query the TimescaleDB catalog for the view definition
+            # Use a bind parameter :view_name for security and performance
+            check_sql: TextClause = text("""
+                SELECT view_definition
+                FROM timescaledb_information.continuous_aggregates
+                WHERE view_name = :view_name
+            """)
+            view_def: Optional[str] = session.scalar(check_sql, {"view_name": view_name})
+
+            # Logic: If it doesn't exist, we definitely need to build it
+            if not view_def:
+                self._log.debug(f"Rollup {view_name} does not exist. Rebuild required.")
+                return True
+
+            # 3. If the result exists, extract the 'interval' string from the definition
+            # We use Postgres regex_match to find the first argument of time_bucket()
+            # Pattern looks for: time_bucket('interval_text', ...)
+            extract_sql: TextClause = text("""
+                SELECT (regexp_match(:vdef, 'time_bucket\\(''([^'']+)''', 'i'))[1]
+            """)
+            current_interval_str: Optional[str] = session.scalar(extract_sql, {"vdef": view_def})
+
+            if not current_interval_str:
+                self._log.warning(f"Could not parse time_bucket interval from {view_name} definition.")
+                return True
+
+            # 4. Final Comparison: Let PostgreSQL handle the semantic equality
+            # This correctly recognizes that '01:00:00'::interval = '1 hour'::interval
+            match_sql: TextClause = text("SELECT (:current)::interval = (:target)::interval")
+            is_match: bool = session.scalar(match_sql, {"current": current_interval_str, "target": target_pg_val})
+
+            if not is_match:
+                self._log.info(
+                    f"Config mismatch for {view_name}. "
+                    f"Found: {current_interval_str}, Expected: {target_pg_val}. Rebuild required."
+                )
+                return True
+            else:
+                # 4. Exists and matches config
+                self._log.info(
+                    f"Rollup config matches for {view_name}. "
+                    f"Expected: {bucket_interval} and received {target_pg_val}. No rebuild required."
+                )
+                return False
+
+        except SQLAlchemyError as e:
+            self._log.error(f"Database error while checking rollup {view_name}: {e}")
+            # Default to True to ensure we don't skip a necessary build on error
+            return True
+
+
+    # -------------------------
+    #  Determine wide vs narrow table usage for resource settings
+    # -------------------------
+    def _get_dynamic_settings(self) -> dict:
+        """
+        Returns dynamic settings based on the current metric count.
+        This allows the system to automatically adjust performance tiers based on the size of the data,
+        without requiring manual intervention. If the metric count exceeds 200, it forces the use of 'tier_low'
+        settings which are optimized for larger datasets for only the narrow rollups,
+        as well as more conservative refresh policies. If the metric count is below or equal to 200,
+        it allows the use of higher performance tiers (e.g., 'tier_high' or 'tier_medium')
+        which may have more aggressive settings suitable for smaller datasets. This dynamic adjustment
+        helps ensure that the system remains performant and stable as the volume of metrics grows over time.
+        """
+        metric_count: int = getattr(self, 'current_metric_count', 0)
+
+        if not self.wide_table_flag or metric_count > 200:
+            return self.performance_tiers["tier_low"]  # Force narrow table settings
+
+        # Check tiers from highest to lowest
+        for tier_name in ["tier_high", "tier_medium", "tier_low"]:
+            tier: dict[str, Any] = self.performance_tiers[tier_name]
+            if metric_count <= tier["count"]:
+                return tier
+
+        return self.performance_tiers["tier_low"] # Fallback default
+
+    def _view_exists(self, session: Session, view_name: str) -> bool:
+        """Check to see if a continuous aggregate exists in the catalog.
+        Parameters:
+            session: Active database session for executing SQL commands.
+            view_name: The name of the continuous aggregate view to check for existence.
+        Returns:
+            bool: True if the view exists, False otherwise.
+        """
+        check_sql = text("SELECT 1 FROM timescaledb_information.continuous_aggregates WHERE view_name = :name")
+        return session.execute(check_sql, {"name": view_name}).fetchone() is not None
+
+
+    def _drop_all_continuous_aggregates(self, session: Session) -> None:
+        """
+        Teardown all rollups in correct dependency order (Top-Down) to
+        fix the 'DependentObjectsStillExist' error.
+        Process:
+        1. Fetch all existing continuous aggregates from the TSDB catalog.
+        2. Determine the drop order based on naming conventions (Weekly -> Daily -> Hourly).
+        3. For each view: a) Set a short lock timeout to fail fast if blocked by flush thread,
+                          b) Disable compression to avoid issues with compressed CAGGs,
+                          c) Remove policies to prevent orphaned jobs,
+                          d) Acquire an exclusive lock on the view to ensure no concurrent access,
+                          e) Drop the view with CASCADE to clean up dependencies,
+                          f) Commit after each drop to release locks and allow the next drop to proceed.
+        """
+        r_settings = self._get_dynamic_settings()
+        try:
+            # 1. Fetch current aggregates
+            result = session.execute(text("""
+                SELECT view_schema, view_name
+                FROM timescaledb_information.continuous_aggregates;
+            """))
+            views = result.fetchall()
+
+            if not views:
+                self._log.info("No continuous aggregates found to drop.")
+                return
+
+            # 2. Define Priority: Child views (Weekly) MUST be dropped before Parent views (Daily)
+            # This prevents internal _partial_view dependencies from blocking the drop.
+            priority_map: dict[str, int] = {"monthly": 4, "weekly": 3, "daily": 2, "hourly": 1}
+
+            def get_drop_rank(v_tuple) -> int:
+                name_lower: str = v_tuple[1].lower()
+                for key, val in priority_map.items():
+                    if key in name_lower:
+                        return val
+                return 0
+
+            # Sort descending: 4 (Weekly) drops first, 1 (Hourly) drops last.
+            sorted_views = sorted(views, key=get_drop_rank, reverse=True)
+
+            # 3. Iterate and drop each view safely
+            for schema, name in sorted_views:
+                full_name = f'"{schema}"."{name}"'
+                self._log.info(f"Purging rollup: {full_name}")
+
+                # 3b. Fail-fast if locked by background flush or refresh jobs
+                session.execute(text(f"SET LOCAL lock_timeout = '{r_settings['lock_timeout']}';"))
+
+                # 4. Disable Compression (Mandatory for a clean drop of compressed CAGGs)
+                try:
+                    session.execute(text(f"ALTER MATERIALIZED VIEW {full_name} SET (timescaledb.compress = false);"))
+                except Exception:
+                    self._log.info(f"View was already uncompressed: {full_name}")
+                    pass # Already uncompressed or doesn't support it
+
+                # 5. Remove policies first
+                session.execute(text(f"SELECT remove_continuous_aggregate_policy('{full_name}', if_exists => true);"))
+                session.execute(text(f"SELECT remove_retention_policy('{full_name}', if_exists => true);"))
+
+                # 6. Acquire Exclusive Lock & Drop
+                session.execute(text(f"LOCK TABLE {full_name} IN ACCESS EXCLUSIVE MODE;"))
+                session.execute(text(f"DROP MATERIALIZED VIEW IF EXISTS {full_name} CASCADE;"))
+
+                # 7. Critical: Commit after each view
+                # This releases internal metadata locks and allows the next DROP in the stack to succeed.
+                session.commit()
+                self._log.info(f"Successfully purged {full_name}")
+
+            self._log.info("Full rollup stack teardown complete.")
+
+        except Exception as e:
+            session.rollback()
+            self._log.error(f"Failed to purge rollup stack: {e}")
+            raise
+
+    # 10e
+
+    def refresh_rollups(self, force_full: bool = False) -> None:
+        """
+        Refreshes rollups in Bottom-Up order (Hourly -> Daily -> Weekly).
+        This ensures parent views have data available from their child sources.
+            Params: force_full (bool): If True, refreshes the entire range of data.
+            This is useful for scenarios where incremental refreshes may not be sufficient,
+            such as after a bucket interval change or if there are concerns about data consistency.
+            When set to False, the method performs an incremental refresh based on the predefined
+            start offsets for each rollup, which is more efficient for regular maintenance.
+            The method includes robust error handling and logging to track the progress and
+            duration of each refresh operation, as well as a watchdog mechanism to monitor
+            long-running refreshes and send alerts if they become blocked by locks.
+        """
+        with self.SessionFactory() as session:
+            with self._reconnect_lock:
+                tsdb_connected: bool = self.tsdb_connected
+
+            if not tsdb_connected or not session:
+                self._log.error("Cannot refresh rollups — not tsdb_connected.")
+                return
+
+            try:
+                # 1. Define the refresh sequence: Smallest Grain -> Largest Grain
+                # Monthly is independent (from hypertable), so it can go anywhere.
+                refresh_sequence: List[Tuple[str]] = [
+                    ("hourly_rollup_narrow", self.hourly_rollup_start),
+                    ("hourly_rollup_wide", self.hourly_rollup_start),
+                    ("daily_rollup_narrow", self.daily_rollup_start),
+                    ("daily_rollup_wide", self.daily_rollup_start),
+                    ("weekly_rollup_narrow", self.weekly_rollup_start),
+                    ("weekly_rollup_wide", self.weekly_rollup_start),
+                    ("monthly_rollup_narrow", self.monthly_rollup_start),
+                    ("monthly_rollup_wide", self.monthly_rollup_start),
+                ]
+
+                for view_name, start_offset in refresh_sequence:
+                    # 2. Check if the view exists before refreshing
+                    # (Safety check in case of a partial migration)
+                    if self._view_exists(session, view_name):
+                        self._refresh_single_rollup(session, view_name, start_offset, force_full)
+                    else:
+                        self._log.warning(f"Skipping refresh: {view_name} does not exist.")
+
+            except Exception as e:
+                self._log.error(f"Rollup refresh failed: {e}")
+
+    def _refresh_single_rollup(self, session: Session, view_name: str, start_offset: str, force_full: bool = False) -> None:
+        """
+        Refreshes a rollup with duration tracking and performance logging.
+        The watchdog monitors the refresh process and sends alerts if it detects that the refresh is blocked
+        by locks for an extended period.
+        parameters:
+            session: Active database session for executing SQL commands.
+            view_name: The name of the continuous aggregate view to refresh.
+            start_offset: The offset for incremental refresh (e.g., "3 hours", "3 days").
+            force_full: If True, performs a full refresh from the beginning of time to now. If
+            False, performs an incremental refresh based on the start_offset.
+        """
+        r_settings: dict = self._get_dynamic_settings()
+
+        stop_signal: List[bool] = self._start_refresh_watchdog(view_name)
+
+        start_time: float = time.perf_counter()
+        mode = "FULL" if force_full else "INCREMENTAL"
+
+        self._log.info(f"Starting {mode} refresh for {view_name}...")
+
+        # AUTOCOMMIT is mandatory for CALL refresh_continuous_aggregate
+        with session.bind.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+            conn.execute(text(f"SET LOCAL work_mem = '{r_settings['work_mem']}';"))
+            try:
+                if force_full:
+                    # Refresh from the beginning of time to now
+                    conn.execute(text(f"CALL refresh_continuous_aggregate('{view_name}', NULL, now());"))
+                else:
+                    # Incremental refresh
+                    conn.execute(text(f"""
+                        CALL refresh_continuous_aggregate(
+                            '{view_name}',
+                            now() - INTERVAL '{start_offset}',
+                            now()
+                        );
+                    """))
+
+                end_time: float = time.perf_counter()
+                duration_seconds: float = end_time - start_time
+
+                # Log the duration in a scannable format
+                self._log.info(
+                    f"{mode} refresh COMPLETED for {view_name}. "
+                    f"Duration: {duration_seconds:.2f}s "
+                    f"({int(duration_seconds // 60)}m {int(duration_seconds % 60)}s)"
+                )
+
+
+            except Exception as e:
+                self._log.error(f"{mode} refresh FAILED for {view_name} after {time.perf_counter() - start_time:.2f}s: {e}")
+                raise # Re-raise to let the parent caller decide if it should continue
+
+            finally:
+                # Ensure the watchdog thread stops
+                stop_signal[0] = True
+
+    # watchdog refresh management
+    def _stop_existing_watchdog(self) -> None:
+        """Signals the existing watchdog to exit immediately.
+        The watchdog thread checks the signal at short intervals and will terminate if the signal is set to True.
+        """
+        if hasattr(self, '_current_watchdog_signal') and self._current_watchdog_signal:
+            self._current_watchdog_signal[0] = True
+            self._current_watchdog_signal = None
+
+    # watchdog thread to monitor long-running refreshes
+    def _start_refresh_watchdog(self, view_name: str) -> List[bool]:
+        """
+        This watchdog runs in a separate thread to monitor the progress of a continuous aggregate refresh.
+        It periodically checks the pg_stat_activity for the refresh query and sends a Pushover alert
+        if it detects that the refresh is blocked by locks for an extended period (e.g., 30 seconds).
+        Parameters:
+            view_name (str): The name of the continuous aggregate view being refreshed, used for monitoring and alerting purposes.
+
+        Returns:
+            List[bool]: A mutable list containing a single boolean value that serves as a stop signal for the watchdog thread.
+        """
+        # 1. Kill any existing watchdog before starting a new one
+        self._stop_existing_watchdog()
+
+        # 2. Create the new stop signal
+        stop_signal: List[bool] = [False]
+        self._current_watchdog_signal: List[bool] = stop_signal
+
+        def monitor() -> None:
+            # Use a short-lived session specifically for monitoring
+            with self.SessionFactory() as session:
+                # Check both the signal and the DB state
+                while not stop_signal[0]:
+                    try:
+                        # We check if the refresh is still running
+                        sql: str = text("""
+                            SELECT wait_event_type FROM pg_stat_activity
+                            WHERE query LIKE :pattern
+                            AND state != 'idle'
+                            AND pid != pg_backend_pid()
+                        """)
+                        res = session.execute(sql, {"pattern": f"%refresh_continuous_aggregate%'{view_name}'%"}).fetchone()
+
+                        # If the query is gone from pg_stat_activity, the refresh is done
+                        if not res:
+                            break
+
+                        if res.wait_event_type == 'Lock':
+                            self._send_pushover_message(f"⚠️ {view_name} is BLOCKED by a lock.")
+
+                        # Sleep in small increments to remain responsive to the stop_signal
+                        for _ in range(30):
+                            if stop_signal[0]:
+                                return
+                            time.sleep(1)
+
+                    except Exception:
+                        break
+
+        t = threading.Thread(target=monitor, name=f"Watchdog_{view_name}", daemon=True)
+        t.start()
+        return stop_signal
+
+    def _refresh_rollup_loop(self) -> None:
+        """
+        Background loop: Replays backlog, then refreshes hierarchical aggregates.
+        Uses @property tsdb_connected for live state awareness.
+        The loop includes multiple safeguards:
+            1. Live Connection Check: Before each refresh cycle, it checks if the database connection is healthy.
+                If not, it skips the refresh and waits before retrying.
+            2. Migration Gatekeeper: If a schema migration is currently in progress, it pauses the refresh loop to avoid conflicts.
+            3. Backlog Drain: Before refreshing, it ensures that any backlogged data is replayed to the hypertable,
+                so that the continuous aggregates include the most recent data.
+            4. Sequential Hierarchical Refresh: It refreshes the continuous aggregates in the correct
+                order (Hourly -> Daily -> Weekly -> Monthly) to ensure that parent views have their child data available.
+            5. Dynamic Sleep: The loop uses the auto_refresh_interval from the policy to determine how long to wait
+                between refresh cycles, allowing for dynamic adjustment of refresh frequency based on performance needs.
+
+        """
+        self._log.info("Background rollup refresh loop started.")
+
+        while not self._stop_refresh_rollup_event.is_set():
+            try:
+                # 1. Live Connection Check
+                # Uses the @property to peek into the shared rollup_policy dict
+                with self._reconnect_lock:
+                    tsdb_connected: bool = self.tsdb_connected
+
+                if not tsdb_connected:
+                    self._log.debug("Refresh skipped: Database not connected.")
+                    # Wait 60s or until thread stop event is set
+                    self._stop_refresh_rollup_event.wait(timeout=60)
+                    continue
+
+                # 2. Migration Gatekeeper
+                # Pause if a schema migration (rebuild) is currently running
+                if self.migration_in_progress.is_set():
+                    self._log.debug("Refresh skipped: Migration in progress.")
+                    self._stop_refresh_rollup_event.wait(timeout=30)
+                    continue
+
+                # 3. Drain Backlog Before Refresh
+                # This ensures late/backlogged data is in the hypertable
+                # so the CAGG refresh includes it.
+                with self._backlog_lock:
+                    count: int = self.backlog.replay_to_queue()
+                    if count > 1:
+                        self._log.debug(f"Replayed {count} points. Waiting for flush...")
+                        # Wait for flush worker to finish writing replayed points
+                        self._flush_queue.join()
+
+                # 4. Sequential Hierarchical Refresh
+                # Order: Hourly -> Daily -> Weekly -> Monthly
+                with self.engine.connect() as conn:
+                    conn: Connection = conn.execution_options(isolation_level="AUTOCOMMIT")
+                    # Apply dynamic session settings from performance tiers
+                    tier: dict = self._get_dynamic_settings()
+                    conn.execute(text(f"SET work_mem = '{tier['work_mem']}';"))
+                    conn.execute(text(f"SET lock_timeout = '{tier['lock_timeout']}';"))
+
+                    granularities: List[str] = ["hourly", "daily", "weekly", "monthly"]
+                    prefix = "rollup_wide" if self.wide_table_flag else "rollup_narrow"
+
+                    for gran in granularities:
+                        view_name = f"{gran}_{prefix}"
+
+                        self._log.debug(f"Refreshing continuous aggregate: {view_name}")
+
+                        conn.execute(
+                            text("CALL refresh_continuous_aggregate(:view, NULL, NULL);"),
+                            {"view": view_name}
+                        )
+
+                # 5. Dynamic Sleep
+                # Use the interval from policy (convert seconds to float for wait)
+                wait_time = float(self.auto_refresh_interval)
+                if self._stop_refresh_rollup_event.wait(timeout=wait_time):
+                    break
+
+            except Exception as e:
+                self._log.error(f"Rollup refresh cycle failed: {e}")
+                # Exponential backoff/safety sleep on error
+                self._stop_refresh_rollup_event.wait(timeout=300)
+
+        self._log.info("Background rollup refresh loop exiting.")
+
+    # 10i
+    def stop_auto_refresh(self) -> None:
+        """
+        Cleanly stop the auto rollup refresh thread.
+        This method signals the background thread to exit and waits for it to finish,
+        ensuring that no refresh operations are left in an inconsistent state.
+        It also logs the shutdown of the refresh thread for monitoring purposes.
+        """
+        if hasattr(self, "_stop_refresh_rollup_event"):
+            self._stop_refresh_rollup_event.set()
+            self._log.info("Auto rollup refresh thread stopped.")
+
+    def _purge_ghost_jobs(self, session: Session) -> None:
+        """
+        Cleans up aberrant TimescaleDB processes using dynamic type-based thresholds.
+        This method identifies and purges three types of aberrant jobs:
+            1. Orphaned Metadata Jobs: Jobs that reference non-existent continuous aggregates,
+                often due to failed refreshes or manual drops without policy cleanup.
+            2. Stale Execution Jobs: Jobs that have been in a 'Started' state for longer than
+                their expected duration based on their type (e.g., Refresh, Compression, Retention).
+            3. Ghost Processes: Jobs that are marked as 'Started' but have no corresponding active backend process,
+                indicating they are stuck in a limbo state.
+
+            The method uses a single SQL query with CASE statements to classify jobs into these categories based on
+            their application_name, last run status, and timestamps. It then iterates through the identified aberrant jobs,
+            logs the issues, and takes appropriate actions such as terminating stale backend processes and deleting
+            the jobs to clean up the TimescaleDB environment. Error handling ensures that any issues during the
+            purge process are logged and do not disrupt the overall system stability.
+        """
+        self._log.info("Initiating dynamic ghost & stale job sweep...")
+
+        # Define thresholds based on TimescaleDB common job patterns
+        # Refresh: Short (30m), Compression/Retention: Long (6h), Others: Standard (1h)
+        detect_sql = text("""
+            WITH job_thresholds AS (
+                SELECT
+                    j.job_id,
+                    j.application_name,
+                    js.last_run_started_at,
+                    js.last_run_status,
+                    CASE
+                        WHEN j.application_name LIKE 'Refresh Continuous Aggregate%' THEN INTERVAL '30 minutes'
+                        WHEN j.application_name LIKE 'Compression Policy%' THEN INTERVAL '6 hours'
+                        WHEN j.application_name LIKE 'Retention Policy%' THEN INTERVAL '2 hours'
+                        ELSE INTERVAL '1 hour'
+                    END as allowed_duration
+                FROM timescaledb_information.jobs j
+                LEFT JOIN timescaledb_information.job_stats js ON j.job_id = js.job_id
+            )
+            SELECT
+                t.job_id,
+                t.application_name,
+                CASE
+                    -- 1. Orphaned
+                    WHEN (t.application_name LIKE 'Refresh%' OR t.application_name LIKE 'Retention%')
+                        AND NOT EXISTS (
+                            SELECT 1 FROM timescaledb_information.continuous_aggregates c
+                            JOIN timescaledb_information.jobs j2 ON t.job_id = j2.job_id
+                            WHERE j2.hypertable_name = c.view_name
+                        ) THEN 'ORPHANED_METADATA'
+
+                    -- 2. Stale
+                    WHEN t.last_run_status = 'Started' AND t.last_run_started_at < now() - t.allowed_duration
+                        THEN 'STALE_EXECUTION'
+
+                    -- 3. Ghost (PID check via application_name)
+                    WHEN t.last_run_status = 'Started'
+                        AND NOT EXISTS (
+                            SELECT 1 FROM pg_stat_activity p
+                            WHERE p.application_name LIKE '%' || t.job_id || '%'
+                        ) THEN 'GHOST_PROCESS'
+
+                    ELSE NULL
+                END as aberrancy_type
+            FROM job_thresholds t
+            WHERE 1=1; -- Add filter for NOT NULL if needed
+        """)
+
+        try:
+            ghosts = session.execute(detect_sql).fetchall()
+
+            if not ghosts:
+                self._log.info("All background workers healthy.")
+                return
+
+            for job_id, app_name,  issue in ghosts:
+                self._log.warning(f"Purging {issue}: {app_name} (Job {job_id})")
+
+                # Terminate hanging backend if it still technically exists (Stale case)
+                if issue == 'STALE_EXECUTION':
+                    session.execute(text("SELECT pg_terminate_backend(:pid);"))
+
+                # delete_job() terminates any remaining worker and removes the schedule
+                session.execute(text("SELECT delete_job(:job_id);"), {"job_id": job_id})
+
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            self._log.error(f"Sweep failed: {e}")
+
+
+    # 10  may eventually need this method to parse interval strings from settings
+    def _parse_interval_days(self, interval_str: str) -> float:
+        """
+        Convert interval strings like '7 days' or '6 hours' into fractional days.
+        No used at the moment, but this could be useful if we want to allow flexible interval inputs in the future.
+        """
+        try:
+            parts: List[str] = interval_str.lower().split()
+            if len(parts) != 2:
+                return 7  # default fallback
+            value = float(parts[0])
+            unit: str = parts[1]
+            if "hour" in unit:
+                return value / 24.0
+            elif "day" in unit:
+                return value * 1
+            elif "week" in unit:
+                return value * 7
+            elif "month" in unit:
+                return value * 30
+            else:
+                return value
+        except Exception:
+            return 7.0
+
