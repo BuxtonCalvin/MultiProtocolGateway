@@ -50,7 +50,7 @@ from _thread import RLock, lock
 from configparser import SectionProxy
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Callable, List, Optional, Tuple
+from typing import Any, Callable, List, Literal, Optional, Tuple
 
 import requests
 from sqlalchemy import (
@@ -1837,69 +1837,62 @@ class RollupManager:
     # -------------------------
     # 7. Enable compression
     # -------------------------
+
     def ensure_compression_enabled(self) -> None:
         """
         Enable TimescaleDB compression on device_metrics_narrow and device_metrics_wide tables.
         """
         with self.SessionFactory() as session:
             self._log.info("Setting up compression policy")
-
             if not session:
-                    self._log.error("Cannot set up compression — not tsdb_connected.")
-                    return
-            # Enable TimescaleDB compression on device_metrics_narrow.
-            try:
-                sql: str = (
-                    "ALTER TABLE device_metrics_narrow SET ("
-                    "timescaledb.compress, "
-                    f"timescaledb.compress_orderby = '{self.compress_orderby}', "
-                    f"timescaledb.compress_segmentby = '{self.compress_segmentby_narrow}'"
-                    ");"
-                )
-                session.execute(text(sql))
-                session.commit()
-                self._log.debug("_enable_compression_narrow executed")
-            except SQLAlchemyError as e:
-                self._log.error(f"_enable_compression_narrow error device_metrics_narrow: {e}")
-                try:
-                    session.rollback()
-                except SQLAlchemyError as e2:
-                    self._log.error(f"_enable_compression_narrow rollback error: {e2}")
+                self._log.error("Cannot set up compression — not tsdb_connected.")
+                return
 
-            # Enable TimescaleDB compression on device_metrics_wide.
+            # Define tables and their specific segmentation configuration
+            tables_to_configure: List[Tuple[str]] = [
+                ("device_metrics_narrow", self.compress_segmentby_narrow),
+            ]
             if self.wide_table_flag:
-                try:
-                    sql = (
-                        "ALTER TABLE device_metrics_wide SET ("
-                        "timescaledb.compress, "
-                        f"timescaledb.compress_orderby = '{self.compress_orderby}', "
-                        f"timescaledb.compress_segmentby = '{self.compress_segmentby_wide}'"
-                        ");"
-                    )
-                    session.execute(text(sql))
-                    session.commit()
-                    self._log.debug("_enable_compression_wide executed")
-                except SQLAlchemyError as e:
-                    self._log.error(f"_enable_compression_wide error device_metrics_wide: {e}")
-                    try:
-                        session.rollback()
-                    except SQLAlchemyError as e2:
-                        self._log.error(f"_enable_compression_wide rollback error: {e2}")
+                tables_to_configure.append(("device_metrics_wide", self.compress_segmentby_wide))
 
+            # Repetitive SQL Execution
+            for table_name, segment_by in tables_to_configure:
+                self._apply_compression_to_table(session, table_name, segment_by)
+
+            #  Policy Creation
             with session.begin():
-                for  chunk_interval in [
-                    (self.hourly_chunk_time_interval),
-                    (self.daily_chunk_time_interval),
-                    (self.weekly_chunk_time_interval),
-                    (self.monthly_chunk_time_interval),
-                ]:
+                chunk_intervals: List[str] = [
+                    self.hourly_chunk_time_interval,
+                    self.daily_chunk_time_interval,
+                    self.weekly_chunk_time_interval,
+                    self.monthly_chunk_time_interval,
+                ]
 
-                    # add compression policy
-                    self.ensure_compression_policy("device_metrics_narrow", chunk_interval)
-                    if self.wide_table_flag:
-                        self.ensure_compression_policy("device_metrics_wide", chunk_interval)
+                for table_name, _ in tables_to_configure:
+                    for chunk_interval in chunk_intervals:
+                        self.ensure_compression_policy(table_name, chunk_interval)
 
+                session.commit()
+
+    def _apply_compression_to_table(self, session: Session, table_name: str, segment_by: str) -> None:
+        """Helper to apply compression ALTER TABLE statement with error handling."""
+        try:
+            sql: TextClause = text(
+                f"ALTER TABLE {table_name} SET ("
+                f"timescaledb.compress, "
+                f"timescaledb.compress_orderby = '{self.compress_orderby}', "
+                f"timescaledb.compress_segmentby = '{segment_by}'"
+                ");"
+            )
+            session.execute(sql)
             session.commit()
+            self._log.debug(f"Compression enabled on {table_name}")
+        except SQLAlchemyError as e:
+            self._log.error(f"Error enabling compression on {table_name}: {e}")
+            try:
+                session.rollback()
+            except SQLAlchemyError as e2:
+                self._log.error(f"Rollback error for {table_name}: {e2}")
 
     # -------------------------
     # 7b. Add compression policy
@@ -1917,9 +1910,9 @@ class RollupManager:
                     return
 
             try:
-                sql: str = f"SELECT add_compression_policy('{source}', compress_after => INTERVAL '{chunk_interval}', if_not_exists => TRUE);"
+                sql: TextClause = text(f"SELECT add_compression_policy('{source}', compress_after => INTERVAL '{chunk_interval}', if_not_exists => TRUE);")
 
-                session.execute(text(sql))
+                session.execute(sql)
 
                 self._log.debug(f"_add_compression_policy {source} for {chunk_interval} executed")
             except SQLAlchemyError as e:
@@ -2281,7 +2274,7 @@ class RollupManager:
             # We pass agg_func ('stats_agg' or 'rollup') to ensure hierarchical consistency
             metric_columns: list = self._resolve_metric_columns(session, agg_func)
 
-            sql = f"""
+            sql: str = f"""
                 CREATE MATERIALIZED VIEW {view_name}
                 WITH (timescaledb.continuous = true) AS
                 SELECT
@@ -2313,7 +2306,7 @@ class RollupManager:
         based on the aggregation level, ensuring that the wide rollups maintain hierarchical consistency regardless of the source.
         """
         # 1. Fetch all clean column names from the catalog
-        result: engine.Result[Any] = session.execute(text("SELECT clean_column_name FROM metric_catalog ORDER BY clean_column_name"))
+        result = session.execute(text("SELECT clean_column_name FROM metric_catalog ORDER BY clean_column_name"))
         column_names: List[str] = list(result.scalars())
 
         metric_expressions: list = []
@@ -2448,7 +2441,7 @@ class RollupManager:
         Returns:
             bool: True if the view exists, False otherwise.
         """
-        check_sql = text("SELECT 1 FROM timescaledb_information.continuous_aggregates WHERE view_name = :name")
+        check_sql: TextClause = text("SELECT 1 FROM timescaledb_information.continuous_aggregates WHERE view_name = :name")
         return session.execute(check_sql, {"name": view_name}).fetchone() is not None
 
 
@@ -2491,11 +2484,11 @@ class RollupManager:
                 return 0
 
             # Sort descending: 4 (Weekly) drops first, 1 (Hourly) drops last.
-            sorted_views = sorted(views, key=get_drop_rank, reverse=True)
+            sorted_views: List[Row[Any]] = sorted(views, key=get_drop_rank, reverse=True)
 
             # 3. Iterate and drop each view safely
             for schema, name in sorted_views:
-                full_name = f'"{schema}"."{name}"'
+                full_name: str = f'"{schema}"."{name}"'
                 self._log.info(f"Purging rollup: {full_name}")
 
                 # 3b. Fail-fast if locked by background flush or refresh jobs
@@ -2593,7 +2586,7 @@ class RollupManager:
         stop_signal: List[bool] = self._start_refresh_watchdog(view_name)
 
         start_time: float = time.perf_counter()
-        mode = "FULL" if force_full else "INCREMENTAL"
+        mode: Literal['FULL'] | Literal['INCREMENTAL'] = "FULL" if force_full else "INCREMENTAL"
 
         self._log.info(f"Starting {mode} refresh for {view_name}...")
 
@@ -2668,13 +2661,13 @@ class RollupManager:
                 while not stop_signal[0]:
                     try:
                         # We check if the refresh is still running
-                        sql: str = text("""
+                        sql: TextClause = text("""
                             SELECT wait_event_type FROM pg_stat_activity
                             WHERE query LIKE :pattern
                             AND state != 'idle'
                             AND pid != pg_backend_pid()
                         """)
-                        res = session.execute(sql, {"pattern": f"%refresh_continuous_aggregate%'{view_name}'%"}).fetchone()
+                        res: Row[Any] | None = session.execute(sql, {"pattern": f"%refresh_continuous_aggregate%'{view_name}'%"}).fetchone()
 
                         # If the query is gone from pg_stat_activity, the refresh is done
                         if not res:
@@ -2754,7 +2747,7 @@ class RollupManager:
                     conn.execute(text(f"SET lock_timeout = '{tier['lock_timeout']}';"))
 
                     granularities: List[str] = ["hourly", "daily", "weekly", "monthly"]
-                    prefix = "rollup_wide" if self.wide_table_flag else "rollup_narrow"
+                    prefix: Literal['rollup_wide'] | Literal['rollup_narrow'] = "rollup_wide" if self.wide_table_flag else "rollup_narrow"
 
                     for gran in granularities:
                         view_name = f"{gran}_{prefix}"

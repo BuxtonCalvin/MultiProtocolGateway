@@ -60,6 +60,7 @@ max_backlog_age = 86400
 reconnect_attempts = 5
 # minutes
 reconnect_delay = 5
+
 # Exponential backoff settings (reconnect delay increases exponentially on each failure)
 use_exponential_backoff = true
 # minutes --> 5 hours
