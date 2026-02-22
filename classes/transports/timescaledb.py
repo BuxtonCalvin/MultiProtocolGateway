@@ -1661,7 +1661,7 @@ class RollupManager:
             1 Hour	          3 hours	     1 day	          Allows a 3-hour window for late data before locking it via compression.
             1 Day	          3 days	     7 days	          Ensures daily rollups are finalized before compressing.
             1 Week	          2 weeks	     1 month	      Larger window helps capture any delayed source data updates.
-            1 Month	          2 months	     3 months	      Maximum safety for long-term historical accuracy.
+            1 Month	          3 months	     3 months	      Maximum safety for long-term historical accuracy.
         """
 
         # hypertable defaults
@@ -1689,7 +1689,7 @@ class RollupManager:
             "weekly_rollup_bucket": "1 week",
             "weekly_rollup_start": "3 weeks",
             "monthly_rollup_bucket": "1 month",
-            "monthly_rollup_start": "2 months",
+            "monthly_rollup_start": "3 months",
             "anchor_start_time_utc": "2000-01-01 00:00:00+00",  # default anchor time for rollup alignment
         }
 
