@@ -98,6 +98,7 @@ from .transport_base import transport_base
 
 SessionGlobal: Callable[..., Session] = sessionmaker(
     autocommit=False,
+    expire_on_commit=False,
     autoflush=False
 )
 machine_timezone: str = get_localzone_name()
@@ -675,7 +676,7 @@ class timescaledb(transport_base):
         try:
             self._log.debug(f"Connecting to database '{self.database}' at {self.host}:{self.port} as user '{self.username}'")
             self.engine: Engine = create_engine(url, pool_pre_ping=True, future=True, pool_recycle=3600)
-            SessionGlobal.configure(bind=self.engine, expire_on_commit=False)
+            SessionGlobal.configure(bind=self.engine)
             self.SessionFactory: Callable[..., Session] = SessionGlobal
             with self.engine.connect() as conn:   # make sure connection works
                 conn.execute(text("SELECT 1"))
