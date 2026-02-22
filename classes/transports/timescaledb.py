@@ -2163,7 +2163,7 @@ class RollupManager:
                 """))  # noqa: S608
 
             # 5. Apply Policies & Index
-            self._add_aggregate_policy(session, view_name, bucket_interval, start_offset, chunk_time_interval)
+            self._add_aggregate_policy(session, view_name, bucket_interval, start_offset)
 
 
             # 6. Finalize the view so it is available as a 'source' for the next view in the loop
