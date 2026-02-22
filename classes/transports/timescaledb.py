@@ -1658,10 +1658,10 @@ class RollupManager:
         """
         Rollup Type
             refresh rollup    start_offset   compress_after   reason
-            1 Hour	          3 hours	     1 day	          Allows a 3-hour window for late data before locking it via compression.
-            1 Day	          3 days	     7 days	          Ensures daily rollups are finalized before compressing.
-            1 Week	          2 weeks	     1 month	      Larger window helps capture any delayed source data updates.
-            1 Month	          3 months	     3 months	      Maximum safety for long-term historical accuracy.
+            1 Hour	          3 hours	     2 days	          Allows a 3-hour window for late data before locking it via compression.
+            1 Day	          3 days	     2 weeks	          Ensures daily rollups are finalized before compressing.
+            1 Week	          3 weeks	     2 months	      Larger window helps capture any delayed source data updates.
+            1 Month	          3 months	     6 months	      Maximum safety for long-term historical accuracy.
         """
 
         # hypertable defaults
