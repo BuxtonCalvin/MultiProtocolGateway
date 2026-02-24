@@ -1,5 +1,5 @@
-FROM python:3.13-alpine as base
-FROM base as builder
+FROM python:3.13-alpine AS base
+FROM base AS builder
 RUN mkdir /install
 WORKDIR /install
 COPY requirements.txt /requirements.txt
