@@ -14,18 +14,18 @@ or
 the section header is dual purpose and acts as naming mechanism for parameters like "bridge"
 
 ## Protocol
-Transports using ambiguous open ended protocols, such as ModBus, Canbus, or register / address based protocols require a map to be defined. this is done so in the /protocols/ folder through csv tables. 
+Transports using ambiguous open ended protocols, such as ModBus, Canbus, or register / address based protocols require a map to be defined. this is done so in the /protocols/ folder through csv tables.
 
 ```
 protocol = v0.14
 ```
 
-see [Protocol Wiki](https://github.com/HotNoob/PythonProtocolGateway/wiki/Protocols) for more on this. 
+see [Protocol Wiki](https://github.com/HotNoob/PythonProtocolGateway/wiki/Protocols) for more on this.
 
-Other transport protocols such as MQTT, do not require this configuration, as the variable names are provided during transmission and therefore do not need interpretation. 
+Other transport protocols such as MQTT, do not require this configuration, as the variable names are provided during transmission and therefore do not need interpretation.
 
 ### Reading
-Some transports are Event based, such as MQTT, while others are require active reading. 
+Some transports are Event based, such as MQTT, while others are require active reading.
 for protocols that require active reading such as ModBus, the scan interval is set via "read_interval"
 
 ```
@@ -64,7 +64,7 @@ to use this custom transport:
 transport=mqtt.custom
 ```
 
-naming your transport with .custom will ensure that it won't be overwritten when updating. 
+naming your transport with .custom will ensure that it won't be overwritten when updating.
 
 # Base
 These are parameters that apply to all transports
@@ -106,7 +106,7 @@ model = SPF 12000T
 
 ### serial_number
 serial_number is used as an identifier and is passed on where applicable.
-If left empty, serial number may be automatically fetched if protocol supports it. 
+If left empty, serial number may be automatically fetched if protocol supports it.
 ``` 
 serial_number = 
 ```

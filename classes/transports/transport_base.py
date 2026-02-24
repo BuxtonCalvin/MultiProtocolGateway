@@ -62,6 +62,7 @@ class transport_base:
     device_manufacturer : str = "hotnoob"
     device_model : str = "hotnoob"
     device_identifier : str = "hotnoob"
+    device_location: str = ""
     bridge : str = ""
 
     write_enabled : bool = False
@@ -99,6 +100,7 @@ class transport_base:
             self.device_serial_number = settings.get(["device_serial_number", "serial_number"], self.device_serial_number)
             self.device_manufacturer = settings.get(["device_manufacturer", "manufacturer"], self.device_manufacturer)
             self.device_model = settings.get(["device_model", "model"], self.device_model)
+            self.device_location = settings.get(["device_location", "location"], self.device_location)
             self.device_name = settings.get(["device_name", "name"], fallback=self.device_manufacturer+"_"+self.device_serial_number)
             self.bridge = settings.get("bridge", self.bridge)
             self.read_interval = settings.getfloat("read_interval", self.read_interval)

@@ -323,13 +323,13 @@ class Protocol_Gateway:
                 self.__read_completion_tracker[transport.transport_name] = False
         self._wire_reconnect_hooks()
 
-    def on_message(self, transport: transport_base, entry: registry_map_entry, data: str) -> None:
+    def on_message(self, from_transport: transport_base, entry: registry_map_entry, data: str) -> None:
         for to_transport in self.__transports:
-            if to_transport is transport:
+            if to_transport is from_transport:
                 continue
 
-            if self._are_bridged(transport, to_transport):
-                to_transport.write_data({entry.variable_name: data}, transport)
+            if self._are_bridged(from_transport, to_transport):
+                to_transport.write_data({entry.variable_name: data}, from_transport)
                 break
 
     def _process_transport_read(self, transport) -> None:
@@ -360,23 +360,23 @@ class Protocol_Gateway:
             self._mark_read_complete(transport)
 
         except Exception as err:
-            self.__log.error(f"Error processing transport {transport.transport_name}: {err}")
+            self.__log.exception(f"Error processing transport {transport.transport_name} and {err}")
             # traceback.print_exc()
             self._mark_read_complete(transport)
 
-    def _mark_read_complete(self, transport):
+    def _mark_read_complete(self, transport) -> None:
         """Mark a transport as having completed its read cycle"""
         with self.__read_tracker_lock:
             self.__read_completion_tracker[transport.transport_name] = True
             self.__log.debug(f"Marked {transport.transport_name} read cycle as complete")
 
-    def _reset_read_completion_tracker(self):
+    def _reset_read_completion_tracker(self) -> None:
         """Reset the read completion tracker for the next cycle"""
         with self.__read_tracker_lock:
             for transport_name in self.__read_completion_tracker:
                 self.__read_completion_tracker[transport_name] = False
 
-    def _get_read_completion_status(self):
+    def _get_read_completion_status(self) -> dict[str, bool]:
         """Get the current read completion status for debugging"""
         with self.__read_tracker_lock:
             return self.__read_completion_tracker.copy()

@@ -70,10 +70,12 @@ from sqlalchemy import (
     engine,
     insert,
     inspect,
-    select,
     text,
 )
 from sqlalchemy.dialects.postgresql import Insert
+from sqlalchemy.dialects.postgresql import (
+    insert as pg_insert,  # Postgres Insert (with on_conflict)
+)
 
 # from sqlalchemy.engine.interfaces import ReflectedColumn
 from sqlalchemy.engine.interfaces import ReflectedColumn
@@ -111,14 +113,14 @@ class DeviceInfo(Base):
     __tablename__: str = "device_info"
 
     device_info_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    device_identifier: Mapped[str] = mapped_column(Text, index=True)
+    device_identifier: Mapped[Optional[str]] = mapped_column(Text, index=True)
     device_serial_number: Mapped[Optional[str]] = mapped_column(Text)
-    device_name: Mapped[str] = mapped_column(Text)
+    device_name: Mapped[Optional[str]] = mapped_column(Text)
     device_manufacturer: Mapped[Optional[str]] = mapped_column(Text)
     device_model: Mapped[Optional[str]] = mapped_column(Text)
     device_firmware: Mapped[Optional[str]] = mapped_column(Text)
     device_location: Mapped[Optional[str]] = mapped_column(Text)
-    transport: Mapped[str] = mapped_column(Text)
+    transport: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now().astimezone())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now().astimezone(), onupdate=lambda: datetime.now().astimezone())
@@ -189,11 +191,7 @@ class timescaledb(transport_base):
     username: str = ""
     password: str = ""
     # write_mode = "READ"  # Unclear from base classes on how to use, as TimescaleDB transport will only write to the database, never to the inverter
-    device_manufacturer: str = "Inverter Manufacturer"
-    device_model: str = "Inverter Model"
-    device_serial_number: str = "0001"
-    device_name: str = "TimeScaleDB PPG Bridge"
-    scrape_transport: str = None
+
     force_float: bool = True
 
     flush_timeout: int = 15
@@ -293,19 +291,14 @@ class timescaledb(transport_base):
         self.username = settings.get("username", fallback=self.username)
         self.password = settings.get("password", fallback=self.password)
 
+        # transport_name -> device_info_id cache to minimize DB lookups for device_info_id during batch writes
+        self._device_cache: dict[str, int] = {}
+
         if not self.username:
             raise ValueError("TimeScaleDB User is not set")
 
         if not self.password:
             warnings.warn("TimeScaleDB Password is empty", RuntimeWarning)
-
-        # device info of the transport device and software bridge
-        self.device_manufacturer: str = settings.get("manufacturer", fallback=self.device_manufacturer)
-        self.device_model: str = settings.get("model", fallback=self.device_model)
-        self.device_serial_number: str = settings.get("serial_number", fallback=self.device_serial_number)
-        self.device_identifier: str = settings.get("device_identifier", fallback= f"{self.normalize(self.device_model)}_{self.normalize(self.device_serial_number)}")
-        self.device_name: str = settings.get("device_name", fallback="TimescaleDB PPG Bridge")
-        self.device_location: str = settings.get("location", fallback="Home")
 
         # load reconnect/backoff settings
         self.use_exponential_backoff = settings.getboolean("use_exponential_backoff", fallback=self.use_exponential_backoff)
@@ -348,8 +341,14 @@ class timescaledb(transport_base):
 
         super().__init__(settings)
 
+        # 3. Explicitly set bridge name
+        self.device_name = "TimescaleDB PPG Bridge"
+
+        self._verified_devices: set[str] = set()
+
         # end user settings
         #*********************************
+
 
         self.write_enabled = True  # TimescaleDB output is always write-enabled but this setting is unclear from base class
                                     # keep it enabled to allow access to transport_base.write_data method???
@@ -360,7 +359,7 @@ class timescaledb(transport_base):
 
         self._wide_columns: set[str] = set()  # cached set of existing wide table columns for fast lookup
         self.metric_mapping: dict[str, str] = {}  # metric_name and clean_column_name mapping dict for raw to safe metric name conversions
-        self.device_info_id = None  # will be set during init with _ensure_device_info insert, and after data scrape, per transport batch (future feature).
+        self.device_info_id = None  # will be set during init insert, and after data scrape, per transport batch (future feature).
         self.wide_table_flag = True  # assume wide table unless too many metrics detected
         self.metric_lookup: dict[str, registry_map_entry] = {
             entry.variable_name: entry
@@ -393,12 +392,15 @@ class timescaledb(transport_base):
         self.migration_in_progress = threading.Event()  # event to pause flushes during rollup migration
 
         # Protects the BacklogManager (the list and the .jsonl file).
-        self._backlog_lock: lock = threading.RLock()  # lock for backlog operations
+        self._backlog_lock: RLock = threading.RLock()  # lock for backlog operations
 
         # Lock for protecting schema mutations and metadata reflection
         # Use RLock to allow nested calls within the same thread
         # Protects the SQLAlchemy Metadata and Table Identifiers (the "structure" of the Wide Table).
         self._schema_lock: RLock = threading.RLock()
+
+        # lock for protecting device_info appends when incoming data is from two or more source transports
+        self._device_lock: lock = threading.Lock()
 
         # persistent backlog file and path, both the file path and the in-memory backlog file are initialized here
         self.backlog_file_path: Path = self.backlog_storage_path / f"{self.backlog_file_name}.jsonl"
@@ -451,12 +453,6 @@ class timescaledb(transport_base):
             except Exception as e:
                 self._log.error(f"ORM table creation error: {e}")
 
-        # 4 Write device information metadata for single device/transport on startup if from_transport provided.
-          # multi-device support is via multiple transport instances with unique device identifiers where device_info_id is captured during batch writes.
-            try:
-                self.device_info_id: int = self._ensure_device_info()
-            except Exception as e:
-                self._log.error(f"Device Information Data write failed: {e}")
 
         # 5 If needed, create dynamic columns for metrics in device_metrics_wide and add metrics to metric_catalog table
              # Using the registry_map from protocol_settings to get metric names.  No live data access here.
@@ -716,81 +712,73 @@ class timescaledb(transport_base):
     # -------------------------
     #  4. Write device information metadata
     # -------------------------
-    def _ensure_device_info(self) -> int:
-        """
-        Pull basic device metadata from device attributes and write to device_info table.
-        Ensure that device information is present in the TimescaleDB database. If not, insert it.
 
-        Args:
-            from_transport (transport_base): The transport object containing device metadata.
-        """
-        # if we've lost the session, and can't check against the timescaledb table, then return with 0 as default
+    def _get_or_create_device(self, from_transport: transport_base) -> int:
+        """ The database doesn't know which field changed (name, model, or serial). It only knows that the unique Key (transport) already exists.
+            The First Run: The database sees a new transport name. It creates the row with all metadata.
+            The Next Startup: If say you've changed the device_name in your config. The code tries to INSERT the row again.
+            The Conflict: The database says: "Stop! I already have a row where transport is growatt_1."
+            The Upsert Logic: Because of on_conflict_do_update, the database then takes the new values you just sent
+              (the changed device_name) and overwrites the old values in that existing row."""
 
-        with self.SessionFactory() as session:
+        t_name = from_transport.transport_name
 
-            with self._reconnect_lock:
-                tsdb_connected: bool = self.tsdb_connected
-            if not tsdb_connected or not session:
-                deviceID = 0
-                self._log.debug("device_info unknown, skipping insert, returning error ID 0")
+        # 1. Verified & Cached
+        # If it's in both, we know the DB is up-to-date for this session.
+        if t_name in self._device_cache and t_name in self._verified_devices:
+            return self._device_cache[t_name]
 
-                return deviceID
-            else:
-                self._log.debug("Ensuring device_info record exists")
-            try:
-                # pull device info from transport user settings configuration
-                # check for existing record with exact match on all fields
-                existing: DeviceInfo = (
-                    session.execute(
-                    select(DeviceInfo).where(
-                        (DeviceInfo.device_identifier == self.device_identifier) &
-                        (DeviceInfo.device_name == self.device_name) &
-                        (DeviceInfo.device_serial_number == self.device_serial_number)
+        # 2. THE VERIFICATION PATH (First packet of the session)
+        with self._device_lock:
+            # Double check inside lock
+            if t_name in self._device_cache and t_name in self._verified_devices:
+                return self._device_cache[t_name]
+
+            with self.SessionFactory() as session:
+                try:
+                    # Prepare the Upsert Statement (PostgreSQL specific)
+                    stmt = pg_insert(DeviceInfo).values(
+                        transport=t_name,
+                        device_identifier=from_transport.device_identifier,
+                        device_name=from_transport.device_name,
+                        device_manufacturer=from_transport.device_manufacturer,
+                        device_model=from_transport.device_model,
+                        device_serial_number=from_transport.device_serial_number,
+                        device_location=self.device_location,
+                        created_at=datetime.now().astimezone(),
+                        updated_at=datetime.now().astimezone()
                     )
-                ).scalar_one_or_none()
-                )
-            except SQLAlchemyError as e:
-                self._log.error(f"_ensure_device_info error: {e}")
-                try:
+
+                    # Define what to update if the 'transport' unique constraint is hit
+                    upsert_stmt = stmt.on_conflict_do_update(
+                        index_elements=['transport'],
+                        set_={
+                            "device_identifier":stmt.excluded.device_identifier,
+                            "device_name": stmt.excluded.device_name,
+                            "device_manufacturer": stmt.excluded.device_manufacturer,
+                            "device_model": stmt.excluded.device_model,
+                            "device_serial_number": stmt.excluded.device_serial_number,
+                            "device_location": stmt.excluded.device_location,
+                            "updated_at": stmt.excluded.updated_at
+                        }
+                    ).returning(DeviceInfo.device_info_id)
+
+                    # Execute and get the ID
+                    result = session.execute(upsert_stmt)
+                    db_id = result.scalar_one()
+                    session.commit()
+
+                except Exception as e:
                     session.rollback()
-                except SQLAlchemyError:
-                    self._log.debug("Ensuring device_info rollback failed")
-                raise
+                    self._log.error(f"Upsert failed for {t_name}: {e}")
+                    # Fallback to cache if we have it, otherwise None
+                    return self._device_cache.get(t_name)
 
-            if existing:
-                self._log.debug("Exact device_info exists — skipping insert")
-                return existing.device_info_id
-            else:
-                self._log.debug("device_info not found — inserting new record")
-            try:
-                dev = DeviceInfo(
-                    device_identifier=self.device_identifier,
-                    device_name=self.device_name,
-                    device_manufacturer=self.device_manufacturer,
-                    device_model=self.device_model,
-                    device_serial_number=self.device_serial_number,
-                    #device_firmware=self.device_firmware,
-                    device_location=self.device_location,
-                    transport=self.scrape_transport,
-                    created_at=datetime.now().astimezone(),
-                )
-
-                session.add(dev)
-                session.commit()
-                self._log.info(f"Inserted DeviceInfo for {self.device_identifier}")
-
-                if dev.device_info_id is None:
-                    raise ValueError("Failed to retrieve device_info_id after insert.")  # noqa: TRY301
                 else:
-                    return dev.device_info_id
-
-            except SQLAlchemyError as e:
-                self._log.error(f"device_info insert error: {e}")
-                try:
-                    session.rollback()
-                except SQLAlchemyError:
-                    self._log.debug("inserting new record failed, rollback failed")
-                raise
+                    # Update caches
+                    self._device_cache[t_name] = db_id
+                    self._verified_devices.add(t_name) # Mark as verified for this run
+                    return db_id
 
     def _determine_wide_table(self) -> None:
         """
@@ -1048,57 +1036,36 @@ class timescaledb(transport_base):
         """Overload write_data to process incoming data from transports."""
 
         # 1. Trap: Ignore non-dictionary signals (like boolean True)
-        if not isinstance(data, dict):
+        if not isinstance(data, dict) or not data:
             self._log.warning(
                 f"Received non-dict signal ({type(data).__name__}) from "
                 f"[{from_transport.transport_name}]. Ignoring."
             )
             return
 
-        # 2. Trap: Ignore empty dictionaries
-        if not data:
-            self._log.debug("Received empty data dictionary. Skipping.")
+        # 3. Ensure device_info_id is set and transport is set for device metadata
+        device_id: int = self._get_or_create_device(from_transport = from_transport)
+
+        if device_id is None:
+            self._log.error("Could not resolve Device ID. Dropping packet.")
             return
-        self.scrape_transport = from_transport.transport_name
 
         # 3. Proceed only if there is "real" data
         self._log.debug(f"Data: {data}")
         self._log.debug(f"writing data from [{from_transport.transport_name}] to timescaledb bridge")
 
-        # Safe to copy now that we know it's a dict
-        self._flush_queue.put(data.copy())
-
-    def _prepare_final_data(self,datacopy: dict) -> dict:
-        try:
-            new_data: dict = {self.metric_mapping.get(k, k): v for k, v in datacopy.items()}
-            for key, raw_value in new_data.items():
-
-                # get registry metadata for data type conversions
-                r_metadata: registry_map_entry | None  = self.metric_lookup.get(key)
-
-                # type metric coercion to float value
-                if r_metadata and hasattr(r_metadata, "data_type"):  # field in registry mapping
-                    dt: str = str(r_metadata.data_type).lower()
-                    if dt in ("int", "integer"):
-                        raw_value = int(raw_value)
-                    elif dt in ("float", "double"):
-                        raw_value = float(raw_value)
-                    else:
-                        raw_value = raw_value
-                else:
-                    raw_value: float | Any = float(raw_value) if self.force_float else raw_value
-
-                new_data[key] = raw_value
-            return new_data  # noqa: TRY300
-
-        except (TypeError, ValueError):
-            self._log.warning(f"Invalid metric value encountered in: {datacopy}")
-
+        payload = {
+            "device_info_id": device_id,
+            "metrics": data.copy(),
+            "m_time": datetime.now().astimezone(),
+            "is_processed": False
+        }
+        self._flush_queue.put(payload)
 
     # Flush worker thread to handle data writes to the database.
     def _flush_worker(self) -> None:
         """Async flush worker created during init.  Handles data appends to tables. Routing to backlog if needed.
-            datacopy  -> wide dict of unaltered metrics passed from PPG
+            datacopy  -> wide dict of unaltered metrics passed from PPG or backlog
             new_data  -> wide dict of processed datacopy for safe sql and floating point value coercion.
             final_data  -> wide dict of appended new_data with deviceid and timestamp.  Needed because narrow table
             applies timestamp to individual metrics.
@@ -1114,9 +1081,9 @@ class timescaledb(transport_base):
             try:
                 self._flush_event.wait(timeout=0)
                 # Drain the queue with a 1s timeout to stay responsive
-                datacopy: dict | None = self._flush_queue.get(block=True)
+                data_in: dict | None = self._flush_queue.get(block=True)
 
-                if datacopy is None or datacopy is True:
+                if data_in is None or data_in is True:
                     self._log.info("Shutdown sentinel received. Exiting flush worker.")
                     self._flush_queue.task_done()
                     break # Exit the loop cleanly and immediately
@@ -1127,18 +1094,27 @@ class timescaledb(transport_base):
                         break
                     time.sleep(0.25)
 
-                #  NOTE get most current device_info_id here if future PPG allows multi transports
-                # pre-process data to coerce floating point as values
+                # 2. Extract the metadata from data_in if it came from write_data
+                is_processed = data_in.get("is_processed", False)
+                device_info_id: int = data_in.get("device_info_id")
+                timestamp: datetime = data_in.get("m_time")
+                metrics_only: dict = data_in.get("metrics")
 
+                # pre-process data to coerce floating point as values
                 # # Apply SQL-safe renaming. New dictionary via comprehension/force floats
-                new_data: dict = self._prepare_final_data(datacopy)
-                if not new_data:
-                    continue
+                if not is_processed:
+                    new_data: dict = self._force_float(metrics_only)
+                    if not new_data:
+                        self._flush_queue.task_done()
+                        continue
+                else:
+                    # It's already processed, so new_data IS metrics_only
+                    new_data = metrics_only
 
                 # Add device_info_id and timestamp to new_data
                 final_data: dict = new_data | {
-                    "device_info_id": self.device_info_id,
-                    "m_time": datetime.now().astimezone()
+                    "device_info_id": device_info_id,
+                    "m_time": timestamp
                 }
                 is_stale: bool
                 time_read: float
@@ -1202,6 +1178,33 @@ class timescaledb(transport_base):
 
             finally:
                 session.close()
+
+    def _force_float(self,datacopy: dict) -> dict:
+        try:
+            new_data: dict = {self.metric_mapping.get(k, k): v for k, v in datacopy.items()}
+            for key, raw_value in new_data.items():
+
+                # get registry metadata for data type conversions
+                r_metadata: registry_map_entry | None  = self.metric_lookup.get(key)
+
+                # type metric coercion to float value
+                if r_metadata and hasattr(r_metadata, "data_type"):  # field in registry mapping
+                    dt: str = str(r_metadata.data_type).lower()
+                    if dt in ("int", "integer"):
+                        raw_value = int(raw_value)
+                    elif dt in ("float", "double"):
+                        raw_value = float(raw_value)
+                    else:
+                        raw_value = raw_value
+                else:
+                    raw_value: float | Any = float(raw_value) if self.force_float else raw_value
+
+                new_data[key] = raw_value
+            return new_data  # noqa: TRY300
+
+        except (TypeError, ValueError):
+            self._log.warning(f"Invalid metric value encountered in: {datacopy}")
+
 
     def _flush_batch_narrow(self, newData: dict, session: Session) -> None:
         """
@@ -1527,6 +1530,8 @@ class BacklogManager:
                         try:
                             point: dict[str, Any] = json.loads(clean)
                             ts: str = point.get("m_time")
+                            # flag for the flush worker
+                            point["is_processed"] = True
                             if not ts:
                                 continue
                             m_time: datetime = datetime.fromisoformat(ts)

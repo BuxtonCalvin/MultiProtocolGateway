@@ -44,7 +44,7 @@ MODBUS_FUNCTION_CODES = {
     0x2B: "Read Device Identification"
 }
 
-MODBUS_EXCEPTION_CODES = {
+MODBUS_EXCEPTION_CODES: dict[ExcCodes, str] = {
     ExcCodes.ILLEGAL_FUNCTION: "ILLEGAL_FUNCTION",
     ExcCodes.ILLEGAL_ADDRESS: "ILLEGAL_ADDRESS",
     ExcCodes.ILLEGAL_VALUE: "ILLEGAL_VALUE",
@@ -58,7 +58,7 @@ MODBUS_EXCEPTION_CODES = {
 }
 # Descriptions for Modbus exception codes (using ExceptionResponse constants as keys)
 
-MODBUS_EXCEPTION_DESCRIPTIONS = {
+MODBUS_EXCEPTION_DESCRIPTIONS: dict[ExcCodes, str] = {
     ExcCodes.ILLEGAL_FUNCTION: "The function code received in the query is not an allowable action for the slave",
     ExcCodes.ILLEGAL_ADDRESS: "The data address received in the query is not an allowable address for the slave",
     ExcCodes.DEVICE_FAILURE: "An unrecoverable error occurred while the slave was attempting to perform the requested action",
@@ -113,7 +113,7 @@ class RegisterFailureTracker:
         if self._lock is None:
             self._lock = threading.Lock()
 
-    def record_failure(self, max_failures: int = 5, disable_duration_hours: int = 12):
+    def record_failure(self, max_failures: int = 5, disable_duration_hours: int = 12) -> bool:
         """Record a failed read attempt"""
         with self._lock:
             current_time = time.time()
@@ -326,7 +326,24 @@ class modbus_base(transport_base):
         return disabled_info
 
     def get_register_failure_status(self) -> dict:
-        """Get comprehensive status of register failure tracking"""
+        """Get comprehensive status of register failure tracking
+            - `enabled`: Whether failure tracking is enabled
+            - `max_failures_before_disable`: Configured failure threshold
+            - `disable_duration_hours`: Configured disable duration
+            - `total_tracked_ranges`: Total number of ranges being tracked
+            - `disabled_ranges`: List of currently disabled ranges
+            - `failed_ranges`: List of ranges with failures but not yet disabled
+            - `successful_ranges`: List of ranges with no failures
+
+                Each range entry contains:
+                - `registry_type`: INPUT or HOLDING
+                - `range`: Register range (e.g., "994-999")
+                - `failure_count`: Number of failures
+                - `last_failure_time`: Timestamp of last failure
+                - `last_success_time`: Timestamp of last success
+                - `disabled_until`: Timestamp when disabled until (for disabled ranges)
+                - `remaining_hours`: Hours remaining until re-enabled (for disabled ranges)
+        """
         status = {
             "enabled": self.enable_register_failure_tracking,
             "max_failures_before_disable": self.max_failures_before_disable,
