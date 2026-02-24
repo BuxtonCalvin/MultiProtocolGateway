@@ -46,5 +46,4 @@ ruff.toml
 pytests/test_timescaledb_out.py
 
 config.cfg
-config.cfg.back
 logs/gateway.log
