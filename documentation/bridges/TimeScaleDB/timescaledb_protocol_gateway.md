@@ -301,7 +301,6 @@ services:
 ```ini
 [general]
 log_level = DEBUG
-# enable for multi inverter reads.
 enable_concurrency = false
 
 [logging]
@@ -318,13 +317,10 @@ backup_count = 4
 # 100MB (only if size-based)
 max_bytes = 104857600      
 console = true
-```
 
-#### Example transport Scraper
-
-```ini
-
-[transport.modbus_tcp] 
+# can be any name in the format transport.<name>
+# changing the name will result in a new device being created in the Timescale DB.
+[transport.Inverter1]
 log_level = DEBUG
 transport = modbus_tcp
 protocol_version = eg4_18kpv
@@ -332,16 +328,16 @@ analyze_protocol = false
 write = false
 host = 10.17.2.65
 port = 502
-#  Here you are telling PPG to use the timescaledb module for you data output.
 bridge = transport.timescaledb
 read_interval = 15
-```
 
-### 6.5 TimescaleDB Module Configuration (config.cfg)
-
-#### Example timescaledb bridge configuration
-
-```ini
+# Device descriptions used by Timescale for scraping an inverter/device.
+manufacturer = EG4
+model = 18KPV
+serial_number = 4066670074
+location = home
+name = EG4 18kpv1
+# serial_number =
 
 [transport.timescaledb]
 log_level = DEBUG
@@ -349,22 +345,11 @@ transport = timescaledb
 host = 10.17.2.42
 port = 5431
 database = solar1
-username =  your_user_name_here
-password = your_password_here
+username =  your-username
+password = your-password
 
-# TimescaleDB Device settings.  Changing any of these three will create a new device in the database
-device_name = 18KPV1
-serial_number = 4066670076
-device_identifier = Main Inverter
-
-# Additional Device descriptors
-manufacturer = EG4
-model = 18kPV
-device_firmware = 46543224
-location = Basement
-
-## All of the below are optional and are set to defaults if not specified
-# force float coerces all values obtained to be of the float type
+### All of the below are optional and are set to defaults if not specified
+# force float coerces all values obtained to be of the float type.
 force_float = true
 
 # persistent backlog settings
@@ -375,12 +360,13 @@ backlog_file_name = no_connect_backlog
 # max data points to store in backlog
 max_backlog_size = 10000
 # seconds-->  equal to 24 hours
-max_backlog_age = 86400
+max_backlog_age = 86400 
 
 # TSDB Connection monitoring settings
 reconnect_attempts = 5
 # minutes
 reconnect_delay = 5
+
 # Exponential backoff settings (reconnect delay increases exponentially on each failure)
 use_exponential_backoff = true
 # minutes --> 5 hours

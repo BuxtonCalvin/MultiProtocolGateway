@@ -14,10 +14,12 @@ interval = 1
 # keep 4 weeks
 backup_count = 4           
 # 100MB (only if size-based)
-max_bytes = 104857600      
+max_bytes = 104857600 
 console = true
 
-[transport.modbus_tcp] 
+# can be any name in the format transport.<name>
+# changing the name will result in a new device being created in the Timescale DB.
+[transport.Inverter1]
 log_level = DEBUG
 transport = modbus_tcp
 protocol_version = eg4_18kpv
@@ -28,19 +30,22 @@ port = 502
 bridge = transport.timescaledb
 read_interval = 15
 
+# Device descriptions used by Timescale for scraping an inverter/device.
+manufacturer = EG4
+model = 18KPV
+serial_number = 4066670074
+location = home
+name = EG$ 18kPV1
+# serial_number =
+
 [transport.timescaledb]
 log_level = DEBUG
 transport = timescaledb
 host = 10.17.2.42
 port = 5431
 database = solar1
-username =  your_user_name_here
-password = your_password_here
-
-# TimescaleDB Device settings.  Changing any of these will create a new device in the database.
-manufacturer = EG4
-model = 18KPV
-serial_number = 4066670074
+username =  your-username
+password = your-password
 
 ### All of the below are optional and are set to defaults if not specified
 # force float coerces all values obtained to be of the float type.
@@ -81,5 +86,5 @@ stale_data_timeout = 300
 
 # pushover settings / disable if you don't use pushover.
 enable_pushover = True
-pushover_token = your_token_here
-pushover_user = your_user_key_here
+pushover_token = your-token
+pushover_user = your-userid

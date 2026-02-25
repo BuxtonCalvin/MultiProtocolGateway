@@ -1058,7 +1058,8 @@ class timescaledb(transport_base):
             "device_info_id": device_id,
             "metrics": data.copy(),
             "m_time": datetime.now().astimezone(),
-            "is_processed": False
+            "is_processed": False,
+            "transport_name": from_transport.transport_name
         }
         self._flush_queue.put(payload)
 
@@ -1094,11 +1095,12 @@ class timescaledb(transport_base):
                         break
                     time.sleep(0.25)
 
-                # 2. Extract the metadata from data_in if it came from write_data
+                # 2. Extract the metadata from data_in
                 is_processed = data_in.get("is_processed", False)
                 device_info_id: int = data_in.get("device_info_id")
                 timestamp: datetime = data_in.get("m_time")
                 metrics_only: dict = data_in.get("metrics")
+                transport_name: str = data_in.get("transport_name")
 
                 # pre-process data to coerce floating point as values
                 # # Apply SQL-safe renaming. New dictionary via comprehension/force floats
@@ -1108,13 +1110,13 @@ class timescaledb(transport_base):
                         self._flush_queue.task_done()
                         continue
                 else:
-                    # It's already processed, so new_data IS metrics_only
+                    # It's already processed, so new_data is metrics_only from backlog
                     new_data = metrics_only
 
-                # Add device_info_id and timestamp to new_data
+                # Add device_info_id and timestamp to new_data regardless of origin.
                 final_data: dict = new_data | {
                     "device_info_id": device_info_id,
-                    "m_time": timestamp
+                    "m_time": timestamp,
                 }
                 is_stale: bool
                 time_read: float
@@ -1142,7 +1144,7 @@ class timescaledb(transport_base):
                                     session.execute(stmt)
 
                         self._commit_stale_state(metrics=metrics, time_read=time_read, is_stale=is_stale)
-
+                        self._log.debug(f"writing data from [{transport_name}] to timescaledb bridge")
                 except (SQLAlchemyError, ValueError) as e:
                     session.rollback()
                     self._log.warning("metrics data write failed.")
@@ -1156,7 +1158,15 @@ class timescaledb(transport_base):
                         acquired: bool = self._backlog_lock.acquire(blocking=False)
                         try:
                             if acquired:
-                                self.backlog.enqueue(final_data)
+                                payload: dict[str,Any] = {
+                                    "metrics": new_data,          # The cleaned metrics
+                                    "device_info_id": device_info_id, # Preserve ID
+                                    "m_time": timestamp,             # Preserve original timestamp
+                                    "is_processed": True,         # Flag so we don't re-float-coerce
+                                    "transport_name": transport_name
+                                }
+                                self.backlog.enqueue(payload)
+
                         finally:
                             if acquired:
                                 self._backlog_lock.release()
@@ -1530,8 +1540,6 @@ class BacklogManager:
                         try:
                             point: dict[str, Any] = json.loads(clean)
                             ts: str = point.get("m_time")
-                            # flag for the flush worker
-                            point["is_processed"] = True
                             if not ts:
                                 continue
                             m_time: datetime = datetime.fromisoformat(ts)
@@ -1575,8 +1583,8 @@ class BacklogManager:
             count: int = len(self.backlog_points)
             if count > 0:
                 self._log.debug(f"Replaying {count} points to flush queue.")
-                for point in self.backlog_points:
-                    self._flush_queue.put(point)
+                for payload in self.backlog_points:
+                    self._flush_queue.put(payload)
                 self.backlog_points.clear()
                 self._sync_to_disk()
         return count

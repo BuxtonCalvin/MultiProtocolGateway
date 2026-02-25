@@ -496,14 +496,14 @@ class modbus_base(transport_base):
     def read_serial_number(self) -> str:
         # First try to read "Serial Number" from input registers (for protocols like EG4 v58)
         self._log.info("Looking for serial_number variable in input registers...")
-        serial_number = str(self.read_variable("Serial Number", Registry_Type.INPUT))
+        serial_number = str(self.read_variable("Serial_Number", Registry_Type.INPUT))
         self._log.info("read SN from input registers: " + serial_number)
         if serial_number and serial_number != "None":
             return serial_number
 
         # Then try holding registers (for other protocols)
         self._log.info("Looking for serial_number variable in holding registers...")
-        serial_number = str(self.read_variable("Serial Number", Registry_Type.HOLDING))
+        serial_number = str(self.read_variable("Serial_Number", Registry_Type.HOLDING))
         self._log.info("read SN from holding registers: " + serial_number)
         if serial_number and serial_number != "None":
             return serial_number
