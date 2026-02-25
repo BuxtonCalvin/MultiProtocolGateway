@@ -1,26 +1,26 @@
 ## Overriding protocols
-Protocols CSVs can be overridden, so that specific entries can be modified. 
+Protocols CSVs can be overridden, so that specific entries can be modified.
 Protocols CSV overrides can be created naming them with name.override.csv
 
 For example, creating a file called: v0.14.input_registry_map.override.csv
-will allow the v0.14 protocol to be modified while preserving the main csv. 
+will allow the v0.14 protocol to be modified while preserving the main csv.
 
-"documented name" is used as the primary key. the "register" is a secondary key. 
+"documented name" is used as the primary key. the "register" is a secondary key.
 
-only non-empty values will overwrite; not all columns need to be specified. 
+only non-empty values will overwrite; not all columns need to be specified.
 
 | documented name  | data type |
 | ------------- | ------------- |
 | product id  | ASCII  |
 
-if both the "documented name" and "register" are unique, the row will be treated as a new entry. 
+if both the "documented name" and "register" are unique, the row will be treated as a new entry.
 
 ## Custom / Editing Protocols
-Custom protocols can be created by naming them with name.custom. this will ensure that they do not get overwritten when updating. 
+Custom protocols can be created by naming them with name.custom. this will ensure that they do not get overwritten when updating.
 
-for example, say that you want to modify the eg4_v58 protocol without having to worry about updates overwriting it: 
+for example, say that you want to modify the eg4_v58 protocol without having to worry about updates overwriting it:
 
-```
+``` ini
 copy eg4_v58.json eg4_v58.custom.json
 copy eg4_v58.input_registry_map.csv eg4_v58.input_registry_map.custom.csv
 copy eg4_v58.holding_registry_map.csv eg4_v58.holding_registry_map.custom.csv
@@ -34,7 +34,7 @@ protocol_version = eg4_v58.custom
 ## Protocol Configuration - CSV / JSON
 {protocol_name}.json contains default settings, related to the transport.
 {protocol_name}.{registry_type}_registry_map.csv contains configuration for specific registry "type".
-{protocol_name}.registry_map.csv contains configuration for generic "registers". 
+{protocol_name}.registry_map.csv contains configuration for generic "registers".
  
 ### csv format:
 [creating_and_editing_protocols.md](creating_and_editing_protocols.md) - Creating and editing protocols

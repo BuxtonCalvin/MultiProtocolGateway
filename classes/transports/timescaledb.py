@@ -1144,7 +1144,7 @@ class timescaledb(transport_base):
                                     session.execute(stmt)
 
                         self._commit_stale_state(metrics=metrics, time_read=time_read, is_stale=is_stale)
-                        self._log.debug(f"writing data from [{transport_name}] to timescaledb bridge")
+                        self._log.debug(f"data write complete from [{transport_name}] to timescaledb bridge")
                 except (SQLAlchemyError, ValueError) as e:
                     session.rollback()
                     self._log.warning("metrics data write failed.")

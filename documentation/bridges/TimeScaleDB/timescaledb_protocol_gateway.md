@@ -337,7 +337,11 @@ model = 18KPV
 serial_number = 4066670074
 location = home
 name = EG4 18kpv1
-# serial_number =
+# If you want to retrieve the serial number from the inverter, uncomment the below Serial_Number and comment the above.
+# You must include Serial_Number in the list in the variable_mask file along with any other variables you want to capture.
+# or leave the variable_mask file blank to capture all variables.
+
+# Serial_Number =
 
 [transport.timescaledb]
 log_level = DEBUG

@@ -44,6 +44,10 @@ def strtoint(val : str) -> int:
     if not val: #empty
         return 0
 
+   # trap for a code that contains a letter thereby cannot be coerced.
+    if any(char.isalpha() for char in val):
+        return val
+
     return int(val)
 
 def get_usb_serial_port_info(port : str = "") -> str:
