@@ -149,6 +149,7 @@ class DeviceMetricsNarrow(Base):
 
     # In TimescaleDB/SQLAlchemy, mark columns that are part of PK as primary_key=True in mapped_column
     # as well as defining the constraint in __table_args__
+    # metric_value is forced float for all numerics and booleans.  Text (ASCII) is filtered out prior to append.
     m_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now().astimezone(), primary_key=True)
     device_info_id: Mapped[int] = mapped_column(ForeignKey("device_info.device_info_id"), primary_key=True)
     metric_name: Mapped[str] = mapped_column(Text, primary_key=True)
@@ -168,7 +169,8 @@ class MetricCatalog(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     metric_name: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     clean_column_name: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
-    data_type: Mapped[str] = mapped_column(Text, default='double precision')
+    data_type: Mapped[str] = mapped_column(Text, default='double precision', nullable=False)
+    unit_mod: Mapped[str] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),  default=lambda: datetime.now().astimezone(), onupdate=lambda: datetime.now().astimezone())
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
@@ -193,6 +195,40 @@ class timescaledb(transport_base):
     # write_mode = "READ"  # Unclear from base classes on how to use, as TimescaleDB transport will only write to the database, never to the inverter
 
     force_float: bool = True
+
+    timescale_type_map: dict[str, str] = {
+        # 8-bit & 16-bit Unsigned/Signed -> SMALLINT or INTEGER
+        # USHORT is mapped to INTEGER to accommodate values > 32767
+        "BYTE": "SMALLINT",
+        "USHORT": "INTEGER",
+        "SHORT": "SMALLINT",
+        # 32-bit Unsigned/Signed
+        "UINT": "BIGINT",
+        "INT": "INTEGER",
+        # Flags & Bits (Integers are best for Delta-Delta compression)
+        "_8BIT_FLAGS": "SMALLINT",
+        "_16BIT_FLAGS": "INTEGER",
+        "_32BIT_FLAGS": "BIGINT",
+        # Strings (Dictionary compression)
+        "ASCII": "TEXT",
+        "ASCII_LE": "TEXT",
+        "HEX": "TEXT",
+        "_1BIT": "BOOLEAN",
+
+        # 1. Unsigned Bit-lengths (_2BIT to _15BIT)
+        **{f"_{i}BIT": "SMALLINT" for i in range(2, 16)},
+        "_16BIT": "INTEGER", # 16-bit unsigned needs INTEGER
+
+        # 2. Signed Bits (_2SBIT to _16SBIT)
+        **{f"_{i}SBIT": "SMALLINT" for i in range(2, 17)},
+
+        # 3. Signed Magnitude (_2SMBIT to _16SMBIT)
+        **{f"_{i}SMBIT": "SMALLINT" for i in range(2, 17)},
+
+        # Float (Add these if you use them - Gorilla compression)
+        "FLOAT32": "REAL",
+        "FLOAT64": "DOUBLE PRECISION"
+    }
 
     flush_timeout: int = 15
 
@@ -744,7 +780,7 @@ class timescaledb(transport_base):
                         device_manufacturer=from_transport.device_manufacturer,
                         device_model=from_transport.device_model,
                         device_serial_number=from_transport.device_serial_number,
-                        device_location=self.device_location,
+                        device_location=from_transport.device_location,
                         created_at=datetime.now().astimezone(),
                         updated_at=datetime.now().astimezone()
                     )
@@ -822,7 +858,8 @@ class timescaledb(transport_base):
     # -------------------------
 
     def _registry_metric_names(self) -> List[str]:
-        """ load registry map for validation of metric names for dynamic column creation. Return sorted list of metric names.
+        """ load registry map for validation of metric names for dynamic column creation. Return sorted list of metric names
+            with their data types and notes.
         """
 
         ## returns all variable_name in registry_metrics as opposed to below selected Registry_Type.
@@ -834,7 +871,7 @@ class timescaledb(transport_base):
         # ])
 
         return sorted([
-            (entry.variable_name, getattr(entry, 'note', ''))
+            (entry.variable_name, getattr(entry, 'data_type', ''), getattr(entry, 'unit_mod', ''), getattr(entry, 'note', ''))
             for registry_type in (Registry_Type.INPUT, Registry_Type.HOLDING)
             for entry in self.registry_metrics[registry_type]
             if hasattr(entry, 'variable_name')
@@ -854,6 +891,7 @@ class timescaledb(transport_base):
         There could potentially be thousands of metrics, which cannot all be ingested as columns. If over 200 metrics we only save metrics to the
         device_metrics_narrow table, so this method is not needed and is bypassed at the calling method connection stage.
         """
+
         with self.SessionFactory() as session:
 
             # Must be connected to tsdb to write metric names
@@ -874,14 +912,26 @@ class timescaledb(transport_base):
                         # advisory lock to serialize schema changes
                         self._schema_advisory_lock(session)
 
-                        for m, n in metric_start_names:
+                        # metric name, data_type, unit_mod, note
+                        for m, d, u, n in metric_start_names:
                             # 1. Check for existing mapping
                             row_value: Any | None = session.execute(
                                 text("SELECT clean_column_name FROM metric_catalog WHERE metric_name = :m"),
                                 {"m": m}
                             ).scalar()
 
+                            d_type: str = self._timescale_type(d,u)
+
                             if row_value:
+                                # Update the notes, data_type and unit_mod fields in the database for a matching metric
+                                session.execute(
+                                    text("""
+                                        UPDATE metric_catalog SET notes = :n, data_type = :d, unit_mod = :u
+                                        WHERE metric_name = :m
+                                    """),
+                                    {"n": n, "d": d_type, "u": u, "m": m}
+                                )
+
                                 self.metric_mapping[m] = row_value
                                 continue
 
@@ -894,27 +944,33 @@ class timescaledb(transport_base):
                                 WHERE table_name = 'device_metrics_wide' AND column_name = :col
                             """), {"col": col}).scalar()
 
-                            # add column if missing.  Initial column creation should be alphabetic due to sorted metric names.
-                            # per postgres docs, subsequent columns added after first init are appended to the end of the table.
-                            # ie if you want a new column in the middle of the table, you must manually delete the table contents.
-                            # and restart PPG to recreate the table with the new column in the desired location.
+                            # Add column if missing.  Initial column creation is alphabetic due to sorted metric names.
+                            # Per postgres docs, subsequent columns added after first init are always appended to the end of the table.
+                            # ie if you want a new column in the middle of the wide table, you must manually delete all tables,
+                            # (losing your data) and restart PPG to recreate the table with the new column in the desired location.
+
                             if not exists_wide:
                                 session.execute(text(
-                                    f"ALTER TABLE device_metrics_wide ADD COLUMN IF NOT EXISTS {col} double precision;"
+                                    f"ALTER TABLE device_metrics_wide ADD COLUMN IF NOT EXISTS {col} {d_type};"
                                 ))
+
                             params: dict = {
-                                'm': m, # metric_name
-                                'col': col, # clean_column_name
-                                'dtype': 'double precision', # data_type default to double precision for now
+                                'm': m,         # metric_name
+                                'col': col,     # clean_column_name
+                                'dtype': d_type or 'double precision', # data_type mapped from registry, with default
+                                'umod': u,
                                 'col_date': datetime.now().astimezone(),
-                                'n': n # Add the note here
+                                'n': n          # note from registry
                             }
 
                             session.execute(text("""
-                                INSERT INTO metric_catalog (metric_name, clean_column_name, data_type, created_at, notes)
-                                VALUES (:m, :col, :dtype, :col_date, :n)
-                                ON CONFLICT (metric_name) DO UPDATE SET clean_column_name = EXCLUDED.clean_column_name,
-                                notes = EXCLUDED.notes
+                                INSERT INTO metric_catalog (metric_name, clean_column_name, data_type, unit_mod, created_at, notes)
+                                VALUES (:m, :col, :dtype, :umod, :col_date, :n)
+                                ON CONFLICT (metric_name) DO UPDATE SET
+                                    clean_column_name = EXCLUDED.clean_column_name,
+                                    data_type = EXCLUDED.data_type,
+                                    unit_mod = EXCLUDED.unit_mod,
+                                    notes = EXCLUDED.notes
                             """), params)
 
                             self.metric_mapping[m] = col
@@ -936,6 +992,23 @@ class timescaledb(transport_base):
         """
 
         session.execute(text("SELECT pg_advisory_xact_lock(hashtext(:k));"), {"k": key_text})
+
+    def _timescale_type(self,data_type,unit) -> str:
+        dt_name = data_type.name
+
+        # --- base type from lookup, use DOUBLE PRECISION as fall back to be safe.
+        base_type: Any = self.timescale_type_map.get(dt_name, "DOUBLE PRECISION")
+
+        # --- text and boolean never scale ---
+        if base_type in ("TEXT", "BOOLEAN"):
+            return base_type
+
+        # --- scaling override ---
+        # if a numeric value has a unit modifier, store as float
+        if unit != 1.0:
+            return "DOUBLE PRECISION"
+
+        return base_type
 
     #5d. clean column name
     def _clean_column_name(self, metric_name: str) -> str:
@@ -1105,7 +1178,8 @@ class timescaledb(transport_base):
                 # pre-process data to coerce floating point as values
                 # # Apply SQL-safe renaming. New dictionary via comprehension/force floats
                 if not is_processed:
-                    new_data: dict = self._force_float(metrics_only)
+                    # new_data: dict = self._force_float(metrics_only)
+                    new_data: dict = metrics_only
                     if not new_data:
                         self._flush_queue.task_done()
                         continue
@@ -1232,7 +1306,7 @@ class timescaledb(transport_base):
                 # Convert string to datetime if needed
                 reading_time: datetime = datetime.fromisoformat(reading_time)
 
-            # Convert the flat dict into a list of row mappings
+            # Convert the flat dict into a list of row mappings, excluding strings
             narrow_mappings: list = [
                 {
                     "m_time": reading_time,
@@ -1240,7 +1314,8 @@ class timescaledb(transport_base):
                     "metric_name": key,
                     "metric_value": value
                 }
-                for key, value in  narrow_data.items()
+                for key, value in narrow_data.items()
+                if isinstance(value, (int, float, bool))
             ]
 
             # Use the optimized 'insert' construct for bulk efficiency
@@ -2308,7 +2383,7 @@ class RollupManager:
 
         except Exception as e:
             session.rollback()
-            self._log.error(f"_create_rollup_wide error for {view_name}: {e}")
+            self._log.error(f"_create_wide_rollup error for {view_name}: {e}")
             raise
 
     def _resolve_metric_columns(self, session: Session, agg_func: str) -> List[str]:
@@ -2319,8 +2394,14 @@ class RollupManager:
         This method dynamically fetches all metric columns from the catalog and constructs the appropriate aggregate expressions
         based on the aggregation level, ensuring that the wide rollups maintain hierarchical consistency regardless of the source.
         """
-        # 1. Fetch all clean column names from the catalog
-        result = session.execute(text("SELECT clean_column_name FROM metric_catalog ORDER BY clean_column_name"))
+        # 1. Fetch all clean column names from the catalog that are not ASCII values.
+        result = session.execute(text(
+            "SELECT clean_column_name "
+            "FROM metric_catalog "
+            "WHERE data_type NOT IN ('TEXT', 'BOOLEAN') "
+            "ORDER BY clean_column_name"
+        ))
+
         column_names: List[str] = list(result.scalars())
 
         metric_expressions: list = []

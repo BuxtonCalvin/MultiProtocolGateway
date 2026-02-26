@@ -192,6 +192,7 @@ class registry_map_entry:
 
     variable_name : str
     documented_name : str
+    note : str
     unit : str
     unit_mod : float
     concatenate : bool
@@ -571,7 +572,10 @@ class protocol_settings:
 
                 data_type = Data_Type.fromString(data_type_str)
 
-
+            if "note" in row and row["note"]:
+                note = row["note"]
+            else:
+                note = ""
 
             if "values" not in row:
                 row["values"] = ""
@@ -708,6 +712,7 @@ class protocol_settings:
                                             data_type= data_type,
                                             data_type_size = data_type_len,
                                             data_byteorder = data_byteorder,
+                                            note = note,
                                             concatenate = concatenate,
                                             concatenate_registers = concatenate_registers,
                                             values=values,
