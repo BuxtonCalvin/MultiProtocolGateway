@@ -349,7 +349,7 @@ class timescaledb(transport_base):
 
         # persistent backlog settings
         self.enable_persistent_storage = settings.getboolean("enable_persistent_storage", fallback=self.enable_persistent_storage)
-        self.backlog_storage_path = Path(settings.get("backlog_storage_path", fallback=self.backlog_storage_path))
+        self.backlog_storage_path = Path(str(settings.get("backlog_storage_path", fallback=self.backlog_storage_path)))
         self.backlog_file_name = settings.get("backlog_file_name", fallback=self.backlog_file_name)
         self.max_backlog_size = settings.getint("max_backlog_size", fallback=self.max_backlog_size)
         self.max_backlog_age: int = settings.getint("max_backlog_age", fallback=self.max_backlog_age)
@@ -385,24 +385,19 @@ class timescaledb(transport_base):
         # end user settings
         #*********************************
 
-
-        self.write_enabled = True  # TimescaleDB output is always write-enabled but this setting is unclear from base class
-                                    # keep it enabled to allow access to transport_base.write_data method???
-        # self.transport_connected: bool = transport_base.connected   # inverter connection state from base class
+        # TimescaleDB output is always write-enabled but this setting is unclear from base class
+        # keep it enabled to allow access to transport_base.write_data method???
+        self.write_enabled = True
 
         # load all registry metrics' map.
         self.registry_metrics: dict[Registry_Type, List[registry_map_entry]]  = protocol_settings.registry_map
 
         self._wide_columns: set[str] = set()  # cached set of existing wide table columns for fast lookup
-        self.metric_mapping: dict[str, str] = {}  # metric_name and clean_column_name mapping dict for raw to safe metric name conversions
-        self.device_info_id = None  # will be set during init insert, and after data scrape, per transport batch (future feature).
+
+        # metric_name with clean_column_name, data_type, unit for mapping dict for raw to safe metric name conversions
+        self.metric_mapping: dict[str, tuple[str, str]] = {}
+        self.device_info_id = None  # will be set after data scrape, per transport batch.
         self.wide_table_flag = True  # assume wide table unless too many metrics detected
-        self.metric_lookup: dict[str, registry_map_entry] = {
-            entry.variable_name: entry
-            for registry_type in (Registry_Type.INPUT, Registry_Type.HOLDING)
-            for entry in self.registry_metrics.get(registry_type, [])
-            if hasattr(entry, 'variable_name')
-        }
 
         # SQLAlchemy init runtime
         self.engine = None  # engine connection
@@ -764,7 +759,7 @@ class timescaledb(transport_base):
         if t_name in self._device_cache and t_name in self._verified_devices:
             return self._device_cache[t_name]
 
-        # 2. THE VERIFICATION PATH (First packet of the session)
+        # 2. The verification path (First packet of the session)
         with self._device_lock:
             # Double check inside lock
             if t_name in self._device_cache and t_name in self._verified_devices:
@@ -883,8 +878,8 @@ class timescaledb(transport_base):
 
     def _ensure_columns_for_metrics(self, metric_start_names: List[str]) -> bool:
         """
-        Ensure each metric name as defined in the variable_mask/variable_screen filters has a corresponding column in device_metrics, and an entry
-        in the metric_catalog table.
+        Ensure each metric name as defined in the variable_mask/variable_screen filters has a corresponding column in device_metrics_wide,
+        and an entry in the metric_catalog table-- which describes the wide table field definitions.
         Due to the memory limits of postgres, no more than 200 metrics as determined in the calling method.
         Using metric_name to map, return clean_column_name in the metric_catalog to create the SQL column in device_metrics_wide.
 
@@ -903,7 +898,7 @@ class timescaledb(transport_base):
                 return False
 
             if not metric_start_names:
-                self._log.info("No metric column names were detected")
+                self._log.error("No metric column names were detected")
                 return False
 
             try:
@@ -914,31 +909,33 @@ class timescaledb(transport_base):
 
                         # metric name, data_type, unit_mod, note
                         for m, d, u, n in metric_start_names:
-                            # 1. Check for existing mapping
-                            row_value: Any | None = session.execute(
+                            # 1. Check for existing clean name that has already been mapped.
+                            clean_value: Any | None = session.execute(
                                 text("SELECT clean_column_name FROM metric_catalog WHERE metric_name = :m"),
                                 {"m": m}
                             ).scalar()
 
                             d_type: str = self._timescale_type(d,u)
 
-                            if row_value:
-                                # Update the notes, data_type and unit_mod fields in the database for a matching metric
+                            if clean_value:
+                                # Update the data_type,unit_mod and notes fields in metric_catalog for a matching metric
+                                # from the csv files.  All corrections/updates should take place in the CSV.
                                 session.execute(
                                     text("""
-                                        UPDATE metric_catalog SET notes = :n, data_type = :d, unit_mod = :u
+                                        UPDATE metric_catalog SET data_type = :d, unit_mod = :u, notes = :n
                                         WHERE metric_name = :m
                                     """),
-                                    {"n": n, "d": d_type, "u": u, "m": m}
+                                    {"d": d_type, "u": u, "m": m, "n": n}
                                 )
-
-                                self.metric_mapping[m] = row_value
+                                # metric_mapping is used to process raw metrics data for coercion.
+                                self.metric_mapping[m] = (clean_value, d_type)
+                                # metric exists so return to the top of the loop.
                                 continue
 
-                            # 2. Clean name and ensure column exists in wide table
+                            # 2. If clean_value was false, clean metric name for safe sql column naming.
                             col: str = self._clean_column_name(m)
 
-                            # check if column name (cleaned metric name) exists in postgres information_schema
+                            # check if column name (cleaned name) exists in postgres information_schema
                             exists_wide: Any | None = session.execute(text("""
                                 SELECT 1 FROM information_schema.columns
                                 WHERE table_name = 'device_metrics_wide' AND column_name = :col
@@ -962,7 +959,8 @@ class timescaledb(transport_base):
                                 'col_date': datetime.now().astimezone(),
                                 'n': n          # note from registry
                             }
-
+                            # just in case the if clean_value: check failed.
+                            # Take the existing record's field values and overwrite them with the value from the row that failed to insert".
                             session.execute(text("""
                                 INSERT INTO metric_catalog (metric_name, clean_column_name, data_type, unit_mod, created_at, notes)
                                 VALUES (:m, :col, :dtype, :umod, :col_date, :n)
@@ -973,7 +971,7 @@ class timescaledb(transport_base):
                                     notes = EXCLUDED.notes
                             """), params)
 
-                            self.metric_mapping[m] = col
+                            self.metric_mapping[m] = (col, d_type)
 
                     self._cache_wide_table_columns()  # cache existing wide table columns for fast lookup validation during writes
                     self._sync_single_table_schema()  #  resync ORM table after dynamic column changes
@@ -1140,7 +1138,7 @@ class timescaledb(transport_base):
     def _flush_worker(self) -> None:
         """Async flush worker created during init.  Handles data appends to tables. Routing to backlog if needed.
             datacopy  -> wide dict of unaltered metrics passed from PPG or backlog
-            new_data  -> wide dict of processed datacopy for safe sql and floating point value coercion.
+            new_data  -> wide dict of processed datacopy for safe sql coercion.
             final_data  -> wide dict of appended new_data with deviceid and timestamp.  Needed because narrow table
             applies timestamp to individual metrics.
         """
@@ -1175,11 +1173,11 @@ class timescaledb(transport_base):
                 metrics_only: dict = data_in.get("metrics")
                 transport_name: str = data_in.get("transport_name")
 
-                # pre-process data to coerce floating point as values
+                # pre-process data to coerce floating point, integer as values (from metric_catalog definitions.)
                 # # Apply SQL-safe renaming. New dictionary via comprehension/force floats
                 if not is_processed:
-                    # new_data: dict = self._force_float(metrics_only)
-                    new_data: dict = metrics_only
+                    new_data: dict = self._process_raw_metrics(metrics_only)
+
                     if not new_data:
                         self._flush_queue.task_done()
                         continue
@@ -1263,32 +1261,61 @@ class timescaledb(transport_base):
             finally:
                 session.close()
 
-    def _force_float(self,datacopy: dict) -> dict:
+    def _process_raw_metrics(self, datacopy: dict) -> dict:
+
         try:
-            new_data: dict = {self.metric_mapping.get(k, k): v for k, v in datacopy.items()}
-            for key, raw_value in new_data.items():
+            # 1. Get the mapping entry (the tuple) or None if not found
+            # 2. If it's a tuple, use the first element [0] (clean_name)
+            # 3. If it's not found (None), fallback to the original key 'k'
+            # 4. Insert the new clean_key into the dict in place of the original metric name.
+            new_data: dict = {}
 
-                # get registry metadata for data type conversions
-                r_metadata: registry_map_entry | None  = self.metric_lookup.get(key)
+            # Type Coercion based on timescale_type_map values for field definitions.
+            # data is coerced to improve compression in metrics' tables.
+            INT_TYPES: set[str] = {"SMALLINT", "INTEGER", "BIGINT"}
+            FLOAT_TYPES: set[str] = {"REAL", "DOUBLE PRECISION", "NUMERIC"}
 
-                # type metric coercion to float value
-                if r_metadata and hasattr(r_metadata, "data_type"):  # field in registry mapping
-                    dt: str = str(r_metadata.data_type).lower()
-                    if dt in ("int", "integer"):
-                        raw_value = int(raw_value)
-                    elif dt in ("float", "double"):
-                        raw_value = float(raw_value)
-                    else:
-                        raw_value = raw_value
+            for k, v in datacopy.items():
+                mapping_info: Tuple[str, str] = self.metric_mapping.get(k)
+
+                if mapping_info:
+                    clean_key, field_type = mapping_info
+
+                    field_type_upper: str = field_type.upper()
+
+                    try:
+                        # Skip conversion if value is None.  Keep as a null to spot the issue in the data base.
+                        if v is None:
+                            new_data[clean_key] = None
+                            continue
+
+                        if field_type_upper in INT_TYPES:
+                            v = int(float(v)) # float(v) handles cases like "16.0"
+                        elif  field_type_upper in FLOAT_TYPES:
+                            v = float(v)
+                        elif field_type_upper == "BOOLEAN":
+                            v = bool(v)
+
+                        # TEXT/ASCII/HEX remains as is
+                        else:
+                            v= str(v)
+
+                    except (ValueError, TypeError) as e1:
+                        # log the specific key that failed, but keep the original value
+                        self._log.warning(
+                            f"Coercion failed for metric '{k}' (Value: {v}, Target: {field_type_upper}). "
+                            f"Error: {e1}. Keeping original value."
+                        )
+
+                        new_data[clean_key] = v
                 else:
-                    raw_value: float | Any = float(raw_value) if self.force_float else raw_value
+                    # Metric name not in catalog; keep original name/value
+                    new_data[k] = v
 
-                new_data[key] = raw_value
             return new_data  # noqa: TRY300
 
-        except (TypeError, ValueError):
-            self._log.warning(f"Invalid metric value encountered in: {datacopy}")
-
+        except (TypeError, ValueError) as e2:
+            self._log.warning(f"Error in _process_raw_metrics {e2} encountered in: {datacopy}")
 
     def _flush_batch_narrow(self, newData: dict, session: Session) -> None:
         """
@@ -1584,7 +1611,7 @@ class BacklogManager:
         log: logging.Logger
     ) -> None:
 
-        self.backlog_file_path: Path | None = backlog_file_path
+        self.backlog_file_path: Path  = backlog_file_path
         self.max_backlog_age: int = max_backlog_age
         self.max_backlog_size: int = max_backlog_size
         self._flush_queue: queue.Queue = flush_queue
