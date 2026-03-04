@@ -1128,8 +1128,7 @@ class timescaledb(transport_base):
         payload = {
             "device_info_id": device_id,
             "metrics": data.copy(),
-            "m_time": datetime.now().astimezone(),
-            "is_processed": False,
+            "m_time": datetime.now().astimezone(),  # source of truth timestamp for all metrics.
             "transport_name": from_transport.transport_name
         }
         self._flush_queue.put(payload)
@@ -1138,8 +1137,8 @@ class timescaledb(transport_base):
     def _flush_worker(self) -> None:
         """Async flush worker created during init.  Handles data appends to tables. Routing to backlog if needed.
             datacopy  -> wide dict of unaltered metrics passed from PPG or backlog
-            new_data  -> wide dict of processed datacopy for safe sql coercion.
-            final_data  -> wide dict of appended new_data with deviceid and timestamp.  Needed because narrow table
+            wide_data  -> wide dict of processed datacopy for safe sql coercion.
+            narrow_data  -> dict of appended new_data with deviceid and timestamp.  Needed because narrow table
             applies timestamp to individual metrics.
         """
         # Check if another thread flagged a schema change
@@ -1167,36 +1166,40 @@ class timescaledb(transport_base):
                     time.sleep(0.25)
 
                 # 2. Extract the metadata from data_in
-                is_processed = data_in.get("is_processed", False)
                 device_info_id: int = data_in.get("device_info_id")
                 timestamp: datetime = data_in.get("m_time")
                 metrics_only: dict = data_in.get("metrics")
                 transport_name: str = data_in.get("transport_name")
 
-                # pre-process data to coerce floating point, integer as values (from metric_catalog definitions.)
-                # # Apply SQL-safe renaming. New dictionary via comprehension/force floats
-                if not is_processed:
-                    new_data: dict = self._process_raw_metrics(metrics_only)
 
-                    if not new_data:
-                        self._flush_queue.task_done()
-                        continue
-                else:
-                    # It's already processed, so new_data is metrics_only from backlog
-                    new_data = metrics_only
+                # Check for stale data before attempting to process/write to the database. This is based on the timestamp from the transport
+                # and the previous saved timestamp.
 
-                # Add device_info_id and timestamp to new_data regardless of origin.
-                final_data: dict = new_data | {
-                    "device_info_id": device_info_id,
-                    "m_time": timestamp,
-                }
-                is_stale: bool
-                time_read: float
-                metrics: dict
-                is_stale, time_read, metrics = self._is_stale_data(final_data)
+                is_stale: bool = self._is_stale_data(metrics_only, timestamp)
                 if is_stale:
                     self._log.debug("Stale data detected, skipping DB write.")
                     continue
+
+                # pre-process data to coerce floating point, integer as values (from metric_catalog definitions) for safe insertion to the wide table.
+                # Also applies SQL-safe column renaming. Only process metric values for the wide table path.
+                # The narrow table stores raw key/values as default double precision and is not subject to the same schema
+                # constraints, so we can skip processing for narrow table entries with only metric names safe SQL cleaned for
+                # consistency.
+
+                wide_data, narrow_data = self._process_raw_metrics(metrics_only)
+
+                if not wide_data:
+                    self._flush_queue.task_done()
+                    continue
+                else:
+                    # Add device_info_id and timestamp to wide_data for wide table insertion.  This is needed because the narrow table
+                    # applies timestamp and device_info_id to individual rows, whereas the wide table has one row per
+                    # timestamp/device with multiple metric columns.
+                    valid_row: bool = self._validate_wide_row(wide_data)  # validate wide row without timestamp before insert
+                    wide_data: dict = wide_data | {
+                        "device_info_id": device_info_id,
+                        "m_time": timestamp,
+                    }
 
                 if self._stop_event.is_set():
                     break
@@ -1208,14 +1211,15 @@ class timescaledb(transport_base):
                 try:
                     with self._schema_lock:
                         with session.begin():
-                            self._flush_batch_narrow(final_data, session)
+                            # Have to further process the narrow data with the timestamp and device_info_id for insertion
+                            # to the narrow table, which applies the timestamp and device_info_id to each metric/value pair.
+                            self._flush_batch_narrow(narrow_data, device_info_id, timestamp, session)
                             if self.wide_table_flag:
-                                valid_row: bool = self._validate_wide_row(new_data)  # validate wide row without timestamp before insert
                                 if valid_row:
-                                    stmt: Insert = insert(DeviceMetricsWide.__table__).values(**final_data)
+                                    stmt: Insert = insert(DeviceMetricsWide.__table__).values(**wide_data)
                                     session.execute(stmt)
 
-                        self._commit_stale_state(metrics=metrics, time_read=time_read, is_stale=is_stale)
+                        self._commit_stale_state(metrics=metrics_only, time_read=timestamp, is_stale=is_stale)
                         self._log.debug(f"data write complete from [{transport_name}] to timescaledb bridge")
                 except (SQLAlchemyError, ValueError) as e:
                     session.rollback()
@@ -1231,10 +1235,9 @@ class timescaledb(transport_base):
                         try:
                             if acquired:
                                 payload: dict[str,Any] = {
-                                    "metrics": new_data,          # The cleaned metrics
+                                    "metrics": metrics_only,
                                     "device_info_id": device_info_id, # Preserve ID
                                     "m_time": timestamp,             # Preserve original timestamp
-                                    "is_processed": True,         # Flag so we don't re-float-coerce
                                     "transport_name": transport_name
                                 }
                                 self.backlog.enqueue(payload)
@@ -1268,7 +1271,8 @@ class timescaledb(transport_base):
             # 2. If it's a tuple, use the first element [0] (clean_name)
             # 3. If it's not found (None), fallback to the original key 'k'
             # 4. Insert the new clean_key into the dict in place of the original metric name.
-            new_data: dict = {}
+            processed_wide_data: dict = {}
+            processed_narrow_data: dict = {}
 
             # Type Coercion based on timescale_type_map values for field definitions.
             # data is coerced to improve compression in metrics' tables.
@@ -1282,11 +1286,13 @@ class timescaledb(transport_base):
                     clean_key, field_type = mapping_info
 
                     field_type_upper: str = field_type.upper()
+                    # Store the original value for narrow table before coercion
+                    nv: Any =v
 
                     try:
-                        # Skip conversion if value is None.  Keep as a null to spot the issue in the data base.
+                        # Skip coercion if value is None.  Keep as a null to spot the issue in the data base.
                         if v is None:
-                            new_data[clean_key] = None
+                            processed_wide_data[clean_key] = None
                             continue
 
                         if field_type_upper in INT_TYPES:
@@ -1300,6 +1306,11 @@ class timescaledb(transport_base):
                         else:
                             v= str(v)
 
+                        processed_wide_data[clean_key] = v
+                        # only return numeric and boolean values to the narrow table to preserve the raw data in the narrow table.
+                        if isinstance(nv, (int, float, bool)):
+                            processed_narrow_data[clean_key] = float(nv)
+
                     except (ValueError, TypeError) as e1:
                         # log the specific key that failed, but keep the original value
                         self._log.warning(
@@ -1307,27 +1318,28 @@ class timescaledb(transport_base):
                             f"Error: {e1}. Keeping original value."
                         )
 
-                        new_data[clean_key] = v
+                        processed_wide_data[clean_key] = v
+                        if isinstance(nv, (int, float, bool)):
+                            processed_narrow_data[clean_key] = float(nv)
                 else:
                     # Metric name not in catalog; keep original name/value
-                    new_data[k] = v
+                    processed_wide_data[k] = v
+                    if isinstance(nv, (int, float, bool)):
+                        processed_narrow_data[k] = float(nv)
 
-            return new_data  # noqa: TRY300
+            self._log.debug("All metrics coerced")
+            return processed_wide_data, processed_narrow_data  # noqa: TRY300
 
         except (TypeError, ValueError) as e2:
-            self._log.warning(f"Error in _process_raw_metrics {e2} encountered in: {datacopy}")
+            self._log.error(f"Error in _process_raw_metrics {e2} encountered in: {datacopy}")
 
-    def _flush_batch_narrow(self, newData: dict, session: Session) -> None:
+    def _flush_batch_narrow(self, newData: dict, device_info_id: str, timestamp: datetime, session: Session) -> None:
         """
             Flush new_data narrow-table metric points to the database.
             Any failed writes will be added to the backlog.
         """
         try:
-            back_data: dict = newData.copy()  # use for backlog only in case of failure
-            narrow_data: dict = newData.copy()
-
-            device_info_id: str =  narrow_data.pop('device_info_id', Optional[int])
-            reading_time =  narrow_data.pop('m_time', datetime.now().astimezone())
+            reading_time =  timestamp
             # Ensure we have a datetime object
             if isinstance(reading_time, str):
                 # Convert string to datetime if needed
@@ -1341,7 +1353,7 @@ class timescaledb(transport_base):
                     "metric_name": key,
                     "metric_value": value
                 }
-                for key, value in narrow_data.items()
+                for key, value in newData.items()
                 if isinstance(value, (int, float, bool))
             ]
 
@@ -1356,19 +1368,12 @@ class timescaledb(transport_base):
             except SQLAlchemyError as e2:
                 self._log.exception(f"Narrow flush rollback failed: {e2}")
 
-            # Add new_data to backlog only for the narrow table failure
-            try:
-                # since this is a copy of final_data, we have already completely processed the data.
-                self.backlog.enqueue(back_data)
-            except Exception as e2:
-                self._log.error(f"Failed to add narrow point to backlog: {e2}")
-
             # === Auto Reconnect handling ===
             self._set_tsdb_connected(False, "Connect unsuccessful")  # noqa: FBT003
             self._trigger_reconnect()
 
 
-    def _is_stale_data(self, row: dict) -> tuple[bool, datetime | None, dict | None]:
+    def _is_stale_data(self, row: dict, timestamp: datetime) -> bool:
         """
         Updates stale-data state tracking using transport data.
 
@@ -1378,7 +1383,7 @@ class timescaledb(transport_base):
         flow.
 
         Args:
-            row (dict): Incoming data row with metrics and metadata.
+            row (dict): Incoming data row with metrics only, timestamp (datetime): timestamp of the read data.
 
         Notes:
             This method does not initiate reconnect attempts directly; stale-data
@@ -1397,9 +1402,9 @@ class timescaledb(transport_base):
 
         stale_limit = timedelta(seconds=int(self.stale_data_timeout))
 
-        time_read: datetime | None = row.get("m_time")
+        time_read: datetime = timestamp
         if time_read is None:
-            return False, None, None
+            return False
 
         if isinstance(time_read, str):
             try:
@@ -1407,31 +1412,25 @@ class timescaledb(transport_base):
             except ValueError:
                 time_read = datetime.strptime(time_read, "%Y-%m-%d %H:%M:%S%z")
 
-        # Build metrics-only view (exclude metadata)
-        metrics: dict = {
-            k: v for k, v in row.items()
-            if k not in ("m_time", "device_info_id")
-        }
-
         if self.stale_data_last_row is None:
             # First observation is never stale
-            return False, time_read, metrics
+            return False
 
         # 1. Determine if the data has changed
-        for key, value in metrics.items():
+        for key, value in row.items():
             prev_val = self.stale_data_last_row.get(key)
 
             if isinstance(value, (int, float)) and isinstance(prev_val, (int, float)):
                 if not math.isclose(value, prev_val, rel_tol=1e-4, abs_tol=1e-6):
-                    return False, time_read, metrics
+                    return False
             elif value != prev_val:
-                return False, time_read, metrics
+                return False
 
         # 2. Data unchanged → check elapsed time
         elapsed: timedelta = time_read - self.stale_data_start_ts
-        is_stale = elapsed > stale_limit
+        is_stale: bool = elapsed > stale_limit
 
-        return is_stale, time_read, metrics
+        return is_stale
 
     # 3. Update stale state data
     def _commit_stale_state(self, *, metrics: dict, time_read: datetime, is_stale: bool) -> None:

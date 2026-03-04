@@ -282,7 +282,7 @@ class protocol_settings:
         self.transport_settings = transport_settings
 
         #load variable mask
-        file_path_m = self.find_protocol_file("variable_mask.txt")
+        file_path_m: str = self.find_protocol_file("variable_mask.txt")
         self.variable_mask = []
         if file_path_m is not None and os.path.isfile(file_path_m):
             try:
@@ -309,7 +309,7 @@ class protocol_settings:
                         # Skip all empty lines or comments
                         if not clean_line or clean_line.startswith('#'):
                             continue
-                        self.variable_mask.append(clean_line)
+                        self.variable_screen.append(clean_line)
             except Exception as e:
                 self._log.error(f"Error reading file: {e}")
         else:

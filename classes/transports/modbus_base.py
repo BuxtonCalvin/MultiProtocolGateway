@@ -1,12 +1,12 @@
-import glob
 import inspect
 import json
-import os
 import re
 import threading
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from datetime import datetime
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from pymodbus.constants import ExcCodes
 from pymodbus.exceptions import ModbusIOException
@@ -96,7 +96,6 @@ def interpret_modbus_exception_code(code):
         # This is not an exception response
         function_name = MODBUS_FUNCTION_CODES.get(function_code, f"Unknown Function ({function_code})")
         return f"Modbus Function: {function_name} (not an exception response)"
-
 
 @dataclass
 class RegisterFailureTracker:
@@ -686,156 +685,273 @@ class modbus_base(transport_base):
         self._log.info("validation score: " + str(score) + " of " + str(maxScore) + " : " + str(round(percent)) + "%")
         return percent
 
-    def analyze_protocol(self, settings_dir : str = "protocols"):
-        print("=== PROTOCOL ANALYZER ===")
-        protocol_names : list[str] = []
-        protocols : dict[str,protocol_settings] = {}
 
-        for file in glob.glob(settings_dir + "/*.json"):
-            file = file.lower().replace(settings_dir, "").replace("/", "").replace("\\", "").replace("\\", "").replace(".json", "")
-            print(file)
-            protocol_names.append(file)
+    def analyze_protocol(self, settings_dir: str = "protocols") -> None:
+        self._log.info("=== PROTOCOL ANALYZER (DENSE MODE) ===")
 
-        max_input_register : int = 0
-        max_holding_register : int = 0
+        # ==========================================================
+        # Helper types + functions (scoped to this method)
+        # ==========================================================
+        @dataclass
+        class RegisterRef:
+            register: int
+            byte: Optional[str] = None  # "low" | "high"
+            bit: Optional[int] = None
+            bit_length: int = 1
 
-        for name in protocol_names:
-            protocols[name] = protocol_settings(name)
+        def bit_len_from_dtype(dtype: str) -> int:
+            if "6bit" in dtype:
+                return 6
+            if "3bit" in dtype:
+                return 3
+            if "2bit" in dtype:
+                return 2
+            return 1
 
-            if protocols[name].registry_map_size[Registry_Type.INPUT] > max_input_register:
-                max_input_register = protocols[name].registry_map_size[Registry_Type.INPUT]
+        def parse_register_expr(expr: str, dtype: str) -> RegisterRef:
+            if ".b" in expr:
+                reg, bit = expr.split(".b")
+                return RegisterRef(
+                    register=int(reg),
+                    bit=int(bit),
+                    bit_length=bit_len_from_dtype(dtype),
+                )
 
-            if protocols[name].registry_map_size[Registry_Type.HOLDING] > max_holding_register:
-                max_holding_register = protocols[name].registry_map_size[Registry_Type.HOLDING]
+            if "." in expr:
+                reg, byte_idx = expr.split(".")
+                return RegisterRef(
+                    register=int(reg),
+                    byte="high" if byte_idx == "2" else "low",
+                )
 
-        print("max input register: ", max_input_register)
-        print("max holding register: ", max_holding_register)
+            return RegisterRef(register=int(expr))
 
-        self.modbus_delay = self.modbus_delay #decrease delay because can probably get away with it due to lots of small reads
-        print("read INPUT Registers: ")
+        def extract_value(raw: Dict[int, Optional[int]], ref: RegisterRef) -> Optional[int]:
+            val = raw.get(ref.register)
+            if val is None:
+                return None
 
-        input_save_path = "input_registry.json"
-        holding_save_path = "holding_registry.json"
+            if ref.bit is not None:
+                mask = (1 << ref.bit_length) - 1
+                return (val >> ref.bit) & mask
 
-        #load previous scan if enabled and exists
-        if self.analyze_protocol_save_load and os.path.exists(input_save_path) and os.path.exists(holding_save_path):
-            with open(input_save_path, "r") as file:
-                input_registry = json.load(file)
+            if ref.byte == "high":
+                return (val >> 8) & 0xFF
 
-            with open(holding_save_path, "r") as file:
-                holding_registry = json.load(file)
+            if ref.byte == "low":
+                return val & 0xFF
 
-            # Convert keys to integers
-            input_registry = {int(key): value for key, value in input_registry.items()}
-            holding_registry = {int(key): value for key, value in holding_registry.items()}
-        else:
-            #perform registry scan
-            ##batch_size = 1, read registers one by one; if out of bound. it just returns error
-            input_registry = self.read_modbus_registers(start=0, end=max_input_register, registry_type=Registry_Type.INPUT)
-            holding_registry = self.read_modbus_registers(start=0, end=max_holding_register, registry_type=Registry_Type.HOLDING)
+            return val
 
-            if self.analyze_protocol_save_load: #save results if enabled
-                with open(input_save_path, "w") as file:
-                    json.dump(input_registry, file)
+        def decode_ascii(raw: Dict[int, Optional[int]], refs: List[RegisterRef]) -> str:
+            chars: List[str] = []
+            for ref in refs:
+                val: int | None = extract_value(raw, ref)
+                if val is None:
+                    break
+                if 32 <= val <= 126:
+                    chars.append(chr(val))
+            return "".join(chars)
 
-                with open(holding_save_path, "w") as file:
-                    json.dump(holding_registry, file)
+        def unique_key(name: str, used: Dict[str, int]) -> str:
+            if name not in used:
+                used[name] = 0
+                return name
+            used[name] += 1
+            return f"{name}_{used[name]}"
 
-        #print results for debug
-        self._log.debug("=== START INPUT REGISTER ===")
-        if input_registry:
-            self._log.debug([(key, value) for key, value in input_registry.items()])
-        self._log.debug("=== END INPUT REGISTER ===")
-        self._log.debug("=== START HOLDING REGISTER ===")
-        if holding_registry:
-            self._log.debug([(key, value) for key, value in holding_registry.items()])
-        self._log.debug("=== END HOLDING REGISTER ===")
-
-        #very well possible the registers will be incomplete due to different hardware sizes
-        #so dont assume they are set / complete
-        #we'll see about the behavior. if it glitches, this could be a way to determine protocol.
-
-
-        input_register_score : dict[str, int] = {}
-        holding_register_score : dict[str, int] = {}
-
-        input_valid_count : dict[str, int] = {}
-        holding_valid_count  : dict[str, int] = {}
-
-        def evaluate_score(entry : registry_map_entry, val):
+        def evaluate_score(entry: registry_map_entry, val: Any) -> int:
             score = 0
             if entry.data_type == Data_Type.ASCII:
-                if val and not re.match("[^a-zA-Z0-9_-]", val): #validate ascii
-                    mod = 1
-                    if entry.concatenate:
-                        mod = len(entry.concatenate_registers)
-
-                    if entry.value_regex: #regex validation
-                        if re.match(entry.value_regex, val):
-                            mod = mod * 2
-                        else:
-                            mod = mod * -2 #regex validation failed, double damage!
-
-                    score = score + (2 * mod) #double points for ascii
-                pass
-            else: #default type
-                if isinstance(val, str):
-                    #likely to be a code
-                    score = score + 2
-                elif val != 0:
-                    if val >= entry.value_min and val <= entry.value_max:
-                        score = score + 1
-
-                        if entry.value_max != 65535: #double points for non-default range
-                            score = score + 1
-
+                if isinstance(val, str) and val:
+                    score += 4
+            else:
+                if isinstance(val, int):
+                    if entry.value_min <= val <= entry.value_max:
+                        score += 2
+                    elif val != 0:
+                        score += 1
             return score
 
+        # ==========================================================
+        # Paths
+        # ==========================================================
+        base_path: Path = Path(__file__).resolve().parents[2]
+        settings_path: Path = base_path / settings_dir
 
+        analysis_path: Path = settings_path / "_analysis"
+        raw_scan_path: Path = settings_path / analysis_path /"raw_scans"
+        decoded_path: Path = settings_path / analysis_path / "decoded"
+        scores_path: Path = settings_path / analysis_path / "scores"
 
-        for name, protocol in protocols.items():
-            input_register_score[name] = 0
-            holding_register_score[name] = 0
-            #very rough percentage. todo calc max possible score.
-            input_valid_count[name] = 0
-            holding_valid_count[name] = 0
+        analysis_path.mkdir(parents=True, exist_ok=True)
+        raw_scan_path.mkdir(parents=True, exist_ok=True)
+        decoded_path.mkdir(parents=True, exist_ok=True)
+        scores_path.mkdir(parents=True, exist_ok=True)
 
-            #process registry based on protocol
-            input_info = protocol.process_registery(input_registry, protocol.registry_map[Registry_Type.INPUT])
-            holding_info = protocol.process_registery(input_registry, protocol.registry_map[Registry_Type.HOLDING])
+        # ==========================================================
+        # Load protocol definitions
+        # ==========================================================
+        protocol_names: List[str] = []
+        protocols: Dict[str, protocol_settings] = {}
 
+        for file_path in analysis_path.glob("*.json"):
+            protocol_names.append(file_path.stem.lower())
 
-            for entry in protocol.registry_map[Registry_Type.INPUT]:
-                if entry.variable_name in input_info:
-                    val = input_info[entry.variable_name]
-                    score = evaluate_score(entry, val)
-                    if score > 0:
-                        input_valid_count[name] = input_valid_count[name] + 1
+        max_input_register = 0
+        max_holding_register = 0
 
-                    input_register_score[name] = input_register_score[name] + score
+        for name in protocol_names:
+            proto = protocol_settings(name)
+            protocols[name] = proto
 
+            max_input_register: int = max(
+                max_input_register,
+                proto.registry_map_size[Registry_Type.INPUT],
+            )
+            max_holding_register: int = max(
+                max_holding_register,
+                proto.registry_map_size[Registry_Type.HOLDING],
+            )
 
-            for entry in protocol.registry_map[Registry_Type.HOLDING]:
-                if entry.variable_name in holding_info:
-                    val = holding_info[entry.variable_name]
-                    score = evaluate_score(entry, val)
+        self._log.info(f"Max INPUT register: {max_input_register}")
+        self._log.info(f"Max HOLDING register: {max_holding_register}")
 
-                    if score > 0:
-                        holding_valid_count[name] = holding_valid_count[name] + 1
+        input_file: Path = raw_scan_path / "input_dense.json"
+        holding_file: Path = raw_scan_path / "holding_dense.json"
 
-                    holding_register_score[name] = holding_register_score[name] + score
+        # ==========================================================
+        # Load or perform dense scan
+        # ==========================================================
+        if (
+            self.analyze_protocol_save_load
+            and input_file.exists()
+            and holding_file.exists()
+        ):
+            input_registry: Dict[int, Any] = {
+                int(k): v for k, v in json.loads(input_file.read_text()).items()
+            }
+            holding_registry: Dict[int, Any] = {
+                int(k): v for k, v in json.loads(holding_file.read_text()).items()
+            }
+            self._log.info("Loaded existing dense scans")
+        else:
+            input_registry = self.read_modbus_registers(
+                start=0,
+                end=max_input_register,
+                registry_type=Registry_Type.INPUT,
+            )
+            holding_registry = self.read_modbus_registers(
+                start=0,
+                end=max_holding_register,
+                registry_type=Registry_Type.HOLDING,
+            )
 
+            if self.analyze_protocol_save_load:
+                input_file.write_text(json.dumps(input_registry, indent=2))
+                holding_file.write_text(json.dumps(holding_registry, indent=2))
 
-        protocol_scores: dict[str, int] = {}
-        #combine scores
-        for name, protocol in protocols.items():
-            protocol_scores[name] = input_register_score[name] + holding_register_score[name]
+        # ==========================================================
+        # Scoring + decoding
+        # ==========================================================
+        protocol_scores: Dict[str, int] = {}
 
-        #print scores
+        for name, proto in protocols.items():
+            self._log.info(f"Decoding protocol: {name}")
+
+            input_decoded: Dict[str, Any] = {}
+            holding_decoded: Dict[str, Any] = {}
+
+            input_score = 0
+            holding_score = 0
+
+            for reg_type, raw_map, out_map in [
+                (Registry_Type.INPUT, input_registry, input_decoded),
+                (Registry_Type.HOLDING, holding_registry, holding_decoded),
+            ]:
+                used_keys: Dict[str, int] = {}
+                ascii_groups: Dict[str, List[RegisterRef]] = {}
+
+                for entry in proto.get_registry_map(reg_type):
+                    key = unique_key(entry.variable_name, used_keys)
+
+                    ref = parse_register_expr(
+                        str(entry.register),
+                        str(entry.data_type),
+                    )
+
+                    if entry.data_type == Data_Type.ASCII:
+                        ascii_groups.setdefault(key, []).append(ref)
+                        continue
+
+                    val = extract_value(raw_map, ref)
+                    out_map[key] = val
+
+                    score: int = evaluate_score(entry, val)
+                    if reg_type == Registry_Type.INPUT:
+                        input_score += score
+                    else:
+                        holding_score += score
+
+                # decode ASCII groups
+                for key, refs in ascii_groups.items():
+                    refs.sort(
+                        key=lambda r: (
+                            r.register,
+                            0 if r.byte == "low" else 1,
+                        )
+                    )
+                    val: str = decode_ascii(raw_map, refs)
+                    out_map[key] = val
+
+                    score = 4 if val else 0
+                    if reg_type == Registry_Type.INPUT:
+                        input_score += score
+                    else:
+                        holding_score += score
+
+            protocol_scores[name] = input_score + holding_score
+
+            # ======================================================
+            # Save decoded output per protocol
+            # ======================================================
+            timestamp: str = datetime.now().astimezone().isoformat()
+            decoded_input_file = decoded_path / f"{name}_input.json"
+            decoded_holding_file = decoded_path / f"{name}_holding.json"
+
+            decoded_input_file.write_text(
+                json.dumps(
+                    {
+                        "protocol": name,
+                        "registry_type": "input",
+                        "timestamp": timestamp,
+                        "values": input_decoded,
+                    },
+                    indent=2,
+                )
+            )
+
+            decoded_holding_file.write_text(
+                json.dumps(
+                    {
+                        "protocol": name,
+                        "registry_type": "holding",
+                        "timestamp": timestamp,
+                        "values": holding_decoded,
+                    },
+                    indent=2,
+                )
+            )
+
+        # ==========================================================
+        # Save scoring results
+        # ==========================================================
+        score_file = scores_path / "protocol_scores.json"
+        score_file.write_text(json.dumps(protocol_scores, indent=2))
+
+        self._log.info("=== PROTOCOL SCORES ===")
         for name in sorted(protocol_scores, key=protocol_scores.get, reverse=True):
-            self._log.debug("=== "+str(name)+" - "+str(protocol_scores[name])+" ===")
-            self._log.debug("input register score: " + str(input_register_score[name]) + "; valid registers: "+str(input_valid_count[name])+" of " + str(len(protocols[name].get_registry_map(Registry_Type.INPUT))))
-            self._log.debug("holding register score : " + str(holding_register_score[name]) + "; valid registers: "+str(holding_valid_count[name])+" of " + str(len(protocols[name].get_registry_map(Registry_Type.HOLDING))))
+            self._log.info(f"{name}: {protocol_scores[name]}")
 
 
     def write_variable(self, entry : registry_map_entry, value : str, registry_type : Registry_Type = Registry_Type.HOLDING):

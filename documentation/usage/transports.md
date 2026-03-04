@@ -74,6 +74,7 @@ device_name =
 manufacturer = 
 model =
 serial_number =
+location =
 bridge = 
 write_enabled = False
 Interval = 10
@@ -111,6 +112,12 @@ If left empty, serial number may be automatically fetched if protocol supports i
 serial_number = 
 ```
 
+### location
+location is used as an identifier and is passed on where applicable.
+``` 
+location = Home
+```
+
 ### bridge
 bridge determines which transports to translate data to
 this value can be a csv to specify multiple transports
@@ -120,7 +127,7 @@ bridge = transport.mqtt
 ```
 
 ### write_enabled 
-write_enabled allows writing to this transport if enabled. 
+write_enabled allows writing to this transport if enabled.
 many protocols have this disabled by default and require accurate registry maps to enable writing, as misconfiguration can have fatal unintended consequences. 
 by default mqtt allows writing.
 ```
@@ -129,7 +136,7 @@ write_enabled  = True
 
 #Interval
 Interval ( seconds ), sets the frequency of how often data is actively read from a transport.
-If interval is not set, data is only sent passively as events occur. 
+If interval is not set, data is only sent passively as events occur.
 ```
 Interval = 10
 ```
@@ -408,8 +415,8 @@ needs a lot of work. on the todo to improve. low priority
 analyze_protocol = true
 ```
 
-when this mode runs, it attempt to read all of the registers of your inverter and attempt to determine which protocol best fits. 
-the higher the value, the more likely that the protocol matches. 
+when this mode runs, it attempt to read all of the registers of your inverter and attempt to determine which protocol best fits.
+the higher the value, the more likely that the protocol matches.
 
 ```
 === growatt_2020_v1.24 - 710 ===
@@ -445,19 +452,19 @@ baudrate =
 ```
 
 ## Linux / Windows
-usb can adapters are a pain with windows, so primary focus is linux. 
+usb can adapters are a pain with windows, so primary focus is linux.
 
 ## CanBus USB Adapters
 
-there is a bit of a learning curve with canbus usb adapters. 
+there is a bit of a learning curve with canbus usb adapters.
 
 the main adapter being used to test python protocol gateway: https://github.com/FYSETC/UCAN
-these are dime a dozen on aliexpress / ebay / wherever. most of them will be based on the CANable adapters. 
+these are dime a dozen on aliexpress / ebay / wherever. most of them will be based on the CANable adapters.
 
 fysetc sells them directly here: https://www.fysetc.com/products/fysetc-ucan-board
 this adapter comes with the candlelight ( socketcan ) by default. the board is CANable v1.0 compatible. slcan firmware can be flashed here: https://canable.io/updater/canable1.html
 
-candlelight utilizes socketcan, slcan is can over serial. 
+candlelight utilizes socketcan, slcan is can over serial.
 
 here is some extra reading material to help on using a usb canbus adapter: https://canable.io/getting-started.html
 
@@ -467,7 +474,7 @@ This adapter will appear as a gs_usb device, and the can interface will appear a
 ``` ip link show ```
 
 ### slcan
-This adapter will appear as a serial device. 
+This adapter will appear as a serial device.
 
 ```
 bustype = slcan
