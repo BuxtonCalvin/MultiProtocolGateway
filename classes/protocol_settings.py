@@ -879,7 +879,7 @@ class protocol_settings:
 
 
     def find_protocol_file(self, file: str, base_dir: str = "") -> str:
-        # use Path object to allow MS windows path.
+        # using Path object to allow MS windows path.
         # protocol_settings.py is two folders to root parent  ie. parent.parent
         # code uses Path objects to return a path string similar to original code
         # but formatted per OS.

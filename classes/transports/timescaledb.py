@@ -13,7 +13,10 @@ You can find a copy of the GNU Affero General Public License in the documentatio
 If not, see <https://www.gnu.org>.
 
 timescaledb transport bridge module (with rollup continuous aggregates) and persistent disk backlog.
-python > 3.9 is required.
+python > 3.9 is required, 3.14 is recommended for best performance and latest features.
+The transport uses SQLAlchemy for database interactions and supports automatic schema management,
+including dynamic column creation based on the protocol registry, hypertable setup, and continuous
+aggregate rollups for efficient querying of historical data.
 
 Features:
  - Auto-create database (default "solar", configurable)
@@ -205,7 +208,7 @@ class timescaledb(transport_base):
         # 32-bit Unsigned/Signed
         "UINT": "BIGINT",
         "INT": "INTEGER",
-        # Flags & Bits (Integers are best for Delta-Delta compression)
+        # Flags & Bits (Integers for Delta-Delta compression)
         "_8BIT_FLAGS": "SMALLINT",
         "_16BIT_FLAGS": "INTEGER",
         "_32BIT_FLAGS": "BIGINT",
@@ -225,7 +228,7 @@ class timescaledb(transport_base):
         # 3. Signed Magnitude (_2SMBIT to _16SMBIT)
         **{f"_{i}SMBIT": "SMALLINT" for i in range(2, 17)},
 
-        # Float (Add these if you use them - Gorilla compression)
+        # Float (Add these to the register maps if you use them - Gorilla compression)
         "FLOAT32": "REAL",
         "FLOAT64": "DOUBLE PRECISION"
     }
@@ -354,7 +357,7 @@ class timescaledb(transport_base):
         self.max_backlog_size = settings.getint("max_backlog_size", fallback=self.max_backlog_size)
         self.max_backlog_age: int = settings.getint("max_backlog_age", fallback=self.max_backlog_age)
 
-        # hypertable / rollup options that are user defined.  These are sent to the rollup manager
+        # hypertable / rollup options that are user defined.  These are sent to the rollup manager class
         # which will handle the hypertable and rollup creation and maintenance based on these settings.
 
         self.rollup_policy: dict[str,Any] = {
@@ -390,6 +393,8 @@ class timescaledb(transport_base):
         self.write_enabled = True
 
         # load all registry metrics' map.
+        # NOTE this will need to be changed if we want to support dynamic registry updates or multiple protocols/devices with different registries,
+        # but for now we can assume a static registry map for the protocol.
         self.registry_metrics: dict[Registry_Type, List[registry_map_entry]]  = protocol_settings.registry_map
 
         self._wide_columns: set[str] = set()  # cached set of existing wide table columns for fast lookup
@@ -487,6 +492,8 @@ class timescaledb(transport_base):
 
         # 5 If needed, create dynamic columns for metrics in device_metrics_wide and add metrics to metric_catalog table
              # Using the registry_map from protocol_settings to get metric names.  No live data access here.
+             # NOTE Will need to change if we want to support dynamic registry updates or multiple protocols/devices with different registries,
+             # but for now we can assume a static registry map for the protocol.
             try:
                 self._determine_wide_table()
             except Exception as e:
@@ -747,12 +754,12 @@ class timescaledb(transport_base):
     def _get_or_create_device(self, from_transport: transport_base) -> int:
         """ The database doesn't know which field changed (name, model, or serial). It only knows that the unique Key (transport) already exists.
             The First Run: The database sees a new transport name. It creates the row with all metadata.
-            The Next Startup: If say you've changed the device_name in your config. The code tries to INSERT the row again.
-            The Conflict: The database says: "Stop! I already have a row where transport is growatt_1."
+            The Next Startup: If you've changed the device_name in your config. The code tries to INSERT the row again.
+            The Conflict: The database says: "I already have a row where the transport name is myInverter."
             The Upsert Logic: Because of on_conflict_do_update, the database then takes the new values you just sent
               (the changed device_name) and overwrites the old values in that existing row."""
 
-        t_name = from_transport.transport_name
+        t_name: str = from_transport.transport_name
 
         # 1. Verified & Cached
         # If it's in both, we know the DB is up-to-date for this session.
@@ -796,7 +803,7 @@ class timescaledb(transport_base):
 
                     # Execute and get the ID
                     result = session.execute(upsert_stmt)
-                    db_id = result.scalar_one()
+                    db_id: int = result.scalar_one()
                     session.commit()
 
                 except Exception as e:
@@ -1125,7 +1132,7 @@ class timescaledb(transport_base):
         self._log.debug(f"Data: {data}")
         self._log.debug(f"writing data from [{from_transport.transport_name}] to timescaledb bridge")
 
-        payload = {
+        payload: dict[str, Any] = {
             "device_info_id": device_id,
             "metrics": data.copy(),
             "m_time": datetime.now().astimezone(),  # source of truth timestamp for all metrics.
@@ -1211,8 +1218,8 @@ class timescaledb(transport_base):
                 try:
                     with self._schema_lock:
                         with session.begin():
-                            # Have to further process the narrow data with the timestamp and device_info_id for insertion
-                            # to the narrow table, which applies the timestamp and device_info_id to each metric/value pair.
+                            # Further process the narrow data with the timestamp and device_info_id for insertion
+                            # to the narrow table, by applying the timestamp and device_info_id to each metric/value pair.
                             self._flush_batch_narrow(narrow_data, device_info_id, timestamp, session)
                             if self.wide_table_flag:
                                 if valid_row:
@@ -1221,9 +1228,9 @@ class timescaledb(transport_base):
 
                         self._commit_stale_state(metrics=metrics_only, time_read=timestamp, is_stale=is_stale)
                         self._log.debug(f"data write complete from [{transport_name}] to timescaledb bridge")
-                except (SQLAlchemyError, ValueError) as e:
+                except (SQLAlchemyError, ValueError) as e1:
                     session.rollback()
-                    self._log.warning("metrics data write failed.")
+                    self._log.warning(f"metrics data write failed.{e1}")
 
                     # Only backlog if setting enabled and DB is down
                     with self._reconnect_lock:
@@ -1236,7 +1243,7 @@ class timescaledb(transport_base):
                             if acquired:
                                 payload: dict[str,Any] = {
                                     "metrics": metrics_only,
-                                    "device_info_id": device_info_id, # Preserve ID
+                                    "device_info_id": device_info_id, # Preserve Device Inverter ID
                                     "m_time": timestamp,             # Preserve original timestamp
                                     "transport_name": transport_name
                                 }
@@ -1247,7 +1254,7 @@ class timescaledb(transport_base):
                                 self._backlog_lock.release()
 
                     # Handle recovery
-                    if isinstance(e, SQLAlchemyError):
+                    if isinstance(e1, SQLAlchemyError):
                         self._set_tsdb_connected(False, "Connection failure")  # noqa: FBT003
                         self._trigger_reconnect()
 
@@ -1307,7 +1314,7 @@ class timescaledb(transport_base):
                             v= str(v)
 
                         processed_wide_data[clean_key] = v
-                        # only return numeric and boolean values to the narrow table to preserve the raw data in the narrow table.
+                        # only return numeric and boolean values to the narrow table to allow inserts to narrow table double precision column.
                         if isinstance(nv, (int, float, bool)):
                             processed_narrow_data[clean_key] = float(nv)
 
@@ -1336,7 +1343,6 @@ class timescaledb(transport_base):
     def _flush_batch_narrow(self, newData: dict, device_info_id: str, timestamp: datetime, session: Session) -> None:
         """
             Flush new_data narrow-table metric points to the database.
-            Any failed writes will be added to the backlog.
         """
         try:
             reading_time =  timestamp
@@ -1371,6 +1377,8 @@ class timescaledb(transport_base):
             # === Auto Reconnect handling ===
             self._set_tsdb_connected(False, "Connect unsuccessful")  # noqa: FBT003
             self._trigger_reconnect()
+
+            raise  # Re-raise to be caught by outer handler for potential backlog queuing
 
 
     def _is_stale_data(self, row: dict, timestamp: datetime) -> bool:
@@ -1763,6 +1771,9 @@ class RollupManager:
         self._refresh_rollup_thread = threading.Thread(target=self._refresh_rollup_loop, daemon=True, name="RollupAutoRefreshThread")
         self._stop_refresh_rollup_event: threading.Event = getattr(self, "_stop_refresh_rollup_event", threading.Event())
 
+        # Performance tiers for rollup refreshes, mapped from rollup_policy or default values.
+        # These settings control the computer's resource allocation and batch sizes for refreshing rollups at different granularities,
+        # allowing for optimized performance based on the expected workload and data volume of each tier.
         self.performance_tiers: dict[str, dict[str, Any]] = {
         "tier_low":    {"count": 50,  "work_mem": "32MB",  "lock_timeout": "10s", "flush_batch_size": 10},
         "tier_medium": {"count": 100, "work_mem": "64MB",  "lock_timeout": "15s", "flush_batch_size": 20},
@@ -1770,15 +1781,18 @@ class RollupManager:
         }
 
         """
+        Rollup and Compression Timing Defaults comments only:
         Rollup Type
             refresh rollup    start_offset   compress_after   reason
             1 Hour	          3 hours	     2 days	          Allows a 3-hour window for late data before locking it via compression.
-            1 Day	          3 days	     2 weeks	          Ensures daily rollups are finalized before compressing.
+            1 Day	          3 days	     2 weeks	      Ensures daily rollups are finalized before compressing.
             1 Week	          3 weeks	     2 months	      Larger window helps capture any delayed source data updates.
             1 Month	          3 months	     6 months	      Maximum safety for long-term historical accuracy.
         """
 
-        # hypertable defaults
+        # hypertable defaults. These are not configurable by the user but can be overridden by changing the below rollup_policy if needed.
+        # These settings are critical for ensuring that the hypertable is created with the appropriate chunking and compression
+        # settings to optimize performance and storage efficiency for time-series data.
         self.hypertable_defaults: dict[str, Any] = {
             "compress_segmentby_narrow": "device_info_id, metric_name",
             "compress_segmentby_wide": "device_info_id",
@@ -1794,7 +1808,7 @@ class RollupManager:
             "monthly_compress_after_interval": "6 months",
         }
 
-        # rollup defaults, continuous aggregate bucket sizes
+        # rollup defaults, continuous aggregate bucket sizes.
         self.rollup_defaults: dict[str, Any] = {
             "hourly_rollup_bucket": "1 hour",
             "hourly_rollup_start": "3 hours",
@@ -1865,7 +1879,7 @@ class RollupManager:
 
     def setup_schema(self) -> None:
         """
-        This method orchestrates the entire schema setup process, including hypertable creation,
+        This method orchestrates the entire post schema setup process, including hypertable creation,
         compression setup, retention policy, and continuous aggregate rollup creation.
         Called once during TSDB startup.
         """
@@ -2040,48 +2054,37 @@ class RollupManager:
     # -------------------------
     # 9. Add retention policy
     # -------------------------
+
     def ensure_retention_policy(self) -> None:
-        """
-        Drop old data automatically after drop_after interval.
-        This method first removes any existing retention policy to ensure that changes to the drop_after interval are applied correctly.
+        """ Drop old data automatically after drop_after interval.
+            This method first removes any existing retention policy to ensure that changes to the drop_after interval are applied correctly.
         """
         with self.SessionFactory() as session:
             if not session:
-                    self._log.error("Cannot add retention policies — not tsdb_connected.")
-                    return
+                self._log.error("Cannot add retention policies — not tsdb_connected.")
+                return
 
-            drop_after: str = self.drop_after
-
-            try:
-                sql1: str = "SELECT remove_retention_policy('device_metrics_narrow', if_exists => True);"
-                sql2: str = f"SELECT add_retention_policy('device_metrics_narrow', INTERVAL '{drop_after}');"
-
-                session.execute(text(sql1))
-                session.execute(text(sql2))
-                session.commit()
-                self._log.debug("_add_retention_policy_narrow executed")
-            except SQLAlchemyError as e:
-                self._log.error(f"_add_retention_policy_narrow error: {e}")
-                try:
-                    session.rollback()
-                except SQLAlchemyError as e2:
-                    self._log.error(f"_add_retention_policy_narrow rollback error: {e2}")
-
+            # Determine the tables that need the policy
+            tables: List[str] = ["device_metrics_narrow"]
             if self.wide_table_flag:
-                try:
-                    sql1b: str = "SELECT remove_retention_policy('device_metrics_wide', if_exists => True);"
-                    sql2b: str = f"SELECT add_retention_policy('device_metrics_wide', INTERVAL '{drop_after}');"
+                tables.append("device_metrics_wide")
 
-                    session.execute(text(sql1b))
-                    session.execute(text(sql2b))
+            for table in tables:
+                try:
+                    # Remove and re-add policy to ensure interval updates apply
+                    session.execute(text(f"SELECT remove_retention_policy('{table}', if_exists => True);"))
+                    session.execute(text(f"SELECT add_retention_policy('{table}', INTERVAL '{self.drop_after}');"))
+
                     session.commit()
-                    self._log.debug("_add_retention_policy_wide executed")
+                    self._log.debug(f"Retention policy updated for {table}")
+
                 except SQLAlchemyError as e:
-                    self._log.error(f"_add_retention_policy_wide error: {e}")
+                    self._log.error(f"Error updating retention policy for {table}: {e}")
                     try:
                         session.rollback()
                     except SQLAlchemyError as e2:
-                        self._log.error(f"_add_retention_policy_wide rollback error: {e2}")
+                        self._log.error(f"Rollback failed for {table}: {e2}")
+
 
     # -------------------------
     # 10 Rollups
@@ -2197,7 +2200,7 @@ class RollupManager:
                         # If the view doesn't exist (due to purge or first run), create it
                         if not self._view_exists(session, view_name):
                             self._log.info(f"Creating {view_name} from {current_source}...")
-                            self._create_narrow_rollup(session, current_source, view_name, bucket, start_offset, chunk_time_interval)
+                            self._create_narrow_rollup(session, current_source, view_name, bucket, start_offset)
                         else:
                             self._log.debug(f"View {view_name} is already up to date.")
 
@@ -2219,7 +2222,7 @@ class RollupManager:
     # 10d
     # -------------------------
 
-    def _create_narrow_rollup(self, session: Session, source: str, view_name: str, bucket_interval: str, start_offset: str, chunk_time_interval: str) -> None:
+    def _create_narrow_rollup(self, session: Session, source: str, view_name: str, bucket_interval: str, start_offset: str) -> None:
         """
         Creates a continuous aggregate with proper hierarchical logic and locking.
         Parameters:
@@ -2228,7 +2231,6 @@ class RollupManager:
             view_name: The name of the continuous aggregate view to create.
             bucket_interval: The time bucket size for aggregation (e.g., "1 hour", "1 day").
             start_offset: The offset for the continuous aggregate policy (e.g., "3 hours", "3 days").
-            chunk_time_interval: The chunk time interval for compression policy (e.g., "1 day", "7 days").
 
         """
         r_settings: dict = self._get_dynamic_settings()
@@ -2464,6 +2466,12 @@ class RollupManager:
         returns:
             bool: True if the rollup needs to be rebuilt (missing or config mismatch),
                   False if it exists and matches the expected bucket interval.
+        NOTE  this method uses a robust approach to compare the configured bucket interval with the actual interval used in the view definition.
+            It first maps friendly terms to their equivalent PostgreSQL interval strings, then extracts the interval from
+            the view definition using a regex, and finally compares the two intervals using PostgreSQL's interval comparison
+            to ensure semantic correctness.  It's funky and may break if timescaledb changes their view definition format,
+            but it is necessary to accurately detect when a rebuild is needed due to bucket changes,
+            while avoiding unnecessary rebuilds when the intervals are semantically equivalent but textually different (e.g., '1 hour' vs '01:00:00').
         """
         # 1. Map friendly terms to PG Interval inputs
         # This allows 'monthly' -> '1 month', while letting '2 hours' pass through as-is
@@ -2485,7 +2493,7 @@ class RollupManager:
             """)
             view_def: Optional[str] = session.scalar(check_sql, {"view_name": view_name})
 
-            # Logic: If it doesn't exist, we definitely need to build it
+            # If it doesn't exist, we definitely need to build it
             if not view_def:
                 self._log.debug(f"Rollup {view_name} does not exist. Rebuild required.")
                 return True
@@ -2998,7 +3006,7 @@ class RollupManager:
     def _parse_interval_days(self, interval_str: str) -> float:
         """
         Convert interval strings like '7 days' or '6 hours' into fractional days.
-        No used at the moment, but this could be useful if we want to allow flexible interval inputs in the future.
+        Not used at the moment, but this could be useful if we want to allow flexible interval inputs in the future.
         """
         try:
             parts: List[str] = interval_str.lower().split()

@@ -179,7 +179,7 @@ variable name,data type,register,documented name,unit,values,note
 ,,170,Pload,W,,active power (in Watts) currently being utilized by the loads connected to the inverter
 ,,171,Eload_day,0.1kWh,,represents the total energy in kilowatt-hours (kWh) consumed by the loads connected to the inverter for the current day.
 ,,172,Eload_allL,0.1kWh,,low bit  combine with high bit to get historical total
-,,173,Eload_allH,0.1kWh,,high bit
+,,173,Eload_allH,0.1kWh,,high bit cumulative total energy (in kWh) consumed by the load since the system was first installed 
 ,4bit,174,SwitchState_SafetySw,Bit0~4,0~0x1F,The status of the 5-digit safety DIP switch
 ,,180,Pinv_S,W,0-65535,On grid inverter power of three phase: S phase
 ,,181,Pinv_T,W,0-65535,On grid inverter power of three phase: T phase

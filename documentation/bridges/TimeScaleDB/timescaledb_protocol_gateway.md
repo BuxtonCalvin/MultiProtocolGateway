@@ -208,9 +208,14 @@ services:
       # we change the access port here to allow for other postgres dbs
       - "5431:5432"
     volumes:
-      - home/tsdb_data:/var/lib/postgresql/data
+   # note the ha version of timescaledb uses a different data storage path compared to the standard postgres database
+   # so the volume is mapped in the environment variable to account for any future changes to the path-- which as of 3/3/2026 doesn't work. So direct mapping to timescaledb-ha data folder: /home/postgres/pgdata  
+   #- /home/timescaledb:/var/lib/postgresql/data
+   # current data path in timescale.
+   - /home/timescaledb:/home/postgres/pgdata
   
   # name your containers to whatever you want.  The TimescaleDB module sits on top of PPG
+  # This example is for the EG4 18kpv, but you can use any volume mappings for your particular inverter.
   18kPV_timescaledb:
     container_name: 18kPV_timescaledb
     image: buxtoncalvin/pythonprotocolgateway:latest
