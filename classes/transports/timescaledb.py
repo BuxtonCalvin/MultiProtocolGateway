@@ -1,5 +1,5 @@
 """
-timescaledb transport bridge module is free software: you can redistribute it and/or modify
+timescaledb transport bridge module is free software written by Kevin Burke: you can redistribute it and/or modify
 it under the terms of the GNU Affero General Public License as published by
 the Free Software Foundation, either version 3 of the License, or
 any later version.
@@ -106,9 +106,13 @@ SessionGlobal: Callable[..., Session] = sessionmaker(
     expire_on_commit=False,
     autoflush=False
 )
+# machine_timezone: Stores the local timezone name as detected by tzlocal.get_localzone_name(), used for time alignment in rollups and timestamp storage.
 machine_timezone: str = get_localzone_name()
 # base class for all tables.
 __version__ = "0.9.0"
+
+def _now_tz() -> datetime:
+    return datetime.now().astimezone()
 
 class Base(DeclarativeBase):
     pass
@@ -125,8 +129,8 @@ class DeviceInfo(Base):
     device_location: Mapped[Optional[str]] = mapped_column(Text)
     transport: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now().astimezone())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now().astimezone(), onupdate=lambda: datetime.now().astimezone())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now_tz)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now_tz, onupdate=_now_tz)
 
     devicemetricswide: Mapped[List["DeviceMetricsWide"]] = relationship(
         "DeviceMetricsWide", back_populates="device_info"
@@ -138,7 +142,7 @@ class DeviceInfo(Base):
 class DeviceMetricsWide(Base):
     __tablename__: str = "device_metrics_wide"
 
-    m_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now().astimezone(), primary_key=True)
+    m_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now_tz, primary_key=True)
     device_info_id: Mapped[int] = mapped_column(ForeignKey("device_info.device_info_id"), primary_key=True)
 
     __table_args__: Tuple = (
@@ -153,7 +157,7 @@ class DeviceMetricsNarrow(Base):
     # In TimescaleDB/SQLAlchemy, mark columns that are part of PK as primary_key=True in mapped_column
     # as well as defining the constraint in __table_args__
     # metric_value is forced float for all numerics and booleans.  Text (ASCII) is filtered out prior to append.
-    m_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now().astimezone(), primary_key=True)
+    m_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now_tz, primary_key=True)
     device_info_id: Mapped[int] = mapped_column(ForeignKey("device_info.device_info_id"), primary_key=True)
     metric_name: Mapped[str] = mapped_column(Text, primary_key=True)
     metric_value: Mapped[float] = mapped_column(Float)
@@ -173,8 +177,8 @@ class MetricCatalog(Base):
     metric_name: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     clean_column_name: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     data_type: Mapped[str] = mapped_column(Text, default='double precision', nullable=False)
-    unit_mod: Mapped[str] = mapped_column(Float, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),  default=lambda: datetime.now().astimezone(), onupdate=lambda: datetime.now().astimezone())
+    unit_mod:Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),  default=_now_tz, onupdate=_now_tz)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
 # TimescaleDB transport bridge class
@@ -262,8 +266,8 @@ class timescaledb(transport_base):
 
     # Pushover settings
     enable_pushover: bool = True
-    pushover_token: str = None
-    pushover_user: str = None
+    pushover_token: Optional[str] = None
+    pushover_user: Optional[str] = None
 
     # stale data settings and fields
     stale_data_timeout: int = 300       # seconds before considering data stale for incomplete batch cleanup
@@ -292,7 +296,7 @@ class timescaledb(transport_base):
             - password (str): Database password
             - device_name (str): Name for the bridge (default: "TimeScaleDB PPG Bridge")
             - force_float (bool): Force metric values to float (default: True)
-            - flush_timeout (int): Seconds between batch flushes (default: 15) matches read_interval of source transport
+            - flush_timeout (int): Seconds between batch flushes (default: 15). Note: this is set from the "read_interval" setting, not "flush_timeout".
             - enable_persistent_storage (bool): Enable disk backlog (default: True)
             - backlog_storage_path (str): Path for backlog files (default: "parent/timescaledb_backlog")
             - max_backlog_size (int): Max backlog points (default: 10000)
@@ -343,7 +347,10 @@ class timescaledb(transport_base):
         self.use_exponential_backoff = settings.getboolean("use_exponential_backoff", fallback=self.use_exponential_backoff)
         self.max_reconnect_delay = settings.getint("max_reconnect_delay", fallback=self.max_reconnect_delay)
 
-        # flush points settings
+        # flush points settings.  We use the read interval setting from the base transport as the flush interval for this transport,
+        # since it is a natural fit for how often to flush batches to the database, and it keeps the user from having to configure
+        # an additional setting that is essentially doing the same thing.  The flush_timeout setting is still available as a fallback 
+        # if read_interval is not set by the user.
         self.flush_timeout = settings.getint("read_interval", fallback=self.flush_timeout)
         self.force_float = settings.getboolean("force_float", fallback=self.force_float)
 
@@ -352,7 +359,11 @@ class timescaledb(transport_base):
 
         # persistent backlog settings
         self.enable_persistent_storage = settings.getboolean("enable_persistent_storage", fallback=self.enable_persistent_storage)
-        self.backlog_storage_path = Path(str(settings.get("backlog_storage_path", fallback=self.backlog_storage_path)))
+        self.backlog_storage_path_value: str | Path = settings.get("backlog_storage_path", fallback=self.backlog_storage_path)
+        if not isinstance(self.backlog_storage_path_value, Path):
+            self.backlog_storage_path_value = Path(self.backlog_storage_path_value)
+        self.backlog_storage_path = self.backlog_storage_path_value
+
         self.backlog_file_name = settings.get("backlog_file_name", fallback=self.backlog_file_name)
         self.max_backlog_size = settings.getint("max_backlog_size", fallback=self.max_backlog_size)
         self.max_backlog_age: int = settings.getint("max_backlog_age", fallback=self.max_backlog_age)
@@ -365,12 +376,12 @@ class timescaledb(transport_base):
             "current_metric_count": self.current_metric_count,
             "tsdb_connected": self.tsdb_connected,
             "drop_after": settings.get("drop_after", fallback=self.drop_after),
-            "migrate_data": settings.getboolean("migrate_data", fallback=str(self.migrate_data)),
-            "enable_compression": settings.getboolean("enable_compression", fallback=str(self.enable_compression)),
+            "migrate_data": settings.getboolean("migrate_data", fallback=self.migrate_data),
+            "enable_compression": settings.getboolean("enable_compression", fallback=self.enable_compression),
             # Rollup Settings
             "auto_refresh_interval": settings.getint("auto_refresh_interval", fallback=self.auto_refresh_interval),
-            "enable_auto_refresh": settings.getboolean("enable_auto_refresh", fallback=str(self.enable_auto_refresh)),
-            "enable_rollups": settings.getboolean("enable_rollups", fallback=str(self.enable_rollups)),
+            "enable_auto_refresh": settings.getboolean("enable_auto_refresh", fallback=self.enable_auto_refresh),
+            "enable_rollups": settings.getboolean("enable_rollups", fallback=self.enable_rollups),
         }
 
         # pushover settings
@@ -378,10 +389,11 @@ class timescaledb(transport_base):
         self.pushover_token: str = settings.get("pushover_token", fallback=self.pushover_token)
         self.pushover_user: str = settings.get("pushover_user", fallback=self.pushover_user)
 
+        # 3. Explicitly set bridge name if not set by user, since this transport doesn't have a device name from an upstream transport to pull from.
+        self.device_name = settings.get("device_name", fallback="TimescaleDB PPG Bridge")
+
         super().__init__(settings)
 
-        # 3. Explicitly set bridge name
-        self.device_name = "TimescaleDB PPG Bridge"
 
         self._verified_devices: set[str] = set()
 
@@ -439,8 +451,15 @@ class timescaledb(transport_base):
         self._device_lock: lock = threading.Lock()
 
         # persistent backlog file and path, both the file path and the in-memory backlog file are initialized here
-        self.backlog_file_path: Path = self.backlog_storage_path / f"{self.backlog_file_name}.jsonl"
+         # Ensure the backlog storage path is a valid directory
+        if not self.backlog_storage_path.exists():
+            try:
+                self.backlog_storage_path.mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                self._log.error(f"Failed to create backlog storage directory '{self.backlog_storage_path}': {e}")
+                raise
         # full path to backlog file
+        self.backlog_file_path: Path = self.backlog_storage_path / f"{self.backlog_file_name}.jsonl"
 
         self.backlog = BacklogManager(
             backlog_file_path=self.backlog_file_path,
@@ -457,14 +476,27 @@ class timescaledb(transport_base):
 
         # attempt tsdb connection now
         try:
-            self.connect_tsdb(transport_base)
+            self.connect_tsdb()
         except Exception as e:
             self._log.error(f"Initial connect failed: {e}")
             self._set_tsdb_connected(False, "Initial connect was not successful")  # noqa: FBT003
 
+            """
+                 Attributes:
+                 request_upstream_reconnect (Callable[[], None] | None):
+                 Optional callback function that, if set by the user,
+                 will be called to trigger an upstream reconnect when stale data is detected or a reconnect is required.
+                 Users of the class should assign a callable to this attribute after instantiating the class if they want
+                to handle upstream reconnect logic; otherwise, it defaults to None and no upstream reconnect will be triggered.
+
+                The transport itself will handle reconnecting to the TimescaleDB database when a connection issue is detected,
+                but this callback allows users to also trigger a reconnect of the upstream data source (e.g., inverter or scraper)
+                if they want to attempt to resolve stale data conditions or other issues that might be mitigated by refreshing the
+                data source connection.
+            """
         self.request_upstream_reconnect: Callable[[], None] | None = None
 
-    def connect_tsdb(self, from_transport: transport_base) -> None:
+    def connect_tsdb(self) -> None:
         """
         Connect to DB, build device_metrics_wide table from metrics data, and ensure schema/hypertable/policies exist.
         If from_transport data provided, ensure device_info insert for that transport.
@@ -472,9 +504,8 @@ class timescaledb(transport_base):
         #self._log.info(f"Version: {self.__version__}")
         try:
         # 1 create database if missing.  Connect to standard default "postgres" database first to then check/create target database structure.
-
+            self._log.info(f"Starting Timescaledb {self.__version__} and attempting connection:")
             self._create_database_if_missing()
-
 
         # 2 create engine by logging into the default (or changed name) database
             try:
@@ -859,7 +890,7 @@ class timescaledb(transport_base):
     #  5a. Get metric's names from registry map
     # -------------------------
 
-    def _registry_metric_names(self) -> List[str]:
+    def _registry_metric_names(self) ->  List[Tuple[str, str, Any, Any]] :
         """ load registry map for validation of metric names for dynamic column creation. Return sorted list of metric names
             with their data types and notes.
         """
@@ -999,7 +1030,7 @@ class timescaledb(transport_base):
         session.execute(text("SELECT pg_advisory_xact_lock(hashtext(:k));"), {"k": key_text})
 
     def _timescale_type(self,data_type,unit) -> str:
-        dt_name = data_type.name
+        dt_name = getattr(data_type, "name", data_type)
 
         # --- base type from lookup, use DOUBLE PRECISION as fall back to be safe.
         base_type: Any = self.timescale_type_map.get(dt_name, "DOUBLE PRECISION")
