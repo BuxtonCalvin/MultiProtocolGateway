@@ -46,6 +46,7 @@ import logging
 import math
 import queue
 import re
+import sys
 import threading
 import time
 import warnings
@@ -481,19 +482,19 @@ class timescaledb(transport_base):
             self._log.error(f"Initial connect failed: {e}")
             self._set_tsdb_connected(False, "Initial connect was not successful")  # noqa: FBT003
 
-            """
-                 Attributes:
-                 request_upstream_reconnect (Callable[[], None] | None):
-                 Optional callback function that, if set by the user,
-                 will be called to trigger an upstream reconnect when stale data is detected or a reconnect is required.
-                 Users of the class should assign a callable to this attribute after instantiating the class if they want
-                to handle upstream reconnect logic; otherwise, it defaults to None and no upstream reconnect will be triggered.
+        """
+            Attributes:
+            request_upstream_reconnect (Callable[[], None] | None):
+            Optional callback function that, if set by the user,
+            will be called to trigger an upstream reconnect when stale data is detected or a reconnect is required.
+            Users of the class should assign a callable to this attribute after instantiating the class if they want
+            to handle upstream reconnect logic; otherwise, it defaults to None and no upstream reconnect will be triggered.
 
-                The transport itself will handle reconnecting to the TimescaleDB database when a connection issue is detected,
-                but this callback allows users to also trigger a reconnect of the upstream data source (e.g., inverter or scraper)
-                if they want to attempt to resolve stale data conditions or other issues that might be mitigated by refreshing the
-                data source connection.
-            """
+            The transport itself will handle reconnecting to the TimescaleDB database when a connection issue is detected,
+            but this callback allows users to also trigger a reconnect of the upstream data source (e.g., inverter or scraper)
+            if they want to attempt to resolve stale data conditions or other issues that might be mitigated by refreshing the
+            data source connection.
+        """
         self.request_upstream_reconnect: Callable[[], None] | None = None
 
     def connect_tsdb(self) -> None:
@@ -501,7 +502,6 @@ class timescaledb(transport_base):
         Connect to DB, build device_metrics_wide table from metrics data, and ensure schema/hypertable/policies exist.
         If from_transport data provided, ensure device_info insert for that transport.
         """
-        #self._log.info(f"Version: {self.__version__}")
         try:
         # 1 create database if missing.  Connect to standard default "postgres" database first to then check/create target database structure.
             self._log.info(f"Starting Timescaledb {self.__version__} and attempting connection:")
@@ -580,7 +580,7 @@ class timescaledb(transport_base):
             if self.tsdb_connected != conn_value:
                 self.tsdb_connected: bool = conn_value
                 self.rollup_policy["tsdb_connected"] = conn_value
-                self._log.info(f"tsdb_connected -> {conn_value} ({con_reason})")
+                self._log.info(f"TimescaleDB is connected -> {conn_value} ({con_reason})")
 
 
     # -------------------------
@@ -774,9 +774,10 @@ class timescaledb(transport_base):
                     session.execute(text("CREATE INDEX IF NOT EXISTS device_metrics_wide_pkey ON device_metrics_wide (m_time DESC, device_info_id);"))
                     session.execute(text("CREATE INDEX IF NOT EXISTS device_metrics_narrow_pkey ON device_metrics_narrow (m_time DESC, device_info_id, metric_name);"))
                     session.commit()
-                self._log.info("ORM tables created/ensured")
+                self._log.info("ORM tables and indexes created/ensured")
             except Exception as e:
-                self._log.error(f"ORM table creation error: {e}")
+                self._log.error(f"ORM tables and indexes creation error: {e}")
+                raise
 
     # -------------------------
     #  4. Write device information metadata
@@ -877,14 +878,14 @@ class timescaledb(transport_base):
                     raise ValueError("Failed to ensure metric columns.")  # noqa: TRY301
 
         except ValueError as e:
-
             self._log.error(f"No metric names detected: {e}")
-            return  # Exit connect early if no metrics are detected  or column creation failed
+            sys.exit(1) # exit if no metric names detected, since this is a critical failure for the transport's functionality.
 
         except Exception as e:
             # Catch any general exceptions that occurred during any step above
 
             self._log.error(f"device_metrics_wide table columns creation error: {e}")
+            raise
 
     # -------------------------
     #  5a. Get metric's names from registry map
@@ -933,11 +934,12 @@ class timescaledb(transport_base):
 
             if not tsdb_connected or not session:
                 self._log.error("Cannot create columns — not tsdb_connected.")
-                return False
+                raise ConnectionError("Not connected to TimescaleDB.")
+
 
             if not metric_start_names:
                 self._log.error("No metric column names were detected")
-                return False
+                raise ValueError("No metric column names were detected.")
 
             try:
                 with self._schema_lock:
@@ -1741,6 +1743,7 @@ class BacklogManager:
                 f.write(cleaned_json + "\n")
         except Exception as e:
             self._log.error(f"Failed to append point to backlog disk: {e}")
+            raise
 
     def _sync_to_disk(self) -> None:
         if not self.backlog_file_path:
@@ -1753,6 +1756,7 @@ class BacklogManager:
                         f.write(json.dumps(p, default=str) + "\n")
             except Exception as e:
                 self._log.error(f"Failed to sync backlog to disk: {e}")
+                raise
 
 
 class RollupManager:
