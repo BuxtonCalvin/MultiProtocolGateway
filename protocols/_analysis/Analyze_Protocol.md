@@ -48,9 +48,9 @@ The method functions as a **self-identification engine** for Modbus devices (lik
 ### 4. Load Protocol Definitions
 
 * **For each `*.json` protocol file:**
-  1. Instantiate `protocol_settings(name)`.
-  2. Store in `protocols` dictionary.
-  3. Track `max INPUT` and `max HOLDING` registers to determine scan range.
+  a. Instantiate `protocol_settings(name)`.
+  b. Store in `protocols` dictionary.
+  c. Track `max INPUT` and `max HOLDING` registers to determine scan range.
 
 * **If Cache Exists:** Loads `input_dense.json` and `holding_dense.json`.
 * **Else:** Calls `read_modbus_registers(start=0, end=max_register)`.
