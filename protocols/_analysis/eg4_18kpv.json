@@ -1,6 +1,0 @@
-{
-    "transport" : "modbus_tcp",
-    "batch_size": 40,
-    "send_holding_register": true,
-    "send_input_register" : true
-}
