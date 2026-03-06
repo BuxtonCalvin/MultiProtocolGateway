@@ -145,7 +145,7 @@ class DeviceMetricsWide(Base):
     m_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now_tz, primary_key=True)
     device_info_id: Mapped[int] = mapped_column(ForeignKey("device_info.device_info_id"), primary_key=True)
 
-    __table_args__: Tuple = (
+    __table_args__ = (
         PrimaryKeyConstraint('m_time', 'device_info_id', name='device_metrics_wide_pkey'),
     )
 
@@ -162,7 +162,7 @@ class DeviceMetricsNarrow(Base):
     metric_name: Mapped[str] = mapped_column(Text, primary_key=True)
     metric_value: Mapped[float] = mapped_column(Float)
 
-    __table_args__: Tuple = (
+    __table_args__ = (
         PrimaryKeyConstraint('m_time', 'device_info_id', 'metric_name', name='device_metrics_narrow_pkey'),
     )
 
@@ -265,20 +265,16 @@ class timescaledb(transport_base):
     enable_auto_refresh: bool = True  # whether to auto-refresh rollups periodically
     drop_after: str = "1 year"  # default retention policy for raw data in tables and views, can be overridden by settings SectionProxy
 
-    # Pushover settings
-    enable_pushover: bool = True
-    pushover_token: Optional[str] = None
-    pushover_user: Optional[str] = None
-
-    # stale data settings and fields
+    # stale data settings and fields.  Stale data is read per transport batch based on the timestamp of the last row of metrics data received.  If the current time exceeds that timestamp by more than the stale_data_timeout, then the transport will consider the data to be stale and trigger a cleanup of incomplete batches in the database, as well as an optional upstream reconnect if request_upstream_reconnect callback is set by the user.
     stale_data_timeout: int = 300       # seconds before considering data stale for incomplete batch cleanup
-    stale_data_last_row: Optional[dict[str, Any]] = None  # last row of metrics for stale data detection
-    stale_data_start_ts: Optional[datetime] = None # timestamp when stale data period started
-    is_stale_data: bool = False  # flag indicating if stale data condition is active
-    stale_event_count: int = 0
-    last_stale_event_ts: Optional[datetime] = None
     max_stale_attempts: int = 3
     retry_delay_mins: int = 5
+
+    # Pushover settings
+    enable_pushover: bool = True
+    pushover_token: Optional[str] = ""
+    pushover_user: Optional[str] = ""
+
     schema_needs_refresh: bool = True  # flag to indicate if ORM schema refresh is needed after reconnect or column changes
     current_metric_count: int = 0
 
@@ -395,6 +391,9 @@ class timescaledb(transport_base):
 
         super().__init__(settings)
 
+        # registry map for the last batch of data received, used for stale data detection.
+        self._stale_registry: dict[str, dict[str, Any]] = {}
+        self._last_cleanup_time: float = time.time()
 
         self._verified_devices: set[str] = set()
 
@@ -495,7 +494,7 @@ class timescaledb(transport_base):
             if they want to attempt to resolve stale data conditions or other issues that might be mitigated by refreshing the
             data source connection.
         """
-        self.request_upstream_reconnect: Callable[[], None] | None = None
+        self.request_upstream_reconnect: Callable[[str], None] | None = None
 
     def connect_tsdb(self) -> None:
         """
@@ -1188,6 +1187,10 @@ class timescaledb(transport_base):
                 self.schema_needs_refresh = False
 
         while True:
+            if time.time() - self._last_cleanup_time > 86400:
+                self._cleanup_stale_registry()
+                self._last_cleanup_time = time.time()
+
             session: Session = self.SessionFactory()
             try:
                 self._flush_event.wait(timeout=0)
@@ -1215,9 +1218,12 @@ class timescaledb(transport_base):
                 # Check for stale data before attempting to process/write to the database. This is based on the timestamp from the transport
                 # and the previous saved timestamp.
 
-                is_stale: bool = self._is_stale_data(metrics_only, timestamp)
+                is_stale: bool = self._check_is_stale(transport_name, metrics_only, timestamp)
+
                 if is_stale:
+                    self._commit_transport_state(transport_name, metrics_only, timestamp, is_stale=True)
                     self._log.debug("Stale data detected, skipping DB write.")
+                    self._flush_queue.task_done()
                     continue
 
                 # pre-process data to coerce floating point, integer as values (from metric_catalog definitions) for safe insertion to the wide table.
@@ -1259,7 +1265,7 @@ class timescaledb(transport_base):
                                     stmt: Insert = insert(DeviceMetricsWide.__table__).values(**wide_data)
                                     session.execute(stmt)
 
-                        self._commit_stale_state(metrics=metrics_only, time_read=timestamp, is_stale=is_stale)
+                        self._commit_transport_state(transport_name, metrics_only, timestamp, is_stale=False)
                         self._log.debug(f"data write complete from [{transport_name}] to timescaledb bridge")
                 except (SQLAlchemyError, ValueError) as e1:
                     session.rollback()
@@ -1413,123 +1419,133 @@ class timescaledb(transport_base):
 
             raise  # Re-raise to be caught by outer handler for potential backlog queuing
 
-
-    def _is_stale_data(self, row: dict, timestamp: datetime) -> bool:
-        """
-        Updates stale-data state tracking using transport data.
-
-        If the incoming row's metric dictionary is identical to the previously
-        observed row, this method maintains or initializes the stale-data timer.
-        If the row differs, the stale-data state is reset, indicating new data
-        flow.
+    def _check_is_stale(self, transport_id: str, row: dict, timestamp: datetime) -> bool:
+        """_summary_   Stale Data Detection and Handling
+            The following methods implement a mechanism to detect when incoming data from a transport has become stale
+            (i.e., unchanged for a certain period) and to handle such situations by triggering reconnects and notifications.
 
         Args:
-            row (dict): Incoming data row with metrics only, timestamp (datetime): timestamp of the read data.
+            transport_id (str):  the unique identifier for the transport whose data is being evaluated for staleness.
+            row (dict): the latest data row received from the transport, which is compared against the last received data to determine if it has changed.
+            timestamp (datetime):  the timestamp of when the latest data was received, used to calculate how long the data has been unchanged.
 
-        Notes:
-            This method does not initiate reconnect attempts directly; stale-data
-            handling is performed in `_handle_stale_event` to centralize state
-            and timing logic.
-
-            Tracks rows for stale-data detection.
-
-            Called each time _flush_worker successfully produces a row.
-
-            Behavior:
-            - If the row's metrics are identical to the last recorded row, continue
-            the stale counter (self.stale_data_start_ts).
-            - If different, reset the stale counter.
+        Returns:
+            bool: Returns True if the data is considered stale (unchanged for longer than the defined timeout),
+                otherwise False.
         """
-
-        stale_limit = timedelta(seconds=int(self.stale_data_timeout))
-
-        time_read: datetime = timestamp
-        if time_read is None:
+        state = self._stale_registry.get(transport_id)
+        if not state or state["last_row"] is None:
             return False
 
-        if isinstance(time_read, str):
-            try:
-                time_read = datetime.fromisoformat(time_read)
-            except ValueError:
-                time_read = datetime.strptime(time_read, "%Y-%m-%d %H:%M:%S%z")
-
-        if self.stale_data_last_row is None:
-            # First observation is never stale
-            return False
-
-        # 1. Determine if the data has changed
-        for key, value in row.items():
-            prev_val = self.stale_data_last_row.get(key)
-
-            if isinstance(value, (int, float)) and isinstance(prev_val, (int, float)):
-                if not math.isclose(value, prev_val, rel_tol=1e-4, abs_tol=1e-6):
+        # Comparison Logic (Numeric + Strict)
+        for key, val in row.items():
+            prev = state["last_row"].get(key)
+            if isinstance(val, (int, float)) and isinstance(prev, (int, float)):
+                if not math.isclose(val, prev, rel_tol=1e-4, abs_tol=1e-6):
                     return False
-            elif value != prev_val:
+            elif val != prev:
                 return False
 
-        # 2. Data unchanged → check elapsed time
-        elapsed: timedelta = time_read - self.stale_data_start_ts
-        is_stale: bool = elapsed > stale_limit
+        # Data is unchanged; check elapsed time
+        elapsed = timestamp - state["start_ts"]
+        return elapsed > timedelta(seconds=int(self.stale_data_timeout))
 
-        return is_stale
+    def _commit_transport_state(self, transport_id: str, row: dict, timestamp: datetime, is_stale: bool) -> None:
+        """_summary_ The method _commit_transport_state is responsible for tracking the state of each transport's
+            data freshness. It maintains a registry (_stale_registry) that records the last received data, the timestamp of when that
+            data was received, and whether the data is currently considered stale. When new data arrives, this method
+            updates the registry accordingly and triggers events if stale data is detected.
 
-    # 3. Update stale state data
-    def _commit_stale_state(self, *, metrics: dict, time_read: datetime, is_stale: bool) -> None:
+        Args:
+            transport_id (str): The unique identifier for the transport whose state is being committed.
+            row (dict): The latest data row received from the transport, which is used to compare against previous data for staleness checks.
+            timestamp (datetime): The timestamp of when the data was received.
+            is_stale (bool): A flag indicating whether the data is considered stale.
+        """
+        # Initialize if missing
+        if transport_id not in self._stale_registry:
+            self._stale_registry[transport_id] = {
+                "last_row": row.copy(), "start_ts": timestamp, "is_stale": False,
+                "last_seen": timestamp, "stale_event_count": 0, "last_event_ts": None
+            }
 
-        if self.stale_data_last_row is None:
-            self.stale_data_last_row = metrics.copy()
-            self.stale_data_start_ts = time_read
-            self.is_stale_data = False
-            return
+        state = self._stale_registry[transport_id]
+        state["last_seen"] = timestamp
+        self._log.debug(
+            f"Committing state for transport: {transport_id} | "
+            f"is_stale: {is_stale} | "
+            f"elapsed: {timestamp - state['start_ts']}"
+        )
 
         if not is_stale:
-            # Data changed
-            self.stale_data_last_row = metrics.copy()
-            self.stale_data_start_ts = time_read
-            self.is_stale_data = False
-            self.stale_event_count = 0
-            self.last_stale_event_ts = None
+            # Reset everything on fresh data/successful write
+            state.update({
+                "last_row": row.copy(), "start_ts": timestamp,
+                "is_stale": False, "stale_event_count": 0
+            })
+        elif is_stale and not state["is_stale"]:
+            # Only trigger the event ONCE per stale period
+            state["is_stale"] = True
+            state["stale_event_count"] += 1
+            state["last_event_ts"] = timestamp
+
+            elapsed = timestamp - state["start_ts"]
+            self._handle_stale_event(transport_id, timestamp, elapsed)
+
+
+    def _cleanup_stale_registry(self) -> None:
+        """Removes transports that haven't been seen in 7 days."""
+        now: datetime = datetime.now().astimezone()
+        to_delete = [
+            tid for tid, s in self._stale_registry.items()
+            if (now - s["last_seen"]).days >= 7
+        ]
+        for tid in to_delete:
+            self._log.info(f"Decommissioning stale state for transport: {tid}")
+            del self._stale_registry[tid]
+
+    def _handle_stale_event(self, transport_id: str, current_time: datetime, total_stale_elapsed: timedelta) -> None:
+        """
+        Triggers a reconnect for a specific transport (max X times) with a gap between attempts.
+        """
+        state = self._stale_registry.get(transport_id)
+        if not state:
             return
 
-        # Data unchanged and stale threshold crossed
-        if is_stale and not self.is_stale_data:
-            self.is_stale_data = True
-            self._handle_stale_event(time_read, time_read - self.stale_data_start_ts)
-
-
-    def _handle_stale_event(self, current_time: datetime, total_stale_elapsed: timedelta) -> None:
-        """
-        Triggers a reconnect max 3 times with a 5-minute gap between attempts.
-        """
-        # 1. Check if we have already hit the max attempts
-        if self.stale_event_count >= self.max_stale_attempts:
+        # 1. Check max attempts for THIS transport
+        if state["stale_event_count"] >= self.max_stale_attempts:
+            self._log.debug(f"[{transport_id}] Max stale retry attempts reached. No further reconnects.")
             return
 
-        # 2. Check if enough time has passed since the last attempt (if it's not the first one)
-        if self.last_stale_event_ts is not None:
-            time_since_last_attempt: timedelta = current_time - self.last_stale_event_ts
-            if time_since_last_attempt < timedelta(minutes=int(self.retry_delay_mins)):
+        # 2. Throttling: Has enough time passed since THIS transport's last attempt?
+        if state["last_event_ts"] is not None:
+            time_since_last = current_time - state["last_event_ts"]
+            if time_since_last < timedelta(minutes=int(self.retry_delay_mins)):
                 return
 
-        # 3. Proceed with the attempt
-        self.stale_event_count += 1
-        self.last_stale_event_ts: datetime = current_time
+        # 3. Increment counters
+        state["stale_event_count"] += 1
+        state["last_event_ts"] = current_time
 
-        # 4. Trigger reconnect
+        # 4. Trigger Reconnect with Transport ID
         if self.request_upstream_reconnect:
             try:
-               self.request_upstream_reconnect()
+                self._log.warning(f"[{transport_id}] Data stale. Requesting reconnect (Attempt {state['stale_event_count']}/{self.max_stale_attempts}).")
+                # PASS THE TRANSPORT ID HERE
+                self.request_upstream_reconnect(transport_id)
             except Exception:
-                self._log.exception("Failed requesting upstream reconnect")
+                self._log.exception(f"[{transport_id}] Failed requesting upstream reconnect.")
 
-        # Send Notification
+        # 5. Notify
         try:
             if getattr(self, "enable_pushover", False):
-                msg = (f"Inverter data stale for {total_stale_elapsed.total_seconds()/60:.1f} mins. "
-                    f"Attempt {self.stale_event_count} of {self.max_stale_attempts}.")
-                self._send_pushover_message(title="Inverter Data Stale", message=msg)
+                minutes = total_stale_elapsed.total_seconds() / 60
+                msg = (f"Transport [{transport_id}] stale for {minutes:.1f} mins. "
+                    f"Attempt {state['stale_event_count']} of {self.max_stale_attempts}.")
+                self._send_pushover_message(title="Transport Stale", message=msg)
         except Exception:
-            self._log.exception("Failed sending Pushover notification.")
+            self._log.exception(f"[{transport_id}] Failed sending Pushover notification.")
+
 
     def normalize(self, text: str) -> str:
         # Keeps only letters and numbers

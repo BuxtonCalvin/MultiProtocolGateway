@@ -421,9 +421,10 @@ class Protocol_Gateway:
     def _wire_reconnect_hooks(self) -> None:
         for transport in self.__transports:
             if hasattr(transport, "request_upstream_reconnect"):
+                # Use 'name=transport.transport_name' to capture the CURRENT value
                 transport.request_upstream_reconnect = (
-                    lambda name=transport.transport_name:
-                        self.reconnect_upstream_bridge(name)
+                    lambda transport_id=transport.transport_name:
+                        self.reconnect_upstream_bridge(transport_id)
                 )
 
     def run(self):

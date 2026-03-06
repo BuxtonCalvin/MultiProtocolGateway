@@ -134,7 +134,7 @@ One row per timestamp with multiple metric columns.
 
 Here is a screen shot of how the schema looks in PGadmin.  The tables reside in the public folder.
 
-![alt text](image-1.png)
+![pgAdmin](pgAdmin.png)
 
 ---
 
