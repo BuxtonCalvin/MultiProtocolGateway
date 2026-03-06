@@ -47,8 +47,6 @@ pytests/test_timescaledb_out.py
 
 config.cfg
 logs/gateway.log
-protocols/_analysis/decoded/eg4_18kpv_holding.json
-protocols/_analysis/decoded/eg4_18kpv_input.json
-protocols/_analysis/decoded/sigineer_v0.11_holding.json
-protocols/_analysis/decoded/sigineer_v0.11_input.json
+protocols/_analysis/decoded/*
 files_to_ignore.txt
+
