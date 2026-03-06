@@ -109,12 +109,11 @@ SessionGlobal: Callable[..., Session] = sessionmaker(
 )
 # machine_timezone: Stores the local timezone name as detected by tzlocal.get_localzone_name(), used for time alignment in rollups and timestamp storage.
 machine_timezone: str = get_localzone_name()
-# base class for all tables.
-__version__ = "0.9.0"
 
 def _now_tz() -> datetime:
     return datetime.now().astimezone()
 
+# base class for all tables.
 class Base(DeclarativeBase):
     pass
 class DeviceInfo(Base):
@@ -190,6 +189,7 @@ class timescaledb(transport_base):
     The class uses background threads for auto-refresh of rollups and stale data detection.
     Uses a global sqlalchemy session for most database operations.
     """
+    __version__: str = "0.9.0"
 
     # -------------------------
     # Default settings (overridable by settings SectionProxy)
@@ -350,7 +350,7 @@ class timescaledb(transport_base):
 
         # flush points settings.  We use the read interval setting from the base transport as the flush interval for this transport,
         # since it is a natural fit for how often to flush batches to the database, and it keeps the user from having to configure
-        # an additional setting that is essentially doing the same thing.  The flush_timeout setting is still available as a fallback 
+        # an additional setting that is essentially doing the same thing.  The flush_timeout setting is still available as a fallback
         # if read_interval is not set by the user.
         self.flush_timeout = settings.getint("read_interval", fallback=self.flush_timeout)
         self.force_float = settings.getboolean("force_float", fallback=self.force_float)
