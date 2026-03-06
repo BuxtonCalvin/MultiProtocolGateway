@@ -15,7 +15,7 @@ The method functions as a **self-identification engine** for Modbus devices (lik
 ### 1.  Set up analysis folder
 
 * Copy the target comparison inverters json files from their protocols/folders, and place them in the analysis folder.
-* Make sure that ==analyze_protocol = true== and ==analyze_protocol_save_load = true== in the config.cgf folder.
+* Make sure that "analyze_protocol = true" and "analyze_protocol_save_load = true" in the config.cgf folder.
 * Start PPG.  The analysis files will save into the three sub-folders below the analysis folder.
 
 ## 🔢 Step-by-Step Execution
