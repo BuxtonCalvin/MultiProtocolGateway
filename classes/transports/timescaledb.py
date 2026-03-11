@@ -71,14 +71,14 @@ from sqlalchemy import (
     Text,
     TextClause,
     create_engine,
-    engine,
-    insert,
     inspect,
     text,
 )
-from sqlalchemy.dialects.postgresql import Insert
 from sqlalchemy.dialects.postgresql import (
-    insert as pg_insert,  # Postgres Insert (with on_conflict)
+    Insert,
+)
+from sqlalchemy.dialects.postgresql import (
+    insert as pg_insert,
 )
 
 # from sqlalchemy.engine.interfaces import ReflectedColumn
@@ -102,7 +102,7 @@ from classes.protocol_settings import (
 
 from .transport_base import transport_base
 
-SessionGlobal: Callable[..., Session] = sessionmaker(
+SessionGlobal: sessionmaker[Session] = sessionmaker(
     autocommit=False,
     expire_on_commit=False,
     autoflush=False
@@ -270,11 +270,6 @@ class timescaledb(transport_base):
     max_stale_attempts: int = 3
     retry_delay_mins: int = 5
 
-    # Pushover settings
-    enable_pushover: bool = True
-    pushover_token: Optional[str] = ""
-    pushover_user: Optional[str] = ""
-
     schema_needs_refresh: bool = True  # flag to indicate if ORM schema refresh is needed after reconnect or column changes
     current_metric_count: int = 0
 
@@ -417,8 +412,8 @@ class timescaledb(transport_base):
         self.wide_table_flag = True  # assume wide table unless too many metrics detected
 
         # SQLAlchemy init runtime
-        self.engine = None  # engine connection
-        self.SessionFactory = None
+        self.engine: Engine
+        self.SessionFactory: sessionmaker[Session]
 
         # -------------------------
         # threading
@@ -534,12 +529,12 @@ class timescaledb(transport_base):
             except Exception as e:
                 self._log.error(f"thread start failed: {e}")
 
-            # initialize rollup class.
+            # initialize RollupManager class.
             if self.rollup_policy.get("enable_rollups", True):
                 self.rollup_mgr = RollupManager(
                     rollup_policy=self.rollup_policy,
-                    SessionFactory=self.SessionFactory,
-                    Engine=self.engine,
+                    my_session_factory=self.SessionFactory,
+                    my_engine=self.engine,
                     wide_table_flag=self.wide_table_flag,
                     migration_in_progress=self.migration_in_progress,
                     send_pushover_message = self._send_pushover_message,
@@ -560,12 +555,13 @@ class timescaledb(transport_base):
                 self._log.error(f"Persistent storage failed: {e}")
 
             # start _refresh_rollup_thread after connect completes successfully
-            if self.rollup_policy.get("enable_rollups", True) and self.tsdb_connected:
+            if self.rollup_policy.get("enable_rollups", True) and self.tsdb_connected and self.rollup_mgr:
                 self._log.info("Rollups are enabled.")
 
                 if not self.rollup_policy.get("enable_auto_refresh", True):
                     self._log.info("Auto rollup refresh is disabled.")
                     return
+
                 self.rollup_mgr.start_auto_refresh()
 
         except Exception as e:
@@ -741,7 +737,7 @@ class timescaledb(transport_base):
             self._log.debug(f"Connecting to database '{self.database}' at {self.host}:{self.port} as user '{self.username}'")
             self.engine: Engine = create_engine(url, pool_pre_ping=True, future=True, pool_recycle=3600)
             SessionGlobal.configure(bind=self.engine)
-            self.SessionFactory: Callable[..., Session] = SessionGlobal
+            self.SessionFactory: sessionmaker[Session] = SessionGlobal
             with self.engine.connect() as conn:   # make sure connection works
                 conn.execute(text("SELECT 1"))
             self._set_tsdb_connected(True, "Connect successful")  # noqa: FBT003
@@ -783,8 +779,8 @@ class timescaledb(transport_base):
     # -------------------------
 
     def _get_or_create_device(self, from_transport: transport_base) -> int:
-        """ The database doesn't know which field changed (name, model, or serial). It only knows that the unique Key (transport) already exists.
-            The First Run: The database sees a new transport name. It creates the row with all metadata.
+        """ The database doesn't know which field changed (name, model, or serial). It only knows that the unique Key (transport_name)
+            already exists. The First Run: The database sees a new transport name. It creates the row with all metadata.
             The Next Startup: If you've changed the device_name in your config. The code tries to INSERT the row again.
             The Conflict: The database says: "I already have a row where the transport name is myInverter."
             The Upsert Logic: Because of on_conflict_do_update, the database then takes the new values you just sent
@@ -814,8 +810,8 @@ class timescaledb(transport_base):
                         device_model=from_transport.device_model,
                         device_serial_number=from_transport.device_serial_number,
                         device_location=from_transport.device_location,
-                        created_at=datetime.now().astimezone(),
-                        updated_at=datetime.now().astimezone()
+                        created_at=_now_tz(),
+                        updated_at=_now_tz()
                     )
 
                     # Define what to update if the 'transport' unique constraint is hit
@@ -841,8 +837,7 @@ class timescaledb(transport_base):
                     session.rollback()
                     self._log.error(f"Upsert failed for {t_name}: {e}")
                     # Fallback to cache if we have it, otherwise None
-                    return self._device_cache.get(t_name)
-
+                    return self._device_cache[t_name]
                 else:
                     # Update caches
                     self._device_cache[t_name] = db_id
@@ -855,7 +850,7 @@ class timescaledb(transport_base):
         """
         try:
             #5a get metric names from registry_map
-            metric_start_names: list[tuple[str, str]] = self._registry_metric_names()
+            metric_start_names: list[tuple[str, str, Any, Any]] = self._registry_metric_names()
             metric_count: int = len(metric_start_names)
             self.current_metric_count: int = metric_count
 
@@ -914,7 +909,7 @@ class timescaledb(transport_base):
     #  5b. Dynamically create wide table columns for metrics
     # -------------------------
 
-    def _ensure_columns_for_metrics(self, metric_start_names: List[str]) -> bool:
+    def _ensure_columns_for_metrics(self, metric_start_names: List[Tuple[str, str, Any, Any]]) -> bool:
         """
         Ensure each metric name as defined in the variable_mask/variable_screen filters has a corresponding column in device_metrics_wide,
         and an entry in the metric_catalog table-- which describes the wide table field definitions.
@@ -995,7 +990,7 @@ class timescaledb(transport_base):
                                 'col': col,     # clean_column_name
                                 'dtype': d_type or 'double precision', # data_type mapped from registry, with default
                                 'umod': u,
-                                'col_date': datetime.now().astimezone(),
+                                'col_date': _now_tz(),
                                 'n': n          # note from registry
                             }
                             # just in case the if clean_value: check failed.
@@ -1110,9 +1105,11 @@ class timescaledb(transport_base):
             self._log.info(f"Resyncing schema for {table_name}...")
 
             # 1. Unbind the old table from metadata
-            old_table: Table  = Base.metadata.tables.get(table_name)
+            old_table: Table | None  = Base.metadata.tables.get(table_name)
             if old_table is not None:
                 Base.metadata.remove(old_table)
+            else:
+                self._log.warning(f"No existing table found for {table_name} during resync. Continuing with new reflection.")
 
             # 2. Reflect the NEW structure from the database
             new_table = Table(
@@ -1146,15 +1143,15 @@ class timescaledb(transport_base):
         """Overload write_data to process incoming data from transports."""
 
         # 1. Trap: Ignore non-dictionary signals (like boolean True)
-        if not isinstance(data, dict) or not data:
+        if not isinstance(data, dict) or not data or not isinstance(from_transport, transport_base):
             self._log.warning(
                 f"Received non-dict signal ({type(data).__name__}) from "
                 f"[{from_transport.transport_name}]. Ignoring."
             )
             return
-
-        # 3. Ensure device_info_id is set and transport is set for device metadata
-        device_id: int = self._get_or_create_device(from_transport = from_transport)
+        else:
+            # 3. Ensure device_info_id is set and transport is set for device metadata
+            device_id: int = self._get_or_create_device(from_transport = from_transport)
 
         if device_id is None:
             self._log.error("Could not resolve Device ID. Dropping packet.")
@@ -1167,7 +1164,7 @@ class timescaledb(transport_base):
         payload: dict[str, Any] = {
             "device_info_id": device_id,
             "metrics": data.copy(),
-            "m_time": datetime.now().astimezone(),  # source of truth timestamp for all metrics.
+            "m_time": _now_tz(),  # source of truth timestamp for all metrics.
             "transport_name": from_transport.transport_name
         }
         self._flush_queue.put(payload)
@@ -1187,6 +1184,10 @@ class timescaledb(transport_base):
                 self.schema_needs_refresh = False
 
         while True:
+
+            # 24hr cleanup interval in seconds for stale registry entries based on transport timestamp vs last known timestamp
+            # in the registry map for that transport. This is to prevent the registry map from growing indefinitely
+            # with old transports that are no longer sending data.
             if time.time() - self._last_cleanup_time > 86400:
                 self._cleanup_stale_registry()
                 self._last_cleanup_time = time.time()
@@ -1195,7 +1196,7 @@ class timescaledb(transport_base):
             try:
                 self._flush_event.wait(timeout=0)
                 # Drain the queue with a 1s timeout to stay responsive
-                data_in: dict | None = self._flush_queue.get(block=True)
+                data_in: dict[str, Any] | None = self._flush_queue.get(block=True)
 
                 if data_in is None or data_in is True:
                     self._log.info("Shutdown sentinel received. Exiting flush worker.")
@@ -1209,10 +1210,10 @@ class timescaledb(transport_base):
                     time.sleep(0.25)
 
                 # 2. Extract the metadata from data_in
-                device_info_id: int = data_in.get("device_info_id")
-                timestamp: datetime = data_in.get("m_time")
-                metrics_only: dict = data_in.get("metrics")
-                transport_name: str = data_in.get("transport_name")
+                device_info_id: int = data_in["device_info_id"]
+                timestamp: datetime = data_in["m_time"]
+                metrics_only: dict = data_in["metrics"]
+                transport_name: str = data_in["transport_name"]
 
 
                 # Check for stale data before attempting to process/write to the database. This is based on the timestamp from the transport
@@ -1262,7 +1263,7 @@ class timescaledb(transport_base):
                             self._flush_batch_narrow(narrow_data, device_info_id, timestamp, session)
                             if self.wide_table_flag:
                                 if valid_row:
-                                    stmt: Insert = insert(DeviceMetricsWide.__table__).values(**wide_data)
+                                    stmt: Insert = pg_insert(DeviceMetricsWide).values(**wide_data)
                                     session.execute(stmt)
 
                         self._commit_transport_state(transport_name, metrics_only, timestamp, is_stale=False)
@@ -1310,7 +1311,7 @@ class timescaledb(transport_base):
             finally:
                 session.close()
 
-    def _process_raw_metrics(self, datacopy: dict) -> dict:
+    def _process_raw_metrics(self, datacopy: dict) -> tuple[dict[Any, Any], dict[Any, Any]]:
 
         try:
             # 1. Get the mapping entry (the tuple) or None if not found
@@ -1326,7 +1327,7 @@ class timescaledb(transport_base):
             FLOAT_TYPES: set[str] = {"REAL", "DOUBLE PRECISION", "NUMERIC"}
 
             for k, v in datacopy.items():
-                mapping_info: Tuple[str, str] = self.metric_mapping.get(k)
+                mapping_info: tuple[str, str] = self.metric_mapping.get(k, ("", ""))
 
                 if mapping_info:
                     clean_key, field_type = mapping_info
@@ -1374,12 +1375,16 @@ class timescaledb(transport_base):
                         processed_narrow_data[k] = float(nv)
 
             self._log.debug("All metrics coerced")
+
             return processed_wide_data, processed_narrow_data  # noqa: TRY300
 
         except (TypeError, ValueError) as e2:
             self._log.error(f"Error in _process_raw_metrics {e2} encountered in: {datacopy}")
+            # If there's an error in processing, return empty dicts to avoid crashing the flush worker.
+            # The original data is preserved in the backlog if enabled.
+            return {}, {}
 
-    def _flush_batch_narrow(self, newData: dict, device_info_id: str, timestamp: datetime, session: Session) -> None:
+    def _flush_batch_narrow(self, newData: dict, device_info_id: int, timestamp: datetime, session: Session) -> None:
         """
             Flush new_data narrow-table metric points to the database.
         """
@@ -1403,7 +1408,7 @@ class timescaledb(transport_base):
             ]
 
             # Use the optimized 'insert' construct for bulk efficiency
-            session.execute(insert(DeviceMetricsNarrow), narrow_mappings)
+            session.execute(pg_insert(DeviceMetricsNarrow), narrow_mappings)
 
         except SQLAlchemyError as e:
             self._log.exception(f"Narrow flush failed: {e}")
@@ -1495,7 +1500,7 @@ class timescaledb(transport_base):
 
     def _cleanup_stale_registry(self) -> None:
         """Removes transports that haven't been seen in 7 days."""
-        now: datetime = datetime.now().astimezone()
+        now: datetime = _now_tz()
         to_delete = [
             tid for tid, s in self._stale_registry.items()
             if (now - s["last_seen"]).days >= 7
@@ -1658,7 +1663,7 @@ class BacklogManager:
 
     def __init__(
         self,
-        backlog_file_path: Optional[Path],
+        backlog_file_path: Path,
         max_backlog_age: int,
         max_backlog_size: int,
         flush_queue: queue.Queue,
@@ -1685,7 +1690,7 @@ class BacklogManager:
         if not self.backlog_file_path or not self.backlog_file_path.exists():
             return
 
-        now: datetime = datetime.now().astimezone()
+        now: datetime = _now_tz()
         loaded: list[dict] = []
 
         try:
@@ -1697,7 +1702,7 @@ class BacklogManager:
                             continue
                         try:
                             point: dict[str, Any] = json.loads(clean)
-                            ts: str = point.get("m_time")
+                            ts: Any | None = point.get("m_time")
                             if not ts:
                                 continue
                             m_time: datetime = datetime.fromisoformat(ts)
@@ -1795,11 +1800,11 @@ class RollupManager:
     def __init__(
         self,
         rollup_policy: dict,
-        SessionFactory: Callable[..., Session],
-        Engine: engine,
+        my_session_factory: sessionmaker[Session],
+        my_engine: Engine,
         wide_table_flag: bool,
         migration_in_progress: threading.Event,
-        send_pushover_message,
+        send_pushover_message: Callable[[str, str], None],
         log: logging.Logger,
         backlog_lock: threading.RLock,
         flush_queue: queue.Queue,
@@ -1808,11 +1813,11 @@ class RollupManager:
         ) -> None:
 
         self.rollup_policy: dict = rollup_policy
-        self.SessionFactory: Callable[..., Session] = SessionFactory
-        self.engine: engine = Engine
+        self.SessionFactory: sessionmaker[Session] = my_session_factory
+        self.engine: Engine = my_engine
         self.wide_table_flag: bool = wide_table_flag
         self.migration_in_progress: threading.Event = migration_in_progress
-        self._send_pushover_message = send_pushover_message
+        self._send_pushover_message: Callable[[str, str], None] = send_pushover_message
         self._log: logging.Logger = log
         self._backlog_lock: threading.RLock = backlog_lock
         self._flush_queue: queue.Queue  = flush_queue
@@ -1844,7 +1849,7 @@ class RollupManager:
         # hypertable defaults. These are not configurable by the user but can be overridden by changing the below rollup_policy if needed.
         # These settings are critical for ensuring that the hypertable is created with the appropriate chunking and compression
         # settings to optimize performance and storage efficiency for time-series data.
-        self.hypertable_defaults: dict[str, Any] = {
+        self.hypertable_defaults: dict[str, str] = {
             "compress_segmentby_narrow": "device_info_id, metric_name",
             "compress_segmentby_wide": "device_info_id",
             "time_column": "m_time",
@@ -1860,7 +1865,7 @@ class RollupManager:
         }
 
         # rollup defaults, continuous aggregate bucket sizes.
-        self.rollup_defaults: dict[str, Any] = {
+        self.rollup_defaults: dict[str, str] = {
             "hourly_rollup_bucket": "1 hour",
             "hourly_rollup_start": "3 hours",
             "daily_rollup_bucket": "1 day",
@@ -1876,41 +1881,41 @@ class RollupManager:
 
         # Rollup /Hypertable Settings extracted from rollup_policy  (user can override defaults via rollup_policy)
         self.current_metric_count: int = self.rollup_policy.get("current_metric_count", 0)
-        self.auto_refresh_interval: int = self.rollup_policy.get("auto_refresh_interval")
+        self.auto_refresh_interval: int = self.rollup_policy.get("auto_refresh_interval",21600)
         self.enable_auto_refresh:bool = self.rollup_policy.get("enable_auto_refresh", True)
         self.enable_rollups = bool(self.rollup_policy.get("enable_rollups", True))
-        self.drop_after: str = self.rollup_policy.get("drop_after")
+        self.drop_after: str = self.rollup_policy.get("drop_after", "1 year")
         self.migrate_data = bool(self.rollup_policy.get("migrate_data",True))
         self.enable_compression = bool(self.rollup_policy.get("enable_compression",True))
 
         # Compression settings
-        self.compress_segmentby_narrow: str= self.hypertable_defaults.get("compress_segmentby_narrow")
-        self.compress_segmentby_wide: str= self.hypertable_defaults.get("compress_segmentby_wide")
-        self.compress_orderby: str= self.hypertable_defaults.get("compress_orderby")
-        self.time_column: str= self.hypertable_defaults.get("time_column")
+        self.compress_segmentby_narrow: str= self.hypertable_defaults["compress_segmentby_narrow"]
+        self.compress_segmentby_wide: str= self.hypertable_defaults["compress_segmentby_wide"]
+        self.compress_orderby: str= self.hypertable_defaults["compress_orderby"]
+        self.time_column: str= self.hypertable_defaults["time_column"]
 
-        self.hourly_chunk_time_interval: str = self.hypertable_defaults.get("hourly_chunk_time_interval")
-        self.daily_chunk_time_interval: str = self.hypertable_defaults.get("daily_chunk_time_interval")
-        self.weekly_chunk_time_interval: str = self.hypertable_defaults.get("weekly_chunk_time_interval")
-        self.monthly_chunk_time_interval: str = self.hypertable_defaults.get("monthly_chunk_time_interval")
+        self.hourly_chunk_time_interval: str = self.hypertable_defaults["hourly_chunk_time_interval"]
+        self.daily_chunk_time_interval: str = self.hypertable_defaults["daily_chunk_time_interval"]
+        self.weekly_chunk_time_interval: str = self.hypertable_defaults["weekly_chunk_time_interval"]
+        self.monthly_chunk_time_interval: str = self.hypertable_defaults["monthly_chunk_time_interval"]
 
-        self.hourly_compress_after_interval: str = self.hypertable_defaults.get("hourly_compress_after_interval")
-        self.daily_compress_after_interval: str = self.hypertable_defaults.get("daily_compress_after_interval")
-        self.weekly_compress_after_interval: str = self.hypertable_defaults.get("weekly_compress_after_interval")
-        self.monthly_compress_after_interval: str = self.hypertable_defaults.get("monthly_compress_after_interval")
+        self.hourly_compress_after_interval: str = self.hypertable_defaults["hourly_compress_after_interval"]
+        self.daily_compress_after_interval: str = self.hypertable_defaults["daily_compress_after_interval"]
+        self.weekly_compress_after_interval: str = self.hypertable_defaults["weekly_compress_after_interval"]
+        self.monthly_compress_after_interval: str = self.hypertable_defaults["monthly_compress_after_interval"]
 
         # Rollup view settings
-        self.anchor_start_time_utc: str = self.rollup_defaults.get("anchor_start_time_utc")
+        self.anchor_start_time_utc: str = self.rollup_defaults["anchor_start_time_utc"]
 
-        self.hourly_rollup_bucket: str = self.rollup_defaults.get("hourly_rollup_bucket")
-        self.daily_rollup_bucket: str = self.rollup_defaults.get("daily_rollup_bucket")
-        self.weekly_rollup_bucket: str = self.rollup_defaults.get("weekly_rollup_bucket")
-        self.monthly_rollup_bucket: str = self.rollup_defaults.get("monthly_rollup_bucket")
+        self.hourly_rollup_bucket: str = self.rollup_defaults["hourly_rollup_bucket"]
+        self.daily_rollup_bucket: str = self.rollup_defaults["daily_rollup_bucket"]
+        self.weekly_rollup_bucket: str = self.rollup_defaults["weekly_rollup_bucket"]
+        self.monthly_rollup_bucket: str = self.rollup_defaults["monthly_rollup_bucket"]
 
-        self.hourly_rollup_start: str = self.rollup_defaults.get("hourly_rollup_start")
-        self.daily_rollup_start: str = self.rollup_defaults.get("daily_rollup_start")
-        self.weekly_rollup_start: str = self.rollup_defaults.get("weekly_rollup_start")
-        self.monthly_rollup_start: str = self.rollup_defaults.get("monthly_rollup_start")
+        self.hourly_rollup_start: str = self.rollup_defaults["hourly_rollup_start"]
+        self.daily_rollup_start: str = self.rollup_defaults["daily_rollup_start"]
+        self.weekly_rollup_start: str = self.rollup_defaults["weekly_rollup_start"]
+        self.monthly_rollup_start: str = self.rollup_defaults["monthly_rollup_start"]
 
     @property
     def tsdb_connected(self) -> bool:
@@ -2029,7 +2034,7 @@ class RollupManager:
                 return
 
             # Define tables and their specific segmentation configuration
-            tables_to_configure: List[Tuple[str]] = [
+            tables_to_configure: List[Tuple[str, str]] = [
                 ("device_metrics_narrow", self.compress_segmentby_narrow),
             ]
             if self.wide_table_flag:
@@ -2191,7 +2196,7 @@ class RollupManager:
                 self._log.info("Starting continuous aggregate setup...")
 
                 # 1. Configuration Setup
-                contexts: list[dict[str]] = [
+                contexts: list[dict[str, Any]] = [
                     {
                         "table_name": "device_metrics_narrow",
                         "segments": {
@@ -2213,7 +2218,7 @@ class RollupManager:
                         }
                     })
 
-                view_configs: List[Tuple[str]] = [
+                view_configs: list[tuple[str, str, str, str]] = [
                     ("hourly_rollup", self.hourly_rollup_bucket, self.hourly_rollup_start, self.hourly_chunk_time_interval),
                     ("daily_rollup", self.daily_rollup_bucket, self.daily_rollup_start, self.daily_chunk_time_interval),
                     ("weekly_rollup", self.weekly_rollup_bucket, self.weekly_rollup_start, self.weekly_chunk_time_interval),
@@ -2243,7 +2248,7 @@ class RollupManager:
                 for context in contexts:
                     source_table: str = context["table_name"]
                     current_source: str = source_table  # Reset source for each context (Narrow vs Wide)
-                    rollup_segments: str = context["segments"]
+                    rollup_segments: dict[str, str] = context["segments"]
 
                     for view_key, bucket, start_offset, chunk_time_interval in view_configs:
                         view_name = rollup_segments[view_key]
@@ -2727,7 +2732,7 @@ class RollupManager:
             try:
                 # 1. Define the refresh sequence: Smallest Grain -> Largest Grain
                 # Monthly is independent (from hypertable), so it can go anywhere.
-                refresh_sequence: List[Tuple[str]] = [
+                refresh_sequence:list[tuple[str, str]] = [
                     ("hourly_rollup_narrow", self.hourly_rollup_start),
                     ("hourly_rollup_wide", self.hourly_rollup_start),
                     ("daily_rollup_narrow", self.daily_rollup_start),
@@ -2771,7 +2776,7 @@ class RollupManager:
         self._log.info(f"Starting {mode} refresh for {view_name}...")
 
         # AUTOCOMMIT is mandatory for CALL refresh_continuous_aggregate
-        with session.bind.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+        with session.connection().execution_options(isolation_level="AUTOCOMMIT") as conn:
             conn.execute(text(f"SET LOCAL work_mem = '{r_settings['work_mem']}';"))
             try:
                 if force_full:
@@ -2832,7 +2837,7 @@ class RollupManager:
 
         # 2. Create the new stop signal
         stop_signal: List[bool] = [False]
-        self._current_watchdog_signal: List[bool] = stop_signal
+        self._current_watchdog_signal: List[bool] | None = stop_signal
 
         def monitor() -> None:
             # Use a short-lived session specifically for monitoring
@@ -2854,7 +2859,14 @@ class RollupManager:
                             break
 
                         if res.wait_event_type == 'Lock':
-                            self._send_pushover_message(f"⚠️ {view_name} is BLOCKED by a lock.")
+                            self._send_pushover_message(
+                            f"⚠️ {view_name} is BLOCKED by a lock.",
+                                (
+                                f"The refresh for {view_name} has been running for over 30 seconds "
+                                f"and is currently blocked by a lock. Please investigate the "
+                                f"database locks to ensure the refresh can complete successfully."
+                                )
+                            )
 
                         # Sleep in small increments to remain responsive to the stop_signal
                         for _ in range(30):
