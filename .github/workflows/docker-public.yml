@@ -3,10 +3,7 @@ name: Publish Docker Public Image
 on:
   push:
     branches:
-      - main
       - TSDB
-      - Test
-      - v1/*  # Matches any branch starting with v1
   workflow_dispatch: 
 
 jobs:
@@ -17,26 +14,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       
-      # 1. Normalize repository and branch names to lowercase
       - name: Prepare Docker Metadata
         id: prep
         run: |
-          # Convert repo name and branch to lowercase
           REPO_LC=$(echo "${{ github.event.repository.name }}" | tr '[:upper:]' '[:lower:]')
-          BRANCH_LC=$(echo "${{ github.ref_name }}" | tr '[:upper:]' '[:lower:]' | sed 's/\//-/g')
-          
           echo "repo=${REPO_LC}" >> $GITHUB_OUTPUT
-          echo "branch=${BRANCH_LC}" >> $GITHUB_OUTPUT
           echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT        
-
-      - name: Get current date for tag
-        id: date
-        run: echo "NOW=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
-
-      - name: Extract branch name
-        shell: bash
-        run: echo "branch=${GITHUB_REF#refs/heads/}" >> $GITHUB_OUTPUT
-        id: get_branch
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
@@ -52,7 +35,7 @@ jobs:
         with:
           context: .
           push: true
-          # Use the normalized outputs from the 'prep' step
+          # This builds once and applies both tags to a single image
           tags: |
-            ${{ secrets.DOCKER_USERNAME }}/${{ steps.prep.outputs.repo }}:${{ steps.prep.outputs.branch }}-${{ steps.prep.outputs.date }}
-            ${{ github.ref == 'refs/heads/TSDB' && format('{0}/{1}:latest', secrets.DOCKER_USERNAME, steps.prep.outputs.repo) || '' }}
+            ${{ secrets.DOCKER_USERNAME }}/${{ steps.prep.outputs.repo }}:latest
+            ${{ secrets.DOCKER_USERNAME }}/${{ steps.prep.outputs.repo }}:${{ steps.prep.outputs.date }}
