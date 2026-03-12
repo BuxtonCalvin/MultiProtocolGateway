@@ -80,7 +80,7 @@ class transport_base:
     on_message : Callable[["transport_base", registry_map_entry, str], None] = None
     ''' callback, on message received '''
 
-    request_upstream_reconnect: Callable[[], None] | None = None # callback for reconnect.
+    request_upstream_reconnect: Callable[[str], None] | None = None # callback for reconnect.
 
     _log : logging.Logger = None
 

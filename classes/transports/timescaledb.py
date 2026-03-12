@@ -273,6 +273,13 @@ class timescaledb(transport_base):
     schema_needs_refresh: bool = True  # flag to indicate if ORM schema refresh is needed after reconnect or column changes
     current_metric_count: int = 0
 
+    # pushover notification settings for stale data alerts.
+    # These are optional and can be configured by the user if they want
+    # to receive pushover notifications when stale data is detected.
+    enable_pushover: bool = False
+    pushover_token: str = ""
+    pushover_user: str = ""
+
     def __init__(self, settings: SectionProxy) -> None:
         """
         Initialize the TimescaleDB transport bridge.
@@ -1085,11 +1092,25 @@ class timescaledb(transport_base):
 
             # metadata keys like m_time and device_info_id are excluded in _cache_wide_table_columns
             extra_keys: set = set(row) - self._wide_columns
+            fewer_keys: set = self._wide_columns - set(row)
 
             if extra_keys:
-                self._log.error( f"Wide-table schema mismatch; unknown columns: {sorted(extra_keys)}" )
-                msg: str= f"Unknown columns: {sorted(extra_keys)}"
-                raise ValueError(msg)
+                self._log.info(f"New metrics detected: {extra_keys}. Triggering resync...")
+
+                # 1. Trigger the sync logic to update the table schema and internal column cache.
+                self._sync_single_table_schema()
+
+                # 2. Re-check: Did the resync actually add the keys?
+                # (In case the DB hasn't been updated yet)
+                still_extra = set(row) - self._wide_columns - {"m_time", "device_info_id"}
+                if still_extra:
+                    msg = f"Database schema is still missing columns after resync: {sorted(still_extra)}"
+                    self._log.error(msg)
+                    raise ValueError(msg)
+            elif fewer_keys:
+                self._log.warning( f"Wide-table schema mismatch; missing keys in scrape data: {sorted(fewer_keys)}" )
+                msg: str= f"Missing columns: {sorted(fewer_keys)}"
+
             else:
                 return True
 
@@ -1111,7 +1132,7 @@ class timescaledb(transport_base):
             else:
                 self._log.warning(f"No existing table found for {table_name} during resync. Continuing with new reflection.")
 
-            # 2. Reflect the NEW structure from the database
+            # 2. Reflect the new structure from the database
             new_table = Table(
                 table_name,
                 Base.metadata,
@@ -1263,14 +1284,15 @@ class timescaledb(transport_base):
                             self._flush_batch_narrow(narrow_data, device_info_id, timestamp, session)
                             if self.wide_table_flag:
                                 if valid_row:
-                                    stmt: Insert = pg_insert(DeviceMetricsWide).values(**wide_data)
+                                    target_table: Table = Base.metadata.tables[DeviceMetricsWide.__tablename__]
+                                    stmt: Insert = pg_insert(target_table).values(**wide_data)
                                     session.execute(stmt)
 
                         self._commit_transport_state(transport_name, metrics_only, timestamp, is_stale=False)
                         self._log.debug(f"data write complete from [{transport_name}] to timescaledb bridge")
                 except (SQLAlchemyError, ValueError) as e1:
                     session.rollback()
-                    self._log.warning(f"metrics data write failed.{e1}")
+                    self._log.error(f"metrics data write failed.{e1}")
 
                     # Only backlog if setting enabled and DB is down
                     with self._reconnect_lock:
@@ -2618,6 +2640,7 @@ class RollupManager:
 
         return self.performance_tiers["tier_low"] # Fallback default
 
+
     def _view_exists(self, session: Session, view_name: str) -> bool:
         """Check to see if a continuous aggregate exists in the catalog.
         Parameters:
@@ -2626,9 +2649,20 @@ class RollupManager:
         Returns:
             bool: True if the view exists, False otherwise.
         """
-        check_sql: TextClause = text("SELECT 1 FROM timescaledb_information.continuous_aggregates WHERE view_name = :name")
-        return session.execute(check_sql, {"name": view_name}).fetchone() is not None
+        check_sql = text("SELECT 1 FROM timescaledb_information.continuous_aggregates WHERE view_name = :name")
 
+        try:
+            # Keep ONLY the risky operation in the try block
+            result = session.execute(check_sql, {"name": view_name}).fetchone()
+        except Exception as e:
+            # Handle the error and clean up
+            self._log.error(f"Error checking view existence for {view_name}: {e}")
+            session.rollback()
+            return False
+        else:
+            # The 'else' block runs ONLY if the try block succeeded
+            session.rollback()  # Resets state for your next AUTOCOMMIT call
+            return result is not None
 
     def _drop_all_continuous_aggregates(self, session: Session) -> None:
         """
@@ -2776,7 +2810,7 @@ class RollupManager:
         self._log.info(f"Starting {mode} refresh for {view_name}...")
 
         # AUTOCOMMIT is mandatory for CALL refresh_continuous_aggregate
-        with session.connection().execution_options(isolation_level="AUTOCOMMIT") as conn:
+        with self.engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
             conn.execute(text(f"SET LOCAL work_mem = '{r_settings['work_mem']}';"))
             try:
                 if force_full:

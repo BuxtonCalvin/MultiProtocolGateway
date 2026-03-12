@@ -126,7 +126,7 @@ class Protocol_Gateway:
     _logging_initialized = False
 
     @classmethod
-    def _setup_logging(cls, cfg) -> None:
+    def _setup_logging(cls, cfg: ConfigParser) -> None:
         """
         created to eliminate multi gig log file sizes in docker as logging.StreamHandler(sys.stdout) results in a
         json file that can quickly grow quiet large.
@@ -138,7 +138,7 @@ class Protocol_Gateway:
             return
 
         # Read logging config
-        level_name: str = cfg.get("logging", "level", fallback="INFO").upper()
+        level_name: str = cfg.get("logging", "level", fallback="INFO").strip().upper()
         level: int = getattr(logging, level_name, logging.INFO)
 
         log_dir = Path(cfg.get("logging", "log_dir", fallback="logs"))
@@ -190,7 +190,7 @@ class Protocol_Gateway:
         handler.setFormatter(formatter)
 
         # ---- Root logger wiring ----
-        root = logging.getLogger()
+        root: logging.Logger = logging.getLogger()
         root.setLevel(level)
         root.handlers.clear()
         root.addHandler(handler)
@@ -203,7 +203,7 @@ class Protocol_Gateway:
 
         cls._logging_initialized = True
 
-    __log = None
+    __log : logging.Logger
     # log level, available log levels are CRITICAL, FATAL, ERROR, WARNING, INFO, DEBUG, EXCEPTION
     __log_level = "DEBUG"
 
@@ -213,12 +213,12 @@ class Protocol_Gateway:
     __transports : list[transport_base] = []
     ''' transport_base is for type hinting. this can be any transport'''
 
-    config_file : str
+    config_file : Path
 
     # Simple read completion tracking
     __read_completion_tracker : dict[str, bool] = {}
     ''' Track which transports have completed their current read cycle '''
-    __read_tracker_lock : threading.Lock = None
+    __read_tracker_lock : threading.Lock
 
     # Concurrency control
     __enable_concurrency : bool = False
@@ -245,6 +245,7 @@ class Protocol_Gateway:
         if alternate_cfg.is_file():
             self.config_file = alternate_cfg
         else:
+            self.__log.warning(f"Config file not found {alternate_cfg}, using default: {default_cfg}")
             self.config_file = default_cfg
 
         #pymodbus_log = logging.getLogger('pymodbus')
@@ -252,7 +253,7 @@ class Protocol_Gateway:
         #pymodbus_log.addHandler(handler)
 
         self.__settings = CustomConfigParser()
-        self.__settings.read(self.config_file)
+        self.__settings.read(self.config_file.as_posix())
 
         self._setup_logging(self.__settings)
         self.__log: logging.Logger = logging.getLogger(__name__)
@@ -261,15 +262,17 @@ class Protocol_Gateway:
         self.__log_level = self.__settings.get("general","log_level", fallback="INFO")
 
         # Read concurrency setting - default to sequential (disabled) for better stability
-        self.__enable_concurrency = self.__settings.getboolean("general", "enable_concurrency", fallback=False)
+        self.__enable_concurrency = bool(self.__settings.getboolean("general", "enable_concurrency", fallback=False))
         self.__log.info(f"Concurrency mode: {'Concurrent' if self.__enable_concurrency else 'Sequential'}")
 
         # Read sequential delay setting
-        self.__sequential_delay = self.__settings.getfloat("general", "sequential_delay", fallback=1.0)
+        self.__sequential_delay = float(
+            self.__settings.getfloat("general", "sequential_delay", fallback=1.0) or 1.0
+        )
         if not self.__enable_concurrency:
             self.__log.info(f"Sequential delay between transports: {self.__sequential_delay} seconds")
 
-        log_level = getattr(logging, self.__log_level, logging.INFO)
+        log_level = getattr(logging, str(self.__log_level), logging.INFO)
         self.__log.setLevel(log_level)
         self.__log.info("Loading...")
 
@@ -362,6 +365,13 @@ class Protocol_Gateway:
         except Exception as err:
             self.__log.exception(f"Error processing transport {transport.transport_name} and {err}")
             # traceback.print_exc()
+            # Errno 104 - Connection reset by peer (common for MQTT disconnects)
+            # Errno 32 - Broken pipe (common for MQTT disconnects)
+            # Errno 110 - Connection timed out (common for network issues)
+            if err == 'Errno 104' or err == 'Errno 32' or err == 'Errno 110':
+                # traceback.print_exc()
+                transport.connect()
+            self.__log.warning(f"Attempting reconnect for {transport.transport_name}")
             self._mark_read_complete(transport)
 
     def _mark_read_complete(self, transport) -> None:
