@@ -1,9 +1,6 @@
 name: Publish Docker Private Image
 
 on:
-  push:
-    branches:
-      - TSDB_dev
   workflow_dispatch: 
 
 jobs:
