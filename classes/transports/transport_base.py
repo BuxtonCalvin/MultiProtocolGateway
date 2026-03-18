@@ -25,32 +25,27 @@ class TransportWriteMode(Enum):
     ''' skip all safeties '''
 
     @classmethod
-    def fromString(cls, name : str):
+    def fromString(cls, name : str) -> "TransportWriteMode":
         name = name.strip().upper()
 
         #common inputs
         alias : dict[str,TransportWriteMode] = {
-            "" : "READ", #default
-            "FALSE"     : "READ",
-            "NO"    : "READ",
-            "READ"  : "READ",
-            "R"  : "READ",
+            "" : cls.READ, #default
+            "FALSE": cls.READ,
+            "NO": cls.READ,
+            "READ": cls.READ,
+            "R": cls.READ,
 
-            "TRUE"    : "WRITE",
-            "YES"    : "WRITE",
-            "WRITE"     : "WRITE",
-            "W"   : "WRITE",
+            "TRUE": cls.WRITE,
+            "YES": cls.WRITE,
+            "WRITE": cls.WRITE,
+            "W": cls.WRITE,
 
-            "RELAXED"    : "RELAXED",
-            "UNSAFE"    : "UNSAFE",
+            "RELAXED": cls.RELAXED,
+            "UNSAFE": cls.UNSAFE
         }
-
-        if name in alias:
-            name = alias[name]
-        else:
-            name = "READ" #default
-
-        return getattr(cls, name)
+        # handle any direct matches to enum names returning the corresponding enum value, defaulting to READ if no match is found.
+        return alias.get(name, cls.READ)
 
 class transport_base:
     type : str = ""
@@ -67,7 +62,7 @@ class transport_base:
 
     write_enabled : bool = False
     ''' deprecated -- use / move to write_mode'''
-    write_mode : TransportWriteMode = None
+    write_mode : TransportWriteMode
 
     max_precision : int = 2
 
@@ -77,12 +72,16 @@ class transport_base:
     connected : bool = False
     _needs_reconnection : bool = False
 
-    on_message : Callable[["transport_base", registry_map_entry, str], None] = None
+    on_message: Callable[[transport_base, registry_map_entry, str], None] | None = None
     ''' callback, on message received '''
 
-    request_upstream_reconnect: Callable[[str], None] | None = None # callback for reconnect.
+    request_upstream_reconnect: Callable[[str], None] | None = None
+    ''' callback for reconnect. transport should call this with the name of the transport it wants to reconnect to
+        trigger a reconnect from the bridge. This is required for transports that have a bridge and need to trigger
+        a reconnect of the bridge when the bridge's connection drops.
+    '''
 
-    _log : logging.Logger = None
+    _log : logging.Logger
 
 
     def __init__(self, settings : "SectionProxy") -> None:

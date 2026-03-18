@@ -435,7 +435,7 @@ class timescaledb(transport_base):
         self._stop_event: threading.Event = getattr(self, "_stop_event", threading.Event())
 
         # init runtime backoff settings for connection attempts
-        self._reconnect_lock: lock = threading.Lock()     # prevents multiple concurrent TSDB reconnect triggers
+        self._reconnect_lock: RLock = threading.RLock()     # prevents multiple concurrent TSDB reconnect triggers
         self._reconnect_thread_running = False      # guard to prevent duplicate reconnect threads
         self._stop_reconnect_event:  threading.Event = getattr(self, "_stop_reconnect_event", threading.Event())
 
@@ -603,6 +603,7 @@ class timescaledb(transport_base):
 
             attempt_no = 0
             while (attempts <= 0) or (attempt_no < attempts):  # attempts <= 0 => unlimited attempts
+                self._log.info(f"Reconnect attempt {attempt_no} starting")
                 if self._stop_reconnect_event.is_set():
                     self._log.info("Auto-reconnect: stop requested, exiting reconnect loop.")
                     break
@@ -623,7 +624,6 @@ class timescaledb(transport_base):
 
                 try:
                     # Attempt to re-establish DB connection.
-
                     with self.engine.connect() as conn:
                         conn.execute(text("SELECT 1"))
                     self._set_tsdb_connected(True, "reconnect successful")  # noqa: FBT003
@@ -671,7 +671,7 @@ class timescaledb(transport_base):
         """Prevent concurrent reconnect threads from being spawned """
 
         if not hasattr(self, "_reconnect_lock"):
-            self._reconnect_lock = threading.Lock()
+            self._reconnect_lock = threading.RLock()
             self._reconnect_thread_running = False
 
         if not hasattr(self, "_stop_reconnect_event"):
@@ -761,6 +761,33 @@ class timescaledb(transport_base):
     def _create_tables(self) -> None:
         """
          Create ORM tables for device_info, device_metrics_wide, device_metrics_narrow and metric_catalog.
+
+         TODO - 1 this method is currently called at startup after connection and will attempt to create tables each time.
+         We should optimize this to only attempt to create tables if we detect they don't exist, or if we detect a schema change that requires a refresh.
+         We can use SQLAlchemy's inspection/reflection capabilities to check for existing tables and columns before attempting to create them,
+         and we can also track the expected schema in the class to detect when a refresh is needed.
+
+         2 To handle multiple protocols each with their own unique registries, with potentially multiple devices per protocol, we need to change this method to
+         create wide table names based on the specific protocol name as seen in a given settings section.  This requires a new protocol_settings method to
+         return a list of active scraper protocols to support (based on settings). TSDB will loop through those protocols and create mappings to table names
+         for each protocol based on the active registry map for that protocol. The required columns for each protocol based table will be created from device
+         level registry scans which will then be blended together to one column list per protocol. Narrow table does not need to be changed since it is designed to be
+         dynamic and handle any metric with the metric name as a key. Metric catalog needs to be updated to include device_info_id to track which metrics
+         belong to which protocol/device for the dynamic table creation.  Device info table also needs to be updated to include protocol to link devices to
+         specific protocols and registries.  Probably a Protocol table will be needed to track protocol names and link to device info and metric catalog.
+
+         3 Narrow table creation should handle ASCII in a separate text column with dictionary compression, and the metric_catalog
+         should track which metrics are ASCII to know which values to put in the ASCII column vs the value column.
+
+         4. Rollup logic also needs to be updated to handle multiple protocols/devices with different registries and metric sets,
+         and to know which tables to pull from for rollups based on the protocol/device of the incoming data.
+         This will employ a device_info_id column in the metric_catalog to link metrics to specific protocol/device tables,
+         and the rollup manager needs to be aware of this when creating rollup views and policies.
+
+         5. Backlog and flush logic also need to be updated to handle multiple protocol/device tables and to know which table
+         to write to based on the protocol/device of the incoming data.
+
+         For now, we can assume a single static registry map and a single wide table structure for simplicity.
         """
         with self.SessionFactory() as session:
             with self._reconnect_lock:
@@ -1089,7 +1116,6 @@ class timescaledb(transport_base):
     def _validate_wide_row(self, row: dict) -> bool:
         # Use the same lock to ensure we aren't validating against a table being swapped
         with self._schema_lock:
-
             # metadata keys like m_time and device_info_id are excluded in _cache_wide_table_columns
             extra_keys: set = set(row) - self._wide_columns
             fewer_keys: set = self._wide_columns - set(row)
@@ -1107,10 +1133,15 @@ class timescaledb(transport_base):
                     msg = f"Database schema is still missing columns after resync: {sorted(still_extra)}"
                     self._log.error(msg)
                     raise ValueError(msg)
-            elif fewer_keys:
-                self._log.warning( f"Wide-table schema mismatch; missing keys in scrape data: {sorted(fewer_keys)}" )
-                msg: str= f"Missing columns: {sorted(fewer_keys)}"
+                else:
+                    return True  # Validation passes after successful resync
 
+            elif fewer_keys:
+                self._log.warning(
+                    f"Wide-table schema mismatch; missing keys in scrape data: {sorted(fewer_keys)}"
+                )
+                msg: str = f"Missing columns: {sorted(fewer_keys)}"
+                return False
             else:
                 return True
 
@@ -1831,7 +1862,7 @@ class RollupManager:
         backlog_lock: threading.RLock,
         flush_queue: queue.Queue,
         backlog: BacklogManager,
-        reconnect_lock: threading.Lock
+        reconnect_lock: threading.RLock
         ) -> None:
 
         self.rollup_policy: dict = rollup_policy
@@ -1844,7 +1875,7 @@ class RollupManager:
         self._backlog_lock: threading.RLock = backlog_lock
         self._flush_queue: queue.Queue  = flush_queue
         self.backlog: 'BacklogManager'  = backlog
-        self._reconnect_lock: threading.Lock = reconnect_lock
+        self._reconnect_lock: threading.RLock = reconnect_lock
 
         self._refresh_rollup_thread = threading.Thread(target=self._refresh_rollup_loop, daemon=True, name="RollupAutoRefreshThread")
         self._stop_refresh_rollup_event: threading.Event = getattr(self, "_stop_refresh_rollup_event", threading.Event())

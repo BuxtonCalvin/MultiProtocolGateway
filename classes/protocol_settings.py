@@ -148,32 +148,28 @@ class WriteMode(Enum):
     ''' WRITE ONLY'''
 
     @classmethod
-    def fromString(cls, name : str):
+    def fromString(cls, name: str) -> "WriteMode":
         name = name.strip().upper()
 
-        #common alternative names
-        alias : dict[str,WriteMode] = {
-            "R"     : "READ",
-            "NO"    : "READ",
-            "READ"  : "READ",
-            "WD"    : "READ",
-            "RD"            : "READDISABLED",
-            "READDISABLED"  : "READDISABLED",
-            "DISABLED"      : "READDISABLED",
-            "D"             : "READDISABLED",
-            "R/W"    : "WRITE",
-            "RW"    : "WRITE",
-            "W"     : "WRITE",
-            "YES"   : "WRITE",
-            "WO"    : "WRITEONLY"
+        # Strings mapped directly to the Enum members
+        alias: dict[str, WriteMode] = {
+            "R": cls.READ,
+            "NO": cls.READ,
+            "READ": cls.READ,
+            "WD": cls.READ,
+            "RD": cls.READDISABLED,
+            "READDISABLED": cls.READDISABLED,
+            "DISABLED": cls.READDISABLED,
+            "D": cls.READDISABLED,
+            "R/W": cls.WRITE,
+            "RW": cls.WRITE,
+            "W": cls.WRITE,
+            "YES": cls.WRITE,
+            "WO": cls.WRITEONLY
         }
 
-        if name in alias:
-            name = alias[name]
-        else:
-            name = "READ" #default
-
-        return getattr(cls, name)
+        # Use .get() to handle the default case cleanly
+        return alias.get(name, cls.READ)
 
 class Registry_Type(Enum):
     ZERO = 0x00
@@ -214,7 +210,7 @@ class registry_map_entry:
     data_byteorder : str = ''
     ''' entry specific byte order little | big | '' '''
 
-    read_command : bytes = None
+    read_command : bytes | None = None
     ''' for transports/protocols that require sending a command on top of "register" '''
 
     read_interval : int = 1000
