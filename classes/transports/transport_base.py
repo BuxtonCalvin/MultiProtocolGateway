@@ -72,7 +72,7 @@ class transport_base:
     connected : bool = False
     _needs_reconnection : bool = False
 
-    on_message: Callable[[transport_base, registry_map_entry, str], None] | None = None
+    on_message : Callable[["transport_base", registry_map_entry, str], None] = None
     ''' callback, on message received '''
 
     request_upstream_reconnect: Callable[[str], None] | None = None
