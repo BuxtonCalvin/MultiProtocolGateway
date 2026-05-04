@@ -1,0 +1,679 @@
+{% extends "base.html" %}
+{% block title %}Analyze {{ device.name }} - PPG Admin{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-4 py-6"
+     data-device-name="{{ device.name }}"
+     data-current-protocol="{{ current_protocol }}">
+  <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
+    <div>
+      <h1 class="surface-text font-bold text-xl">Analyze {{ device.name }}</h1>
+      <p class="surface-muted text-sm mt-1">
+        Compare live Modbus register I/O against one or more protocol maps, then queue register-map additions and removals before committing.
+      </p>
+    </div>
+    <div class="flex items-center gap-2">
+      <label class="flex items-center gap-1.5 text-xs surface-muted" title="Number of registers per Modbus read batch">
+        Batch size
+        <input id="analysis-batch-size"
+               type="number" min="1" max="125" value="40"
+               class="w-16 rounded border border-ppg-300 dark:border-ppg-600 bg-ppg-100/70 dark:bg-ppg-800 surface-text text-xs font-mono px-2 py-1 text-center
+                      focus:outline-none focus:ring-1 focus:ring-accent">
+      </label>
+      <button id="analysis-run-btn" type="button" class="btn-primary text-sm">Run Analysis</button>
+      <button id="analysis-commit-btn" type="button" class="btn-primary text-sm" disabled>Commit</button>
+      <button id="analysis-cancel-btn" type="button" class="btn-secondary text-sm">Cancel</button>
+    </div>
+  </div>
+
+  <div id="analysis-message" class="mb-4" aria-live="polite"></div>
+
+  <!-- Progress bar — hidden until analysis starts -->
+  <div id="analysis-progress-wrap" class="mb-4 hidden">
+    <div class="flex items-center justify-between text-xs surface-muted mb-1">
+      <span id="analysis-progress-label">Scanning…</span>
+      <span class="flex items-center gap-3">
+        <span id="analysis-progress-etl" class="surface-subtle font-mono"></span>
+        <span id="analysis-progress-pct">0%</span>
+      </span>
+    </div>
+    <div class="w-full bg-ppg-700 rounded-full h-2 overflow-hidden">
+      <div id="analysis-progress-bar"
+           class="h-2 rounded-full bg-accent transition-all duration-200"
+           style="width: 0%">
+      </div>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 xl:grid-cols-[28rem_minmax(0,1fr)] gap-5 items-start">
+    <aside class="card space-y-4">
+      <div class="flex items-center justify-between gap-3">
+        <div>
+          <h2 class="surface-text font-semibold text-sm">Protocols</h2>
+          <p class="surface-muted text-xs mt-1">Select protocols to compare against the current device scan.</p>
+        </div>
+        <button id="analysis-check-all-btn" type="button" class="btn-secondary text-xs">Check All</button>
+      </div>
+
+      <div class="grid grid-cols-[1.5rem_minmax(0,1fr)_5.25rem_5.25rem] gap-2 text-ppg-400 text-xs uppercase tracking-wide border-b border-ppg-200 dark:border-ppg-700 pb-2">
+        <span></span>
+        <span>Protocol</span>
+        <span>Input</span>
+        <span>Holding</span>
+      </div>
+
+      <div id="analysis-protocol-list" class="space-y-1">
+        {% for protocol in analysis_protocols %}
+        <div class="analysis-protocol-row w-full text-left grid grid-cols-[1.5rem_minmax(0,1fr)_5.25rem_5.25rem] gap-2 items-center px-2 py-2 rounded border border-transparent hover:border-ppg-300 dark:hover:border-ppg-600 hover:bg-ppg-100/70 dark:hover:bg-ppg-700/40 cursor-pointer"
+             data-protocol="{{ protocol.name }}"
+             role="button"
+             tabindex="0"
+             aria-label="Focus analysis results for {{ protocol.name }}">
+          <input type="checkbox"
+                 class="analysis-protocol-check accent-accent w-3.5 h-3.5"
+                 data-protocol="{{ protocol.name }}"
+                 {% if protocol.name == current_protocol %}checked{% endif %}>
+          <div class="min-w-0">
+            <div class="surface-text text-sm font-medium truncate">{{ protocol.name }}</div>
+            <div class="surface-subtle text-xs truncate">{{ protocol.group }}</div>
+          </div>
+          <div class="analysis-score-input text-xs font-mono surface-subtle">--</div>
+          <div class="analysis-score-holding text-xs font-mono surface-subtle">--</div>
+        </div>
+        {% endfor %}
+      </div>
+    </aside>
+
+    <section class="card min-w-0">
+      <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
+        <div>
+          <h2 id="analysis-focus-title" class="surface-text font-semibold text-sm">Results</h2>
+          <p id="analysis-focus-subtitle" class="surface-muted text-xs mt-1">
+            Run analysis to see score details and queued protocol-map changes.
+          </p>
+        </div>
+        <div id="analysis-queue-summary" class="surface-subtle text-xs font-mono">Queued changes: 0</div>
+      </div>
+
+      <div id="analysis-results-shell" class="space-y-4">
+        <div class="rounded border border-dashed border-ppg-300 dark:border-ppg-600 px-4 py-6 text-sm surface-subtle">
+          Select one or more protocols on the left, then run analysis.
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const _root = document.querySelector('[data-device-name]');
+  const deviceName = _root ? _root.dataset.deviceName : '';
+  const currentProtocol = _root ? _root.dataset.currentProtocol : '';
+  const runBtn = document.getElementById('analysis-run-btn');
+  const commitBtn = document.getElementById('analysis-commit-btn');
+  const checkAllBtn = document.getElementById('analysis-check-all-btn');
+  const messageBox = document.getElementById('analysis-message');
+  const resultShell = document.getElementById('analysis-results-shell');
+  const focusTitle = document.getElementById('analysis-focus-title');
+  const focusSubtitle = document.getElementById('analysis-focus-subtitle');
+  const queueSummary = document.getElementById('analysis-queue-summary');
+  const protocolRows = Array.from(document.querySelectorAll('.analysis-protocol-row'));
+  const protocolChecks = Array.from(document.querySelectorAll('.analysis-protocol-check'));
+  const cancelBtn = document.getElementById('analysis-cancel-btn');
+  const progressWrap  = document.getElementById('analysis-progress-wrap');
+  const progressBar   = document.getElementById('analysis-progress-bar');
+  const progressLabel = document.getElementById('analysis-progress-label');
+  const progressPct   = document.getElementById('analysis-progress-pct');
+  const progressEtl   = document.getElementById('analysis-progress-etl');
+  const batchSizeInput = document.getElementById('analysis-batch-size');
+
+  const state = {
+    analysisResult: null,
+    focusedProtocol: currentProtocol || null,
+    queuedChanges: new Map(),
+    running: false,
+    committing: false,
+    abortController: null,  // set during analysis, used by cancel
+  };
+
+  function showMessage(kind, message) {
+    const tone = kind === 'error'
+      ? 'border-danger/40 text-danger bg-danger/10'
+      : kind === 'success'
+        ? 'border-success/40 text-success bg-success/10'
+        : 'border-ppg-300 dark:border-ppg-600 surface-text bg-ppg-100/70 dark:bg-ppg-800/70';
+    messageBox.innerHTML = `<div class="rounded border px-4 py-2 text-sm ${tone}">${message}</div>`;
+  }
+
+  function clearMessage() {
+    messageBox.innerHTML = '';
+  }
+
+  function selectedProtocols() {
+    return protocolChecks.filter((input) => input.checked).map((input) => input.dataset.protocol);
+  }
+
+  function queueKey(change) {
+    return [
+      change.protocol_name,
+      change.registry_type,
+      change.action,
+      change.register_address,
+      change.variable_name || '',
+    ].join('|');
+  }
+
+  function setBusy() {
+    runBtn.disabled = state.running || state.committing;
+    commitBtn.disabled = state.running || state.committing || state.queuedChanges.size === 0;
+    checkAllBtn.disabled = state.running || state.committing;
+    batchSizeInput.disabled = state.running || state.committing;
+    // Cancel is always clickable — during a scan it aborts, otherwise navigates away
+    cancelBtn.disabled = state.committing;
+  }
+
+  function updateQueueSummary() {
+    queueSummary.textContent = `Queued changes: ${state.queuedChanges.size}`;
+    setBusy();
+  }
+
+  function normalizeActionRow(protocolName, registryType, action, row) {
+    return {
+      protocol_name: protocolName,
+      registry_type: registryType,
+      action,
+      register_address: row.register_address || '',
+      variable_name: row.variable_name || '',
+      documented_name: row.documented_name || '',
+      data_type: row.data_type || '',
+      values_range: row.values_range || '',
+      unit: row.unit || '',
+      read_interval: row.read_interval || '',
+      write_mode: row.write_mode || 'R',
+      note: row.note || '',
+    };
+  }
+
+  function ensureFocusProtocol() {
+    if (state.focusedProtocol && state.analysisResult?.protocols?.[state.focusedProtocol]) {
+      return;
+    }
+    const names = Object.keys(state.analysisResult?.protocols || {});
+    state.focusedProtocol = names.includes(currentProtocol) ? currentProtocol : (names[0] || null);
+  }
+
+  function renderScores() {
+    protocolRows.forEach((row) => {
+      const protocolName = row.dataset.protocol;
+      const scoreInput = row.querySelector('.analysis-score-input');
+      const scoreHolding = row.querySelector('.analysis-score-holding');
+      const protocolResult = state.analysisResult?.protocols?.[protocolName];
+      if (!protocolResult) {
+        scoreInput.textContent = '--';
+        scoreHolding.textContent = '--';
+        return;
+      }
+      scoreInput.textContent = `${protocolResult.scores.input.accuracy.toFixed(1)}%`;
+      scoreHolding.textContent = `${protocolResult.scores.holding.accuracy.toFixed(1)}%`;
+    });
+  }
+
+  // Bug fix: buttons now start as "Queue Add" / "Queue Remove" (unselected)
+  // rather than pre-selected.  Users click to opt IN to a change.
+  function renderActionRows(protocolName, registryType, actionName, rows) {
+    if (!rows.length) {
+      return `
+        <div class="rounded border border-dashed border-ppg-300 dark:border-ppg-600 px-3 py-3 text-xs surface-subtle">
+          No ${actionName === 'add' ? 'additions' : 'removals'} suggested.
+        </div>
+      `;
+    }
+
+    return rows.map((row) => {
+      const change = normalizeActionRow(protocolName, registryType, actionName, row);
+      const key = queueKey(change);
+      const selected = state.queuedChanges.has(key);
+
+      // Labels now reflect an opt-in model:
+      //   add    — "Queue Add"    when pending,  "Queued ✓"  when selected
+      //   remove — "Queue Remove" when pending,  "Queued ✓"  when selected
+      const buttonLabel = selected
+        ? 'Queued ✓'
+        : actionName === 'add'
+          ? 'Queue Add'
+          : 'Queue Remove';
+      const buttonTone = selected ? 'btn-primary' : 'btn-secondary';
+
+      // Range-out-of-bounds indicator for add candidates
+      const outOfRange = row.out_of_range === true;
+      const rangeWarning = outOfRange
+        ? `<div class="text-warning text-xs mt-1">⚠ Raw value ${row.raw_value} is outside the documented range ${row.values_range || '?'}</div>`
+        : '';
+      const extra = actionName === 'add'
+        ? `<div class="surface-subtle text-xs">Raw value: <span class="font-mono">${row.raw_value ?? '--'}</span></div>${rangeWarning}`
+        : '';
+
+      const hasValue = actionName === 'add' && row.raw_value != null && row.raw_value > 0;
+      const rowHighlight = hasValue ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-700' : 'border-ppg-200 dark:border-ppg-700';
+      return `
+        <div class="grid grid-cols-[7rem_minmax(0,1fr)_7rem] gap-3 items-start rounded border ${rowHighlight} px-3 py-3">
+          <div class="font-mono text-xs surface-code">${row.register_address}</div>
+          <div class="min-w-0">
+            <div class="surface-text text-sm font-medium truncate">${row.variable_name || row.documented_name || row.register_address}</div>
+            <div class="surface-subtle text-xs truncate">${row.documented_name || ''}</div>
+            <div class="surface-subtle text-xs mt-1">Type: <span class="font-mono">${row.data_type || '--'}</span></div>
+            ${row.note ? `<div class="surface-subtle text-xs mt-1">${row.note}</div>` : ''}
+            ${extra}
+          </div>
+          <button type="button"
+                  class="analysis-action-toggle ${buttonTone} text-xs"
+                  data-change='${JSON.stringify(change).replace(/'/g, '&#39;')}'>
+            ${buttonLabel}
+          </button>
+        </div>
+      `;
+    }).join('');
+  }
+
+  // Returns true if every value>0 add row for this protocol+registry is queued.
+  // Used to restore the add-all checkbox checked state after re-render.
+  function _allAddValueQueued(protocolName, registry) {
+    const protocolResult = state.analysisResult?.protocols?.[protocolName];
+    if (!protocolResult) return false;
+    const rows = protocolResult.actions?.[registry]?.add || [];
+    const valueRows = rows.filter((r) => r.raw_value != null && r.raw_value > 0);
+    if (!valueRows.length) return false;
+    return valueRows.every((row) => {
+      const change = normalizeActionRow(protocolName, registry, 'add', row);
+      return state.queuedChanges.has(queueKey(change));
+    });
+  }
+
+  // Returns true if every remove row for this protocol+registry is queued.
+  // Used to restore the remove-all checkbox checked state after re-render.
+  function _allRemoveQueued(protocolName, registry) {
+    const protocolResult = state.analysisResult?.protocols?.[protocolName];
+    if (!protocolResult) return false;
+    const rows = protocolResult.actions?.[registry]?.remove || [];
+    if (!rows.length) return false;
+    return rows.every((row) => {
+      const change = normalizeActionRow(protocolName, registry, 'remove', row);
+      return state.queuedChanges.has(queueKey(change));
+    });
+  }
+
+  function renderFocusedProtocol() {
+    ensureFocusProtocol();
+    const protocolName = state.focusedProtocol;
+    const protocolResult = protocolName ? state.analysisResult?.protocols?.[protocolName] : null;
+
+    protocolRows.forEach((row) => {
+      row.classList.toggle('border-accent', row.dataset.protocol === protocolName);
+      row.classList.toggle('bg-ppg-100/90', row.dataset.protocol === protocolName);
+      row.classList.toggle('dark:bg-ppg-700/60', row.dataset.protocol === protocolName);
+    });
+
+    if (!protocolResult) {
+      focusTitle.textContent = 'Results';
+      focusSubtitle.textContent = 'Run analysis to see score details and queued protocol-map changes.';
+      resultShell.innerHTML = `
+        <div class="rounded border border-dashed border-ppg-300 dark:border-ppg-600 px-4 py-6 text-sm surface-subtle">
+          No protocol results are available yet.
+        </div>
+      `;
+      return;
+    }
+
+    const inputScore = protocolResult.scores.input;
+    const holdingScore = protocolResult.scores.holding;
+    focusTitle.textContent = protocolName;
+    focusSubtitle.textContent = `Input ${inputScore.accuracy.toFixed(1)}% (${inputScore.matches}/${inputScore.total}) • Holding ${holdingScore.accuracy.toFixed(1)}% (${holdingScore.matches}/${holdingScore.total})`;
+
+    resultShell.innerHTML = `
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <section class="space-y-3">
+          <div class="flex items-center justify-between gap-3 border-b border-ppg-200 dark:border-ppg-700 pb-2">
+            <h3 class="surface-text font-semibold text-sm">Input Registry Map</h3>
+            <span class="surface-subtle text-xs font-mono">${inputScore.missing_in_scan} missing • ${inputScore.unknown_in_scan} new</span>
+          </div>
+          <div class="space-y-2">
+            <div class="flex items-center justify-between">
+              <div class="surface-text text-xs font-semibold uppercase tracking-wide">Add to Map</div>
+              <label class="flex items-center gap-1.5 text-xs surface-muted cursor-pointer select-none">
+                <input type="checkbox" class="analysis-add-all-check accent-accent w-3.5 h-3.5"
+                       data-registry="input" data-protocol="${protocolName}"
+                       ${_allAddValueQueued(protocolName, 'input') ? 'checked' : ''}>
+                Add all with value &gt; 0
+              </label>
+            </div>
+            ${renderActionRows(protocolName, 'input', 'add', protocolResult.actions.input.add)}
+          </div>
+          <div class="space-y-2 pt-2 border-t border-ppg-200 dark:border-ppg-700">
+            <div class="flex items-center justify-between">
+              <div class="surface-text text-xs font-semibold uppercase tracking-wide">Remove from Map</div>
+              <label class="flex items-center gap-1.5 text-xs surface-muted cursor-pointer select-none">
+                <input type="checkbox" class="analysis-remove-all-check accent-accent w-3.5 h-3.5"
+                       data-registry="input" data-protocol="${protocolName}"
+                       ${_allRemoveQueued(protocolName, 'input') ? 'checked' : ''}>
+                Remove all missing
+              </label>
+            </div>
+            ${renderActionRows(protocolName, 'input', 'remove', protocolResult.actions.input.remove)}
+          </div>
+        </section>
+
+        <section class="space-y-3">
+          <div class="flex items-center justify-between gap-3 border-b border-ppg-200 dark:border-ppg-700 pb-2">
+            <h3 class="surface-text font-semibold text-sm">Holding Registry Map</h3>
+            <span class="surface-subtle text-xs font-mono">${holdingScore.missing_in_scan} missing • ${holdingScore.unknown_in_scan} new</span>
+          </div>
+          <div class="space-y-2">
+            <div class="flex items-center justify-between">
+              <div class="surface-text text-xs font-semibold uppercase tracking-wide">Add to Map</div>
+              <label class="flex items-center gap-1.5 text-xs surface-muted cursor-pointer select-none">
+                <input type="checkbox" class="analysis-add-all-check accent-accent w-3.5 h-3.5"
+                       data-registry="holding" data-protocol="${protocolName}"
+                       ${_allAddValueQueued(protocolName, 'holding') ? 'checked' : ''}>
+                Add all with value &gt; 0
+              </label>
+            </div>
+            ${renderActionRows(protocolName, 'holding', 'add', protocolResult.actions.holding.add)}
+          </div>
+          <div class="space-y-2 pt-2 border-t border-ppg-200 dark:border-ppg-700">
+            <div class="flex items-center justify-between">
+              <div class="surface-text text-xs font-semibold uppercase tracking-wide">Remove from Map</div>
+              <label class="flex items-center gap-1.5 text-xs surface-muted cursor-pointer select-none">
+                <input type="checkbox" class="analysis-remove-all-check accent-accent w-3.5 h-3.5"
+                       data-registry="holding" data-protocol="${protocolName}"
+                       ${_allRemoveQueued(protocolName, 'holding') ? 'checked' : ''}>
+                Remove all missing
+              </label>
+            </div>
+            ${renderActionRows(protocolName, 'holding', 'remove', protocolResult.actions.holding.remove)}
+          </div>
+        </section>
+      </div>
+    `;
+  }
+
+  // ETL tracking — reset at the start of each run
+  let _etlStartTime = null;
+  let _etlLastPhase = null;
+
+  function _formatEtl(seconds) {
+    if (!isFinite(seconds) || seconds <= 0) return '';
+    const m = Math.floor(seconds / 60);
+    const s = Math.round(seconds % 60);
+    return m > 0 ? `~${m}m ${s}s remaining` : `~${s}s remaining`;
+  }
+
+  function showProgress(phase, pct) {
+    progressWrap.classList.remove('hidden');
+    const label = phase === 'holding' ? 'Scanning holding registers…' : 'Scanning input registers…';
+    progressLabel.textContent = label;
+
+    // Overall progress across both phases:
+    //   input phase  → 0–50 % of total
+    //   holding phase → 50–100 % of total
+    const overallPct = phase === 'holding' ? 50 + pct / 2 : pct / 2;
+    progressBar.style.width = overallPct + '%';
+    progressPct.textContent = Math.round(overallPct) + '%';
+
+    // ETL — use overall progress (0–100%) and a single clock started at
+    // the beginning of the whole scan.  This gives a stable rate estimate
+    // across 30-40 minute scans rather than resetting each phase and
+    // showing wild early estimates when the holding phase starts.
+    if (_etlStartTime === null) {
+      _etlStartTime = Date.now();
+    }
+    _etlLastPhase = phase;
+    if (overallPct > 2) {
+      const elapsed = (Date.now() - _etlStartTime) / 1000;
+      const rate = elapsed / overallPct;              // seconds per overall %
+      const remaining = rate * (100 - overallPct);
+      progressEtl.textContent = _formatEtl(remaining);
+    }
+  }
+
+  function hideProgress() {
+    progressWrap.classList.add('hidden');
+    progressBar.style.width = '0%';
+    progressLabel.textContent = 'Scanning…';
+    progressPct.textContent = '0%';
+    progressEtl.textContent = '';
+    _etlStartTime = null;
+    _etlLastPhase = null;
+  }
+
+  async function runAnalysis() {
+    const protocols = selectedProtocols();
+    if (!protocols.length) {
+      showMessage('error', 'Select at least one protocol to analyze.');
+      return;
+    }
+
+    // Warn the user that normal scraper reads will be suspended for the
+    // duration of the analysis scan.  The transport lock is held by the
+    // scan thread, so read_data() calls will block until it completes.
+    const confirmed = window.confirm(
+      'Running analysis will suspend all normal device reads and writes for ' +
+      'the duration of the scan (typically 30-40 minutes depending on device ' +
+      'response times and batch size).\n\nProceed?'
+    );
+    if (!confirmed) return;
+
+    clearMessage();
+    state.running = true;
+    state.analysisResult = null;
+    state.queuedChanges.clear();
+    state.abortController = new AbortController();
+    setBusy();
+    showProgress('input', 0);
+
+    let evtSource = null;
+    try {
+      evtSource = new EventSource(`/api/analyze/${encodeURIComponent(deviceName)}/progress`);
+      evtSource.onmessage = function (e) {
+        try {
+          const msg = JSON.parse(e.data);
+          if (msg.type === 'progress') {
+            showProgress(msg.phase, msg.pct);
+          } else if (msg.type === 'done' || msg.type === 'error') {
+            evtSource.close();
+          }
+        } catch (_) {}
+      };
+      evtSource.onerror = function () {
+        evtSource.close();
+      };
+
+      const response = await fetch(`/api/analyze/${encodeURIComponent(deviceName)}`, {
+        method: 'POST',
+        signal: state.abortController.signal,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          protocol_names: protocols,
+          current_protocol: currentProtocol || null,
+          batch_size: parseInt(batchSizeInput.value, 10) || 40,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok || data.status !== 'ok') {
+        throw new Error(Array.isArray(data.detail) ? data.detail.map(e => e.msg || JSON.stringify(e)).join('; ') : (data.detail || 'Analysis failed.'));
+      }
+
+      state.analysisResult = data.result;
+      renderScores();
+      renderFocusedProtocol();
+      updateQueueSummary();
+      showMessage('success', 'Analysis complete. Click "Queue Add" or "Queue Remove" on the changes you want, then commit.');
+    } catch (error) {
+      if (error.name === 'AbortError') {
+        showMessage('info', 'Analysis cancelled. Normal device reads will resume shortly.');
+      } else {
+        showMessage('error', error.message || 'Analysis failed.');
+      }
+    } finally {
+      if (evtSource) evtSource.close();
+      hideProgress();
+      state.running = false;
+      state.abortController = null;
+      setBusy();
+    }
+  }
+
+  async function commitAnalysis() {
+    if (!state.queuedChanges.size) {
+      showMessage('error', 'Queue at least one change before committing.');
+      return;
+    }
+
+    clearMessage();
+    state.committing = true;
+    setBusy();
+    showMessage('info', 'Writing selected changes to the protocol CSV files and rescanning the web database.');
+
+    try {
+      const response = await fetch(`/api/analyze/${encodeURIComponent(deviceName)}/commit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          changes: Array.from(state.queuedChanges.values()),
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok || data.status !== 'ok') {
+        throw new Error(Array.isArray(data.detail) ? data.detail.map(e => e.msg || JSON.stringify(e)).join('; ') : (data.detail || 'Commit failed.'));
+      }
+
+      const appliedCount = data.changes_applied;
+      const fileCount = data.files_written;
+
+      // Bug fix: clear both the queue and the stale analysis result so the
+      // results panel does not re-render committed changes as still pending.
+      state.queuedChanges.clear();
+      state.analysisResult = null;
+
+      renderScores();
+      renderFocusedProtocol();
+      updateQueueSummary();
+      showMessage(
+        'success',
+        `Committed ${appliedCount} change(s) across ${fileCount} protocol file(s). Run analysis again to verify.`,
+      );
+    } catch (error) {
+      showMessage('error', error.message || 'Commit failed.');
+    } finally {
+      state.committing = false;
+      setBusy();
+    }
+  }
+
+  protocolRows.forEach((row) => {
+    row.addEventListener('click', function (event) {
+      const checkbox = row.querySelector('.analysis-protocol-check');
+      if (event.target === checkbox) {
+        event.stopPropagation();
+        return;
+      }
+      state.focusedProtocol = row.dataset.protocol;
+      renderFocusedProtocol();
+    });
+    row.addEventListener('keydown', function (event) {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      state.focusedProtocol = row.dataset.protocol;
+      renderFocusedProtocol();
+    });
+  });
+
+  protocolChecks.forEach((checkbox) => {
+    checkbox.addEventListener('click', function (event) {
+      event.stopPropagation();
+    });
+  });
+
+  checkAllBtn.addEventListener('click', function () {
+    const shouldCheck = protocolChecks.some((checkbox) => !checkbox.checked);
+    protocolChecks.forEach((checkbox) => {
+      checkbox.checked = shouldCheck;
+    });
+  });
+
+  cancelBtn.addEventListener('click', function () {
+    if (state.running && state.abortController) {
+      state.abortController.abort();
+    } else {
+      window.location.href = '/device/' + deviceName;
+    }
+  });
+
+  runBtn.addEventListener('click', runAnalysis);
+  commitBtn.addEventListener('click', commitAnalysis);
+
+  resultShell.addEventListener('click', function (event) {
+    const toggle = event.target.closest('.analysis-action-toggle');
+    if (!toggle) return;
+    const change = JSON.parse(toggle.dataset.change);
+    const key = queueKey(change);
+    if (state.queuedChanges.has(key)) {
+      state.queuedChanges.delete(key);
+    } else {
+      state.queuedChanges.set(key, change);
+    }
+    updateQueueSummary();
+    renderFocusedProtocol();
+  });
+
+  // Bulk checkbox handler — covers both add-all and remove-all checkboxes
+  resultShell.addEventListener('change', function (event) {
+    const addChk = event.target.closest('.analysis-add-all-check');
+    const removeChk = event.target.closest('.analysis-remove-all-check');
+    if (!addChk && !removeChk) return;
+
+    const chk = addChk || removeChk;
+    const registry = chk.dataset.registry;
+    const protocolName = chk.dataset.protocol;
+    const protocolResult = state.analysisResult?.protocols?.[protocolName];
+    if (!protocolResult) return;
+
+    if (addChk) {
+      // "Add all with value > 0"
+      const rows = protocolResult.actions?.[registry]?.add || [];
+      const valueRows = rows.filter((r) => r.raw_value != null && r.raw_value > 0);
+      if (chk.checked) {
+        valueRows.forEach((row) => {
+          const change = normalizeActionRow(protocolName, registry, 'add', row);
+          state.queuedChanges.set(queueKey(change), change);
+        });
+      } else {
+        valueRows.forEach((row) => {
+          const change = normalizeActionRow(protocolName, registry, 'add', row);
+          state.queuedChanges.delete(queueKey(change));
+        });
+      }
+    } else {
+      // "Remove all missing"
+      const rows = protocolResult.actions?.[registry]?.remove || [];
+      if (chk.checked) {
+        rows.forEach((row) => {
+          const change = normalizeActionRow(protocolName, registry, 'remove', row);
+          state.queuedChanges.set(queueKey(change), change);
+        });
+      } else {
+        rows.forEach((row) => {
+          const change = normalizeActionRow(protocolName, registry, 'remove', row);
+          state.queuedChanges.delete(queueKey(change));
+        });
+      }
+    }
+    updateQueueSummary();
+    renderFocusedProtocol();
+  });
+
+  updateQueueSummary();
+})();
+</script>
+{% endblock %}

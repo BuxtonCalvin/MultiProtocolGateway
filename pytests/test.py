@@ -1,4 +1,5 @@
 import ast
+import operator as op
 import re
 
 #pip install "python-can[gs_usb]"
@@ -33,29 +34,30 @@ if False:
 try:
     while True:
         msg = bus.recv()  # Block until a message is received
+        if msg is not None:
 
-        print(str(msg.arbitration_id) + "- "+ hex(msg.arbitration_id))
+            print(str(msg.arbitration_id) + "- "+ hex(msg.arbitration_id))
 
-        # Check if it's the State of Charge (SoC) message (ID: 0x0FFF)
-        if msg.arbitration_id == 0x0FFF:
-            # The data is a 2-byte value (un16)
-            soc_bytes = msg.data[:2]
-            soc = int.from_bytes(soc_bytes, byteorder="big", signed=False) / 100.0
+            # Check if it's the State of Charge (SoC) message (ID: 0x0FFF)
+            if msg.arbitration_id == 0x0FFF:
+                # The data is a 2-byte value (un16)
+                soc_bytes = msg.data[:2]
+                soc = int.from_bytes(soc_bytes, byteorder="big", signed=False) / 100.0
 
-            print(f"State of Charge: {soc:.2f}%")
+                print(f"State of Charge: {soc:.2f}%")
 
-        if msg.arbitration_id == 0x0355:
-            # Extract and print SOC value (U16, 0.01%)
-            soc_value = int.from_bytes(msg.data[0:0 + 2], byteorder="little")
-            print(f"State of Charge (SOC) Value: {soc_value / 100:.2f}%")
+            if msg.arbitration_id == 0x0355:
+                # Extract and print SOC value (U16, 0.01%)
+                soc_value = int.from_bytes(msg.data[0:0 + 2], byteorder="little")
+                print(f"State of Charge (SOC) Value: {soc_value / 100:.2f}%")
 
-            # Extract and print SOH value (U16, 1%)
-            soh_value = int.from_bytes(msg.data[2:2 + 2], byteorder="little")
-            print(f"State of Health (SOH) Value: {soh_value:.2f}%")
+                # Extract and print SOH value (U16, 1%)
+                soh_value = int.from_bytes(msg.data[2:2 + 2], byteorder="little")
+                print(f"State of Health (SOH) Value: {soh_value:.2f}%")
 
-            # Extract and print HiRes SOC value (U16, 0.01%)
-            hires_soc_value = int.from_bytes(msg.data[4:4 + 2], byteorder="little")
-            print(f"High Resolution SOC Value: {hires_soc_value / 100:.2f}%")
+                # Extract and print HiRes SOC value (U16, 0.01%)
+                hires_soc_value = int.from_bytes(msg.data[4:4 + 2], byteorder="little")
+                print(f"High Resolution SOC Value: {hires_soc_value / 100:.2f}%")
 
 except KeyboardInterrupt:
     print("Listening stopped.")
@@ -112,29 +114,51 @@ def evaluate_ranges(expression):
 
     return results
 
+# Map AST nodes to safe operators
+OPERATORS = {
+    ast.Add: op.add, ast.Sub: op.sub,
+    ast.Mult: op.mul, ast.Div: op.truediv,
+    ast.Pow: op.pow, ast.USub: op.neg
+}
+
+def eval_node(node):
+    # Handle Numbers (Modern Python uses Constant)
+    if isinstance(node, ast.Constant):
+        if isinstance(node.value, (int, float)):
+            return node.value
+        msg: str = f"Non-numeric constant: {type(node.value)}"
+        raise TypeError(msg)
+
+    # Handle Binary Operations (e.g., 1 + 2)
+    elif isinstance(node, ast.BinOp):
+        left = eval_node(node.left)
+        right = eval_node(node.right)
+        return OPERATORS[type(node.op)](left, right)
+
+    # Handle Unary Operations (e.g., -5)
+    elif isinstance(node, ast.UnaryOp):
+        return OPERATORS[type(node.op)](eval_node(node.operand))
+
+    else:
+        msg: str = f"Unsupported syntax: {type(node)}"
+        raise TypeError(msg)
+
 def evaluate_expression(expression):
-     # Define a regular expression pattern to match "maths"
     var_pattern = re.compile(r"\[(?P<maths>.*?)\]")
 
-    # Replace variables in the expression with their values
     def replace_vars(match):
         try:
-            maths = match.group("maths")
-            maths = re.sub(r"\s", "", maths) #remove spaces, because ast.parse doesnt like them
-
-            # Parse the expression safely
-            tree = ast.parse(maths, mode="eval")
-
-            # Evaluate the expression
-            end_value = ast.literal_eval(compile(tree, filename="", mode="eval"))
-
-            return str(end_value)
+            maths = match.group("maths").strip()
+            # Parse into an expression tree
+            tree = ast.parse(maths, mode='eval')
+            # Evaluate the body of the expression
+            result = eval_node(tree.body)
+            return str(result)
         except Exception:
+            # Fallback to original text if math fails
             return match.group(0)
 
-    # Replace variables with their values
     return var_pattern.sub(replace_vars, expression)
-
 
 # Evaluate the register string
 result = evaluate_variables(register)

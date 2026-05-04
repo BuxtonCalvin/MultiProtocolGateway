@@ -1,0 +1,4 @@
+{
+    "transport" : "modbus_eg4_ll_s_tcp",
+    "batch_size" : 40
+}

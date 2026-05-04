@@ -1,3 +1,6 @@
+# scraper transport class for serial communication with SOI/EOI framing, supporting both synchronous and asynchronous modes.
+# Does not implement any protocol-specific logic, just the framing and serial communication. Can be used as a base
+# for custom serial protocols that use simple start/end framing.
 import threading
 import time
 from typing import Callable
@@ -27,7 +30,7 @@ class serial_frame_client():
     asynchronous : bool = False
     ''' if set, runs main loop'''
 
-    on_message : Callable[[bytes], None] = None
+    on_message : Callable[[bytes], None] | None = None
     ''' async mode only'''
 
     thread : threading.Thread
@@ -49,7 +52,7 @@ class serial_frame_client():
         if self.asynchronous:
             self.running = True
             self.pending_frames = []
-            self.thread = threading.Thread(target=self.read_thread)
+            self.thread = threading.Thread(target=self.read_thread, name="Serial_Read", daemon=True)
             self.thread.daemon = True
             self.thread.start()
         return True
@@ -59,66 +62,51 @@ class serial_frame_client():
         data = self.soi + data + self.eoi
         self.client.write(data)
 
-    def read(self, reset_buffer = True, frames = 1) -> list[bytes] | bytes:
-        ''' returns list of frames, if frames > 1 '''
+    def read(self, reset_buffer=True, frames=1) -> list[bytes] | bytes | None:
         buffer = bytearray()
         self.pending_frames.clear()
 
-        #for shatty order sensitive protocols.
-        # Clear input buffers
         if reset_buffer:
             self.client.reset_input_buffer()
 
         timedout = time.time() + self.timeout
         self.client.timeout = self.timeout
-        frameCount = 0
 
         while time.time() < timedout:
-            # Read data from serial port
             data = self.client.read()
 
-            # Check if data is available
             if data:
-                # Append data to buffer
                 buffer += data
-
-                # Find SOI index in buffer
                 soi_index = buffer.find(self.soi)
 
-                # Process all occurrences of SOI in buffer
                 while soi_index != -1:
-                    # Remove data before SOI sequence
                     buffer = buffer[soi_index:]
-
-                    # Find EOI index in buffer
                     eoi_index = buffer.find(self.eoi)
 
                     if eoi_index != -1:
-
                         frame = buffer[len(self.soi):eoi_index]
+
                         if frames == 1:
                             return frame
 
-                        if frameCount > 1:
-                            # Extract and store the complete frame
-                            self.pending_frames.append(frame)
+                        # Accumulate frames and return when we have enough
+                        self.pending_frames.append(frame)
+                        if len(self.pending_frames) == frames:
+                            return self.pending_frames
 
-                            if self.pending_frames.count() == frames:
-                                return self.pending_frames
-
-                        # Remove the processed data from the buffer
-                        buffer = buffer[eoi_index + len(self.eoi) : ]
-
-                        # Find next SOI index in the remaining buffer
+                        buffer = buffer[eoi_index + len(self.eoi):]
                         soi_index = buffer.find(self.soi)
 
                     else:
-                        # If no EOI is found and buffer size exceeds max_frame_size, clear buffer
                         if len(buffer) > self.max_frame_size:
                             buffer.clear()
-                        break #no eoi, continue waiting
+                        break
 
             time.sleep(0.01)
+
+        # Timeout reached — return whatever was collected (could be empty or partial)
+        return self.pending_frames if self.pending_frames else None
+
 
     def read_thread(self):
         buffer = bytearray()

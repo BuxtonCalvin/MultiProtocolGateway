@@ -1,0 +1,386 @@
+<!--
+  json_editor.html
+  HTMX partial — rich JSON editor for protocol .json config files.
+  Replaces the CSV register table when registry_type == 'json'.
+-->
+<div class="p-3 bg-ppg-800 rounded" id="json-editor-root"
+     data-protocol-name="{{ protocol_name }}"
+     data-protocol-group="{{ protocol_group }}">
+
+  {% if is_override %}
+  <div class="mb-3 flex items-center gap-2 px-4 py-2 rounded bg-warning/10 border border-warning/40 text-warning text-xs font-semibold">
+    <span>⚠ Modified override — this file is loaded from the config folder and overrides the default protocol JSON.</span>
+  </div>
+  {% endif %}
+
+  <div class="flex items-center justify-between mb-3">
+    <div>
+      <p class="text-ppg-100 font-semibold text-sm">
+        JSON Config Editor
+        <span class="text-accent font-mono ml-1">{{ protocol_name }}.json</span>
+        {% if is_override %}<span class="ml-2 text-warning text-xs font-normal">(override)</span>{% endif %}
+      </p>
+      <p class="text-ppg-300 text-xs mt-0.5">
+        Edit key/value pairs below. Save writes to the config folder — PPG loads this override at next start.
+      </p>
+    </div>
+    <div class="flex items-center gap-2">
+      <button id="json-add-btn"
+              onclick="jsonEditorAddRow()"
+              class="btn-secondary text-xs px-3 py-1.5">
+        + Add Key
+      </button>
+      <button id="json-save-btn"
+              onclick="jsonEditorSave()"
+              class="btn-primary text-xs px-4 py-1.5">
+        Save JSON
+      </button>
+    </div>
+  </div>
+
+  <!-- Status message -->
+  <div id="json-editor-status" class="mb-3 hidden"></div>
+
+  <!-- Editor table -->
+  <div class="rounded border border-ppg-600 overflow-hidden">
+    <table class="w-full text-xs border-collapse">
+      <thead class="bg-ppg-900 sticky top-0 z-10">
+        <tr class="text-ppg-200 uppercase tracking-wide text-xs">
+          <th class="px-3 py-2 text-left w-64 font-semibold border-r border-ppg-700">Key</th>
+          <th class="px-3 py-2 text-left font-semibold border-r border-ppg-700">Value</th>
+          <th class="px-3 py-2 text-left w-28 font-semibold border-r border-ppg-700">Type</th>
+          <th class="px-3 py-2 text-center w-12 font-semibold">Del</th>
+        </tr>
+      </thead>
+      <tbody id="json-editor-body">
+        {% for key, value in json_data.items() %}
+        {% set vtype = 'object' if value is mapping else ('array' if (value is iterable and value is not string) else ('boolean' if value is boolean else ('null' if value is none else ('number' if value is number else 'string')))) %}
+        <tr class="border-t border-ppg-700/60 hover:bg-ppg-700/20 transition-colors json-row"
+            data-key="{{ key }}">
+          <td class="px-2 py-1.5 border-r border-ppg-700/40">
+            <input type="text"
+                   class="json-key w-full bg-ppg-900 border border-ppg-600 rounded px-2 py-1
+                          text-ppg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent"
+                   value="{{ key }}"
+                   aria-label="Key name">
+          </td>
+          <td class="px-2 py-1.5 border-r border-ppg-700/40">
+            {% if vtype in ('object', 'array') %}
+            <textarea class="json-value w-full bg-ppg-900 border border-ppg-600 rounded px-2 py-1
+                             text-ppg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent
+                             min-h-[4rem] resize-y"
+                      aria-label="Value for {{ key }}"
+                      data-type="{{ vtype }}">{{ value | tojson(indent=2) }}</textarea>
+            {% else %}
+            <input type="text"
+                   class="json-value w-full bg-ppg-900 border border-ppg-600 rounded px-2 py-1
+                          text-ppg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent"
+                   value="{{ value if vtype == 'string' else value | tojson }}"
+                   aria-label="Value for {{ key }}"
+                   data-type="{{ vtype }}">
+            {% endif %}
+          </td>
+          <td class="px-2 py-1.5 border-r border-ppg-700/40">
+            <select class="json-type w-full bg-ppg-900 border border-ppg-600 rounded px-1 py-1
+                           text-ppg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent"
+                    aria-label="Type for {{ key }}"
+                    onchange="jsonEditorTypeChange(this)">
+              <option value="string"  {% if vtype == 'string'  %}selected{% endif %}>string</option>
+              <option value="number"  {% if vtype == 'number'  %}selected{% endif %}>number</option>
+              <option value="boolean" {% if vtype == 'boolean' %}selected{% endif %}>boolean</option>
+              <option value="object"  {% if vtype == 'object'  %}selected{% endif %}>object</option>
+              <option value="array"   {% if vtype == 'array'   %}selected{% endif %}>array</option>
+              <option value="null"    {% if vtype == 'null'    %}selected{% endif %}>null</option>
+            </select>
+          </td>
+          <td class="px-2 py-1.5 text-center">
+            <button onclick="this.closest('tr').remove()"
+                    class="text-danger hover:text-red-400 text-sm font-bold leading-none px-1"
+                    aria-label="Delete row {{ key }}" title="Delete key">×</button>
+          </td>
+        </tr>
+        {% endfor %}
+
+        {% if not json_data %}
+        <tr id="json-empty-row">
+          <td colspan="4" class="px-4 py-6 text-center text-ppg-300 text-sm">
+            No JSON keys found. Click <strong class="text-ppg-100">+ Add Key</strong> to begin.
+          </td>
+        </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Raw JSON toggle -->
+  <div class="mt-4">
+    <button onclick="jsonEditorToggleRaw(this)"
+            class="btn-secondary text-xs px-3 py-1.5">
+      Show Raw JSON
+    </button>
+    <div id="json-raw-panel" class="hidden mt-2">
+      <textarea id="json-raw-textarea"
+                class="w-full bg-ppg-900 border border-ppg-600 rounded px-3 py-2
+                       text-ppg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent
+                       min-h-[12rem] resize-y"
+                spellcheck="false"
+                aria-label="Raw JSON editor">{{ json_data | tojson(indent=2) }}</textarea>
+      <div class="flex gap-2 mt-2 items-center">
+        <button onclick="jsonEditorApplyRaw()"
+                class="btn-primary text-xs px-3 py-1.5">
+          Apply Raw JSON to Table
+        </button>
+        <p class="text-ppg-300 text-xs">
+          Edit raw JSON then click Apply to sync back to the table view.
+        </p>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+(function() {
+  const _root = document.getElementById('json-editor-root');
+  const PROTOCOL_NAME  = _root ? _root.dataset.protocolName  : '';
+  const PROTOCOL_GROUP = _root ? _root.dataset.protocolGroup : '';
+
+  // ── Collect current table state ───────────────────────────────────────────
+  function collectData() {
+    const result = {};
+    document.querySelectorAll('#json-editor-body tr.json-row').forEach(row => {
+      const keyEl   = row.querySelector('.json-key');
+      const valueEl = row.querySelector('.json-value');
+      const typeEl  = row.querySelector('.json-type');
+      if (!keyEl || !valueEl || !typeEl) return;
+      const k = keyEl.value.trim();
+      if (!k) return;
+      result[k] = parseTyped(valueEl.value, typeEl.value);
+    });
+    return result;
+  }
+
+  function parseTyped(raw, type) {
+    try {
+      switch (type) {
+        case 'string':  return raw;                                   // raw value IS the string — no JSON decode needed
+        case 'number':  return Number(raw);
+        case 'boolean': return raw === 'true';
+        case 'null':    return null;
+        case 'object':
+        case 'array':   return JSON.parse(raw);
+        default:        return raw;
+      }
+    } catch { return raw; }
+  }
+
+  // ── Add a new empty row ───────────────────────────────────────────────────
+  window.jsonEditorAddRow = function() {
+    const empty = document.getElementById('json-empty-row');
+    if (empty) empty.remove();
+    const tbody = document.getElementById('json-editor-body');
+    const tr = document.createElement('tr');
+    tr.className = 'border-t border-ppg-700/60 hover:bg-ppg-700/20 transition-colors json-row';
+    tr.dataset.key = '';
+    tr.innerHTML = `
+      <td class="px-2 py-1.5 border-r border-ppg-700/40">
+        <input type="text"
+               class="json-key w-full bg-ppg-900 border border-ppg-600 rounded px-2 py-1
+                      text-ppg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent"
+               placeholder="key_name" aria-label="Key name">
+      </td>
+      <td class="px-2 py-1.5 border-r border-ppg-700/40">
+        <input type="text"
+               class="json-value w-full bg-ppg-900 border border-ppg-600 rounded px-2 py-1
+                      text-ppg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent"
+               placeholder="value" aria-label="Value" data-type="string">
+      </td>
+      <td class="px-2 py-1.5 border-r border-ppg-700/40">
+        <select class="json-type w-full bg-ppg-900 border border-ppg-600 rounded px-1 py-1
+                       text-ppg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent"
+                aria-label="Type" onchange="jsonEditorTypeChange(this)">
+          <option value="string" selected>string</option>
+          <option value="number">number</option>
+          <option value="boolean">boolean</option>
+          <option value="object">object</option>
+          <option value="array">array</option>
+          <option value="null">null</option>
+        </select>
+      </td>
+      <td class="px-2 py-1.5 text-center">
+        <button onclick="this.closest('tr').remove()"
+                class="text-danger hover:text-red-400 text-sm font-bold leading-none px-1"
+                title="Delete key">×</button>
+      </td>`;
+    tbody.appendChild(tr);
+    tr.querySelector('.json-key').focus();
+  };
+
+  // ── Switch value input type when type selector changes ────────────────────
+  window.jsonEditorTypeChange = function(selectEl) {
+    const row     = selectEl.closest('tr');
+    const valueEl = row.querySelector('.json-value');
+    const type    = selectEl.value;
+    const needsTextarea = type === 'object' || type === 'array';
+    const isTextarea    = valueEl.tagName === 'TEXTAREA';
+
+    if (needsTextarea && !isTextarea) {
+      const ta = document.createElement('textarea');
+      ta.className = valueEl.className + ' min-h-[4rem] resize-y';
+      ta.dataset.type = type;
+      ta.setAttribute('aria-label', valueEl.getAttribute('aria-label'));
+      ta.value = type === 'object' ? '{}' : '[]';
+      valueEl.replaceWith(ta);
+    } else if (!needsTextarea && isTextarea) {
+      const inp = document.createElement('input');
+      inp.type = 'text';
+      inp.className = valueEl.className.replace(' min-h-[4rem] resize-y', '');
+      inp.dataset.type = type;
+      inp.setAttribute('aria-label', valueEl.getAttribute('aria-label'));
+      inp.value = type === 'boolean' ? 'false' : type === 'null' ? 'null' : '';
+      valueEl.replaceWith(inp);
+    } else {
+      valueEl.dataset.type = type;
+    }
+  };
+
+  // ── Save to server ────────────────────────────────────────────────────────
+  window.jsonEditorSave = async function() {
+    const data     = collectData();
+    const statusEl = document.getElementById('json-editor-status');
+    const saveBtn  = document.getElementById('json-save-btn');
+
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving…';
+    statusEl.className = 'mb-3 hidden';
+
+    try {
+      const res = await fetch(
+        `/api/protocol/${encodeURIComponent(PROTOCOL_GROUP)}/${encodeURIComponent(PROTOCOL_NAME)}/json`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data),
+        }
+      );
+      const json = await res.json();
+      if (res.ok && json.status === 'ok') {
+        statusEl.className = 'mb-3 flex items-center justify-between gap-4 px-4 py-2 rounded bg-success/10 border border-success/40 text-success text-sm';
+        statusEl.innerHTML = `<span>✔ Saved — <span class="font-mono text-xs">${json.path}</span></span>
+          <button onclick="this.closest('div').classList.add('hidden')" class="font-bold leading-none ml-2 text-success/70 hover:text-success">×</button>`;
+        // sync raw textarea
+        const rawTA = document.getElementById('json-raw-textarea');
+        if (rawTA) rawTA.value = JSON.stringify(data, null, 2);
+      } else {
+        throw new Error(json.detail || 'Server error');
+      }
+    } catch (err) {
+      statusEl.className = 'mb-3 flex items-center justify-between gap-4 px-4 py-2 rounded bg-danger/10 border border-danger/40 text-danger text-sm';
+      statusEl.innerHTML = `<span>✖ Save failed: ${err.message}</span>
+        <button onclick="this.closest('div').classList.add('hidden')" class="font-bold leading-none ml-2">×</button>`;
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Save JSON';
+    }
+  };
+
+  // ── Raw JSON panel toggle ─────────────────────────────────────────────────
+  window.jsonEditorToggleRaw = function(btn) {
+    const panel = document.getElementById('json-raw-panel');
+    const hidden = panel.classList.toggle('hidden');
+    btn.textContent = hidden ? 'Show Raw JSON' : 'Hide Raw JSON';
+    if (!hidden) {
+      document.getElementById('json-raw-textarea').value =
+        JSON.stringify(collectData(), null, 2);
+    }
+  };
+
+  // ── Apply raw JSON back to table ──────────────────────────────────────────
+  window.jsonEditorApplyRaw = function() {
+    const raw = document.getElementById('json-raw-textarea').value;
+    let parsed;
+    try { parsed = JSON.parse(raw); }
+    catch (e) { alert('Invalid JSON: ' + e.message); return; }
+    rebuildTable(parsed);
+  };
+
+  function detectType(v) {
+    if (v === null)            return 'null';
+    if (typeof v === 'boolean') return 'boolean';
+    if (typeof v === 'number')  return 'number';
+    if (Array.isArray(v))       return 'array';
+    if (typeof v === 'object')  return 'object';
+    return 'string';
+  }
+
+  function escHtml(s) {
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function displayValue(v, type) {
+    // For string type: show the raw string value directly (no JSON quotes)
+    // For everything else: show JSON representation
+    if (type === 'string') return String(v);
+    return JSON.stringify(v, null, (type === 'object' || type === 'array') ? 2 : 0);
+  }
+
+  function rebuildTable(parsed) {
+    const tbody = document.getElementById('json-editor-body');
+    tbody.innerHTML = '';
+    const entries = Object.entries(parsed);
+    if (!entries.length) {
+      tbody.innerHTML = `<tr id="json-empty-row">
+        <td colspan="4" class="px-4 py-6 text-center text-ppg-300 text-sm">
+          No JSON keys. Click <strong class="text-ppg-100">+ Add Key</strong> to begin.
+        </td></tr>`;
+      return;
+    }
+    entries.forEach(([k, v]) => {
+      const type = detectType(v);
+      const needsTextarea = type === 'object' || type === 'array';
+      const dv = escHtml(displayValue(v, type));
+      const tr = document.createElement('tr');
+      tr.className = 'border-t border-ppg-700/60 hover:bg-ppg-700/20 transition-colors json-row';
+      tr.dataset.key = k;
+      tr.innerHTML = `
+        <td class="px-2 py-1.5 border-r border-ppg-700/40">
+          <input type="text"
+                 class="json-key w-full bg-ppg-900 border border-ppg-600 rounded px-2 py-1
+                        text-ppg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent"
+                 value="${escHtml(k)}" aria-label="Key name">
+        </td>
+        <td class="px-2 py-1.5 border-r border-ppg-700/40">
+          ${needsTextarea
+            ? `<textarea class="json-value w-full bg-ppg-900 border border-ppg-600 rounded px-2 py-1
+                                text-ppg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent
+                                min-h-[4rem] resize-y"
+                          data-type="${type}" aria-label="Value for ${escHtml(k)}">${dv}</textarea>`
+            : `<input type="text"
+                      class="json-value w-full bg-ppg-900 border border-ppg-600 rounded px-2 py-1
+                             text-ppg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent"
+                      value="${dv}" data-type="${type}" aria-label="Value for ${escHtml(k)}">`
+          }
+        </td>
+        <td class="px-2 py-1.5 border-r border-ppg-700/40">
+          <select class="json-type w-full bg-ppg-900 border border-ppg-600 rounded px-1 py-1
+                         text-ppg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent"
+                  aria-label="Type" onchange="jsonEditorTypeChange(this)">
+            ${['string','number','boolean','object','array','null'].map(t =>
+              `<option value="${t}"${t === type ? ' selected' : ''}>${t}</option>`
+            ).join('')}
+          </select>
+        </td>
+        <td class="px-2 py-1.5 text-center">
+          <button onclick="this.closest('tr').remove()"
+                  class="text-danger hover:text-red-400 text-sm font-bold leading-none px-1"
+                  title="Delete key">×</button>
+        </td>`;
+      tbody.appendChild(tr);
+    });
+  }
+})();
+</script>

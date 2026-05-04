@@ -1,0 +1,493 @@
+"""routers/devices.py — Device settings endpoints."""
+
+from __future__ import annotations
+
+import logging
+import types
+from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import HTMLResponse
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from classes.WebServer.models import AppState
+
+from ..database import get_session, refresh_app_state
+from ..models import Setting
+from ..scanner import scan_transport_library
+from ..services.device_service import (
+    delete_orphans_bulk,
+    get_app_state,
+    get_device_settings,
+    get_device_summary,
+    get_orphaned_settings,
+)
+
+_log = logging.getLogger(__name__)
+router = APIRouter(prefix="/api/devices", tags=["devices"])
+
+
+class SettingUpdate(BaseModel):
+    value_staged: str | None = None
+    is_active: bool | None = None
+
+
+class ReconcileRequest(BaseModel):
+    new_transport: str | None = None   # e.g. "modbus_tcp"
+    new_bridge: str | None = None      # e.g. "transport.mqtt"
+
+
+class CreateAndActivateRequest(BaseModel):
+    key: str
+    default_value: str | None = None
+
+
+class RefreshProtocolRequest(BaseModel):
+    new_protocol: str
+
+
+class OrphanDeleteRequest(BaseModel):
+    ids: list[int]
+
+
+# ── Static routes must come before wildcard /{device_name} routes ──────────
+# FastAPI matches in registration order; /state, /orphans, /nav, /connection-status
+# would otherwise be captured by /{device_name}/settings as device_name="state" etc.
+
+
+@router.patch("/diag/patch-test")
+def diag_patch_test(payload: SettingUpdate, request: Request, db: Session = Depends(get_session)) -> dict[str, Any]:
+    """
+    Test endpoint: POST a JSON body here to verify FastAPI receives it correctly.
+    Example: curl -X PATCH http://host:1717/api/devices/diag/patch-test \
+               -H "Content-Type: application/json" \
+               -d '{"value_staged": "hello"}'
+    """
+    return {
+        "content_type_received": request.headers.get("content-type", "MISSING"),
+        "payload_received": payload.model_dump(),
+        "value_staged_is_none": payload.value_staged is None,
+        "is_active_is_none": payload.is_active is None,
+        "verdict": "JSON body parsed correctly" if payload.value_staged is not None or payload.is_active is not None
+                   else "PAYLOAD IS EMPTY — json-enc is not sending data or Content-Type is wrong",
+    }
+
+
+@router.get("/diag")
+def diagnostics(db: Session = Depends(get_session)) -> dict[str, Any]:
+    """
+    Self-test endpoint. Visit /api/devices/diag in your browser to verify
+    routing, DB connectivity, and app state. Safe — read-only.
+    """
+    from sqlalchemy import text
+    result: dict[str, Any] = {}
+
+    # 1. DB connectivity
+    try:
+        row_count = db.execute(text("SELECT COUNT(*) FROM settings")).scalar()
+        result["db_ok"] = True
+        result["settings_row_count"] = row_count
+    except Exception as exc:
+        result["db_ok"] = False
+        result["db_error"] = str(exc)
+
+    # 2. Dirty counts
+    try:
+        dirty = db.execute(text("SELECT COUNT(*) FROM settings WHERE is_dirty=1")).scalar()
+        result["dirty_settings"] = dirty
+    except Exception as exc:
+        result["dirty_settings"] = f"error: {exc}"
+
+    # 3. App state row
+    try:
+        state = get_app_state(db)
+        result["app_state"] = {
+            "has_dirty_settings": state.has_dirty_settings,
+            "has_dirty_protocols": state.has_dirty_protocols,
+            "dirty_settings_count": state.dirty_settings_count,
+            "scanner_status": state.scanner_status,
+        }
+    except Exception as exc:
+        result["app_state"] = f"error: {exc}"
+
+    # 4. Route self-check — confirm this endpoint resolved correctly
+    result["route_resolution_ok"] = True
+    result["note"] = (
+        "If you see this response, /api/devices/diag resolved correctly. "
+        "If /api/devices/state returns a list instead of an object, "
+        "the old devices.py with wrong route order is still deployed."
+    )
+
+    return result
+
+
+@router.get("/nav")
+def nav_data(db: Session = Depends(get_session)) -> dict[str, Any]:
+    """Returns scraper/bridge lists and protocol groups for nav rendering."""
+    from ..services.device_service import get_nav_data as _nav
+    nav = _nav(db)
+    return {
+        "scrapers": [
+            {"name": s.name, "transport_class": s.transport_class,
+             "protocol_version": s.protocol_version}
+            for s in nav.scrapers
+        ],
+        "bridges": [
+            {"name": b.name, "transport_class": b.transport_class}
+            for b in nav.bridges
+        ],
+        "protocol_groups": nav.protocol_groups,
+    }
+
+
+@router.get("/state")
+def app_state(db: Session = Depends(get_session)) -> dict[str, Any]:
+    state: AppState = get_app_state(db)
+    return {
+        "has_dirty_settings": state.has_dirty_settings,
+        "has_dirty_protocols": state.has_dirty_protocols,
+        "has_orphans": state.has_orphans,
+        "dirty_settings_count": state.dirty_settings_count,
+        "dirty_protocols_count": state.dirty_protocols_count,
+        "orphan_count": state.orphan_count,
+        "last_scan_at": state.last_scan_at.isoformat() if state.last_scan_at else None,
+        "last_commit_at": state.last_commit_at.isoformat() if state.last_commit_at else None,
+        "scanner_status": state.scanner_status,
+    }
+
+
+@router.get("/orphans")
+def list_orphans(db: Session = Depends(get_session)) -> list[dict[str, Any]]:
+    rows: list[Setting] = get_orphaned_settings(db)
+    return [
+        {
+            "id": r.id,
+            "section": r.section,
+            "key": r.key,
+            "value_disk": r.value_disk,
+            "transport_type": r.transport_type,
+        }
+        for r in rows
+    ]
+
+
+@router.delete("/orphans")
+def delete_orphans(payload: OrphanDeleteRequest, db: Session = Depends(get_session)):
+    count = delete_orphans_bulk(db, payload.ids)
+    refresh_app_state(db)
+    db.commit()
+    return {"deleted": count}
+
+
+@router.get("/connection-status")
+def connection_status(request: Request) -> dict[str, bool]:
+    """Returns live connection status for all transports from the gateway instance."""
+    from ..services.analysis_service import get_transport_connection_status
+    gateway = getattr(request.app.state, "gateway", None)
+    result: dict[str, bool] = get_transport_connection_status(gateway)
+    if result:
+        _log.debug("connection-status keys: %s", list(result.keys()))
+    return result
+
+
+@router.patch("/general/{section}/{setting_id}")
+def update_general_setting(section: str, setting_id: int, payload: SettingUpdate, request: Request, db: Session = Depends(get_session)) -> dict[str, Any]:
+    """Update a setting in general/logging sections."""
+    _log.warning("PATCH update_general: section=%s id=%s content-type=%s payload=%s",
+                 section, setting_id,
+                 request.headers.get("content-type", "MISSING"),
+                 payload.model_dump())
+    row: Setting | None = db.get(Setting, setting_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Setting not found")
+    if row.section != section:
+        raise HTTPException(status_code=403, detail="Section mismatch")
+
+    if payload.value_staged is not None:
+        row.value_staged = payload.value_staged
+    if payload.is_active is not None:
+        row.is_active = payload.is_active
+
+    row.mark_dirty()
+    db.flush()
+    refresh_app_state(db)
+    db.commit()
+
+    return {"id": row.id, "is_dirty": row.is_dirty, "value_staged": row.value_staged}
+
+
+# ── Transport / Bridge reconcile ───────────────────────────────────────────
+
+@router.post("/{device_name}/reconcile-settings")
+def reconcile_settings(
+    device_name: str,
+    payload: ReconcileRequest,
+    request: Request,
+    db: Session = Depends(get_session),
+) -> HTMLResponse:
+    """
+    Called when the user picks a new TRANSPORT or BRIDGE.
+
+    Only stages the transport/bridge value change (reversible by Cancel).
+    Does NOT insert rows or mutate is_orphan in the DB — those structural
+    changes are permanent and would survive a Cancel. Instead the display
+    list is computed on-the-fly by merging:
+      - DB rows that belong to the new transport's key set  (shown normally)
+      - DB rows outside the new transport's key set         (hidden — inactive orphans)
+      - Library keys with no DB row yet                    (shown as virtual inactive rows)
+    The virtual rows are passed to the template as plain dicts with id=None.
+    They only get persisted to the DB when the user activates them and commits.
+    """
+
+    section: str = f"transport.{device_name}"
+    transports_dir = request.app.state.transports_dir
+
+    # 1. Stage the new transport / bridge value only — no db.commit() here.
+    #    This keeps the change reversible via the Cancel button.
+    if payload.new_transport is not None:
+        row = db.query(Setting).filter(
+            Setting.section == section, Setting.key == "transport"
+        ).first()
+        if row:
+            row.value_staged = payload.new_transport
+            row.mark_dirty()
+
+    if payload.new_bridge is not None:
+        row = db.query(Setting).filter(
+            Setting.section == section, Setting.key == "bridge"
+        ).first()
+        if row:
+            row.value_staged = payload.new_bridge
+            row.mark_dirty()
+
+    db.flush()
+    refresh_app_state(db)
+    db.commit()
+
+    # 2. Determine expected keys for the newly selected transport
+    transport_row = db.query(Setting).filter(
+        Setting.section == section, Setting.key == "transport"
+    ).first()
+    current_transport = transport_row.value_staged if transport_row else ""
+
+    library = scan_transport_library(transports_dir)
+    transport_info = {}
+    if current_transport is not None:
+        transport_info = library.get(current_transport, {})
+    expected_keys: dict[str, str] = transport_info.get("keys", {})
+
+
+    FIXED_KEYS: set[str] = {"transport", "bridge", "protocol_version", "log_level",
+                  "transport_type_cached"}
+
+    # 3. Build the display list without touching the DB
+    existing_rows: list[Setting] = get_device_settings(db, section)
+    existing_map = {r.key: r for r in existing_rows}
+
+    display_rows: list[Any] = []
+
+    if expected_keys:
+        # 3a. Keys the new transport defines — use DB row if it exists, else virtual.
+        # If the DB row exists but was orphaned by a previous transport switch,
+        # clear is_orphan in memory so the template shows it correctly.
+        # This is a display-only mutation — not committed to DB until user commits.
+        for key in sorted(expected_keys.keys()):
+            if key in FIXED_KEYS:
+                continue
+            if key in existing_map:
+                row = existing_map[key]
+                row.is_orphan = False   # belongs to this transport — not an orphan
+                display_rows.append(row)
+            else:
+                # Virtual row — not yet in DB, shown as inactive placeholder
+                default_val = expected_keys[key] or ""
+                display_rows.append(types.SimpleNamespace(
+                    id=None,
+                    key=key,
+                    value_disk="",
+                    value_staged=default_val,
+                    default_value=default_val,
+                    is_active=False,
+                    is_dirty=False,
+                    is_orphan=False,
+                    section=section,
+                ))
+
+        # 3b. DB rows NOT in the new transport — only include if active (user-intentional)
+        for key, row in existing_map.items():
+            if key in FIXED_KEYS or key in expected_keys:
+                continue
+            if row.is_active:
+                display_rows.append(row)
+    else:
+        # Unknown transport — show all existing non-fixed rows as-is
+        for key, row in existing_map.items():
+            if key not in FIXED_KEYS:
+                display_rows.append(row)
+
+    display_rows.sort(key=lambda r: r.key)
+
+    # 4. Render the settings rows partial with the computed display list
+    summary = get_device_summary(db, device_name)
+    templates = request.app.state.templates
+    html = templates.get_template("partials/settings_rows.html").render(
+        {"device": summary, "settings": display_rows, "request": request}
+    )
+    return HTMLResponse(content=html)
+
+
+@router.post("/{device_name}/settings/create-and-activate")
+def create_and_activate(
+    device_name: str,
+    payload: CreateAndActivateRequest,
+    db: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """
+    Creates a new Setting row for a virtual key (one from the transport library
+    that has no DB row yet) and immediately marks it active and dirty.
+    Called when the user checks a virtual row's checkbox.
+    """
+    from ..models import Setting
+    section = f"transport.{device_name}"
+
+    # Check it doesn't already exist (race condition guard)
+    existing = db.query(Setting).filter(
+        Setting.section == section, Setting.key == payload.key
+    ).first()
+
+    if existing:
+        existing.is_active = True
+        existing.is_dirty = True
+        row = existing
+    else:
+        row = Setting(
+            section=section,
+            key=payload.key,
+            value_disk="",
+            value_staged=payload.default_value or "",
+            default_value=payload.default_value or "",
+            transport_type="scraper",
+            is_active=True,
+            is_dirty=True,
+            is_orphan=False,
+        )
+        db.add(row)
+
+    db.flush()
+    refresh_app_state(db)
+    db.commit()
+
+    return {
+        "id": row.id,
+        "key": row.key,
+        "value_staged": row.value_staged,
+        "is_active": row.is_active,
+        "is_dirty": row.is_dirty,
+    }
+
+
+@router.post("/{device_name}/refresh-protocol-tabs")
+def refresh_protocol_tabs(
+    device_name: str,
+    payload: RefreshProtocolRequest,
+    request: Request,
+    db: Session = Depends(get_session),
+) -> HTMLResponse:
+    """
+    Called when the user changes Protocol Version.
+    Stages the new protocol value and returns the rendered protocol section
+    (tabs with W/M/S counts + empty table container) for the new protocol.
+    """
+    from ..services.protocol_service import get_protocols_for_device
+
+    section = f"transport.{device_name}"
+
+    # Stage the new protocol_version value
+    row = db.query(Setting).filter(
+        Setting.section == section, Setting.key == "protocol_version"
+    ).first()
+    if row:
+        row.value_staged = payload.new_protocol
+        row.mark_dirty()
+        db.flush()
+        refresh_app_state(db)
+        db.commit()
+
+    proto_tabs = get_protocols_for_device(db, payload.new_protocol, device_name=device_name)
+    summary = get_device_summary(db, device_name)
+
+    # Rebuild summary with updated protocol_version so the heading shows correctly
+    if summary:
+        summary.protocol_version = payload.new_protocol
+
+    templates = request.app.state.templates
+    html = templates.get_template("partials/protocol_section.html").render({
+        "device": summary,
+        "proto_tabs": proto_tabs,
+        "request": request,
+    })
+    return HTMLResponse(content=html)
+
+
+# ── Wildcard /{device_name} routes — registered last ───────────────────────
+
+@router.get("/{device_name}/settings")
+def device_settings(device_name: str, db: Session = Depends(get_session)) -> list[dict[str, Any]]:
+    """Return all settings rows for a device."""
+    section: str = f"transport.{device_name}"
+    rows: list[Setting] = get_device_settings(db, section)
+    return [
+        {
+            "id": r.id,
+            "key": r.key,
+            "value_disk": r.value_disk,
+            "value_staged": r.value_staged,
+            "default_value": r.default_value,
+            "is_active": r.is_active,
+            "is_dirty": r.is_dirty,
+            "is_orphan": r.is_orphan,
+            "transport_type": r.transport_type,
+        }
+        for r in rows
+    ]
+
+
+@router.patch("/{device_name}/settings/{setting_id}")
+def update_setting(device_name: str, setting_id: int, payload: SettingUpdate, request: Request, db: Session = Depends(get_session)) -> dict[str, Any]:
+    """Update a single setting's staged value or active state."""
+    _log.warning("PATCH update_setting: device=%s id=%s content-type=%s payload=%s",
+                 device_name, setting_id,
+                 request.headers.get("content-type", "MISSING"),
+                 payload.model_dump())
+    row: Setting | None = db.get(Setting, setting_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Setting not found")
+    if row.section != f"transport.{device_name}":
+        raise HTTPException(status_code=403, detail="Section mismatch")
+
+    if payload.value_staged is not None:
+        row.value_staged = payload.value_staged
+    if payload.is_active is not None:
+        row.is_active = payload.is_active
+
+    # Compute dirty correctly:
+    # - Active row: dirty if staged value differs from what's on disk
+    # - Deactivated row: dirty only if the disk has a real value that needs removing.
+    #   If disk was already empty, deactivating changes nothing on disk → not dirty.
+    if row.is_active:
+        row.mark_dirty()
+    else:
+        row.is_dirty = bool(row.value_disk)  # dirty only if disk had something to remove
+
+    db.flush()
+    refresh_app_state(db)
+    db.commit()
+
+    return {
+        "id": row.id,
+        "key": row.key,
+        "value_staged": row.value_staged,
+        "is_dirty": row.is_dirty,
+        "is_active": row.is_active,
+    }

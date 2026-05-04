@@ -1,0 +1,68 @@
+{#
+  protocol_section.html
+  The full protocol metrics section — tabs + empty table container.
+  Swapped in when the user changes Protocol Version.
+  Context: device, proto_tabs
+#}
+<section id="protocol-section" class="col-span-12 md:col-span-9" aria-label="Protocol registers for {{ device.name }}">
+
+  <div class="flex flex-wrap items-center gap-x-3 gap-y-1 mb-2">
+    <h2 class="surface-title font-semibold text-sm">
+      Protocol Metrics
+      {% if device.protocol_version %}
+      <span class="surface-muted font-normal">[{{ device.protocol_version }}]</span>
+      {% endif %}
+    </h2>
+    <p class="surface-muted text-xs font-semibold tracking-wide">
+      (W)rite, (M)ask, (S)creen  -- Add and subtract metrics to mask, screen, and custom write files.
+    </p>
+  </div>
+
+  {% if proto_tabs %}
+  <div class="flex gap-1 mb-3 border-b border-ppg-700" role="tablist">
+    {% for tab in proto_tabs %}
+    <button class="tab-btn px-4 py-1.5 text-xs font-medium rounded-t
+                   {% if loop.first %}tab-active{% else %}tab-inactive{% endif %}"
+            role="tab"
+            data-protocol="{{ tab.protocol_name }}"
+            data-registry="{{ tab.registry_type }}"
+            aria-selected="{{ 'true' if loop.first else 'false' }}"
+            hx-get="/protocol/{{ tab.protocol_name }}/{{ tab.registry_type }}?device_name={{ device.name }}"
+            hx-target="#protocol-table-container"
+            hx-swap="innerHTML"
+            hx-headers='{"Cache-Control": "no-cache"}'
+            {% if loop.first %}hx-trigger="load, click"{% else %}hx-trigger="click"{% endif %}>
+      {{ tab.registry_type | title }}
+      <span class="text-ppg-100 ml-1">({{ tab.protocol_name }})</span>
+      {% if tab.registry_type != "json" %}
+      <span class="tab-counts ml-1.5 text-ppg-400 text-xs">
+        W:{{ tab.write_count }} M:{{ tab.mask_count }} S:{{ tab.screen_count }}
+      </span>
+      {% endif %}
+    </button>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div id="protocol-table-container"
+       class="overflow-x-auto rounded border border-ppg-700">
+    <p class="text-ppg-300 text-xs p-4">Select a tab to load protocol registers.</p>
+  </div>
+
+</section>
+
+<script>
+  // Re-bind tab click handlers for the newly swapped section
+  document.querySelectorAll('#protocol-section .tab-btn').forEach(btn => {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('#protocol-section .tab-btn').forEach(b => {
+        b.classList.remove('tab-active');
+        b.classList.add('tab-inactive');
+        b.setAttribute('aria-selected', 'false');
+      });
+      this.classList.add('tab-active');
+      this.classList.remove('tab-inactive');
+      this.setAttribute('aria-selected', 'true');
+    });
+  });
+</script>

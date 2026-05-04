@@ -46,13 +46,15 @@ reconnect_attempts = 5
 ### Example Scenarios
 
 #### Short Network Glitch
-```
+
+``` ini
 Attempt 1: 5s delay → Success
 Total time: ~5 seconds
 ```
 
 #### Server Restart
-```
+
+``` ini
 Attempt 1: 5s delay → Fail
 Attempt 2: 10s delay → Fail  
 Attempt 3: 20s delay → Success
@@ -60,7 +62,8 @@ Total time: ~35 seconds
 ```
 
 #### Extended Outage
-```
+
+``` ini
 Attempt 1: 5s delay → Fail
 Attempt 2: 10s delay → Fail
 Attempt 3: 20s delay → Fail
@@ -82,7 +85,7 @@ Periodic reconnection ensures the connection to InfluxDB remains healthy even du
 
 ### Configuration
 
-```ini
+``` ini
 [influxdb_output]
 # Periodic reconnection interval (seconds)
 periodic_reconnect_interval = 14400.0  # 4 hours (default)
@@ -101,7 +104,8 @@ periodic_reconnect_interval = 0
 ### Example Scenarios
 
 #### Quiet Periods (No Data)
-```
+
+``` ini
 10:00 AM: Last data written
 11:00 AM: Periodic reconnection check → Connection healthy
 12:00 PM: Periodic reconnection check → Connection healthy
@@ -110,7 +114,8 @@ periodic_reconnect_interval = 0
 ```
 
 #### Network Issues During Quiet Period
-```
+
+``` ini
 10:00 AM: Last data written
 11:00 AM: Periodic reconnection check → Connection failed
 11:00 AM: Attempting reconnection → Success
@@ -118,7 +123,8 @@ periodic_reconnect_interval = 0
 ```
 
 #### Server Restart During Quiet Period
-```
+
+``` ini
 10:00 AM: Last data written
 11:00 AM: Periodic reconnection check → Connection failed
 11:00 AM: Attempting reconnection → Success (server restarted)
@@ -155,7 +161,7 @@ max_backlog_age = 86400
 
 ### Storage Structure
 
-```
+``` ini
 influxdb_backlog/
 ├── influxdb_backlog_influxdb_output.pkl
 ├── influxdb_backlog_another_transport.pkl
@@ -171,7 +177,7 @@ influxdb_backlog/
 
 ### Example Recovery Log
 
-```
+``` ini
 [2024-01-15 10:30:00] Connection check failed: Connection refused
 [2024-01-15 10:30:00] Not connected to InfluxDB, storing data in backlog
 [2024-01-15 10:30:00] Added point to backlog. Backlog size: 1
@@ -324,10 +330,12 @@ find influxdb_backlog/ -name "*.pkl" -mtime +7 -delete
 ### Backlog Not Flushing
 
 **Symptoms:**
+
 - Backlog points remain after reconnection
 - No "Flushing X backlog points" messages
 
 **Solutions:**
+
 - Check InfluxDB server capacity
 - Verify database permissions
 - Monitor InfluxDB logs for errors
@@ -335,10 +343,12 @@ find influxdb_backlog/ -name "*.pkl" -mtime +7 -delete
 ### Excessive Memory Usage
 
 **Symptoms:**
+
 - High memory consumption
 - Slow performance
 
 **Solutions:**
+
 - Reduce `max_backlog_size`
 - Decrease `max_backlog_age`
 - Monitor system resources
@@ -346,10 +356,12 @@ find influxdb_backlog/ -name "*.pkl" -mtime +7 -delete
 ### Disk Space Issues
 
 **Symptoms:**
+
 - "Backlog full" warnings
 - Disk space running low
 
 **Solutions:**
+
 - Clean up old backlog files
 - Reduce `max_backlog_size`
 - Move `persistent_storage_path` to larger disk
@@ -357,10 +369,12 @@ find influxdb_backlog/ -name "*.pkl" -mtime +7 -delete
 ### Reconnection Too Aggressive
 
 **Symptoms:**
+
 - High CPU usage during outages
 - Network congestion
 
 **Solutions:**
+
 - Increase `reconnect_delay`
 - Reduce `reconnect_attempts`
 - Enable `use_exponential_backoff`
@@ -410,4 +424,4 @@ use_exponential_backoff = false
 
 # Disable persistent storage
 enable_persistent_storage = false
-``` 
+```

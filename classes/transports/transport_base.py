@@ -1,7 +1,11 @@
-import copy
+# Base transport class defining common interface and behavior for all transports,
+# including protocol settings management, device metadata, and read/write operations.
+# Transports should inherit from this and implement protocol-specific logic as needed.
 import logging
+import threading
+from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Any, Callable, Iterator, Optional
 
 from classes.protocol_settings import (
     Registry_Type,
@@ -10,9 +14,22 @@ from classes.protocol_settings import (
 )
 
 if TYPE_CHECKING:
-    from configparser import SectionProxy
+    from defs.common import TransportSettings
 
     from .transport_base import transport_base
+
+
+@dataclass
+class TransportCycleResult:
+    """
+    Transport-owned read cycle outcome used by the gateway to decide whether
+    a payload is safe to forward to completeness-sensitive bridges.
+    """
+    has_data: bool = False
+    is_complete: bool = True
+    expected_units: int = 0
+    completed_units: int = 0
+    skipped_units: int = 0
 
 class TransportWriteMode(Enum):
     READ = 0x00
@@ -25,68 +42,86 @@ class TransportWriteMode(Enum):
     ''' skip all safeties '''
 
     @classmethod
-    def fromString(cls, name : str) -> "TransportWriteMode":
+    def fromString(cls, name: str) -> "TransportWriteMode":
         name = name.strip().upper()
 
-        #common inputs
-        alias : dict[str,TransportWriteMode] = {
-            "" : cls.READ, #default
-            "FALSE": cls.READ,
-            "NO": cls.READ,
-            "READ": cls.READ,
-            "R": cls.READ,
+        # Map inputs to the STRING names of the Enum members
+        alias: dict[str, str] = {
+            "": "READ",
+            "FALSE": "READ",
+            "NO": "READ",
+            "READ": "READ",
+            "R": "READ",
 
-            "TRUE": cls.WRITE,
-            "YES": cls.WRITE,
-            "WRITE": cls.WRITE,
-            "W": cls.WRITE,
+            "TRUE": "WRITE",
+            "YES": "WRITE",
+            "WRITE": "WRITE",
+            "W": "WRITE",
 
-            "RELAXED": cls.RELAXED,
-            "UNSAFE": cls.UNSAFE
+            "RELAXED": "RELAXED",
+            "UNSAFE": "UNSAFE"
         }
-        # handle any direct matches to enum names returning the corresponding enum value, defaulting to READ if no match is found.
-        return alias.get(name, cls.READ)
+
+        # Get the target name, defaulting to "READ"
+        target_member: str = alias.get(name, "READ")
+
+        # Access the member via bracket notation
+        return cls[target_member]
 
 class transport_base:
-    type : str = ""
-    protocolSettings : "protocol_settings"
-    protocol_version : str = ""
-    transport_name : str = ""
-    device_name : str = ""
-    device_serial_number : str = ""
-    device_manufacturer : str = "hotnoob"
-    device_model : str = "hotnoob"
-    device_identifier : str = "hotnoob"
-    device_location: str = ""
-    bridge : str = ""
-
-    write_enabled : bool = False
-    ''' deprecated -- use / move to write_mode'''
-    write_mode : TransportWriteMode
-
-    max_precision : int = 2
-
-    read_interval : float = 0
-    last_read_time : float = 0
-
-    connected : bool = False
-    _needs_reconnection : bool = False
-
-    on_message : Callable[["transport_base", registry_map_entry, str], None] = None
-    ''' callback, on message received '''
-
-    request_upstream_reconnect: Callable[[str], None] | None = None
-    ''' callback for reconnect. transport should call this with the name of the transport it wants to reconnect to
-        trigger a reconnect from the bridge. This is required for transports that have a bridge and need to trigger
-        a reconnect of the bridge when the bridge's connection drops.
-    '''
 
     _log : logging.Logger
 
 
-    def __init__(self, settings : "SectionProxy") -> None:
+    def __init__(self, settings : TransportSettings) -> None:
 
+        self.protocolSettings: Optional["protocol_settings"] = None
+        self.type: str = self.__class__.__name__
+        self.transport_name: str = ""
+        self.connected: bool = False
+        self._needs_reconnection: bool = False
+        self.last_read_time: float = 0.0
+        self.read_interval: float = 0.0
+        self.write_enabled: bool = False
+        self.max_precision: int = 2
+        self.bridge: str = ""
+        # device metadata
+        self.device_name: str = ""
+        self.device_serial_number: str = ""
+        self.device_manufacturer: str = "PPG"
+        self.device_model: str = ""
+        self.device_identifier: str = ""
+        self.device_location: str = ""
+
+        # so any early log calls before transport_name is set don't crash
+        self._log: logging.Logger = logging.getLogger(__name__)
+
+        self.transport_name: str = settings.name
+
+        # Replace with transport-specific logger now that name is known
+        self._log_level = getattr(logging, settings.get("log_level", fallback="INFO"), logging.INFO)
+        self._log = logging.getLogger(self.transport_name)
+        self._log.setLevel(self._log_level)
+
+        self.on_message: Callable[["transport_base", registry_map_entry, int | float | str], None] | None = None
+        ''' callback, on message received '''
+
+        self.request_upstream_reconnect: Callable[[str], None] | None = None
+        ''' callback for reconnect. transport should call this with the name of the transport it wants to reconnect to
+            trigger a reconnect from the bridge. This is required for transports that have a bridge and need to trigger
+            a reconnect of the bridge when the bridge's connection drops.
+        '''
+        # Initialize the bus lock
+        self._bus_lock: threading.Lock | None = None
+        self._last_cycle_result: TransportCycleResult = TransportCycleResult()
         self.transport_name = settings.name #section name
+
+        # Bridges set this to True if they require a complete, end-of-cycle
+        # batch rather than partial mid-cycle data.  The gateway will suppress
+        # write_data calls for this bridge when the data is known to be partial
+        # (i.e. the scrape cycle was cut short by a block timeout or too many
+        # retries). Default False preserves existing behavior for MQTT etc.
+        self.write_requires_complete_cycle: bool = False
 
         #apply log level to logger
         self._log_level = getattr(logging, settings.get("log_level", fallback="INFO"), logging.INFO)
@@ -96,19 +131,24 @@ class transport_base:
         self.type = self.__class__.__name__
 
         if settings:
-            self.device_serial_number = settings.get(["device_serial_number", "serial_number"], self.device_serial_number)
-            self.device_manufacturer = settings.get(["device_manufacturer", "manufacturer"], self.device_manufacturer)
-            self.device_model = settings.get(["device_model", "model"], self.device_model)
-            self.device_location = settings.get(["device_location", "location"], self.device_location)
-            self.device_name = settings.get(["device_name", "name"], fallback=self.device_manufacturer+"_"+self.device_serial_number)
-            self.bridge = settings.get("bridge", self.bridge)
-            self.read_interval = settings.getfloat("read_interval", self.read_interval)
-            self.max_precision = settings.getint(["max_precision", "precision"], fallback=self.max_precision)
-            if "write_enabled" in settings or "enable_write" in settings:
-                self.write_enabled = settings.getboolean(["write_enabled", "enable_write"], self.write_enabled)
+            self.device_serial_number = settings.get(["device_serial_number"], self.device_serial_number)
+            self.device_manufacturer = settings.get(["device_manufacturer"], self.device_manufacturer)
+            self.device_model = settings.get(["device_model"], self.device_model)
+            self.device_location = settings.get(["device_location"], self.device_location)
+            self.device_name = settings.get(["device_name"], fallback=self.device_manufacturer+"_"+self.device_serial_number)
 
-            if "write" in settings:
-                self.write_mode = TransportWriteMode.fromString(settings.get("write", ""))
+            bridge_raw: str = settings.get("bridge", "")
+            self.bridges: list[str] = [b.strip() for b in bridge_raw.split(",") if b.strip()]
+            self.bridge: str = self.bridges[0] if self.bridges else ""  # backward compatibility with single "bridge" setting
+
+            self.read_interval = settings.getfloat("read_interval", self.read_interval)
+            self.max_precision = settings.getint(["max_precision"], fallback=self.max_precision)
+
+            if "write_enabled" in settings:
+                self.write_enabled = settings.getboolean(["write_enabled"], self.write_enabled)
+
+            if "write_type" in settings:  #  relaxed write etc
+                self.write_mode: TransportWriteMode = TransportWriteMode.fromString(settings.get("write_type", ""))
                 if self.write_mode != TransportWriteMode.READ:
                     self.write_enabled = True
 
@@ -116,9 +156,8 @@ class transport_base:
             #must load after settings
             self.protocol_version = settings.get("protocol_version", fallback='')
             if self.protocol_version:
-                # Create a deep copy of protocol settings to avoid shared state between transports
-                original_protocol_settings = protocol_settings(self.protocol_version, transport_settings=settings)
-                self.protocolSettings = copy.deepcopy(original_protocol_settings)
+
+                self.protocolSettings = protocol_settings(self.protocol_version, transport_settings=settings)
 
                 # Update the transport settings reference in the copy
                 self.protocolSettings.transport_settings = settings
@@ -130,11 +169,28 @@ class transport_base:
 
         self.update_identifier()
 
+    @property
+    def registry_map(self) -> dict:
+        """
+        Returns this transport's registry map, or empty dict if no protocol loaded.
+        Consumers should always use this rather than protocol_settings.registry_map
+        directly.
+        """
+        if hasattr(self, "protocolSettings") and self.protocolSettings:
+            return self.protocolSettings.registry_map
+        return {}
+
+    @property
+    def protocol_name(self) -> str:
+        if hasattr(self, "protocolSettings") and self.protocolSettings:
+            return self.protocolSettings.protocol
+        return ""
+
 
     def update_identifier(self):
-        self.device_identifier = self.device_serial_number.strip().lower()
+        self.device_identifier = str(self.device_serial_number or "").strip().lower()
 
-    def init_bridge(self, from_transport : "transport_base"):
+    def init_bridge(self, from_transport : "transport_base") -> None:
         pass
 
     @classmethod
@@ -144,7 +200,7 @@ class transport_base:
         else:
             return cls._get_top_class_name(cls_obj.__bases__[0])
 
-    def connect(self):
+    def connect(self) -> bool | None:
         pass
 
     def cleanup(self):
@@ -155,36 +211,123 @@ class transport_base:
         self._needs_reconnection = True
         pass
 
-    def write_data(self, data : dict[str, registry_map_entry], from_transport : "transport_base"):
+    # write_data receives either the full batch dict
+    # or a single-entry dict constructed in on_message, both with same value type
+    def write_data( self, data: dict[str, int | float | str ], from_transport: "transport_base" ) -> None:
         ''' general purpose write function for between transports'''
         pass
 
     #let's convert this to dict[str, registry_map_entry]
-    def read_data(self) -> dict[str,str]:
+    def read_data(self) -> dict[str, int | float | str]:
         '''
         general purpose read function for between transports;
         return type may be changed to dict[str, registry_map_entry]. still thinking about this
         '''
-        pass
+        return {}
 
+    def read_group_data(self, members: list["transport_base"]) -> dict[str, int | float | str]:
+        """
+        Read data for a scrape group.
+        The default behavior is a normal transport read; transports with
+        grouped-read optimizations can override this.
+        """
+        self._start_cycle_tracking()
+        data = self.read_data()
+        self._finish_cycle_tracking(data)
+        return data
 
+    # In transport_base, alongside read_data():
 
-    def enable_write(self):
+    def read_data_iter(self) -> "Iterator[bool]":
+        """
+        Block-level generator variant of read_data for interleaved scheduling.
+        Yields True after each register block attempt (success or failure),
+        allowing the caller to interleave reads across transports on a shared bus.
+        Default implementation wraps read_data() as a single-yield generator
+        so non-modbus transports work transparently in interleaved mode.
+        Modbus transports override this with true block-level yielding.
+        """
+        self._start_cycle_tracking()
+        yield True  # non-modbus: treat the entire read as one atomic block
+        self._partial_data: dict[str, int | float | str] = self.read_data()
+        self._finish_cycle_tracking(self._partial_data)
+
+    def get_partial_data(self) -> dict[str, int | float | str]:
+        """
+        Returns data accumulated by read_data_iter().
+        Non-modbus transports return whatever read_data() produced.
+        """
+        return getattr(self, '_partial_data', {})
+
+    def _start_cycle_tracking(self) -> None:
+        self._last_cycle_result = TransportCycleResult()
+
+    def _cycle_expect_unit(self, count: int = 1) -> None:
+        self._last_cycle_result.expected_units += count
+
+    def _cycle_mark_unit_complete(self, count: int = 1) -> None:
+        self._last_cycle_result.completed_units += count
+
+    def _cycle_mark_incomplete(self, skipped_units: int = 1) -> None:
+        self._last_cycle_result.is_complete = False
+        self._last_cycle_result.skipped_units += skipped_units
+
+    def _finish_cycle_tracking(self, data: dict[str, int | float | str]) -> None:
+        self._last_cycle_result.has_data = bool(data)
+
+    def get_cycle_result(self) -> TransportCycleResult:
+        return self._last_cycle_result
+
+    def cycle_is_complete_for_bridge(self) -> bool:
+        result = self.get_cycle_result()
+        return result.has_data and result.is_complete
+
+    def interleaved_cycle_timeout(self) -> float:
+        """
+        Return a reasonable full-cycle timeout for one interleaved read.
+        Transports with better knowledge of their block structure can override.
+        """
+        return 60.0
+
+    @property
+    def scrape_target(self) -> str:
+        """
+        Identifies the physical device this transport reads from.
+        Two transports with the same scrape_target share an endpoint
+        and can be consolidated into a scrape group.
+        Returns empty string for bridge transports (no scrape target).
+        Override in scraper subclasses to return a normalized identifier.
+        """
+        return ""
+
+    def enable_write(self) -> None:
         ''' required for sensitive / manually defined protocols '''
         pass
 
+    # on_message helper to filter out None.
+    def _emit_message( self, entry: registry_map_entry, value: int | float | str ) -> None:
+        if self.on_message is not None:
+            self.on_message(self, entry, value)
+
     #region - modbus
     #might limit to modbus_base only. not sure; might also apply to future protocols
-    def read_registers(self, start, count=1, registry_type : Registry_Type = Registry_Type.INPUT, **kwargs):
+    def read_registers(self, start, count=1, registry_type : Registry_Type = Registry_Type.INPUT, **kwargs) -> Any:
         pass
 
-    def write_register(self, register : int, value : int, **kwargs):
+    def write_register(self, register : int, value : int, **kwargs) -> None:
         pass
 
-    def analyse_protocol(self):
+    def analyse_protocol(self) -> None:
         pass
 
-    def validate_protocol(self, protocolSettings : "protocol_settings") -> float:
-        ''' validates protocol'''
-        pass
+
+def validate_protocol(self, registry_type: Registry_Type = Registry_Type.INPUT) -> float:
+    """
+    Validates the protocol by reading registers and scoring results.
+    Args:
+        registry_type: Which register type to validate against.
+    Returns:
+        Score percentage 0-100 indicating valid register reads.
+    """
+    return 0.0
     #endregion

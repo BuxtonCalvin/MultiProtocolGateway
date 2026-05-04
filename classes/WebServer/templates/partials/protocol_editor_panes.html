@@ -1,0 +1,133 @@
+<!--
+  protocol_editor_panes.html
+  HTMX partial — replaces #main-panes when a protocol is selected
+  directly from the Protocols nav menu (not via a scraper device).
+
+  Left  (cols 1-3):  Protocol metadata / file info
+  Right (cols 4-12): Register table with tab strip (input / holding / json)
+-->
+<div class="col-span-12 grid grid-cols-12 gap-4">
+
+  <!-- ══ LEFT: PROTOCOL INFO PANE ══ -->
+  <aside class="col-span-12 md:col-span-3 h-screen sticky top-14 overflow-y-auto
+                bg-ppg-800 rounded border border-ppg-700 p-3">
+
+    <h2 class="text-ppg-100 font-semibold text-sm mb-1">
+      {{ protocol_name }}
+    </h2>
+    <p class="text-ppg-400 text-xs mb-3">
+      Group: <span class="font-mono text-ppg-300">{{ protocol_group }}</span>
+    </p>
+
+    <!-- Tab summary -->
+    <div class="space-y-1 mb-4">
+      <p class="label mb-1">Available Register Maps</p>
+      {% for tab in proto_tabs %}
+      <div class="flex items-center justify-between py-1
+                  border-b border-ppg-700/40 last:border-0">
+        <span class="text-ppg-200 text-xs font-mono">{{ tab.registry_type }}</span>
+        <span class="badge badge-ok text-xs">{{ tab.total }} regs</span>
+      </div>
+      {% endfor %}
+      {% if not proto_tabs %}
+      <p class="text-ppg-500 text-xs italic">No register maps found in database.<br>
+        Run a re-scan from the dashboard.</p>
+      {% endif %}
+    </div>
+
+    <!-- File path info -->
+    {% if csv_path %}
+    <div class="card mt-2">
+      <p class="label mb-1">Source File</p>
+      <p class="font-mono text-ppg-400 text-xs break-all">{{ csv_path }}</p>
+    </div>
+    {% endif %}
+
+    <!-- JSON config summary -->
+    {% if json_data %}
+    <div class="card mt-2">
+      <p class="label mb-2">JSON Config</p>
+      <dl class="space-y-0.5">
+        {% for k, v in json_data.items() %}
+        {% if not k.endswith('_codes') %}
+        <div class="flex justify-between gap-2 text-xs">
+          <dt class="font-mono text-ppg-400 truncate">{{ k }}</dt>
+          <dd class="text-ppg-200 truncate">{{ v }}</dd>
+        </div>
+        {% endif %}
+        {% endfor %}
+      </dl>
+    </div>
+    {% endif %}
+
+    <!-- Hide analyze button — no device context here -->
+    <script>
+      const ab = document.getElementById('analyze-btn');
+      if (ab) ab.classList.add('hidden');
+    </script>
+  </aside>
+
+  <!-- ══ RIGHT: PROTOCOL REGISTER TABLE ══ -->
+  <section class="col-span-12 md:col-span-9"
+           aria-label="Protocol register editor for {{ protocol_name }}">
+
+    <div class="mb-2">
+    <h2 class="surface-title font-semibold text-sm">
+      Protocol Metrics Edit
+      <span class="surface-muted font-normal">[{{ protocol_name }}]</span>
+    </h2>
+    </div>
+
+    <!-- Tab strip -->
+    {% if proto_tabs %}
+    <div class="flex gap-1 mb-3 border-b border-ppg-700" role="tablist">
+      {% for tab in proto_tabs %}
+      <button class="tab-btn px-4 py-1.5 text-xs font-medium rounded-t
+                     {% if loop.first %}tab-active{% else %}tab-inactive{% endif %}"
+              role="tab"
+              aria-selected="{{ 'true' if loop.first else 'false' }}"
+              hx-get="/protocol/{{ tab.protocol_name }}/{{ tab.registry_type }}"
+              hx-target="#protocol-table-container"
+              hx-swap="innerHTML"
+              hx-headers='{"Cache-Control": "no-cache"}'
+              {% if loop.first %}hx-trigger="load, click"{% else %}hx-trigger="click"{% endif %}>
+        {{ tab.registry_type | title }}
+        <span class="text-ppg-300 ml-1 text-xs">({{ tab.total }})</span>
+      </button>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Protocol table loads here via HTMX -->
+    <div id="protocol-table-container"
+         class="overflow-x-auto rounded border border-ppg-700">
+      {% if not proto_tabs %}
+      <div class="px-4 py-8 text-center text-ppg-400 text-sm">
+        No register data found for <strong class="font-mono">{{ protocol_name }}</strong>.<br>
+        <button hx-get="/api/scan"
+                hx-swap="none"
+                class="btn-secondary text-xs mt-3">
+          Run Re-scan
+        </button>
+      </div>
+      {% endif %}
+    </div>
+
+  </section>
+
+</div>
+
+<script>
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('.tab-btn').forEach(b => {
+        b.classList.remove('tab-active');
+        b.classList.add('tab-inactive');
+        b.setAttribute('aria-selected', 'false');
+      });
+      this.classList.add('tab-active');
+      this.classList.remove('tab-inactive');
+      this.setAttribute('aria-selected', 'true');
+    });
+  });
+</script>

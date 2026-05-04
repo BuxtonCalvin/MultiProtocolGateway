@@ -1,6 +1,5 @@
 [general]
-log_level = DEBUG
-enable_concurrency = false
+read_mode = sequential
 
 [logging]
 log_dir = logs
@@ -23,8 +22,7 @@ console = true
 log_level = DEBUG
 transport = modbus_tcp
 protocol_version = eg4_18kpv
-analyze_protocol = false
-write = false
+write_enabled = false
 host = 10.17.2.65
 port = 502
 bridge = transport.timescaledb
@@ -36,7 +34,6 @@ model = 18KPV
 serial_number = 4066670074
 location = home
 name = EG$ 18kPV1
-# serial_number =
 
 [transport.timescaledb]
 log_level = DEBUG

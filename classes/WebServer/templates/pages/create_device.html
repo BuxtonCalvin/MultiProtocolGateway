@@ -1,0 +1,520 @@
+{% extends "base.html" %}
+{% block title %}Create Device - PPG Admin{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto px-4 py-6">
+  <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
+    <div>
+      <h1 class="surface-text font-bold text-xl">Create Device</h1>
+      <p class="surface-muted text-sm mt-1">
+        Build one new scraper section and write it directly to <span class="font-mono">config.cfg</span>.
+      </p>
+    </div>
+    <div class="flex items-center gap-2">
+      <button id="save-device-btn" type="button" class="btn-primary text-sm" disabled>Save</button>
+      <button id="cancel-device-btn" type="button" class="btn-secondary text-sm">Cancel</button>
+    </div>
+  </div>
+
+  <div class="card space-y-4">
+    <div class="grid grid-cols-[12rem_minmax(0,1fr)_2.5rem_minmax(0,1fr)] gap-3 items-center">
+      <label for="device-name-input" class="label mb-0">Transport Name</label>
+      <input id="device-name-input"
+             type="text"
+             placeholder="Inverter1"
+             class="theme-input w-full border rounded px-3 py-2 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-accent">
+      <button id="confirm-name-btn" type="button" class="btn-secondary px-0 text-sm h-9 w-9 create-add-btn">+</button>
+      <div id="device-section-preview" class="font-mono text-sm text-ppg-300"></div>
+    </div>
+
+    <div id="scraper-row" class="grid grid-cols-[12rem_minmax(0,1fr)_2.5rem] gap-3 items-center">
+      <label for="scraper-select" class="label mb-0">Scraper Transport</label>
+      <select id="scraper-select"
+              class="theme-input w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+              disabled>
+        <option value="">Select scraper transport</option>
+      </select>
+      <button id="confirm-scraper-btn" type="button" class="btn-secondary px-0 text-sm h-9 w-9 create-add-btn" disabled>+</button>
+    </div>
+
+    <div id="bridge-row" class="grid grid-cols-[12rem_minmax(0,1fr)_2.5rem] gap-3 items-center">
+      <label for="bridge-select" class="label mb-0">Bridge</label>
+      <select id="bridge-select"
+              class="theme-input w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+              disabled>
+        <option value="">Select bridge</option>
+      </select>
+      <button id="confirm-bridge-btn" type="button" class="btn-secondary px-0 text-sm h-9 w-9 create-add-btn" disabled>+</button>
+    </div>
+
+    <div id="protocol-row" class="grid grid-cols-[12rem_minmax(0,1fr)_2.5rem] gap-3 items-center">
+      <label for="protocol-select" class="label mb-0">Protocol Version</label>
+      <select id="protocol-select"
+              class="theme-input w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+              disabled>
+        <option value="">Select protocol version</option>
+      </select>
+      <button id="confirm-protocol-btn" type="button" class="btn-secondary px-0 text-sm h-9 w-9 create-add-btn" disabled>+</button>
+    </div>
+
+    <div id="log-row" class="grid grid-cols-[12rem_minmax(0,1fr)_2.5rem] gap-3 items-center">
+      <label for="log-level-select" class="label mb-0">Log Level</label>
+      <select id="log-level-select"
+              class="theme-input w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+              disabled>
+        {% for level in ["CRITICAL", "FATAL", "ERROR", "WARNING", "INFO", "DEBUG", "EXCEPTION"] %}
+        <option value="{{ level }}" {% if level == "INFO" %}selected{% endif %}>{{ level }}</option>
+        {% endfor %}
+      </select>
+      <button id="confirm-log-btn" type="button" class="btn-secondary px-0 text-sm h-9 w-9 create-add-btn" disabled>+</button>
+    </div>
+  </div>
+
+  <div id="settings-shell" class="card mt-5 hidden">
+    <div class="flex items-center justify-between gap-3 mb-3">
+      <div>
+        <h2 class="surface-text font-semibold text-sm">Device Settings</h2>
+        <p class="surface-muted text-xs mt-1">Checked rows are saved. Defaults are shown in the right column.</p>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-[1.75rem_16rem_minmax(0,1fr)_12rem] gap-2 text-ppg-400 text-xs uppercase tracking-wide px-1 pb-2 border-b border-ppg-700">
+      <span>A</span>
+      <span>Key</span>
+      <span>Value</span>
+      <span>Default</span>
+    </div>
+
+    <div id="settings-editor" class="space-y-3 mt-3"></div>
+  </div>
+
+  <div id="create-device-result" class="mt-4" aria-live="polite"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+const createData = JSON.parse('{{ create_device_data | tojson | safe }}');
+const protoGroups = JSON.parse('{{ proto_groups | tojson | safe }}');
+  const fixedKeys = new Set(['transport', 'bridge', 'protocol_version', 'log_level', 'transport_type_cached']);
+  const logLevels = ['CRITICAL', 'FATAL', 'ERROR', 'WARNING', 'INFO', 'DEBUG', 'EXCEPTION'];
+
+  const state = {
+    deviceName: '',
+    scraperTransport: '',
+    bridge: '',
+    protocolVersion: '',
+    logLevel: 'INFO'
+  };
+
+  const nameInput = document.getElementById('device-name-input');
+  const preview = document.getElementById('device-section-preview');
+  const scraperSelect = document.getElementById('scraper-select');
+  const bridgeSelect = document.getElementById('bridge-select');
+  const protocolSelect = document.getElementById('protocol-select');
+  const logLevelSelect = document.getElementById('log-level-select');
+  const saveBtn = document.getElementById('save-device-btn');
+  const cancelBtn = document.getElementById('cancel-device-btn');
+  const resultBox = document.getElementById('create-device-result');
+  const settingsShell = document.getElementById('settings-shell');
+  const settingsEditor = document.getElementById('settings-editor');
+
+  const scraperMap = Object.fromEntries((createData.scrapers || []).map(item => [item.name, item]));
+  const bridgeOptions = createData.bridges || [];
+  const sharedKeySet = new Set(createData.shared_keys || []);
+  const stepControls = [
+    { input: nameInput, button: document.getElementById('confirm-name-btn') },
+    { input: scraperSelect, button: document.getElementById('confirm-scraper-btn') },
+    { input: bridgeSelect, button: document.getElementById('confirm-bridge-btn') },
+    { input: protocolSelect, button: document.getElementById('confirm-protocol-btn') },
+    { input: logLevelSelect, button: document.getElementById('confirm-log-btn') }
+  ];
+
+  function fillSelect(select, items, getValue, getLabel) {
+    items.forEach(item => {
+      const option = document.createElement('option');
+      option.value = getValue(item);
+      option.textContent = getLabel(item);
+      select.appendChild(option);
+    });
+  }
+
+  fillSelect(scraperSelect, createData.scrapers || [], item => item.name, item => item.name);
+  fillSelect(bridgeSelect, bridgeOptions, item => item.section, item => item.section);
+
+  protoGroups.forEach(group => {
+    if ((group.group || '').startsWith('_')) return;
+    const optgroup = document.createElement('optgroup');
+    optgroup.label = group.group;
+    (group.protocols || []).forEach(protocol => {
+      const lower = String(protocol).toLowerCase();
+      if (String(protocol).startsWith('_')) return;
+      if (lower.includes('registry') || lower.includes('debug')) return;
+      const option = document.createElement('option');
+      option.value = protocol;
+      option.textContent = String(protocol).replace('.json', '');
+      optgroup.appendChild(option);
+    });
+    if (optgroup.children.length) {
+      protocolSelect.appendChild(optgroup);
+    }
+  });
+
+  function setStepEnabled(control, enabled) {
+    if (!control) return;
+    if (control.input) {
+      control.input.disabled = !enabled;
+      control.input.classList.toggle('opacity-60', !enabled);
+      control.input.classList.toggle('cursor-not-allowed', !enabled);
+    }
+    if (control.button) {
+      control.button.disabled = !enabled;
+      control.button.classList.toggle('opacity-60', !enabled);
+      control.button.classList.toggle('cursor-not-allowed', !enabled);
+    }
+  }
+
+  function sanitizeName(value) {
+    return value.trim();
+  }
+
+  function sectionName() {
+    return state.deviceName ? `transport.${state.deviceName}` : '';
+  }
+
+  function showMessage(kind, message, linkHref) {
+    const tone = kind === 'error'
+      ? 'border-danger/40 text-danger'
+      : 'border-success/40 text-success';
+    const link = linkHref
+      ? ` <a href="${linkHref}" class="underline ml-2">Open</a>`
+      : '';
+    resultBox.innerHTML = `<div class="card ${tone} text-sm">${message}${link}</div>`;
+  }
+
+  function clearMessage() {
+    resultBox.innerHTML = '';
+  }
+
+  function enableStepsThrough(index) {
+    stepControls.forEach((control, controlIndex) => {
+      setStepEnabled(control, controlIndex <= index);
+    });
+  }
+
+  function confirmName() {
+    const value = sanitizeName(nameInput.value);
+    if (!/^[A-Za-z0-9_]+$/.test(value)) {
+      showMessage('error', 'Transport name must use letters, numbers, or underscores only.');
+      return;
+    }
+    clearMessage();
+    state.deviceName = value;
+    state.scraperTransport = '';
+    state.bridge = '';
+    state.protocolVersion = '';
+    state.logLevel = 'INFO';
+    scraperSelect.value = '';
+    bridgeSelect.value = '';
+    protocolSelect.value = '';
+    logLevelSelect.value = 'INFO';
+    preview.textContent = `[${sectionName()}]`;
+    enableStepsThrough(1);
+    settingsShell.classList.add('hidden');
+    saveBtn.disabled = true;
+  }
+
+  function confirmScraper() {
+    if (!scraperSelect.value) {
+      showMessage('error', 'Choose a scraper transport.');
+      return;
+    }
+    clearMessage();
+    state.scraperTransport = scraperSelect.value;
+    state.bridge = '';
+    state.protocolVersion = '';
+    state.logLevel = 'INFO';
+    bridgeSelect.value = '';
+    protocolSelect.value = '';
+    logLevelSelect.value = 'INFO';
+    enableStepsThrough(2);
+    settingsShell.classList.add('hidden');
+    saveBtn.disabled = true;
+  }
+
+  function confirmBridge() {
+    if (!bridgeSelect.value) {
+      showMessage('error', 'Choose a bridge.');
+      return;
+    }
+    clearMessage();
+    state.bridge = bridgeSelect.value;
+    state.protocolVersion = '';
+    state.logLevel = 'INFO';
+    protocolSelect.value = '';
+    logLevelSelect.value = 'INFO';
+    enableStepsThrough(3);
+    settingsShell.classList.add('hidden');
+    saveBtn.disabled = true;
+  }
+
+  function confirmProtocol() {
+    if (!protocolSelect.value) {
+      showMessage('error', 'Choose a protocol version.');
+      return;
+    }
+    clearMessage();
+    state.protocolVersion = protocolSelect.value;
+    state.logLevel = 'INFO';
+    logLevelSelect.value = 'INFO';
+    enableStepsThrough(4);
+    settingsShell.classList.add('hidden');
+    saveBtn.disabled = true;
+  }
+
+  function createSettingRow(key, defaultValue, checked) {
+    const row = document.createElement('div');
+    row.className = 'grid grid-cols-[1.75rem_16rem_minmax(0,1fr)_12rem] gap-2 items-center px-1 py-1 rounded text-xs hover:bg-ppg-700/40';
+    row.dataset.key = key;
+
+    const active = document.createElement('input');
+    active.type = 'checkbox';
+    active.className = 'accent-accent w-3 h-3';
+    active.checked = checked;
+
+    const keyCell = document.createElement('div');
+    keyCell.className = 'font-mono surface-text truncate';
+    keyCell.textContent = key;
+    if (key.startsWith('device_')) {
+      keyCell.innerHTML = `${key}<span class="text-danger ml-1">*</span>`;
+    }
+
+    const value = document.createElement('input');
+    value.type = 'text';
+    value.value = checked ? defaultValue : '';
+    value.dataset.defaultValue = defaultValue;
+    value.className = 'theme-input w-full border rounded px-2 py-1 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent disabled:opacity-40 disabled:cursor-not-allowed';
+    value.disabled = !checked;
+
+    const defaultCell = document.createElement('div');
+    defaultCell.className = 'font-mono text-ppg-400 text-xs truncate';
+    defaultCell.title = defaultValue || '-';
+    defaultCell.textContent = defaultValue || '-';
+
+    active.addEventListener('change', () => {
+      value.disabled = !active.checked;
+      row.classList.toggle('opacity-60', !active.checked);
+      if (active.checked && !value.value) {
+        value.value = value.dataset.defaultValue || '';
+      }
+    });
+
+    row.classList.toggle('opacity-60', !checked);
+
+    row.appendChild(active);
+    row.appendChild(keyCell);
+    row.appendChild(value);
+    row.appendChild(defaultCell);
+    return row;
+  }
+
+  function renderSettings() {
+    const scraper = scraperMap[state.scraperTransport];
+    if (!scraper) return;
+
+    const allKeys = Object.entries(scraper.keys || {})
+      .filter(([key]) => !fixedKeys.has(key))
+      .sort((a, b) => a[0].localeCompare(b[0]));
+
+    const shared = [];
+    const specific = [];
+    allKeys.forEach(([key, defaultValue]) => {
+      if (sharedKeySet.has(key)) shared.push([key, defaultValue || '']);
+      else specific.push([key, defaultValue || '']);
+    });
+
+    settingsEditor.innerHTML = '';
+
+    const groups = [
+      { label: 'Scraper Settings', items: specific },
+      { label: 'Shared Settings', items: shared }
+    ].filter(group => group.items.length > 0);
+
+    groups.forEach((group, index) => {
+      if (index > 0) {
+        const divider = document.createElement('div');
+        divider.className = 'border-t border-ppg-700 pt-3';
+        settingsEditor.appendChild(divider);
+      }
+
+      const wrapper = document.createElement('div');
+      wrapper.className = 'space-y-1.5';
+
+      const heading = document.createElement('div');
+      heading.className = 'text-ppg-300 text-xs uppercase tracking-wide';
+      heading.textContent = group.label;
+      wrapper.appendChild(heading);
+
+      group.items.forEach(([key, defaultValue]) => {
+        const checked = defaultValue !== '';
+        wrapper.appendChild(createSettingRow(key, defaultValue, checked));
+      });
+
+      settingsEditor.appendChild(wrapper);
+    });
+
+    settingsShell.classList.remove('hidden');
+    saveBtn.disabled = false;
+  }
+
+  function confirmLogLevel() {
+    const selected = logLevelSelect.value;
+    if (!logLevels.includes(selected)) {
+      showMessage('error', 'Choose a log level.');
+      return;
+    }
+    clearMessage();
+    state.logLevel = selected;
+    renderSettings();
+  }
+
+  function validateSettings(settings) {
+    const errors = [];
+
+    settings.forEach(setting => {
+      if (!setting.is_active) {
+        return;
+      }
+
+      const value = String(setting.value || '').trim();
+      if (setting.key.startsWith('device_') && !value) {
+        errors.push(`${setting.key} is required.`);
+      }
+
+      const lowered = value.toLowerCase();
+      const defaultLowered = String(setting.default_value || '').trim().toLowerCase();
+      const looksBoolean = ['true', 'false'].includes(defaultLowered) || ['true', 'false'].includes(lowered);
+      if (looksBoolean && !['true', 'false'].includes(lowered)) {
+        errors.push(`${setting.key} must be true or false.`);
+      }
+    });
+
+    return errors;
+  }
+
+  function resetForm(options = {}) {
+    const keepMessage = Boolean(options.keepMessage);
+    state.deviceName = '';
+    state.scraperTransport = '';
+    state.bridge = '';
+    state.protocolVersion = '';
+    state.logLevel = 'INFO';
+
+    nameInput.value = '';
+    scraperSelect.value = '';
+    bridgeSelect.value = '';
+    protocolSelect.value = '';
+    logLevelSelect.value = 'INFO';
+    preview.textContent = '';
+    settingsEditor.innerHTML = '';
+    settingsShell.classList.add('hidden');
+    saveBtn.disabled = true;
+    enableStepsThrough(0);
+    if (!keepMessage) {
+      clearMessage();
+    }
+  }
+
+  async function saveDevice() {
+    if (!state.deviceName || !state.scraperTransport || !state.bridge || !state.protocolVersion || !state.logLevel) {
+      showMessage('error', 'Finish the five setup fields before saving.');
+      return;
+    }
+
+    const settings = Array.from(settingsEditor.querySelectorAll('[data-key]')).map(row => {
+      const key = row.dataset.key;
+      const checkbox = row.querySelector('input[type="checkbox"]');
+      const input = row.querySelector('input[type="text"]');
+      return {
+        key,
+        value: input ? input.value : '',
+        default_value: input ? (input.dataset.defaultValue || '') : '',
+        is_active: Boolean(checkbox && checkbox.checked)
+      };
+    });
+
+    const settingErrors = validateSettings(settings);
+    if (settingErrors.length) {
+      showMessage('error', settingErrors.join(' '));
+      return;
+    }
+
+    saveBtn.disabled = true;
+    clearMessage();
+
+    try {
+      const response = await fetch('/api/devices/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          device_name: state.deviceName,
+          scraper_transport: state.scraperTransport,
+          bridge: state.bridge,
+          protocol_version: state.protocolVersion,
+          log_level: state.logLevel,
+          settings
+        })
+      });
+
+      const payload = await response.json();
+      if (!response.ok) {
+        showMessage('error', payload.detail || 'Device creation failed.');
+        saveBtn.disabled = false;
+        return;
+      }
+
+      showMessage('success', `Saved [${payload.section}] to config.cfg.`, `/device/${encodeURIComponent(state.deviceName)}`);
+      resetForm({ keepMessage: true });
+    } catch (error) {
+      showMessage('error', `Network error: ${error}`);
+      saveBtn.disabled = false;
+    }
+  }
+
+  document.getElementById('confirm-name-btn').addEventListener('click', confirmName);
+  document.getElementById('confirm-scraper-btn').addEventListener('click', confirmScraper);
+  document.getElementById('confirm-bridge-btn').addEventListener('click', confirmBridge);
+  document.getElementById('confirm-protocol-btn').addEventListener('click', confirmProtocol);
+  document.getElementById('confirm-log-btn').addEventListener('click', confirmLogLevel);
+  saveBtn.addEventListener('click', saveDevice);
+  cancelBtn.addEventListener('click', resetForm);
+  nameInput.addEventListener('keydown', event => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      confirmName();
+    }
+  });
+  enableStepsThrough(0);
+})();
+</script>
+<style>
+.create-add-btn {
+  color: rgb(46 61 82);
+  border-color: rgb(140 174 200);
+  background-color: rgb(158, 166, 175);
+  font-weight: 700;
+}
+
+.create-add-btn:hover:not(:disabled) {
+  background-color: rgb(185 208 228);
+  border-color: rgb(100 140 180);
+}
+
+.create-add-btn:disabled {
+  color: rgb(91 122 153);
+  background-color: rgb(226 235 244);
+  border-color: rgb(185 208 228);
+}
+</style>
+{% endblock %}

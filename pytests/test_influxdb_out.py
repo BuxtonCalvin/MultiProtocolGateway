@@ -5,9 +5,11 @@ Test for InfluxDB output transport
 
 import time
 import unittest
-from unittest.mock import MagicMock, Mock, patch
+from typing import cast
+from unittest.mock import Mock, patch
 
 from classes.transports.influxdb_out import influxdb_out
+from defs.common import TransportSettings
 from protocol_gateway import CustomConfigParser as ConfigParser
 
 
@@ -32,8 +34,9 @@ class TestInfluxDBOut(unittest.TestCase):
         mock_client = Mock()
         mock_influxdb_client.return_value = mock_client
         mock_client.get_list_database.return_value = [{'name': 'test_db'}]
+        settings: TransportSettings = cast(TransportSettings, self.config['influxdb_output'])
 
-        transport = influxdb_out(self.config['influxdb_output'])
+        transport = influxdb_out(settings)
         transport.connect()
 
         self.assertTrue(transport.connected)
@@ -53,8 +56,9 @@ class TestInfluxDBOut(unittest.TestCase):
         mock_client = Mock()
         mock_influxdb_client.return_value = mock_client
         mock_client.get_list_database.return_value = [{'name': 'other_db'}]
+        settings: TransportSettings = cast(TransportSettings, self.config['influxdb_output'])
 
-        transport = influxdb_out(self.config['influxdb_output'])
+        transport = influxdb_out(settings)
         transport.connect()
 
         self.assertTrue(transport.connected)
@@ -68,7 +72,9 @@ class TestInfluxDBOut(unittest.TestCase):
         mock_influxdb_client.return_value = mock_client
         mock_client.get_list_database.return_value = [{'name': 'test_db'}]
 
-        transport = influxdb_out(self.config['influxdb_output'])
+        settings: TransportSettings = cast(TransportSettings, self.config['influxdb_output'])
+
+        transport = influxdb_out(settings)
         transport.connect()
 
 
@@ -86,7 +92,7 @@ class TestInfluxDBOut(unittest.TestCase):
         source_transport.protocolSettings = mock_protocol_settings
 
         # Test data
-        test_data = {'battery_voltage': '48.5', 'battery_current': '10.2'}
+        test_data: dict[str, int | float | str ] = {'battery_voltage': '48.5', 'battery_current': '10.2'}
 
         transport.last_batch_time = time.time() #stop "flush" from happening and failing test
         transport.batch_timeout = 21
@@ -114,7 +120,9 @@ class TestInfluxDBOut(unittest.TestCase):
         self.config.set('influxdb_output', 'batch_size', '50')
         self.config.set('influxdb_output', 'batch_timeout', '5.0')
 
-        transport = influxdb_out(self.config['influxdb_output'])
+        settings: TransportSettings = cast(TransportSettings, self.config['influxdb_output'])
+
+        transport = influxdb_out(settings)
 
         self.assertEqual(transport.username, 'admin')
         self.assertEqual(transport.password, 'secret')

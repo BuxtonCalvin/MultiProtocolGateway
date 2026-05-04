@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+{% block title %}Logging Settings — PPG Admin{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto">
+  <h1 class="surface-title font-bold text-xl mb-1">Logging Settings</h1>
+  <p class="surface-muted text-sm mb-6">
+    Settings from the <code class="font-mono surface-code">[logging]</code> section of config.cfg.
+  </p>
+
+  <div class="card space-y-2" id="logging-settings-pane">
+    {% for s in settings %}
+    <div class="grid grid-cols-[1fr_10rem_1.5rem_minmax(0,1fr)] gap-3 items-center py-1
+                border-b border-ppg-700/40 last:border-0
+                {% if s.is_dirty %}bg-dirty/5 rounded px-2{% endif %}">
+      <div>
+        <label class="font-mono surface-text text-sm font-medium" for="ls-{{ s.id }}">{{ s.key }}</label>
+        {% if s.default_value %}
+        <span class="surface-subtle text-xs ml-2">default: {{ s.default_value }}</span>
+        {% endif %}
+        {% if s.is_dirty %}<span class="text-dirty text-xs ml-1" title="Unsaved change">*</span>{% endif %}
+      </div>
+      {% if s.key == "level" %}
+      <select id="ls-{{ s.id }}"
+              class="theme-input rounded px-2 py-1
+                     font-mono text-sm
+                     focus:outline-none focus:ring-1 focus:ring-accent"
+              aria-label="{{ s.key }}"
+              hx-patch="/api/devices/general/logging/{{ s.id }}"
+              name="value_staged"
+              hx-swap="none"
+              hx-trigger="change delay:200ms"
+              onchange="updateLoggingHelpText(this)">
+        {% for level in ["CRITICAL", "FATAL", "ERROR", "WARNING", "INFO", "DEBUG", "EXCEPTION"] %}
+        <option value="{{ level }}" {% if (s.value_staged or "")|upper == level %}selected{% endif %}>{{ level }}</option>
+        {% endfor %}
+      </select>
+      {% elif s.key == "rotation" %}
+      <select id="ls-{{ s.id }}"
+              class="theme-input rounded px-2 py-1
+                     font-mono text-sm
+                     focus:outline-none focus:ring-1 focus:ring-accent"
+              aria-label="{{ s.key }}"
+              hx-patch="/api/devices/general/logging/{{ s.id }}"
+              name="value_staged"
+              hx-swap="none"
+              hx-trigger="change delay:200ms"
+              onchange="updateLoggingHelpText(this)">
+        <option value="weekly" {% if (s.value_staged or "")|lower == "weekly" %}selected{% endif %}>weekly</option>
+        <option value="daily" {% if (s.value_staged or "")|lower == "daily" %}selected{% endif %}>daily</option>
+        <option value="size" {% if (s.value_staged or "")|lower == "size" %}selected{% endif %}>size</option>
+      </select>
+      {% elif s.key == "console" %}
+      <select id="ls-{{ s.id }}"
+              class="theme-input rounded px-2 py-1
+                     font-mono text-sm
+                     focus:outline-none focus:ring-1 focus:ring-accent"
+              aria-label="{{ s.key }}"
+              hx-patch="/api/devices/general/logging/{{ s.id }}"
+              name="value_staged"
+              hx-swap="none"
+              hx-trigger="change delay:200ms"
+              onchange="updateLoggingHelpText(this)">
+        <option value="true" {% if (s.value_staged or "")|lower == "true" %}selected{% endif %}>true</option>
+        <option value="false" {% if (s.value_staged or "")|lower == "false" %}selected{% endif %}>false</option>
+      </select>
+      {% elif s.key == "when" %}
+      <select id="ls-{{ s.id }}"
+              class="theme-input rounded px-2 py-1
+                     font-mono text-sm
+                     focus:outline-none focus:ring-1 focus:ring-accent"
+              aria-label="{{ s.key }}"
+              hx-patch="/api/devices/general/logging/{{ s.id }}"
+              name="value_staged"
+              hx-swap="none"
+              hx-trigger="change delay:200ms"
+              onchange="updateLoggingHelpText(this)">
+        {% for day in ["W0", "W1", "W2", "W3", "W4", "W5", "W6"] %}
+        <option value="{{ day }}" {% if (s.value_staged or "")|upper == day %}selected{% endif %}>{{ day }}</option>
+        {% endfor %}
+      </select>
+      {% else %}
+      <input id="ls-{{ s.id }}"
+             type="text"
+             class="theme-input rounded px-2 py-1
+                    font-mono text-sm
+                    focus:outline-none focus:ring-1 focus:ring-accent"
+             value="{{ s.value_staged or '' }}"
+             aria-label="{{ s.key }}"
+             hx-patch="/api/devices/general/logging/{{ s.id }}"
+             name="value_staged"
+             hx-swap="none"
+             hx-trigger="change delay:400ms"
+             onchange="updateLoggingHelpText(this)">
+      {% endif %}
+      <input type="checkbox"
+             class="accent-accent w-3.5 h-3.5"
+             {% if s.is_active %}checked{% endif %}
+             title="Include in config.cfg"
+             aria-label="Active: {{ s.key }}"
+             hx-patch="/api/devices/general/logging/{{ s.id }}"
+             hx-on:htmx:config-request="event.detail.parameters = {is_active: this.checked}"
+             hx-swap="none"
+             hx-trigger="change">
+      <div id="logging-help-{{ s.id }}" class="surface-subtle text-xs leading-5"></div>
+    </div>
+    {% endfor %}
+    {% if not settings %}
+    <p class="surface-muted text-sm py-2">No logging settings found in config.cfg.</p>
+    {% endif %}
+  </div>
+</div>
+<script>
+  function updateLoggingHelpText(fieldEl) {
+    const key = (fieldEl.getAttribute("aria-label") || "").toLowerCase();
+    const rawValue = (fieldEl.value || "").trim();
+    const value = rawValue.toLowerCase();
+    const helpEl = document.getElementById(`logging-help-${fieldEl.id.replace("ls-", "")}`);
+    if (!helpEl) return;
+
+    if (key === "level") {
+      const levelHelp = {
+        critical: "Critical: severe failure; application may not continue safely.",
+        fatal: "Fatal: unrecoverable condition requiring immediate shutdown or restart.",
+        error: "Error: operation failed and needs attention, but process can continue.",
+        warning: "Warning: unexpected or risky condition; execution continues.",
+        info: "Info: normal high-level operational events and state changes.",
+        debug: "Debug: detailed diagnostic data for troubleshooting.",
+        exception: "Exception: captured exception traceback and context for failures."
+      };
+      helpEl.textContent = levelHelp[value] || "Severity threshold for emitted log messages.";
+      return;
+    }
+
+    if (key === "rotation") {
+      const rotationHelp = {
+        weekly: "Rotate on a weekly schedule; use 'when' (W0..W6) to choose day.",
+        daily: "Rotate once per day at midnight UTC.",
+        size: "Rotate when file reaches max_bytes."
+      };
+      helpEl.textContent = rotationHelp[value] || "Controls how log files rotate.";
+      return;
+    }
+
+    if (key === "when") {
+      const dayMap = {
+        w0: "Monday", w1: "Tuesday", w2: "Wednesday", w3: "Thursday",
+        w4: "Friday", w5: "Saturday", w6: "Sunday"
+      };
+      helpEl.textContent = `Weekly rotation day (${dayMap[value] || "W0=Mon ... W6=Sun"}).`;
+      return;
+    }
+
+    const staticHelp = {
+      backup_count: "How many rotated log files to keep before deleting older archives.",
+      console: "Also emit logs to console/stdout in addition to file logging.",
+      interval: "Rotation interval multiplier (used with timed rotation modes).",
+      log_dir: "Directory where log files are written.",
+      log_file: "Primary log filename.",
+      max_bytes: "Maximum log file size in bytes before rotation when rotation='size'."
+    };
+    helpEl.textContent = staticHelp[key] || "Logging configuration setting.";
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    document.querySelectorAll('#logging-settings-pane [id^="ls-"][aria-label]').forEach(updateLoggingHelpText);
+  });
+</script>
+{% endblock %}

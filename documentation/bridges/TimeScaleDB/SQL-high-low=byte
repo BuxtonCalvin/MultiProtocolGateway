@@ -1,2 +1,0 @@
-SELECT (<high_byte> * 65536) + <low_byte> AS total_generation FROM device_metrics_wide
-WHERE device_id = 'your_device_id' AND timestamp >= 'start_time' AND timestamp <= 'end_time';

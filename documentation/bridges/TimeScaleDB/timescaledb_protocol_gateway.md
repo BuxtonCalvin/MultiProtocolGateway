@@ -134,7 +134,7 @@ One row per timestamp with multiple metric columns.
 
 Here is a screen shot of how the schema looks in PGadmin.  The tables reside in the public folder.
 
-![pgAdmin](pgAdmin.png)
+![PGAdmin for TimescaleDB](image.png)
 
 ---
 
@@ -177,7 +177,7 @@ GROUP BY device_info_id;
 ### 5.4 All metrics from public.device_metrics_wide
 
 ```sql
-SELECT * FROM public.device_metrics_wide
+SELECT * FROM public.device_metrics_wide__eg4_18kpv
 ORDER BY m_time ASC, device_info_id ASC 
 ```
 
@@ -215,7 +215,7 @@ services:
    - /home/timescaledb:/home/postgres/pgdata
   
   # name your containers to whatever you want.  The TimescaleDB module sits on top of PPG
-  # This example is for the EG4 18kpv, but you can use any volume mappings for your particular inverter.
+  # This example is for the EG4 18kpv (/app/protocols/eg4), but you can use any volume mappings for your particular inverter.
   18kPV_timescaledb:
     container_name: 18kPV_timescaledb
     image: buxtoncalvin/pythonprotocolgateway:latest
@@ -225,12 +225,10 @@ services:
     environment:
       - TZ=America/Los_Angeles
     volumes:
-      - /home/ppg/cfg/config.cfg:/app/config.cfg
-      - /home/ppg/cfg/variable_mask.txt:/app/variable_mask.txt
-      - /home/ppg/cfg/variable_screen.txt:/app/variable_screen.txt
-      - /home/ppg/cfg/eg4_18kpv.input_registry_map.csv:/app/protocols/eg4/eg4_18kpv.input_registry_map.csv
-      - /home/ppg/cfg/eg4_18kpv.holding_registry_map.csv:/app/protocols/eg4/eg4_18kpv.holding_registry_map.csv
-      - /home/ppg/cfg/eg4_18kpv.json:/app/protocols/eg4/eg4_18kpv.json
+      - /home/pythonprotocolgateway/config:/app/config
+      - /home/pythonprotocolgateway/protocols/eg4:/app/protocols/eg4
+      - /home/pythonprotocolgateway/timescaledb_backlog:/app/timescaledb_backlog
+      - /home/pythonprotocolgateway/logs:/app/logs
     logging:
     driver: "json-file"
     options:
@@ -301,12 +299,11 @@ services:
 
 ```
 
-### 6.4 PPG Configuration File General (config.cfg)
+### 6.4 PPG Configuration File Simple General (config.cfg)
 
 ```ini
 [general]
-log_level = DEBUG
-enable_concurrency = false
+read_mode = sequential
 
 [logging]
 log_dir = logs
@@ -329,8 +326,6 @@ console = true
 log_level = DEBUG
 transport = modbus_tcp
 protocol_version = eg4_18kpv
-analyze_protocol = false
-write = false
 host = 10.17.2.65
 port = 502
 bridge = transport.timescaledb
@@ -398,6 +393,8 @@ stale_data_timeout = 300
 enable_pushover = True
 pushover_token = your_token_here
 pushover_user = your_user_key_here
+# tells PPG to wait until all metrics have been read to write data to timescaledb
+write_requires_complete_cycle = True
 ```
 
 ---

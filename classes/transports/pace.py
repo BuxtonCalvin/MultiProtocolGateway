@@ -1,3 +1,18 @@
+"""This module uses a long obsolete CRC-16 algorithm that is not compatible with
+the standard CRC-16 implementations in pymodbus and elsewhere.
+It is recommended to use the modbus_pace transport instead, which uses the standard CRC-16 algorithm
+and is compatible with a wider range of Modbus devices.
+It is only used for the PACE 5048 inverter, which has a custom Modbus implementation
+that requires this specific CRC. The code includes a custom CRC calculation function
+and a transport class that implements the necessary Modbus communication using this CRC.
+This transport is not recommended for new implementations, but is included for legacy support of the PACE 5048 inverter.
+The pymodbus library version (2.3.0) is obsolete and should not be used for new projects, but is included
+here for compatibility with the PACE 5048's custom Modbus implementation.  You'll need to install pymodbus
+2.3.0 specifically to use this transport, as newer versions of pymodbus do not support the custom CRC required by the PACE 5048.
+Use the modbus_rtu transport or the modbus_pace transport instead for new projects, as they use the
+standard CRC-16 algorithm and are compatible with a wider range of Modbus devices.
+"""
+
 import logging
 import struct
 import time

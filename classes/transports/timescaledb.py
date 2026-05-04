@@ -1,8 +1,9 @@
+# bridge transport module for TimescaleDB, implementing a high-performance transport that writes protocol metrics
+# to a TimescaleDB database with support for hypertables, continuous aggregates, rollups, and persistent disk backlog.
 """
 timescaledb transport bridge module is free software written by Kevin Burke: you can redistribute it and/or modify
 it under the terms of the GNU Affero General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-any later version.
+the Free Software Foundation, either version 3 of the License, or any later version.
 
 timescaledb transport bridge module is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -11,17 +12,18 @@ GNU Affero General Public License for more details.
 
 You can find a copy of the GNU Affero General Public License in the documentation/bridges/timescaledb folder.
 If not, see <https://www.gnu.org>.
-
+----------------------------------------------------------------------------------------------------------------------
 timescaledb transport bridge module (with rollup continuous aggregates) and persistent disk backlog.
-python > 3.9 is required, 3.14 is recommended for best performance and latest features.
-The transport uses SQLAlchemy for database interactions and supports automatic schema management,
+python > 3.9 is required, 3.13 is recommended for best performance and latest features.
+The transport uses the latest SQLAlchemy version for database interactions and supports automatic schema management,
 including dynamic column creation based on the protocol registry, hypertable setup, and continuous
 aggregate rollups for efficient querying of historical data.
 
 Features:
  - Auto-create database (default "solar", configurable)
- - device_info (multi unique transport scraper devices) (for future multi-device/transport support)
- - device_metrics_wide hypertable
+ - device_info (multi unique transport scraper devices)
+ - device_metrics_wide hypertable per protocol with dynamic column creation based on protocol registry metrics,
+        with intelligent type mapping and coercion for optimal compression
  - device_metrics_narrow hypertable
  - Hypertable compression & retention (idempotent)
  - Continuous aggregates rollups: hourly_rollup, daily_rollup, weekly_rollup, monthly_rollup with hierarchical dependencies and policies
@@ -30,7 +32,7 @@ Features:
 
 Terminology:
 Continuous Aggregates	The official TimescaleDB feature name. It's an automatically and incrementally updated
-    materialized SQL view that pre-computes aggregate data (e.g., averages, sums over a minute, hour, day, week or month)
+    materialized SQL view that pre-computes aggregate data (e.g., averages, sums over a time window: minute, hour, day, week or month)
     from raw data and stores it in a separate hypertable view.
 
 Continuous Rollups	 This term refers to the process of downsampling data into successively
@@ -40,24 +42,24 @@ Continuous Rollups	 This term refers to the process of downsampling data into su
     aggregate would be defined based on the hourly rollup continuous aggregate, and so on.
 
 """
-import asyncio
+
 import json
 import logging
 import math
 import queue
 import re
-import sys
 import threading
 import time
 import warnings
-from _thread import RLock, lock
-from configparser import SectionProxy
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
+from threading import Lock, RLock
 from typing import Any, Callable, List, Literal, Optional, Tuple
 
 import requests
 from sqlalchemy import (
+    Boolean,
     Connection,
     DateTime,
     Engine,
@@ -70,19 +72,15 @@ from sqlalchemy import (
     Table,
     Text,
     TextClause,
+    UniqueConstraint,
     create_engine,
     inspect,
     text,
 )
-from sqlalchemy.dialects.postgresql import (
-    Insert,
-)
-from sqlalchemy.dialects.postgresql import (
-    insert as pg_insert,
-)
+from sqlalchemy.dialects.postgresql import Insert
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 # from sqlalchemy.engine.interfaces import ReflectedColumn
-from sqlalchemy.engine.interfaces import ReflectedColumn
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.orm import (
     DeclarativeBase,
@@ -96,18 +94,14 @@ from tzlocal import get_localzone_name
 
 from classes.protocol_settings import (
     Registry_Type,
-    protocol_settings,
     registry_map_entry,
 )
+from defs.common import TransportSettings
 
 from .transport_base import transport_base
 
-SessionGlobal: sessionmaker[Session] = sessionmaker(
-    autocommit=False,
-    expire_on_commit=False,
-    autoflush=False
-)
-# machine_timezone: Stores the local timezone name as detected by tzlocal.get_localzone_name(), used for time alignment in rollups and timestamp storage.
+# machine_timezone: Stores the local timezone name as detected by tzlocal.get_localzone_name(),
+# used for time alignment in rollups and timestamp storage.
 machine_timezone: str = get_localzone_name()
 
 def _now_tz() -> datetime:
@@ -116,10 +110,65 @@ def _now_tz() -> datetime:
 # base class for all tables.
 class Base(DeclarativeBase):
     pass
+
+class ProtocolRegistry(Base):
+    __tablename__ = "protocol_registry"
+
+    protocol_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    protocol_name: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    wide_table_name: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # None = narrow only (>200 metrics)
+
+    metric_count: Mapped[int] = mapped_column(Integer, default=0)
+
+    # Rollup state — enough for RollupManager to rediscover and manage views
+    rollup_prefix: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # e.g. "rollup_wide__eg4_18kpv" — the base name views are derived from
+    # None if rollups are disabled or not yet set up for this protocol
+
+    rollup_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    rollup_setup_complete: Mapped[bool] = mapped_column(Boolean, default=False)
+    # False until setup_narrow_rollup completes successfully — allows restart recovery
+
+    last_refresh_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Tracks when rollups were last successfully refreshed per protocol
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now_tz)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now_tz, onupdate=_now_tz)
+
+    metriccatalog: Mapped[List["MetricCatalog"]] = relationship(
+        "MetricCatalog", back_populates="protocolregistry"
+    )
+    deviceinfo: Mapped[List["DeviceInfo"]] = relationship(
+        "DeviceInfo", back_populates="protocolregistry"
+    )
+
+class MetricCatalog(Base):
+    __tablename__: str = "metric_catalog"
+
+    catalog_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    protocol_id: Mapped[int] = mapped_column(ForeignKey("protocol_registry.protocol_id"), nullable=False)
+    metric_name: Mapped[str] = mapped_column(Text, nullable=False)
+    clean_column_name: Mapped[str] = mapped_column(Text, nullable=False)
+    data_type: Mapped[str] = mapped_column(Text, default='double precision', nullable=False)
+    unit_mod: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now_tz, onupdate=_now_tz)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        # Same metric name can exist in multiple protocols
+        UniqueConstraint('protocol_id', 'metric_name', name='uq_metric_catalog_protocol_metric'),
+        # Same clean column name can exist in multiple protocols' wide tables
+        # but must be unique within a protocol
+        UniqueConstraint('protocol_id', 'clean_column_name', name='uq_metric_catalog_protocol_column'),)
+
+    protocolregistry: Mapped["ProtocolRegistry"] = relationship(
+        "ProtocolRegistry", back_populates="metriccatalog")
 class DeviceInfo(Base):
     __tablename__: str = "device_info"
 
     device_info_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    protocol_id: Mapped[Optional[int]] = mapped_column(ForeignKey("protocol_registry.protocol_id"), nullable=True, index=True)
     device_identifier: Mapped[Optional[str]] = mapped_column(Text, index=True)
     device_serial_number: Mapped[Optional[str]] = mapped_column(Text)
     device_name: Mapped[Optional[str]] = mapped_column(Text)
@@ -128,58 +177,231 @@ class DeviceInfo(Base):
     device_firmware: Mapped[Optional[str]] = mapped_column(Text)
     device_location: Mapped[Optional[str]] = mapped_column(Text)
     transport: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
-
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now_tz)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now_tz, onupdate=_now_tz)
 
-    devicemetricswide: Mapped[List["DeviceMetricsWide"]] = relationship(
-        "DeviceMetricsWide", back_populates="device_info"
-    )
+    # Relationships
+    protocolregistry: Mapped[Optional["ProtocolRegistry"]] = relationship(
+        "ProtocolRegistry", back_populates="deviceinfo")
     devicemetricsnarrow: Mapped[List["DeviceMetricsNarrow"]] = relationship(
-        "DeviceMetricsNarrow", back_populates="device_info"
-    )
-
-class DeviceMetricsWide(Base):
-    __tablename__: str = "device_metrics_wide"
-
-    m_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now_tz, primary_key=True)
-    device_info_id: Mapped[int] = mapped_column(ForeignKey("device_info.device_info_id"), primary_key=True)
-
-    __table_args__ = (
-        PrimaryKeyConstraint('m_time', 'device_info_id', name='device_metrics_wide_pkey'),
-    )
-
-    device_info: Mapped["DeviceInfo"] = relationship("DeviceInfo", back_populates="devicemetricswide")
+        "DeviceMetricsNarrow", back_populates="deviceinfo")
 
 class DeviceMetricsNarrow(Base):
     __tablename__: str = "device_metrics_narrow"
 
     # In TimescaleDB/SQLAlchemy, mark columns that are part of PK as primary_key=True in mapped_column
-    # as well as defining the constraint in __table_args__
-    # metric_value is forced float for all numerics and booleans.  Text (ASCII) is filtered out prior to append.
+    # as well as defining the constraint in __table_args__ to ensure correct behavior and indexing.
+    # metric_value is forced float for all numerics and booleans. Ascii values are stored in metric_ascii column,
+    # which is nullable and only populated for string types.
     m_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now_tz, primary_key=True)
     device_info_id: Mapped[int] = mapped_column(ForeignKey("device_info.device_info_id"), primary_key=True)
     metric_name: Mapped[str] = mapped_column(Text, primary_key=True)
     metric_value: Mapped[float] = mapped_column(Float)
+    metric_ascii: Mapped[str] = mapped_column(Text, nullable=True)
 
     __table_args__ = (
         PrimaryKeyConstraint('m_time', 'device_info_id', 'metric_name', name='device_metrics_narrow_pkey'),
     )
 
-    device_info: Mapped["DeviceInfo"] = relationship("DeviceInfo", back_populates="devicemetricsnarrow")
+    deviceinfo: Mapped["DeviceInfo"] = relationship("DeviceInfo", back_populates="devicemetricsnarrow")
 
-class MetricCatalog(Base):
-    """ Metric catalog for dynamic columns ensures that each metric has a corresponding column that is safe for SQL column naming.
+# The TimescaleDBConnectionManager class encapsulates the SQLAlchemy engine and connection pool management for a single TimescaleDB database.
+class TimescaleDBConnectionManager:
     """
-    __tablename__: str = "metric_catalog"
+    Owns the SQLAlchemy engine and connection pool for a single TimescaleDB database.
+    Shared across all protocol instances pointing at the same database.
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    metric_name: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
-    clean_column_name: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
-    data_type: Mapped[str] = mapped_column(Text, default='double precision', nullable=False)
-    unit_mod:Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),  default=_now_tz, onupdate=_now_tz)
-    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    Usage:
+        manager = TimescaleDBConnectionManager(host, port, database, username, password)
+        manager.connect()
+
+        protocol_a = timescaledb(settings_a, connection_manager=manager)
+        protocol_b = timescaledb(settings_b, connection_manager=manager)
+
+        manager.dispose()  # clean shutdown of shared pool
+    """
+
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        database: str,
+        username: str,
+        password: str,
+        pool_size: int = 5,
+        max_overflow: int = 10,
+        pool_recycle: int = 3600,
+        log: logging.Logger | None = None
+    ) -> None:
+
+        self.host: str = host
+        self.port: int = port
+        self.database: str = database
+        self.username: str = username
+        self.password: str = password
+        self.pool_size: int = pool_size
+        self.max_overflow: int = max_overflow
+        self.pool_recycle: int = pool_recycle
+        self._log: logging.Logger = log or logging.getLogger(__name__)
+
+        self._engine: Engine | None = None
+        self._lock: threading.RLock = threading.RLock()
+        self._ref_count: int = 0  # tracks how many protocol instances are using this manager
+        self._connected: bool = False
+
+
+    @classmethod
+    def from_settings(cls, settings: TransportSettings, log: logging.Logger | None = None ) -> "TimescaleDBConnectionManager":
+        """
+        Construct a ConnectionManager directly from a configparser SectionProxy.
+        Connection settings are read from the section, with the same defaults
+        as the timescaledb class uses.
+        """
+        return cls(
+            host=settings.get("host", fallback="localhost"),
+            port=settings.getint("port", fallback=5432),
+            database=settings.get("database", fallback="solar"),
+            username=settings.get("username", fallback=""),
+            password=settings.get("password", fallback=""),
+            pool_size=settings.getint("pool_size", fallback=5),
+            max_overflow=settings.getint("max_overflow", fallback=10),
+            pool_recycle=settings.getint("pool_recycle", fallback=3600),
+            log=log
+        )
+
+    # -------------------------
+    # Connection lifecycle
+    # -------------------------
+
+    def connect(self) -> None:
+        """
+        Create the shared engine and verify the connection.
+        Safe to call multiple times — only creates the engine once.
+        """
+        with self._lock:
+            if self._engine is not None:
+                return
+            try:
+                self._create_database_if_missing()
+                url: str = (
+                    f"postgresql+psycopg2://{self.username}:{self.password}"
+                    f"@{self.host}:{self.port}/{self.database}"
+                )
+                self._engine = create_engine(
+                    url,
+                    pool_pre_ping=True,
+                    future=True,
+                    pool_recycle=self.pool_recycle,
+                    pool_size=self.pool_size,
+                    max_overflow=self.max_overflow
+                )
+                with self._engine.connect() as conn:
+                    conn.execute(text("SELECT 1"))
+                self._connected = True
+                self._log.info(f"ConnectionManager: connected to '{self.database}'")
+            except OperationalError as e:
+                self._connected = False
+                self._log.error(f"ConnectionManager: failed to connect: {e}")
+                self._log.error(f"❌ [COMMUNICATION LOST] --- Name: {self.database} ---")
+                raise
+
+    def dispose(self) -> None:
+        """
+        Dispose the shared engine. Should only be called when all protocol
+        instances have been closed — use ref counting to enforce this.
+        """
+        with self._lock:
+            if self._ref_count > 0:
+                self._log.warning(
+                    f"ConnectionManager: dispose() called with {self._ref_count} "
+                    f"active references — deferring."
+                )
+                return
+            if self._engine is not None:
+                self._engine.dispose()
+                self._engine = None
+                self._connected = False
+                self._log.info("ConnectionManager: engine disposed.")
+
+    # -------------------------
+    # Session factory
+    # -------------------------
+
+    def make_session_factory(self) -> sessionmaker[Session]:
+        """
+        Returns a new sessionmaker bound to the shared engine.
+        Each protocol instance calls this once during its own init
+        and holds the returned factory for its lifetime.
+        """
+        if self._engine is None:
+            raise RuntimeError("ConnectionManager: connect() must be called before make_session_factory()")
+        return sessionmaker(
+            bind=self._engine,
+            autocommit=False,
+            expire_on_commit=False,
+            autoflush=False
+        )
+
+    # -------------------------
+    # Reference counting
+    # -------------------------
+
+    def register(self) -> None:
+        """Called by each protocol instance during __init__."""
+        with self._lock:
+            self._ref_count += 1
+            self._log.debug(f"ConnectionManager: registered instance (total: {self._ref_count})")
+
+    def unregister(self) -> None:
+        """
+        Called by each protocol instance during close().
+        Automatically disposes the engine when the last instance unregisters.
+        """
+        with self._lock:
+            self._ref_count = max(0, self._ref_count - 1)
+            self._log.debug(f"ConnectionManager: unregistered instance (total: {self._ref_count})")
+            if self._ref_count == 0:
+                self._log.info("ConnectionManager: last instance unregistered — disposing engine.")
+                self.dispose()
+
+    # -------------------------
+    # Engine access
+    # -------------------------
+
+    @property
+    def engine(self) -> Engine:
+        if self._engine is None:
+            raise RuntimeError("ConnectionManager: engine is not initialized. Call connect() first.")
+        return self._engine
+
+    @property
+    def connected(self) -> bool:
+        return self._connected
+
+
+    def _create_database_if_missing(self) -> None:
+        default_url: str = (
+            f"postgresql+psycopg2://{self.username}:{self.password}"
+            f"@{self.host}:{self.port}/postgres"
+        )
+        try:
+            default_engine: Engine = create_engine(default_url, isolation_level="AUTOCOMMIT", pool_pre_ping=True)
+            with default_engine.connect() as conn:
+                row = conn.execute(
+                    text("SELECT 1 FROM pg_database WHERE datname = :d"),
+                    {"d": self.database}
+                ).fetchone()
+                if not row:
+                    self._log.info(f"Database '{self.database}' not found — creating")
+                    conn.execute(text(f'CREATE DATABASE "{self.database}"'))
+                    self._log.info(f"Database '{self.database}' created")
+                else:
+                    self._log.debug(f"Database '{self.database}' already exists")
+            default_engine.dispose()
+        except Exception as e:
+            self._log.error(f"Failed to verify/create database '{self.database}': {e}")
+            raise
+
 
 # TimescaleDB transport bridge class
 class timescaledb(transport_base):
@@ -200,7 +422,6 @@ class timescaledb(transport_base):
     database: str = "solar"
     username: str = ""
     password: str = ""
-    # write_mode = "READ"  # Unclear from base classes on how to use, as TimescaleDB transport will only write to the database, never to the inverter
 
     force_float: bool = True
 
@@ -238,6 +459,11 @@ class timescaledb(transport_base):
         "FLOAT64": "DOUBLE PRECISION"
     }
 
+    # Type Coercion based on timescale_type_map values for field definitions.
+    # data is coerced to improve compression in metrics' tables.
+    INT_TYPES: set[str] = {"SMALLINT", "INTEGER", "BIGINT"}
+    FLOAT_TYPES: set[str] = {"REAL", "DOUBLE PRECISION", "NUMERIC"}
+
     flush_timeout: int = 15
 
     # persistent storage/backlog settings. Default folder name and file name are the same but can be user configured.
@@ -255,6 +481,7 @@ class timescaledb(transport_base):
     tsdb_connected = False
 
     ### Hypertable and rollup settings defaults.  These can be overridden by settings SectionProxy, but defaults are provided here for clarity.
+
     # whether to attempt to migrate existing data when creating hypertables and rollups.  Set to False to skip migration and start fresh with new schema.
     migrate_data: bool = True
     # whether to enable compression on hypertables at startup.
@@ -265,12 +492,14 @@ class timescaledb(transport_base):
     enable_auto_refresh: bool = True  # whether to auto-refresh rollups periodically
     drop_after: str = "1 year"  # default retention policy for raw data in tables and views, can be overridden by settings SectionProxy
 
-    # stale data settings and fields.  Stale data is read per transport batch based on the timestamp of the last row of metrics data received.  If the current time exceeds that timestamp by more than the stale_data_timeout, then the transport will consider the data to be stale and trigger a cleanup of incomplete batches in the database, as well as an optional upstream reconnect if request_upstream_reconnect callback is set by the user.
+    # stale data settings and fields.  Stale data is read per transport batch based on the timestamp of the last row of metrics data received.
+    # If the current time exceeds that timestamp by more than the stale_data_timeout, then the transport will consider the data to be stale
+    # and trigger a cleanup of incomplete batches in the database, as well as an optional upstream reconnect if request_upstream_reconnect
+    # callback is set by the user.
     stale_data_timeout: int = 300       # seconds before considering data stale for incomplete batch cleanup
     max_stale_attempts: int = 3
     retry_delay_mins: int = 5
 
-    schema_needs_refresh: bool = True  # flag to indicate if ORM schema refresh is needed after reconnect or column changes
     current_metric_count: int = 0
 
     # pushover notification settings for stale data alerts.
@@ -280,7 +509,20 @@ class timescaledb(transport_base):
     pushover_token: str = ""
     pushover_user: str = ""
 
-    def __init__(self, settings: SectionProxy) -> None:
+    # write_requires_complete_cycle is used to prevent writing incomplete batches of data to the database,
+    # which can cause issues with rollup continuous aggregates and data integrity.
+    # When True, the transport will only write data to the database once it has received a complete cycle
+    # of metrics for a given protocol, as determined by the registry map.  This allows the transport
+    # to ensure that all expected metrics for a given timestamp have been received before writing to the database,
+    # which is important for maintaining data integrity and ensuring that rollups are accurate.
+    write_requires_complete_cycle = True
+
+
+    def __init__(self, settings: TransportSettings, connection_manager: TimescaleDBConnectionManager | None = None) -> None:
+        # This explicitly checks: "Does this object actually have the methods I need?"
+        if not isinstance(settings, TransportSettings):
+            msg: str = f"Provided settings object {type(settings)} is missing required methods!"
+            raise TypeError(msg)
         """
         Initialize the TimescaleDB transport bridge.
 
@@ -288,28 +530,29 @@ class timescaledb(transport_base):
             settings (SectionProxy): Configuration section containing database and transport options.
 
         Configuration options:
-            - host (str): Database host (default: "localhost")
-            - port (int): Database port (default: 5432)
-            - database (str): Database name (default: "solar")
-            - username (str): Database username
-            - password (str): Database password
-            - device_name (str): Name for the bridge (default: "TimeScaleDB PPG Bridge")
-            - force_float (bool): Force metric values to float (default: True)
-            - flush_timeout (int): Seconds between batch flushes (default: 15). Note: this is set from the "read_interval" setting, not "flush_timeout".
-            - enable_persistent_storage (bool): Enable disk backlog (default: True)
+            - auto_refresh_interval (int): Seconds between rollup refreshes (default: 21600)
             - backlog_storage_path (str): Path for backlog files (default: "parent/timescaledb_backlog")
+            - database (str): Database name (default: "solar")
+            - device_name (str): Name for the bridge (default: "TimeScaleDB PPG Bridge")
+            - enable_auto_refresh (bool): Enable periodic rollup refresh (default: True)
+            - enable_compression (bool): Enable compression on hypertables at startup (default: True)
+            - enable_persistent_storage (bool): Enable disk backlog (default: True)
+            - flush_timeout (int): Seconds between batch flushes (default: 15). Note: this is set from the "read_interval" setting, not "flush_timeout".
+            - force_float (bool): Force metric values to float (default: True)
+            - host (str): Database host (default: "localhost")
+            - hypertable_defaults: Dicts for hypertable narrow and wide creation and policies
+            - max_backlog_age (int): Max age (seconds) for backlog points (default: 86400) 24 hours
             - max_backlog_size (int): Max backlog points (default: 10000)
-            - max_backlog_age (int): Max age (seconds) for backlog points (default: 86400)  24 hours
+            - max_reconnect_delay (int): Max reconnect delay (default: 300)
+            - migrate_data: whether to attempt to migrate existing data when creating hypertables and rollups. Set to False to skip migration and start fresh with new schema.
+            - password (str): Database password
+            - port (int): Database port (default: 5432)
             - reconnect_attempts (int): Max reconnect attempts (default: 5)
             - reconnect_delay (int): Initial reconnect delay (default: 5)
-            - use_exponential_backoff (bool): Use exponential backoff (default: True)
-            - max_reconnect_delay (int): Max reconnect delay (default: 300)
-            - stale_data_timeout (int): Seconds before considering data stale for incomplete batch cleanup (default: 300)
-            - hypertable_defaults: Dicts for hypertable narrow and wide creation and policies
-            - enable_compression (bool): Enable compression on hypertables at startup (default: True)
             - rollup_defaults: dict for rollup settings
-            - enable_auto_refresh (bool): Enable periodic rollup refresh (default: True)
-            - auto_refresh_interval (int): Seconds between rollup refreshes (default: 21600)
+            - stale_data_timeout (int): Seconds before considering data stale for incomplete batch cleanup (default: 300)
+            - use_exponential_backoff (bool): Use exponential backoff (default: True)
+            - username (str): Database username
 
         Thread behavior:
             - Starts a background thread for batch flushing of metrics.
@@ -321,7 +564,15 @@ class timescaledb(transport_base):
         0.9.0 Initial Commit
 
         """
+        # Per-protocol state — populated as init_bridge is called for each scraper
+        self._registered_protocols: set[str] = set()
 
+        # Maps protocol_name -> wide_table_name (or None if narrow-only)
+        self._protocol_wide_table_map: dict[str, str | None] = {}
+
+        # Maps protocol_name -> metric_mapping dict
+        # Each protocol has its own metric_name -> (clean_column_name, data_type) map
+        self._protocol_metric_mappings: dict[str, dict[str, tuple[str, str]]] = {}
         # -------------------------
         # load user settings from SectionProxy
         # -------------------------
@@ -333,9 +584,6 @@ class timescaledb(transport_base):
         self.username = settings.get("username", fallback=self.username)
         self.password = settings.get("password", fallback=self.password)
 
-        # transport_name -> device_info_id cache to minimize DB lookups for device_info_id during batch writes
-        self._device_cache: dict[str, int] = {}
-
         if not self.username:
             raise ValueError("TimeScaleDB User is not set")
 
@@ -345,8 +593,10 @@ class timescaledb(transport_base):
         # load reconnect/backoff settings
         self.use_exponential_backoff = settings.getboolean("use_exponential_backoff", fallback=self.use_exponential_backoff)
         self.max_reconnect_delay = settings.getint("max_reconnect_delay", fallback=self.max_reconnect_delay)
+        self.reconnect_attempts: int = settings.getint("reconnect_attempts", fallback=self.reconnect_attempts)
+        self.reconnect_delay: int = settings.getint("reconnect_delay", fallback=self.reconnect_delay)
 
-        # flush points settings.  We use the read interval setting from the base transport as the flush interval for this transport,
+        # flush points settings.  We use the read interval setting from the base transport as the flush interval,
         # since it is a natural fit for how often to flush batches to the database, and it keeps the user from having to configure
         # an additional setting that is essentially doing the same thing.  The flush_timeout setting is still available as a fallback
         # if read_interval is not set by the user.
@@ -355,6 +605,8 @@ class timescaledb(transport_base):
 
         # stale data cleanup settings
         self.stale_data_timeout: int = settings.getint("stale_data_timeout", fallback=self.stale_data_timeout)
+        # wait for complete data to write to db.
+        self.write_requires_complete_cycle = settings.getboolean("write_requires_complete_cycle", fallback=self.write_requires_complete_cycle)
 
         # persistent backlog settings
         self.enable_persistent_storage = settings.getboolean("enable_persistent_storage", fallback=self.enable_persistent_storage)
@@ -398,29 +650,50 @@ class timescaledb(transport_base):
         self._last_cleanup_time: float = time.time()
 
         self._verified_devices: set[str] = set()
+        # transport_name -> device_info_id cache to minimize DB lookups for device_info_id during batch writes
+        self._device_cache: dict[str, int] = {}
 
         # end user settings
         #*********************************
 
-        # TimescaleDB output is always write-enabled but this setting is unclear from base class
-        # keep it enabled to allow access to transport_base.write_data method???
-        self.write_enabled = True
+        # Instance-scoped metadata — isolates schema per connection
+        #self._metadata: MetaData = MetaData()
+        self._base: DeclarativeBase  # will be constructed after engine is ready
 
         # load all registry metrics' map.
-        # NOTE this will need to be changed if we want to support dynamic registry updates or multiple protocols/devices with different registries,
-        # but for now we can assume a static registry map for the protocol.
-        self.registry_metrics: dict[Registry_Type, List[registry_map_entry]]  = protocol_settings.registry_map
+        self.registry_metrics: dict[Registry_Type, List[registry_map_entry]]  = {}
 
-        self._wide_columns: set[str] = set()  # cached set of existing wide table columns for fast lookup
+        # keyed as: self._wide_columns_cache[wide_table_name] = {col1, col2, ...}
+        self._wide_columns_cache: dict[str, set[str]] = {}
 
-        # metric_name with clean_column_name, data_type, unit for mapping dict for raw to safe metric name conversions
-        self.metric_mapping: dict[str, tuple[str, str]] = {}
+        # keyed as: self._protocol_metric_mappings[protocol_name][metric_name] = (clean_col, data_type)
+        self._protocol_metric_mappings: dict[str, dict[str, tuple[str, str]]] = {}
+
         self.device_info_id = None  # will be set after data scrape, per transport batch.
-        self.wide_table_flag = True  # assume wide table unless too many metrics detected
 
         # SQLAlchemy init runtime
-        self.engine: Engine
-        self.SessionFactory: sessionmaker[Session]
+        # If a shared manager is provided, use it.
+        # Otherwise create an instance-scoped one.
+        if connection_manager is not None:
+            self._connection_manager: TimescaleDBConnectionManager = connection_manager
+            self._owns_connection_manager = False
+        else:
+            self._connection_manager = TimescaleDBConnectionManager(
+                host=self.host,
+                port=self.port,
+                database=self.database,
+                username=self.username,
+                password=self.password,
+                log=self._log
+            )
+            self._connection_manager.connect()
+            self._owns_connection_manager = True
+
+        self._connection_manager.register()
+
+        # Engine and SessionFactory come from the manager
+        self.engine = self._connection_manager.engine
+        self.SessionFactory = self._connection_manager.make_session_factory()
 
         # -------------------------
         # threading
@@ -429,7 +702,7 @@ class timescaledb(transport_base):
         # Initialize async flush queue and worker thread.  Start it here so it's ready at full init.
         self._flush_queue: queue.Queue = queue.Queue(maxsize=0)
         self._flush_thread = threading.Thread(target=self._flush_worker, daemon=True, name="FlushWorker")
-        self._flush_lock: lock = threading.Lock()
+        self._flush_lock: Lock = threading.Lock()
         self._flush_event: threading.Event = getattr(self, "_flush_event", threading.Event())
         # event used to stop all threads
         self._stop_event: threading.Event = getattr(self, "_stop_event", threading.Event())
@@ -445,12 +718,12 @@ class timescaledb(transport_base):
         self._backlog_lock: RLock = threading.RLock()  # lock for backlog operations
 
         # Lock for protecting schema mutations and metadata reflection
-        # Use RLock to allow nested calls within the same thread
+        # RLock to allow nested calls within the same thread
         # Protects the SQLAlchemy Metadata and Table Identifiers (the "structure" of the Wide Table).
         self._schema_lock: RLock = threading.RLock()
 
         # lock for protecting device_info appends when incoming data is from two or more source transports
-        self._device_lock: lock = threading.Lock()
+        self._device_lock: Lock = threading.Lock()
 
         # persistent backlog file and path, both the file path and the in-memory backlog file are initialized here
          # Ensure the backlog storage path is a valid directory
@@ -472,26 +745,28 @@ class timescaledb(transport_base):
             backlog_lock=self._backlog_lock,
             log=self._log
         )
+        # Rollup manager is initialized after the database connection is established, since
+        # it needs the session factory and engine to set up the schema and policies.
+        # don't AttributeError if init raises early.
+        self.rollup_mgr: "RollupManager | None" = None
 
         if self.enable_persistent_storage:
-            asyncio.run(asyncio.to_thread(self.backlog.load_from_disk))
+            self.backlog.load_from_disk()
 
         # attempt tsdb connection now
         try:
             self.connect_tsdb()
         except Exception as e:
             self._log.error(f"Initial connect failed: {e}")
-            self._set_tsdb_connected(False, "Initial connect was not successful")  # noqa: FBT003
+            self._set_tsdb_connected(conn_value = False, conn_reason = "Initial connect was not successful")
 
         """
-            Attributes:
+            Attribute:
             request_upstream_reconnect (Callable[[], None] | None):
             Optional callback function that, if set by the user,
-            will be called to trigger an upstream reconnect when stale data is detected or a reconnect is required.
-            Users of the class should assign a callable to this attribute after instantiating the class if they want
-            to handle upstream reconnect logic; otherwise, it defaults to None and no upstream reconnect will be triggered.
+            will be called to trigger an source data reconnect when stale data is detected or a reconnect is required.
 
-            The transport itself will handle reconnecting to the TimescaleDB database when a connection issue is detected,
+            The Timescaledb bridge transport itself will handle reconnecting to the TimescaleDB database when a connection issue is detected,
             but this callback allows users to also trigger a reconnect of the upstream data source (e.g., inverter or scraper)
             if they want to attempt to resolve stale data conditions or other issues that might be mitigated by refreshing the
             data source connection.
@@ -500,89 +775,67 @@ class timescaledb(transport_base):
 
     def connect_tsdb(self) -> None:
         """
-        Connect to DB, build device_metrics_wide table from metrics data, and ensure schema/hypertable/policies exist.
+        Connect to DB, build device_metrics_wide__* table from metrics data, and ensure schema/hypertable/policies exist.
         If from_transport data provided, ensure device_info insert for that transport.
         """
         try:
-        # 1 create database if missing.  Connect to standard default "postgres" database first to then check/create target database structure.
+        # create database if missing.  Connect to standard default "postgres" database first to then check/create target database structure.
             self._log.info(f"Starting Timescaledb {self.__version__} and attempting connection:")
-            self._create_database_if_missing()
 
-        # 2 create engine by logging into the default (or changed name) database
+            # Database creation and engine setup are owned by TimescaleDBConnectionManager.
+            if self._owns_connection_manager:
+                self._create_database_if_missing()
+                try:
+                    self._create_engine()   # sets tsdb_connected internally
+                except Exception as e:
+                    self._log.error(f"Engine creation error: {e}")
+            else:
+                # Engine and session factory already live via the shared manager.
+                # Verify the connection is healthy and mark ourselves as connected.
+                try:
+                    with self.engine.connect() as conn:
+                        conn.execute(text("SELECT 1"))
+                        conn.execute(text("CREATE EXTENSION IF NOT EXISTS timescaledb_toolkit"))
+                    self._set_tsdb_connected(conn_value = True, conn_reason ="Shared manager connection verified")
+                except OperationalError as e:
+                    self._set_tsdb_connected(conn_value = False, conn_reason = "Shared manager connection failed")
+                    self._log.error(f"Connection verification failed: {e}")
+                    self._log.error(f"❌ [COMMUNICATION LOST] --- Name: {self.transport_name} ---")
+                    raise
+
+            # Clean up any orphaned locks from a previous crashed session
+            # before attempting schema work that could deadlock against them.
             try:
-                self._create_engine()
+                self._cleanup_orphaned_locks()
             except Exception as e:
-                self._log.error(f"Engine creation error: {e}")
+                self._log.error(f"Orphaned lock cleanup failed: {e}")
 
-        # 3 create ORM tables. DeviceInfo, and stub columns for DeviceMetricsWide.  MetricCatalog for dynamic column names.
+        # create ORM tables. DeviceInfo, DeviceMetricsNarrow.  MetricCatalog for dynamic column names.
+        # ProtocolRegistry for protocol metadata.
             try:
                 self._create_tables()
 
             except Exception as e:
                 self._log.error(f"ORM table creation error: {e}")
 
-
-        # 5 If needed, create dynamic columns for metrics in device_metrics_wide and add metrics to metric_catalog table
-             # Using the registry_map from protocol_settings to get metric names.  No live data access here.
-             # NOTE Will need to change if we want to support dynamic registry updates or multiple protocols/devices with different registries,
-             # but for now we can assume a static registry map for the protocol.
-            try:
-                self._determine_wide_table()
-            except Exception as e:
-                self._log.error(f"Determine wide/narrow table failed: {e}")
-
             try:
                 self._start_flush_thread()
             except Exception as e:
                 self._log.error(f"thread start failed: {e}")
 
-            # initialize RollupManager class.
-            if self.rollup_policy.get("enable_rollups", True):
-                self.rollup_mgr = RollupManager(
-                    rollup_policy=self.rollup_policy,
-                    my_session_factory=self.SessionFactory,
-                    my_engine=self.engine,
-                    wide_table_flag=self.wide_table_flag,
-                    migration_in_progress=self.migration_in_progress,
-                    send_pushover_message = self._send_pushover_message,
-                    log=self._log,
-                    backlog_lock=self._backlog_lock,
-                    flush_queue=self._flush_queue,
-                    backlog=self.backlog,
-                    reconnect_lock=self._reconnect_lock
-                )
-                self.rollup_mgr.setup_schema()
-
-        # 6 Flush any existing backlog that might have been saved prior to initialization.
-             # backlogs accumulated during connection down or method malfunctions are flushed during reconnect.
-            try:
-                if self.enable_persistent_storage:
-                    self.backlog.replay_to_queue()
-            except Exception as e:
-                self._log.error(f"Persistent storage failed: {e}")
-
-            # start _refresh_rollup_thread after connect completes successfully
-            if self.rollup_policy.get("enable_rollups", True) and self.tsdb_connected and self.rollup_mgr:
-                self._log.info("Rollups are enabled.")
-
-                if not self.rollup_policy.get("enable_auto_refresh", True):
-                    self._log.info("Auto rollup refresh is disabled.")
-                    return
-
-                self.rollup_mgr.start_auto_refresh()
-
         except Exception as e:
-            self._set_tsdb_connected(False, "Connect unsuccessful")  # noqa: FBT003
+            self._set_tsdb_connected(conn_value = False, conn_reason ="Connect unsuccessful")
             self._log.error(f"connect() failed: {e}")
             raise
 
     # Centralize state transitions for tsdb_connected helper
-    def _set_tsdb_connected(self, conn_value: bool, con_reason: str) -> None:
+    def _set_tsdb_connected(self, conn_value: bool, conn_reason: str) -> None:
         with self._reconnect_lock:
-            if self.tsdb_connected != conn_value:
-                self.tsdb_connected: bool = conn_value
-                self.rollup_policy["tsdb_connected"] = conn_value
-                self._log.info(f"TimescaleDB is connected -> {conn_value} ({con_reason})")
+            if self.tsdb_connected != conn_value:   # if we change state
+                self.tsdb_connected: bool = conn_value  # new state
+                self.connected = self.tsdb_connected  # set the PPG connected flag here to mimic central connection state.
+                self.rollup_policy["tsdb_connected"] = conn_value  # set the connect status in the rollup class.
+                self._log.info(f"TimescaleDB is connected -> {conn_value} ({conn_reason})")
 
 
     # -------------------------
@@ -626,10 +879,11 @@ class timescaledb(transport_base):
                     # Attempt to re-establish DB connection.
                     with self.engine.connect() as conn:
                         conn.execute(text("SELECT 1"))
-                    self._set_tsdb_connected(True, "reconnect successful")  # noqa: FBT003
+                    self._set_tsdb_connected(conn_value = True, conn_reason = "reconnect successful")
                 except Exception as e:
-                    self._set_tsdb_connected(False, "reconnect unsuccessful")  # noqa: FBT003
+                    self._set_tsdb_connected(conn_value = False, conn_reason = "reconnect unsuccessful")
                     self._log.warning(f"Reconnect attempt {attempt_no} failed during connect(): {e}")
+                    self._log.warning(f"❌ [COMMUNICATION LOST] --- Name: {self.transport_name} ---")
 
                 with self._reconnect_lock:
                     tsdb_connected: bool = self.tsdb_connected
@@ -637,15 +891,30 @@ class timescaledb(transport_base):
                 if tsdb_connected:
                     self._log.info("Auto-reconnect: connection re-established.")
 
-                    # Immediately try to flush backlog — don't let exceptions prevent thread exit
+                    # Restore runtime state before allowing flush worker to resume
+                    try:
+                        self._rediscover_protocols()
+                        # repopulate rollup views after reconnect to ensure they're up to date before any flushes occur.
+                        # This is important in case the connection issue was due to a transient schema issue or if the
+                        # schema changed during the disconnect.
+                        if self.rollup_mgr is not None:
+                            try:
+                                self.rollup_mgr.repopulate_known_rollup_views()
+                            except Exception as e:
+                                self._log.error(f"Failed to repopulate rollup views after reconnect: {e}")
+                    except Exception as e:
+                        self._log.error( f"Protocol rediscovery failed after reconnect: {e}" )
+                        # Non-fatal — protocols will re-register via init_bridge
+                        # on next PPG restart if rediscovery fails here
+
                     try:
                         if getattr(self, "enable_persistent_storage", False):
                             with self._backlog_lock:
                                 self.backlog.replay_to_queue()
                     except Exception as e:
-                        self._log.error(f"Auto-reconnect: backlog flush failed after reconnect: {e}")
+                        self._log.error(f"Backlog flush failed after reconnect: {e}")
 
-                    break  # success: exit loop
+                    break
 
                 # not tsdb_connected: compute next delay (exponential if configured)
                 if use_exp:
@@ -657,6 +926,7 @@ class timescaledb(transport_base):
                 # Final log if exhausted
                 if attempts > 0 and attempt_no >= attempts:
                     self._log.error("Auto-reconnect: exhausted reconnect attempts. Will continue buffering to backlog.")
+                    self._log.error(f"❌ [COMMUNICATION LOST] --- Name: {self.transport_name} ---")
                 else:
                     self._log.info("Auto-reconnect: stopped without establishing connection.")
 
@@ -685,7 +955,7 @@ class timescaledb(transport_base):
                 return
             self._reconnect_thread_running = True
             # set tsdb_connected False immediately to cause upstream to stop DB work
-            self._set_tsdb_connected(False, "Connect unsuccessful")  # noqa: FBT003
+            self._set_tsdb_connected(conn_value = False, conn_reason = "Connect unsuccessful")
             self._stop_reconnect_event.clear()
             threading.Thread(target=self._attempt_reconnect, daemon=True, name= "TSDB ReconnectThread").start()
             self._log.info("Reconnect thread started.")
@@ -713,7 +983,7 @@ class timescaledb(transport_base):
                 default_engine: Engine = create_engine(default_url, isolation_level="AUTOCOMMIT", pool_pre_ping=True)
 
             except OperationalError as e:
-                self._set_tsdb_connected(False, "Connect unsuccessful")  # noqa: FBT003
+                self._set_tsdb_connected(conn_value = False, conn_reason ="Connect unsuccessful")
                 self._log.error(f"OperationalError during engine/session creation during database creation: {e}")
                 raise
 
@@ -722,37 +992,110 @@ class timescaledb(transport_base):
                 if not row:
                     self._log.info(f"Database '{self.database}' not found — creating")
                     conn.execute(text(f'CREATE DATABASE "{self.database}"'))
-                    conn.execute(text('CREATE EXTENSION IF NOT EXISTS timescaledb_toolkit'))
                     self._log.info(f"Database '{self.database}' created")
                 else:
                     self._log.debug(f"Database '{self.database}' already exists")
+            # get rid of default engine after use to avoid connection pool issues with multiple engines in the same process.
+            # We only needed it to check/create the database, and all subsequent work is done through the main engine from the connection manager.
             default_engine.dispose()
         except Exception as e:
             self._log.error(f"Failed to verify/create database '{self.database}': {e}")
             raise
-    # -------------------------
-    # 2. Create SQLAlchemy engine
-    #-------------------------
 
     def _create_engine(self) -> None:
-        """
-        create SQLAlchemy engine for TimescaleDB database connection
-        """
+        pool_size = 3 if self.flush_timeout <= 10 else 1
 
         url: str = f"postgresql+psycopg2://{self.username}:{self.password}@{self.host}:{self.port}/{self.database}"
         try:
             self._log.debug(f"Connecting to database '{self.database}' at {self.host}:{self.port} as user '{self.username}'")
-            self.engine: Engine = create_engine(url, pool_pre_ping=True, future=True, pool_recycle=3600)
-            SessionGlobal.configure(bind=self.engine)
-            self.SessionFactory: sessionmaker[Session] = SessionGlobal
-            with self.engine.connect() as conn:   # make sure connection works
+            self.engine: Engine = create_engine(url, pool_pre_ping=True, future=True, pool_recycle=3600, pool_size=pool_size, max_overflow=2)
+
+            # Each protocol instance gets its own factory
+            self.SessionFactory: sessionmaker[Session] = sessionmaker(
+                bind=self.engine,
+                autocommit=False,
+                expire_on_commit=False,
+                autoflush=False
+            )
+            with self.engine.connect() as conn:
                 conn.execute(text("SELECT 1"))
-            self._set_tsdb_connected(True, "Connect successful")  # noqa: FBT003
-            self._log.info(f"Connected to database '{self.database}'")
+                conn.execute(text('CREATE EXTENSION IF NOT EXISTS timescaledb_toolkit'))
+            self._set_tsdb_connected(conn_value = True, conn_reason = "Connect successful")
         except OperationalError as e:
-            self._set_tsdb_connected(False, "Connect unsuccessful")  # noqa: FBT003
+            self._set_tsdb_connected(conn_value = False, conn_reason = "Connect unsuccessful")
             self._log.error(f"OperationalError during engine creation: {e}")
             raise
+
+
+    def _ensure_wide_table_exists(self, table_name: str) -> None:
+        """
+        Ensures a protocol-specific wide metrics table exists in PostgreSQL.
+        Creates it if missing with the same base structure as device_metrics_wide__*
+        (m_time, device_info_id) — dynamic metric columns are added later
+        by _ensure_columns_for_metrics.
+
+        The table is created as a plain PostgreSQL table. RollupManager's
+        ensure_hypertables() converts it to a TimescaleDB hypertable
+        during setup_narrow_rollup(), which is called after this method completes.
+
+        Safe to call on every startup — the IF NOT EXISTS guard makes it
+        idempotent.
+
+        Args:
+            table_name: The protocol-specific wide table name, e.g.
+                        'device_metrics_wide__eg4_18kpv'. Must be a
+                        pre-validated SQL-safe name from _safe_table_name().
+
+        Raises:
+            ConnectionError: if not connected to TimescaleDB.
+            SQLAlchemyError: if table creation fails unexpectedly.
+        """
+        with self._reconnect_lock:
+            tsdb_connected: bool = self.tsdb_connected
+
+        if not tsdb_connected:
+            msg: str = f"Cannot create wide table '{table_name}' — not connected."
+            raise ConnectionError(msg)
+
+        with self.SessionFactory() as session:
+            try:
+                with session.begin():
+                    self._schema_advisory_lock(session)
+
+                    # 1. Create the base table if it doesn't exist.
+                    #    Only the structural columns are created here —
+                    #    metric columns are added by _ensure_columns_for_metrics.
+                    #    table_name comes from _safe_table_name() so f-string is safe.
+                    session.execute(text(f"""
+                        CREATE TABLE IF NOT EXISTS {table_name} (
+                            m_time          TIMESTAMPTZ     NOT NULL,
+                            device_info_id  INTEGER         NOT NULL
+                                REFERENCES device_info(device_info_id)
+                                ON DELETE CASCADE,
+                            CONSTRAINT {table_name}_pkey
+                                PRIMARY KEY (m_time, device_info_id)
+                        );
+                    """))
+
+                    # 2. Create the descending index on (m_time, device_info_id)
+                    #    TimescaleDB will add its own chunk indexes on top of this
+                    #    when the table is converted to a hypertable.
+                    session.execute(text(f"""
+                        CREATE INDEX IF NOT EXISTS {table_name}_time_device_idx
+                            ON {table_name} (m_time DESC, device_info_id);
+                    """))
+
+                # 3. Register the new table in SQLAlchemy metadata so the ORM
+                #    and flush worker can reference it by name immediately.
+                #    Uses extend_existing=True so re-running on restart is safe.
+                with self._schema_lock:
+                    Table(table_name, Base.metadata, autoload_with=self.engine, extend_existing=True)
+
+                self._log.info(f"Wide table '{table_name}' created/verified successfully.")
+
+            except SQLAlchemyError as e:
+                self._log.error(f"_ensure_wide_table_exists failed for '{table_name}': {e}")
+                raise
 
     # -------------------------
     # 3. Ensure ORM tables exist
@@ -760,34 +1103,9 @@ class timescaledb(transport_base):
 
     def _create_tables(self) -> None:
         """
-         Create ORM tables for device_info, device_metrics_wide, device_metrics_narrow and metric_catalog.
+         Create ORM tables for device_info, device_metrics_narrow, protocol_registry and metric_catalog.
+            The wide tables for each protocol/device are created dynamically by _ensure_wide_table_exists when protocols register via init_bridge,
 
-         TODO - 1 this method is currently called at startup after connection and will attempt to create tables each time.
-         We should optimize this to only attempt to create tables if we detect they don't exist, or if we detect a schema change that requires a refresh.
-         We can use SQLAlchemy's inspection/reflection capabilities to check for existing tables and columns before attempting to create them,
-         and we can also track the expected schema in the class to detect when a refresh is needed.
-
-         2 To handle multiple protocols each with their own unique registries, with potentially multiple devices per protocol, we need to change this method to
-         create wide table names based on the specific protocol name as seen in a given settings section.  This requires a new protocol_settings method to
-         return a list of active scraper protocols to support (based on settings). TSDB will loop through those protocols and create mappings to table names
-         for each protocol based on the active registry map for that protocol. The required columns for each protocol based table will be created from device
-         level registry scans which will then be blended together to one column list per protocol. Narrow table does not need to be changed since it is designed to be
-         dynamic and handle any metric with the metric name as a key. Metric catalog needs to be updated to include device_info_id to track which metrics
-         belong to which protocol/device for the dynamic table creation.  Device info table also needs to be updated to include protocol to link devices to
-         specific protocols and registries.  Probably a Protocol table will be needed to track protocol names and link to device info and metric catalog.
-
-         3 Narrow table creation should handle ASCII in a separate text column with dictionary compression, and the metric_catalog
-         should track which metrics are ASCII to know which values to put in the ASCII column vs the value column.
-
-         4. Rollup logic also needs to be updated to handle multiple protocols/devices with different registries and metric sets,
-         and to know which tables to pull from for rollups based on the protocol/device of the incoming data.
-         This will employ a device_info_id column in the metric_catalog to link metrics to specific protocol/device tables,
-         and the rollup manager needs to be aware of this when creating rollup views and policies.
-
-         5. Backlog and flush logic also need to be updated to handle multiple protocol/device tables and to know which table
-         to write to based on the protocol/device of the incoming data.
-
-         For now, we can assume a single static registry map and a single wide table structure for simplicity.
         """
         with self.SessionFactory() as session:
             with self._reconnect_lock:
@@ -800,9 +1118,7 @@ class timescaledb(transport_base):
             try:
                 Base.metadata.create_all(self.engine)
                 with session.begin():
-                    session.execute(text("CREATE INDEX IF NOT EXISTS device_metrics_wide_pkey ON device_metrics_wide (m_time DESC, device_info_id);"))
-                    session.execute(text("CREATE INDEX IF NOT EXISTS device_metrics_narrow_pkey ON device_metrics_narrow (m_time DESC, device_info_id, metric_name);"))
-                    session.commit()
+                    session.execute(text("CREATE INDEX IF NOT EXISTS device_metrics_narrow_time_idx ON device_metrics_narrow (m_time DESC, device_info_id, metric_name);"))
                 self._log.info("ORM tables and indexes created/ensured")
             except Exception as e:
                 self._log.error(f"ORM tables and indexes creation error: {e}")
@@ -813,31 +1129,54 @@ class timescaledb(transport_base):
     # -------------------------
 
     def _get_or_create_device(self, from_transport: transport_base) -> int:
-        """ The database doesn't know which field changed (name, model, or serial). It only knows that the unique Key (transport_name)
-            already exists. The First Run: The database sees a new transport name. It creates the row with all metadata.
-            The Next Startup: If you've changed the device_name in your config. The code tries to INSERT the row again.
-            The Conflict: The database says: "I already have a row where the transport name is myInverter."
-            The Upsert Logic: Because of on_conflict_do_update, the database then takes the new values you just sent
-              (the changed device_name) and overwrites the old values in that existing row."""
+        """
+        Upserts a row into device_info for the given transport and returns
+        its device_info_id.
+
+        First call per session hits the DB to insert or update all metadata
+        fields (name, model, serial, location, protocol_id). Subsequent calls
+        for the same transport_name are served from the two-level cache
+        (_device_cache + _verified_devices) with no DB round-trip.
+
+        The database doesn't know which field changed between restarts — it
+        only knows the unique key (transport). on_conflict_do_update ensures
+        any changed metadata (e.g. device_name in config) is kept current.
+        """
 
         t_name: str = from_transport.transport_name
 
-        # 1. Verified & Cached
-        # If it's in both, we know the DB is up-to-date for this session.
+        # 1. Fast path — verified and cached this session, no DB needed.
         if t_name in self._device_cache and t_name in self._verified_devices:
-            return self._device_cache[t_name]
+            return self._device_cache.get(t_name) or 100
 
-        # 2. The verification path (First packet of the session)
+        # 2. Slow path — first packet for this transport this session.
+        #    Lock prevents two concurrent threads racing to insert the same row.
         with self._device_lock:
-            # Double check inside lock
+
+            # Double-check inside the lock in case another thread just resolved it.
             if t_name in self._device_cache and t_name in self._verified_devices:
                 return self._device_cache[t_name]
 
             with self.SessionFactory() as session:
                 try:
-                    # Prepare the Upsert Statement (PostgreSQL specific)
+                    # Resolve protocol_id within the same session so we don't
+                    # need a separate round-trip.  nullable=True on the column
+                    # means a None here is safe.
+                    protocol_name: str = from_transport.protocol_name
+                    protocol_id: int | None = None
+                    if protocol_name:
+                        protocol_id = session.execute(
+                            text(
+                                "SELECT protocol_id FROM protocol_registry "
+                                "WHERE protocol_name = :p"
+                            ),
+                            {"p": protocol_name}
+                        ).scalar()
+
+                    # Build the upsert — transport is the unique key.
                     stmt = pg_insert(DeviceInfo).values(
                         transport=t_name,
+                        protocol_id=protocol_id,
                         device_identifier=from_transport.device_identifier,
                         device_name=from_transport.device_name,
                         device_manufacturer=from_transport.device_manufacturer,
@@ -848,107 +1187,177 @@ class timescaledb(transport_base):
                         updated_at=_now_tz()
                     )
 
-                    # Define what to update if the 'transport' unique constraint is hit
                     upsert_stmt = stmt.on_conflict_do_update(
                         index_elements=['transport'],
                         set_={
-                            "device_identifier":stmt.excluded.device_identifier,
-                            "device_name": stmt.excluded.device_name,
+                            "protocol_id":         stmt.excluded.protocol_id,
+                            "device_identifier":   stmt.excluded.device_identifier,
+                            "device_name":         stmt.excluded.device_name,
                             "device_manufacturer": stmt.excluded.device_manufacturer,
-                            "device_model": stmt.excluded.device_model,
-                            "device_serial_number": stmt.excluded.device_serial_number,
-                            "device_location": stmt.excluded.device_location,
-                            "updated_at": stmt.excluded.updated_at
+                            "device_model":        stmt.excluded.device_model,
+                            "device_serial_number":stmt.excluded.device_serial_number,
+                            "device_location":     stmt.excluded.device_location,
+                            "updated_at":          stmt.excluded.updated_at,
                         }
                     ).returning(DeviceInfo.device_info_id)
 
-                    # Execute and get the ID
-                    result = session.execute(upsert_stmt)
-                    db_id: int = result.scalar_one()
+                    db_id: int = session.execute(upsert_stmt).scalar_one()
                     session.commit()
 
                 except Exception as e:
                     session.rollback()
-                    self._log.error(f"Upsert failed for {t_name}: {e}")
-                    # Fallback to cache if we have it, otherwise None
-                    return self._device_cache[t_name]
+                    self._log.error(f"Upsert failed for '{t_name}': {e}")
+                    # Return cached id if available, otherwise a sentinel value.
+                    return self._device_cache.get(t_name, 100)
                 else:
-                    # Update caches
                     self._device_cache[t_name] = db_id
-                    self._verified_devices.add(t_name) # Mark as verified for this run
+                    self._verified_devices.add(t_name)
                     return db_id
 
-    def _determine_wide_table(self) -> None:
+    def _extract_metric_names(self, registry_map: dict[Registry_Type, list[registry_map_entry]]) -> list[tuple[str, str, Any, Any]] :
+
         """
-        Determine whether to create wide table based on metric_catalog entries.
+        Extracts metric names, data types, unit modifiers and notes from a
+        transport's registry map for use in schema creation.
+
+        accepts any transport's registry_map directly, enabling
+        multi-protocol schema registration.
+
+        Args:
+            registry_map: The registry map from a transport_base instance,
+                        accessed via from_transport.registry_map.
+                        Keyed by Registry_Type, values are lists of
+                        registry_map_entry objects.
+
+        Returns:
+            Sorted list of (variable_name, data_type, unit_mod, note) tuples,
+            filtered to INPUT and HOLDING registry types only.
+            Returns empty list if registry_map is None, empty, or malformed.
         """
-        try:
-            #5a get metric names from registry_map
-            metric_start_names: list[tuple[str, str, Any, Any]] = self._registry_metric_names()
-            metric_count: int = len(metric_start_names)
-            self.current_metric_count: int = metric_count
+        if not registry_map:
+            return []
 
-            if metric_count == 0 or not metric_start_names:
-                self._log.error(f"Detected {metric_count} metrics — no metric names detected. ")
-                raise ValueError("No metric names detected.")  # noqa: TRY301
+        results: list[tuple[str, str, Any, Any]] = []
 
-            # too many metrics for wide table; use only narrow storage
-            elif metric_count >= 200:
-                self.wide_table_flag = False
-                self._log.warning(f"Detected {metric_count} metrics exceeds 200 column limit; will use narrow metric storage.")
-            else:  # 200 or fewer metrics; create dynamic columns
-                self._log.info(f"Detected {metric_count} metrics; creating columns.")
-                # ensure dynamic columns for metrics in device_metrics and metric_catalog.
-                self.wide_table_flag: bool = self._ensure_columns_for_metrics(metric_start_names)
+        for registry_type in (Registry_Type.INPUT, Registry_Type.HOLDING):
 
-                if not self.wide_table_flag:
-                    self._log.error("Failed to ensure metric columns despite valid metric names.")
-                    raise ValueError("Failed to ensure metric columns.")  # noqa: TRY301
+            entries: list[registry_map_entry] | None = registry_map.get(registry_type)
 
-        except ValueError as e:
-            self._log.error(f"No metric names detected: {e}")
-            sys.exit(1) # exit if no metric names detected, since this is a critical failure for the transport's functionality.
+            if not entries:
+                continue
 
-        except Exception as e:
-            # Catch any general exceptions that occurred during any step above
+            for entry in entries:
+                if not hasattr(entry, 'variable_name') or not entry.variable_name:
+                    continue
 
-            self._log.error(f"device_metrics_wide table columns creation error: {e}")
-            raise
+                results.append((
+                    entry.variable_name,
+                    getattr(entry, 'data_type', ''),
+                    getattr(entry, 'unit_mod', 1.0),   # default to 1.0 — no scaling
+                    getattr(entry, 'note', '')
+                ))
+
+        return sorted(results)
+
+    def _upsert_protocol_registry(self, protocol: str, wide_table_name: str | None, metric_count: int ) -> int:
+        """
+        Upserts a row into protocol_registry for the given protocol.
+
+        On first insert:
+            - Creates the row with rollup_setup_complete = False
+            - rollup_prefix derived from wide_table_name if provided
+
+        On subsequent updates:
+            - Updates wide_table_name, metric_count, rollup_prefix, updated_at
+            - Does NOT reset rollup_setup_complete — a completed setup
+            survives restarts
+
+        Returns the protocol_id for use by downstream methods such as
+        _ensure_columns_for_metrics.
+
+        Raises:
+            ConnectionError: if not connected to TimescaleDB
+            RuntimeError: if the upsert executes but returns no protocol_id
+        """
+        with self._reconnect_lock:
+            tsdb_connected: bool = self.tsdb_connected
+
+        if not tsdb_connected:
+            msg: str = f"Cannot upsert protocol_registry for '{protocol}' — not connected."
+            raise ConnectionError(msg)
+
+        # Derive rollup_prefix from wide_table_name if provided.
+        # None for narrow-only protocols (metric_count >= 200).
+        # e.g. wide_table_name = "device_metrics_wide__eg4_18kpv"
+        #      rollup_prefix   = "rollup_wide__eg4_18kpv"
+        rollup_prefix: str | None = None
+        if wide_table_name is not None:
+            # Strip the "device_metrics_" prefix to get the protocol suffix,
+            # then prepend "rollup_" to form the rollup view base name.
+            # e.g. "device_metrics_wide__eg4_18kpv"
+            #   -> "wide__eg4_18kpv"
+            #   -> "rollup_wide__eg4_18kpv"
+            suffix = wide_table_name.removeprefix("device_metrics_")
+            rollup_prefix = f"rollup_{suffix}"
+
+        with self.SessionFactory() as session:
+            try:
+                with session.begin():
+
+                    stmt = pg_insert(ProtocolRegistry).values(
+                        protocol_name=protocol,
+                        wide_table_name=wide_table_name,
+                        metric_count=metric_count,
+                        rollup_prefix=rollup_prefix,
+                        rollup_enabled=True,
+                        rollup_setup_complete=False,   # safe default on first insert
+                        created_at=_now_tz(),
+                        updated_at=_now_tz()
+                    ).on_conflict_do_update(
+                        index_elements=["protocol_name"],
+                        set_={
+                            # Update structural fields that may change between restarts
+                            # e.g. metric_count grows if CSV is updated
+                            "wide_table_name": pg_insert(ProtocolRegistry).excluded.wide_table_name,
+                            "metric_count": pg_insert(ProtocolRegistry).excluded.metric_count,
+                            "rollup_prefix": pg_insert(ProtocolRegistry).excluded.rollup_prefix,
+                            "updated_at": _now_tz(),
+                            # rollup_setup_complete is intentionally not updated here —
+                            # once True it should only be reset explicitly via
+                            # mark_rollup_setup_complete(False) when a schema change
+                            # requires rollup views to be rebuilt
+                        }
+                    ).returning(ProtocolRegistry.protocol_id)
+
+                    protocol_id: int | None = session.execute(stmt).scalar_one_or_none()
+
+            except Exception as e:
+                self._log.error(f"_upsert_protocol_registry failed for '{protocol}': {e}")
+                raise
+
+            else:
+
+                if protocol_id is None:
+                    msg1: str = f"_upsert_protocol_registry: no protocol_id returned for protocol '{protocol}' — upsert may have silently failed."
+                    raise RuntimeError(msg1)
+
+                self._log.info(
+                    f"Protocol registry upserted: '{protocol}' "
+                    f"(id={protocol_id}, table='{wide_table_name}', "
+                    f"metrics={metric_count})"
+                )
+                return protocol_id
 
     # -------------------------
-    #  5a. Get metric's names from registry map
+    #  Dynamically create wide table columns for metrics
     # -------------------------
 
-    def _registry_metric_names(self) ->  List[Tuple[str, str, Any, Any]] :
-        """ load registry map for validation of metric names for dynamic column creation. Return sorted list of metric names
-            with their data types and notes.
+    def _ensure_columns_for_metrics(self, metric_start_names: List[Tuple[str, str, Any, Any]], table_name: str, protocol: str) -> bool:
         """
-
-        ## returns all variable_name in registry_metrics as opposed to below selected Registry_Type.
-        # return sorted([
-        #     entry.variable_name
-        #     for entries_list in self.registry_metrics.values()
-        #     for entry in entries_list
-        #     if hasattr(entry, 'variable_name')
-        # ])
-
-        return sorted([
-            (entry.variable_name, getattr(entry, 'data_type', ''), getattr(entry, 'unit_mod', ''), getattr(entry, 'note', ''))
-            for registry_type in (Registry_Type.INPUT, Registry_Type.HOLDING)
-            for entry in self.registry_metrics[registry_type]
-            if hasattr(entry, 'variable_name')
-        ])
-
-    # -------------------------
-    #  5b. Dynamically create wide table columns for metrics
-    # -------------------------
-
-    def _ensure_columns_for_metrics(self, metric_start_names: List[Tuple[str, str, Any, Any]]) -> bool:
-        """
-        Ensure each metric name as defined in the variable_mask/variable_screen filters has a corresponding column in device_metrics_wide,
+        Ensure each metric name as defined in the variable_mask/variable_screen filters has a corresponding column in device_metrics_wide__*,
         and an entry in the metric_catalog table-- which describes the wide table field definitions.
         Due to the memory limits of postgres, no more than 200 metrics as determined in the calling method.
-        Using metric_name to map, return clean_column_name in the metric_catalog to create the SQL column in device_metrics_wide.
+        Using metric_name to map, return clean_column_name in the metric_catalog to create the SQL column in device_metrics_wide__*.
 
         There could potentially be thousands of metrics, which cannot all be ingested as columns. If over 200 metrics we only save metrics to the
         device_metrics_narrow table, so this method is not needed and is bypassed at the calling method connection stage.
@@ -975,28 +1384,34 @@ class timescaledb(transport_base):
                         # advisory lock to serialize schema changes
                         self._schema_advisory_lock(session)
 
+                        # lookup the protocol ID from the protocol name
+                        protocol_id: int = session.execute(
+                            text("SELECT protocol_id FROM protocol_registry WHERE protocol_name = :p"),
+                            {"p": protocol}
+                        ).scalar_one()
+
                         # metric name, data_type, unit_mod, note
                         for m, d, u, n in metric_start_names:
                             # 1. Check for existing clean name that has already been mapped.
                             clean_value: Any | None = session.execute(
-                                text("SELECT clean_column_name FROM metric_catalog WHERE metric_name = :m"),
-                                {"m": m}
+                                text("SELECT clean_column_name FROM metric_catalog WHERE metric_name = :m  AND protocol_id = :p""" ),
+                                {"m": m, "p": protocol_id}
                             ).scalar()
 
                             d_type: str = self._timescale_type(d,u)
 
                             if clean_value:
                                 # Update the data_type,unit_mod and notes fields in metric_catalog for a matching metric
-                                # from the csv files.  All corrections/updates should take place in the CSV.
+                                # from the csv files.  All corrections/updates should take place in the CSV or the UI in the webserver.
                                 session.execute(
                                     text("""
                                         UPDATE metric_catalog SET data_type = :d, unit_mod = :u, notes = :n
-                                        WHERE metric_name = :m
+                                        WHERE metric_name = :m AND protocol_id = :p
                                     """),
-                                    {"d": d_type, "u": u, "m": m, "n": n}
+                                    {"d": d_type, "u": u, "m": m, "n": n, "p": protocol_id}
                                 )
-                                # metric_mapping is used to process raw metrics data for coercion.
-                                self.metric_mapping[m] = (clean_value, d_type)
+                                # _protocol_metric_mappings is used to process raw metrics data for coercion.
+                                self._protocol_metric_mappings.setdefault(protocol, {})[m] = (clean_value, d_type)
                                 # metric exists so return to the top of the loop.
                                 continue
 
@@ -1006,8 +1421,8 @@ class timescaledb(transport_base):
                             # check if column name (cleaned name) exists in postgres information_schema
                             exists_wide: Any | None = session.execute(text("""
                                 SELECT 1 FROM information_schema.columns
-                                WHERE table_name = 'device_metrics_wide' AND column_name = :col
-                            """), {"col": col}).scalar()
+                                WHERE table_name = :tname AND column_name = :col
+                            """), {"tname": table_name, "col": col}).scalar()
 
                             # Add column if missing.  Initial column creation is alphabetic due to sorted metric names.
                             # Per postgres docs, subsequent columns added after first init are always appended to the end of the table.
@@ -1016,11 +1431,12 @@ class timescaledb(transport_base):
 
                             if not exists_wide:
                                 session.execute(text(
-                                    f"ALTER TABLE device_metrics_wide ADD COLUMN IF NOT EXISTS {col} {d_type};"
+                                    f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS {col} {d_type};"
                                 ))
 
                             params: dict = {
                                 'm': m,         # metric_name
+                                'p': protocol_id, # protocol ID
                                 'col': col,     # clean_column_name
                                 'dtype': d_type or 'double precision', # data_type mapped from registry, with default
                                 'umod': u,
@@ -1030,28 +1446,28 @@ class timescaledb(transport_base):
                             # just in case the if clean_value: check failed.
                             # Take the existing record's field values and overwrite them with the value from the row that failed to insert".
                             session.execute(text("""
-                                INSERT INTO metric_catalog (metric_name, clean_column_name, data_type, unit_mod, created_at, notes)
-                                VALUES (:m, :col, :dtype, :umod, :col_date, :n)
-                                ON CONFLICT (metric_name) DO UPDATE SET
+                                INSERT INTO metric_catalog (protocol_id, metric_name, clean_column_name, data_type, unit_mod, created_at, notes)
+                                VALUES (:p, :m, :col, :dtype, :umod, :col_date, :n)
+                                ON CONFLICT (protocol_id, metric_name) DO UPDATE SET
                                     clean_column_name = EXCLUDED.clean_column_name,
                                     data_type = EXCLUDED.data_type,
                                     unit_mod = EXCLUDED.unit_mod,
                                     notes = EXCLUDED.notes
                             """), params)
 
-                            self.metric_mapping[m] = (col, d_type)
+                            self._protocol_metric_mappings.setdefault(protocol, {})[m] = (col, d_type)
 
-                    self._cache_wide_table_columns()  # cache existing wide table columns for fast lookup validation during writes
-                    self._sync_single_table_schema()  #  resync ORM table after dynamic column changes
+                    self._cache_wide_table_columns(table_name)  # cache existing wide table columns for fast lookup validation during writes
+                    self._sync_single_table_schema(table_name)  # resync ORM table after dynamic column changes
 
                     self._log.info(f"Ensured {len(metric_start_names)} metric columns.")
-                    return True  # noqa: TRY300
+                    return True
 
             except Exception as e:
                 self._log.error(f"_ensure_columns_for_metrics failed (rolled back): {e}")
                 return False
 
-    #5c. advisory lock for schema changes
+    # advisory lock for schema changes
     def _schema_advisory_lock(self, session: Session, key_text: str = "timescaledb_schema_lock") -> None:
         """ transaction scoped advisory lock based on hash of key_text
             Locks wide table schema in postgres DB to allow dynamic wide table refactor.
@@ -1076,7 +1492,7 @@ class timescaledb(transport_base):
 
         return base_type
 
-    #5d. clean column name
+    # clean column name
     def _clean_column_name(self, metric_name: str) -> str:
         """
         Cleans a string to be a safe SQL column name.
@@ -1096,88 +1512,163 @@ class timescaledb(transport_base):
         # Truncate to length if necessary (PostgreSQL limit is 63 chars for identifiers)
         return cleaned_name[:63]
 
-    #5e. wide table columns helper for write operations
-    def _cache_wide_table_columns(self) -> None:
-        """Updates the internal set of valid column names."""
+    # wide table columns helper for write operations.  Per protocol wide table name.
+    def _cache_wide_table_columns(self, table_name: str) -> None:
         try:
             insp: Inspector = inspect(self.engine)
-            cols: List[ReflectedColumn] = insp.get_columns("device_metrics_wide", schema='public')
-
-            # Use a local variable then swap to keep the operation near-atomic
-            new_cols: set[str] = {
+            cols = insp.get_columns(table_name, schema='public')
+            self._wide_columns_cache[table_name] = {
                 col['name'] for col in cols
                 if col['name'] not in ("m_time", "device_info_id")
             }
-            self._wide_columns = new_cols
         except Exception as e:
-            self._log.error(f"Failed to cache wide columns: {e}")
+            self._log.error(f"Failed to cache wide columns for {table_name}: {e}")
 
-    #5f. wide table row validation
-    def _validate_wide_row(self, row: dict) -> bool:
+    # wide table row validation
+    def _validate_wide_row(self, row: dict, table_name: str) -> tuple[bool, str | None]:
         # Use the same lock to ensure we aren't validating against a table being swapped
         with self._schema_lock:
             # metadata keys like m_time and device_info_id are excluded in _cache_wide_table_columns
-            extra_keys: set = set(row) - self._wide_columns
-            fewer_keys: set = self._wide_columns - set(row)
+            wide_columns: set[str] = self._wide_columns_cache.get(table_name, set())
+            if not wide_columns:
+                self._log.debug(f"_validate_wide_row: no cache entry for '{table_name}'. Cache keys: {list(self._wide_columns_cache.keys())}")
+            extra_keys: set[str] = set(row) - wide_columns
+            fewer_keys: set[str] = wide_columns - set(row)
 
             if extra_keys:
                 self._log.info(f"New metrics detected: {extra_keys}. Triggering resync...")
 
                 # 1. Trigger the sync logic to update the table schema and internal column cache.
-                self._sync_single_table_schema()
+                self._sync_single_table_schema(table_name)
 
-                # 2. Re-check: Did the resync actually add the keys?
-                # (In case the DB hasn't been updated yet)
-                still_extra = set(row) - self._wide_columns - {"m_time", "device_info_id"}
+                # Re-read the now-updated cache — the local `wide_columns` is stale
+                refreshed_cols: set[str] = self._wide_columns_cache.get(table_name, set())
+                still_extra = set(row) - refreshed_cols - {"m_time", "device_info_id"}
                 if still_extra:
                     msg = f"Database schema is still missing columns after resync: {sorted(still_extra)}"
                     self._log.error(msg)
                     raise ValueError(msg)
                 else:
-                    return True  # Validation passes after successful resync
+                    return True, None  # Validation passes after successful resync
 
             elif fewer_keys:
-                self._log.warning(
-                    f"Wide-table schema mismatch; missing keys in scrape data: {sorted(fewer_keys)}"
-                )
-                msg: str = f"Missing columns: {sorted(fewer_keys)}"
-                return False
+                self._log.warning(f"Wide-table schema mismatch; missing keys in scrape data: {sorted(fewer_keys)}")
+                msg: str = f"Missing {len(sorted(fewer_keys))} columns: {sorted(fewer_keys)}"
+                return False, msg
             else:
-                return True
+                return True, None
 
-    # 5g. resync single wide table schema after dynamic column changes
-    def _sync_single_table_schema(self) -> None:
-        """
-        Resyncs the SQLAlchemy ORM mapping after dynamic column changes.
-        Uses a lock to prevent the flush worker from using a half-reflected table.
-        """
-        table_name: str = DeviceMetricsWide.__tablename__
-
+    # resync single wide table schema after dynamic column changes
+    def _sync_single_table_schema(self, table_name: str) -> None:
         with self._schema_lock:
             self._log.info(f"Resyncing schema for {table_name}...")
 
-            # 1. Unbind the old table from metadata
-            old_table: Table | None  = Base.metadata.tables.get(table_name)
+            old_table = Base.metadata.tables.get(table_name)
             if old_table is not None:
                 Base.metadata.remove(old_table)
-            else:
-                self._log.warning(f"No existing table found for {table_name} during resync. Continuing with new reflection.")
 
-            # 2. Reflect the new structure from the database
-            new_table = Table(
-                table_name,
-                Base.metadata,
-                autoload_with=self.engine,
-                extend_existing=True  # Ensures we overwrite the internal cache
-            )
+            Table(table_name, Base.metadata, autoload_with=self.engine, extend_existing=True)
 
-            # 3. Update the ORM class binding
-            DeviceMetricsWide.__table__ = new_table
-
-            # 4. Refresh the column cache used for validation
-            self._cache_wide_table_columns()
+            # Update column cache for this specific table
+            self._cache_wide_table_columns(table_name)
             self._log.info(f"Schema resync complete for {table_name}")
 
+
+    def _rediscover_protocols(self) -> None:
+        """
+        Called during reconnect to rebuild runtime state from protocol_registry.
+        Restores _protocol_wide_table_map and retries any incomplete
+        rollup setups via RollupManager.add_wide_rollup.
+
+        Separated from _register_protocol_schema because on reconnect the
+        physical tables and metric_catalog entries already exist — only the
+        in-memory state and any incomplete rollup views need recovery.
+        """
+        with self.SessionFactory() as session:
+            try:
+                rows = session.execute(
+                    text("""
+                        SELECT protocol_name, wide_table_name,
+                            rollup_setup_complete
+                        FROM protocol_registry
+                        WHERE rollup_enabled = true
+                        ORDER BY created_at ASC
+                    """)
+                ).fetchall()
+
+            except SQLAlchemyError as e:
+                self._log.error(f"_rediscover_protocols query failed: {e}")
+                return
+
+        if not rows:
+            self._log.info("_rediscover_protocols: no registered protocols found.")
+            return
+
+        for protocol_name, wide_table_name, setup_complete in rows:
+
+            # Restore runtime mapping — this is what lets write_data and
+            # _flush_worker route correctly without re-running full schema setup
+            self._protocol_wide_table_map[protocol_name] = wide_table_name
+            self._registered_protocols.add(protocol_name)
+
+            # Re-reflect the wide table into Base.metadata so the flush worker
+            # can look it up by name after reconnect.
+            if wide_table_name is not None:
+                with self._schema_lock:
+                    Table(
+                        wide_table_name,
+                        Base.metadata,
+                        autoload_with=self.engine,
+                        extend_existing=True
+                    )
+                self._cache_wide_table_columns(wide_table_name)
+
+            # Restore per-protocol metric mapping from metric_catalog
+            # so _process_raw_metrics can coerce values correctly
+            self._restore_metric_mapping(protocol_name)
+
+            self._log.info(f"Rediscovered protocol '{protocol_name}' (table='{wide_table_name}', setup_complete={setup_complete})")
+
+            if not setup_complete and self.rollup_mgr is not None:
+                self._log.warning(f"Protocol '{protocol_name}' has incomplete rollup setup — retrying via RollupManager.add_wide_rollup.")
+                try:
+                    self.rollup_mgr.add_wide_rollup(protocol_name, wide_table_name)
+                except Exception as e:
+                    self._log.error(f"Recovery failed for protocol '{protocol_name}': {e} — will retry on next startup.")
+                    # Non-fatal — protocol data can still flow via narrow table
+                    # even if wide table rollups are incomplete
+
+    def _restore_metric_mapping(self, protocol: str) -> None:
+        """
+        Rebuilds _protocol_metric_mappings[protocol] from metric_catalog
+        after a reconnect, so _process_raw_metrics can coerce values
+        correctly without re-running _ensure_columns_for_metrics.
+        """
+        with self.SessionFactory() as session:
+            try:
+                rows = session.execute(
+                    text("""
+                        SELECT mc.metric_name, mc.clean_column_name, mc.data_type
+                        FROM metric_catalog mc
+                        JOIN protocol_registry pr
+                            ON mc.protocol_id = pr.protocol_id
+                        WHERE pr.protocol_name = :p
+                    """),
+                    {"p": protocol}
+                ).fetchall()
+
+                mapping: dict[str, tuple[str, str]] = {
+                    metric_name: (clean_column_name, data_type)
+                    for metric_name, clean_column_name, data_type in rows
+                }
+
+                self._protocol_metric_mappings[protocol] = mapping
+
+                self._log.debug(f"Restored {len(mapping)} metric mappings for protocol '{protocol}'")
+
+            except SQLAlchemyError as e:
+                self._log.error(f"_restore_metric_mapping failed for '{protocol}': {e}")
+                raise
 
     # # 10g
     def _start_flush_thread(self) -> None:
@@ -1189,36 +1680,164 @@ class timescaledb(transport_base):
         self._flush_thread.start()
         self._log.debug("Flush thread started.")
 
-    # using inherited transport_base.write_data method
 
-    def write_data(self, data: dict[str, Any], from_transport: transport_base) -> None:
-        """Overload write_data to process incoming data from transports."""
+    def _register_protocol_schema(self, protocol: str, registry_map: dict[Registry_Type, list[registry_map_entry]]) -> None:
+        """
+        Ensures wide table columns and metric_catalog entries exist for
+        all metrics in this protocol's registry map.
+        Each protocol gets its own wide table: device_metrics_wide__{protocol}
+        The narrow table is shared across all protocols.
+        """
+        # Derive the table name for this protocol up front
+        # so it can be passed to every downstream method that needs it
+        wide_table_name: str = self._safe_table_name(protocol)
 
-        # 1. Trap: Ignore non-dictionary signals (like boolean True)
-        if not isinstance(data, dict) or not data or not isinstance(from_transport, transport_base):
-            self._log.warning(
-                f"Received non-dict signal ({type(data).__name__}) from "
-                f"[{from_transport.transport_name}]. Ignoring."
+        # Extract metric names from this transport's registry map
+        metric_names: list[tuple[str, str, Any, Any]] = self._extract_metric_names(registry_map)
+        metric_count: int = len(metric_names)
+
+        if metric_count == 0:
+            self._log.error(f"No metrics found for protocol '{protocol}'")
+            return
+
+        #  Upsert into protocol_registry — creates the protocol row
+        #  and anchors the table name before metric_catalog FKs are written
+        self._upsert_protocol_registry(protocol, wide_table_name, metric_count)
+
+        if metric_count >= 200:
+            self._log.warning(f"Protocol '{protocol}' has {metric_count} metrics — exceeds 200 column limit, using narrow table only.")
+            self._protocol_wide_table_map[protocol] = None
+            return
+
+        # 5. Ensure the wide table exists as a physical table in postgres
+        #    before _ensure_columns_for_metrics tries to ALTER it
+        self._ensure_wide_table_exists(wide_table_name)
+
+        # 6. Create columns and metric_catalog entries —
+        #    table_name and protocol are both passed through
+        success: bool = self._ensure_columns_for_metrics(metric_names, table_name=wide_table_name, protocol=protocol)
+
+        if not success:
+            self._log.error(f"Failed to ensure metric columns for protocol '{protocol}'. Wide table will not be used.")
+            self._protocol_wide_table_map[protocol] = None
+            return
+
+        self._protocol_wide_table_map[protocol] = wide_table_name
+        self._log.info(f"Schema ready for protocol '{protocol}' → table '{wide_table_name}' ({metric_count} metrics)")
+
+        self._init_or_update_rollup_manager(protocol)
+
+    def _init_or_update_rollup_manager(self, protocol) -> None:
+        """
+        Creates RollupManager on first call, adds new protocol views on
+        subsequent calls as more protocols register via init_bridge.
+        """
+        if not self.rollup_policy.get("enable_rollups", True):
+            return
+
+        if self.rollup_mgr is None:
+            # First protocol registered — create the manager
+            self.rollup_mgr = RollupManager(
+                rollup_policy=self.rollup_policy,
+                my_session_factory=self.SessionFactory,
+                my_engine=self.engine,
+                migration_in_progress=self.migration_in_progress,
+                send_pushover_message = self._send_pushover_message,
+                log=self._log,
+                backlog_lock=self._backlog_lock,
+                flush_queue=self._flush_queue,
+                backlog=self.backlog,
+                reconnect_lock=self._reconnect_lock
+            )
+            self.rollup_mgr.setup_narrow_rollup()
+            # First protocol also needs per-protocol setup.
+            # setup_narrow_rollup() only creates shared narrow rollups.
+            self.rollup_mgr.add_wide_rollup(
+                protocol_name=protocol,
+                wide_table_name=self._protocol_wide_table_map[protocol]
+            )
+
+            if self.rollup_policy.get("enable_auto_refresh", True):
+                self.rollup_mgr.start_auto_refresh()
+
+            # Replay backlog now that schema is confirmed ready.
+            # Must be after setup_narrow_rollup releases migration_in_progress.
+            try:
+                if self.enable_persistent_storage:
+                    self.backlog.replay_to_queue()
+            except Exception as e:
+                self._log.error(f"Backlog replay after schema setup failed: {e}")
+        else:
+            # Subsequent protocol — add its views to existing manager
+            self.rollup_mgr.add_wide_rollup( protocol_name=protocol, wide_table_name=self._protocol_wide_table_map[protocol])
+
+    def _safe_table_name(self, protocol: str) -> str:
+        """Converts a protocol name to a safe PostgreSQL table name."""
+        safe = re.sub(r'[^a-zA-Z0-9_]', '_', protocol.strip().lower())
+        if not re.match(r'^[a-zA-Z_]', safe):
+            safe = '_' + safe
+        return f"device_metrics_wide__{safe}"[:63]
+
+    # In timescaledb — override init_bridge to register each scraper's protocol
+    def init_bridge(self, from_transport: transport_base) -> None:
+        """
+        Called by PPG after all transports are constructed, once per
+        scraper transport wired to this bridge. This is where per-protocol
+        schema setup should happen, since we now know which transports
+        (and therefore which registry maps) are actually feeding us.
+        """
+        if not isinstance(from_transport, transport_base):
+            return
+
+        if not from_transport.registry_map:
+            self._log.debug(
+                f"init_bridge: skipping '{from_transport.transport_name}' "
+                f"— no registry map (likely a bridge transport)"
             )
             return
-        else:
-            # 3. Ensure device_info_id is set and transport is set for device metadata
-            device_id: int = self._get_or_create_device(from_transport = from_transport)
+
+        protocol: str = from_transport.protocol_name
+        if not protocol:
+            return
+
+        if protocol in self._registered_protocols:
+            self._log.debug(f"Protocol '{protocol}' already registered, skipping.")
+            return
+
+        self._log.info(f"Registering protocol '{protocol}' from transport '{from_transport.transport_name}'")
+
+        try:
+            self._register_protocol_schema(protocol, from_transport.registry_map)
+            self._registered_protocols.add(protocol)
+        except Exception as e:
+            self._log.error(f"Failed to register schema for protocol '{protocol}': {e}")
+
+    # using  override transport_base.write_data method
+
+    def write_data(self, data: dict[str, int | float | str ], from_transport: transport_base) -> None:
+
+        if not isinstance(data, dict) or not data:
+            return
+
+        protocol: str = from_transport.protocol_name
+        device_id: int = self._get_or_create_device(from_transport)
 
         if device_id is None:
             self._log.error("Could not resolve Device ID. Dropping packet.")
             return
 
-        # 3. Proceed only if there is "real" data
-        self._log.debug(f"Data: {data}")
-        self._log.debug(f"writing data from [{from_transport.transport_name}] to timescaledb bridge")
+        # Look up the wide table for this transport's protocol
+        wide_table_name: str | None = self._protocol_wide_table_map.get(protocol)
 
         payload: dict[str, Any] = {
             "device_info_id": device_id,
             "metrics": data.copy(),
-            "m_time": _now_tz(),  # source of truth timestamp for all metrics.
-            "transport_name": from_transport.transport_name
+            "m_time": _now_tz(),
+            "transport_name": from_transport.transport_name,
+            "protocol": protocol,                    # carry protocol through to flush worker
+            "wide_table_name": wide_table_name,      # carry resolved table name
         }
+
         self._flush_queue.put(payload)
 
     # Flush worker thread to handle data writes to the database.
@@ -1229,11 +1848,6 @@ class timescaledb(transport_base):
             narrow_data  -> dict of appended new_data with deviceid and timestamp.  Needed because narrow table
             applies timestamp to individual metrics.
         """
-        # Check if another thread flagged a schema change
-        with self._schema_lock:
-            if self.schema_needs_refresh:
-                self._sync_single_table_schema()
-                self.schema_needs_refresh = False
 
         while True:
 
@@ -1247,7 +1861,7 @@ class timescaledb(transport_base):
             session: Session = self.SessionFactory()
             try:
                 self._flush_event.wait(timeout=0)
-                # Drain the queue with a 1s timeout to stay responsive
+                #************** Drain the queue with a 1s timeout to stay responsive************
                 data_in: dict[str, Any] | None = self._flush_queue.get(block=True)
 
                 if data_in is None or data_in is True:
@@ -1264,9 +1878,13 @@ class timescaledb(transport_base):
                 # 2. Extract the metadata from data_in
                 device_info_id: int = data_in["device_info_id"]
                 timestamp: datetime = data_in["m_time"]
+                # Backlog replay deserializes datetime as ISO string — convert back.
+                if isinstance(timestamp, str):
+                    timestamp = datetime.fromisoformat(timestamp)
                 metrics_only: dict = data_in["metrics"]
                 transport_name: str = data_in["transport_name"]
-
+                protocol: str = data_in["protocol"]
+                wide_table_name: str = data_in["wide_table_name"]
 
                 # Check for stale data before attempting to process/write to the database. This is based on the timestamp from the transport
                 # and the previous saved timestamp.
@@ -1285,20 +1903,25 @@ class timescaledb(transport_base):
                 # constraints, so we can skip processing for narrow table entries with only metric names safe SQL cleaned for
                 # consistency.
 
-                wide_data, narrow_data = self._process_raw_metrics(metrics_only)
+                wide_data, narrow_data = self._process_raw_metrics(metrics_only, protocol)
 
-                if not wide_data:
+                if not wide_data and not narrow_data:
+                    self._log.debug("No data detected, skipping DB write.")
                     self._flush_queue.task_done()
                     continue
                 else:
                     # Add device_info_id and timestamp to wide_data for wide table insertion.  This is needed because the narrow table
                     # applies timestamp and device_info_id to individual rows, whereas the wide table has one row per
                     # timestamp/device with multiple metric columns.
-                    valid_row: bool = self._validate_wide_row(wide_data)  # validate wide row without timestamp before insert
-                    wide_data: dict = wide_data | {
-                        "device_info_id": device_info_id,
-                        "m_time": timestamp,
-                    }
+
+                    valid_row: bool = False
+                    msg = None
+                    if wide_data and wide_table_name is not None:
+                        valid_row, msg = self._validate_wide_row(wide_data, wide_table_name)
+                        wide_data = wide_data | {
+                            "device_info_id": device_info_id,
+                            "m_time": timestamp,
+                        }
 
                 if self._stop_event.is_set():
                     break
@@ -1312,15 +1935,23 @@ class timescaledb(transport_base):
                         with session.begin():
                             # Further process the narrow data with the timestamp and device_info_id for insertion
                             # to the narrow table, by applying the timestamp and device_info_id to each metric/value pair.
-                            self._flush_batch_narrow(narrow_data, device_info_id, timestamp, session)
-                            if self.wide_table_flag:
+                            self._flush_batch_narrow(narrow_data, device_info_id, timestamp, session, transport_name)
+
+                            # Only attempt to write to the wide table if the row is valid and the table name is known.
+                            # If the row fails validation, it may indicate a schema mismatch between the incoming data
+                            # and the existing wide table columns — in this case we skip the wide table write to prevent data loss,
+                            # but still write to the narrow table which is schema-flexible and can accept all incoming data.
+                            if wide_table_name is not None:
+                                target_table: Table = Base.metadata.tables[wide_table_name]
+                                stmt: Insert = pg_insert(target_table).values(**wide_data)
+                                session.execute(stmt)
                                 if valid_row:
-                                    target_table: Table = Base.metadata.tables[DeviceMetricsWide.__tablename__]
-                                    stmt: Insert = pg_insert(target_table).values(**wide_data)
-                                    session.execute(stmt)
+                                    self._log.debug(f"data write complete from [{transport_name}] to timescaledb wide table for {len(metrics_only)} metrics.")
+                                else:
+                                    self._log.debug(f"Not a complete valid row for the wide table because {msg}, but wrote metrics anyway.")
 
                         self._commit_transport_state(transport_name, metrics_only, timestamp, is_stale=False)
-                        self._log.debug(f"data write complete from [{transport_name}] to timescaledb bridge")
+
                 except (SQLAlchemyError, ValueError) as e1:
                     session.rollback()
                     self._log.error(f"metrics data write failed.{e1}")
@@ -1334,11 +1965,13 @@ class timescaledb(transport_base):
                         acquired: bool = self._backlog_lock.acquire(blocking=False)
                         try:
                             if acquired:
-                                payload: dict[str,Any] = {
+                                payload: dict[str, Any] = {
                                     "metrics": metrics_only,
-                                    "device_info_id": device_info_id, # Preserve Device Inverter ID
-                                    "m_time": timestamp,             # Preserve original timestamp
-                                    "transport_name": transport_name
+                                    "device_info_id": device_info_id,
+                                    "m_time": timestamp,
+                                    "transport_name": transport_name,
+                                    "protocol": protocol,
+                                    "wide_table_name": wide_table_name,
                                 }
                                 self.backlog.enqueue(payload)
 
@@ -1348,7 +1981,7 @@ class timescaledb(transport_base):
 
                     # Handle recovery
                     if isinstance(e1, SQLAlchemyError):
-                        self._set_tsdb_connected(False, "Connection failure")  # noqa: FBT003
+                        self._set_tsdb_connected(conn_value = False, conn_reason = "Connection failure")
                         self._trigger_reconnect()
 
                 finally:
@@ -1360,122 +1993,108 @@ class timescaledb(transport_base):
                         self._flush_event.clear()
             except Exception as e:
                 self._log.critical(f" Fatal Flush Worker Crash: {e}")
+                self._flush_queue.task_done()
 
             finally:
                 session.close()
 
-    def _process_raw_metrics(self, datacopy: dict) -> tuple[dict[Any, Any], dict[Any, Any]]:
-
+    def _process_raw_metrics(self, datacopy: dict, protocol: str) -> tuple[dict, dict]:
         try:
-            # 1. Get the mapping entry (the tuple) or None if not found
-            # 2. If it's a tuple, use the first element [0] (clean_name)
-            # 3. If it's not found (None), fallback to the original key 'k'
-            # 4. Insert the new clean_key into the dict in place of the original metric name.
             processed_wide_data: dict = {}
             processed_narrow_data: dict = {}
-
-            # Type Coercion based on timescale_type_map values for field definitions.
-            # data is coerced to improve compression in metrics' tables.
-            INT_TYPES: set[str] = {"SMALLINT", "INTEGER", "BIGINT"}
-            FLOAT_TYPES: set[str] = {"REAL", "DOUBLE PRECISION", "NUMERIC"}
+            metric_mapping: dict[str, tuple[str, str]] = self._protocol_metric_mappings.get(protocol, {})
 
             for k, v in datacopy.items():
-                mapping_info: tuple[str, str] = self.metric_mapping.get(k, ("", ""))
+                mapping_info: tuple[str, str] | None = metric_mapping.get(k)
 
-                if mapping_info:
+                # 1. Resolve naming and type info
+                if mapping_info is not None:
                     clean_key, field_type = mapping_info
-
                     field_type_upper: str = field_type.upper()
-                    # Store the original value for narrow table before coercion
-                    nv: Any =v
-
-                    try:
-                        # Skip coercion if value is None.  Keep as a null to spot the issue in the data base.
-                        if v is None:
-                            processed_wide_data[clean_key] = None
-                            continue
-
-                        if field_type_upper in INT_TYPES:
-                            v = int(float(v)) # float(v) handles cases like "16.0"
-                        elif  field_type_upper in FLOAT_TYPES:
-                            v = float(v)
-                        elif field_type_upper == "BOOLEAN":
-                            v = bool(v)
-
-                        # TEXT/ASCII/HEX remains as is
-                        else:
-                            v= str(v)
-
-                        processed_wide_data[clean_key] = v
-                        # only return numeric and boolean values to the narrow table to allow inserts to narrow table double precision column.
-                        if isinstance(nv, (int, float, bool)):
-                            processed_narrow_data[clean_key] = float(nv)
-
-                    except (ValueError, TypeError) as e1:
-                        # log the specific key that failed, but keep the original value
-                        self._log.warning(
-                            f"Coercion failed for metric '{k}' (Value: {v}, Target: {field_type_upper}). "
-                            f"Error: {e1}. Keeping original value."
-                        )
-
-                        processed_wide_data[clean_key] = v
-                        if isinstance(nv, (int, float, bool)):
-                            processed_narrow_data[clean_key] = float(nv)
                 else:
-                    # Metric name not in catalog; keep original name/value
-                    processed_wide_data[k] = v
-                    if isinstance(nv, (int, float, bool)):
-                        processed_narrow_data[k] = float(nv)
+                    clean_key = k
+                    field_type_upper = "UNKNOWN"
 
-            self._log.debug("All metrics coerced")
+                # 2. Prepare Narrow Data
+                # We send the raw value so _flush_batch_narrow can sort it into numeric value vs ascii
+                processed_narrow_data[clean_key] = v
 
-            return processed_wide_data, processed_narrow_data  # noqa: TRY300
+                # 3. Prepare Wide Data (Apply coercion)
+                try:
+                    if v is None:
+                        processed_wide_data[clean_key] = None
+                        continue
 
-        except (TypeError, ValueError) as e2:
-            self._log.error(f"Error in _process_raw_metrics {e2} encountered in: {datacopy}")
-            # If there's an error in processing, return empty dicts to avoid crashing the flush worker.
-            # The original data is preserved in the backlog if enabled.
+                    if field_type_upper in self.INT_TYPES:
+                        processed_wide_data[clean_key] = int(float(v))
+                    elif field_type_upper in self.FLOAT_TYPES:
+                        processed_wide_data[clean_key] = float(v)
+                    elif field_type_upper == "BOOLEAN":
+                        processed_wide_data[clean_key] = bool(int(v))
+                    else:
+                        # ascii and unknown types are stored as text in the wide table, with best effort coercion
+                        # to string for non-string values.  This is to prevent data loss in the wide table for unexpected types,
+                        # while still allowing all values to be stored in the narrow table.
+                        processed_wide_data[clean_key] = str(v)
+
+                except (ValueError, TypeError) as e1:
+                    self._log.warning(f"Coercion failed for metric '{k}' (Value: {v}). Error: {e1}.")
+                    processed_wide_data[clean_key] = v
+
+        except Exception as e2:
+            self._log.error(f"Error in _process_raw_metrics {e2}")
             return {}, {}
+        else:
+            self._log.debug("All metrics processed for wide and narrow paths")
+            return processed_wide_data, processed_narrow_data
 
-    def _flush_batch_narrow(self, newData: dict, device_info_id: int, timestamp: datetime, session: Session) -> None:
-        """
-            Flush new_data narrow-table metric points to the database.
-        """
+    def _flush_batch_narrow(self, newData: dict, device_info_id: int, timestamp: datetime, session: Session, transport_name: str) -> None:
         try:
-            reading_time =  timestamp
-            # Ensure we have a datetime object
+            reading_time: datetime = timestamp
             if isinstance(reading_time, str):
-                # Convert string to datetime if needed
-                reading_time: datetime = datetime.fromisoformat(reading_time)
+                reading_time = datetime.fromisoformat(reading_time)
 
-            # Convert the flat dict into a list of row mappings, excluding strings
-            narrow_mappings: list = [
-                {
+            narrow_mappings: list = []
+            for key, value in newData.items():
+                row = {
                     "m_time": reading_time,
                     "device_info_id": device_info_id,
                     "metric_name": key,
-                    "metric_value": value
+                    "metric_value": 0.0,
+                    "metric_ascii": None
                 }
-                for key, value in newData.items()
-                if isinstance(value, (int, float, bool))
-            ]
 
-            # Use the optimized 'insert' construct for bulk efficiency
-            session.execute(pg_insert(DeviceMetricsNarrow), narrow_mappings)
+                # Numeric/Bool Logic
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    row["metric_value"] = float(value)
+                elif isinstance(value, bool):
+                    row["metric_value"] = 1.0 if value else 0.0
+                # String Logic
+                else:
+                    row["metric_ascii"] = str(value) if value is not None else None
+                    row["metric_value"] = 0.0
+
+                narrow_mappings.append(row)
+
+            if narrow_mappings:
+                stmt: Insert = pg_insert(DeviceMetricsNarrow).values(narrow_mappings)
+                upsert_stmt: Insert = stmt.on_conflict_do_nothing(index_elements=['m_time', 'device_info_id', 'metric_name'])
+                session.execute(upsert_stmt)
+                self._log.debug(f"data write complete from [{transport_name}] to timescaledb narrow table for {len(narrow_mappings)} metrics.")
 
         except SQLAlchemyError as e:
             self._log.exception(f"Narrow flush failed: {e}")
-
             try:
                 session.rollback()
             except SQLAlchemyError as e2:
                 self._log.exception(f"Narrow flush rollback failed: {e2}")
 
             # === Auto Reconnect handling ===
-            self._set_tsdb_connected(False, "Connect unsuccessful")  # noqa: FBT003
+            self._set_tsdb_connected(conn_value = False, conn_reason = "Connect unsuccessful")
             self._trigger_reconnect()
 
             raise  # Re-raise to be caught by outer handler for potential backlog queuing
+
 
     def _check_is_stale(self, transport_id: str, row: dict, timestamp: datetime) -> bool:
         """_summary_   Stale Data Detection and Handling
@@ -1520,14 +2139,14 @@ class timescaledb(transport_base):
             timestamp (datetime): The timestamp of when the data was received.
             is_stale (bool): A flag indicating whether the data is considered stale.
         """
-        # Initialize if missing
+        # Initialize if missing — start_ts and stale_event_count begin fresh here
         if transport_id not in self._stale_registry:
             self._stale_registry[transport_id] = {
                 "last_row": row.copy(), "start_ts": timestamp, "is_stale": False,
                 "last_seen": timestamp, "stale_event_count": 0, "last_event_ts": None
             }
 
-        state = self._stale_registry[transport_id]
+        state: dict[str, Any] = self._stale_registry[transport_id]
         state["last_seen"] = timestamp
         self._log.debug(
             f"Committing state for transport: {transport_id} | "
@@ -1539,22 +2158,85 @@ class timescaledb(transport_base):
             # Reset everything on fresh data/successful write
             state.update({
                 "last_row": row.copy(), "start_ts": timestamp,
-                "is_stale": False, "stale_event_count": 0
+                "is_stale": False, "stale_event_count": 0,   # ← counter resets here on recovery
+                "last_event_ts": None                        # ← also reset the throttle timer
             })
         elif is_stale and not state["is_stale"]:
             # Only trigger the event ONCE per stale period
             state["is_stale"] = True
-            state["stale_event_count"] += 1
             state["last_event_ts"] = timestamp
 
             elapsed = timestamp - state["start_ts"]
             self._handle_stale_event(transport_id, timestamp, elapsed)
 
+    def _cleanup_orphaned_locks(self) -> None:
+        """
+        Terminates stale backend connections that are holding locks on our
+        tables but have no active query — typically left by a crashed client.
+
+        Runs once at startup after connection is verified, before any schema
+        work. Targets only connections to our specific database that are idle
+        or idle-in-transaction and have been so for more than 60 seconds,
+        excluding our own connection and the TimescaleDB background workers.
+
+        Non-fatal — a failure here is logged and skipped, not raised.
+        """
+        try:
+            with self.engine.connect().execution_options(
+                isolation_level="AUTOCOMMIT"
+            ) as conn:
+
+                # 1. Find stale idle connections holding locks on our tables.
+                # Excludes our own pid, TimescaleDB workers, and active queries.
+                stale = conn.execute(text("""
+                    SELECT
+                        pid,
+                        state,
+                        application_name,
+                        now() - state_change AS idle_duration,
+                        query
+                    FROM pg_stat_activity
+                    WHERE datname = :dbname
+                    AND pid <> pg_backend_pid()
+                    AND application_name NOT LIKE 'TimescaleDB%'
+                    AND state IN ('idle in transaction', 'idle in transaction (aborted)')
+                    AND now() - state_change > INTERVAL '60 seconds'
+                """), {"dbname": self.database}).fetchall()
+
+                if not stale:
+                    self._log.debug("No orphaned backend connections found.")
+                    return
+
+                for pid, state, app_name, idle_duration, query in stale:
+                    self._log.warning(
+                        f"Terminating orphaned connection: pid={pid}, "
+                        f"state='{state}', app='{app_name}', "
+                        f"idle={idle_duration}, query='{str(query)[:80]}'"
+                    )
+                    try:
+                        conn.execute(
+                            text("SELECT pg_terminate_backend(:pid);"),
+                            {"pid": pid}
+                        )
+                    except Exception as e:
+                        self._log.error(
+                            f"Failed to terminate pid {pid}: {e}"
+                        )
+                        # Non-fatal — continue with remaining connections
+
+                self._log.info(
+                    f"Orphaned connection cleanup complete: "
+                    f"{len(stale)} connection(s) terminated."
+                )
+
+        except Exception as e:
+            self._log.error(f"_cleanup_orphaned_locks failed: {e}")
+            # Non-fatal — proceed with startup even if cleanup fails
 
     def _cleanup_stale_registry(self) -> None:
         """Removes transports that haven't been seen in 7 days."""
         now: datetime = _now_tz()
-        to_delete = [
+        to_delete: List[str] = [
             tid for tid, s in self._stale_registry.items()
             if (now - s["last_seen"]).days >= 7
         ]
@@ -1570,12 +2252,12 @@ class timescaledb(transport_base):
         if not state:
             return
 
-        # 1. Check max attempts for THIS transport
+        # 1. Check max attempts for this transport
         if state["stale_event_count"] >= self.max_stale_attempts:
             self._log.debug(f"[{transport_id}] Max stale retry attempts reached. No further reconnects.")
             return
 
-        # 2. Throttling: Has enough time passed since THIS transport's last attempt?
+        # 2. Throttling: Has enough time passed since this transport's last attempt?
         if state["last_event_ts"] is not None:
             time_since_last = current_time - state["last_event_ts"]
             if time_since_last < timedelta(minutes=int(self.retry_delay_mins)):
@@ -1589,7 +2271,7 @@ class timescaledb(transport_base):
         if self.request_upstream_reconnect:
             try:
                 self._log.warning(f"[{transport_id}] Data stale. Requesting reconnect (Attempt {state['stale_event_count']}/{self.max_stale_attempts}).")
-                # PASS THE TRANSPORT ID HERE
+                # Pass the transport ID here
                 self.request_upstream_reconnect(transport_id)
             except Exception:
                 self._log.exception(f"[{transport_id}] Failed requesting upstream reconnect.")
@@ -1597,17 +2279,13 @@ class timescaledb(transport_base):
         # 5. Notify
         try:
             if getattr(self, "enable_pushover", False):
-                minutes = total_stale_elapsed.total_seconds() / 60
-                msg = (f"Transport [{transport_id}] stale for {minutes:.1f} mins. "
+                minutes: float = total_stale_elapsed.total_seconds() / 60
+                msg: str = (f"Transport [{transport_id}] stale for {minutes:.1f} mins. "
                     f"Attempt {state['stale_event_count']} of {self.max_stale_attempts}.")
                 self._send_pushover_message(title="Transport Stale", message=msg)
         except Exception:
             self._log.exception(f"[{transport_id}] Failed sending Pushover notification.")
 
-
-    def normalize(self, text: str) -> str:
-        # Keeps only letters and numbers
-        return "".join(char for char in text if char.isalnum())
 
     def _send_pushover_message(self, title: str, message: str) -> None:
         """
@@ -1683,8 +2361,10 @@ class timescaledb(transport_base):
             self._log.error(f"Error stopping flush thread: {e}")
 
         try:
-            if self.engine:
-                self.engine.dispose()
+            if self._owns_connection_manager:
+                self._connection_manager.dispose()
+            else:
+                self._connection_manager.unregister()
         except Exception as e:
             self._log.error(f"Error disposing engine: {e}")
 
@@ -1808,13 +2488,12 @@ class BacklogManager:
     def _append_to_disk(self, point: dict) -> None:
         if not self.backlog_file_path:
             return
-        json_string = json.dumps(point, default=str)
-        # trap of errata "true" in points.
-        cleaned_json: str = re.sub(r'^true', '', json_string, flags=re.IGNORECASE | re.MULTILINE)
+        json_string: str = json.dumps(point, default=str)
+
         try:
             self.backlog_file_path.parent.mkdir(parents=True, exist_ok=True)
             with open(self.backlog_file_path, "a") as f:
-                f.write(cleaned_json + "\n")
+                f.write(json_string + "\n")
         except Exception as e:
             self._log.error(f"Failed to append point to backlog disk: {e}")
             raise
@@ -1850,12 +2529,30 @@ class RollupManager:
         SQL Execution: The SET LOCAL work_mem uses the single-quote fix to prevent f-string placeholder errors.
     """
 
+    # This dataclass is used to describe the SQL expressions needed to create rollup continuous aggregates for a given metric.
+    @dataclass(frozen=True)
+    class RollupMetricDescriptor:
+        """
+        Describe one logical metric stream for generic rollup SQL generation.
+
+        Narrow rollups use a single descriptor keyed by `metric_name`.
+        Wide rollups use one descriptor per protocol-specific metric column.
+        """
+
+        group_key_sql: str | None
+        raw_value_sql: str
+        rolled_min_sql: str
+        rolled_max_sql: str
+        rolled_summary_sql: str
+        min_alias: str
+        max_alias: str
+        summary_alias: str
+
     def __init__(
         self,
         rollup_policy: dict,
         my_session_factory: sessionmaker[Session],
         my_engine: Engine,
-        wide_table_flag: bool,
         migration_in_progress: threading.Event,
         send_pushover_message: Callable[[str, str], None],
         log: logging.Logger,
@@ -1868,7 +2565,6 @@ class RollupManager:
         self.rollup_policy: dict = rollup_policy
         self.SessionFactory: sessionmaker[Session] = my_session_factory
         self.engine: Engine = my_engine
-        self.wide_table_flag: bool = wide_table_flag
         self.migration_in_progress: threading.Event = migration_in_progress
         self._send_pushover_message: Callable[[str, str], None] = send_pushover_message
         self._log: logging.Logger = log
@@ -1877,7 +2573,7 @@ class RollupManager:
         self.backlog: 'BacklogManager'  = backlog
         self._reconnect_lock: threading.RLock = reconnect_lock
 
-        self._refresh_rollup_thread = threading.Thread(target=self._refresh_rollup_loop, daemon=True, name="RollupAutoRefreshThread")
+        self._refresh_rollup_thread = threading.Thread(target=self._refresh_rollup_loop_helper, daemon=True, name="RollupAutoRefreshThread")
         self._stop_refresh_rollup_event: threading.Event = getattr(self, "_stop_refresh_rollup_event", threading.Event())
 
         # Performance tiers for rollup refreshes, mapped from rollup_policy or default values.
@@ -1888,6 +2584,11 @@ class RollupManager:
         "tier_medium": {"count": 100, "work_mem": "64MB",  "lock_timeout": "15s", "flush_batch_size": 20},
         "tier_high":   {"count": 200, "work_mem": "128MB", "lock_timeout": "30s", "flush_batch_size": 40},
         }
+
+        # Tracks metric_count per protocol, keyed by protocol_name.
+        # Populated in add_wide_rollup from protocol_registry.metric_count.
+        # Used by _get_dynamic_settings to determine tier without a DB hit.
+        self._protocol_wide_column_counts: dict[str, int] = {}
 
         """
         Rollup and Compression Timing Defaults comments only:
@@ -1970,6 +2671,17 @@ class RollupManager:
         self.weekly_rollup_start: str = self.rollup_defaults["weekly_rollup_start"]
         self.monthly_rollup_start: str = self.rollup_defaults["monthly_rollup_start"]
 
+        # Tracks whether the shared narrow CAGG views have been created.
+        # Narrow rollup views (hourly/daily/weekly/monthly_rollup_narrow) are shared
+        # across all protocols, so they only need to be built once.
+        self._narrow_rollups_created: bool = False
+
+        # Registry of all CAGG view names this manager is responsible for refreshing.
+        # Populated by add_wide_rollup and _ensure_narrow_cagg_views.
+        # Keyed as view_name -> start_offset string, preserving insertion order
+        # so the refresh loop always runs hourly -> daily -> weekly -> monthly.
+        self._known_rollup_views: dict[str, str] = {}
+
     @property
     def tsdb_connected(self) -> bool:
         """Always returns the live connection state from the shared policy dict.
@@ -1986,45 +2698,193 @@ class RollupManager:
             return False
 
 
-    def setup_schema(self) -> None:
+    def setup_narrow_rollup(self) -> None:
         """
-        This method orchestrates the entire post schema setup process, including hypertable creation,
-        compression setup, retention policy, and continuous aggregate rollup creation.
-        Called once during TSDB startup.
-        """
+        Build the shared narrow-table post-creation stack.
 
-    # 1 Hypertable & Policies
+        This method preserves the original narrow bootstrap behavior while
+        routing the work through a single lifecycle helper so shared and
+        protocol-specific paths use the same orchestration shape.
+        """
+        self.setup_rollup(
+            table_name="device_metrics_narrow",
+            segment_by=self.compress_segmentby_narrow,
+            compression_policy_intervals=[
+                self.hourly_chunk_time_interval,
+                self.daily_chunk_time_interval,
+                self.weekly_chunk_time_interval,
+                self.monthly_chunk_time_interval,
+            ],
+            protocol_name=None,
+            wide_table_name=None,
+            use_shared_rollup_flow=True,
+        )
+
+    def setup_rollup(
+        self,
+        table_name: str,
+        segment_by: str,
+        compression_policy_intervals: list[str],
+        protocol_name: str | None,
+        wide_table_name: str | None,
+        use_shared_rollup_flow: bool,
+    ) -> None:
+        """
+        Run the common post-table-processing lifecycle for both narrow and wide sources.
+
+        The shared narrow stack and protocol wide stack both apply the same
+        major categories of work: hypertable setup, compression setup,
+        retention policy, rollup creation, and initial refresh. This helper
+        centralizes that lifecycle while still allowing narrow-specific and
+        wide-specific rollup creation to diverge where required.
+        """
+        # 1 Hypertable & Policies
         try:
-            self.ensure_hypertables()
+            self._ensure_hypertables([table_name])
             self._log.info("Hypertable check/creation complete")
         except Exception as e:
             self._log.error(f"Hypertable creation failed: {e}")
 
-    # 2 Enable compression (if configured)
+        # 2 Enable compression (if configured)
         try:
             if self.enable_compression:
-                self.ensure_compression_enabled()
+                self._configure_compression(
+                    table_name=table_name,
+                    segment_by=segment_by,
+                    compression_policy_intervals=compression_policy_intervals,
+                )
         except Exception as e:
             self._log.error(f"Enable compression failed: {e}")
 
-    # 3 Add retention policy
+        # 3 Add retention policy
         try:
-            self.ensure_retention_policy()
+            self._apply_retention_policy(table_name)
         except Exception as e:
             self._log.error(f"Add retention policy failed: {e}")
 
-    # 4 Setup continuous aggregate rollups
+        # 4 Setup continuous aggregate rollups
         if self.enable_rollups:
-            # 4a
+            if use_shared_rollup_flow:
+                # 4a
+                try:
+                    self.setup_with_retry()
+                except Exception as e:
+                    self._log.error(f"Aggregate Rollup setup failed: {e}")
+                # 4b
+                try:
+                    self.refresh_rollups(force_full=True)
+                except Exception as e:
+                    self._log.error(f"Refresh Rollup failed: {e}")
+            elif protocol_name is not None:
+                # 4a
+                try:
+                    self._ensure_cagg_views_for_protocol(protocol_name, wide_table_name)
+                except Exception as e:
+                    self._log.error(f"CAGG view creation failed for protocol '{protocol_name}': {e}")
+
+                # 4b
+                try:
+                    self._refresh_protocol_rollups_helper(protocol_name, wide_table_name)
+                except Exception as e:
+                    self._log.error(
+                        f"Initial rollup refresh failed for '{protocol_name}': {e}"
+                        f" — views exist but data may not be pre-aggregated."
+                    )
+
+    def _ensure_hypertables(self, tables: list[str]) -> None:
+        """
+        Ensure the provided source tables are TimescaleDB hypertables.
+
+        The helper preserves the original `create_hypertable(... if_not_exists)`
+        behavior while letting both narrow and wide orchestration paths pass in
+        the tables they need processed.
+        """
+        params: dict[str, Any] = {
+            "time_col": getattr(self, "time_column", "m_time"),
+            "if_exists": getattr(self, "if_not_exists", True),
+            "migrate": getattr(self, "migrate_data", True),
+        }
+
+        try:
+            with self.SessionFactory() as session:
+                with session.begin():
+                    for table in tables:
+                        session.execute(
+                            text(
+                                f"""
+                                SELECT create_hypertable(
+                                    '{table}',
+                                    :time_col,
+                                    if_not_exists => :if_exists,
+                                    migrate_data => :migrate
+                                )
+                                """
+                            ),
+                            {
+                                **params,
+                            },
+                        )
+                self._log.debug(f"Hypertable creation ensured for: {', '.join(tables)}")
+
+        except SQLAlchemyError as e:
+            self._log.error("Failed to ensure hypertables: %s", e)
+            raise
+
+    def _configure_compression(
+        self,
+        table_name: str,
+        segment_by: str,
+        compression_policy_intervals: list[str],
+    ) -> None:
+        """
+        Apply compression settings and compression policies to one source table.
+
+        The table structure is immutable after creation, but policy scheduling
+        remains configurable. This helper keeps those concerns together for
+        both shared narrow and protocol-specific wide sources.
+        """
+        with self.SessionFactory() as session:
+            self._log.info("Setting up compression policy")
+            if not session:
+                self._log.error("Cannot set up compression — not tsdb_connected.")
+                return
+
+            self._apply_compression_helper(session, table_name, segment_by)
+
+            with session.begin():
+                for interval in compression_policy_intervals:
+                    self.ensure_compression_policy(table_name, interval)
+
+                session.commit()
+
+    def _apply_retention_policy(self, table_name: str) -> None:
+        """
+        Apply the configured retention policy to one source table.
+
+        This preserves the previous remove-and-readd behavior so changes to the
+        retention interval still take effect on restart.
+        """
+        with self.SessionFactory() as session:
+            if not session:
+                self._log.error("Cannot add retention policies — not tsdb_connected.")
+                return
+
             try:
-                self.setup_with_retry()
-            except Exception as e:
-                self._log.error(f"Aggregate Rollup setup failed: {e}")
-            # 4b
-            try:
-                self.refresh_rollups(force_full=True)
-            except Exception as e:
-                self._log.error(f"Refresh Rollup failed: {e}")
+                # Remove and re-add policy to ensure interval updates apply
+                session.execute(text(f"SELECT remove_retention_policy('{table_name}', if_exists => True);"))
+                session.execute(text(f"SELECT add_retention_policy('{table_name}', INTERVAL '{self.drop_after}');"))
+
+                session.commit()
+                self._log.debug(f"Retention policy updated for {table_name}")
+
+            except SQLAlchemyError as e:
+                self._log.error(f"Error updating retention policy for {table_name}: {e}")
+                try:
+                    session.rollback()
+                except SQLAlchemyError as e2:
+                    self._log.error(f"Rollback failed for {table_name}: {e2}")
+                raise
+
 
     # 5 Start the rollup thread.  Called from TimescaleDB class upon connection to the database.
     def start_auto_refresh(self) -> None:
@@ -2037,83 +2897,9 @@ class RollupManager:
             self._refresh_rollup_thread.start()
             self._log.debug("Auto rollup refresh thread started.")
 
-    # -------------------------
-    # 6. Hypertable creation
-    # -------------------------
-    def ensure_hypertables(self) -> None:
-        """Convert base tables into TimescaleDB hypertables.
-           If the hypertables already exist, this function will do nothing due to the 'if_not_exists' flag.
-           If wide_table_flag is False, only device_metrics_narrow will be processed.
-        """
-        # 1. The tables that need to be processed
-        tables: List[str] = ["device_metrics_narrow"]
-        if self.wide_table_flag:
-            tables.append("device_metrics_wide")
 
-        # 2. shared parameters
-        params: dict[str, Any] = {
-            "time_col": getattr(self, "time_column", "m_time"),
-            "if_exists": getattr(self, "if_not_exists", True),
-            "migrate": getattr(self, "migrate_data", True),
-        }
-
-        try:
-            with self.SessionFactory() as session:
-                for table in tables:
-
-                    session.execute(
-                        text(f"SELECT create_hypertable('{table}', :time_col, if_not_exists => :if_exists, migrate_data => :migrate)"),
-                        params
-                    )
-                session.commit()
-                self._log.debug(f"Hypertable creation ensured for: {', '.join(tables)}")
-
-        except SQLAlchemyError as e:
-            self._log.error("Failed to ensure hypertables: %s", e)
-
-
-    # -------------------------
-    # 7. Enable compression
-    # -------------------------
-
-    def ensure_compression_enabled(self) -> None:
-        """
-        Enable TimescaleDB compression on device_metrics_narrow and device_metrics_wide tables.
-        """
-        with self.SessionFactory() as session:
-            self._log.info("Setting up compression policy")
-            if not session:
-                self._log.error("Cannot set up compression — not tsdb_connected.")
-                return
-
-            # Define tables and their specific segmentation configuration
-            tables_to_configure: List[Tuple[str, str]] = [
-                ("device_metrics_narrow", self.compress_segmentby_narrow),
-            ]
-            if self.wide_table_flag:
-                tables_to_configure.append(("device_metrics_wide", self.compress_segmentby_wide))
-
-            # Repetitive SQL Execution
-            for table_name, segment_by in tables_to_configure:
-                self._apply_compression_to_table(session, table_name, segment_by)
-
-            #  Policy Creation
-            with session.begin():
-                chunk_intervals: List[str] = [
-                    self.hourly_chunk_time_interval,
-                    self.daily_chunk_time_interval,
-                    self.weekly_chunk_time_interval,
-                    self.monthly_chunk_time_interval,
-                ]
-
-                for table_name, _ in tables_to_configure:
-                    for chunk_interval in chunk_intervals:
-                        self.ensure_compression_policy(table_name, chunk_interval)
-
-                session.commit()
-
-    def _apply_compression_to_table(self, session: Session, table_name: str, segment_by: str) -> None:
-        """Helper to apply compression ALTER TABLE statement with error handling."""
+    def _apply_compression_helper(self, session: Session, table_name: str, segment_by: str) -> None:
+        """Apply compression ALTER TABLE settings to one source table."""
         try:
             sql: TextClause = text(
                 f"ALTER TABLE {table_name} SET ("
@@ -2132,9 +2918,6 @@ class RollupManager:
             except SQLAlchemyError as e2:
                 self._log.error(f"Rollback error for {table_name}: {e2}")
 
-    # -------------------------
-    # 7b. Add compression policy
-    # -------------------------
     def ensure_compression_policy(self, source, chunk_interval) -> None:
         """Automatically compress chunks older than chunk_time_interval.
         Parameters:
@@ -2160,44 +2943,6 @@ class RollupManager:
                 except SQLAlchemyError as e2:
                     self._log.error(f"_add_compression_policy {source} for {chunk_interval} rollback error: {e2}")
 
-    # -------------------------
-    # 9. Add retention policy
-    # -------------------------
-
-    def ensure_retention_policy(self) -> None:
-        """ Drop old data automatically after drop_after interval.
-            This method first removes any existing retention policy to ensure that changes to the drop_after interval are applied correctly.
-        """
-        with self.SessionFactory() as session:
-            if not session:
-                self._log.error("Cannot add retention policies — not tsdb_connected.")
-                return
-
-            # Determine the tables that need the policy
-            tables: List[str] = ["device_metrics_narrow"]
-            if self.wide_table_flag:
-                tables.append("device_metrics_wide")
-
-            for table in tables:
-                try:
-                    # Remove and re-add policy to ensure interval updates apply
-                    session.execute(text(f"SELECT remove_retention_policy('{table}', if_exists => True);"))
-                    session.execute(text(f"SELECT add_retention_policy('{table}', INTERVAL '{self.drop_after}');"))
-
-                    session.commit()
-                    self._log.debug(f"Retention policy updated for {table}")
-
-                except SQLAlchemyError as e:
-                    self._log.error(f"Error updating retention policy for {table}: {e}")
-                    try:
-                        session.rollback()
-                    except SQLAlchemyError as e2:
-                        self._log.error(f"Rollback failed for {table}: {e2}")
-
-
-    # -------------------------
-    # 10 Rollups
-    # -------------------------
     def setup_with_retry(self) -> None:
         """_summary_
          This method wraps the ensure_rollups() call with retry Logic to handle potential lock timeouts that can occur if the flush
@@ -2221,7 +2966,7 @@ class RollupManager:
                 else:
                     raise  # Real error, don't retry
 
-    # 10a
+
     def ensure_rollups(self) -> None:
         """
         Sets up continuous aggregate rollups based on predefined configurations.
@@ -2260,16 +3005,6 @@ class RollupManager:
                         }
                     }
                 ]
-                if self.wide_table_flag:
-                    contexts.append({
-                        "table_name": "device_metrics_wide",
-                        "segments": {
-                            "hourly_rollup": "hourly_rollup_wide",
-                            "daily_rollup": "daily_rollup_wide",
-                            "weekly_rollup": "weekly_rollup_wide",
-                            "monthly_rollup": "monthly_rollup_wide",
-                        }
-                    })
 
                 view_configs: list[tuple[str, str, str, str]] = [
                     ("hourly_rollup", self.hourly_rollup_bucket, self.hourly_rollup_start, self.hourly_chunk_time_interval),
@@ -2279,23 +3014,35 @@ class RollupManager:
                 ]
 
                 # 2. Scan Phase: Detect if any bucket change exists across the whole stack
-                any_rebuild_needed = False
+                # 2. Scan Phase: Detect whether the stack is missing, mismatched, or already valid
+                any_rebuild_needed: bool = False
+                any_missing_views: bool = False
+
                 for context in contexts:
                     for view_key, bucket, _, _ in view_configs:
                         view_name: str = context["segments"][view_key]
-                        if self.rollup_needs_rebuild(session, view_name, bucket):
+                        rollup_state: str = self.rollup_needs_rebuild(session, view_name, bucket)
+
+                        if rollup_state == "rebuild":
                             any_rebuild_needed = True
                             break
+
+                        if rollup_state == "missing":
+                            any_missing_views = True
+
                     if any_rebuild_needed:
                         break
 
-                # 3. Purge Phase: If a change is detected, wipe the slate clean in correct order
+                # 3. Purge Phase: Only purge when an existing rollup stack is mismatched
                 if any_rebuild_needed:
                     self._log.info("Bucket change detected. Purging all rollups for clean rebuild.")
                     # This method must drop Weekly -> Daily -> Hourly with sequential commits
                     self._drop_all_continuous_aggregates(session)
                     # Purge orphaned scheduler jobs
-                    self._purge_ghost_jobs(session)
+                    self._purge_ghost_jobs_helper(session)
+                elif any_missing_views:
+                    self._log.info("Missing rollups detected. Creating required views without purge.")
+
 
                 # 4. Creation Phase: Build/Verify Bottom-Up (Hourly -> Daily -> Weekly)
                 for context in contexts:
@@ -2304,14 +3051,19 @@ class RollupManager:
                     rollup_segments: dict[str, str] = context["segments"]
 
                     for view_key, bucket, start_offset, chunk_time_interval in view_configs:
+                        # gran: str = view_key.split("_")[0]  # "hourly", "daily", etc.
                         view_name = rollup_segments[view_key]
 
-                        # If the view doesn't exist (due to purge or first run), create it
-                        if not self._view_exists(session, view_name):
-                            self._log.info(f"Creating {view_name} from {current_source}...")
-                            self._create_narrow_rollup(session, current_source, view_name, bucket, start_offset)
-                        else:
-                            self._log.debug(f"View {view_name} is already up to date.")
+                        # Create if missing and register into _known_rollup_views
+                        # regardless, so the refresh loop picks it up.
+                        self._ensure_single_cagg_view_helper(
+                            session=session,
+                            view_name=view_name,
+                            source_table=current_source,
+                            bucket_interval=bucket,
+                            start_offset=start_offset,
+                            protocol_name="shared_narrow"
+                        )
 
                         # Update current_source for Hierarchical Aggregation
                         # Note: Monthly is kept on the source_table
@@ -2327,71 +3079,76 @@ class RollupManager:
             self._log.info("Resuming flush thread.")
 
 
-    # -------------------------
-    # 10d
-    # -------------------------
-
-    def _create_narrow_rollup(self, session: Session, source: str, view_name: str, bucket_interval: str, start_offset: str) -> None:
+    def _create_rollup_helper(self, session: Session, source: str, view_name: str, bucket_interval: str, start_offset: str, base_wide_table_name: str | None = None) -> None:
         """
-        Creates a continuous aggregate with proper hierarchical logic and locking.
-        Parameters:
-            session: Active database session for executing SQL commands.
-            source: The source table or view from which to aggregate (e.g., "device_metrics_narrow" or a previous rollup view).
-            view_name: The name of the continuous aggregate view to create.
-            bucket_interval: The time bucket size for aggregation (e.g., "1 hour", "1 day").
-            start_offset: The offset for the continuous aggregate policy (e.g., "3 hours", "3 days").
+        Create one continuous aggregate view using the shared narrow/wide SQL pipeline.
 
+        Narrow and wide rollups follow the same structural flow:
+        time bucket, device grouping, metric dimension, and aggregate fields.
+        The real variation is the metric dimension itself, so this method builds
+        one generic SELECT using typed metric descriptors and then applies the
+        standard view policies.
         """
-        r_settings: dict = self._get_dynamic_settings()
+        r_settings: dict[str, Any] = self._get_dynamic_settings_helper()
 
         if not session:
             self._log.error("Cannot create rollup — not connected.")
             return
 
-        # 1. Set local lock timeout to fail fast if blocked by flush thread.  Set dynamically from settings.
+        # Set local lock timeout to fail fast if blocked by flush thread.  Set dynamically from settings.
         session.execute(text(f"SET LOCAL lock_timeout = '{r_settings['lock_timeout']}';"))
 
-        # 2. Determine Aggregation Mode
+        # Determine Aggregation Mode
         # If source is another view, we MUST use rollup(). If it's a hypertable, use stats_agg().
-        reading_from_raw = source in ["device_metrics_narrow", "device_metrics_wide"]
-
-        if reading_from_raw:
-            agg_func = "stats_agg(metric_value)"
-            min_func = "metric_value"
-            max_func = "metric_value"
-        else:
-            agg_func = "rollup(stats_summary)"
-            min_func = "min_value"
-            max_func = "max_value"
+        reading_from_raw: bool = (source == "device_metrics_narrow" or source.startswith("device_metrics_wide__"))
 
         try:
-            # 3. Branch for Wide vs Narrow
-            if self.wide_table_flag and "wide" in source:
-                # mapping columns for wide table rollups
-                self._create_wide_rollup(session, source, view_name, bucket_interval, agg_func)
-            else:
-                # 4. Standard Narrow View Creation
-                # Uses 3-arg time_bucket for IANA timezone midnight alignment
-                session.execute(text(f"""
-                    CREATE MATERIALIZED VIEW {view_name}
-                    WITH (timescaledb.continuous = true) AS
-                    SELECT
-                        time_bucket(INTERVAL '{bucket_interval}', m_time, '{machine_timezone}') AS m_time,
-                        device_info_id,
-                        metric_name,
-                        MIN({min_func}) AS min_value,
-                        MAX({max_func}) AS max_value,
-                        {agg_func} AS stats_summary
-                    FROM {source}
-                    GROUP BY 1, 2, 3
-                    WITH NO DATA;
-                """))  # noqa: S608
+            descriptors: list[RollupManager.RollupMetricDescriptor] = self._resolve_rollup_metric_descriptors_helper(
+                session=session,
+                source=source,
+                base_wide_table_name=base_wide_table_name,
+            )
 
-            # 5. Apply Policies & Index
-            self._add_aggregate_policy(session, view_name, bucket_interval, start_offset)
+            select_clauses: list[str] = [
+                f"time_bucket(INTERVAL '{bucket_interval}', m_time, '{machine_timezone}') AS m_time",
+                "device_info_id",
+            ]
+            group_by_positions: list[str] = ["1", "2"]
+
+            for descriptor in descriptors:
+                if descriptor.group_key_sql is not None:
+                    select_clauses.append(descriptor.group_key_sql)
+                    group_by_positions.append(str(len(group_by_positions) + 1))
+
+                if reading_from_raw:
+                    select_clauses.append(f"MIN({descriptor.raw_value_sql}) AS {descriptor.min_alias}")
+                    select_clauses.append(f"MAX({descriptor.raw_value_sql}) AS {descriptor.max_alias}")
+                    select_clauses.append(
+                        f"stats_agg({descriptor.raw_value_sql}) AS {descriptor.summary_alias}"
+                    )
+                else:
+                    select_clauses.append(f"MIN({descriptor.rolled_min_sql}) AS {descriptor.min_alias}")
+                    select_clauses.append(f"MAX({descriptor.rolled_max_sql}) AS {descriptor.max_alias}")
+                    select_clauses.append(
+                        f"rollup({descriptor.rolled_summary_sql}) AS {descriptor.summary_alias}"
+                    )
+
+            session.execute(text(f"""
+                CREATE MATERIALIZED VIEW {view_name}
+                WITH (timescaledb.continuous = true) AS
+                SELECT
+                    {', '.join(select_clauses)}
+                FROM {source}
+                GROUP BY {', '.join(group_by_positions)}
+                WITH NO DATA;
+            """))  # noqa: S608
 
 
-            # 6. Finalize the view so it is available as a 'source' for the next view in the loop
+            # Apply Policies & Index
+            self._add_aggregate_policy_helper(session, view_name, bucket_interval, start_offset)
+
+
+            # Finalize the view so it is available as a 'source' for the next view in the loop
             session.commit()
             self._log.info(f"Successfully created hierarchical rollup: {view_name}")
 
@@ -2400,7 +3157,7 @@ class RollupManager:
             self._log.error(f"Failed to create {view_name}: {e}")
             raise
 
-    def _add_aggregate_policy(self, session: Session, view_name: str, bucket_interval: str, start_offset: str) -> None:
+    def _add_aggregate_policy_helper(self, session: Session, view_name: str, bucket_interval: str, start_offset: str) -> None:
         """
         Applies refresh, retention, and compression policies to a newly created view
         using granularity-specific settings from hypertable_policy.
@@ -2480,91 +3237,434 @@ class RollupManager:
             raise
 
 
-    def _create_wide_rollup(self, session: Session, source: str, view_name: str, bucket_interval: str, agg_func: str) -> None:
+    def _resolve_rollup_metric_descriptors_helper(self, session: Session, source: str, base_wide_table_name: str | None,) -> list[RollupMetricDescriptor]:
         """
-        Creates the complex 'wide' materialized view with dynamic column mapping.
-        Parameters:
-            session: Active database session for executing SQL commands.
-            source: The source table or view from which to aggregate (e.g., "device_metrics_wide" or a previous wide rollup view).
-            view_name: The name of the continuous aggregate view to create.
-            bucket_interval: The time bucket size for aggregation (e.g., "1 hour", "1 day").
-            agg_func: The aggregate function to use for the stats_summary column
-                (e.g., "stats_agg(metric_value)" or "rollup(stats_summary)"), determined by whether the source
-                is a raw hypertable or another view.
+        Resolve the metric dimension for generic rollup SQL creation.
+
+        Narrow rollups return a single descriptor keyed by `metric_name`.
+        Wide rollups return one descriptor per protocol metric column, allowing
+        the same creation loop to build either shape with identical aggregate
+        semantics.
         """
+        if "wide" not in source and base_wide_table_name is None:
+            return [
+                RollupManager.RollupMetricDescriptor(
+                    group_key_sql="metric_name",
+                    raw_value_sql="metric_value",
+                    rolled_min_sql="min_value",
+                    rolled_max_sql="max_value",
+                    rolled_summary_sql="stats_summary",
+                    min_alias="min_value",
+                    max_alias="max_value",
+                    summary_alias="stats_summary",
+                )
+            ]
+
+        wide_table_name: str = base_wide_table_name or source
+        self._log.debug(f"_resolve_rollup_metric_descriptors_helper: wide_table_name='{wide_table_name}'")
+
+        result = session.execute(
+            text(
+                """
+                SELECT mc.clean_column_name
+                FROM metric_catalog mc
+                JOIN protocol_registry pr ON mc.protocol_id = pr.protocol_id
+                WHERE pr.wide_table_name = :tname
+                AND mc.data_type NOT IN ('TEXT', 'BOOLEAN')
+                ORDER BY mc.clean_column_name
+                """
+            ),
+            {"tname": wide_table_name},
+        )
+
+        column_names: list[str] = list(result.scalars())
+
+        return [
+            RollupManager.RollupMetricDescriptor(
+                group_key_sql=None,
+                raw_value_sql=column_name,
+                rolled_min_sql=f"min_{column_name}",
+                rolled_max_sql=f"max_{column_name}",
+                rolled_summary_sql=f"stats_summary_{column_name}",
+                min_alias=f"min_{column_name}",
+                max_alias=f"max_{column_name}",
+                summary_alias=f"stats_summary_{column_name}",
+            )
+            for column_name in column_names
+        ]
+
+    def add_wide_rollup(self, protocol_name: str, wide_table_name: str | None) -> None:
+        """
+        Build the protocol-specific wide-table rollup stack for one protocol.
+
+        This method now delegates the common table lifecycle work to the same
+        post-processing helper used by the shared narrow stack, while
+        preserving protocol-specific metric count caching and completion
+        tracking.
+        """
+
+        self.migration_in_progress.set()
+
         try:
-            # 1. Fail-fast locking for the wide table migration
-            session.execute(text("SET LOCAL lock_timeout = '15s';"))
+            if wide_table_name is None:
+                self._log.info(f"Protocol '{protocol_name}' is narrow-only — skipping protocol-specific wide stack.")
+                self._mark_rollup_setup_complete_helper(protocol_name, complete=True)
+                return
 
-            # 2. Build the dynamic SQL
-            # We pass agg_func ('stats_agg' or 'rollup') to ensure hierarchical consistency
-            metric_columns: list = self._resolve_metric_columns(session, agg_func)
+            self.setup_rollup(
+                table_name=wide_table_name,
+                segment_by=self.compress_segmentby_wide,
+                compression_policy_intervals=[
+                    self.hourly_compress_after_interval,
+                    self.daily_compress_after_interval,
+                    self.weekly_compress_after_interval,
+                    self.monthly_compress_after_interval,
+                ],
+                protocol_name=protocol_name,
+                wide_table_name=wide_table_name,
+                use_shared_rollup_flow=False,
+            )
 
-            sql: str = f"""
-                CREATE MATERIALIZED VIEW {view_name}
-                WITH (timescaledb.continuous = true) AS
-                SELECT
-                    time_bucket(INTERVAL '{bucket_interval}', m_time, '{machine_timezone}') AS m_time,
-                    device_info_id,
-                    {', '.join(metric_columns)}
-                FROM {source}
-                GROUP BY 1, 2
-                WITH NO DATA;
-            """  # noqa: S608
+            # Retention and Catalog Count
+            if wide_table_name is not None:
+                # Record this protocol's column count for dynamic settings tuning.
+                # wide_table_name is None for narrow-only and column count is irrelevant there.
+                try:
+                    with self.SessionFactory() as session:
+                        cat_count = session.execute(
+                            text("SELECT metric_count FROM protocol_registry WHERE protocol_name = :p"),
+                            {"p": protocol_name}
+                        ).scalar() or 0
+                    self._protocol_wide_column_counts[protocol_name] = cat_count
+                except SQLAlchemyError:
+                    pass  # Non-fatal — _get_dynamic_settings falls back to 0
 
-            self._log.debug(f"Executing Wide View DDL for {view_name}")
-            session.execute(text(sql))
+            # Mark complete — protocol_name is in scope here naturally
+            self._mark_rollup_setup_complete_helper(protocol_name, complete=True)
 
-            # 3. Commit the view structure before applying policies
-            session.commit()
+            self._log.info(f"RollupManager.add_wide_rollup: setup complete for '{protocol_name}'")
 
         except Exception as e:
-            session.rollback()
-            self._log.error(f"_create_wide_rollup error for {view_name}: {e}")
+            self._log.error(f"RollupManager.add_wide_rollup failed for '{protocol_name}': {e}")
+            # rollup_setup_complete stays False — next startup retries
             raise
 
-    def _resolve_metric_columns(self, session: Session, agg_func: str) -> List[str]:
+        finally:
+            self.migration_in_progress.clear()
+
+
+    def _mark_rollup_setup_complete_helper(self, protocol: str, complete: bool = True ) -> None:
         """
-        Generates SQL aggregate expressions for the 'wide' table.
-        - If reading from hypertable: uses stats_agg(column)
-        - If reading from another view: uses rollup(stats_summary_column)
-        This method dynamically fetches all metric columns from the catalog and constructs the appropriate aggregate expressions
-        based on the aggregation level, ensuring that the wide rollups maintain hierarchical consistency regardless of the source.
+        Sets rollup_setup_complete for the given protocol in protocol_registry.
+        Called by RollupManager after successful setup_narrow_rollup (complete=True),
+        or when a schema change requires rollup views to be rebuilt (complete=False).
         """
-        # 1. Fetch all clean column names from the catalog that are not ASCII values.
-        result = session.execute(text(
-            "SELECT clean_column_name "
-            "FROM metric_catalog "
-            "WHERE data_type NOT IN ('TEXT', 'BOOLEAN') "
-            "ORDER BY clean_column_name"
-        ))
-
-        column_names: List[str] = list(result.scalars())
-
-        metric_expressions: list = []
-
-        # Check if we are at the base level (reading raw data) or hierarchical (reading an aggregate)
-        is_base_level: bool = agg_func == 'stats_agg(metric_value)'
-
-        for col in column_names:
-            if is_base_level:
-                # Base Level: Creating the first aggregate (e.g., Hourly) from the Hypertable
-                # Columns: min_Col, max_Col, stats_summary_Col
-                metric_expressions.append(f"MIN({col}) AS min_{col}")
-                metric_expressions.append(f"MAX({col}) AS max_{col}")
-                metric_expressions.append(f"stats_agg({col}) AS stats_summary_{col}")
-            else:
-                # Hierarchical Level: Creating Daily from Hourly, or Weekly from Daily
-                # We must target the Aliased columns created by the previous view level.
-                # Example: rollup(stats_summary_Volts) AS stats_summary_Volts
-                metric_expressions.append(f"MIN(min_{col}) AS min_{col}")
-                metric_expressions.append(f"MAX(max_{col}) AS max_{col}")
-                metric_expressions.append(f"rollup(stats_summary_{col}) AS stats_summary_{col}")
-
-        return metric_expressions
+        with self.SessionFactory() as session:
+            try:
+                with session.begin():
+                    session.execute(
+                        text("""
+                            UPDATE protocol_registry
+                            SET rollup_setup_complete = :complete,
+                                updated_at = :now
+                            WHERE protocol_name = :p
+                        """),
+                        {
+                            "complete": complete,
+                            "p": protocol,
+                            "now": _now_tz()
+                        }
+                    )
+                self._log.debug(f"rollup_setup_complete = {complete} for protocol '{protocol}'")
+            except Exception as e:
+                self._log.error(f"Failed to mark rollup setup complete for '{protocol}': {e}")
+                raise
 
 
-    def rollup_needs_rebuild(self, session: Session, view_name: str, bucket_interval: str) -> bool:
+    def _ensure_cagg_views_for_protocol(self, protocol_name: str, wide_table_name: str | None) -> None:
+        """
+        Create or rebuild the four hierarchical CAGG views for a protocol's wide table.
+
+        This method mirrors the narrow rebuild-detection behavior:
+        it scans the protocol-specific view stack for bucket drift, purges that
+        stack if needed, and then recreates the views bottom-up using the shared
+        generic CAGG builder.
+
+        View names follow the pattern:
+            hourly_rollup_wide__eg4_18kpv
+            daily_rollup_wide__eg4_18kpv
+            weekly_rollup_wide__eg4_18kpv
+            monthly_rollup_wide__eg4_18kpv
+
+        For narrow-only protocols (wide_table_name=None), creates views
+        against device_metrics_narrow scoped by device_info_id instead.
+        """
+        if wide_table_name is None:
+            self._log.info(f"Protocol '{protocol_name}' is narrow-only — skipping wide table CAGG views.")
+            # Narrow rollup views are shared across all protocols —
+            # only create them once
+            if not self._narrow_rollups_created:
+                self._ensure_narrow_cagg_views_helper()
+                self._narrow_rollups_created = True
+            return
+
+        # Derive rollup prefix from wide table name
+        # "device_metrics_wide__eg4_18kpv" -> "rollup_wide__eg4_18kpv"
+        suffix: str = wide_table_name.removeprefix("device_metrics_")
+        rollup_prefix: str = f"rollup_{suffix}"
+
+        granularities: list[tuple[str, str, str, str]] = [
+            # (granularity, bucket, start_offset, compress_after)
+            ("hourly",  self.hourly_rollup_bucket,  self.hourly_rollup_start,
+                        self.hourly_compress_after_interval),
+            ("daily",   self.daily_rollup_bucket,   self.daily_rollup_start,
+                        self.daily_compress_after_interval),
+            ("weekly",  self.weekly_rollup_bucket,  self.weekly_rollup_start,
+                        self.weekly_compress_after_interval),
+            ("monthly", self.monthly_rollup_bucket, self.monthly_rollup_start,
+                        self.monthly_compress_after_interval),
+        ]
+
+        try:
+            with self.SessionFactory() as session:
+                view_specs: list[tuple[str, str, str, str]] = []
+
+                # Hierarchical — each view depends on the previous one
+                # so they must be created in order
+                previous_view: str = wide_table_name
+
+                for gran, bucket, start_offset, compress_after in granularities:
+                    view_name: str = f"{gran}_{rollup_prefix}"
+
+                    # Monthly sources directly from the base wide table,
+                    # not from the weekly view — a month is not a fixed
+                    # multiple of 7 days so TimescaleDB rejects that hierarchy.
+                    source_for_this_view: str = wide_table_name if gran == "monthly" else previous_view
+                    view_specs.append((view_name, source_for_this_view, bucket, start_offset))
+                    previous_view = view_name
+
+                any_rebuild_needed: bool = False
+                any_missing_views: bool = False
+
+                for view_name, _, bucket, _ in view_specs:
+                    rollup_state: str = self.rollup_needs_rebuild(session, view_name, bucket)
+
+                    if rollup_state == "rebuild":
+                        any_rebuild_needed = True
+                        break
+
+                    if rollup_state == "missing":
+                        any_missing_views = True
+
+                if any_rebuild_needed:
+                    self._log.info(f"Bucket change detected for protocol '{protocol_name}'. Purging protocol rollups for clean rebuild.")
+                    self._drop_protocol_rollup(session=session, view_names=[view_name for view_name, _, _, _ in view_specs])
+                    self._purge_ghost_jobs_helper(session)
+
+                elif any_missing_views:
+                    self._log.info(f"Missing rollups detected for protocol '{protocol_name}'. Creating required views without purge.")
+
+                for view_name, source_for_this_view, bucket, start_offset in view_specs:
+                    self._ensure_single_cagg_view_helper(
+                        session=session,
+                        view_name=view_name,
+                        source_table=source_for_this_view,
+                        bucket_interval=bucket,
+                        start_offset=start_offset,
+                        protocol_name=protocol_name,
+                        base_wide_table_name=wide_table_name,
+                    )
+
+                session.commit()
+
+            self._log.info(f"CAGG views created for protocol '{protocol_name}' with prefix '{rollup_prefix}'")
+
+        except SQLAlchemyError as e:
+            self._log.error(f"CAGG view creation failed for protocol '{protocol_name}': {e}")
+            raise
+
+    def _drop_protocol_rollup(self, session: Session, view_names: list[str]) -> None:
+        """
+        Drop one protocol-specific rollup stack in dependency-safe reverse order.
+
+        Only existing views are touched. If any per-view cleanup step fails, the
+        transaction is rolled back before continuing so the session does not remain
+        in the aborted state.
+        """
+        r_settings: dict[str, Any] = self._get_dynamic_settings_helper()
+
+        ordered_view_names: list[str] = sorted(
+            view_names,
+            key=lambda name: 0 if "hourly" in name else 1 if "daily" in name else 2 if "weekly" in name else 3,
+            reverse=True,
+        )
+
+        for view_name in ordered_view_names:
+            full_name: str = f'"public"."{view_name}"'
+
+            # Skip views that do not exist yet. This avoids poisoning the transaction
+            # on ALTER / policy removal calls against missing materialized views.
+            if not self._view_exists_helper(session, view_name):
+                self._log.info(f"Rollup does not exist, skipping purge: {full_name}")
+                continue
+
+            self._log.info(f"Purging rollup: {full_name}")
+
+            try:
+                session.execute(text(f"SET LOCAL lock_timeout = '{r_settings['lock_timeout']}';"))
+
+                # Disable compression first when present.
+                try:
+                    session.execute(text(f"ALTER MATERIALIZED VIEW {full_name} SET (timescaledb.compress = false);"))
+                except Exception:
+                    # IMPORTANT: clear failed transaction state before continuing
+                    session.rollback()
+                    self._log.info(f"View was already uncompressed: {full_name}")
+
+                    # Re-enter a clean transaction for the remaining cleanup
+                    session.execute(text(f"SET LOCAL lock_timeout = '{r_settings['lock_timeout']}';"))
+
+                session.execute(text(f"SELECT remove_continuous_aggregate_policy('{full_name}', if_exists => true);"))
+                session.execute(text(f"SELECT remove_retention_policy('{full_name}', if_exists => true);"))
+                session.execute(text(f"DROP MATERIALIZED VIEW IF EXISTS {full_name} CASCADE;"))
+
+                session.commit()
+                self._known_rollup_views.pop(view_name, None)
+
+            except Exception as e:
+                session.rollback()
+                self._log.error(f"Failed to purge rollup {full_name}: {e}")
+                raise
+
+    # -------------------------
+    # Helpers for per-protocol CAGG management
+    # -------------------------
+
+    def _ensure_narrow_cagg_views_helper(self) -> None:
+        """
+        Creates the four shared narrow CAGG views (hourly/daily/weekly/monthly_rollup_narrow).
+        These are shared across all protocols — device_info_id already partitions by device.
+        Called at most once per RollupManager lifetime, guarded by _narrow_rollups_created.
+        """
+        granularities: list[tuple[str, str, str]] = [
+            ("hourly",  self.hourly_rollup_bucket,  self.hourly_rollup_start),
+            ("daily",   self.daily_rollup_bucket,   self.daily_rollup_start),
+            ("weekly",  self.weekly_rollup_bucket,  self.weekly_rollup_start),
+            ("monthly", self.monthly_rollup_bucket, self.monthly_rollup_start),
+        ]
+
+        try:
+            with self.SessionFactory() as session:
+                previous_source = "device_metrics_narrow"
+                for gran, bucket, start_offset in granularities:
+                    view_name: str = f"{gran}_rollup_narrow"
+
+                    # Monthly sources directly from the base hypertable —
+                    # 1 month is not a fixed multiple of 7 days so TimescaleDB
+                    # rejects monthly-over-weekly hierarchies.
+                    source_for_this_view: str = ("device_metrics_narrow" if gran == "monthly" else previous_source)
+
+                    self._ensure_single_cagg_view_helper(
+                        session=session,
+                        view_name=view_name,
+                        source_table=source_for_this_view,
+                        bucket_interval=bucket,
+                        start_offset=start_offset,
+                        protocol_name="shared_narrow"
+                    )
+                    previous_source = view_name
+
+            self._log.info("Shared narrow CAGG views created/verified.")
+
+        except SQLAlchemyError as e:
+            self._log.error(f"_ensure_narrow_cagg_views failed: {e}")
+            raise
+
+    def _ensure_single_cagg_view_helper(
+        self,
+        session: Session,
+        view_name: str,
+        source_table: str,
+        bucket_interval: str,
+        start_offset: str,
+        protocol_name: str,
+        base_wide_table_name: str | None = None,
+    ) -> None:
+        """
+        Idempotently creates one CAGG view if it does not already exist,
+        then records it in _known_rollup_views for the refresh loop.
+
+        Delegates to _create_rollup (which branches wide vs narrow
+        internally based on whether 'wide' appears in source_table).
+
+        Args:
+            session:          Active session (caller owns the transaction).
+            view_name:        Target materialized view name.
+            source_table:     Hypertable or parent CAGG view to aggregate from.
+            bucket_interval:  Time-bucket width, e.g. '1 hour'.
+            start_offset:     Refresh policy start offset, e.g. '3 hours'.
+            protocol_name:    Used for log context only.
+        """
+        if self._view_exists_helper(session, view_name):
+            self._log.debug(f"CAGG view '{view_name}' already exists for protocol '{protocol_name}' —skipping creation.")
+        else:
+            self._log.info(f"Creating CAGG view '{view_name}' from '{source_table}' during startup.")
+            self._create_rollup_helper(session, source_table, view_name, bucket_interval, start_offset, base_wide_table_name=base_wide_table_name)
+
+        # Register in the refresh registry regardless of whether we just created it
+        # so the refresh loop picks it up on every run.
+        if view_name not in self._known_rollup_views:
+            self._known_rollup_views[view_name] = start_offset
+
+
+    def _refresh_protocol_rollups_helper(self, protocol_name: str, wide_table_name: str | None) -> None:
+        """
+        Performs the initial full refresh for all CAGG views that belong to
+        a specific protocol.  Called once at the end of add_wide_rollup after
+        views are created.
+
+        For wide protocols the views are named:
+            hourly_rollup_wide__<suffix>
+            daily_rollup_wide__<suffix>
+            ...
+        For narrow-only protocols the shared narrow views are refreshed:
+            hourly_rollup_narrow, daily_rollup_narrow, ...
+
+        Args:
+            protocol_name:   Used to derive the rollup_prefix for wide protocols.
+            wide_table_name: The wide table name, or None for narrow-only.
+        """
+        granularities: list[tuple[str, str]] = [
+            ("hourly",  self.hourly_rollup_start),
+            ("daily",   self.daily_rollup_start),
+            ("weekly",  self.weekly_rollup_start),
+            ("monthly", self.monthly_rollup_start),
+        ]
+
+        if wide_table_name is not None:
+            suffix: str = wide_table_name.removeprefix("device_metrics_")
+            rollup_prefix: str = f"rollup_{suffix}"
+            view_names: List[Tuple[str, str]] = [(f"{gran}_{rollup_prefix}", start) for gran, start in granularities]
+        else:
+            view_names = [(f"{gran}_rollup_narrow", start) for gran, start in granularities]
+
+        successfully_refreshed = False
+        for view_name, start_offset in view_names:
+            with self.SessionFactory() as session:
+                if not self._view_exists_helper(session, view_name):
+                    self._log.warning(f"_refresh_protocol_rollups: '{view_name}' not found, skipping.")
+                    continue
+                try:
+                    self._refresh_single_rollup_helper(view_name, start_offset, force_full=True)
+                    successfully_refreshed = True
+                except Exception as e:
+                    self._log.error(
+                        f"Initial refresh failed for '{view_name}': {e} — background loop will retry.")
+        if successfully_refreshed:
+            self._update_last_refresh_helper(protocol_name)
+
+
+    def rollup_needs_rebuild(self, session: Session, view_name: str, bucket_interval: str) -> str:
         """
         Checks if a rollup exists and if its bucket matches the current config.
         Returns True if the rollup is missing or configuration is mismatched.
@@ -2575,14 +3675,15 @@ class RollupManager:
         returns:
             bool: True if the rollup needs to be rebuilt (missing or config mismatch),
                   False if it exists and matches the expected bucket interval.
-        NOTE  this method uses a robust approach to compare the configured bucket interval with the actual interval used in the view definition.
+
+            This method compares the configured bucket interval with the actual interval used in the view definition.
             It first maps friendly terms to their equivalent PostgreSQL interval strings, then extracts the interval from
             the view definition using a regex, and finally compares the two intervals using PostgreSQL's interval comparison
             to ensure semantic correctness.  It's funky and may break if timescaledb changes their view definition format,
             but it is necessary to accurately detect when a rebuild is needed due to bucket changes,
             while avoiding unnecessary rebuilds when the intervals are semantically equivalent but textually different (e.g., '1 hour' vs '01:00:00').
         """
-        # 1. Map friendly terms to PG Interval inputs
+        # Map friendly terms to PG Interval inputs
         # This allows 'monthly' -> '1 month', while letting '2 hours' pass through as-is
         mapping: dict[str, str] = {
             "monthly": "1 month",
@@ -2593,7 +3694,8 @@ class RollupManager:
         target_pg_val: str = mapping.get(bucket_interval.lower(), bucket_interval)
 
         try:
-            # 2. Query the TimescaleDB catalog for the view definition
+
+            # Query the TimescaleDB catalog for the view definition
             # Use a bind parameter :view_name for security and performance
             check_sql: TextClause = text("""
                 SELECT view_definition
@@ -2601,13 +3703,16 @@ class RollupManager:
                 WHERE view_name = :view_name
             """)
             view_def: Optional[str] = session.scalar(check_sql, {"view_name": view_name})
+            # 1. missing: not found in catalog, definitely needs build
+            # 2. rebuild: exists but mismatched
+            # 3. OK: exists and matches
 
             # If it doesn't exist, we definitely need to build it
             if not view_def:
                 self._log.debug(f"Rollup {view_name} does not exist. Rebuild required.")
-                return True
+                return "missing"
 
-            # 3. If the result exists, extract the 'interval' string from the definition
+            # If the result exists, extract the 'interval' string from the definition
             # We use Postgres regex_match to find the first argument of time_bucket()
             # Pattern looks for: time_bucket('interval_text', ...)
             extract_sql: TextClause = text("""
@@ -2617,9 +3722,9 @@ class RollupManager:
 
             if not current_interval_str:
                 self._log.warning(f"Could not parse time_bucket interval from {view_name} definition.")
-                return True
+                return "rebuild"  # Safer to rebuild if we can't verify the bucket
 
-            # 4. Final Comparison: Let PostgreSQL handle the semantic equality
+            # Final Comparison: Let PostgreSQL handle the semantic equality
             # This correctly recognizes that '01:00:00'::interval = '1 hour'::interval
             match_sql: TextClause = text("SELECT (:current)::interval = (:target)::interval")
             is_match: bool = session.scalar(match_sql, {"current": current_interval_str, "target": target_pg_val})
@@ -2629,50 +3734,71 @@ class RollupManager:
                     f"Config mismatch for {view_name}. "
                     f"Found: {current_interval_str}, Expected: {target_pg_val}. Rebuild required."
                 )
-                return True
+                return "rebuild"
             else:
                 # 4. Exists and matches config
-                self._log.info(
-                    f"Rollup config matches for {view_name}. "
-                    f"Expected: {bucket_interval} and received {target_pg_val}. No rebuild required."
-                )
-                return False
+                self._log.info(f"Rollup config matches for {view_name}. Expected: {bucket_interval} and received {target_pg_val}. No rebuild required.")
+                return "OK"
 
         except SQLAlchemyError as e:
             self._log.error(f"Database error while checking rollup {view_name}: {e}")
             # Default to True to ensure we don't skip a necessary build on error
-            return True
+            return "rebuild"
 
 
     # -------------------------
     #  Determine wide vs narrow table usage for resource settings
     # -------------------------
-    def _get_dynamic_settings(self) -> dict:
+    def _get_dynamic_settings_helper(self) -> dict[str, Any]:
         """
-        Returns dynamic settings based on the current metric count.
-        This allows the system to automatically adjust performance tiers based on the size of the data,
-        without requiring manual intervention. If the metric count exceeds 200, it forces the use of 'tier_low'
-        settings which are optimized for larger datasets for only the narrow rollups,
-        as well as more conservative refresh policies. If the metric count is below or equal to 200,
-        it allows the use of higher performance tiers (e.g., 'tier_high' or 'tier_medium')
-        which may have more aggressive settings suitable for smaller datasets. This dynamic adjustment
-        helps ensure that the system remains performant and stable as the volume of metrics grows over time.
+        Returns performance tier settings based on the actual workload drivers
+        in a multi-protocol environment.
+
+        Two axes determine lock pressure:
+        1. Protocol count — more protocols = more CAGG views refreshed per cycle
+            = longer total lock hold time across the refresh window.
+        2. Wide table presence — wide rollups generate one stats_agg() expression
+            per metric column, which is significantly more CPU and memory intensive
+            than a single stats_agg(metric_value) on the narrow table.
+
+        Tier selection:
+        tier_low    — many protocols (>4) or any wide table with many columns (>100):
+                        conservative work_mem and short lock_timeout to yield quickly.
+        tier_medium — few protocols with wide tables, or many protocols narrow-only:
+                        balanced settings.
+        tier_high   — single or few protocols, narrow-only or small wide tables:
+                        can afford longer lock windows and higher memory.
         """
-        metric_count: int = getattr(self, 'current_metric_count', 0)
+        protocol_count: int = len(self._known_rollup_views)
+        # Proxy for wide table complexity: any wide views registered means
+        # at least one protocol has per-column rollup expressions in play.
+        has_wide_views: bool = any("wide__" in v for v in self._known_rollup_views)
 
-        if not self.wide_table_flag or metric_count > 200:
-            return self.performance_tiers["tier_low"]  # Force narrow table settings
+        # Max column count across all wide protocols from protocol_registry.
+        # Cached after registration, so no DB hit on the hot path.
+        max_wide_columns: int = self._max_wide_column_count_helper()
 
-        # Check tiers from highest to lowest
-        for tier_name in ["tier_high", "tier_medium", "tier_low"]:
-            tier: dict[str, Any] = self.performance_tiers[tier_name]
-            if metric_count <= tier["count"]:
-                return tier
+        if protocol_count > 4 or max_wide_columns > 100:
+            return self.performance_tiers["tier_low"]
+        elif has_wide_views or protocol_count > 2:
+            return self.performance_tiers["tier_medium"]
+        else:
+            return self.performance_tiers["tier_high"]
 
-        return self.performance_tiers["tier_low"] # Fallback default
+
+    def _max_wide_column_count_helper(self) -> int:
+        """
+        Returns the highest metric_count across all registered wide-table protocols.
+        Used by _get_dynamic_settings to tune lock/memory settings.
+        Reads from the in-memory _protocol_wide_column_counts dict populated
+        during add_wide_rollup, so there is no DB hit on the hot path.
+        """
+        if not self._protocol_wide_column_counts:
+            return 0
+        return max(self._protocol_wide_column_counts.values(), default=0)
 
 
-    def _view_exists(self, session: Session, view_name: str) -> bool:
+    def _view_exists_helper(self, session: Session, view_name: str) -> bool:
         """Check to see if a continuous aggregate exists in the catalog.
         Parameters:
             session: Active database session for executing SQL commands.
@@ -2695,6 +3821,66 @@ class RollupManager:
             session.rollback()  # Resets state for your next AUTOCOMMIT call
             return result is not None
 
+    def repopulate_known_rollup_views(self) -> None:
+        """
+        Rebuilds _known_rollup_views from protocol_registry after a reconnect.
+        Queries all registered protocols and reconstructs view name -> start_offset
+        mappings in the correct hierarchical order (hourly -> daily -> weekly -> monthly).
+        """
+        granularities: list[tuple[str, str]] = [
+            ("hourly",  self.hourly_rollup_start),
+            ("daily",   self.daily_rollup_start),
+            ("weekly",  self.weekly_rollup_start),
+            ("monthly", self.monthly_rollup_start),
+        ]
+
+        self._known_rollup_views.clear()
+
+        # Always add the shared narrow views first
+        for gran, start_offset in granularities:
+            view_name = f"{gran}_rollup_narrow"
+            self._known_rollup_views[view_name] = start_offset
+
+        # Then per-protocol wide views
+        try:
+            with self.SessionFactory() as session:
+                rows = session.execute(
+                    text("""
+                        SELECT rollup_prefix
+                        FROM protocol_registry
+                        WHERE rollup_enabled = true
+                        AND rollup_prefix IS NOT NULL
+                        ORDER BY created_at ASC
+                    """)
+                ).fetchall()
+
+            for (rollup_prefix,) in rows:
+                for gran, start_offset in granularities:
+                    view_name: str = f"{gran}_{rollup_prefix}"
+                    self._known_rollup_views[view_name] = start_offset
+
+            self._log.info(
+                f"Repopulated {len(self._known_rollup_views)} "
+                f"rollup views after reconnect."
+            )
+        except SQLAlchemyError as e:
+            self._log.error(f"repopulate_known_rollup_views failed: {e}")
+            raise
+
+    def _view_exists_conn_helper(self, conn: Connection, view_name: str) -> bool:
+        """Session-free variant of _view_exists for use inside autocommit engine.connect() blocks."""
+        try:
+            result = conn.execute(
+                text("SELECT 1 FROM timescaledb_information.continuous_aggregates WHERE view_name = :name"),
+                {"name": view_name}
+            ).fetchone()
+        except Exception as e:
+            self._log.error(f"_view_exists_conn error for {view_name} : {e}")
+            return False
+        else:
+            return result is not None
+
+
     def _drop_all_continuous_aggregates(self, session: Session) -> None:
         """
         Teardown all rollups in correct dependency order (Top-Down) to
@@ -2702,14 +3888,15 @@ class RollupManager:
         Process:
         1. Fetch all existing continuous aggregates from the TSDB catalog.
         2. Determine the drop order based on naming conventions (Weekly -> Daily -> Hourly).
-        3. For each view: a) Set a short lock timeout to fail fast if blocked by flush thread,
-                          b) Disable compression to avoid issues with compressed CAGGs,
-                          c) Remove policies to prevent orphaned jobs,
-                          d) Acquire an exclusive lock on the view to ensure no concurrent access,
-                          e) Drop the view with CASCADE to clean up dependencies,
-                          f) Commit after each drop to release locks and allow the next drop to proceed.
+        3. For each view:
+            1) Set a short lock timeout to fail fast if blocked by flush thread,
+            2) Disable compression to avoid issues with compressed CAGGs,
+            3) Remove policies to prevent orphaned jobs,
+            4) Acquire an exclusive lock on the view to ensure no concurrent access,
+            5) Drop the view with CASCADE to clean up dependencies,
+            6) Commit after each drop to release locks and allow the next drop to proceed.
         """
-        r_settings = self._get_dynamic_settings()
+        r_settings: dict[str, Any] = self._get_dynamic_settings_helper()
         try:
             # 1. Fetch current aggregates
             result = session.execute(text("""
@@ -2765,6 +3952,9 @@ class RollupManager:
                 self._log.info(f"Successfully purged {full_name}")
 
             self._log.info("Full rollup stack teardown complete.")
+            # Clear the refresh registry — views are dropped, _ensure_single_cagg_view
+            # will re-populate it during the creation phase.
+            self._known_rollup_views.clear()
 
         except Exception as e:
             session.rollback()
@@ -2775,7 +3965,7 @@ class RollupManager:
 
     def refresh_rollups(self, force_full: bool = False) -> None:
         """
-        Refreshes rollups in Bottom-Up order (Hourly -> Daily -> Weekly).
+        Refreshes rollups in Bottom-Up order (Hourly -> Daily -> Weekly -> Monthly).
         This ensures parent views have data available from their child sources.
             Params: force_full (bool): If True, refreshes the entire range of data.
             This is useful for scenarios where incremental refreshes may not be sufficient,
@@ -2797,29 +3987,15 @@ class RollupManager:
             try:
                 # 1. Define the refresh sequence: Smallest Grain -> Largest Grain
                 # Monthly is independent (from hypertable), so it can go anywhere.
-                refresh_sequence:list[tuple[str, str]] = [
-                    ("hourly_rollup_narrow", self.hourly_rollup_start),
-                    ("hourly_rollup_wide", self.hourly_rollup_start),
-                    ("daily_rollup_narrow", self.daily_rollup_start),
-                    ("daily_rollup_wide", self.daily_rollup_start),
-                    ("weekly_rollup_narrow", self.weekly_rollup_start),
-                    ("weekly_rollup_wide", self.weekly_rollup_start),
-                    ("monthly_rollup_narrow", self.monthly_rollup_start),
-                    ("monthly_rollup_wide", self.monthly_rollup_start),
-                ]
-
-                for view_name, start_offset in refresh_sequence:
-                    # 2. Check if the view exists before refreshing
-                    # (Safety check in case of a partial migration)
-                    if self._view_exists(session, view_name):
-                        self._refresh_single_rollup(session, view_name, start_offset, force_full)
+                for view_name, start_offset in self._known_rollup_views.items():
+                    if self._view_exists_helper(session, view_name):
+                        self._refresh_single_rollup_helper(view_name, start_offset, force_full)
                     else:
-                        self._log.warning(f"Skipping refresh: {view_name} does not exist.")
-
+                        self._log.warning(f"Skipping refresh: '{view_name}' does not exist.")
             except Exception as e:
                 self._log.error(f"Rollup refresh failed: {e}")
 
-    def _refresh_single_rollup(self, session: Session, view_name: str, start_offset: str, force_full: bool = False) -> None:
+    def _refresh_single_rollup_helper(self, view_name: str, start_offset: str, force_full: bool = False) -> None:
         """
         Refreshes a rollup with duration tracking and performance logging.
         The watchdog monitors the refresh process and sends alerts if it detects that the refresh is blocked
@@ -2831,9 +4007,9 @@ class RollupManager:
             force_full: If True, performs a full refresh from the beginning of time to now. If
             False, performs an incremental refresh based on the start_offset.
         """
-        r_settings: dict = self._get_dynamic_settings()
+        r_settings: dict[str, Any] = self._get_dynamic_settings_helper()
 
-        stop_signal: List[bool] = self._start_refresh_watchdog(view_name)
+        stop_signal: List[bool] = self._start_refresh_watchdog_helper(view_name)
 
         start_time: float = time.perf_counter()
         mode: Literal['FULL'] | Literal['INCREMENTAL'] = "FULL" if force_full else "INCREMENTAL"
@@ -2867,7 +4043,6 @@ class RollupManager:
                     f"({int(duration_seconds // 60)}m {int(duration_seconds % 60)}s)"
                 )
 
-
             except Exception as e:
                 self._log.error(f"{mode} refresh FAILED for {view_name} after {time.perf_counter() - start_time:.2f}s: {e}")
                 raise # Re-raise to let the parent caller decide if it should continue
@@ -2877,7 +4052,7 @@ class RollupManager:
                 stop_signal[0] = True
 
     # watchdog refresh management
-    def _stop_existing_watchdog(self) -> None:
+    def _stop_existing_watchdog_helper(self) -> None:
         """Signals the existing watchdog to exit immediately.
         The watchdog thread checks the signal at short intervals and will terminate if the signal is set to True.
         """
@@ -2886,7 +4061,7 @@ class RollupManager:
             self._current_watchdog_signal = None
 
     # watchdog thread to monitor long-running refreshes
-    def _start_refresh_watchdog(self, view_name: str) -> List[bool]:
+    def _start_refresh_watchdog_helper(self, view_name: str) -> List[bool]:
         """
         This watchdog runs in a separate thread to monitor the progress of a continuous aggregate refresh.
         It periodically checks the pg_stat_activity for the refresh query and sends a Pushover alert
@@ -2898,7 +4073,7 @@ class RollupManager:
             List[bool]: A mutable list containing a single boolean value that serves as a stop signal for the watchdog thread.
         """
         # 1. Kill any existing watchdog before starting a new one
-        self._stop_existing_watchdog()
+        self._stop_existing_watchdog_helper()
 
         # 2. Create the new stop signal
         stop_signal: List[bool] = [False]
@@ -2946,7 +4121,7 @@ class RollupManager:
         t.start()
         return stop_signal
 
-    def _refresh_rollup_loop(self) -> None:
+    def _refresh_rollup_loop_helper(self) -> None:
         """
         Background loop: Replays backlog, then refreshes hierarchical aggregates.
         Uses @property tsdb_connected for live state awareness.
@@ -2989,7 +4164,7 @@ class RollupManager:
                 # so the CAGG refresh includes it.
                 with self._backlog_lock:
                     count: int = self.backlog.replay_to_queue()
-                    if count > 1:
+                    if count > 0:
                         self._log.debug(f"Replayed {count} points. Waiting for flush...")
                         # Wait for flush worker to finish writing replayed points
                         self._flush_queue.join()
@@ -2999,18 +4174,17 @@ class RollupManager:
                 with self.engine.connect() as conn:
                     conn: Connection = conn.execution_options(isolation_level="AUTOCOMMIT")
                     # Apply dynamic session settings from performance tiers
-                    tier: dict = self._get_dynamic_settings()
+                    tier: dict[str, Any] = self._get_dynamic_settings_helper()
                     conn.execute(text(f"SET work_mem = '{tier['work_mem']}';"))
                     conn.execute(text(f"SET lock_timeout = '{tier['lock_timeout']}';"))
 
-                    granularities: List[str] = ["hourly", "daily", "weekly", "monthly"]
-                    prefix: Literal['rollup_wide'] | Literal['rollup_narrow'] = "rollup_wide" if self.wide_table_flag else "rollup_narrow"
-
-                    for gran in granularities:
-                        view_name = f"{gran}_{prefix}"
-
+                    # Refresh all registered CAGG views in insertion order
+                    # (hourly -> daily -> weekly -> monthly, narrow before wide per protocol).
+                    for view_name in list(self._known_rollup_views):
+                        if not self._view_exists_conn_helper(conn, view_name):
+                            self._log.warning(f"Skipping refresh: '{view_name}' not found.")
+                            continue
                         self._log.debug(f"Refreshing continuous aggregate: {view_name}")
-
                         conn.execute(
                             text("CALL refresh_continuous_aggregate(:view, NULL, NULL);"),
                             {"view": view_name}
@@ -3029,7 +4203,28 @@ class RollupManager:
 
         self._log.info("Background rollup refresh loop exiting.")
 
-    # 10i
+    def _update_last_refresh_helper(self, protocol: str) -> None:
+        """
+        Updates last_refresh_at in protocol_registry after a successful
+        rollup refresh for the given protocol.
+        Called by RollupManager after each refresh cycle completes.
+        """
+        with self.SessionFactory() as session:
+            try:
+                with session.begin():
+                    session.execute(
+                        text("""
+                            UPDATE protocol_registry
+                            SET last_refresh_at = :now,
+                                updated_at = :now
+                            WHERE protocol_name = :p
+                        """),
+                        {"now": _now_tz(), "p": protocol}
+                    )
+            except Exception as e:
+                self._log.error(f"Failed to update last_refresh_at for '{protocol}': {e}")
+                # Non-fatal — don't raise, refresh already completed successfully
+
     def stop_auto_refresh(self) -> None:
         """
         Cleanly stop the auto rollup refresh thread.
@@ -3041,7 +4236,7 @@ class RollupManager:
             self._stop_refresh_rollup_event.set()
             self._log.info("Auto rollup refresh thread stopped.")
 
-    def _purge_ghost_jobs(self, session: Session) -> None:
+    def _purge_ghost_jobs_helper(self, session: Session) -> None:
         """
         Cleans up aberrant TimescaleDB processes using dynamic type-based thresholds.
         This method identifies and purges three types of aberrant jobs:
@@ -3062,6 +4257,13 @@ class RollupManager:
 
         # Define thresholds based on TimescaleDB common job patterns
         # Refresh: Short (30m), Compression/Retention: Long (6h), Others: Standard (1h)
+        """ The backend_pid subquery uses the same application_name LIKE '%job_id%' pattern as the GHOST_PROCESS check, so it's consistent
+            with how TimescaleDB names its workers. If TimescaleDB changes that naming convention, both checks break together, which is easier to spot.
+            The LIMIT 1 guard is important — a job could theoretically have multiple pg_stat_activity rows if it spawned subprocesses, and
+            you only want to terminate the main worker.
+            The backend_pid will be NULL for ORPHANED_METADATA and GHOST_PROCESS rows (by definition — ghost processes have no active PID),
+            so checking if backend_pid is not None before calling pg_terminate_backend prevents a spurious error on those branches."""
+
         detect_sql = text("""
             WITH job_thresholds AS (
                 SELECT
@@ -3077,34 +4279,38 @@ class RollupManager:
                     END as allowed_duration
                 FROM timescaledb_information.jobs j
                 LEFT JOIN timescaledb_information.job_stats js ON j.job_id = js.job_id
+            ),
+            classified AS (
+                SELECT
+                    t.job_id,
+                    t.application_name,
+                    CASE
+                        WHEN (t.application_name LIKE 'Refresh%' OR t.application_name LIKE 'Retention%')
+                            AND NOT EXISTS (
+                                SELECT 1 FROM timescaledb_information.continuous_aggregates c
+                                JOIN timescaledb_information.jobs j2 ON t.job_id = j2.job_id
+                                WHERE j2.hypertable_name = c.view_name
+                            ) THEN 'ORPHANED_METADATA'
+                        WHEN t.last_run_status = 'Started' AND t.last_run_started_at < now() - t.allowed_duration
+                            THEN 'STALE_EXECUTION'
+                        WHEN t.last_run_status = 'Started'
+                            AND NOT EXISTS (
+                                SELECT 1 FROM pg_stat_activity p
+                                WHERE p.application_name LIKE '%' || t.job_id || '%'
+                            ) THEN 'GHOST_PROCESS'
+                        ELSE NULL
+                    END as aberrancy_type,
+                    (
+                        SELECT p.pid
+                        FROM pg_stat_activity p
+                        WHERE p.application_name LIKE '%' || t.job_id || '%'
+                        LIMIT 1
+                    ) as backend_pid
+                FROM job_thresholds t
             )
-            SELECT
-                t.job_id,
-                t.application_name,
-                CASE
-                    -- 1. Orphaned
-                    WHEN (t.application_name LIKE 'Refresh%' OR t.application_name LIKE 'Retention%')
-                        AND NOT EXISTS (
-                            SELECT 1 FROM timescaledb_information.continuous_aggregates c
-                            JOIN timescaledb_information.jobs j2 ON t.job_id = j2.job_id
-                            WHERE j2.hypertable_name = c.view_name
-                        ) THEN 'ORPHANED_METADATA'
-
-                    -- 2. Stale
-                    WHEN t.last_run_status = 'Started' AND t.last_run_started_at < now() - t.allowed_duration
-                        THEN 'STALE_EXECUTION'
-
-                    -- 3. Ghost (PID check via application_name)
-                    WHEN t.last_run_status = 'Started'
-                        AND NOT EXISTS (
-                            SELECT 1 FROM pg_stat_activity p
-                            WHERE p.application_name LIKE '%' || t.job_id || '%'
-                        ) THEN 'GHOST_PROCESS'
-
-                    ELSE NULL
-                END as aberrancy_type
-            FROM job_thresholds t
-            WHERE 1=1; -- Add filter for NOT NULL if needed
+            SELECT job_id, application_name, aberrancy_type, backend_pid
+            FROM classified
+            WHERE aberrancy_type IS NOT NULL
         """)
 
         try:
@@ -3114,12 +4320,12 @@ class RollupManager:
                 self._log.info("All background workers healthy.")
                 return
 
-            for job_id, app_name,  issue in ghosts:
+            for job_id, app_name, issue, backend_pid in ghosts:
                 self._log.warning(f"Purging {issue}: {app_name} (Job {job_id})")
 
                 # Terminate hanging backend if it still technically exists (Stale case)
-                if issue == 'STALE_EXECUTION':
-                    session.execute(text("SELECT pg_terminate_backend(:pid);"))
+                if issue == 'STALE_EXECUTION' and backend_pid is not None:
+                    session.execute(text("SELECT pg_terminate_backend(:pid);"), {"pid": backend_pid})
 
                 # delete_job() terminates any remaining worker and removes the schedule
                 session.execute(text("SELECT delete_job(:job_id);"), {"job_id": job_id})
@@ -3128,30 +4334,3 @@ class RollupManager:
         except Exception as e:
             session.rollback()
             self._log.error(f"Sweep failed: {e}")
-
-
-    # 10  may eventually need this method to parse interval strings from settings
-    def _parse_interval_days(self, interval_str: str) -> float:
-        """
-        Convert interval strings like '7 days' or '6 hours' into fractional days.
-        Not used at the moment, but this could be useful if we want to allow flexible interval inputs in the future.
-        """
-        try:
-            parts: List[str] = interval_str.lower().split()
-            if len(parts) != 2:
-                return 7  # default fallback
-            value = float(parts[0])
-            unit: str = parts[1]
-            if "hour" in unit:
-                return value / 24.0
-            elif "day" in unit:
-                return value * 1
-            elif "week" in unit:
-                return value * 7
-            elif "month" in unit:
-                return value * 30
-            else:
-                return value
-        except Exception:
-            return 7.0
-

@@ -10,7 +10,6 @@ log_level = DEBUG
 #rs485 / modbus device
 #protocol config files are located in protocols/
 protocol_version = v0.14
-analyze_protocol = false
 write = false
 
 #modbus address

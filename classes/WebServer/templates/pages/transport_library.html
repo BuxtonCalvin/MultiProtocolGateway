@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Transport Library — PPG Admin{% endblock %}
+{% block content %}
+<div class="max-w-6xl mx-auto">
+  <h1 class="surface-title font-bold text-xl mb-4">Transport Library</h1>
+  <p class="surface-muted text-sm mb-6">
+    All transport classes found in <code class="font-mono surface-code">classes/transports/</code>.
+    Classification is determined by the first-line comment in each file.
+  </p>
+
+  <div class="surface-table overflow-x-auto rounded border">
+    <table class="w-full min-w-[72rem] text-sm" role="table" aria-label="Transport library">
+      <thead>
+        <tr class="text-left text-xs uppercase tracking-wide" role="row">
+          <th class="px-4 py-2 w-72" scope="col">Transport Name</th>
+          <th class="px-4 py-2 text-right w-48" scope="col">Classification</th>
+          <th class="px-4 py-2 min-w-[32rem]" scope="col">Config Keys</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in library %}
+        <tr class="border-t transition-colors" role="row">
+          <td class="px-4 py-2.5 font-mono surface-title" role="cell">{{ t.name }}</td>
+          <td class="px-4 py-2.5 text-right" role="cell">
+            {% if t.classification == 'scraper' %}
+            <span class="badge badge-scraper">scraper</span>
+            {% elif t.classification == 'bridge' %}
+            <span class="badge badge-bridge">bridge</span>
+            {% else %}
+            <span class="badge badge-disabled">base class</span>
+            {% endif %}
+          </td>
+          <td class="px-4 py-2.5 surface-text text-xs" role="cell">
+            <div class="flex items-start gap-3">
+              <span class="shrink-0">{{ t.key_count }} keys</span>
+              <div class="max-w-full overflow-x-auto pb-1">
+                <div class="min-w-max whitespace-nowrap surface-muted"
+                     title="{{ t.all_keys | join(', ') }}">
+                  {{ t.all_keys | join(', ') }}
+                </div>
+              </div>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+        {% if not library %}
+        <tr>
+          <td colspan="3" class="px-4 py-6 text-center surface-muted">
+            No transport files found.
+          </td>
+        </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

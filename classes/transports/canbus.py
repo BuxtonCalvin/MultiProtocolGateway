@@ -1,3 +1,6 @@
+# Scraper for canbus data; because canbus is passive, we read the bus and store results in a cache,
+# then process the cache to return values for the protocol. This allows us to read the bus as fast
+# as possible, and process the data at a more reasonable rate for the protocol.
 import asyncio
 import os
 import platform
@@ -5,17 +8,14 @@ import re
 import threading
 import time
 from collections import OrderedDict
-from typing import TYPE_CHECKING
 
 import can
 
-from defs.common import strtoint
+from defs.common import TransportSettings, strtoint_safe
 
 from ..protocol_settings import Registry_Type, protocol_settings, registry_map_entry
 from .transport_base import transport_base
 
-if TYPE_CHECKING:
-    from configparser import SectionProxy
 
 class canbus(transport_base):
     ''' canbus is a more passive protocol; todo to include active commands to trigger canbus responses '''
@@ -28,7 +28,7 @@ class canbus(transport_base):
 
     baudrate : int = 500000
 
-    bus : can.BusABC = None
+    bus : can.BusABC | None = None
     ''' holds canbus interface'''
 
     reader = can.AsyncBufferedReader()
@@ -37,16 +37,16 @@ class canbus(transport_base):
     ''' main thread for async loop'''
 
     #lock : threading.Lock = threading.Lock()
-    lock : threading.Lock = None
-    loop : asyncio.AbstractEventLoop = None
+    lock : threading.Lock | None = None
+    loop : asyncio.AbstractEventLoop | None = None
 
-    cache : OrderedDict [int,(bytes, float)] = None
+    cache: OrderedDict[int, tuple[bytes, float]] | None = None
     ''' cache, key is id, value is touple (data, timestamp)'''
 
     cacheTimeout : int = 120
     ''' seconds to keep message in cache '''
 
-    emptyTime : float = None
+    emptyTime : float | None = None
     ''' the last time values were read for watchdog'''
 
     watchDogTime : float = 120
@@ -55,7 +55,7 @@ class canbus(transport_base):
     linux : bool = True
 
 
-    def __init__(self, settings : "SectionProxy", protocolSettings : "protocol_settings" = None):
+    def __init__(self, settings : TransportSettings, protocolSettings : "protocol_settings | None" = None) -> None:
         super().__init__(settings)
 
         #check if running on windows or linux
@@ -67,8 +67,9 @@ class canbus(transport_base):
             raise ValueError("Port/Channel is not set")
 
         #get default baud from protocol settings
-        if "baud" in self.protocolSettings.settings:
-            self.baudrate = strtoint(self.protocolSettings.settings["baud"])
+        if self.protocolSettings is not None:
+            if "baud" in self.protocolSettings.settings:
+                self.baudrate = strtoint_safe(self.protocolSettings.settings["baud"])
 
         self.baudrate = settings.getint(["baudrate", "bitrate"], self.baudrate)
         self.interface = settings.get(["interface", "bustype"], self.interface).lower()
@@ -92,7 +93,7 @@ class canbus(transport_base):
         #notifier = can.Notifier(self.bus, [self.reader], loop=self.loop)
 
 
-        thread = threading.Thread(target=self.start_loop)
+        thread = threading.Thread(target=self.start_loop, name="CANBus_Read", daemon=True)
         thread.daemon = True
         thread.start()
 
@@ -135,7 +136,8 @@ class canbus(transport_base):
 
         while True:
             try:
-                msg = self.bus.recv()  # This will be non-blocking with asyncio
+                if self.bus is not None:
+                    msg = self.bus.recv()  # This will be non-blocking with asyncio
 
             except can.CanError as e:
                 # Handle specific CAN errors
@@ -152,23 +154,27 @@ class canbus(transport_base):
             if msg:
                 self._log.info(f"Received message: {msg.arbitration_id:X}, data: {msg.data}")
 
-                with self.lock:
-                    #convert bytearray to bytes; we're working with bytes.
-                    self.cache[msg.arbitration_id] = (bytes(msg.data), time.time())
+                if self.lock is not None:
+                    with self.lock:
+                        if self.cache is not None:
+                            #convert bytearray to bytes; we're working with bytes.
+                            self.cache[msg.arbitration_id] = (bytes(msg.data), time.time())
 
-                #time.sleep(1) no need for sleep because recv is blocking
+                        #time.sleep(1) no need for sleep because recv is blocking
 
 
     def clean_cache(self):
         current_time = time.time()
 
-        with self.lock:
-            # Create a list of keys to remove (don't remove while iterating)
-            keys_to_delete = [msg_id for msg_id, (_, timestamp) in self.cache.items() if current_time - timestamp > self.cacheTimeout]
+        if self.lock is not None:
+            with self.lock:
+                if self.cache is not None:
+                    # Create a list of keys to remove (don't remove while iterating)
+                    keys_to_delete = [msg_id for msg_id, (_, timestamp) in self.cache.items() if current_time - timestamp > self.cacheTimeout]
 
-            # Remove old messages from the dictionary
-            for key in keys_to_delete:
-                del self.cache[key]
+                    # Remove old messages from the dictionary
+                    for key in keys_to_delete:
+                        del self.cache[key]
 
     def init_after_connect(self):
         return True
@@ -223,57 +229,63 @@ class canbus(transport_base):
         self.write_enabled = True
         self._log.warning("enable write - validation on the todo")
 
-    def write_data(self, data : dict[str, str], from_transport : transport_base) -> None:
+    def write_data(self, data: dict[str, int | float | str ], from_transport : transport_base) -> None:
         if not self.write_enabled:
             return
 
-    def read_data(self) -> dict[str, str]:
+    def read_data(self) -> dict[str, int | float | str]:
         ''' because canbus is passive / broadcast, were just going to read from the cache '''
+        info: dict[str, int | float | str] = {} # Added type hint for clarity
 
-        info = {}
+        if self.lock is not None:
+            with self.lock:
+                # Check both cache and protocolSettings exist
+                if self.cache is not None and self.protocolSettings is not None:
+                    registry = {key: value[0] for key, value in self.cache.items()}
 
-        #remove timestamp for processing
-        with self.lock:
-            registry = {key: value[0] for key, value in self.cache.items()}
+                    new_info: dict[str, int | float | str] = self.protocolSettings.process_registery(
+                        registry,
+                        self.protocolSettings.get_registry_map(Registry_Type.ZERO)
+                    )
+                    info.update(new_info)
+                    currentTime = time.time()
 
-        new_info = self.protocolSettings.process_registery(registry, self.protocolSettings.get_registry_map(Registry_Type.ZERO))
+                    if not info:
+                        self._log.info("Register/Cache is Empty; no new information reported.")
+                        if self.emptyTime is not None:
+                            if currentTime - self.emptyTime > self.watchDogTime:
+                                self._log.error("Register/Cache has been empty...")
+                                quit()
+                    else:
+                        self.emptyTime = currentTime
 
-        info.update(new_info)
+                    self.clean_cache()
 
-        currentTime = time.time()
-
-        if not info:
-            self._log.info("Register/Cache is Empty; no new information reported.")
-            if currentTime - self.emptyTime > self.watchDogTime:
-                self._log.error("Register/Cache has been empty for over " + str(self.watchDogTime) + "seconds. watchdog quitting application. ")
-                quit() #quit application, service should be configured to restart
-
-        else:
-            self.emptyTime = currentTime
-
-        self.clean_cache() #clean cache of old data
-
+        # This ensures a dict is returned even if self.lock or self.cache is None
         return info
 
-    def read_variable(self, variable_name : str, registry_type : Registry_Type, entry : registry_map_entry = None):
+
+    def read_variable(self, variable_name : str, registry_type : Registry_Type, entry : registry_map_entry | None = None) -> int | float | str | None:
         ''' read's variable from cache'''
         ##clean for convenience
         if variable_name:
             variable_name = variable_name.strip().lower().replace(" ", "_")
 
-        registry_map = self.protocolSettings.get_registry_map(registry_type)
+        if self.cache is not None and self.protocolSettings is not None:
+            registry_map = self.protocolSettings.get_registry_map(registry_type)
 
-        if entry is None:
-            for e in registry_map:
-                if e.variable_name == variable_name:
-                    entry = e
-                    break
+            if entry is None:
+                for e in registry_map:
+                    if e.variable_name == variable_name:
+                        entry = e
+                        break
 
-        if entry:
-            #no concat for canbus or concat on todo
-            with self.lock:
-                if entry.register in self.cache:
-                    results = self.protocolSettings.process_register_bytes(self.cache, entry)
-                    return results[entry.variable_name]
-                else:
-                    return None #empty
+            if entry:
+                #no concat for canbus or concat on todo
+                if self.lock is not None:
+                    with self.lock:
+                        if entry.register in self.cache:
+                            value: int | float | str | None = self.protocolSettings.process_register_bytes(self.cache, entry)
+                            return value
+                        else:
+                            return None #empty

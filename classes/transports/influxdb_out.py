@@ -1,13 +1,13 @@
+# Bridge module for InfluxDB v1 output transport with persistent disk backlog and connection monitoring
 import logging
 import os
 import pickle
 import threading
 import time
-from configparser import SectionProxy
 
 from influxdb import InfluxDBClient
 
-from defs.common import strtobool
+from defs.common import TransportSettings, strtobool
 
 from ..protocol_settings import Data_Type, Registry_Type
 from .transport_base import transport_base
@@ -57,7 +57,11 @@ class influxdb_out(transport_base):
     backlog_file = None
     backlog_points = []
 
-    def __init__(self, settings: SectionProxy):
+    def __init__(self, settings: TransportSettings) -> None:
+        # This explicitly checks: "Does this object actually have the methods I need?"
+        if not isinstance(settings, TransportSettings):
+            msg: str = f"Provided settings object {type(settings)} is missing required methods!"
+            raise TypeError(msg)
         self.host = settings.get("host", fallback=self.host)
         self.port = settings.getint("port", fallback=self.port)
         self.database = settings.get("database", fallback=self.database)
@@ -88,7 +92,6 @@ class influxdb_out(transport_base):
         # Periodic reconnection settings
         self.periodic_reconnect_interval = settings.getfloat("periodic_reconnect_interval", fallback=self.periodic_reconnect_interval)
 
-        self.write_enabled = True  # InfluxDB output is always write-enabled
         super().__init__(settings)
 
         # Initialize instance variables for thread safety
@@ -192,12 +195,13 @@ class influxdb_out(transport_base):
                 point_copy.pop('_backlog_time', None)  # Remove internal timestamp
                 points_to_send.append(point_copy)
 
-            self.client.write_points(points_to_send)
-            self._log.info(f"Successfully wrote {len(points_to_send)} backlog points to InfluxDB")
+            if self.client is not None:
+                self.client.write_points(points_to_send)
+                self._log.info(f"Successfully wrote {len(points_to_send)} backlog points to InfluxDB")
 
-            # Clear backlog after successful write
-            self.backlog_points = []
-            self._save_backlog()
+                # Clear backlog after successful write
+                self.backlog_points = []
+                self._save_backlog()
 
         except Exception as e:
             self._log.error(f"Failed to flush backlog to InfluxDB: {e}")
@@ -213,8 +217,8 @@ class influxdb_out(transport_base):
             self.client = InfluxDBClient(
                 host=self.host,
                 port=self.port,
-                username=self.username if self.username else None,
-                password=self.password if self.password else None,
+                username=self.username if self.username else "",
+                password=self.password if self.password else "",
                 database=self.database,
                 timeout=self.connection_timeout
             )
@@ -305,8 +309,8 @@ class influxdb_out(transport_base):
                 self.client = InfluxDBClient(
                     host=self.host,
                     port=self.port,
-                    username=self.username if self.username else None,
-                    password=self.password if self.password else None,
+                    username=self.username if self.username else "",
+                    password=self.password if self.password else "",
                     database=self.database,
                     timeout=self.connection_timeout
                 )
@@ -346,12 +350,10 @@ class influxdb_out(transport_base):
         self.last_periodic_reconnect_attempt = 0  # Reset timer to force immediate check
         return self._check_connection()
 
-    def write_data(self, data: dict[str, str], from_transport: transport_base):
+    def write_data(self, data: dict[str, int | float | str ], from_transport: transport_base) -> None:
         # Promote LCDMachineModelCode to device_model if present and meaningful
-        if "LCDMachineModelCode" in data and data["LCDMachineModelCode"] and data["LCDMachineModelCode"] != "hotnoob":
-            from_transport.device_model = data["LCDMachineModelCode"]
-        if not self.write_enabled:
-            return
+        if "LCDMachineModelCode" in data and data["LCDMachineModelCode"] and data["LCDMachineModelCode"] != "PPG":
+            from_transport.device_model = str(data["LCDMachineModelCode"])
 
         # Debug logging to track transport data flow
         if self._log.isEnabledFor(logging.DEBUG):
@@ -370,10 +372,10 @@ class influxdb_out(transport_base):
         # Process and write data
         self._process_and_write_data(data, from_transport)
 
-    def _process_and_store_data(self, data: dict[str, str], from_transport: transport_base):
+    def _process_and_store_data(self, data: dict[str, int | float | str ], from_transport: transport_base):
         # Promote LCDMachineModelCode to device_model if present and meaningful
-        if "LCDMachineModelCode" in data and data["LCDMachineModelCode"] and data["LCDMachineModelCode"] != "hotnoob":
-            from_transport.device_model = data["LCDMachineModelCode"]
+        if "LCDMachineModelCode" in data and data["LCDMachineModelCode"] and data["LCDMachineModelCode"] != "PPG":
+            from_transport.device_model = str(data["LCDMachineModelCode"])
         if not self.enable_persistent_storage:
             self._log.warning("Persistent storage disabled, data will be lost")
             return
@@ -399,10 +401,10 @@ class influxdb_out(transport_base):
         if should_flush:
             self._flush_batch()
 
-    def _process_and_write_data(self, data: dict[str, str], from_transport: transport_base):
+    def _process_and_write_data(self, data: dict[str, int | float | str ], from_transport: transport_base):
         # Promote LCDMachineModelCode to device_model if present and meaningful
-        if "LCDMachineModelCode" in data and data["LCDMachineModelCode"] and data["LCDMachineModelCode"] != "hotnoob":
-            from_transport.device_model = data["LCDMachineModelCode"]
+        if "LCDMachineModelCode" in data and data["LCDMachineModelCode"] and data["LCDMachineModelCode"] != "PPG":
+            from_transport.device_model = str(data["LCDMachineModelCode"])
         # Prepare tags for InfluxDB
         tags = {}
 
@@ -474,7 +476,7 @@ class influxdb_out(transport_base):
         if should_flush:
             self._flush_batch()
 
-    def _create_influxdb_point(self, data: dict[str, str], from_transport: transport_base):
+    def _create_influxdb_point(self, data: dict[str, int | float | str ], from_transport: transport_base):
         """Create an InfluxDB point from data"""
         # Prepare tags for InfluxDB
         tags = {}
@@ -559,7 +561,8 @@ class influxdb_out(transport_base):
             return
 
         try:
-            self.client.write_points(points_to_write)
+            if self.client is not None:
+                self.client.write_points(points_to_write)
 
             # Log serial numbers and sample values if debug level is enabled
             if self._log.isEnabledFor(logging.DEBUG):
@@ -621,7 +624,8 @@ class influxdb_out(transport_base):
             if self._attempt_reconnect():
                 # If reconnection successful, try to write again
                 try:
-                    self.client.write_points(points_to_write)
+                    if self.client is not None:
+                        self.client.write_points(points_to_write)
 
                     # Log serial numbers and sample values if debug level is enabled
                     if self._log.isEnabledFor(logging.DEBUG):
@@ -685,7 +689,7 @@ class influxdb_out(transport_base):
                     self._add_to_backlog(point)
                 self.connected = False
 
-    def init_bridge(self, from_transport: transport_base):
+    def init_bridge(self, from_transport: transport_base) -> None:
         """Initialize bridge - not needed for InfluxDB output"""
         pass
 

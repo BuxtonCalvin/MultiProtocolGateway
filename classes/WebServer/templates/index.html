@@ -1,0 +1,295 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — PPG Admin{% endblock %}
+
+{% block content %}
+<div class="grid grid-cols-12 gap-4">
+
+  <!-- Left: status cards -->
+  <aside class="col-span-12 md:col-span-3 space-y-3">
+
+    <h2 class="surface-muted text-xs font-semibold uppercase tracking-widest mb-1">
+      Gateway Status
+    </h2>
+
+    <div class="card {% if app_state.has_dirty_settings %}border-dirty{% endif %}">
+      <div class="flex justify-between items-center">
+        <span class="label">Staged Settings</span>
+        <span class="badge {% if app_state.dirty_settings_count > 0 %}badge-warn{% else %}badge-ok{% endif %}">
+          {{ app_state.dirty_settings_count }}
+        </span>
+      </div>
+      <p class="surface-muted text-xs mt-1">
+        {% if app_state.has_dirty_settings %}
+          Uncommitted changes pending.
+        {% else %}
+          In sync with config.cfg
+        {% endif %}
+      </p>
+    </div>
+
+    <div class="card {% if app_state.has_dirty_protocols %}border-dirty{% endif %}">
+      <div class="flex justify-between items-center">
+        <span class="label">Protocol Toggles</span>
+        <span class="badge {% if app_state.dirty_protocols_count > 0 %}badge-warn{% else %}badge-ok{% endif %}">
+          {{ app_state.dirty_protocols_count }}
+        </span>
+      </div>
+    </div>
+
+    {% if app_state.has_orphans %}
+    <div class="card border-warning">
+      <div class="flex justify-between items-center">
+        <span class="label text-warning">Orphaned Keys</span>
+        <span class="badge badge-warn">{{ app_state.orphan_count }}</span>
+      </div>
+      <button hx-get="/orphan-modal"
+              hx-target="#diff-overlay"
+              hx-swap="innerHTML"
+              class="text-xs text-warning underline mt-1 hover:no-underline
+                     focus:outline-none focus:ring-1 focus:ring-warning">
+        Review &amp; Prune
+      </button>
+    </div>
+    {% endif %}
+
+    <div class="card">
+      <p class="label">Last Scan</p>
+      <p class="surface-text text-xs">
+        {{ app_state.last_scan_at.strftime('%Y-%m-%d %H:%M:%S') if app_state.last_scan_at else 'Never' }}
+      </p>
+      <p class="label mt-2">Last Commit</p>
+      <p class="surface-text text-xs">
+        {{ app_state.last_commit_at.strftime('%Y-%m-%d %H:%M:%S') if app_state.last_commit_at else 'Never' }}
+      </p>
+    </div>
+
+    <button hx-get="/api/scan"
+            hx-swap="none"
+            hx-indicator="#scan-spin"
+            class="w-full btn-secondary text-xs"
+            aria-label="Manually re-scan configuration">
+      <span id="scan-spin" class="htmx-indicator mr-1 opacity-0">↻</span>
+      Re-scan Configuration
+    </button>
+
+    <button id="rollback-btn"
+            class="w-full btn-secondary text-xs mt-2"
+            aria-label="Rollback to a previous configuration">
+      Rollback Configuration
+    </button>
+
+  </aside>
+
+<!-- ── Rollback modal ──────────────────────────────────────────────────── -->
+<div id="rollback-modal"
+     class="fixed inset-0 z-50 hidden items-center justify-center bg-black/60"
+     role="dialog" aria-modal="true" aria-labelledby="rollback-modal-title">
+  <div class="card rounded-lg shadow-2xl border border-ppg-700 w-[480px] max-h-[70vh] flex flex-col bg-white dark:bg-ppg-800">
+
+    <div class="flex items-center justify-between px-5 py-4 border-b border-ppg-200 dark:border-ppg-700">
+      <h3 id="rollback-modal-title" class="surface-text font-semibold text-sm">
+        Rollback Configuration
+      </h3>
+      <button id="rollback-close" class="surface-muted hover:text-white text-lg leading-none">✕</button>
+    </div>
+
+    <p class="px-5 pt-3 text-xs surface-muted">
+      Select a backup to restore. The current config will be saved first.
+      All staged changes will be discarded and the DB will sync to match the restored file.
+    </p>
+
+    <div id="rollback-list" class="overflow-y-auto flex-1 px-5 py-3 space-y-1.5">
+      <p class="text-ppg-400 text-xs">Loading backups…</p>
+    </div>
+
+    <div class="px-5 py-3 border-t border-ppg-200 dark:border-ppg-700 text-xs surface-muted">
+      <span id="rollback-status"></span>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  const modal      = document.getElementById('rollback-modal');
+  const list       = document.getElementById('rollback-list');
+  const statusEl   = document.getElementById('rollback-status');
+  const closeBtn   = document.getElementById('rollback-close');
+  const openBtn    = document.getElementById('rollback-btn');
+
+  function openModal() {
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+    statusEl.textContent = '';
+    list.innerHTML = '<p class="text-ppg-400 text-xs">Loading backups…</p>';
+
+    fetch('/api/commit/backups')
+      .then(r => r.json())
+      .then(backups => {
+        if (!backups.length) {
+          list.innerHTML = '<p class="text-ppg-400 text-xs">No backups found.</p>';
+          return;
+        }
+        list.innerHTML = backups.map(b => {
+          const date  = new Date(b.created_at).toLocaleString();
+          const kb    = b.file_size_bytes ? `${(b.file_size_bytes/1024).toFixed(1)} KB` : '';
+          const label = b.trigger === 'auto'
+            ? `<span class="text-ppg-400">[auto]</span> `
+            : `<span class="text-accent">[manual]</span> `;
+          const note  = b.notes ? `<span class="text-ppg-500 ml-1">— ${b.notes}</span>` : '';
+          return `<button class="rollback-item w-full text-left px-3 py-2 rounded
+                                 bg-ppg-100 hover:bg-ppg-200 dark:bg-ppg-700 dark:hover:bg-ppg-600
+                                 border border-ppg-200 dark:border-ppg-600
+                                 text-xs surface-text transition-colors flex items-start justify-between gap-2"
+                          data-id="${b.id}">
+                    <span>${label}${date}${note}</span>
+                    <span class="surface-muted whitespace-nowrap">${kb}</span>
+                  </button>`;
+        }).join('');
+
+        list.querySelectorAll('.rollback-item').forEach(btn => {
+          btn.addEventListener('click', function () {
+            const id = parseInt(this.dataset.id, 10);
+            doRollback(id);
+          });
+        });
+      })
+      .catch(() => {
+        list.innerHTML = '<p class="text-red-400 text-xs">Failed to load backups.</p>';
+      });
+  }
+
+  function doRollback(backupId) {
+    statusEl.textContent = 'Restoring… please wait.';
+    list.querySelectorAll('.rollback-item').forEach(b => b.disabled = true);
+
+    fetch('/api/commit/rollback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ backup_id: backupId }),
+    })
+    .then(r => r.json())
+    .then(data => {
+      if (data.status === 'rolled_back') {
+        statusEl.textContent = '✔ Rollback successful. Reloading…';
+        setTimeout(() => { closeModal(); window.location.reload(); }, 1200);
+      } else {
+        statusEl.textContent = `✖ Rollback failed: ${data.detail || 'unknown error'}`;
+      }
+    })
+    .catch(() => {
+      statusEl.textContent = '✖ Network error during rollback.';
+    });
+  }
+
+  function closeModal() {
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+  }
+
+  openBtn.addEventListener('click', openModal);
+  closeBtn.addEventListener('click', closeModal);
+  modal.addEventListener('click', e => { if (e.target === modal) closeModal(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+})();
+</script>
+
+  <!-- Right: device overview -->
+  <section class="col-span-12 md:col-span-9" id="main-panes">
+
+    <h2 class="surface-muted text-xs font-semibold uppercase tracking-widest mb-3">
+      Configured Devices
+    </h2>
+
+    {% if nav.scrapers %}
+    <div class="mb-6">
+      <h3 class="text-sm font-semibold surface-title mb-2">Scrapers</h3>
+      <div class="surface-table overflow-x-auto rounded border">
+        <table class="w-full text-sm table-fixed" role="table" aria-label="Scrapers">
+          <thead>
+            <tr class="text-left text-xs uppercase">
+              <th class="px-3 py-2 w-36">Name</th>
+              <th class="px-3 py-2 w-36">Transport</th>
+              <th class="px-3 py-2 w-36">Protocol</th>
+              <th class="px-3 py-2">Host</th>
+              <th class="px-3 py-2 w-24 text-right">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for s in nav.scrapers %}
+            <tr class="border-t transition-colors" role="row">
+              <td class="px-3 py-2 font-medium surface-title">{{ s.name }}</td>
+              <td class="px-3 py-2 surface-text">{{ s.transport_class }}</td>
+              <td class="px-3 py-2 surface-text text-xs">{{ s.protocol_version or '—' }}</td>
+              <td class="px-3 py-2 surface-muted font-mono text-xs">
+                {{ s.host }}:{{ s.port }}
+              </td>
+              <td class="px-3 py-2 text-right">
+                <a href="/device/{{ s.name }}"
+                   hx-get="/device/{{ s.name }}"
+                   hx-target="#main-panes"
+                   hx-swap="innerHTML"
+                   hx-push-url="true"
+                   class="text-accent text-xs hover:underline
+                          focus:outline-none focus:ring-1 focus:ring-accent">
+                  Configure →
+                </a>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endif %}
+
+    {% if nav.bridges %}
+    <div>
+      <h3 class="text-sm font-semibold surface-title mb-2">Bridges</h3>
+      <div class="surface-table overflow-x-auto rounded border">
+        <table class="w-full text-sm table-fixed" role="table" aria-label="Bridges">
+          <thead>
+            <tr class="text-left text-xs uppercase">
+              <th class="px-3 py-2 w-36">Name</th>
+              <th class="px-3 py-2 w-36">Transport</th>
+              <th class="px-3 py-2">Host</th>
+              <th class="px-3 py-2 w-24 text-right">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for b in nav.bridges %}
+            <tr class="border-t transition-colors" role="row">
+              <td class="px-3 py-2 font-medium surface-title">{{ b.name }}</td>
+              <td class="px-3 py-2 surface-text">{{ b.transport_class }}</td>
+              <td class="px-3 py-2 surface-muted font-mono text-xs">
+                {{ b.host }}:{{ b.port }}
+              </td>
+              <td class="px-3 py-2 text-right">
+                <a href="/device/{{ b.name }}"
+                   hx-get="/device/{{ b.name }}"
+                   hx-target="#main-panes"
+                   hx-swap="innerHTML"
+                   hx-push-url="true"
+                   class="text-accent text-xs hover:underline
+                          focus:outline-none focus:ring-1 focus:ring-accent">
+                  Configure →
+                </a>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% endif %}
+
+    {% if not nav.scrapers and not nav.bridges %}
+    <div class="card surface-text text-sm">
+      No devices configured. Check config.cfg or click
+      <a href="/pages/create-device" class="text-accent underline">Create Device</a>.
+    </div>
+    {% endif %}
+
+  </section>
+
+</div>
+{% endblock %}

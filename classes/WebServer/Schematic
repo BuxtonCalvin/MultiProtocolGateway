@@ -1,0 +1,74 @@
+PythonProtocolGateway or App/
+├── protocol_gateway.py               ← wire webserver start here
+├── config.cfg
+├── protocols/
+│   └── [protocol_group]/
+│       ├── eg4_18kpv_holding.csv
+│       ├── eg4_18kpv_input.csv
+│       └── eg4_18kpv.json
+└── classes/
+    └── WebServer/
+        ├── main.py                   ← FastAPI app, startup, uvicorn launcher
+        ├── database.py               ← SQLAlchemy engine, Base, session factory
+        ├── models.py                 ← ORM models: Setting, ProtocolRegister, DirtyState
+        ├── scanner.py                ← scans config.cfg + transport files → populates DB
+        ├── config_writer.py          ← commit logic: DB → config.cfg + mask/screen files
+        ├── diff_engine.py            ← compares DB staging vs config.cfg on disk
+        ├── file_watcher.py           ← watchdog-based file change detector
+        │
+        ├── services/
+        │   ├── device_service.py     ← SCRAPER/BRIDGE classification, device CRUD
+        │   ├── protocol_service.py   ← CSV/JSON read, override file management
+        │   ├── analysis_service.py   ← wraps gateway's analyze_protocol()
+        │   └── backup_service.py     ← versioned config.cfg backups + rollback
+        │
+        ├── routers/
+        │   ├── devices.py            ← /api/devices/*
+        │   ├── protocols.py          ← /api/protocols/*
+        │   ├── pages.py              ← /api/pages/*
+        │   ├── commit.py             ← /api/commit
+        │   └── analysis.py           ← /api/analyze (SSE)
+        │
+        ├── templates/
+        │   ├── base.html             ← 12-col grid, nav, HTMX includes
+        │   ├── index.html            ← dashboard + dirty/orphan banner
+        │   ├── partials/
+        │   │   ├── scraper_panes.html
+        │   │   ├── bridge_panes.html
+        │   │   ├── settings_rows.html
+        │   │   ├── protocol_table.html
+        │   │   ├── protocol_editor_panes.html       
+        │   │   ├── protocol_section.html               
+        │   │   ├── diff_panel.html
+        │   │   ├── json_editor.html
+        │   │   ├── orphan_modal.html
+        │   └── pages/
+        │       ├── global_settings.html
+        │       ├── logging_settings.html
+        │       ├── transport_library.html
+        │       ├── create_device.html
+        │       ├── view_log.html
+        │       ├── faq.html
+        │       └── about.html
+        │
+        ├── static/
+        │   ├── css/
+        │   │   └── ppg.css           ← WCAG 2.2 CSS custom properties + dark mode
+        │   └── js/
+        │   │   └── json-enc.js
+        │
+        ├── migrations/               ← Alembic
+        │   ├── env.py
+        │   ├── script.py.mako
+        │   └── versions/
+        │
+        ├── pytests/
+        │   ├── fixtures/
+        │   │   ├── sample_config.cfg
+        │   │   └── sample_protocol.csv
+        │   ├── test_scanner.py
+        │   ├── test_config_writer.py
+        │   ├── test_diff_engine.py
+        │   └── test_commit.py
+        │
+        └── alembic.ini

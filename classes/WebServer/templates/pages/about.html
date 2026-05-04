@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}About — PPG Admin{% endblock %}
+{% block content %}
+<div class="max-w-2xl mx-auto space-y-6">
+  <h1 class="surface-title font-bold text-xl">About PPG</h1>
+
+  <div class="card space-y-4 surface-text text-sm leading-relaxed">
+    <p>
+      <strong class="surface-title">Python Protocol Gateway (PPG)</strong> is an open-source
+      data-collection middleware designed for home energy systems. It bridges low-level
+      hardware communication protocols (Modbus TCP/RTU over RS485) with modern data
+      infrastructure (MQTT for Home Assistant, TimescaleDB and InfluxDB for long-term analytics).
+    </p>
+    <p>
+      PPG supports multiple simultaneous scraper transports, each targeting a different
+      device (inverters, battery management systems), and multiple bridge transports that
+      receive and forward the collected metrics. All transports operate in
+      configurable read modes: sequential, concurrent, or interleaved.
+    </p>
+    <p>
+      This Web Management UI provides a browser-based interface for inspecting and editing
+      the gateway configuration without touching raw config files. All changes are staged
+      in a local SQLite database and only written to disk text files when you explicitly commit.
+    </p>
+    <ul class="list-disc list-inside space-y-1 surface-muted">
+      <li>Configure scrapers and bridges via a guided UI</li>
+      <li>Browse and toggle protocol register maps (mask / screen / write-back)</li>
+      <li>Track staged vs committed state with a visual diff</li>
+      <li>Auto-detect orphaned settings after code changes</li>
+      <li>Versioned config.cfg backups with one-click rollback</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2 class="surface-title font-semibold mb-2">Links</h2>
+    <ul class="space-y-2 text-sm">
+      <li>
+        <a href="https://github.com/BuxtonCalvin/PythonProtocolGateway"
+           target="_blank" rel="noopener"
+           class="text-accent hover:underline focus:outline-none focus:ring-1 focus:ring-accent">
+          GitHub - BuxtonCalvin/PythonProtocolGateway
+        </a>
+      </li>
+    </ul>
+  </div>
+</div>
+{% endblock %}

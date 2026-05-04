@@ -1,0 +1,122 @@
+variable name,data type,register,documented name,unit,values,note
+# ============================================================
+# EG4 LL-S 48V 100Ah Rack Battery - Modbus RTU Register Map
+# Protocol: EG4-LL-MODBUS-Communication-Protocol (v2+)
+# Baud: 9600 8N1  |  Function code: 0x03 (Read Holding Regs)
+# All registers big-endian 16-bit unsigned unless noted.
+# unit_mod applied after read:  real_value = raw * unit_mod
+#
+# Sources:
+#   EG4-LL-MODBUS-Communication-Protocol.pdf (EG4 Electronics)
+#   Community reverse-engineering: diysolarforum.com / github.com/RAR/esphome-eg4-bms
+# ============================================================
+
+# --- Pack-level summary (registers 0x0000 - 0x0026) --------
+
+,USHORT,0,pack_voltage,0.01V,0-65535,Total pack voltage. raw * 0.01 = volts (e.g. 5331 = 53.31V)
+,SHORT,1,pack_current,0.1A,-32768-32767,Signed. Positive = charging  Negative = discharging
+,USHORT,2,pack_soc,%,0-100,State of Charge in percent
+,USHORT,3,pack_soh,%,0-100,State of Health in percent
+,USHORT,4,remaining_capacity,10mAh,0-65535,Remaining capacity. raw * 10mAh (e.g. 10000 = 100000mAh = 100Ah)
+,USHORT,5,full_capacity,10mAh,0-65535,Full (design) capacity
+,USHORT,6,cycle_count,,0-65535,Charge/discharge cycle count
+,USHORT,7,cell_voltage_max,1mV,0-65535,Maximum cell voltage across all cells in pack
+,USHORT,8,cell_voltage_min,1mV,0-65535,Minimum cell voltage across all cells in pack
+,USHORT,9,cell_voltage_diff,1mV,0-65535,Difference between max and min cell voltages (delta)
+,SHORT,10,cell_temp_max,0.1C,-32768-32767,Maximum cell temperature (signed 0.1°C)
+,SHORT,11,cell_temp_min,0.1C,-32768-32767,Minimum cell temperature (signed 0.1°C)
+,SHORT,12,mosfet_temp,0.1C,-32768-32767,MOSFET / PCB temperature (signed 0.1°C)
+,USHORT,13,cell_count,,0-32,Number of cells in series (16 for LL-S)
+,USHORT,14,temp_sensor_count,,0-8,Number of temperature sensors present
+,USHORT,15,battery_status,16bit_flags,0-65535,See battery_status_codes below
+,USHORT,16,protection_status,16bit_flags,0-65535,See protection_status_codes below
+,USHORT,17,warning_status,16bit_flags,0-65535,See warning_status_codes below
+,USHORT,18,error_status,16bit_flags,0-65535,See error_status_codes below
+,USHORT,19,avg_temp,0.1C,0-65535,Average cell temperature (unsigned; subtract 2731 for signed Kelvin offset if firmware pre-2.0)
+,USHORT,20,charge_fet_status,,0 or 1,0=OFF 1=ON
+,USHORT,21,discharge_fet_status,,0 or 1,0=OFF 1=ON
+,USHORT,22,balance_active,,0 or 1,0=Not balancing 1=Balancing in progress
+,USHORT,23,slave_count,,1-64,Number of slave batteries detected on daisy-chain
+,USHORT,24,parallel_count,,1-64,Number of batteries communicating in this string (same as slave_count + 1 for master)
+,USHORT,25,string_voltage,0.01V,0-65535,Combined string voltage (same as pack_voltage for single string)
+,USHORT,26,string_current,0.1A,0-65535,Combined string current (unsigned; for signed use pack_current)
+,USHORT,27,max_charge_current,0.1A,0-65535,BMS-reported max allowable charge current
+,USHORT,28,max_discharge_current,0.1A,0-65535,BMS-reported max allowable discharge current
+,USHORT,29,max_charge_voltage,0.01V,0-65535,BMS charge voltage limit (CVL)
+,USHORT,30,min_discharge_voltage,0.01V,0-65535,BMS discharge cutoff voltage (DVL)
+
+# --- Individual cell voltages (registers 0x0040 – 0x004F) --
+# 16 cells for LL-S 48V model
+
+,USHORT,64,cell_01_voltage,1mV,0-65535,Cell 1 voltage in mV
+,USHORT,65,cell_02_voltage,1mV,0-65535,Cell 2 voltage in mV
+,USHORT,66,cell_03_voltage,1mV,0-65535,Cell 3 voltage in mV
+,USHORT,67,cell_04_voltage,1mV,0-65535,Cell 4 voltage in mV
+,USHORT,68,cell_05_voltage,1mV,0-65535,Cell 5 voltage in mV
+,USHORT,69,cell_06_voltage,1mV,0-65535,Cell 6 voltage in mV
+,USHORT,70,cell_07_voltage,1mV,0-65535,Cell 7 voltage in mV
+,USHORT,71,cell_08_voltage,1mV,0-65535,Cell 8 voltage in mV
+,USHORT,72,cell_09_voltage,1mV,0-65535,Cell 9 voltage in mV
+,USHORT,73,cell_10_voltage,1mV,0-65535,Cell 10 voltage in mV
+,USHORT,74,cell_11_voltage,1mV,0-65535,Cell 11 voltage in mV
+,USHORT,75,cell_12_voltage,1mV,0-65535,Cell 12 voltage in mV
+,USHORT,76,cell_13_voltage,1mV,0-65535,Cell 13 voltage in mV
+,USHORT,77,cell_14_voltage,1mV,0-65535,Cell 14 voltage in mV
+,USHORT,78,cell_15_voltage,1mV,0-65535,Cell 15 voltage in mV
+,USHORT,79,cell_16_voltage,1mV,0-65535,Cell 16 voltage in mV
+
+# --- Temperature sensors (registers 0x0050 – 0x0057) -------
+# Signed 0.1°C.  LL-S typically has 4 sensors; unused sensors read 0x7FFF.
+
+,SHORT,80,temp_sensor_1,0.1C,-32768-32767,Temperature sensor 1 (cell group 1)
+,SHORT,81,temp_sensor_2,0.1C,-32768-32767,Temperature sensor 2 (cell group 2)
+,SHORT,82,temp_sensor_3,0.1C,-32768-32767,Temperature sensor 3 (cell group 3)
+,SHORT,83,temp_sensor_4,0.1C,-32768-32767,Temperature sensor 4 (cell group 4)
+,SHORT,84,temp_sensor_5,0.1C,-32768-32767,Temperature sensor 5 (if present)
+,SHORT,85,temp_sensor_6,0.1C,-32768-32767,Temperature sensor 6 (if present)
+,SHORT,86,temp_sensor_7,0.1C,-32768-32767,Temperature sensor 7 (if present)
+,SHORT,87,temp_sensor_8,0.1C,-32768-32767,Temperature sensor 8 (if present)
+
+# --- BMS version / identity (registers 0x0060 – 0x0068) ----
+
+,USHORT,96,hardware_version,,0-65535,Hardware version (e.g. 0x0100 = v1.0)
+,USHORT,97,firmware_version,,0-65535,Firmware version (e.g. 0x0205 = v2.5)
+,USHORT,98,manufacture_date,,0-65535,Packed BCD: high byte = year offset from 2000; low byte = week
+,USHORT,99,bms_slave_address,,1-64,This battery's own Modbus slave address (mirrors DIP switch)
+,USHORT,100,battery_chemistry,,0-65535,Cell chemistry code (1=LiFePO4 2=NMC)
+,USHORT,101,nominal_voltage,0.01V,0-65535,Nominal pack voltage (4800 = 48.00V)
+,USHORT,102,nominal_capacity,10mAh,0-65535,Nominal capacity
+
+# ============================================================
+# STATUS / PROTECTION BIT DEFINITIONS
+# (for reference when decoding 16-bit flag registers above)
+#
+# battery_status (reg 15):
+#   bit 0  - Charging
+#   bit 1  - Discharging
+#   bit 2  - Standby
+#   bit 3  - Full charge
+#   bit 4  - Full discharge
+#   bit 5  - Balance active
+#   bit 6  - Charge FET ON
+#   bit 7  - Discharge FET ON
+#
+# protection_status (reg 16):
+#   bit 0  - Cell overvoltage
+#   bit 1  - Cell undervoltage
+#   bit 2  - Pack overvoltage
+#   bit 3  - Pack undervoltage
+#   bit 4  - Charge overcurrent
+#   bit 5  - Discharge overcurrent
+#   bit 6  - Charge overtemperature
+#   bit 7  - Discharge overtemperature
+#   bit 8  - Charge undertemperature
+#   bit 9  - Discharge undertemperature
+#   bit 10 - MOSFET overtemperature
+#   bit 11 - Short circuit
+#   bit 12 - IC fault
+#   bit 13 - Software lock
+#
+# warning_status (reg 17): same bit layout as protection_status but
+#   indicates pre-fault warning thresholds have been crossed.
+# ============================================================

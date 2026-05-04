@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}General Settings — PPG Admin{% endblock %}
+{% block content %}
+<div class="max-w-2xl mx-auto">
+  <h1 class="surface-title font-bold text-xl mb-4">General Settings</h1>
+  <p class="surface-muted text-sm mb-6">
+    Settings from the <code class="font-mono surface-code">[general]</code> section of config.cfg.
+  </p>
+
+  <div class="card space-y-2">
+    {% for s in settings %}
+    <div class="grid grid-cols-[1fr_10rem_minmax(0,1fr)] gap-3 items-center py-1
+                border-b border-ppg-700/40 last:border-0
+                {% if s.is_dirty %}bg-dirty/5 rounded px-2{% endif %}">
+      <div>
+        <label class="font-mono surface-text text-sm font-medium" for="gs-{{ s.id }}">{{ s.key }}</label>
+        {% if s.default_value %}
+        <span class="surface-subtle text-xs ml-2">default: {{ s.default_value }}</span>
+        {% endif %}
+        {% if s.is_dirty %}
+        <span class="text-dirty text-xs ml-1">*</span>
+        {% endif %}
+      </div>
+      {% if s.key == "log_level" %}
+      <select id="gs-{{ s.id }}"
+              class="theme-input rounded px-2 py-1
+                     font-mono text-sm
+                     focus:outline-none focus:ring-1 focus:ring-accent"
+              aria-label="{{ s.key }}"
+              hx-patch="/api/devices/general/general/{{ s.id }}"
+              name="value_staged"
+              hx-swap="none"
+              hx-trigger="change delay:200ms"
+              onchange="updateLogLevelHelpText(this)">
+        {% for level in ["CRITICAL", "FATAL", "ERROR", "WARNING", "INFO", "DEBUG", "EXCEPTION"] %}
+        <option value="{{ level }}" {% if (s.value_staged or "")|upper == level %}selected{% endif %}>{{ level }}</option>
+        {% endfor %}
+      </select>
+      <div id="log-level-help-{{ s.id }}" class="surface-subtle text-xs leading-5"></div>
+      {% elif s.key == "read_mode" %}
+      <select id="gs-{{ s.id }}"
+              class="theme-input rounded px-2 py-1
+                     font-mono text-sm
+                     focus:outline-none focus:ring-1 focus:ring-accent"
+              aria-label="{{ s.key }}"
+              hx-patch="/api/devices/general/general/{{ s.id }}"
+              name="value_staged"
+              hx-swap="none"
+              hx-trigger="change delay:200ms"
+              onchange="updateReadModeHelpText(this)">
+        <option value="concurrent" {% if (s.value_staged or "")|lower == "concurrent" %}selected{% endif %}>Concurrent</option>
+        <option value="sequential" {% if (s.value_staged or "")|lower == "sequential" %}selected{% endif %}>Sequential</option>
+        <option value="interleaved" {% if (s.value_staged or "")|lower == "interleaved" %}selected{% endif %}>Interleaved</option>
+      </select>
+      <div id="read-mode-help-{{ s.id }}" class="surface-subtle text-xs leading-5"></div>
+      {% else %}
+      <input id="gs-{{ s.id }}"
+             type="text"
+             class="theme-input rounded px-2 py-1
+                    font-mono text-sm
+                    focus:outline-none focus:ring-1 focus:ring-accent"
+             value="{{ s.value_staged or '' }}"
+             aria-label="{{ s.key }}"
+             hx-patch="/api/devices/general/general/{{ s.id }}"
+             name="value_staged"
+             hx-swap="none"
+             hx-trigger="change delay:400ms">
+      <div></div>
+      {% endif %}
+    </div>
+    {% endfor %}
+    {% if not settings %}
+    <p class="surface-muted text-sm">No general settings found in config.cfg.</p>
+    {% endif %}
+  </div>
+</div>
+<script>
+  function updateLogLevelHelpText(selectEl) {
+    const helpTextByLevel = {
+      CRITICAL: "Critical: severe failure; application may not be able to continue safely.",
+      FATAL: "Fatal: unrecoverable condition requiring immediate shutdown or restart.",
+      ERROR: "Error: operation failed and needs attention, but process can continue.",
+      WARNING: "Warning: unexpected or risky condition; execution continues.",
+      INFO: "Info: normal high-level operational events and state changes.",
+      DEBUG: "Debug: detailed diagnostic data for troubleshooting.",
+      EXCEPTION: "Exception: captured exception traceback and context for failures."
+    };
+
+    const helpEl = document.getElementById(`log-level-help-${selectEl.id.replace("gs-", "")}`);
+    if (!helpEl) return;
+    helpEl.textContent = helpTextByLevel[(selectEl.value || "").toUpperCase()] || "";
+  }
+
+  function updateReadModeHelpText(selectEl) {
+    const helpTextByMode = {
+      concurrent: "Concurrent mode — fully parallel, correct when transports are on separate physical connections (separate IP addresses, separate serial ports).",
+      sequential: "Sequential mode — read transports one by one with a delay in between, correct when multiple transports share a single bus (e.g. ModBus RTU over RS485).",
+      interleaved: "Interleaved mode — reads one block at a time from each transport in round-robin order, ideal for shared bus scenarios where some devices are significantly slower than others, preventing starvation of faster devices."
+    };
+
+    const helpEl = document.getElementById(`read-mode-help-${selectEl.id.replace("gs-", "")}`);
+    if (!helpEl) return;
+    helpEl.textContent = helpTextByMode[(selectEl.value || "").toLowerCase()] || "";
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    document.querySelectorAll('select[id^="gs-"][aria-label="log_level"]').forEach(updateLogLevelHelpText);
+    document.querySelectorAll('select[id^="gs-"][aria-label="read_mode"]').forEach(updateReadModeHelpText);
+  });
+</script>
+{% endblock %}

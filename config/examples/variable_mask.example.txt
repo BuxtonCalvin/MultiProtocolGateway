@@ -1,0 +1,18 @@
+#list of variables to include
+genpower
+egen_day
+egen_all_l
+epsvoltl1n
+epsvoltl2n
+peps_l1n
+peps_l2n
+seps_l1n
+seps_l2n
+eepsl1n_day
+eepsl2n_day
+eepsl1n_all_l
+eepsl2n_all_l
+afci_currch1
+afci_currch2
+afci_currch3
+afci_currch4

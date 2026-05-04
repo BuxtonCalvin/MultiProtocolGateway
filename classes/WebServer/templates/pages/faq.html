@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}FAQ — PPG Admin{% endblock %}
+{% block content %}
+<div class="max-w-3xl mx-auto space-y-6">
+  <h1 class="surface-text font-bold text-xl">Frequently Asked Questions</h1>
+
+  {% set faqs = [
+    ("What is PPG?",
+     "Python Protocol Gateway (PPG) is a data-collection middleware that reads registers from hardware devices (inverters, batteries) over Modbus TCP/RTU and forwards the data to one or more bridge transports such as MQTT or TimescaleDB."),
+    ("What is a Scraper?",
+     "A Scraper is a transport configured with a protocol_version. It actively polls device registers on a schedule and produces metric data. Examples: an EG4 18KPV inverter on Modbus TCP."),
+    ("What is a Bridge?",
+     "A Bridge is a transport without a protocol — it only receives and stores/forwards data. Examples: MQTT (Home Assistant integration), TimescaleDB (time-series storage)."),
+    ("What does Commit All Changes do?",
+     "It writes all staged UI edits back to config.cfg and updates the protocol mask/screen/override files on disk. A timestamped backup of the previous config.cfg is created first. The gateway does not auto-restart — you must restart it to pick up the changes."),
+    ("What is the dirty state indicator?",
+     "The orange dot (●) next to a setting or the pulsing 'Commit All Changes' button means a staged value differs from what is currently on disk. Nothing is written until you commit."),
+    ("What is an orphaned setting?",
+     "A setting that exists in the database but is no longer referenced by any transport class in the codebase. This typically happens after a transport is renamed or removed. Orphaned settings are never written to config.cfg and should be reviewed and pruned."),
+    ("What are the Write / Mask / Screen checkboxes in the protocol table?",
+     "Write (W): enables write-back of that register from the UI to the hardware — only available if the protocol CSV marks it as writable. Mask (M): includes the metric in the variable_mask file, meaning it will be scraped. Screen (S): adds the metric to the variable_screen file, meaning it will be excluded from output even if scraped."),
+    ("Can I edit the protocol CSV directly?",
+     "Yes — select the protocol from the Protocols menu. You can view and edit the CSV content. Changes are staged in the database and committed on demand. The original CSV is never modified without a backup."),
+    ("How do I add a new device?",
+     "Use the 'Create Device' wizard in the menu bar. It will guide you through choosing a transport type, entering connection parameters, and linking to a bridge. The new device is added to the staging database and written to config.cfg on commit."),
+    ("What port does the web UI run on?",
+     "Port 1717 by default. Access it at http://<your-gateway-host>:1717/"),
+    ("Does the UI restart the gateway automatically?",
+     "No. The gateway process must be restarted manually after a commit for configuration changes to take effect. This is intentional — the UI does not interrupt live data collection."),
+    ("Where are config backups stored?",
+     "In PythonProtocolGateway (or App in docker)/config/backups/ as timestamped .cfg files. You can roll back to any backup via the Diff panel."),
+  ] %}
+
+  {% for q, a in faqs %}
+  <details class="card group" open="{{ loop.first }}">
+    <summary class="cursor-pointer font-medium surface-text list-none flex justify-between items-center">
+      {{ q }}
+      <svg class="w-4 h-4 surface-muted transition-transform group-open:rotate-180"
+           fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+      </svg>
+    </summary>
+    <p class="mt-2 surface-muted text-sm leading-relaxed">{{ a }}</p>
+  </details>
+  {% endfor %}
+
+</div>
+{% endblock %}

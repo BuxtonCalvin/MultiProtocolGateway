@@ -10,24 +10,13 @@ env/
 .venv/
 .env/
 
-growatt2mqtt.cfg
-growatt2mqtt.service
-config.cfg
-*.cfg
-*.old
 invertermodbustomqtt.service
-log.txt
-variable_mask.txt
-variable_screen.txt
 .~lock.*
 protocols/*custom*
 protocols/*/*custom*
 protocols/*override*
 protocols/*/*override*
 classes/transports/*custom*
-
-input_registry.json
-holding_registry.json
 
 #ignore pypi / pyproject.toml output 
 dist/*
@@ -43,10 +32,13 @@ tools/dumps/*
 uv.lock
 
 ruff.toml
+pyproject.toml
 pytests/test_timescaledb_out.py
 
-config.cfg
-logs/gateway.log
-protocols/_analysis/decoded/*
+logs/*
 files_to_ignore.txt
 
+config/*.*
+config/backups/*.*
+**/__pycache__/
+classes/WebServer/**/__init__.py

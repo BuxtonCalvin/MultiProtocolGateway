@@ -1,0 +1,82 @@
+variable name,data type,register,documented name,unit,values,writable,note
+# ============================================================
+# EG4 LL-S 48V 100Ah Rack Battery - HOLDING Registry Map
+# BMS configuration and protection threshold registers
+# Protocol : EG4-LL-MODBUS-Communication-Protocol
+# Base addr: 0x002D (45 decimal)  |  Function code: 0x03 read / 0x06 write
+# All registers big-endian 16-bit unless noted
+#
+# Write access: all entries are READ only by default.
+# To enable write on a specific register, change its writable field to W.
+# Use extreme caution — incorrect protection thresholds can damage cells
+# or cause the BMS to fail to protect against overcurrent / overtemperature.
+# ============================================================
+
+# --- Balancing thresholds (0x002D + offset 25/27/29) --------
+
+,USHORT,70,balance_voltage,0.001V,2500-3600,,Minimum cell voltage (mV) that must be reached before balancing begins. Multiply raw by 0.001 for volts (e.g. 3400 = 3.400V)
+,USHORT,72,balance_voltage_delta,0.001V,0-500,,Maximum cell voltage spread (mV) tolerated before active balancing is triggered. Multiply raw by 0.001 (e.g. 40 = 0.040V delta)
+,USHORT,74,low_capacity_warn_soc,%,0-100,,State of Charge percentage threshold below which a low-capacity warning is issued
+
+# --- Cell undervoltage thresholds (0x002D + offsets 35/37/39) ---
+
+,USHORT,80,cell_uv_warn,0.001V,2000-3200,,Cell undervoltage WARNING threshold (mV). BMS issues warning when any cell drops below this. Multiply raw by 0.001 for volts
+,USHORT,82,cell_uv_protect,0.001V,1500-3000,,Cell undervoltage PROTECTION threshold (mV). BMS opens discharge FET when any cell drops below this. Multiply raw by 0.001
+,USHORT,84,cell_uv_release,0.001V,2000-3200,,Cell undervoltage RELEASE threshold (mV). BMS re-enables discharge FET once all cells recover above this. Multiply raw by 0.001
+
+# --- Pack undervoltage thresholds (0x002D + offsets 41/43/45) ---
+
+,USHORT,86,pack_uv_warn,0.01V,4000-5200,,Pack undervoltage WARNING threshold (V x100). BMS issues warning when pack voltage drops below this. Multiply raw by 0.01 for volts
+,USHORT,88,pack_uv_protect,0.01V,3600-5000,,Pack undervoltage PROTECTION threshold (V x100). BMS opens discharge FET when pack drops below this. Multiply raw by 0.01
+,USHORT,90,pack_uv_release,0.01V,4000-5200,,Pack undervoltage RELEASE threshold (V x100). BMS re-enables discharge FET when pack recovers above this. Multiply raw by 0.01
+
+# --- Cell overvoltage thresholds (0x002D + offsets 47/49/51) ---
+
+,USHORT,92,cell_ov_warn,0.001V,3300-3800,,Cell overvoltage WARNING threshold (mV). BMS issues warning when any cell exceeds this. Multiply raw by 0.001 for volts
+,USHORT,94,cell_ov_protect,0.001V,3400-3900,,Cell overvoltage PROTECTION threshold (mV). BMS opens charge FET when any cell exceeds this. Multiply raw by 0.001
+,USHORT,96,cell_ov_release,0.001V,3200-3700,,Cell overvoltage RELEASE threshold (mV). BMS re-enables charge FET once all cells drop below this. Multiply raw by 0.001
+
+# --- Pack overvoltage thresholds (0x002D + offsets 53/55/57) ---
+
+,USHORT,98,pack_ov_warn,0.01V,5000-6000,,Pack overvoltage WARNING threshold (V x100). BMS issues warning when pack voltage exceeds this. Multiply raw by 0.01 for volts
+,USHORT,100,pack_ov_protect,0.01V,5200-6200,,Pack overvoltage PROTECTION threshold (V x100). BMS opens charge FET when pack exceeds this. Multiply raw by 0.01
+,USHORT,102,pack_ov_release,0.01V,5000-6000,,Pack overvoltage RELEASE threshold (V x100). BMS re-enables charge FET when pack drops below this. Multiply raw by 0.01
+
+# --- Current protection thresholds (0x002D + offsets 73-93) ---
+# Raw unit is 0.01A for current values; seconds for delay values.
+
+,USHORT,118,charge_oc1_protect,0.01A,0-65535,,Charge overcurrent level 1 PROTECTION threshold (0.01A). Sustained beyond charge_oc1_delay_s triggers FET open. Multiply raw by 0.01 for amps
+,USHORT,120,discharge_oc1_protect,0.01A,0-65535,,Discharge overcurrent level 1 PROTECTION threshold (0.01A). Sustained beyond discharge_oc1_delay_s triggers FET open. Multiply raw by 0.01
+,USHORT,122,short_circuit_current,0.01A,0-65535,,Load short-circuit detection threshold (0.01A). Instantaneous overcurrent above this trips the BMS immediately. Multiply raw by 0.01
+,USHORT,124,charge_oc2_protect,0.01A,0-65535,,Charge overcurrent level 2 PROTECTION threshold (0.01A). Higher than OC1; shorter delay before trip. Multiply raw by 0.01
+,USHORT,126,discharge_oc2_protect,0.01A,0-65535,,Discharge overcurrent level 2 PROTECTION threshold (0.01A). Higher than OC1; shorter delay before trip. Multiply raw by 0.01
+,USHORT,128,charge_oc1_delay_s,,0-255,,Time in seconds the charge current must remain above charge_oc1_protect before the BMS opens the charge FET
+,USHORT,130,charge_oc2_delay_s,,0-255,,Time in seconds the charge current must remain above charge_oc2_protect before the BMS opens the charge FET
+,USHORT,132,discharge_oc1_delay_s,,0-255,,Time in seconds the discharge current must remain above discharge_oc1_protect before the BMS opens the discharge FET
+,USHORT,134,discharge_oc2_delay_s,,0-255,,Time in seconds the discharge current must remain above discharge_oc2_protect before the BMS opens the discharge FET
+
+# --- Charge temperature thresholds (0x002D + offsets 93-105) ---
+# Raw values are signed integers with a -50 offset applied by the BMS.
+# Stored value = actual_°C + 50. Transport subtracts 50 during processing.
+
+,SHORT,138,charge_ut_warn,1C,-40-85,,Charge undertemperature WARNING threshold (°C). BMS issues warning when cell temp drops below this during charging
+,SHORT,140,charge_ut_protect,1C,-40-85,,Charge undertemperature PROTECTION threshold (°C). BMS opens charge FET to prevent charging below this temperature
+,SHORT,142,charge_ut_release,1C,-40-85,,Charge undertemperature RELEASE threshold (°C). BMS re-enables charging once temp recovers above this
+,SHORT,144,charge_ot_warn,1C,0-85,,Charge overtemperature WARNING threshold (°C). BMS issues warning when cell temp exceeds this during charging
+,SHORT,146,charge_ot_protect,1C,0-90,,Charge overtemperature PROTECTION threshold (°C). BMS opens charge FET to prevent charging above this temperature
+,SHORT,148,charge_ot_release,1C,0-85,,Charge overtemperature RELEASE threshold (°C). BMS re-enables charging once temp drops below this
+
+# --- Discharge temperature thresholds (0x002D + offsets 105-121) ---
+
+,SHORT,150,discharge_ut_warn,1C,-40-85,,Discharge undertemperature WARNING threshold (°C). BMS issues warning when cell temp drops below this during discharge
+,SHORT,152,discharge_ut_protect,1C,-40-85,,Discharge undertemperature PROTECTION threshold (°C). BMS opens discharge FET to prevent discharge below this temperature
+,SHORT,154,discharge_ut_release,1C,-40-85,,Discharge undertemperature RELEASE threshold (°C). BMS re-enables discharge once temp recovers above this
+,SHORT,156,discharge_ot_warn,1C,0-85,,Discharge overtemperature WARNING threshold (°C). BMS issues warning when cell temp exceeds this during discharge
+,SHORT,158,discharge_ot_protect,1C,0-90,,Discharge overtemperature PROTECTION threshold (°C). BMS opens discharge FET to prevent discharge above this temperature
+,SHORT,160,discharge_ot_release,1C,0-85,,Discharge overtemperature RELEASE threshold (°C). BMS re-enables discharge once temp drops below this
+
+# --- PCB / MOSFET temperature thresholds (0x002D + offsets 117-121) ---
+
+,SHORT,162,pcb_ot_warn,1C,0-110,,PCB/MOSFET overtemperature WARNING threshold (°C). BMS issues warning when board temperature exceeds this
+,SHORT,164,pcb_ot_protect,1C,0-120,,PCB/MOSFET overtemperature PROTECTION threshold (°C). BMS opens both FETs when board temperature exceeds this
+,SHORT,166,pcb_ot_release,1C,0-110,,PCB/MOSFET overtemperature RELEASE threshold (°C). BMS re-enables FETs once board temperature drops below this

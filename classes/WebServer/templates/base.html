@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}PPG Admin{% endblock %}</title>
+
+  <!-- Tailwind CDN (play) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            ppg: {
+              900: '#0f1923',
+              800: '#1a2535',
+              700: '#243040',
+              600: '#2e3d52',
+              500: '#3d5166',
+              400: '#5b7a99',
+              300: '#8aaec8',
+              200: '#b9d0e4',
+              100: '#ddeaf5',
+              50:  '#f0f6fc',
+            },
+            accent: {
+              DEFAULT: '#38bdf8',
+              dark:    '#0ea5e9',
+            },
+            success: '#22c55e',
+            warning: '#f59e0b',
+            danger:  '#ef4444',
+            dirty:   '#fb923c',
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- HTMX — loaded synchronously so extensions register before DOM is processed -->
+  <script src="https://unpkg.com/htmx.org@1.9.12/dist/htmx.min.js"></script>
+  <script src="https://unpkg.com/htmx.org@1.9.12/dist/ext/sse.js"></script>
+  <script src="/static/js/json-enc.js"></script>
+
+  <!-- WCAG / custom properties -->
+  <link rel="stylesheet" href="/static/css/ppg.css" />
+
+  <!-- Dark mode: check preference and apply class immediately to avoid flash -->
+  <script>
+    (function() {
+      const stored = localStorage.getItem('ppg-theme');
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      if (stored === 'dark' || (!stored && prefersDark)) {
+        document.documentElement.classList.add('dark');
+      }
+    })();
+  </script>
+
+  {% block head %}{% endblock %}
+</head>
+<body class="h-full bg-ppg-50 dark:bg-ppg-900 text-ppg-900 dark:text-ppg-100 font-sans antialiased" hx-ext="json-enc">
+
+<!-- ===== SKIP LINK (WCAG 2.2) ===== -->
+<a href="#main-content"
+   class="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-50
+          focus:px-4 focus:py-2 focus:bg-accent focus:text-white focus:rounded">
+  Skip to main content
+</a>
+
+<!-- ===== TOP NAV BAR ===== -->
+<header role="banner"
+        class="sticky top-0 z-40 flex flex-wrap items-center justify-between gap-3
+               bg-ppg-800 dark:bg-ppg-900 border-b border-ppg-600
+               px-4 py-2 shadow-md"
+        aria-label="Main navigation">
+
+  <!-- Brand -->
+  <div class="flex items-center gap-3">
+    <span class="text-accent font-bold text-lg tracking-wide select-none"
+          aria-label="Python Protocol Gateway">PPG</span>
+    <span class="hidden sm:block text-ppg-300 text-xs">Admin UI</span>
+  </div>
+
+  <!-- Primary Nav -->
+  <nav role="navigation" aria-label="Primary" class="flex flex-wrap items-center gap-1 text-sm">
+
+    <!-- Dashboard -->
+    <a href="/"
+       class="nav-item px-3 py-1.5 rounded hover:bg-ppg-600 text-ppg-100
+              focus:outline-none focus:ring-2 focus:ring-accent"
+       aria-label="Dashboard">
+      Dashboard
+    </a>
+
+    <!-- Global Settings dropdown -->
+    <div class="relative group dropdown-root" role="none" data-dropdown>
+      <button type="button"
+              class="nav-item px-3 py-1.5 rounded hover:bg-ppg-600 text-ppg-100
+                     focus:outline-none focus:ring-2 focus:ring-accent
+                     flex items-center gap-1"
+              data-dropdown-trigger
+              aria-haspopup="true" aria-expanded="false"
+              aria-label="Global Settings menu">
+        Global Settings
+        <svg class="w-3 h-3 opacity-60" fill="none" stroke="currentColor"
+             viewBox="0 0 24 24" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+        </svg>
+      </button>
+      <ul class="dropdown-menu absolute left-0 top-full mt-1 w-52 bg-ppg-800
+                 border border-ppg-600 rounded shadow-xl z-50
+                 hidden group-hover:block group-focus-within:block"
+          role="menu" aria-label="Global Settings submenu">
+        <li role="none">
+          <a href="/pages/global-settings" role="menuitem"
+             class="dropdown-item block px-4 py-2 text-ppg-200 hover:bg-ppg-600 hover:text-white">
+            General Settings
+          </a>
+        </li>
+        <li role="none">
+          <a href="/pages/logging-settings" role="menuitem"
+             class="dropdown-item block px-4 py-2 text-ppg-200 hover:bg-ppg-600 hover:text-white">
+            Logging Settings
+          </a>
+        </li>
+        <li role="none">
+          <a href="/pages/view-log" role="menuitem"
+             class="dropdown-item block px-4 py-2 text-ppg-200 hover:bg-ppg-600 hover:text-white">
+            View Log
+          </a>
+        </li>
+        <li role="none">
+          <a href="/pages/transport-library" role="menuitem"
+             class="dropdown-item block px-4 py-2 text-ppg-200 hover:bg-ppg-600 hover:text-white">
+            Transport Library
+          </a>
+        </li>
+        <li role="none">
+          <a href="/pages/transport-settings" role="menuitem"
+             class="dropdown-item block px-4 py-2 text-ppg-200 hover:bg-ppg-600 hover:text-white">
+            Transport Settings
+          </a>
+        </li>
+        <li role="separator" class="border-t border-ppg-600 my-1"></li>
+        <li role="none">
+          <a href="/pages/faq" role="menuitem"
+             class="dropdown-item block px-4 py-2 text-ppg-200 hover:bg-ppg-600 hover:text-white">
+            FAQ
+          </a>
+        </li>
+        <li role="none">
+          <a href="/pages/about" role="menuitem"
+             class="dropdown-item block px-4 py-2 text-ppg-200 hover:bg-ppg-600 hover:text-white">
+            About
+          </a>
+        </li>
+      </ul>
+    </div>
+
+
+    <!-- PROTOCOLS dropdown -->
+    <div class="relative group dropdown-root" role="none" data-dropdown>
+      <button type="button"
+              class="nav-item px-3 py-1.5 rounded hover:bg-ppg-600 text-ppg-100
+                     focus:outline-none focus:ring-2 focus:ring-accent
+                     flex items-center gap-1"
+              data-dropdown-trigger
+              aria-haspopup="true" aria-expanded="false"
+              aria-label="Protocols menu">
+        Protocols
+        <svg class="w-3 h-3 opacity-60" fill="none" stroke="currentColor"
+             viewBox="0 0 24 24" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+        </svg>
+      </button>
+      <ul class="dropdown-menu absolute left-0 top-full mt-1 w-56 bg-ppg-800
+                 border border-ppg-600 rounded shadow-xl z-50
+                 hidden group-hover:block group-focus-within:block"
+          role="menu" aria-label="Protocols submenu">
+        {% for group in proto_groups %}
+        <li role="none" class="relative group/sub">
+          <button class="w-full text-left px-4 py-2 text-ppg-200
+                         hover:bg-ppg-600 hover:text-white flex justify-between items-center"
+                  role="menuitem" aria-haspopup="true">
+            {{ group.group }}
+            <svg class="w-3 h-3 opacity-60" fill="none" stroke="currentColor"
+                 viewBox="0 0 24 24" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+            </svg>
+          </button>
+          <ul class="absolute left-full top-0 w-56 bg-ppg-800
+                     border border-ppg-600 rounded shadow-xl z-50
+                     hidden group-hover/sub:block"
+              role="menu">
+            {% for proto in group.protocols %}
+            <li role="none">
+              <a href="/protocol-editor/{{ group.group }}/{{ proto }}" role="menuitem"
+                 class="block px-4 py-2 text-ppg-200 hover:bg-ppg-600 hover:text-white text-xs">
+                {{ proto }}
+              </a>
+            </li>
+            {% endfor %}
+          </ul>
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+
+    <!-- SCRAPERS dropdown -->
+    <div class="relative group dropdown-root" role="none" data-dropdown>
+      <button type="button"
+              class="nav-item px-3 py-1.5 rounded hover:bg-ppg-600 text-ppg-100
+                     focus:outline-none focus:ring-2 focus:ring-accent
+                     flex items-center gap-1"
+              data-dropdown-trigger
+              aria-haspopup="true" aria-expanded="false"
+              aria-label="Scrapers menu">
+        Scrapers
+        <svg class="w-3 h-3 opacity-60" fill="none" stroke="currentColor"
+             viewBox="0 0 24 24" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+        </svg>
+      </button>
+      <ul class="dropdown-menu absolute left-0 top-full mt-1 w-52 bg-ppg-800
+                 border border-ppg-600 rounded shadow-xl z-50
+                 hidden group-hover:block group-focus-within:block"
+          role="menu" aria-label="Scrapers submenu">
+        {% for scraper in nav.scrapers %}
+        <li role="none">
+          <a href="/device/{{ scraper.name }}" role="menuitem"
+             class="dropdown-item block px-4 py-2 text-ppg-200 hover:bg-ppg-600 hover:text-white">
+            {{ scraper.name }}
+            <span class="text-xs text-ppg-400 ml-1">({{ scraper.transport_class }})</span>
+          </a>
+        </li>
+        {% endfor %}
+        {% if not nav.scrapers %}
+        <li class="px-4 py-2 text-ppg-400 text-xs italic">No scrapers configured</li>
+        {% endif %}
+      </ul>
+    </div>
+
+    <!-- BRIDGES dropdown -->
+    <div class="relative group dropdown-root" role="none" data-dropdown>
+      <button type="button"
+              class="nav-item px-3 py-1.5 rounded hover:bg-ppg-600 text-ppg-100
+                     focus:outline-none focus:ring-2 focus:ring-accent
+                     flex items-center gap-1"
+              data-dropdown-trigger
+              aria-haspopup="true" aria-expanded="false"
+              aria-label="Bridges menu">
+        Bridges
+        <svg class="w-3 h-3 opacity-60" fill="none" stroke="currentColor"
+             viewBox="0 0 24 24" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+        </svg>
+      </button>
+      <ul class="dropdown-menu absolute left-0 top-full mt-1 w-52 bg-ppg-800
+                 border border-ppg-600 rounded shadow-xl z-50
+                 hidden group-hover:block group-focus-within:block"
+          role="menu" aria-label="Bridges submenu">
+        {% for bridge in nav.bridges %}
+        <li role="none">
+          <a href="/device/{{ bridge.name }}" role="menuitem"
+             class="dropdown-item block px-4 py-2 text-ppg-200 hover:bg-ppg-600 hover:text-white">
+            {{ bridge.name }}
+            <span class="text-xs text-ppg-400 ml-1">({{ bridge.transport_class }})</span>
+          </a>
+        </li>
+        {% endfor %}
+        {% if not nav.bridges %}
+        <li class="px-4 py-2 text-ppg-400 text-xs italic">No bridges configured</li>
+        {% endif %}
+      </ul>
+    </div>
+
+  </nav><!-- /primary nav -->
+
+  <!-- Right side: Analyze + Commit + Dark toggle -->
+  <div class="ml-auto flex flex-wrap items-center justify-end gap-2">
+
+    <!-- Create Device -->
+    <a href="/pages/create-device"
+       class="nav-item px-3 py-1.5 rounded hover:bg-ppg-600 text-ppg-100
+              focus:outline-none focus:ring-2 focus:ring-accent">
+      Create Device
+    </a>    
+
+    <!-- ANALYZE (only shown/enabled when a scraper is selected) -->
+    <button id="analyze-btn"
+            class="hidden px-3 py-1.5 text-sm rounded bg-ppg-600 text-ppg-100
+                   hover:bg-ppg-500 focus:outline-none focus:ring-2 focus:ring-accent
+                   disabled:opacity-40 disabled:cursor-not-allowed"
+            aria-label="Analyze selected scraper">
+      Analyze
+    </button>
+
+    <!-- DISCARD / CANCEL -->
+    <button id="discard-btn"
+            class="px-4 py-1.5 text-sm font-semibold rounded
+                   bg-ppg-600 text-ppg-200
+                   data-[dirty=true]:bg-danger data-[dirty=true]:text-white
+                   hover:bg-ppg-500 disabled:opacity-40 disabled:cursor-not-allowed
+                   focus:outline-none focus:ring-2 focus:ring-danger
+                   transition-colors"
+            data-dirty="false"
+            disabled
+            aria-label="Discard all staged changes"
+            hx-post="/api/commit/discard"
+            hx-confirm="Discard all staged changes and revert to current on-disk values?"
+            hx-swap="none">
+      Cancel
+    </button>
+
+    <!-- COMMIT ALL CHANGES -->
+    <button id="commit-btn"
+            class="px-4 py-1.5 text-sm font-semibold rounded
+                   bg-ppg-600 text-ppg-200
+                   data-[dirty=true]:bg-warning data-[dirty=true]:text-white
+                   data-[dirty=true]:animate-pulse
+                   hover:bg-ppg-500 disabled:opacity-40 disabled:cursor-not-allowed
+                   focus:outline-none focus:ring-2 focus:ring-accent
+                   transition-colors"
+            data-dirty="false"
+            aria-label="Commit all staged changes to disk"
+            hx-post="/api/commit"
+            hx-confirm="Write all staged changes to config.cfg and protocol files?"
+            hx-target="#commit-result"
+            hx-swap="none">
+      Commit All Changes
+    </button>
+
+    <!-- Diff panel toggle -->
+    <button class="px-2 py-1.5 text-xs rounded border border-ppg-600
+                   text-ppg-300 hover:bg-ppg-700
+                   focus:outline-none focus:ring-2 focus:ring-accent"
+            hx-get="/diff-panel"
+            hx-target="#diff-overlay"
+            hx-swap="innerHTML"
+            aria-label="View pending changes diff">
+      Diff
+    </button>
+
+    <!-- Dark mode toggle -->
+    <button onclick="toggleDark()"
+            class="p-1.5 rounded hover:bg-ppg-600 text-ppg-300
+                   focus:outline-none focus:ring-2 focus:ring-accent"
+            aria-label="Toggle dark mode">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
+      </svg>
+    </button>
+
+  </div>
+</header>
+<!-- /header -->
+
+<!-- ===== ORPHAN BANNER ===== -->
+{% if app_state and app_state.has_orphans %}
+<div role="alert"
+     class="bg-warning/10 border-b border-warning/40 px-4 py-2
+            flex items-center justify-between text-sm text-warning">
+  <span>
+    ⚠ Database contains <strong>{{ app_state.orphan_count }}</strong>
+    setting{{ 's' if app_state.orphan_count != 1 else '' }} no longer found in code.
+  </span>
+  <button hx-get="/orphan-modal"
+          hx-target="#diff-overlay"
+          hx-swap="innerHTML"
+          class="underline hover:no-underline font-medium focus:outline-none focus:ring-2 focus:ring-warning">
+    Review &amp; Prune
+  </button>
+</div>
+{% endif %}
+
+<!-- ===== MAIN CONTENT ===== -->
+<main id="main-content" class="flex-1 min-h-0 px-4 py-4">
+
+  <!-- Commit result toast -->
+  <div id="commit-result" class="mb-2" aria-live="polite"></div>
+
+  <!-- Diff / modal overlay slot -->
+  <div id="diff-overlay"></div>
+
+  <!-- Analysis panel slot -->
+  <div id="analysis-panel"></div>
+
+  {% block content %}{% endblock %}
+
+</main>
+
+<!-- ===== FOOTER ===== -->
+<footer class="text-center text-ppg-400 text-xs py-2 border-t border-ppg-700"
+        role="contentinfo">
+  PPG Web Management UI &mdash;
+  <a href="https://github.com/BuxtonCalvin/PythonProtocolGateway"
+     target="_blank" rel="noopener"
+     class="text-accent hover:underline focus:outline-none focus:ring-1 focus:ring-accent">
+    GitHub
+  </a>
+</footer>
+
+<!-- ===== SCRIPTS ===== -->
+<script>
+  // Dark mode toggle
+  function toggleDark() {
+    const html = document.documentElement;
+    html.classList.toggle('dark');
+    localStorage.setItem('ppg-theme', html.classList.contains('dark') ? 'dark' : 'light');
+  }
+
+  // Poll /api/devices/state every 10s to keep the dirty/commit button in sync
+  function refreshState() {
+    fetch('/api/devices/state')
+      .then(r => r.json())
+      .then(data => {
+        const btn = document.getElementById('commit-btn');
+        const discardBtn = document.getElementById('discard-btn');
+        if (!btn) return;
+        const dirty = data.has_dirty_settings || data.has_dirty_protocols;
+        btn.dataset.dirty = dirty ? 'true' : 'false';
+        btn.disabled = !dirty;
+        if (discardBtn) {
+          discardBtn.dataset.dirty = dirty ? 'true' : 'false';
+          discardBtn.disabled = !dirty;
+        }
+      })
+      .catch(() => {});
+  }
+  refreshState();
+  setInterval(refreshState, 10000);
+
+  // HTMX optimistic UI rollback on 4xx/5xx
+  document.body.addEventListener('htmx:responseError', function(evt) {
+    const el = evt.detail.elt;
+    if (el) {
+      el.classList.add('ring-2', 'ring-danger');
+      setTimeout(() => el.classList.remove('ring-2', 'ring-danger'), 2000);
+    }
+  });
+
+  document.body.addEventListener('htmx:afterRequest', function(evt) {
+    const path = evt.detail?.requestConfig?.path || evt.detail?.pathInfo?.requestPath || evt.detail?.xhr?.responseURL || '';
+    if (path.includes('/api/protocols/') || path.includes('/api/devices/')) {
+      refreshState();
+    }
+    // Commit response — render a dismissible toast instead of raw JSON
+    if (path === '/api/commit/discard') {
+      if (evt.detail.xhr.status >= 200 && evt.detail.xhr.status < 300) {
+        window.location.reload();
+      }
+      return;
+    }
+
+    if (path === '/api/commit') {
+      const el = document.getElementById('commit-result');
+      if (!el) return;
+      let html = '';
+      try {
+        const data = JSON.parse(evt.detail.xhr.responseText);
+        if (data.status === 'ok') {
+          const parts = [];
+          if (data.settings_written != null)    parts.push(`${data.settings_written} setting(s)`);
+          if (data.mask_files_written != null)   parts.push(`${data.mask_files_written} mask file(s)`);
+          if (data.screen_files_written != null) parts.push(`${data.screen_files_written} screen file(s)`);
+          if (data.override_files_written != null) parts.push(`${data.override_files_written} override file(s)`);
+          if (data.protocol_csvs_written != null) parts.push(`${data.protocol_csvs_written} protocol CSV(s)`);
+          const summary = parts.length ? parts.join(', ') : 'No changes written';
+          html = `<div class="flex items-center justify-between gap-4 px-4 py-2 rounded
+                             bg-success/10 border border-success/40 text-success text-sm">
+                    <span>✔ Commit successful — ${summary}. Refreshing…</span>
+                  </div>`;
+          // Reload after short delay so user sees the success message
+          setTimeout(() => window.location.reload(), 1200);
+        } else {
+          html = `<div class="flex items-center justify-between gap-4 px-4 py-2 rounded
+                             bg-danger/10 border border-danger/40 text-danger text-sm">
+                    <span>✖ Commit failed: ${data.detail || 'Unknown error'}</span>
+                    <button onclick="this.closest('[class]').remove()"
+                            class="text-danger/60 hover:text-danger ml-2 font-bold leading-none"
+                            aria-label="Dismiss">×</button>
+                  </div>`;
+        }
+      } catch {
+        if (evt.detail.xhr.status >= 400) {
+          html = `<div class="px-4 py-2 rounded bg-danger/10 border border-danger/40 text-danger text-sm">
+                    ✖ Commit failed (HTTP ${evt.detail.xhr.status})
+                  </div>`;
+        }
+      }
+      el.innerHTML = html;
+      if (html) {
+        refreshState();
+        setTimeout(() => { if (el.innerHTML) el.innerHTML = ''; }, 8000);
+      }
+    }
+  });
+
+  // Click-friendly dropdowns for the top nav.
+  (function() {
+    const dropdowns = Array.from(document.querySelectorAll('[data-dropdown]'));
+
+    function closeAll(except) {
+      dropdowns.forEach((dropdown) => {
+        if (dropdown === except) return;
+        dropdown.dataset.open = 'false';
+        const trigger = dropdown.querySelector('[data-dropdown-trigger]');
+        if (trigger) trigger.setAttribute('aria-expanded', 'false');
+      });
+    }
+
+    dropdowns.forEach((dropdown) => {
+      const trigger = dropdown.querySelector('[data-dropdown-trigger]');
+      if (!trigger) return;
+
+      trigger.addEventListener('click', function(event) {
+        event.stopPropagation();
+        const willOpen = dropdown.dataset.open !== 'true';
+        closeAll(dropdown);
+        dropdown.dataset.open = willOpen ? 'true' : 'false';
+        trigger.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+      });
+    });
+
+    document.addEventListener('click', function(event) {
+      if (!event.target.closest('[data-dropdown]')) {
+        closeAll();
+      }
+    });
+
+    document.addEventListener('keydown', function(event) {
+      if (event.key === 'Escape') {
+        closeAll();
+      }
+    });
+  })();
+</script>
+
+{% block scripts %}{% endblock %}
+
+</body>
+</html>

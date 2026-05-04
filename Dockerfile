@@ -8,7 +8,7 @@ RUN pip install --prefix=/install -r /requirements.txt
 FROM base
 COPY --from=builder /install /usr/local
 COPY protocol_gateway.py /app/
-COPY config.cfg.example /app/config.cfg
+COPY config/examples/config.example.cfg /app/config/config.cfg
 COPY defs/ /app/defs/
 COPY classes /app/classes/
 COPY protocols /app/protocols/
