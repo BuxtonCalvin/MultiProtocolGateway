@@ -1,6 +1,8 @@
 # Base transport class defining common interface and behavior for all transports,
 # including protocol settings management, device metadata, and read/write operations.
 # Transports should inherit from this and implement protocol-specific logic as needed.
+from __future__ import annotations
+
 import logging
 import threading
 from dataclasses import dataclass
@@ -73,7 +75,7 @@ class transport_base:
     _log : logging.Logger
 
 
-    def __init__(self, settings : TransportSettings) -> None:
+    def __init__(self, settings : "TransportSettings") -> None:
 
         self.protocolSettings: Optional["protocol_settings"] = None
         self.type: str = self.__class__.__name__
