@@ -111,14 +111,14 @@ Bridges receive data from scrapers and write it somewhere. They are passive — 
 
 - InfluxDB
   - Advanced Features
-    [`influxdb_advanced_features.md`](/documentation/bridges/InfluxDB/influxdb_advanced_features.md)
+    [`influxdb_advanced_features.md`](documentation/bridges/InfluxDB/influxdb_advanced_features.md)
 
   - Troubleshooting
-    [`troubleshooting_influxdb.md`](/documentation/bridges/InfluxDB/troubleshooting_influxdb.md)
+    [`troubleshooting_influxdb.md`](documentation/bridges/InfluxDB/troubleshooting_influxdb.md)
 
 - TimeScaledDB
   - Readme
-[`timescaledb_protocol_gateway.md`](/documentation/bridges/TimeScaleDB/timescaledb_protocol_gateway.md)
+[`timescaledb_protocol_gateway.md`](documentation/bridges/TimeScaleDB/timescaledb_protocol_gateway.md)
 
 ---
 
@@ -141,7 +141,7 @@ PPG ships with pre-built protocol maps for the following manufacturers. Each pro
 | **Next Power** | Victor NM RE |
 | **HDHK** | 16-channel AC module |
 
-For a full list of tested devices and community-reported compatibility, see [`devices_and_protocols.csv`](/documentation/usage/devices_and_protocols.csv).
+For a full list of tested devices and community-reported compatibility, see [`devices_and_protocols.csv`](documentation/usage/devices_and_protocols.csv).
 
 PPG also supports any generic Modbus RTU or TCP device when given a register map — the Live Analysis tool is specifically designed to help build maps for undocumented hardware.
 
@@ -173,7 +173,7 @@ Each transport is independently configurable with its own scan interval, log lev
 
 ### Recommendation
 
-- It is much easier and far less error prone to install PPG with its associated bridges via docker compose.  A full docker stack is available see [`docker-compose.yml`](/documentation/docker/docker-compose.yml).  Make sure to also install the accompanying configuration files .env, mosquitto.conf and PPG.yaml (Grafana provisioning).  However, if you want to install without Docker, please read the following:
+- It is much easier and far less error prone to install PPG with its associated bridges via docker compose.  A full docker stack is available see [`docker-compose.yml`](documentation/docker/docker-compose.yml).  Make sure to also install the accompanying configuration files .env, mosquitto.conf and PPG.yaml (Grafana provisioning).  However, if you want to install without Docker, please read the following:
 
 ### Prerequisites
 
@@ -235,7 +235,7 @@ docker run \
 
 ## Full Docker Compose Stack
 
-For a complete monitoring stack — PPG + TimescaleDB + InfluxDB + MQTT + pgAdmin + Chronograf + Grafana — see the included [`docker-compose.yml`](/documentation/docker/docker-compose.yml) in this repository.
+For a complete monitoring stack — PPG + TimescaleDB + InfluxDB + MQTT + pgAdmin + Chronograf + Grafana — see the included [`docker-compose.yml`](documentation/docker/docker-compose.yml) in this repository.
 
 The stack provides:
 
@@ -257,7 +257,7 @@ cp .env.example .env
 docker compose up -d
 ```
 
-Full documentation for the compose stack is in [`docker-compose.yml`](/documentation/docker/docker-compose.yml).
+Full documentation for the compose stack is in [`docker-compose.yml`](documentation/docker/docker-compose.yml).
 
 ---
 
@@ -327,7 +327,7 @@ The CSV files use `,` as delimiter (OpenOffice/LibreOffice compatible) and suppo
 
 Variable names have been normalized for readability. To use original documented names, clear the `variable_name` column in the CSV or edit via the Protocol Editor in the web UI.
 
-Find more protocol documentation here:  [`protocols.md`](/documentation/usage/protocols.md)
+Find more protocol documentation here:  [`protocols.md`](documentation/usage/protocols.md)
 
 ### Using the Live Analysis Tool to Build New Maps
 
@@ -386,9 +386,9 @@ Key settings available on every transport:
 
 For Modbus transports, additional keys include `host`, `port`, `unit_id`, `batch_size`, `max_retries_per_block`, and `disable_duration_hours`.
 
-Full configuration documentation: [`transports.md`](/documentation/usage/transports.md)
+Full configuration documentation: [`transports.md`](documentation/usage/transports.md)
 
-For manufacturer device-specific wiring and installation guides: [devices](/documentation/devices)
+For manufacturer device-specific wiring and installation guides: [devices](documentation/devices)
 
 ---
 
