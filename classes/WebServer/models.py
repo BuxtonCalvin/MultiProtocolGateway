@@ -1,5 +1,5 @@
 """
-SQLAlchemy ORM models for the PPG Web Management UI staging database.
+SQLAlchemy ORM models for the MPG Web Management UI staging database.
 
 This database is a LOCAL SQLite file — it is NOT the TimescaleDB instance.
 Its sole purpose is to stage user edits before they are committed back to

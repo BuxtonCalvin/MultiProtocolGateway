@@ -11,12 +11,12 @@ from enum import Enum
 
 from classes.WebServer.main import start_webserver
 
-# Check if Python version is greater than 3.9
-if sys.version_info < (3, 9):
+# Check if Python version is greater than 3.10
+if sys.version_info < (3, 10):
     print("==================================================")
-    print("WARNING: python version 3.9 or higher is required")
+    print("WARNING: python version 3.10 or higher is required")
     print("Current version: " + sys.version)
-    print("Please upgrade your python version to 3.9")
+    print("Please upgrade your python version to 3.10")
     print("==================================================")
     time.sleep(4)
 
@@ -39,12 +39,12 @@ from defs.common import TransportSettings
 
 __logo = """
 
-██████╗ ██╗   ██╗████████╗██╗  ██╗ ██████╗ ███╗   ██╗
-██╔══██╗╚██╗ ██╔╝╚══██╔══╝██║  ██║██╔═══██╗████╗  ██║
-██████╔╝ ╚████╔╝    ██║   ███████║██║   ██║██╔██╗ ██║
-██╔═══╝   ╚██╔╝     ██║   ██╔══██║██║   ██║██║╚██╗██║
-██║        ██║      ██║   ██║  ██║╚██████╔╝██║ ╚████║
-╚═╝        ╚═╝      ╚═╝   ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═══╝
+███╗   ███╗██╗   ██╗██╗     ████████╗██╗
+████╗ ████║██║   ██║██║     ╚══██╔══╝██║
+██╔████╔██║██║   ██║██║        ██║   ██║
+██║╚██╔╝██║██║   ██║██║        ██║   ██║
+██║ ╚═╝ ██║╚██████╔╝███████╗   ██║   ██║
+╚═╝     ╚═╝ ╚═════╝ ╚══════╝   ╚═╝   ╚═╝
 
 ██████╗ ██████╗  ██████╗ ████████╗ ██████╗  ██████╗ ██████╗ ██╗          ██████╗  █████╗ ████████╗███████╗██╗    ██╗ █████╗ ██╗   ██╗
 ██╔══██╗██╔══██╗██╔═══██╗╚══██╔══╝██╔═══██╗██╔════╝██╔═══██╗██║         ██╔════╝ ██╔══██╗╚══██╔══╝██╔════╝██║    ██║██╔══██╗╚██╗ ██╔╝
@@ -241,7 +241,7 @@ class Protocol_Gateway:
         level: int = getattr(logging, level_name, logging.INFO)
 
         log_dir = Path(cfg.get("logging", "log_dir", fallback="logs"))
-        log_file: str = cfg.get("logging", "log_file", fallback="PPG.log")
+        log_file: str = cfg.get("logging", "log_file", fallback="MPG.log")
 
         rotation: str = cfg.get("logging", "rotation", fallback="weekly").lower()
         backup_count: int = cfg.getint("logging", "backup_count", fallback=4)
@@ -993,7 +993,7 @@ def main(args=None) -> None:
     """
 
     # Create ArgumentParser object
-    parser = argparse.ArgumentParser(description="Python Protocol Gateway")
+    parser = argparse.ArgumentParser(description="Multi Protocol Gateway")
 
     # Add arguments
     parser.add_argument("--config", "-c", type=str, help="Specify Config File")
@@ -1009,7 +1009,7 @@ def main(args=None) -> None:
 
     print(__logo)
 
-    ppg = Protocol_Gateway(config_file)
+    mpg = Protocol_Gateway(config_file)
 
     current_path: Path = Path(__file__).resolve()
     root: Path = current_path
@@ -1024,11 +1024,11 @@ def main(args=None) -> None:
     config_path: Path = root / "config" / config_file
     config_parser = CustomConfigParser()
     config_parser.read(config_path.as_posix())
-    log_file: str = config_parser.get("logging", "log_file", fallback="PPG.log")
+    log_file: str = config_parser.get("logging", "log_file", fallback="MPG.log")
     log_dir: str = config_parser.get("logging", "log_dir", fallback="logs")
 
-    start_webserver(config_path, log_file, log_dir, gateway_instance=ppg)
-    ppg.run()
+    start_webserver(config_path, log_file, log_dir, gateway_instance=mpg)
+    mpg.run()
 
 
 if __name__ == "__main__":

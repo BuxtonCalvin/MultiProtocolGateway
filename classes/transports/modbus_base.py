@@ -39,33 +39,32 @@ MODBUS_FUNCTION_CODES = {
     0x2B: "Read Device Identification"
 }
 
+
 MODBUS_EXCEPTION_CODES: dict[ExcCodes, str] = {
     ExcCodes.ILLEGAL_FUNCTION: "ILLEGAL_FUNCTION",
     ExcCodes.ILLEGAL_ADDRESS: "ILLEGAL_ADDRESS",
     ExcCodes.ILLEGAL_VALUE: "ILLEGAL_VALUE",
-    ExcCodes.DEVICE_FAILURE: "SLAVE_FAILURE",
+    ExcCodes.DEVICE_FAILURE: "DEVICE_FAILURE",
     ExcCodes.ACKNOWLEDGE: "ACKNOWLEDGE",
-    ExcCodes.DEVICE_BUSY: "SLAVE_BUSY",
-    ExcCodes.NEGATIVE_ACKNOWLEDGE: "NEGATIVE ACKNOWLEDGE",
+    ExcCodes.DEVICE_BUSY: "DEVICE_BUSY",
+    ExcCodes.NEGATIVE_ACKNOWLEDGE: "NEGATIVE_ACKNOWLEDGE",
     ExcCodes.MEMORY_PARITY_ERROR: "MEMORY_PARITY_ERROR",
-    ExcCodes.GATEWAY_PATH_UNAVIABLE: "GATEWAY_PATH_UNAVAILABLE",
+    ExcCodes.GATEWAY_PATH_UNAVIABLE: "GATEWAY_PATH_UNAVIABLE",
     ExcCodes.GATEWAY_NO_RESPONSE: "GATEWAY_NO_RESPONSE"
 }
-# Descriptions for Modbus exception codes (using ExceptionResponse constants as keys)
 
 MODBUS_EXCEPTION_DESCRIPTIONS: dict[ExcCodes, str] = {
-    ExcCodes.ILLEGAL_FUNCTION: "The function code received in the query is not an allowable action for the slave",
-    ExcCodes.ILLEGAL_ADDRESS: "The data address received in the query is not an allowable address for the slave",
-    ExcCodes.DEVICE_FAILURE: "An unrecoverable error occurred while the slave was attempting to perform the requested action",
-    ExcCodes.ILLEGAL_VALUE: "A value contained in the query data field is not an allowable value for the slave",
-    ExcCodes.ACKNOWLEDGE: "The slave has accepted the request and is processing it, but a long duration of time will be required",
-    ExcCodes.DEVICE_BUSY: "The slave is engaged in processing a long-duration program command",
-    ExcCodes.NEGATIVE_ACKNOWLEDGE: "The slave cannot perform the program function received in the query",
-    ExcCodes.MEMORY_PARITY_ERROR: "The slave attempted to read record file, but detected a parity error in the memory",
-    ExcCodes.GATEWAY_PATH_UNAVIABLE: "The gateway path is not available",
-    ExcCodes.GATEWAY_NO_RESPONSE: "The gateway target device failed to respond"
+    ExcCodes.ILLEGAL_FUNCTION: "The function code received is not allowed for this device.",
+    ExcCodes.ILLEGAL_ADDRESS: "The data address received is not allowed for this device.",
+    ExcCodes.DEVICE_FAILURE: "An unrecoverable error occurred while performing the action.",
+    ExcCodes.ILLEGAL_VALUE: "A value contained in the query data field is not allowed.",
+    ExcCodes.ACKNOWLEDGE: "The device has accepted the request and is processing it.",
+    ExcCodes.DEVICE_BUSY: "The device is engaged in a long-duration program command.",
+    ExcCodes.NEGATIVE_ACKNOWLEDGE: "The device cannot perform the program function received.",
+    ExcCodes.MEMORY_PARITY_ERROR: "The device detected a parity error in memory.",
+    ExcCodes.GATEWAY_PATH_UNAVIABLE: "The gateway path is not available.",
+    ExcCodes.GATEWAY_NO_RESPONSE: "The gateway target device failed to respond."
 }
-
 
 def interpret_modbus_exception_code(code):
     """
@@ -1552,7 +1551,7 @@ class modbus_base(transport_base):
             return
 
         #  A TypeError would propagate uncaught through write_data and _transport_lock would be released correctly
-        #  since it's a 'with' block, but the exception would propagate to PPG's transport read loop, so just log as error.
+        #  since it's a 'with' block, but the exception would propagate to MPG's transport read loop, so just log as error.
         else:
             self._log.error(
                 f"WRITE_ERROR: Unrecognized data type '{entry.data_type.name}' for "

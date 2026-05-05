@@ -1,7 +1,7 @@
 """
-PPG WebServer test suite.
+MPG WebServer test suite.
 
-Run from PythonProtocolGateway root:
+Run from MultiProtocolGateway root:
     pytest classes/WebServer/pytests/ -v
 
 Tests cover:

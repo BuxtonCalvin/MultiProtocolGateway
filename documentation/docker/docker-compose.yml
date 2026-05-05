@@ -1,9 +1,9 @@
 # =============================================================================
-# Python Protocol Gateway — Full Monitoring Stack
+# Multi Protocol Gateway — Full Monitoring Stack
 # =============================================================================
 #
 # Services included:
-#   ppg          - Python Protocol Gateway (web UI on :1717)
+#   mpg          - Multi Protocol Gateway (web UI on :1717)
 #   timescaledb  - TimescaleDB / PostgreSQL (:5432)
 #   influxdb     - InfluxDB v1.x (:8086)
 #   mosquitto    - Eclipse Mosquitto MQTT broker (:1883, :9001 websocket)
@@ -13,7 +13,7 @@
 #
 # Usage:
 #   1. Copy this file and the companion configs to your deployment directory:
-#        cp docker-compose.yml /opt/ppg/docker-compose.yml
+#        cp docker-compose.yml /opt/mpg/docker-compose.yml
 #
 #   2. Create the .env file from the example and set your passwords:
 #        cp .env.example .env && nano .env
@@ -28,11 +28,11 @@
 #   5. Start the stack:
 #        docker compose up -d
 #
-#   6. Open the PPG web UI at http://localhost:1717 to configure your devices.
+#   6. Open the MPG web UI at http://localhost:1717 to configure your devices.
 #
 # Notes:
-#   - PPG requires access to a serial/USB device for Modbus RTU.
-#     Add your device path under the `devices:` key in the ppg service.
+#   - MPG requires access to a serial/USB device for Modbus RTU.
+#     Add your device path under the `devices:` key in the mpg service.
 #     For Modbus TCP only, remove the `devices:` section entirely.
 #   - All persistent data is stored in named Docker volumes by default.
 #     Override VOLUME_BASE in .env to store data on the host filesystem.
@@ -54,7 +54,7 @@ x-logging: &default-logging
 # NETWORKS
 # =============================================================================
 networks:
-  ppg_internal:
+  mpg_internal:
     driver: bridge
     ipam:
       config:
@@ -64,7 +64,7 @@ networks:
 # VOLUMES
 # =============================================================================
 volumes:
-  ppg_config:
+  mpg_config:
     driver: local
   timescaledb_data:
     driver: local
@@ -89,16 +89,16 @@ volumes:
 services:
 
   # ---------------------------------------------------------------------------
-  # Python Protocol Gateway
+  # Multi Protocol Gateway
   # ---------------------------------------------------------------------------
-  ppg:
-    image: hotn00b/pythonprotocolgateway:latest
-    container_name: ppg
+  mpg:
+    image: buxtoncalvin/multiprotocolgateway:latest
+    container_name: mpg
     <<: [*restart-policy, *default-logging]
     ports:
-      - "${PPG_PORT:-1717}:1717"
+      - "${MPG_PORT:-1717}:1717"
     volumes:
-      - ppg_config:/app/config
+      - mpg_config:/app/config
       # Mount your config.cfg directly if you manage it outside the UI:
       # - ./config/config.cfg:/app/config.cfg
     environment:
@@ -108,7 +108,7 @@ services:
     #   - /dev/ttyUSB0:/dev/ttyUSB0
     #   - /dev/ttyACM0:/dev/ttyACM0
     networks:
-      - ppg_internal
+      - mpg_internal
     depends_on:
       timescaledb:
         condition: service_healthy
@@ -128,34 +128,34 @@ services:
   # ---------------------------------------------------------------------------
   timescaledb:
     image: timescale/timescaledb:latest-pg16
-    container_name: ppg_timescaledb
+    container_name: mpg_timescaledb
     <<: [*restart-policy, *default-logging]
     ports:
       - "${TIMESCALE_PORT:-5432}:5432"
     volumes:
       - timescaledb_data:/var/lib/postgresql/data
-      # Optional: mount init SQL to create PPG schema on first boot
+      # Optional: mount init SQL to create MPG schema on first boot
       # - ./config/timescaledb/init.sql:/docker-entrypoint-initdb.d/init.sql
     environment:
-      POSTGRES_DB: ${TIMESCALE_DB:-ppg}
-      POSTGRES_USER: ${TIMESCALE_USER:-ppg}
+      POSTGRES_DB: ${TIMESCALE_DB:-mpg}
+      POSTGRES_USER: ${TIMESCALE_USER:-mpg}
       POSTGRES_PASSWORD: ${TIMESCALE_PASSWORD:?TIMESCALE_PASSWORD must be set in .env}
       TZ: ${TZ:-UTC}
     networks:
-      - ppg_internal
+      - mpg_internal
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${TIMESCALE_USER:-ppg} -d ${TIMESCALE_DB:-ppg}"]
+      test: ["CMD-SHELL", "pg_isready -U ${TIMESCALE_USER:-mpg} -d ${TIMESCALE_DB:-mpg}"]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 30s
 
   # ---------------------------------------------------------------------------
-  # InfluxDB  (v1.x — compatible with PPG's influxdb_out transport)
+  # InfluxDB  (v1.x — compatible with MPG's influxdb_out transport)
   # ---------------------------------------------------------------------------
   influxdb:
     image: influxdb:1.11
-    container_name: ppg_influxdb
+    container_name: mpg_influxdb
     <<: [*restart-policy, *default-logging]
     ports:
       - "${INFLUXDB_PORT:-8086}:8086"
@@ -163,15 +163,15 @@ services:
       - influxdb_data:/var/lib/influxdb
       - influxdb_config:/etc/influxdb
     environment:
-      INFLUXDB_DB: ${INFLUXDB_DB:-ppg}
+      INFLUXDB_DB: ${INFLUXDB_DB:-mpg}
       INFLUXDB_ADMIN_USER: ${INFLUXDB_ADMIN_USER:-admin}
       INFLUXDB_ADMIN_PASSWORD: ${INFLUXDB_ADMIN_PASSWORD:?INFLUXDB_ADMIN_PASSWORD must be set in .env}
-      INFLUXDB_USER: ${INFLUXDB_USER:-ppg}
+      INFLUXDB_USER: ${INFLUXDB_USER:-mpg}
       INFLUXDB_USER_PASSWORD: ${INFLUXDB_USER_PASSWORD:?INFLUXDB_USER_PASSWORD must be set in .env}
       INFLUXDB_HTTP_AUTH_ENABLED: "true"
       TZ: ${TZ:-UTC}
     networks:
-      - ppg_internal
+      - mpg_internal
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8086/ping"]
       interval: 15s
@@ -186,7 +186,7 @@ services:
   # ---------------------------------------------------------------------------
   mosquitto:
     image: eclipse-mosquitto:2
-    container_name: ppg_mosquitto
+    container_name: mpg_mosquitto
     <<: [*restart-policy, *default-logging]
     ports:
       - "${MQTT_PORT:-1883}:1883"
@@ -198,7 +198,7 @@ services:
     environment:
       TZ: ${TZ:-UTC}
     networks:
-      - ppg_internal
+      - mpg_internal
     healthcheck:
       test: ["CMD", "mosquitto_pub", "-h", "localhost", "-t", "healthcheck", "-m", "ping", "-q", "0"]
       interval: 15s
@@ -211,7 +211,7 @@ services:
   # ---------------------------------------------------------------------------
   pgadmin:
     image: dpage/pgadmin4:latest
-    container_name: ppg_pgadmin
+    container_name: mpg_pgadmin
     <<: [*restart-policy, *default-logging]
     ports:
       - "${PGADMIN_PORT:-5050}:80"
@@ -226,7 +226,7 @@ services:
       PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
       TZ: ${TZ:-UTC}
     networks:
-      - ppg_internal
+      - mpg_internal
     depends_on:
       timescaledb:
         condition: service_healthy
@@ -236,7 +236,7 @@ services:
   # ---------------------------------------------------------------------------
   chronograf:
     image: chronograf:1.10
-    container_name: ppg_chronograf
+    container_name: mpg_chronograf
     <<: [*restart-policy, *default-logging]
     ports:
       - "${CHRONOGRAF_PORT:-8888}:8888"
@@ -248,7 +248,7 @@ services:
       INFLUXDB_PASSWORD: ${INFLUXDB_ADMIN_PASSWORD:?INFLUXDB_ADMIN_PASSWORD must be set in .env}
       TZ: ${TZ:-UTC}
     networks:
-      - ppg_internal
+      - mpg_internal
     depends_on:
       influxdb:
         condition: service_healthy
@@ -258,7 +258,7 @@ services:
   # ---------------------------------------------------------------------------
   grafana:
     image: grafana/grafana:latest
-    container_name: ppg_grafana
+    container_name: mpg_grafana
     <<: [*restart-policy, *default-logging]
     ports:
       - "${GRAFANA_PORT:-3000}:3000"
@@ -274,17 +274,17 @@ services:
       # TimescaleDB connection (used by provisioned datasource)
       GF_TIMESCALE_HOST: timescaledb
       GF_TIMESCALE_PORT: "5432"
-      GF_TIMESCALE_DB: ${TIMESCALE_DB:-ppg}
-      GF_TIMESCALE_USER: ${TIMESCALE_USER:-ppg}
+      GF_TIMESCALE_DB: ${TIMESCALE_DB:-mpg}
+      GF_TIMESCALE_USER: ${TIMESCALE_USER:-mpg}
       GF_TIMESCALE_PASSWORD: ${TIMESCALE_PASSWORD:?TIMESCALE_PASSWORD must be set in .env}
       # InfluxDB connection (used by provisioned datasource)
       GF_INFLUX_URL: http://influxdb:8086
-      GF_INFLUX_DB: ${INFLUXDB_DB:-ppg}
-      GF_INFLUX_USER: ${INFLUXDB_USER:-ppg}
+      GF_INFLUX_DB: ${INFLUXDB_DB:-mpg}
+      GF_INFLUX_USER: ${INFLUXDB_USER:-mpg}
       GF_INFLUX_PASSWORD: ${INFLUXDB_USER_PASSWORD:?INFLUXDB_USER_PASSWORD must be set in .env}
       TZ: ${TZ:-UTC}
     networks:
-      - ppg_internal
+      - mpg_internal
     depends_on:
       timescaledb:
         condition: service_healthy
@@ -301,22 +301,22 @@ services:
 #
 #   TZ=America/Los_Angeles
 #
-#   # PPG
-#   PPG_PORT=1717
+#   # MPG
+#   MPG_PORT=1717
 #
 #   # TimescaleDB
 #   TIMESCALE_PORT=5432
-#   TIMESCALE_DB=ppg
-#   TIMESCALE_USER=ppg
+#   TIMESCALE_DB=mpg
+#   TIMESCALE_USER=mpg
 #   TIMESCALE_PASSWORD=changeme_timescale
 #
 #   # InfluxDB
 #   INFLUXDB_PORT=8086
-#   INFLUXDB_DB=ppg
+#   INFLUXDB_DB=mpg
 #   INFLUXDB_ADMIN_USER=admin
 #   INFLUXDB_ADMIN_PASSWORD=changeme_influx_admin
-#   INFLUXDB_USER=ppg
-#   INFLUXDB_USER_PASSWORD=changeme_influx_ppg
+#   INFLUXDB_USER=mpg
+#   INFLUXDB_USER_PASSWORD=changeme_influx_mpg
 #
 #   # MQTT
 #   MQTT_PORT=1883
@@ -324,7 +324,7 @@ services:
 #
 #   # pgAdmin
 #   PGADMIN_PORT=5050
-#   PGADMIN_EMAIL=admin@ppg.local
+#   PGADMIN_EMAIL=admin@mpg.local
 #   PGADMIN_PASSWORD=changeme_pgadmin
 #
 #   # Chronograf
@@ -368,7 +368,7 @@ services:
 #   # password_file /mosquitto/config/passwd
 #
 #
-# ── config/grafana/provisioning/datasources/ppg.yaml ─────────────────────────
+# ── config/grafana/provisioning/datasources/mpg.yaml ─────────────────────────
 #
 #   Create this file to automatically register both data sources in Grafana.
 #   The ${...} variables are resolved by Grafana from the environment.

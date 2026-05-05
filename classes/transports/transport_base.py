@@ -90,7 +90,7 @@ class transport_base:
         # device metadata
         self.device_name: str = ""
         self.device_serial_number: str = ""
-        self.device_manufacturer: str = "PPG"
+        self.device_manufacturer: str = "MPG"
         self.device_model: str = ""
         self.device_identifier: str = ""
         self.device_location: str = ""

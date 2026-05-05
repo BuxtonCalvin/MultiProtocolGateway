@@ -1,6 +1,6 @@
 # =============================================================================
 # Grafana Datasource Provisioning
-# Place this file at: config/grafana/provisioning/datasources/ppg.yaml
+# Place this file at: config/grafana/provisioning/datasources/mpg.yaml
 #
 # Grafana will automatically register both data sources on first boot.
 # Variables are resolved from the Grafana container's environment.

@@ -3,7 +3,7 @@
   HTMX partial — rich JSON editor for protocol .json config files.
   Replaces the CSV register table when registry_type == 'json'.
 -->
-<div class="p-3 bg-ppg-800 rounded" id="json-editor-root"
+<div class="p-3 bg-mpg-800 rounded" id="json-editor-root"
      data-protocol-name="{{ protocol_name }}"
      data-protocol-group="{{ protocol_group }}">
 
@@ -15,13 +15,13 @@
 
   <div class="flex items-center justify-between mb-3">
     <div>
-      <p class="text-ppg-100 font-semibold text-sm">
+      <p class="text-mpg-100 font-semibold text-sm">
         JSON Config Editor
         <span class="text-accent font-mono ml-1">{{ protocol_name }}.json</span>
         {% if is_override %}<span class="ml-2 text-warning text-xs font-normal">(override)</span>{% endif %}
       </p>
-      <p class="text-ppg-300 text-xs mt-0.5">
-        Edit key/value pairs below. Save writes to the config folder — PPG loads this override at next start.
+      <p class="text-mpg-300 text-xs mt-0.5">
+        Edit key/value pairs below. Save writes to the config folder — MPG loads this override at next start.
       </p>
     </div>
     <div class="flex items-center gap-2">
@@ -42,47 +42,47 @@
   <div id="json-editor-status" class="mb-3 hidden"></div>
 
   <!-- Editor table -->
-  <div class="rounded border border-ppg-600 overflow-hidden">
+  <div class="rounded border border-mpg-600 overflow-hidden">
     <table class="w-full text-xs border-collapse">
-      <thead class="bg-ppg-900 sticky top-0 z-10">
-        <tr class="text-ppg-200 uppercase tracking-wide text-xs">
-          <th class="px-3 py-2 text-left w-64 font-semibold border-r border-ppg-700">Key</th>
-          <th class="px-3 py-2 text-left font-semibold border-r border-ppg-700">Value</th>
-          <th class="px-3 py-2 text-left w-28 font-semibold border-r border-ppg-700">Type</th>
+      <thead class="bg-mpg-900 sticky top-0 z-10">
+        <tr class="text-mpg-200 uppercase tracking-wide text-xs">
+          <th class="px-3 py-2 text-left w-64 font-semibold border-r border-mpg-700">Key</th>
+          <th class="px-3 py-2 text-left font-semibold border-r border-mpg-700">Value</th>
+          <th class="px-3 py-2 text-left w-28 font-semibold border-r border-mpg-700">Type</th>
           <th class="px-3 py-2 text-center w-12 font-semibold">Del</th>
         </tr>
       </thead>
       <tbody id="json-editor-body">
         {% for key, value in json_data.items() %}
         {% set vtype = 'object' if value is mapping else ('array' if (value is iterable and value is not string) else ('boolean' if value is boolean else ('null' if value is none else ('number' if value is number else 'string')))) %}
-        <tr class="border-t border-ppg-700/60 hover:bg-ppg-700/20 transition-colors json-row"
+        <tr class="border-t border-mpg-700/60 hover:bg-mpg-700/20 transition-colors json-row"
             data-key="{{ key }}">
-          <td class="px-2 py-1.5 border-r border-ppg-700/40">
+          <td class="px-2 py-1.5 border-r border-mpg-700/40">
             <input type="text"
-                   class="json-key w-full bg-ppg-900 border border-ppg-600 rounded px-2 py-1
-                          text-ppg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent"
+                   class="json-key w-full bg-mpg-900 border border-mpg-600 rounded px-2 py-1
+                          text-mpg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent"
                    value="{{ key }}"
                    aria-label="Key name">
           </td>
-          <td class="px-2 py-1.5 border-r border-ppg-700/40">
+          <td class="px-2 py-1.5 border-r border-mpg-700/40">
             {% if vtype in ('object', 'array') %}
-            <textarea class="json-value w-full bg-ppg-900 border border-ppg-600 rounded px-2 py-1
-                             text-ppg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent
+            <textarea class="json-value w-full bg-mpg-900 border border-mpg-600 rounded px-2 py-1
+                             text-mpg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent
                              min-h-[4rem] resize-y"
                       aria-label="Value for {{ key }}"
                       data-type="{{ vtype }}">{{ value | tojson(indent=2) }}</textarea>
             {% else %}
             <input type="text"
-                   class="json-value w-full bg-ppg-900 border border-ppg-600 rounded px-2 py-1
-                          text-ppg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent"
+                   class="json-value w-full bg-mpg-900 border border-mpg-600 rounded px-2 py-1
+                          text-mpg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent"
                    value="{{ value if vtype == 'string' else value | tojson }}"
                    aria-label="Value for {{ key }}"
                    data-type="{{ vtype }}">
             {% endif %}
           </td>
-          <td class="px-2 py-1.5 border-r border-ppg-700/40">
-            <select class="json-type w-full bg-ppg-900 border border-ppg-600 rounded px-1 py-1
-                           text-ppg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent"
+          <td class="px-2 py-1.5 border-r border-mpg-700/40">
+            <select class="json-type w-full bg-mpg-900 border border-mpg-600 rounded px-1 py-1
+                           text-mpg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent"
                     aria-label="Type for {{ key }}"
                     onchange="jsonEditorTypeChange(this)">
               <option value="string"  {% if vtype == 'string'  %}selected{% endif %}>string</option>
@@ -103,8 +103,8 @@
 
         {% if not json_data %}
         <tr id="json-empty-row">
-          <td colspan="4" class="px-4 py-6 text-center text-ppg-300 text-sm">
-            No JSON keys found. Click <strong class="text-ppg-100">+ Add Key</strong> to begin.
+          <td colspan="4" class="px-4 py-6 text-center text-mpg-300 text-sm">
+            No JSON keys found. Click <strong class="text-mpg-100">+ Add Key</strong> to begin.
           </td>
         </tr>
         {% endif %}
@@ -120,8 +120,8 @@
     </button>
     <div id="json-raw-panel" class="hidden mt-2">
       <textarea id="json-raw-textarea"
-                class="w-full bg-ppg-900 border border-ppg-600 rounded px-3 py-2
-                       text-ppg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent
+                class="w-full bg-mpg-900 border border-mpg-600 rounded px-3 py-2
+                       text-mpg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent
                        min-h-[12rem] resize-y"
                 spellcheck="false"
                 aria-label="Raw JSON editor">{{ json_data | tojson(indent=2) }}</textarea>
@@ -130,7 +130,7 @@
                 class="btn-primary text-xs px-3 py-1.5">
           Apply Raw JSON to Table
         </button>
-        <p class="text-ppg-300 text-xs">
+        <p class="text-mpg-300 text-xs">
           Edit raw JSON then click Apply to sync back to the table view.
         </p>
       </div>
@@ -180,24 +180,24 @@
     if (empty) empty.remove();
     const tbody = document.getElementById('json-editor-body');
     const tr = document.createElement('tr');
-    tr.className = 'border-t border-ppg-700/60 hover:bg-ppg-700/20 transition-colors json-row';
+    tr.className = 'border-t border-mpg-700/60 hover:bg-mpg-700/20 transition-colors json-row';
     tr.dataset.key = '';
     tr.innerHTML = `
-      <td class="px-2 py-1.5 border-r border-ppg-700/40">
+      <td class="px-2 py-1.5 border-r border-mpg-700/40">
         <input type="text"
-               class="json-key w-full bg-ppg-900 border border-ppg-600 rounded px-2 py-1
-                      text-ppg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent"
+               class="json-key w-full bg-mpg-900 border border-mpg-600 rounded px-2 py-1
+                      text-mpg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent"
                placeholder="key_name" aria-label="Key name">
       </td>
-      <td class="px-2 py-1.5 border-r border-ppg-700/40">
+      <td class="px-2 py-1.5 border-r border-mpg-700/40">
         <input type="text"
-               class="json-value w-full bg-ppg-900 border border-ppg-600 rounded px-2 py-1
-                      text-ppg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent"
+               class="json-value w-full bg-mpg-900 border border-mpg-600 rounded px-2 py-1
+                      text-mpg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent"
                placeholder="value" aria-label="Value" data-type="string">
       </td>
-      <td class="px-2 py-1.5 border-r border-ppg-700/40">
-        <select class="json-type w-full bg-ppg-900 border border-ppg-600 rounded px-1 py-1
-                       text-ppg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent"
+      <td class="px-2 py-1.5 border-r border-mpg-700/40">
+        <select class="json-type w-full bg-mpg-900 border border-mpg-600 rounded px-1 py-1
+                       text-mpg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent"
                 aria-label="Type" onchange="jsonEditorTypeChange(this)">
           <option value="string" selected>string</option>
           <option value="number">number</option>
@@ -334,8 +334,8 @@
     const entries = Object.entries(parsed);
     if (!entries.length) {
       tbody.innerHTML = `<tr id="json-empty-row">
-        <td colspan="4" class="px-4 py-6 text-center text-ppg-300 text-sm">
-          No JSON keys. Click <strong class="text-ppg-100">+ Add Key</strong> to begin.
+        <td colspan="4" class="px-4 py-6 text-center text-mpg-300 text-sm">
+          No JSON keys. Click <strong class="text-mpg-100">+ Add Key</strong> to begin.
         </td></tr>`;
       return;
     }
@@ -344,30 +344,30 @@
       const needsTextarea = type === 'object' || type === 'array';
       const dv = escHtml(displayValue(v, type));
       const tr = document.createElement('tr');
-      tr.className = 'border-t border-ppg-700/60 hover:bg-ppg-700/20 transition-colors json-row';
+      tr.className = 'border-t border-mpg-700/60 hover:bg-mpg-700/20 transition-colors json-row';
       tr.dataset.key = k;
       tr.innerHTML = `
-        <td class="px-2 py-1.5 border-r border-ppg-700/40">
+        <td class="px-2 py-1.5 border-r border-mpg-700/40">
           <input type="text"
-                 class="json-key w-full bg-ppg-900 border border-ppg-600 rounded px-2 py-1
-                        text-ppg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent"
+                 class="json-key w-full bg-mpg-900 border border-mpg-600 rounded px-2 py-1
+                        text-mpg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent"
                  value="${escHtml(k)}" aria-label="Key name">
         </td>
-        <td class="px-2 py-1.5 border-r border-ppg-700/40">
+        <td class="px-2 py-1.5 border-r border-mpg-700/40">
           ${needsTextarea
-            ? `<textarea class="json-value w-full bg-ppg-900 border border-ppg-600 rounded px-2 py-1
-                                text-ppg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent
+            ? `<textarea class="json-value w-full bg-mpg-900 border border-mpg-600 rounded px-2 py-1
+                                text-mpg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent
                                 min-h-[4rem] resize-y"
                           data-type="${type}" aria-label="Value for ${escHtml(k)}">${dv}</textarea>`
             : `<input type="text"
-                      class="json-value w-full bg-ppg-900 border border-ppg-600 rounded px-2 py-1
-                             text-ppg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent"
+                      class="json-value w-full bg-mpg-900 border border-mpg-600 rounded px-2 py-1
+                             text-mpg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent"
                       value="${dv}" data-type="${type}" aria-label="Value for ${escHtml(k)}">`
           }
         </td>
-        <td class="px-2 py-1.5 border-r border-ppg-700/40">
-          <select class="json-type w-full bg-ppg-900 border border-ppg-600 rounded px-1 py-1
-                         text-ppg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent"
+        <td class="px-2 py-1.5 border-r border-mpg-700/40">
+          <select class="json-type w-full bg-mpg-900 border border-mpg-600 rounded px-1 py-1
+                         text-mpg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent"
                   aria-label="Type" onchange="jsonEditorTypeChange(this)">
             ${['string','number','boolean','object','array','null'].map(t =>
               `<option value="${t}"${t === type ? ' selected' : ''}>${t}</option>`

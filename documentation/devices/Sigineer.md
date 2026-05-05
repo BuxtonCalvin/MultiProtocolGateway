@@ -1,27 +1,29 @@
 # Sigineer to MQTT
 
 ## Hardware
+
 1. USB-B or USB-A cable
 2. Connect usb cable.
 
 ## Configuration
-Follow configuration example for ModBus RTU to MQTT
-https://github.com/HotNoob/PythonProtocolGateway/wiki/Configuration-Examples#modbus-rtu-to-mqtt
 
-```
+Follow configuration example for ModBus RTU to MQTT
+https://github.com/BuxtonCalvin/MultiProtocolGateway/wiki/Configuration-Examples#modbus-rtu-to-mqtt
+
+``` ini
 protocol_version = sigineer_v0.11
 ```
-
 
 ## Home Assistant Cards
 
 ### Voltage Card
-![sigineer output](https://github.com/HotNoob/PythonProtocolGateway/assets/2180145/55900744-6aaf-4b44-bf3e-46976fdffce2)
+
+![sigineer output](https://github.com/BuxtonCalvin/MultiProtocolGateway/assets/2180145/55900744-6aaf-4b44-bf3e-46976fdffce2)
 
 <details>
 <summary>code</summary>
 
-```
+``` ini
 type: horizontal-stack
 cards:
   - type: gauge
@@ -43,5 +45,5 @@ cards:
       yellow: 250
       red: 0
 
-```
+``` ini
 </details>

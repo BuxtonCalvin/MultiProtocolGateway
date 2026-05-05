@@ -1,8 +1,7 @@
 """
 database.py — SQLAlchemy engine, session factory, and Alembic upgrade helper.
 
-The staging DB is a local SQLite file: classes/WebServer/ppg_staging.db
-It is completely separate from the TimescaleDB production instance.
+The staging DB is a local SQLite file: config/data-db/mpg_staging.db
 
 Usage
 -----

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Create Device - PPG Admin{% endblock %}
+{% block title %}Create Device - MPG Admin{% endblock %}
 
 {% block content %}
 <div class="max-w-5xl mx-auto px-4 py-6">
@@ -24,7 +24,7 @@
              placeholder="Inverter1"
              class="theme-input w-full border rounded px-3 py-2 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-accent">
       <button id="confirm-name-btn" type="button" class="btn-secondary px-0 text-sm h-9 w-9 create-add-btn">+</button>
-      <div id="device-section-preview" class="font-mono text-sm text-ppg-300"></div>
+      <div id="device-section-preview" class="font-mono text-sm text-mpg-300"></div>
     </div>
 
     <div id="scraper-row" class="grid grid-cols-[12rem_minmax(0,1fr)_2.5rem] gap-3 items-center">
@@ -78,7 +78,7 @@
       </div>
     </div>
 
-    <div class="grid grid-cols-[1.75rem_16rem_minmax(0,1fr)_12rem] gap-2 text-ppg-400 text-xs uppercase tracking-wide px-1 pb-2 border-b border-ppg-700">
+    <div class="grid grid-cols-[1.75rem_16rem_minmax(0,1fr)_12rem] gap-2 text-mpg-400 text-xs uppercase tracking-wide px-1 pb-2 border-b border-mpg-700">
       <span>A</span>
       <span>Key</span>
       <span>Value</span>
@@ -275,7 +275,7 @@ const protoGroups = JSON.parse('{{ proto_groups | tojson | safe }}');
 
   function createSettingRow(key, defaultValue, checked) {
     const row = document.createElement('div');
-    row.className = 'grid grid-cols-[1.75rem_16rem_minmax(0,1fr)_12rem] gap-2 items-center px-1 py-1 rounded text-xs hover:bg-ppg-700/40';
+    row.className = 'grid grid-cols-[1.75rem_16rem_minmax(0,1fr)_12rem] gap-2 items-center px-1 py-1 rounded text-xs hover:bg-mpg-700/40';
     row.dataset.key = key;
 
     const active = document.createElement('input');
@@ -298,7 +298,7 @@ const protoGroups = JSON.parse('{{ proto_groups | tojson | safe }}');
     value.disabled = !checked;
 
     const defaultCell = document.createElement('div');
-    defaultCell.className = 'font-mono text-ppg-400 text-xs truncate';
+    defaultCell.className = 'font-mono text-mpg-400 text-xs truncate';
     defaultCell.title = defaultValue || '-';
     defaultCell.textContent = defaultValue || '-';
 
@@ -344,7 +344,7 @@ const protoGroups = JSON.parse('{{ proto_groups | tojson | safe }}');
     groups.forEach((group, index) => {
       if (index > 0) {
         const divider = document.createElement('div');
-        divider.className = 'border-t border-ppg-700 pt-3';
+        divider.className = 'border-t border-mpg-700 pt-3';
         settingsEditor.appendChild(divider);
       }
 
@@ -352,7 +352,7 @@ const protoGroups = JSON.parse('{{ proto_groups | tojson | safe }}');
       wrapper.className = 'space-y-1.5';
 
       const heading = document.createElement('div');
-      heading.className = 'text-ppg-300 text-xs uppercase tracking-wide';
+      heading.className = 'text-mpg-300 text-xs uppercase tracking-wide';
       heading.textContent = group.label;
       wrapper.appendChild(heading);
 

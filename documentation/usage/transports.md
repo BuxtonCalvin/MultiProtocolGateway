@@ -1,6 +1,6 @@
 # Transports
 
-A **transport** is PPG's fundamental unit of configuration. Every device you read from and every destination you write to is a transport. They are defined as named sections in `config.cfg` and managed through the web UI at `http://localhost:1717`.
+A **transport** is MPG's fundamental unit of configuration. Every device you read from and every destination you write to is a transport. They are defined as named sections in `config.cfg` and managed through the web UI at `http://localhost:1717`.
 
 ## Table of Contents
 
@@ -42,7 +42,7 @@ The section name serves as the transport's identity throughout the system. It is
 
 ## Scrapers and Bridges
 
-PPG separates transports into two roles:
+MPG separates transports into two roles:
 
 **Scrapers** read data from hardware. They actively poll a device on a schedule, parse the register values using a protocol map, and push the data downstream. Examples: `modbus_rtu`, `modbus_tcp`, `canbus`.
 
@@ -71,9 +71,9 @@ These settings apply to every transport, scraper and bridge alike.
 | --- | --- | --- |
 | `transport` | *(inferred from section)* | Transport class to load. Required when the type cannot be inferred from the section name. E.g. `transport = mqtt` |
 | `device_name` | `{manufacturer}_{serial_number}` | Unique friendly name for the device. Used as an identifier in MQTT topics, DB rows, and the web UI. |
-| `device_manufacturer` | `PPG` | Device manufacturer. Passed through to MQTT discovery and DB metadata. |
-| `device_model` | `PPG` | Device model number. |
-| `device_serial_number` | *(empty)* | Serial number. If left blank, PPG will attempt to auto-fetch it from the device if the protocol supports it. |
+| `device_manufacturer` | `MPG` | Device manufacturer. Passed through to MQTT discovery and DB metadata. |
+| `device_model` | `MPG` | Device model number. |
+| `device_serial_number` | *(empty)* | Serial number. If left blank, MPG will attempt to auto-fetch it from the device if the protocol supports it. |
 | `device_location` | *(empty)* | Freeform location label. Passed through to all outputs as metadata. |
 | `protocol_version` | *(required for Modbus/CAN)* | Protocol map to load from the `protocols/` directory. E.g. `protocol_version = growatt_v0.14`. Not required for bridge transports. |
 | `bridge` | *(empty)* | Section name(s) of bridge transport(s) to forward data to. Comma-separated for multiple. |
@@ -86,11 +86,11 @@ These settings apply to every transport, scraper and bridge alike.
 
 ## Write Safety System
 
-Writing to Modbus holding registers on a live inverter or BMS carries real risk. A wrong value can change a charge setpoint, disable a protection threshold, or cause equipment damage. PPG implements a layered write safety system.
+Writing to Modbus holding registers on a live inverter or BMS carries real risk. A wrong value can change a charge setpoint, disable a protection threshold, or cause equipment damage. MPG implements a layered write safety system.
 
 ### How Write Validation Works
 
-Before enabling writes, PPG scores the loaded protocol map against the device's live register values. It reads the holding registers and checks how many documented values fall within the ranges specified in the protocol CSV. A score below 90% means the protocol map cannot be trusted for this device and writes are refused.
+Before enabling writes, MPG scores the loaded protocol map against the device's live register values. It reads the holding registers and checks how many documented values fall within the ranges specified in the protocol CSV. A score below 90% means the protocol map cannot be trusted for this device and writes are refused.
 
 This validation runs automatically when `write_enabled = true` and a Modbus transport connects.
 
@@ -107,7 +107,7 @@ The `write_enabled` setting accepts several values with escalating levels of tru
 
 ### How Writes Are Triggered
 
-PPG uses a deliberate inversion to make writeback safe and auditable. The MQTT bridge **subscribes** to write topics — it does not publish them. When a value arrives on a write topic, the MQTT bridge calls `write_data()` on its linked Modbus scraper, which executes the actual register write.
+MPG uses a deliberate inversion to make writeback safe and auditable. The MQTT bridge **subscribes** to write topics — it does not publish them. When a value arrives on a write topic, the MQTT bridge calls `write_data()` on its linked Modbus scraper, which executes the actual register write.
 
 Write topics follow this pattern:
 
@@ -172,13 +172,13 @@ device_model = SPF 12000T
 
 #### Hardware ID Port Addressing
 
-Serial port numbers (`/dev/ttyUSB0`, `COM3`) can change across reboots, especially when multiple USB devices are connected. PPG supports stable hardware-ID addressing that survives reboots:
+Serial port numbers (`/dev/ttyUSB0`, `COM3`) can change across reboots, especially when multiple USB devices are connected. MPG supports stable hardware-ID addressing that survives reboots:
 
 ```ini
 port = [0x1a86:0x7523::1-4]
 ```
 
-The format is `[vendor_id:product_id:serial_number:location]`. Omit fields you don't need. PPG prints the hardware IDs of all detected serial ports at startup — look for lines like:
+The format is `[vendor_id:product_id:serial_number:location]`. Omit fields you don't need. MPG prints the hardware IDs of all detected serial ports at startup — look for lines like:
 
 ``` ini
 Serial Port : /dev/ttyUSB0 = [0x1a86:0x7523::1-4]
@@ -210,7 +210,7 @@ device_serial_number = 4066670074
 | `timeout` | `7` | Connection timeout in seconds. |
 | `retries` | `3` | Reconnect attempts on connection failure. |
 
-PPG caches and reuses the TCP client across multiple transports pointed at the same `host:port`. This means two transport sections connecting to the same device share a single underlying connection automatically.
+MPG caches and reuses the TCP client across multiple transports pointed at the same `host:port`. This means two transport sections connecting to the same device share a single underlying connection automatically.
 
 ---
 
@@ -268,7 +268,7 @@ bridge = transport.mqtt
 
 ### CAN Bus
 
-Reads a device connected via CAN bus. CAN bus is a passive broadcast protocol — PPG listens to the bus and caches all messages, then processes them against the protocol map at the configured read interval.
+Reads a device connected via CAN bus. CAN bus is a passive broadcast protocol — MPG listens to the bus and caches all messages, then processes them against the protocol map at the configured read interval.
 
 ```ini
 [transport.bms]
@@ -290,7 +290,7 @@ bridge = transport.mqtt
 
 #### CAN Bus Adapter Setup
 
-The primary adapter used to develop and test PPG is the [FYSETC UCAN](https://www.fysetc.com/products/fysetc-ucan-board), a CANable v1.0-compatible USB adapter. These are widely available. Most ship with candlelight firmware (socketcan) by default. slcan firmware is also available at [canable.io](https://canable.io/updater/canable1.html).
+The primary adapter used to develop and test MPG is the [FYSETC UCAN](https://www.fysetc.com/products/fysetc-ucan-board), a CANable v1.0-compatible USB adapter. These are widely available. Most ship with candlelight firmware (socketcan) by default. slcan firmware is also available at [canable.io](https://canable.io/updater/canable1.html).
 
 **Candlelight / socketcan** adapters appear as a `gs_usb` device. The CAN interface appears as a network interface — check with `ip link show` and bring it up with:
 
@@ -316,7 +316,7 @@ Publishes register values to an MQTT broker. Supports Home Assistant auto-discov
 transport = mqtt
 host = 192.168.1.10
 port = 1883
-username = ppg
+username = mpg
 password = your_password
 base_topic = home/inverter
 discovery_enabled = true
@@ -374,7 +374,7 @@ transport = timescaledb
 host = localhost
 port = 5432
 database = solar
-username = ppg
+username = mpg
 password = your_password
 ```
 
@@ -395,7 +395,7 @@ password = your_password
 
 #### Schema Management
 
-TimescaleDB manages its own schema. On first connection PPG will:
+TimescaleDB manages its own schema. On first connection MPG will:
 
 1. Create the target database if it does not exist
 2. Create a `device_info` table tracking all connected scrapers
@@ -419,7 +419,7 @@ New registers added to the protocol map are automatically added as new columns o
 
 #### Persistent Backlog
 
-If the database is unavailable, PPG buffers data points to disk and replays them when connectivity is restored.
+If the database is unavailable, MPG buffers data points to disk and replays them when connectivity is restored.
 
 | Setting | Default | Description |
 | --- | --- | --- |
@@ -460,7 +460,7 @@ transport = influxdb_out
 host = localhost
 port = 8086
 database = solar
-username = ppg
+username = mpg
 password = your_password
 measurement = device_data
 ```
@@ -592,7 +592,7 @@ device_location = Home
 transport = mqtt
 host = 192.168.1.10
 port = 1883
-username = ppg
+username = mpg
 password = your_password
 base_topic = home/inverter
 discovery_enabled = true
@@ -632,7 +632,7 @@ transport = timescaledb
 host = localhost
 port = 5432
 database = solar
-username = ppg
+username = mpg
 password = your_password
 force_float = true
 enable_persistent_storage = true
@@ -663,7 +663,7 @@ device_model = MAX Series
 transport = mqtt
 host = 192.168.1.10
 port = 1883
-username = ppg
+username = mpg
 password = your_password
 base_topic = home/inverter
 discovery_enabled = true
@@ -673,7 +673,7 @@ transport = influxdb_out
 host = localhost
 port = 8086
 database = solar
-username = ppg
+username = mpg
 password = your_password
 measurement = inverter_metrics
 batch_size = 50
@@ -702,7 +702,7 @@ device_model = US2000
 transport = mqtt
 host = 192.168.1.10
 port = 1883
-username = ppg
+username = mpg
 password = your_password
 base_topic = home/bms
 discovery_enabled = true

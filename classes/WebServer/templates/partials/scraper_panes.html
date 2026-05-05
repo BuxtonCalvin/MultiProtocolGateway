@@ -19,11 +19,11 @@
 <div class="col-span-12 flex gap-4" style="height: calc(100vh - 56px); overflow: hidden;">
 
   <aside class="flex-shrink-0 overflow-y-auto
-                bg-ppg-800 rounded border border-ppg-700 p-3"
+                bg-mpg-800 rounded border border-mpg-700 p-3"
          style="width: 28%; min-width: 268px; max-width: 368px;">
 
     <div class="flex items-center justify-between mb-1">
-      <h2 class="text-ppg-200 text-xs font-semibold uppercase tracking-widest">
+      <h2 class="text-mpg-200 text-xs font-semibold uppercase tracking-widest">
         Settings
       </h2>
       {% if analyze_enabled %}
@@ -43,11 +43,11 @@
     </div>
 
     <div class="flex items-center gap-2 mb-3">
-      <h3 class="text-ppg-100 font-semibold text-sm">{{ device.name }}</h3>
+      <h3 class="text-mpg-100 font-semibold text-sm">{{ device.name }}</h3>
       <span class="badge badge-scraper text-xs">scraper</span>
     </div>
 
-    <p class="text-ppg-300 text-xs mb-4">
+    <p class="text-mpg-300 text-xs mb-4">
       {{ device.transport_class }} &middot; {{ device.host }}:{{ device.port }}
     </p>
 
@@ -55,8 +55,8 @@
       <div>
         <p class="label mb-1">Transport</p>
         {% if ns.transport_setting %}
-        <select class="w-full bg-ppg-900 border border-ppg-600 rounded px-2 py-1
-                       text-ppg-100 font-mono text-xs
+        <select class="w-full bg-mpg-900 border border-mpg-600 rounded px-2 py-1
+                       text-mpg-100 font-mono text-xs
                        focus:outline-none focus:ring-1 focus:ring-accent"
                 aria-label="Transport class for {{ device.name }}"
                 hx-post="/api/devices/{{ device.name }}/reconcile-settings"
@@ -79,8 +79,8 @@
       <div>
         <p class="label mb-1">Bridge</p>
         {% if ns.bridge_setting %}
-        <select class="w-full bg-ppg-900 border border-ppg-600 rounded px-2 py-1
-                      text-ppg-100 font-mono text-xs
+        <select class="w-full bg-mpg-900 border border-mpg-600 rounded px-2 py-1
+                      text-mpg-100 font-mono text-xs
                       focus:outline-none focus:ring-1 focus:ring-accent"
                 aria-label="Bridge selection for {{ device.name }}"
                 hx-post="/api/devices/{{ device.name }}/reconcile-settings"
@@ -106,8 +106,8 @@
       <div>
         <p class="label mb-1">Protocol Version</p>
         {% if ns.protocol_setting %}
-        <select class="w-full bg-ppg-900 border border-ppg-600 rounded px-2 py-1
-                      text-ppg-100 font-mono text-xs
+        <select class="w-full bg-mpg-900 border border-mpg-600 rounded px-2 py-1
+                      text-mpg-100 font-mono text-xs
                       focus:outline-none focus:ring-1 focus:ring-accent"
                 aria-label="Protocol version for {{ device.name }}"
                 hx-post="/api/devices/{{ device.name }}/refresh-protocol-tabs"
@@ -146,8 +146,8 @@
       <div>
         <p class="label mb-1">Log Level</p>
         {% if ns.loglevel_setting %}
-        <select class="w-full bg-ppg-900 border border-ppg-600 rounded px-2 py-1
-                       text-ppg-100 font-mono text-xs
+        <select class="w-full bg-mpg-900 border border-mpg-600 rounded px-2 py-1
+                       text-mpg-100 font-mono text-xs
                        focus:outline-none focus:ring-1 focus:ring-accent"
                 aria-label="Log level for {{ device.name }}"
                 hx-patch="/api/devices/{{ device.name }}/settings/{{ ns.loglevel_setting.id }}"
@@ -167,8 +167,8 @@
     </div>
 
     <div class="space-y-0.5" id="settings-rows" role="table" aria-label="Device settings for {{ device.name }}">
-      <div class="grid grid-cols-[1.5rem_1fr_7rem] gap-1 text-ppg-300 text-xs
-                  uppercase tracking-wide px-1 pb-1 border-b border-ppg-700"
+      <div class="grid grid-cols-[1.5rem_1fr_7rem] gap-1 text-mpg-300 text-xs
+                  uppercase tracking-wide px-1 pb-1 border-b border-mpg-700"
            role="row">
         <span role="columnheader" aria-label="Active">A</span>
         <span role="columnheader">Key</span>
@@ -182,7 +182,7 @@
                   {% if s.is_dirty %}bg-dirty/10 border-l-2 border-dirty{% endif %}
                   {% if s.is_orphan %}bg-red-900/20 opacity-60{% endif %}
                   {% if not s.is_active %}opacity-40{% endif %}
-                  hover:bg-ppg-700/50 group"
+                  hover:bg-mpg-700/50 group"
            role="row"
            aria-label="{{ s.key }}">
 
@@ -199,7 +199,7 @@
         </div>
 
         <div role="cell"
-             class="font-mono text-ppg-200 truncate"
+             class="font-mono text-mpg-200 truncate"
              title="{{ s.key }}{% if s.default_value %} (default: {{ s.default_value }}){% endif %}">
           {{ s.key }}
           {% if s.is_orphan %}
@@ -212,8 +212,8 @@
 
         <div role="cell">
           <input type="text"
-                 class="w-full bg-ppg-900 border border-ppg-600 rounded px-1 py-0.5
-                        text-ppg-100 font-mono text-xs
+                 class="w-full bg-mpg-900 border border-mpg-600 rounded px-1 py-0.5
+                        text-mpg-100 font-mono text-xs
                         focus:outline-none focus:ring-1 focus:ring-accent
                         disabled:opacity-40 disabled:cursor-not-allowed"
                  {% if not s.is_active %}disabled{% endif %}
@@ -246,7 +246,7 @@
     </div>
 
     {% if proto_tabs %}
-    <div class="flex gap-1 mb-3 border-b border-ppg-700" role="tablist">
+    <div class="flex gap-1 mb-3 border-b border-mpg-700" role="tablist">
       {% for tab in proto_tabs %}
       <button class="tab-btn px-4 py-1.5 text-xs font-medium rounded-t
                      {% if loop.first %}tab-active{% else %}tab-inactive{% endif %}"
@@ -260,9 +260,9 @@
               hx-headers='{"Cache-Control": "no-cache"}'
               {% if loop.first %}hx-trigger="load, click"{% else %}hx-trigger="click"{% endif %}>
         {{ tab.registry_type | title }}
-        <span class="text-ppg-100 ml-1">({{ tab.protocol_name }})</span>
+        <span class="text-mpg-100 ml-1">({{ tab.protocol_name }})</span>
         {% if tab.registry_type != "json" %}
-        <span class="tab-counts ml-1.5 text-ppg-400 text-xs">
+        <span class="tab-counts ml-1.5 text-mpg-400 text-xs">
           W:{{ tab.write_count }} M:{{ tab.mask_count }} S:{{ tab.screen_count }}
         </span>
         {% endif %}
@@ -272,8 +272,8 @@
     {% endif %}
 
     <div id="protocol-table-container"
-         class="overflow-x-auto rounded border border-ppg-700">
-      <p class="text-ppg-300 text-xs p-4">Select a tab to load protocol registers.</p>
+         class="overflow-x-auto rounded border border-mpg-700">
+      <p class="text-mpg-300 text-xs p-4">Select a tab to load protocol registers.</p>
     </div>
 
   </section>

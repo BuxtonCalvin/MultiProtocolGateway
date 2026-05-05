@@ -19,7 +19,7 @@
   </div>
 
   {% if proto_tabs %}
-  <div class="flex gap-1 mb-3 border-b border-ppg-700" role="tablist">
+  <div class="flex gap-1 mb-3 border-b border-mpg-700" role="tablist">
     {% for tab in proto_tabs %}
     <button class="tab-btn px-4 py-1.5 text-xs font-medium rounded-t
                    {% if loop.first %}tab-active{% else %}tab-inactive{% endif %}"
@@ -33,9 +33,9 @@
             hx-headers='{"Cache-Control": "no-cache"}'
             {% if loop.first %}hx-trigger="load, click"{% else %}hx-trigger="click"{% endif %}>
       {{ tab.registry_type | title }}
-      <span class="text-ppg-100 ml-1">({{ tab.protocol_name }})</span>
+      <span class="text-mpg-100 ml-1">({{ tab.protocol_name }})</span>
       {% if tab.registry_type != "json" %}
-      <span class="tab-counts ml-1.5 text-ppg-400 text-xs">
+      <span class="tab-counts ml-1.5 text-mpg-400 text-xs">
         W:{{ tab.write_count }} M:{{ tab.mask_count }} S:{{ tab.screen_count }}
       </span>
       {% endif %}
@@ -45,8 +45,8 @@
   {% endif %}
 
   <div id="protocol-table-container"
-       class="overflow-x-auto rounded border border-ppg-700">
-    <p class="text-ppg-300 text-xs p-4">Select a tab to load protocol registers.</p>
+       class="overflow-x-auto rounded border border-mpg-700">
+    <p class="text-mpg-300 text-xs p-4">Select a tab to load protocol registers.</p>
   </div>
 
 </section>

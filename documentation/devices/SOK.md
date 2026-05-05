@@ -12,7 +12,7 @@ This protocol is only able to read the battery that is directly connected to it;
 
 SOK, jakiper 48v100AH battery and other PACE BMS batteries.
 
-![pace-bms](https://github.com/HotNoob/InverterModBusToMQTT/assets/2180145/1ea28956-5d74-4bdb-9732-341d492d15c3)
+![pace-bms](https://github.com/BuxtonCalvin/InverterModBusToMQTT/assets/2180145/1ea28956-5d74-4bdb-9732-341d492d15c3)
 
 ### rs485a pinout ### 
 Pin 1,2,3 or Pin 8,7,6

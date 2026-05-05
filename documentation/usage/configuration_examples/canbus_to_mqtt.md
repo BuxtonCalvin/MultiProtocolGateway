@@ -1,8 +1,10 @@
-![ppg canbus diagram drawio](https://github.com/user-attachments/assets/17d1ea02-2414-4289-b295-cd5099679cba)
+#
 
+![mpg canbus diagram drawio](https://github.com/user-attachments/assets/17d1ea02-2414-4289-b295-cd5099679cba)
 
-### CanBus to MQTT
-```
+## CanBus to MQTT
+
+``` ini
 [general]
 log_level = DEBUG
 
@@ -41,4 +43,3 @@ json = false
 discovery_enabled = true
 discovery_topic = homeassistant
 ```
-

@@ -130,7 +130,7 @@ class _PaceResponse:
 
 class pace(modbus_base):
     """
-    PACE BMS transport bridge for PPG.
+    PACE BMS transport bridge for MPG.
 
     Communicates with PACE BMS devices over RS-232/RS-485 serial using
     the PACE proprietary binary protocol. Since pymodbus 3.x dropped the
@@ -176,6 +176,9 @@ class pace(modbus_base):
                 timeout=self.serial_timeout
             )
             self.connected = self._serial.is_open
+            self._serial.reset_input_buffer()
+            self._serial.reset_output_buffer()
+
             if self.connected:
                 self._log.info(f"PACE BMS connected on {self.port} @ {self.baudrate} baud")
                 super().connect()
@@ -322,7 +325,7 @@ class pace(modbus_base):
                 expected_size: int = 5 + (count * 2)
                 response: bytes = self._serial.read(expected_size)
 
-                if len(response) < expected_size:
+                if len(response) != expected_size:
                     self._log.warning(
                         f"PACE BMS short response: got {len(response)} bytes, "
                         f"expected {expected_size} for {count} registers "

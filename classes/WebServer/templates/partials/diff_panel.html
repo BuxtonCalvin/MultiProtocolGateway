@@ -14,14 +14,14 @@
 
   <!-- Panel -->
   <div class="relative w-full max-w-5xl max-h-[80vh] overflow-y-auto
-              bg-ppg-800 border border-ppg-600 rounded-lg shadow-2xl">
+              bg-mpg-800 border border-mpg-600 rounded-lg shadow-2xl">
 
     <!-- Header -->
     <div class="flex items-center justify-between px-5 py-3
-                border-b border-ppg-700 sticky top-0 bg-ppg-800 z-10">
+                border-b border-mpg-700 sticky top-0 bg-mpg-800 z-10">
       <div>
-        <h2 id="diff-title" class="text-ppg-100 font-semibold">Pending Changes</h2>
-        <p class="text-ppg-400 text-xs mt-0.5">
+        <h2 id="diff-title" class="text-mpg-100 font-semibold">Pending Changes</h2>
+        <p class="text-mpg-400 text-xs mt-0.5">
           {{ diff.summary.total_changes }} total change{{ 's' if diff.summary.total_changes != 1 else '' }}
           &mdash;
           {{ diff.summary.settings_modified }} settings,
@@ -30,7 +30,7 @@
         </p>
       </div>
       <button onclick="this.closest('[role=dialog]').remove()"
-              class="text-ppg-400 hover:text-ppg-100 p-1.5 rounded
+              class="text-mpg-400 hover:text-mpg-100 p-1.5 rounded
                      focus:outline-none focus:ring-2 focus:ring-accent"
               aria-label="Close diff panel">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
@@ -44,13 +44,13 @@
       <!-- Settings diff -->
       {% if diff.settings %}
       <section>
-        <h3 class="text-ppg-300 text-xs font-semibold uppercase tracking-widest mb-2">
+        <h3 class="text-mpg-300 text-xs font-semibold uppercase tracking-widest mb-2">
           Settings ({{ diff.settings | length }})
         </h3>
-        <div class="overflow-x-auto rounded border border-ppg-700">
+        <div class="overflow-x-auto rounded border border-mpg-700">
           <table class="w-full text-xs" role="table" aria-label="Settings diff">
             <thead>
-              <tr class="bg-ppg-900 text-ppg-400 text-left uppercase tracking-wide" role="row">
+              <tr class="bg-mpg-900 text-mpg-400 text-left uppercase tracking-wide" role="row">
                 <th class="px-3 py-2 w-8" scope="col">Type</th>
                 <th class="px-3 py-2" scope="col">Section</th>
                 <th class="px-3 py-2" scope="col">Key</th>
@@ -60,7 +60,7 @@
             </thead>
             <tbody>
               {% for d in diff.settings %}
-              <tr class="border-t border-ppg-700/50
+              <tr class="border-t border-mpg-700/50
                          {% if d.change_type == 'modified' %}bg-warning/5
                          {% elif d.change_type == 'added' %}bg-success/5
                          {% elif d.change_type == 'removed' %}bg-danger/5
@@ -78,8 +78,8 @@
                   <span class="badge badge-danger text-xs">⚑</span>
                   {% endif %}
                 </td>
-                <td class="px-3 py-1.5 font-mono text-ppg-400">{{ d.section }}</td>
-                <td class="px-3 py-1.5 font-mono text-ppg-200">{{ d.key }}</td>
+                <td class="px-3 py-1.5 font-mono text-mpg-400">{{ d.section }}</td>
+                <td class="px-3 py-1.5 font-mono text-mpg-200">{{ d.key }}</td>
                 <td class="px-3 py-1.5 font-mono text-danger/80 line-through">{{ d.old_value or '' }}</td>
                 <td class="px-3 py-1.5 font-mono text-success/90">{{ d.new_value or '' }}</td>
               </tr>
@@ -93,13 +93,13 @@
       <!-- Protocol diff -->
       {% if diff.protocols %}
       <section>
-        <h3 class="text-ppg-300 text-xs font-semibold uppercase tracking-widest mb-2">
+        <h3 class="text-mpg-300 text-xs font-semibold uppercase tracking-widest mb-2">
           Protocol Toggles ({{ diff.protocols | length }})
         </h3>
-        <div class="overflow-x-auto rounded border border-ppg-700">
+        <div class="overflow-x-auto rounded border border-mpg-700">
           <table class="w-full text-xs" role="table" aria-label="Protocol toggles diff">
             <thead>
-              <tr class="bg-ppg-900 text-ppg-400 text-left uppercase tracking-wide" role="row">
+              <tr class="bg-mpg-900 text-mpg-400 text-left uppercase tracking-wide" role="row">
                 <th class="px-3 py-2" scope="col">Protocol</th>
                 <th class="px-3 py-2" scope="col">Type</th>
                 <th class="px-3 py-2 w-16" scope="col">Addr</th>
@@ -110,15 +110,15 @@
             </thead>
             <tbody>
               {% for d in diff.protocols %}
-              <tr class="border-t border-ppg-700/50 bg-warning/5" role="row">
-                <td class="px-3 py-1.5 font-mono text-ppg-400 text-xs">{{ d.protocol_name }}</td>
-                <td class="px-3 py-1.5 text-ppg-300">{{ d.registry_type }}</td>
-                <td class="px-3 py-1.5 font-mono text-ppg-400">{{ d.register_address }}</td>
-                <td class="px-3 py-1.5 font-mono text-ppg-200">{{ d.variable_name }}</td>
-                <td class="px-3 py-1.5 text-ppg-400">{{ d.field }}</td>
+              <tr class="border-t border-mpg-700/50 bg-warning/5" role="row">
+                <td class="px-3 py-1.5 font-mono text-mpg-400 text-xs">{{ d.protocol_name }}</td>
+                <td class="px-3 py-1.5 text-mpg-300">{{ d.registry_type }}</td>
+                <td class="px-3 py-1.5 font-mono text-mpg-400">{{ d.register_address }}</td>
+                <td class="px-3 py-1.5 font-mono text-mpg-200">{{ d.variable_name }}</td>
+                <td class="px-3 py-1.5 text-mpg-400">{{ d.field }}</td>
                 <td class="px-3 py-1.5">
                   <span class="text-danger">{{ d.old_value }}</span>
-                  <span class="text-ppg-500 mx-1">→</span>
+                  <span class="text-mpg-500 mx-1">→</span>
                   <span class="text-success">{{ d.new_value }}</span>
                 </td>
               </tr>
@@ -130,7 +130,7 @@
       {% endif %}
 
       {% if not diff.has_changes %}
-      <p class="text-ppg-400 text-sm text-center py-8">
+      <p class="text-mpg-400 text-sm text-center py-8">
         No pending changes — staged state matches disk.
       </p>
       {% endif %}
@@ -138,8 +138,8 @@
     </div><!-- /body -->
 
     <!-- Footer actions -->
-    <div class="flex justify-end gap-3 px-5 py-3 border-t border-ppg-700
-                sticky bottom-0 bg-ppg-800">
+    <div class="flex justify-end gap-3 px-5 py-3 border-t border-mpg-700
+                sticky bottom-0 bg-mpg-800">
       <button onclick="this.closest('[role=dialog]').remove()"
               class="btn-secondary text-sm">
         Close

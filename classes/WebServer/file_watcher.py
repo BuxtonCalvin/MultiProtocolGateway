@@ -15,10 +15,10 @@ from pathlib import Path
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
-log: logging.Logger = logging.getLogger(__name__)
+_log: logging.Logger = logging.getLogger(__name__)
 
 
-class _PPGEventHandler:
+class _MPGEventHandler:
     """Handles file system events from watchdog."""
 
     def __init__(self, scanner, debounce_seconds: float = 2.0) -> None:
@@ -34,15 +34,16 @@ class _PPGEventHandler:
                 self._pending.cancel()
             self._pending = threading.Timer(self._debounce, self._do_scan, args=(path,))
             self._pending.daemon = True
-            self._pending.name = "PPGFileScanDebounce"
+            self._pending.name = "MPGFileScanDebounce"
             self._pending.start()
 
     def _do_scan(self, path: str) -> None:
-        log.info(f"File change detected: {path} — triggering re-scan")  # noqa: G004
+        _log.info(f"File change detected: {path} — triggering re-scan")
         try:
             self._scanner.run()
         except Exception as exc:
-            log.error(f"Re-scan after file change failed: {exc}")  # noqa: G004, TRY400
+            msg = f"Re-scan after file change failed: {exc}"
+            _log.error(msg)
 
     # watchdog interface
     def on_modified(self, event) -> None:
@@ -75,31 +76,32 @@ class FileWatcher:
 
             self._available = True
         except ImportError:
-            log.warning("watchdog not installed — file watching disabled. Install with: pip install watchdog")
+            _log.warning("watchdog not installed — file watching disabled. Install with: pip install watchdog")
 
     def start(self) -> None:
         if not self._available:
             return
 
-        handler_obj = _PPGEventHandler(self._scanner)
+        handler_obj = _MPGEventHandler(self._scanner)
 
         # Shim watchdog's ABC onto our handler
         class _WatchdogShim(FileSystemEventHandler):
-            def __init__(self, inner):
+            def __init__(self, inner) -> None:
                 self._inner = inner
-            def on_modified(self, event):
+            def on_modified(self, event) -> None:
                 self._inner.on_modified(event)
-            def on_created(self, event):
+            def on_created(self, event) -> None:
                 self._inner.on_created(event)
-            def on_deleted(self, event):
+            def on_deleted(self, event) -> None:
                 self._inner.on_deleted(event)
 
         shim = _WatchdogShim(handler_obj)
         self._observer = Observer()
         try:
-            self._observer.name = "PPGFileWatcher"
-        except Exception:
-            pass
+            self._observer.name = "MPGFileWatcher"
+        except Exception as exc:
+            msg: str = f"Failed to set observer name: {exc}"
+            _log.warning(msg)
 
         # Watch config file's parent directory, filter in handler
         self._observer.schedule(shim, str(self._config_path.parent), recursive=False)
@@ -111,13 +113,14 @@ class FileWatcher:
         self._observer.start()
         try:
             for idx, emitter in enumerate(getattr(self._observer, "emitters", [])):
-                emitter.name = f"PPGFileEmitter_{idx}"
-        except Exception:
-            pass
-        log.info(f"File watcher started: watching {self._config_path.parent} and {self._protocols_dir}")  # noqa: G004
+                emitter.name = f"MPGFileEmitter_{idx}"
+        except Exception as exc:
+            msg: str = f"Failed to set emitter names: {exc}"
+            _log.warning(msg)
+        _log.info(f"File watcher started: watching {self._config_path.parent} and {self._protocols_dir}")
 
     def stop(self) -> None:
         if self._observer and self._observer.is_alive():
             self._observer.stop()
             self._observer.join(timeout=5)
-            log.info("File watcher stopped.")
+            _log.info("File watcher stopped.")

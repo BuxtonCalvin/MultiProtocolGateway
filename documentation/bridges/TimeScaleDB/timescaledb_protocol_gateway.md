@@ -1,10 +1,10 @@
-# TimescaleDB Module for Python Protocol Gateway
+# TimescaleDB Module for Multi Protocol Gateway
 
 ---
 
 ## Overview
 
-The TimescaleDB module is a **transform / sink transport** for the Python Protocol Gateway.  
+The TimescaleDB module is a **transform / sink transport** for the Multi Protocol Gateway.  
 Its primary responsibility is to:
 
 - Receive telemetry data from an upstream scraper transport (e.g. Modbus TCP connected inverter)
@@ -87,7 +87,7 @@ One row per metric per timestamp.
 - Flexible schema
 - Efficient aggregation
 
-### 4.2 Wide Table (If Less than 200 metrics chosen via the PPG variable filters)
+### 4.2 Wide Table (If Less than 200 metrics chosen via the MPG variable filters)
 
 One row per timestamp with multiple metric columns.
 
@@ -126,7 +126,7 @@ One row per timestamp with multiple metric columns.
 | Column | Description |
 | ------ | ------------- |
 | id | Metric Unique ID |
-| metric_name | Metric Name as shown in the PPG Registry |
+| metric_name | Metric Name as shown in the MPG Registry |
 | clean_column_name | Metric Name sanitized for SQL |
 | data_type | Metric Data Type (default Double Precision) |
 | created_at | Table Add Date |
@@ -188,7 +188,7 @@ ORDER BY m_time ASC, device_info_id ASC
 ### 6.1 Images Used in the stack
 
 - **TimescaleDB HA:** `timescaledb-ha:pg18`  The Timescale DB Application
-- **Protocol Gateway:** `buxtoncalvin/pythonprotocolgateway:latest` The PPG application/inverter scraper
+- **Protocol Gateway:** `buxtoncalvin/multiprotocolgateway:latest` The MPG application/inverter scraper
 - **Grafana:** `grafana/grafana:latest`   The graphing application
 - **PostGres Admin:** `dpage/pgadmin4:latest` The database administration application
 
@@ -198,6 +198,34 @@ ORDER BY m_time ASC, device_info_id ASC
 version: "3.9"
 
 services:
+
+  18kPV_timescaledb:
+    container_name: 18kPV_timescaledb
+    image: buxtoncalvin/mpg:latest
+    restart: always
+    security_opt:
+    - apparmor:unconfined
+    environment:
+    - TZ=America/Los_Angeles
+    volumes:
+    - /home/multiprotocolgateway4/config:/app/config
+    - /home/multiprotocolgateway4/protocols/eg4:/app/protocols/eg4
+    - /home/multiprotocolgateway4/timescaledb_backlog:/app/timescaledb_backlog
+    - /home/multiprotocolgateway4/logs:/app/logs
+
+    ports:
+    - "1717:1717"
+    expose:
+    - "1717"   
+    depends_on:
+    - timescaledb
+    logging:
+    driver: "json-file"
+    options:
+      max-size: "10m" 
+      max-file: "3
+
+
   timescaledb:
     image: timescale/timescaledb-ha:pg18
     environment:
@@ -214,21 +242,21 @@ services:
    # current data path in timescale.
    - /home/timescaledb:/home/postgres/pgdata
   
-  # name your containers to whatever you want.  The TimescaleDB module sits on top of PPG
+  # name your containers to whatever you want.  The TimescaleDB module sits on top of MPG
   # This example is for the EG4 18kpv (/app/protocols/eg4), but you can use any volume mappings for your particular inverter.
   18kPV_timescaledb:
     container_name: 18kPV_timescaledb
-    image: buxtoncalvin/pythonprotocolgateway:latest
+    image: buxtoncalvin/multiprotocolgateway:latest
     restart: always
     security_opt:
       - apparmor:unconfined
     environment:
       - TZ=America/Los_Angeles
     volumes:
-      - /home/pythonprotocolgateway/config:/app/config
-      - /home/pythonprotocolgateway/protocols/eg4:/app/protocols/eg4
-      - /home/pythonprotocolgateway/timescaledb_backlog:/app/timescaledb_backlog
-      - /home/pythonprotocolgateway/logs:/app/logs
+      - /home/multiprotocolgateway/config:/app/config
+      - /home/multiprotocolgateway/protocols/eg4:/app/protocols/eg4
+      - /home/multiprotocolgateway/timescaledb_backlog:/app/timescaledb_backlog
+      - /home/multiprotocolgateway/logs:/app/logs
     logging:
     driver: "json-file"
     options:
@@ -299,7 +327,7 @@ services:
 
 ```
 
-### 6.4 PPG Configuration File Simple General (config.cfg)
+### 6.4 MPG Configuration File Simple General (config.cfg)
 
 ```ini
 [general]
@@ -393,7 +421,7 @@ stale_data_timeout = 300
 enable_pushover = True
 pushover_token = your_token_here
 pushover_user = your_user_key_here
-# tells PPG to wait until all metrics have been read to write data to timescaledb
+# tells MPG to wait until all metrics have been read to write data to timescaledb
 write_requires_complete_cycle = True
 ```
 
@@ -401,7 +429,7 @@ write_requires_complete_cycle = True
 
 ## Summary
 
-The TimescaleDB module provides a production-grade ingestion and monitoring layer that integrates cleanly with the Python Protocol Gateway. It is designed to be predictable, observable, and resilient — pairing naturally with inverter telemetry, industrial sensors, and edge data collection workloads.
+The TimescaleDB module provides a production-grade ingestion and monitoring layer that integrates cleanly with the Multi Protocol Gateway. It is designed to be predictable, observable, and resilient — pairing naturally with inverter telemetry, industrial sensors, and edge data collection workloads.
 
 The TimescaleDB module provides:
 

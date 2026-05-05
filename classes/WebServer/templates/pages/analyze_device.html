@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Analyze {{ device.name }} - PPG Admin{% endblock %}
+{% block title %}Analyze {{ device.name }} - MPG Admin{% endblock %}
 
 {% block content %}
 <div class="max-w-7xl mx-auto px-4 py-6"
@@ -17,7 +17,7 @@
         Batch size
         <input id="analysis-batch-size"
                type="number" min="1" max="125" value="40"
-               class="w-16 rounded border border-ppg-300 dark:border-ppg-600 bg-ppg-100/70 dark:bg-ppg-800 surface-text text-xs font-mono px-2 py-1 text-center
+               class="w-16 rounded border border-mpg-300 dark:border-mpg-600 bg-mpg-100/70 dark:bg-mpg-800 surface-text text-xs font-mono px-2 py-1 text-center
                       focus:outline-none focus:ring-1 focus:ring-accent">
       </label>
       <button id="analysis-run-btn" type="button" class="btn-primary text-sm">Run Analysis</button>
@@ -37,7 +37,7 @@
         <span id="analysis-progress-pct">0%</span>
       </span>
     </div>
-    <div class="w-full bg-ppg-700 rounded-full h-2 overflow-hidden">
+    <div class="w-full bg-mpg-700 rounded-full h-2 overflow-hidden">
       <div id="analysis-progress-bar"
            class="h-2 rounded-full bg-accent transition-all duration-200"
            style="width: 0%">
@@ -55,7 +55,7 @@
         <button id="analysis-check-all-btn" type="button" class="btn-secondary text-xs">Check All</button>
       </div>
 
-      <div class="grid grid-cols-[1.5rem_minmax(0,1fr)_5.25rem_5.25rem] gap-2 text-ppg-400 text-xs uppercase tracking-wide border-b border-ppg-200 dark:border-ppg-700 pb-2">
+      <div class="grid grid-cols-[1.5rem_minmax(0,1fr)_5.25rem_5.25rem] gap-2 text-mpg-400 text-xs uppercase tracking-wide border-b border-mpg-200 dark:border-mpg-700 pb-2">
         <span></span>
         <span>Protocol</span>
         <span>Input</span>
@@ -64,7 +64,7 @@
 
       <div id="analysis-protocol-list" class="space-y-1">
         {% for protocol in analysis_protocols %}
-        <div class="analysis-protocol-row w-full text-left grid grid-cols-[1.5rem_minmax(0,1fr)_5.25rem_5.25rem] gap-2 items-center px-2 py-2 rounded border border-transparent hover:border-ppg-300 dark:hover:border-ppg-600 hover:bg-ppg-100/70 dark:hover:bg-ppg-700/40 cursor-pointer"
+        <div class="analysis-protocol-row w-full text-left grid grid-cols-[1.5rem_minmax(0,1fr)_5.25rem_5.25rem] gap-2 items-center px-2 py-2 rounded border border-transparent hover:border-mpg-300 dark:hover:border-mpg-600 hover:bg-mpg-100/70 dark:hover:bg-mpg-700/40 cursor-pointer"
              data-protocol="{{ protocol.name }}"
              role="button"
              tabindex="0"
@@ -96,7 +96,7 @@
       </div>
 
       <div id="analysis-results-shell" class="space-y-4">
-        <div class="rounded border border-dashed border-ppg-300 dark:border-ppg-600 px-4 py-6 text-sm surface-subtle">
+        <div class="rounded border border-dashed border-mpg-300 dark:border-mpg-600 px-4 py-6 text-sm surface-subtle">
           Select one or more protocols on the left, then run analysis.
         </div>
       </div>
@@ -143,7 +143,7 @@
       ? 'border-danger/40 text-danger bg-danger/10'
       : kind === 'success'
         ? 'border-success/40 text-success bg-success/10'
-        : 'border-ppg-300 dark:border-ppg-600 surface-text bg-ppg-100/70 dark:bg-ppg-800/70';
+        : 'border-mpg-300 dark:border-mpg-600 surface-text bg-mpg-100/70 dark:bg-mpg-800/70';
     messageBox.innerHTML = `<div class="rounded border px-4 py-2 text-sm ${tone}">${message}</div>`;
   }
 
@@ -225,7 +225,7 @@
   function renderActionRows(protocolName, registryType, actionName, rows) {
     if (!rows.length) {
       return `
-        <div class="rounded border border-dashed border-ppg-300 dark:border-ppg-600 px-3 py-3 text-xs surface-subtle">
+        <div class="rounded border border-dashed border-mpg-300 dark:border-mpg-600 px-3 py-3 text-xs surface-subtle">
           No ${actionName === 'add' ? 'additions' : 'removals'} suggested.
         </div>
       `;
@@ -256,7 +256,7 @@
         : '';
 
       const hasValue = actionName === 'add' && row.raw_value != null && row.raw_value > 0;
-      const rowHighlight = hasValue ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-700' : 'border-ppg-200 dark:border-ppg-700';
+      const rowHighlight = hasValue ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-700' : 'border-mpg-200 dark:border-mpg-700';
       return `
         <div class="grid grid-cols-[7rem_minmax(0,1fr)_7rem] gap-3 items-start rounded border ${rowHighlight} px-3 py-3">
           <div class="font-mono text-xs surface-code">${row.register_address}</div>
@@ -311,15 +311,15 @@
 
     protocolRows.forEach((row) => {
       row.classList.toggle('border-accent', row.dataset.protocol === protocolName);
-      row.classList.toggle('bg-ppg-100/90', row.dataset.protocol === protocolName);
-      row.classList.toggle('dark:bg-ppg-700/60', row.dataset.protocol === protocolName);
+      row.classList.toggle('bg-mpg-100/90', row.dataset.protocol === protocolName);
+      row.classList.toggle('dark:bg-mpg-700/60', row.dataset.protocol === protocolName);
     });
 
     if (!protocolResult) {
       focusTitle.textContent = 'Results';
       focusSubtitle.textContent = 'Run analysis to see score details and queued protocol-map changes.';
       resultShell.innerHTML = `
-        <div class="rounded border border-dashed border-ppg-300 dark:border-ppg-600 px-4 py-6 text-sm surface-subtle">
+        <div class="rounded border border-dashed border-mpg-300 dark:border-mpg-600 px-4 py-6 text-sm surface-subtle">
           No protocol results are available yet.
         </div>
       `;
@@ -334,7 +334,7 @@
     resultShell.innerHTML = `
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <section class="space-y-3">
-          <div class="flex items-center justify-between gap-3 border-b border-ppg-200 dark:border-ppg-700 pb-2">
+          <div class="flex items-center justify-between gap-3 border-b border-mpg-200 dark:border-mpg-700 pb-2">
             <h3 class="surface-text font-semibold text-sm">Input Registry Map</h3>
             <span class="surface-subtle text-xs font-mono">${inputScore.missing_in_scan} missing • ${inputScore.unknown_in_scan} new</span>
           </div>
@@ -350,7 +350,7 @@
             </div>
             ${renderActionRows(protocolName, 'input', 'add', protocolResult.actions.input.add)}
           </div>
-          <div class="space-y-2 pt-2 border-t border-ppg-200 dark:border-ppg-700">
+          <div class="space-y-2 pt-2 border-t border-mpg-200 dark:border-mpg-700">
             <div class="flex items-center justify-between">
               <div class="surface-text text-xs font-semibold uppercase tracking-wide">Remove from Map</div>
               <label class="flex items-center gap-1.5 text-xs surface-muted cursor-pointer select-none">
@@ -365,7 +365,7 @@
         </section>
 
         <section class="space-y-3">
-          <div class="flex items-center justify-between gap-3 border-b border-ppg-200 dark:border-ppg-700 pb-2">
+          <div class="flex items-center justify-between gap-3 border-b border-mpg-200 dark:border-mpg-700 pb-2">
             <h3 class="surface-text font-semibold text-sm">Holding Registry Map</h3>
             <span class="surface-subtle text-xs font-mono">${holdingScore.missing_in_scan} missing • ${holdingScore.unknown_in_scan} new</span>
           </div>
@@ -381,7 +381,7 @@
             </div>
             ${renderActionRows(protocolName, 'holding', 'add', protocolResult.actions.holding.add)}
           </div>
-          <div class="space-y-2 pt-2 border-t border-ppg-200 dark:border-ppg-700">
+          <div class="space-y-2 pt-2 border-t border-mpg-200 dark:border-mpg-700">
             <div class="flex items-center justify-between">
               <div class="surface-text text-xs font-semibold uppercase tracking-wide">Remove from Map</div>
               <label class="flex items-center gap-1.5 text-xs surface-muted cursor-pointer select-none">

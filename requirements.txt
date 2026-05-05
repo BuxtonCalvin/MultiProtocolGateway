@@ -1,4 +1,4 @@
-pymodbus==3.11.4
+pymodbus>=3.13.0
 paho-mqtt
 pyserial
 python-can

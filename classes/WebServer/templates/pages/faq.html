@@ -1,12 +1,12 @@
 {% extends "base.html" %}
-{% block title %}FAQ — PPG Admin{% endblock %}
+{% block title %}FAQ — MPG Admin{% endblock %}
 {% block content %}
 <div class="max-w-3xl mx-auto space-y-6">
   <h1 class="surface-text font-bold text-xl">Frequently Asked Questions</h1>
 
   {% set faqs = [
-    ("What is PPG?",
-     "Python Protocol Gateway (PPG) is a data-collection middleware that reads registers from hardware devices (inverters, batteries) over Modbus TCP/RTU and forwards the data to one or more bridge transports such as MQTT or TimescaleDB."),
+    ("What is MPG?",
+     "Multi Protocol Gateway (MPG) is a data-collection middleware that reads registers from hardware devices (inverters, batteries) over Modbus TCP/RTU and forwards the data to one or more bridge transports such as MQTT or TimescaleDB."),
     ("What is a Scraper?",
      "A Scraper is a transport configured with a protocol_version. It actively polls device registers on a schedule and produces metric data. Examples: an EG4 18KPV inverter on Modbus TCP."),
     ("What is a Bridge?",
@@ -28,7 +28,7 @@
     ("Does the UI restart the gateway automatically?",
      "No. The gateway process must be restarted manually after a commit for configuration changes to take effect. This is intentional — the UI does not interrupt live data collection."),
     ("Where are config backups stored?",
-     "In PythonProtocolGateway (or App in docker)/config/backups/ as timestamped .cfg files. You can roll back to any backup via the Diff panel."),
+     "In MultiProtocolGateway (or App in docker)/config/backups/ as timestamped .cfg files. You can roll back to any backup via the Diff panel."),
   ] %}
 
   {% for q, a in faqs %}

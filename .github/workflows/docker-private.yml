@@ -34,6 +34,6 @@ jobs:
           push: true
           # This builds once and applies both tags to a single image
           tags: |
-            ${{ secrets.DOCKER_USERNAME }}/ppg:latest
-            ${{ secrets.DOCKER_USERNAME }}/ppg:${{ steps.prep.outputs.date }}
+            ${{ secrets.DOCKER_USERNAME }}/mpg:latest
+            ${{ secrets.DOCKER_USERNAME }}/mpg:${{ steps.prep.outputs.date }}
 

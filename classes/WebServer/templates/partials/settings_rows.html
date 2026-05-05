@@ -4,8 +4,8 @@
   and swapped in via hx-swap="innerHTML" on #settings-rows.
   Context: device (DeviceSummary), settings (list[Setting])
 #}
-<div class="grid grid-cols-[1.5rem_1fr_7rem] gap-1 text-ppg-300 text-xs
-            uppercase tracking-wide px-1 pb-1 border-b border-ppg-700"
+<div class="grid grid-cols-[1.5rem_1fr_7rem] gap-1 text-mpg-300 text-xs
+            uppercase tracking-wide px-1 pb-1 border-b border-mpg-700"
      role="row">
   <span role="columnheader" aria-label="Active">A</span>
   <span role="columnheader">Key</span>
@@ -20,7 +20,7 @@
             {% if s.is_dirty %}bg-dirty/10 border-l-2 border-dirty{% endif %}
             {% if s.is_orphan %}bg-red-900/20 opacity-60{% endif %}
             {% if not s.is_active %}opacity-40{% endif %}
-            hover:bg-ppg-700/50 group"
+            hover:bg-mpg-700/50 group"
      role="row"
      aria-label="{{ s.key }}">
 
@@ -49,7 +49,7 @@
   </div>
 
   <div role="cell"
-       class="font-mono text-ppg-200 truncate"
+       class="font-mono text-mpg-200 truncate"
        title="{{ s.key }}{% if s.default_value %} (default: {{ s.default_value }}){% endif %}">
     {{ s.key }}
     {% if s.is_orphan %}
@@ -62,8 +62,8 @@
 
   <div role="cell">
     <input type="text"
-           class="w-full bg-ppg-900 border border-ppg-600 rounded px-1 py-0.5
-                  text-ppg-100 font-mono text-xs
+           class="w-full bg-mpg-900 border border-mpg-600 rounded px-1 py-0.5
+                  text-mpg-100 font-mono text-xs
                   focus:outline-none focus:ring-1 focus:ring-accent
                   disabled:opacity-40 disabled:cursor-not-allowed"
            {% if not s.is_active or is_virtual %}disabled{% endif %}

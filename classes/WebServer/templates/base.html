@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>{% block title %}PPG Admin{% endblock %}</title>
+  <title>{% block title %}MPG Admin{% endblock %}</title>
 
   <!-- Tailwind CDN (play) -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -13,7 +13,7 @@
       theme: {
         extend: {
           colors: {
-            ppg: {
+            mpg: {
               900: '#0f1923',
               800: '#1a2535',
               700: '#243040',
@@ -45,12 +45,12 @@
   <script src="/static/js/json-enc.js"></script>
 
   <!-- WCAG / custom properties -->
-  <link rel="stylesheet" href="/static/css/ppg.css" />
+  <link rel="stylesheet" href="/static/css/mpg.css" />
 
   <!-- Dark mode: check preference and apply class immediately to avoid flash -->
   <script>
     (function() {
-      const stored = localStorage.getItem('ppg-theme');
+      const stored = localStorage.getItem('mpg-theme');
       const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
       if (stored === 'dark' || (!stored && prefersDark)) {
         document.documentElement.classList.add('dark');
@@ -60,7 +60,7 @@
 
   {% block head %}{% endblock %}
 </head>
-<body class="h-full bg-ppg-50 dark:bg-ppg-900 text-ppg-900 dark:text-ppg-100 font-sans antialiased" hx-ext="json-enc">
+<body class="h-full bg-mpg-50 dark:bg-mpg-900 text-mpg-900 dark:text-mpg-100 font-sans antialiased" hx-ext="json-enc">
 
 <!-- ===== SKIP LINK (WCAG 2.2) ===== -->
 <a href="#main-content"
@@ -72,15 +72,15 @@
 <!-- ===== TOP NAV BAR ===== -->
 <header role="banner"
         class="sticky top-0 z-40 flex flex-wrap items-center justify-between gap-3
-               bg-ppg-800 dark:bg-ppg-900 border-b border-ppg-600
+               bg-mpg-800 dark:bg-mpg-900 border-b border-mpg-600
                px-4 py-2 shadow-md"
         aria-label="Main navigation">
 
   <!-- Brand -->
   <div class="flex items-center gap-3">
     <span class="text-accent font-bold text-lg tracking-wide select-none"
-          aria-label="Python Protocol Gateway">PPG</span>
-    <span class="hidden sm:block text-ppg-300 text-xs">Admin UI</span>
+          aria-label="Multi Protocol Gateway">MPG</span>
+    <span class="hidden sm:block text-mpg-300 text-xs">Admin UI</span>
   </div>
 
   <!-- Primary Nav -->
@@ -88,7 +88,7 @@
 
     <!-- Dashboard -->
     <a href="/"
-       class="nav-item px-3 py-1.5 rounded hover:bg-ppg-600 text-ppg-100
+       class="nav-item px-3 py-1.5 rounded hover:bg-mpg-600 text-mpg-100
               focus:outline-none focus:ring-2 focus:ring-accent"
        aria-label="Dashboard">
       Dashboard
@@ -97,7 +97,7 @@
     <!-- Global Settings dropdown -->
     <div class="relative group dropdown-root" role="none" data-dropdown>
       <button type="button"
-              class="nav-item px-3 py-1.5 rounded hover:bg-ppg-600 text-ppg-100
+              class="nav-item px-3 py-1.5 rounded hover:bg-mpg-600 text-mpg-100
                      focus:outline-none focus:ring-2 focus:ring-accent
                      flex items-center gap-1"
               data-dropdown-trigger
@@ -109,50 +109,50 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
         </svg>
       </button>
-      <ul class="dropdown-menu absolute left-0 top-full mt-1 w-52 bg-ppg-800
-                 border border-ppg-600 rounded shadow-xl z-50
+      <ul class="dropdown-menu absolute left-0 top-full mt-1 w-52 bg-mpg-800
+                 border border-mpg-600 rounded shadow-xl z-50
                  hidden group-hover:block group-focus-within:block"
           role="menu" aria-label="Global Settings submenu">
         <li role="none">
           <a href="/pages/global-settings" role="menuitem"
-             class="dropdown-item block px-4 py-2 text-ppg-200 hover:bg-ppg-600 hover:text-white">
+             class="dropdown-item block px-4 py-2 text-mpg-200 hover:bg-mpg-600 hover:text-white">
             General Settings
           </a>
         </li>
         <li role="none">
           <a href="/pages/logging-settings" role="menuitem"
-             class="dropdown-item block px-4 py-2 text-ppg-200 hover:bg-ppg-600 hover:text-white">
+             class="dropdown-item block px-4 py-2 text-mpg-200 hover:bg-mpg-600 hover:text-white">
             Logging Settings
           </a>
         </li>
         <li role="none">
           <a href="/pages/view-log" role="menuitem"
-             class="dropdown-item block px-4 py-2 text-ppg-200 hover:bg-ppg-600 hover:text-white">
+             class="dropdown-item block px-4 py-2 text-mpg-200 hover:bg-mpg-600 hover:text-white">
             View Log
           </a>
         </li>
         <li role="none">
           <a href="/pages/transport-library" role="menuitem"
-             class="dropdown-item block px-4 py-2 text-ppg-200 hover:bg-ppg-600 hover:text-white">
+             class="dropdown-item block px-4 py-2 text-mpg-200 hover:bg-mpg-600 hover:text-white">
             Transport Library
           </a>
         </li>
         <li role="none">
           <a href="/pages/transport-settings" role="menuitem"
-             class="dropdown-item block px-4 py-2 text-ppg-200 hover:bg-ppg-600 hover:text-white">
+             class="dropdown-item block px-4 py-2 text-mpg-200 hover:bg-mpg-600 hover:text-white">
             Transport Settings
           </a>
         </li>
-        <li role="separator" class="border-t border-ppg-600 my-1"></li>
+        <li role="separator" class="border-t border-mpg-600 my-1"></li>
         <li role="none">
           <a href="/pages/faq" role="menuitem"
-             class="dropdown-item block px-4 py-2 text-ppg-200 hover:bg-ppg-600 hover:text-white">
+             class="dropdown-item block px-4 py-2 text-mpg-200 hover:bg-mpg-600 hover:text-white">
             FAQ
           </a>
         </li>
         <li role="none">
           <a href="/pages/about" role="menuitem"
-             class="dropdown-item block px-4 py-2 text-ppg-200 hover:bg-ppg-600 hover:text-white">
+             class="dropdown-item block px-4 py-2 text-mpg-200 hover:bg-mpg-600 hover:text-white">
             About
           </a>
         </li>
@@ -163,7 +163,7 @@
     <!-- PROTOCOLS dropdown -->
     <div class="relative group dropdown-root" role="none" data-dropdown>
       <button type="button"
-              class="nav-item px-3 py-1.5 rounded hover:bg-ppg-600 text-ppg-100
+              class="nav-item px-3 py-1.5 rounded hover:bg-mpg-600 text-mpg-100
                      focus:outline-none focus:ring-2 focus:ring-accent
                      flex items-center gap-1"
               data-dropdown-trigger
@@ -175,14 +175,14 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
         </svg>
       </button>
-      <ul class="dropdown-menu absolute left-0 top-full mt-1 w-56 bg-ppg-800
-                 border border-ppg-600 rounded shadow-xl z-50
+      <ul class="dropdown-menu absolute left-0 top-full mt-1 w-56 bg-mpg-800
+                 border border-mpg-600 rounded shadow-xl z-50
                  hidden group-hover:block group-focus-within:block"
           role="menu" aria-label="Protocols submenu">
         {% for group in proto_groups %}
         <li role="none" class="relative group/sub">
-          <button class="w-full text-left px-4 py-2 text-ppg-200
-                         hover:bg-ppg-600 hover:text-white flex justify-between items-center"
+          <button class="w-full text-left px-4 py-2 text-mpg-200
+                         hover:bg-mpg-600 hover:text-white flex justify-between items-center"
                   role="menuitem" aria-haspopup="true">
             {{ group.group }}
             <svg class="w-3 h-3 opacity-60" fill="none" stroke="currentColor"
@@ -190,14 +190,14 @@
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
             </svg>
           </button>
-          <ul class="absolute left-full top-0 w-56 bg-ppg-800
-                     border border-ppg-600 rounded shadow-xl z-50
+          <ul class="absolute left-full top-0 w-56 bg-mpg-800
+                     border border-mpg-600 rounded shadow-xl z-50
                      hidden group-hover/sub:block"
               role="menu">
             {% for proto in group.protocols %}
             <li role="none">
               <a href="/protocol-editor/{{ group.group }}/{{ proto }}" role="menuitem"
-                 class="block px-4 py-2 text-ppg-200 hover:bg-ppg-600 hover:text-white text-xs">
+                 class="block px-4 py-2 text-mpg-200 hover:bg-mpg-600 hover:text-white text-xs">
                 {{ proto }}
               </a>
             </li>
@@ -211,7 +211,7 @@
     <!-- SCRAPERS dropdown -->
     <div class="relative group dropdown-root" role="none" data-dropdown>
       <button type="button"
-              class="nav-item px-3 py-1.5 rounded hover:bg-ppg-600 text-ppg-100
+              class="nav-item px-3 py-1.5 rounded hover:bg-mpg-600 text-mpg-100
                      focus:outline-none focus:ring-2 focus:ring-accent
                      flex items-center gap-1"
               data-dropdown-trigger
@@ -223,21 +223,21 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
         </svg>
       </button>
-      <ul class="dropdown-menu absolute left-0 top-full mt-1 w-52 bg-ppg-800
-                 border border-ppg-600 rounded shadow-xl z-50
+      <ul class="dropdown-menu absolute left-0 top-full mt-1 w-52 bg-mpg-800
+                 border border-mpg-600 rounded shadow-xl z-50
                  hidden group-hover:block group-focus-within:block"
           role="menu" aria-label="Scrapers submenu">
         {% for scraper in nav.scrapers %}
         <li role="none">
           <a href="/device/{{ scraper.name }}" role="menuitem"
-             class="dropdown-item block px-4 py-2 text-ppg-200 hover:bg-ppg-600 hover:text-white">
+             class="dropdown-item block px-4 py-2 text-mpg-200 hover:bg-mpg-600 hover:text-white">
             {{ scraper.name }}
-            <span class="text-xs text-ppg-400 ml-1">({{ scraper.transport_class }})</span>
+            <span class="text-xs text-mpg-400 ml-1">({{ scraper.transport_class }})</span>
           </a>
         </li>
         {% endfor %}
         {% if not nav.scrapers %}
-        <li class="px-4 py-2 text-ppg-400 text-xs italic">No scrapers configured</li>
+        <li class="px-4 py-2 text-mpg-400 text-xs italic">No scrapers configured</li>
         {% endif %}
       </ul>
     </div>
@@ -245,7 +245,7 @@
     <!-- BRIDGES dropdown -->
     <div class="relative group dropdown-root" role="none" data-dropdown>
       <button type="button"
-              class="nav-item px-3 py-1.5 rounded hover:bg-ppg-600 text-ppg-100
+              class="nav-item px-3 py-1.5 rounded hover:bg-mpg-600 text-mpg-100
                      focus:outline-none focus:ring-2 focus:ring-accent
                      flex items-center gap-1"
               data-dropdown-trigger
@@ -257,21 +257,21 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
         </svg>
       </button>
-      <ul class="dropdown-menu absolute left-0 top-full mt-1 w-52 bg-ppg-800
-                 border border-ppg-600 rounded shadow-xl z-50
+      <ul class="dropdown-menu absolute left-0 top-full mt-1 w-52 bg-mpg-800
+                 border border-mpg-600 rounded shadow-xl z-50
                  hidden group-hover:block group-focus-within:block"
           role="menu" aria-label="Bridges submenu">
         {% for bridge in nav.bridges %}
         <li role="none">
           <a href="/device/{{ bridge.name }}" role="menuitem"
-             class="dropdown-item block px-4 py-2 text-ppg-200 hover:bg-ppg-600 hover:text-white">
+             class="dropdown-item block px-4 py-2 text-mpg-200 hover:bg-mpg-600 hover:text-white">
             {{ bridge.name }}
-            <span class="text-xs text-ppg-400 ml-1">({{ bridge.transport_class }})</span>
+            <span class="text-xs text-mpg-400 ml-1">({{ bridge.transport_class }})</span>
           </a>
         </li>
         {% endfor %}
         {% if not nav.bridges %}
-        <li class="px-4 py-2 text-ppg-400 text-xs italic">No bridges configured</li>
+        <li class="px-4 py-2 text-mpg-400 text-xs italic">No bridges configured</li>
         {% endif %}
       </ul>
     </div>
@@ -283,15 +283,15 @@
 
     <!-- Create Device -->
     <a href="/pages/create-device"
-       class="nav-item px-3 py-1.5 rounded hover:bg-ppg-600 text-ppg-100
+       class="nav-item px-3 py-1.5 rounded hover:bg-mpg-600 text-mpg-100
               focus:outline-none focus:ring-2 focus:ring-accent">
       Create Device
     </a>    
 
     <!-- ANALYZE (only shown/enabled when a scraper is selected) -->
     <button id="analyze-btn"
-            class="hidden px-3 py-1.5 text-sm rounded bg-ppg-600 text-ppg-100
-                   hover:bg-ppg-500 focus:outline-none focus:ring-2 focus:ring-accent
+            class="hidden px-3 py-1.5 text-sm rounded bg-mpg-600 text-mpg-100
+                   hover:bg-mpg-500 focus:outline-none focus:ring-2 focus:ring-accent
                    disabled:opacity-40 disabled:cursor-not-allowed"
             aria-label="Analyze selected scraper">
       Analyze
@@ -300,9 +300,9 @@
     <!-- DISCARD / CANCEL -->
     <button id="discard-btn"
             class="px-4 py-1.5 text-sm font-semibold rounded
-                   bg-ppg-600 text-ppg-200
+                   bg-mpg-600 text-mpg-200
                    data-[dirty=true]:bg-danger data-[dirty=true]:text-white
-                   hover:bg-ppg-500 disabled:opacity-40 disabled:cursor-not-allowed
+                   hover:bg-mpg-500 disabled:opacity-40 disabled:cursor-not-allowed
                    focus:outline-none focus:ring-2 focus:ring-danger
                    transition-colors"
             data-dirty="false"
@@ -317,10 +317,10 @@
     <!-- COMMIT ALL CHANGES -->
     <button id="commit-btn"
             class="px-4 py-1.5 text-sm font-semibold rounded
-                   bg-ppg-600 text-ppg-200
+                   bg-mpg-600 text-mpg-200
                    data-[dirty=true]:bg-warning data-[dirty=true]:text-white
                    data-[dirty=true]:animate-pulse
-                   hover:bg-ppg-500 disabled:opacity-40 disabled:cursor-not-allowed
+                   hover:bg-mpg-500 disabled:opacity-40 disabled:cursor-not-allowed
                    focus:outline-none focus:ring-2 focus:ring-accent
                    transition-colors"
             data-dirty="false"
@@ -333,8 +333,8 @@
     </button>
 
     <!-- Diff panel toggle -->
-    <button class="px-2 py-1.5 text-xs rounded border border-ppg-600
-                   text-ppg-300 hover:bg-ppg-700
+    <button class="px-2 py-1.5 text-xs rounded border border-mpg-600
+                   text-mpg-300 hover:bg-mpg-700
                    focus:outline-none focus:ring-2 focus:ring-accent"
             hx-get="/diff-panel"
             hx-target="#diff-overlay"
@@ -345,7 +345,7 @@
 
     <!-- Dark mode toggle -->
     <button onclick="toggleDark()"
-            class="p-1.5 rounded hover:bg-ppg-600 text-ppg-300
+            class="p-1.5 rounded hover:bg-mpg-600 text-mpg-300
                    focus:outline-none focus:ring-2 focus:ring-accent"
             aria-label="Toggle dark mode">
       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
@@ -393,10 +393,10 @@
 </main>
 
 <!-- ===== FOOTER ===== -->
-<footer class="text-center text-ppg-400 text-xs py-2 border-t border-ppg-700"
+<footer class="text-center text-mpg-400 text-xs py-2 border-t border-mpg-700"
         role="contentinfo">
-  PPG Web Management UI &mdash;
-  <a href="https://github.com/BuxtonCalvin/PythonProtocolGateway"
+  MPG Web Management UI &mdash;
+  <a href="https://github.com/BuxtonCalvin/MultiProtocolGateway"
      target="_blank" rel="noopener"
      class="text-accent hover:underline focus:outline-none focus:ring-1 focus:ring-accent">
     GitHub
@@ -409,7 +409,7 @@
   function toggleDark() {
     const html = document.documentElement;
     html.classList.toggle('dark');
-    localStorage.setItem('ppg-theme', html.classList.contains('dark') ? 'dark' : 'light');
+    localStorage.setItem('mpg-theme', html.classList.contains('dark') ? 'dark' : 'light');
   }
 
   // Poll /api/devices/state every 10s to keep the dirty/commit button in sync

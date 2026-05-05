@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Logging Settings — PPG Admin{% endblock %}
+{% block title %}Logging Settings — MPG Admin{% endblock %}
 
 {% block content %}
 <div class="max-w-2xl mx-auto">
@@ -11,7 +11,7 @@
   <div class="card space-y-2" id="logging-settings-pane">
     {% for s in settings %}
     <div class="grid grid-cols-[1fr_10rem_1.5rem_minmax(0,1fr)] gap-3 items-center py-1
-                border-b border-ppg-700/40 last:border-0
+                border-b border-mpg-700/40 last:border-0
                 {% if s.is_dirty %}bg-dirty/5 rounded px-2{% endif %}">
       <div>
         <label class="font-mono surface-text text-sm font-medium" for="ls-{{ s.id }}">{{ s.key }}</label>

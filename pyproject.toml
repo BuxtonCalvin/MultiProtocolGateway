@@ -7,18 +7,18 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "python-protocol-gateway"
+name = "multi-protocol-gateway"
 version = "1.1.10"
 description = "Reads live register data from Modbus RTU/TCP, CAN bus, and proprietary serial protocols, then fans that data out to any combination of MQTT brokers, TimescaleDB, InfluxDB, and JSON outputs — all managed through a built-in web administration UI."
 readme = "README.md"
 license = "Apache-2.0"
-authors = [{ name = "HotNoob", email = "hotnoob@hotnoob.com" }]
+authors = [{ name = "BuxtonCalvin", email = "buxtoncalvin@gmail.com" }]
 requires-python = ">=3.9"
 dynamic = ["dependencies", "optional-dependencies"]
 
 [project.scripts]
 protocol-gateway = "protocol_gateway:main"
-ppg = "protocol_gateway:main"
+mpg = "protocol_gateway:main"
 
 [tool.setuptools]
 py-modules = ["protocol_gateway"]
@@ -29,5 +29,5 @@ dependencies = {file = ["requirements.txt"]}
 optional-dependencies = {dev = { file = ["requirements-dev.txt"] }}
 
 [project.urls]
-Homepage = "https://github.com/HotNoob/PythonProtocolGateway"
-Repository = "https://github.com/HotNoob/PythonProtocolGateway"
+Homepage = "https://github.com/BuxtonCalvin/MultiProtocolGateway"
+Repository = "https://github.com/BuxtonCalvin/MultiProtocolGateway"

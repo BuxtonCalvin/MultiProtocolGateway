@@ -1,35 +1,41 @@
+#
+
 things todo to perform a release.
 
 can try to automate some of these later.
 
-GitHub - https://github.com/HotNoob/PythonProtocolGateway/releases
-PyPi Package - https://pypi.org/project/python-protocol-gateway/
-```
+GitHub - <https://github.com/BuxtonCalvin/MultiProtocolGateway/releases>
+PyPi Package - <https://pypi.org/project/multi-protocol-gateway/>
+
+``` ini
 pyproject.toml -> version
 ```
-```
+
+``` ini
 python -m build
 python -m twine upload dist/*
 ```
 
+HomeAssistant repo - <https://github.com/BuxtonCalvin/multi-protocol-gateway-hass-addon>
 
-HomeAssistant repo - https://github.com/HotNoob/python-protocol-gateway-hass-addon
-```
-https://github.com/HotNoob/python-protocol-gateway-hass-addon/blob/master/python-protocol-gateway/Dockerfile
+``` ini
+https://github.com/BuxtonCalvin/multi-protocol-gateway-hass-addon/blob/master/multi-protocol-gateway/Dockerfile
 ```
 
+Docker Image - <https://hub.docker.com/r/buxtoncalvin/multiprotocolgateway>
 
-Docker Image - https://hub.docker.com/r/hotn00b/pythonprotocolgateway
-```
+``` ini
 wsl
-docker login -u hotn00b
+docker login -u buxtoncalvin
 ```
+
+``` ini
+docker pull buxtoncalvin/multiprotocolgateway:latest
+docker tag buxtoncalvin/multiprotocolgateway:latest buxtoncalvin/multiprotocolgateway:v1.1.9
+docker push buxtoncalvin/multiprotocolgateway:v1.1.9
 ```
-docker pull hotn00b/pythonprotocolgateway:latest
-docker tag hotn00b/pythonprotocolgateway:latest hotn00b/pythonprotocolgateway:v1.1.9
-docker push hotn00b/pythonprotocolgateway:v1.1.9
-```
-```
-docker build -t hotn00b/pythonprotocolgateway:latest .
-docker push hotn00b/pythonprotocolgateway:latest
+
+``` ini
+docker build -t buxtoncalvin/multiprotocolgateway:latest .
+docker push buxtoncalvin/multiprotocolgateway:latest
 ```

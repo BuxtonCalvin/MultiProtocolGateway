@@ -8,17 +8,17 @@
 
   <!-- ══ LEFT: SETTINGS PANE ══ -->
   <aside class="flex-shrink-0 overflow-y-auto
-                bg-ppg-800 rounded border border-ppg-700 p-3"
+                bg-mpg-800 rounded border border-mpg-700 p-3"
          style="width: 28%; min-width: 268px; max-width: 368px;">
 
     <div class="flex items-center justify-between mb-3">
-      <h2 class="text-ppg-100 font-semibold text-sm">
+      <h2 class="text-mpg-100 font-semibold text-sm">
         {{ device.name }}
         <span class="ml-1 badge badge-bridge text-xs">bridge</span>
       </h2>
     </div>
 
-    <p class="text-ppg-400 text-xs mb-3">
+    <p class="text-mpg-400 text-xs mb-3">
       {{ device.transport_class }} &middot; {{ device.host }}:{{ device.port }}
     </p>
 
@@ -28,8 +28,8 @@
     {% if ns2.log_setting %}
     <div class="mb-3">
       <p class="label mb-1">Log Level</p>
-      <select class="w-full bg-ppg-900 border border-ppg-600 rounded px-2 py-1
-                     text-ppg-100 font-mono text-xs
+      <select class="w-full bg-mpg-900 border border-mpg-600 rounded px-2 py-1
+                     text-mpg-100 font-mono text-xs
                      focus:outline-none focus:ring-1 focus:ring-accent"
               aria-label="Log level for {{ device.name }}"
               hx-patch="/api/devices/{{ device.name }}/settings/{{ ns2.log_setting.id }}"
@@ -50,13 +50,13 @@
     <!-- Settings table -->
     <div class="space-y-0.5" role="table" aria-label="Device settings for {{ device.name }}">
 
-      <div class="grid grid-cols-[1.5rem_1fr_5rem_5rem] gap-1 text-ppg-400 text-xs
-                  uppercase tracking-wide px-1 pb-1 border-b border-ppg-700"
+      <div class="grid grid-cols-[1.5rem_1fr_5rem_5rem] gap-1 text-mpg-400 text-xs
+                  uppercase tracking-wide px-1 pb-1 border-b border-mpg-700"
            role="row">
         <span role="columnheader" aria-label="Active">A</span>
         <span role="columnheader">Key</span>
         <span role="columnheader">Value</span>
-        <span role="columnheader" class="text-ppg-500" title="Default / fallback value from transport module">Default</span>
+        <span role="columnheader" class="text-mpg-500" title="Default / fallback value from transport module">Default</span>
       </div>
 
       {% for s in settings if s.key != "log_level" %}
@@ -65,7 +65,7 @@
                   {% if s.is_dirty %}bg-dirty/10 border-l-2 border-dirty{% endif %}
                   {% if s.is_orphan %}bg-red-900/20{% endif %}
                   {% if not s.is_active %}opacity-70{% endif %}
-                  hover:bg-ppg-700/50"
+                  hover:bg-mpg-700/50"
            role="row">
 
         <div role="cell">
@@ -81,7 +81,7 @@
         </div>
 
         <div role="cell"
-             class="font-mono text-ppg-100 truncate"
+             class="font-mono text-mpg-100 truncate"
              title="{{ s.key }}">
           {{ s.key }}
           {% if s.is_orphan %}<span class="text-danger text-xs ml-1">⚑</span>{% endif %}
@@ -90,10 +90,10 @@
 
         <div role="cell">
           <input type="text"
-                 class="w-full bg-ppg-900 border border-ppg-600 rounded px-1 py-0.5
-                        text-ppg-100 font-mono text-xs
+                 class="w-full bg-mpg-900 border border-mpg-600 rounded px-1 py-0.5
+                        text-mpg-100 font-mono text-xs
                         focus:outline-none focus:ring-1 focus:ring-accent
-                        disabled:opacity-70 disabled:cursor-not-allowed disabled:text-ppg-300"
+                        disabled:opacity-70 disabled:cursor-not-allowed disabled:text-mpg-300"
                  {% if not s.is_active %}disabled{% endif %}
                  value="{{ s.value_staged or '' }}"
                  aria-label="Value for {{ s.key }}"
@@ -105,7 +105,7 @@
         </div>
 
         <div role="cell"
-             class="font-mono text-ppg-400 text-xs truncate leading-tight self-center"
+             class="font-mono text-mpg-400 text-xs truncate leading-tight self-center"
              title="{{ s.default_value or '—' }}">
           {{ s.default_value or '—' }}
         </div>
@@ -144,7 +144,7 @@
             <span id="bridge-status-dot"
                   class="w-2 h-2 rounded-full
                          {% if device.is_connected %}bg-success animate-pulse
-                         {% else %}bg-ppg-400{% endif %}"
+                         {% else %}bg-mpg-400{% endif %}"
                   aria-hidden="true"></span>
             <span id="bridge-status-text"
                   class="{% if device.is_connected %}text-success{% else %}surface-muted{% endif %}">
@@ -175,7 +175,7 @@
     </div>
 
     <!-- Info note: no protocol table for bridges -->
-    <div class="rounded border border-ppg-200 dark:border-ppg-600 bg-ppg-200/40 dark:bg-ppg-700/40 px-4 py-3 surface-text text-sm">
+    <div class="rounded border border-mpg-200 dark:border-mpg-600 bg-mpg-200/40 dark:bg-mpg-700/40 px-4 py-3 surface-text text-sm">
       <span class="text-accent font-semibold">Bridge transport</span> —
       no protocol register map. Bridges handle data sinking only
       (MQTT, TimescaleDB, etc.). Protocol configuration is managed on the
@@ -205,7 +205,7 @@
         text.className = 'text-success';
         text.textContent = 'Connected';
       } else {
-        dot.className  = 'w-2 h-2 rounded-full bg-ppg-400';
+        dot.className  = 'w-2 h-2 rounded-full bg-mpg-400';
         text.className = 'surface-muted';
         text.textContent = 'Offline';
       }
@@ -221,7 +221,7 @@
           applyStatus(connected);
         })
         .catch(() => {
-          dot.className  = 'w-2 h-2 rounded-full bg-ppg-400';
+          dot.className  = 'w-2 h-2 rounded-full bg-mpg-400';
           text.className = 'surface-muted';
           text.textContent = 'Unknown / Offline';
         });

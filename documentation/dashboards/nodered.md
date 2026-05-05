@@ -1,4 +1,4 @@
-# Setting up PythonProtocolGateway on a RasPi with NodeRed Dashboard 2.0
+# Setting up MultiProtocolGateway on a RasPi with NodeRed Dashboard 2.0
 
 This is a simple how-to on setting up a Raspberry Pi node, attempting to be as copy/pasteable as possible. As we stand on the shoulders of giants, I will refer to external how-tos for some of the steps. They did it better than I could anyway.
 
@@ -29,15 +29,15 @@ password_file /etc/mosquitto/passwd
 
 Create a new `mosquitto` password file while adding an mqtt user `sudo mosquitto_passwd -c /etc/mosquitto/passwd solar` - to add another user later, drop the `-c`. Start the service with `sudo systemctl start mosquitto`, set the service to start on boot with `sudo systemctl enable mosquitto`.
 
-## Download/configure PythonProtocolGateway
+## Download/configure MultiProtocolGateway
 
 ### Download
 
-`mkdir ~/src/ && cd ~/src && git clone https://github.com/HotNoob/PythonProtocolGateway.git`
+`mkdir ~/src/ && cd ~/src && git clone https://github.com/BuxtonCalvin/MultiProtocolGateway.git`
 
 ### Configure
 
-[Follow the wiki](https://github.com/HotNoob/PythonProtocolGateway/wiki)
+[Follow the wiki](https://github.com/BuxtonCalvin/MultiProtocolGateway/wiki)
 
 ## Install/configure NodeRed service
 
@@ -102,4 +102,4 @@ Use sudo and your favorite editor to edit `/etc/nginx/sites-enabled/default`. ju
 You should now be able to browse to [Solar.local/Home](http://solar.local/Home/)
 
 ---
-source: <https://github.com/yNosGR/PythonProtocolGateway/blob/NodeRed_howto/NodeRed.MD>
+source: <https://github.com/yNosGR/MultiProtocolGateway/blob/NodeRed_howto/NodeRed.MD>

@@ -83,6 +83,6 @@ class modbus_udp(modbus_base):
             self._log.error(f"Cannot connect '{self.transport_name}' — client not initialized")
             self.connected = False
             return
-        self.connected = cast(bool, self.client.connect())
+        self.connected = bool(self.client.connect())
         self._log.info(f"Modbus udp connected: {self.connected} for {self.transport_name} on port {self.port}")
         super().connect()

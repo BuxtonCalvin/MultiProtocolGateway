@@ -1,8 +1,7 @@
-''' simulate modbus tcp server for testing ppg '''
+''' simulate modbus tcp server for testing mpg '''
 import json
-import sys
 
-from modbus_tk import hooks, modbus_tcp, utils
+from modbus_tk import hooks, modbus_tcp
 from modbus_tk.defines import HOLDING_REGISTERS, READ_INPUT_REGISTERS
 
 
@@ -10,7 +9,7 @@ def on_write_request(request):
     print(f"Write request: {request}")
 
 
-server = modbus_tcp.TcpServer(address="0.0.0.0", port=5020)
+server = modbus_tcp.TcpServer(address="0.0.0.0", port=5020)  # noqa: S104
 slave = server.add_slave(1)
 
 #load registries

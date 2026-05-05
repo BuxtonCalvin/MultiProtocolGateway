@@ -9,7 +9,7 @@ This README file contains an index of all files in the documentation directory.
 
 - [grafana.md](dashboards/grafana.md)
 - [homeassistant.md](dashboards/homeassistant.md)
-- [nodered.md](dashboards/nodered.md) -  Setting up PythonProtocolGateway on a RasPi with NodeRed Dashboard 2.0
+- [nodered.md](dashboards/nodered.md) -  Setting up MultiProtocolGateway on a RasPi with NodeRed Dashboard 2.0
 
 **devices**
 

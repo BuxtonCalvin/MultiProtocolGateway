@@ -294,7 +294,7 @@ class mqtt(transport_base):
         device = {}
         device["manufacturer"] = from_transport.device_manufacturer
         device["model"] = from_transport.device_model
-        device["identifiers"] = "PPG_" + from_transport.device_model + "_" + from_transport.device_serial_number
+        device["identifiers"] = "MPG_" + from_transport.device_model + "_" + from_transport.device_serial_number
         device["name"] = from_transport.device_name
 
         registry_map : list[registry_map_entry] = []
@@ -336,7 +336,7 @@ class mqtt(transport_base):
                 disc_payload["availability_topic"] = self.base_topic + "/" + from_transport.device_identifier + "/availability"
                 disc_payload["device"] = device
                 disc_payload["name"] = clean_name
-                disc_payload["unique_id"] = "PPG_" + from_transport.device_serial_number + "_"+clean_name
+                disc_payload["unique_id"] = "MPG_" + from_transport.device_serial_number + "_"+clean_name
 
                 writePrefix = ""
                 if from_transport.write_enabled and ( item.write_mode == WriteMode.WRITE or item.write_mode == WriteMode.WRITEONLY ):

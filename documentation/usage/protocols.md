@@ -1,6 +1,6 @@
 # Protocols
 
-A **protocol** is the map between raw register addresses on a hardware device and the named, typed, human-readable variables PPG publishes to its outputs. Every scraper transport that reads data — Modbus RTU, Modbus TCP, CAN bus — requires a protocol to know what the register values mean.
+A **protocol** is the map between raw register addresses on a hardware device and the named, typed, human-readable variables MPG publishes to its outputs. Every scraper transport that reads data — Modbus RTU, Modbus TCP, CAN bus — requires a protocol to know what the register values mean.
 
 ## Table of Contents
 
@@ -113,7 +113,7 @@ A unit string can include a numeric multiplier to automatically scale the raw re
 0.1V
 ```
 
-PPG parses the numeric prefix, applies it as a multiplier to the raw value, and publishes the result with unit `V`. This keeps the protocol map self-describing without requiring custom parsing code.
+MPG parses the numeric prefix, applies it as a multiplier to the raw value, and publishes the result with unit `V`. This keeps the protocol map self-describing without requiring custom parsing code.
 
 ### Data Types
 
@@ -193,7 +193,7 @@ Reads byte offset 2 of register 40001. Used in protocols with packed byte fields
 
 ### Write Mode (`writable`)
 
-The `writable` column controls whether PPG is permitted to write to a register. It has no effect on reading — all non-disabled registers are always read during a normal poll cycle.
+The `writable` column controls whether MPG is permitted to write to a register. It has no effect on reading — all non-disabled registers are always read during a normal poll cycle.
 
 | Value | Aliases | Meaning |
 | --- | --- | --- |
@@ -208,7 +208,7 @@ The `writable` column controls whether PPG is permitted to write to a register. 
 
 The `values` column has two distinct purposes.
 
-**Range validation** — used during protocol analysis scoring and Modbus write safety checks. A register with a defined range allows PPG to verify that the live device value is plausible before enabling writes:
+**Range validation** — used during protocol analysis scoring and Modbus write safety checks. A register with a defined range allows MPG to verify that the live device value is plausible before enabling writes:
 
 ``` ini
 0~100
@@ -266,7 +266,7 @@ Override files use the same column format as the main CSV. Only non-empty column
 
 **Matching logic:**
 
-1. PPG first attempts to match the override row by `documented name` (primary key).
+1. MPG first attempts to match the override row by `documented name` (primary key).
 2. If no match by documented name, it falls back to matching by `register` address (secondary key).
 3. If both `documented name` and `register` are unique (no match in the main CSV), the override row is treated as a new register entry and appended.
 
@@ -336,13 +336,13 @@ Before enabling write-back:
 
 ### What Happens on Commit
 
-When you click Commit, PPG executes a multi-step write:
+When you click Commit, MPG executes a multi-step write:
 
 **1. Backup** — The current `config.cfg` is archived to the backups table with a timestamp. This can be restored via the UI's Rollback feature.  Backups are stored in the backups folder below the config folder.
 
 **2. `config.cfg` rewrite** — All active, non-dirty settings are written back to disk from the staging database. Your `write_enabled = true` setting is included here.
 
-**3. Override CSV generation** — This is the critical step for write-back. PPG queries the `DeviceProtocolSelection` table for all registers where `user_write_enabled = True` for this device and protocol. It then writes (or updates) a holding registry override file:
+**3. Override CSV generation** — This is the critical step for write-back. MPG queries the `DeviceProtocolSelection` table for all registers where `user_write_enabled = True` for this device and protocol. It then writes (or updates) a holding registry override file:
 
 ``` ini
 config/{protocol_name}.holding_registry_map.override.csv
@@ -462,7 +462,7 @@ Physical Device
 
 The **M** (mask) and **S** (screen) toggles in the protocol register table control which variables are published to all outputs. These are independent of write-back.
 
-**Mask (allowlist):** When any variable for a device has mask enabled, PPG publishes *only* masked variables. It acts as an explicit include list. If no variables are masked, all variables are published.
+**Mask (allowlist):** When any variable for a device has mask enabled, MPG publishes *only* masked variables. It acts as an explicit include list. If no variables are masked, all variables are published.
 
 **Screen (blocklist):** Screened variables are always excluded from all outputs, regardless of mask settings. Mask is applied first, then screen.
 
@@ -479,7 +479,7 @@ Mask and screen are mutually exclusive per register — enabling one automatical
 
 ## Protocol Library
 
-PPG ships with pre-built protocols for the following devices. All protocols are in the `protocols/` directory.
+MPG ships with pre-built protocols for the following devices. All protocols are in the `protocols/` directory.
 
 | Protocol Name | Device |
 | --- | --- |

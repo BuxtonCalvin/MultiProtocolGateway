@@ -19,7 +19,7 @@ class modbus_tls(modbus_base):
         super().__init__(settings)
 
         # Path(__file__) is the path to the current script (modbus_tls.py)
-        # .parent.parent moves up 2 levels from 'transports/modbus_tls.py' to 'app_root/' ie PythonProtocolGateway
+        # .parent.parent moves up 2 levels from 'transports/modbus_tls.py' to 'app_root/' ie MultiProtocolGateway
         app_root: Path = Path(__file__).resolve().parent.parent
         config_dir: Path = app_root / "config"
 

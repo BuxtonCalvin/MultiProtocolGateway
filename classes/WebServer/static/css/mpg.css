@@ -1,5 +1,5 @@
 /*
- * ppg.css — WCAG 2.2 AA compliant design system
+ * mpg.css — WCAG 2.2 AA compliant design system
  * All contrast ratios meet 4.5:1 (normal text) or 3:1 (large text / UI components)
  *
  * Color tokens are defined here and consumed by Tailwind utilities.
@@ -54,10 +54,10 @@ body { font-size: 0.875rem; line-height: 1.5; }
 .surface-text { color: rgb(46 61 82); }
 .dark .surface-text { color: rgb(185 208 228); }
 
-.surface-muted { color: rgb(26 37 53); }     /* ppg-800 — strong contrast on light bg */
+.surface-muted { color: rgb(26 37 53); }     /* mpg-800 — strong contrast on light bg */
 .dark .surface-muted { color: rgb(140 174 200); }
 
-.surface-subtle { color: rgb(61 81 102); }  /* ppg-500 — readable on light bg */
+.surface-subtle { color: rgb(61 81 102); }  /* mpg-500 — readable on light bg */
 .dark .surface-subtle { color: rgb(91 122 153); }
 
 .surface-code { color: rgb(26 37 53); }
@@ -66,18 +66,18 @@ body { font-size: 0.875rem; line-height: 1.5; }
 /* ── Card component ── */
 .card {
   background-color: rgb(226 235 244 / 0.6); /* light: soft blue-grey tint */
-  border: 1px solid rgb(185 208 228);        /* ppg-200 */
+  border: 1px solid rgb(185 208 228);        /* mpg-200 */
   border-radius: 0.5rem;
   padding: 0.875rem 1rem;
 }
 .dark .card {
-  background-color: rgb(26 37 53 / 0.7);   /* ppg-800/70 */
-  border-color: rgb(46 61 82);              /* ppg-600 */
+  background-color: rgb(26 37 53 / 0.7);   /* mpg-800/70 */
+  border-color: rgb(46 61 82);              /* mpg-600 */
 }
 /* Cards inside dark asides always use dark styling */
 aside .card {
   background-color: rgb(26 37 53 / 0.5);
-  border-color: rgb(46 61 82);              /* ppg-600 */
+  border-color: rgb(46 61 82);              /* mpg-600 */
 }
 .card.border-dirty {
   border-color: #fb923c;
@@ -104,13 +104,13 @@ aside .label,
 .theme-input {
   background-color: rgb(209 220 232);   /* medium-light blue-grey — clearly not white */
   border-color: rgb(160 185 208);
-  color: rgb(26 37 53);                 /* ppg-800 — dark text */
+  color: rgb(26 37 53);                 /* mpg-800 — dark text */
 }
 .dark .theme-input,
 aside .theme-input {
-  background-color: rgb(15 23 42);      /* ppg-900 — near black in dark / sidebar */
-  border-color: rgb(61 81 102);         /* ppg-600 */
-  color: rgb(226 235 244);             /* ppg-100 — light text */
+  background-color: rgb(15 23 42);      /* mpg-900 — near black in dark / sidebar */
+  border-color: rgb(61 81 102);         /* mpg-600 */
+  color: rgb(226 235 244);             /* mpg-100 — light text */
 }
 
 /* ── Transport settings description editable input ── */
@@ -199,24 +199,24 @@ aside .theme-input {
 
 /* ── Tab strip ── */
 .tab-active {
-  background-color: rgb(46 61 82);        /* ppg-600 */
+  background-color: rgb(46 61 82);        /* mpg-600 */
   color: rgb(56 189 248);                 /* accent blue */
-  border: 1px solid rgb(91 122 153);      /* ppg-400 */
+  border: 1px solid rgb(91 122 153);      /* mpg-400 */
   border-bottom-color: rgb(46 61 82);
   font-weight: 600;
 }
 .tab-inactive {
-  color: rgb(61 81 102);                  /* ppg-500 — dark enough for light bg */
+  color: rgb(61 81 102);                  /* mpg-500 — dark enough for light bg */
   border: 1px solid transparent;
   background-color: transparent;
 }
 .tab-inactive span {
-  color: rgb(61 81 102) !important;      /* ppg-500 — dark enough for light bg */
+  color: rgb(61 81 102) !important;      /* mpg-500 — dark enough for light bg */
 }
 .tab-inactive:hover {
-  background-color: rgb(185 208 228 / 0.35); /* ppg-200/35 in light mode */
-  color: rgb(26 37 53);                      /* ppg-800 */
-  border-color: rgb(140 174 200);           /* ppg-300 */
+  background-color: rgb(185 208 228 / 0.35); /* mpg-200/35 in light mode */
+  color: rgb(26 37 53);                      /* mpg-800 */
+  border-color: rgb(140 174 200);           /* mpg-300 */
 }
 
 .dark .tab-active {
@@ -227,16 +227,16 @@ aside .theme-input {
 }
 
 .dark .tab-inactive {
-  color: rgb(185 208 228);                /* ppg-200 */
+  color: rgb(185 208 228);                /* mpg-200 */
 }
 .dark .tab-inactive span {
-  color: rgb(185 208 228) !important;    /* override Tailwind text-ppg-* on child spans */
+  color: rgb(185 208 228) !important;    /* override Tailwind text-mpg-* on child spans */
 }
 
 .dark .tab-inactive:hover {
-  background-color: rgb(46 61 82 / 0.6);  /* ppg-600/60 */
-  color: rgb(240 246 252);                /* ppg-50 */
-  border-color: rgb(91 122 153);          /* ppg-400 */
+  background-color: rgb(46 61 82 / 0.6);  /* mpg-600/60 */
+  color: rgb(240 246 252);                /* mpg-50 */
+  border-color: rgb(91 122 153);          /* mpg-400 */
 }
 
 /* ── HTMX loading indicator ── */

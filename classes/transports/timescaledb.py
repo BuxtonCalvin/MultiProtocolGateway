@@ -533,7 +533,7 @@ class timescaledb(transport_base):
             - auto_refresh_interval (int): Seconds between rollup refreshes (default: 21600)
             - backlog_storage_path (str): Path for backlog files (default: "parent/timescaledb_backlog")
             - database (str): Database name (default: "solar")
-            - device_name (str): Name for the bridge (default: "TimeScaleDB PPG Bridge")
+            - device_name (str): Name for the bridge (default: "TimeScaleDB MPG Bridge")
             - enable_auto_refresh (bool): Enable periodic rollup refresh (default: True)
             - enable_compression (bool): Enable compression on hypertables at startup (default: True)
             - enable_persistent_storage (bool): Enable disk backlog (default: True)
@@ -641,7 +641,7 @@ class timescaledb(transport_base):
         self.pushover_user: str = settings.get("pushover_user", fallback=self.pushover_user)
 
         # 3. Explicitly set bridge name if not set by user, since this transport doesn't have a device name from an upstream transport to pull from.
-        self.device_name = settings.get("device_name", fallback="TimescaleDB PPG Bridge")
+        self.device_name = settings.get("device_name", fallback="TimescaleDB MPG Bridge")
 
         super().__init__(settings)
 
@@ -833,7 +833,7 @@ class timescaledb(transport_base):
         with self._reconnect_lock:
             if self.tsdb_connected != conn_value:   # if we change state
                 self.tsdb_connected: bool = conn_value  # new state
-                self.connected = self.tsdb_connected  # set the PPG connected flag here to mimic central connection state.
+                self.connected = self.tsdb_connected  # set the MPG connected flag here to mimic central connection state.
                 self.rollup_policy["tsdb_connected"] = conn_value  # set the connect status in the rollup class.
                 self._log.info(f"TimescaleDB is connected -> {conn_value} ({conn_reason})")
 
@@ -905,7 +905,7 @@ class timescaledb(transport_base):
                     except Exception as e:
                         self._log.error( f"Protocol rediscovery failed after reconnect: {e}" )
                         # Non-fatal — protocols will re-register via init_bridge
-                        # on next PPG restart if rediscovery fails here
+                        # on next MPG restart if rediscovery fails here
 
                     try:
                         if getattr(self, "enable_persistent_storage", False):
@@ -1427,7 +1427,7 @@ class timescaledb(transport_base):
                             # Add column if missing.  Initial column creation is alphabetic due to sorted metric names.
                             # Per postgres docs, subsequent columns added after first init are always appended to the end of the table.
                             # ie if you want a new column in the middle of the wide table, you must manually delete all tables,
-                            # (losing your data) and restart PPG to recreate the table with the new column in the desired location.
+                            # (losing your data) and restart MPG to recreate the table with the new column in the desired location.
 
                             if not exists_wide:
                                 session.execute(text(
@@ -1781,7 +1781,7 @@ class timescaledb(transport_base):
     # In timescaledb — override init_bridge to register each scraper's protocol
     def init_bridge(self, from_transport: transport_base) -> None:
         """
-        Called by PPG after all transports are constructed, once per
+        Called by MPG after all transports are constructed, once per
         scraper transport wired to this bridge. This is where per-protocol
         schema setup should happen, since we now know which transports
         (and therefore which registry maps) are actually feeding us.
@@ -1843,7 +1843,7 @@ class timescaledb(transport_base):
     # Flush worker thread to handle data writes to the database.
     def _flush_worker(self) -> None:
         """Async flush worker created during init.  Handles data appends to tables. Routing to backlog if needed.
-            datacopy  -> wide dict of unaltered metrics passed from PPG or backlog
+            datacopy  -> wide dict of unaltered metrics passed from MPG or backlog
             wide_data  -> wide dict of processed datacopy for safe sql coercion.
             narrow_data  -> dict of appended new_data with deviceid and timestamp.  Needed because narrow table
             applies timestamp to individual metrics.
@@ -2518,7 +2518,7 @@ class RollupManager:
         After all structures are built:
         1 RollupManager wakes up.
         2 RollupManager tells BacklogManager to put everything into the _flush_queue if backlog data exists.
-            The _flush_queue is the threaded queue object that accepts PPG data obtained from the source transport.
+            The _flush_queue is the threaded queue object that accepts MPG data obtained from the source transport.
         3 RollupManager calls _flush_queue.join() (it pauses here).
         4 _flush_worker finishes writing everything to the Hypertable and calls task_done() for each.
         5 RollupManager resumes and calls refresh_continuous_aggregate.

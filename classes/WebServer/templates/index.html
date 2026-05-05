@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Dashboard — PPG Admin{% endblock %}
+{% block title %}Dashboard — MPG Admin{% endblock %}
 
 {% block content %}
 <div class="grid grid-cols-12 gap-4">
@@ -84,9 +84,9 @@
 <div id="rollback-modal"
      class="fixed inset-0 z-50 hidden items-center justify-center bg-black/60"
      role="dialog" aria-modal="true" aria-labelledby="rollback-modal-title">
-  <div class="card rounded-lg shadow-2xl border border-ppg-700 w-[480px] max-h-[70vh] flex flex-col bg-white dark:bg-ppg-800">
+  <div class="card rounded-lg shadow-2xl border border-mpg-700 w-[480px] max-h-[70vh] flex flex-col bg-white dark:bg-mpg-800">
 
-    <div class="flex items-center justify-between px-5 py-4 border-b border-ppg-200 dark:border-ppg-700">
+    <div class="flex items-center justify-between px-5 py-4 border-b border-mpg-200 dark:border-mpg-700">
       <h3 id="rollback-modal-title" class="surface-text font-semibold text-sm">
         Rollback Configuration
       </h3>
@@ -99,10 +99,10 @@
     </p>
 
     <div id="rollback-list" class="overflow-y-auto flex-1 px-5 py-3 space-y-1.5">
-      <p class="text-ppg-400 text-xs">Loading backups…</p>
+      <p class="text-mpg-400 text-xs">Loading backups…</p>
     </div>
 
-    <div class="px-5 py-3 border-t border-ppg-200 dark:border-ppg-700 text-xs surface-muted">
+    <div class="px-5 py-3 border-t border-mpg-200 dark:border-mpg-700 text-xs surface-muted">
       <span id="rollback-status"></span>
     </div>
   </div>
@@ -120,25 +120,25 @@
     modal.classList.remove('hidden');
     modal.classList.add('flex');
     statusEl.textContent = '';
-    list.innerHTML = '<p class="text-ppg-400 text-xs">Loading backups…</p>';
+    list.innerHTML = '<p class="text-mpg-400 text-xs">Loading backups…</p>';
 
     fetch('/api/commit/backups')
       .then(r => r.json())
       .then(backups => {
         if (!backups.length) {
-          list.innerHTML = '<p class="text-ppg-400 text-xs">No backups found.</p>';
+          list.innerHTML = '<p class="text-mpg-400 text-xs">No backups found.</p>';
           return;
         }
         list.innerHTML = backups.map(b => {
           const date  = new Date(b.created_at).toLocaleString();
           const kb    = b.file_size_bytes ? `${(b.file_size_bytes/1024).toFixed(1)} KB` : '';
           const label = b.trigger === 'auto'
-            ? `<span class="text-ppg-400">[auto]</span> `
+            ? `<span class="text-mpg-400">[auto]</span> `
             : `<span class="text-accent">[manual]</span> `;
-          const note  = b.notes ? `<span class="text-ppg-500 ml-1">— ${b.notes}</span>` : '';
+          const note  = b.notes ? `<span class="text-mpg-500 ml-1">— ${b.notes}</span>` : '';
           return `<button class="rollback-item w-full text-left px-3 py-2 rounded
-                                 bg-ppg-100 hover:bg-ppg-200 dark:bg-ppg-700 dark:hover:bg-ppg-600
-                                 border border-ppg-200 dark:border-ppg-600
+                                 bg-mpg-100 hover:bg-mpg-200 dark:bg-mpg-700 dark:hover:bg-mpg-600
+                                 border border-mpg-200 dark:border-mpg-600
                                  text-xs surface-text transition-colors flex items-start justify-between gap-2"
                           data-id="${b.id}">
                     <span>${label}${date}${note}</span>

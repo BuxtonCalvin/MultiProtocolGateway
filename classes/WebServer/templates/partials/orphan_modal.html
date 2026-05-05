@@ -10,19 +10,19 @@
        aria-hidden="true"></div>
 
   <div class="relative w-full max-w-3xl max-h-[75vh] overflow-y-auto
-              bg-ppg-800 border border-ppg-600 rounded-lg shadow-2xl">
+              bg-mpg-800 border border-mpg-600 rounded-lg shadow-2xl">
 
     <!-- Header -->
     <div class="flex items-center justify-between px-5 py-3
-                border-b border-ppg-700 sticky top-0 bg-ppg-800 z-10">
+                border-b border-mpg-700 sticky top-0 bg-mpg-800 z-10">
       <div>
-        <h2 id="orphan-title" class="text-ppg-100 font-semibold">Orphaned Settings</h2>
-        <p class="text-ppg-400 text-xs mt-0.5">
+        <h2 id="orphan-title" class="text-mpg-100 font-semibold">Orphaned Settings</h2>
+        <p class="text-mpg-400 text-xs mt-0.5">
           These keys exist in the database but are no longer found in any transport class.
         </p>
       </div>
       <button onclick="this.closest('[role=dialog]').remove()"
-              class="text-ppg-400 hover:text-ppg-100 p-1.5 rounded
+              class="text-mpg-400 hover:text-mpg-100 p-1.5 rounded
                      focus:outline-none focus:ring-2 focus:ring-accent"
               aria-label="Close">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
@@ -40,14 +40,14 @@
                  class="accent-accent w-4 h-4"
                  aria-label="Select all orphans"
                  onchange="document.querySelectorAll('.orphan-chk').forEach(c => c.checked = this.checked)">
-          <label for="select-all-orphans" class="text-ppg-300 text-xs">Select all</label>
-          <span class="text-ppg-500 text-xs">({{ orphans | length }} entries)</span>
+          <label for="select-all-orphans" class="text-mpg-300 text-xs">Select all</label>
+          <span class="text-mpg-500 text-xs">({{ orphans | length }} entries)</span>
         </div>
 
-        <div class="overflow-x-auto rounded border border-ppg-700 mb-4">
+        <div class="overflow-x-auto rounded border border-mpg-700 mb-4">
           <table class="w-full text-xs" role="table" aria-label="Orphaned settings">
             <thead>
-              <tr class="bg-ppg-900 text-ppg-400 text-left uppercase tracking-wide" role="row">
+              <tr class="bg-mpg-900 text-mpg-400 text-left uppercase tracking-wide" role="row">
                 <th class="px-3 py-2 w-8" scope="col">Del</th>
                 <th class="px-3 py-2" scope="col">Section</th>
                 <th class="px-3 py-2" scope="col">Key</th>
@@ -57,7 +57,7 @@
             </thead>
             <tbody>
               {% for o in orphans %}
-              <tr class="border-t border-ppg-700/50 hover:bg-ppg-700/30" role="row">
+              <tr class="border-t border-mpg-700/50 hover:bg-mpg-700/30" role="row">
                 <td class="px-3 py-1.5" role="cell">
                   <input type="checkbox"
                          class="orphan-chk accent-danger w-3 h-3"
@@ -65,13 +65,13 @@
                          value="{{ o.id }}"
                          aria-label="Select {{ o.key }} for deletion">
                 </td>
-                <td class="px-3 py-1.5 font-mono text-ppg-400">{{ o.section }}</td>
-                <td class="px-3 py-1.5 font-mono text-ppg-200">{{ o.key }}</td>
-                <td class="px-3 py-1.5 text-ppg-500 truncate max-w-[12rem]"
+                <td class="px-3 py-1.5 font-mono text-mpg-400">{{ o.section }}</td>
+                <td class="px-3 py-1.5 font-mono text-mpg-200">{{ o.key }}</td>
+                <td class="px-3 py-1.5 text-mpg-500 truncate max-w-[12rem]"
                     title="{{ o.value_disk }}">
                   {{ o.value_disk or '—' }}
                 </td>
-                <td class="px-3 py-1.5 text-ppg-500">{{ o.transport_type }}</td>
+                <td class="px-3 py-1.5 text-mpg-500">{{ o.transport_type }}</td>
               </tr>
               {% endfor %}
             </tbody>
@@ -94,7 +94,7 @@
         </div>
       </form>
       {% else %}
-      <p class="text-ppg-400 text-sm text-center py-8">No orphaned settings found.</p>
+      <p class="text-mpg-400 text-sm text-center py-8">No orphaned settings found.</p>
       {% endif %}
     </div>
 

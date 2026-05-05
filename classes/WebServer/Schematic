@@ -1,4 +1,4 @@
-PythonProtocolGateway or App/
+MultiProtocolGateway or App/
 ├── protocol_gateway.py               ← wire webserver start here
 ├── config.cfg
 ├── protocols/
@@ -53,7 +53,7 @@ PythonProtocolGateway or App/
         │
         ├── static/
         │   ├── css/
-        │   │   └── ppg.css           ← WCAG 2.2 CSS custom properties + dark mode
+        │   │   └── mpg.css           ← WCAG 2.2 CSS custom properties + dark mode
         │   └── js/
         │   │   └── json-enc.js
         │

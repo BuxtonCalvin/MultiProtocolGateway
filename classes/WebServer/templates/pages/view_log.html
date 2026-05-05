@@ -1,15 +1,15 @@
 {% extends "base.html" %}
-{% block title %}View Log — PPG Admin{% endblock %}
+{% block title %}View Log — MPG Admin{% endblock %}
 
 {% block content %}
 <div class="max-w-5xl mx-auto">
   <div class="flex items-center justify-between mb-4">
-    <h1 class="text-ppg-100 font-bold text-xl">Gateway Log</h1>
+    <h1 class="text-mpg-100 font-bold text-xl">Gateway Log</h1>
     <div class="flex items-center gap-2">
-      <label class="text-ppg-400 text-xs" for="log-lines">Lines:</label>
+      <label class="text-mpg-400 text-xs" for="log-lines">Lines:</label>
       <select id="log-lines"
-              class="bg-ppg-800 border border-ppg-600 rounded px-2 py-1
-                     text-ppg-200 text-xs focus:outline-none focus:ring-1 focus:ring-accent"
+              class="bg-mpg-800 border border-mpg-600 rounded px-2 py-1
+                     text-mpg-200 text-xs focus:outline-none focus:ring-1 focus:ring-accent"
               hx-get="/api/log"
               hx-target="#log-content"
               hx-swap="innerHTML"
@@ -31,15 +31,15 @@
   </div>
 
   <div id="log-content"
-       class="bg-ppg-900 border border-ppg-700 rounded p-3
-              font-mono text-xs text-ppg-300 overflow-y-auto
+       class="bg-mpg-900 border border-mpg-700 rounded p-3
+              font-mono text-xs text-mpg-300 overflow-y-auto
               max-h-[70vh] whitespace-pre-wrap leading-5"
        aria-label="Log output"
        aria-live="polite"
        hx-get="/api/log?lines=250"
        hx-trigger="load"
        hx-swap="innerHTML">
-    <span class="text-ppg-500">Loading log…</span>
+    <span class="text-mpg-500">Loading log…</span>
   </div>
 </div>
 {% endblock %}

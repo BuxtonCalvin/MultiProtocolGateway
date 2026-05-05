@@ -1,10 +1,10 @@
 """
-main.py — FastAPI application for the PPG Web Management UI.
+main.py — FastAPI application for the MPG Web Management UI.
 
 Entry point called from protocol_gateway.py:
 
     from classes.WebServer.main import start_webserver
-    start_webserver(config_file=config_path, gateway_instance=ppg)
+    start_webserver(config_file=config_path, gateway_instance=mpg)
 
 The server runs on a daemon thread (port 1717) and shuts down automatically
 when the gateway process exits.
@@ -67,6 +67,7 @@ from .services.setting_description_service import (
 )
 
 _log: logging.Logger = logging.getLogger(__name__)
+
 
 # ---------------------------------------------------------------------------
 # Logging — attach a dedicated rotating file handler to the "classes.WebServer"
@@ -152,7 +153,6 @@ def _install_webserver_logging() -> None:
 _WEB_DIR:      Path = Path(__file__).resolve().parent
 _TEMPLATES_DIR: Path = _WEB_DIR / "templates"
 _STATIC_DIR:   Path = _WEB_DIR / "static"
-_DB_PATH:      Path = _WEB_DIR / "ppg_staging.db"
 _ALEMBIC_INI:  Path = _WEB_DIR / "alembic.ini"
 
 
@@ -184,26 +184,27 @@ def create_app(
     Build and return the FastAPI application.
 
     config_path   — fully-resolved path to config.cfg
-    project_root  — root of PythonProtocolGateway (contains protocols/, classes/)
+    project_root  — root of MultiProtocolGateway (contains protocols/, classes/)
     """
+    db_dir: Path = config_dir / "data-db" if config_dir else project_root / "config" / "data-db"
 
     protocols_dir: Path = project_root / "protocols"
     if not protocols_dir.exists():
-        _log.warning(f"Protocols directory missing at {protocols_dir}") # noqa: G004
+        _log.warning(f"Protocols directory missing at {protocols_dir}")
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         # ---- Startup ----
         _install_webserver_logging()
-        _log.info("PPG WebServer starting up...")
+        _log.info("MPG WebServer starting up...")
 
 
         # init_db is fast (in-memory setup only) — safe to run inline.
-        engine: Engine = init_db(_DB_PATH)
+        engine: Engine = init_db(db_dir / "mpg_staging.db")
 
         def _startup_io() -> Scanner:
             import hashlib as _hashlib
-            run_migrations(_DB_PATH, _ALEMBIC_INI)
+            run_migrations(db_dir / "mpg_staging.db", _ALEMBIC_INI)
             Base.metadata.create_all(bind=engine)
             with session_scope() as db:
                 ensure_app_state(db)
@@ -214,7 +215,7 @@ def create_app(
             # so value_staged syncs to value_disk and no stale staged edits remain.
             try:
                 from .models import ConfigBackup
-                cfg_hash = _hashlib.md5(config_path.read_bytes()).hexdigest()  # noqa: S324
+                cfg_hash: str = _hashlib.md5(config_path.read_bytes()).hexdigest()  # noqa: S324
                 with session_scope() as _db:
                     latest = _db.query(ConfigBackup).order_by(
                         ConfigBackup.created_at.desc()
@@ -222,7 +223,7 @@ def create_app(
                     if latest:
                         latest_path = Path(latest.filepath)
                         if latest_path.exists():
-                            backup_hash = _hashlib.md5(latest_path.read_bytes()).hexdigest()  # noqa: S324
+                            backup_hash: str = _hashlib.md5(latest_path.read_bytes()).hexdigest()  # noqa: S324
                             if cfg_hash != backup_hash:
                                 _log.info(
                                     "config.cfg differs from last backup — "
@@ -237,14 +238,15 @@ def create_app(
 
         try:
             loop = asyncio.get_running_loop()
-            with ThreadPoolExecutor(max_workers=1, thread_name_prefix="PPGWebInit") as executor:
-                scanner: Scanner = await loop.run_in_executor(executor, _startup_io) # type: ignore
+            with ThreadPoolExecutor(max_workers=1, thread_name_prefix="MPGWebInit") as executor:
+                scanner: Scanner = await loop.run_in_executor(executor, _startup_io)
 
         except Exception as exc:
-            _log.error(f"Startup I/O failed (server still starting): {exc}")  # noqa: G004, TRY400
+            msg = f"Startup I/O failed (server still starting): {exc}"
+            _log.error(msg)
             scanner = Scanner(config_path, project_root)
 
-        _log.info(f"Database {engine.url} initialized and migrations applied.")  # noqa: G004
+        _log.info(f"Database {engine.url} initialized and migrations applied.")
 
         # State management
         app.state.config_path    = config_path
@@ -267,19 +269,19 @@ def create_app(
         watcher.start()
         app.state.file_watcher = watcher
 
-        _log.info(f"PPG WebServer ready on http://0.0.0.0:{_current_port}")  # noqa: G004
+        _log.info(f"MPG WebServer ready on http://0.0.0.0:{_current_port}")
 
         yield  # -----------------------------------------------------------
 
         # ---- Shutdown ----
-        _log.info("PPG WebServer shutting down...")
+        _log.info("MPG WebServer shutting down...")
         if hasattr(app.state, "file_watcher"):
             app.state.file_watcher.stop()
         if _queue_listener is not None:
             _queue_listener.stop()
 
     app = FastAPI(
-        title="PPG Web Management UI",
+        title="MPG Web Management UI",
         description="Protocol Gateway Configuration & Monitoring",
         version="1.0.0",
         lifespan=lifespan,
@@ -655,8 +657,8 @@ def start_webserver(config_file_path: Path, log_file: str, log_dir: str, gateway
     Usage in protocol_gateway.main():
 
         config_path: Path = root / "config" / config_file
-        start_webserver(config_path, gateway_instance=ppg)
-        ppg.run()   # blocks forever on the main thread
+        start_webserver(config_path, gateway_instance=mpg)
+        mpg.run()   # blocks forever on the main thread
     """
     global _current_port
     _current_port = port
@@ -696,11 +698,11 @@ def start_webserver(config_file_path: Path, log_file: str, log_dir: str, gateway
             # Graceful exit on Ctrl+C
             pass
 
-    thread = threading.Thread(target=_run, name="PPGWebServer", daemon=True)
+    thread = threading.Thread(target=_run, name="MPGWebServer", daemon=True)
     thread.start()
-    _log.info(f"PPG WebServer launched on http://0.0.0.0:{port}") # noqa: G004
+    _log.info(f"MPG WebServer launched on http://0.0.0.0:{port}") # noqa: G004
 
     # Store server reference on gateway so it can trigger graceful shutdown
-    # via:  ppg.web_server.should_exit = True
+    # via:  mpg.web_server.should_exit = True
     if gateway_instance is not None:
         gateway_instance.web_server = server

@@ -1,17 +1,16 @@
-# Python Protocol Gateway
+# Multi Protocol Gateway
 
-![Python 3.9](https://github.com/BuxtonCalvin/PythonProtocolGateway/actions/workflows/python-3.9.yml/badge.svg)
-![Python 3.10](https://github.com/BuxtonCalvin/PythonProtocolGateway/actions/workflows/python-3.10.yml/badge.svg)
-![Python 3.11](https://github.com/BuxtonCalvin/PythonProtocolGateway/actions/workflows/python-3.11.yml/badge.svg)
-![Python 3.12](https://github.com/BuxtonCalvin/PythonProtocolGateway/actions/workflows/python-3.12.yml/badge.svg)
-![Python 3.13](https://github.com/BuxtonCalvin/PythonProtocolGateway/actions/workflows/python-3.13.yml/badge.svg)
-![Python 3.13](https://github.com/BuxtonCalvin/PythonProtocolGateway/actions/workflows/python-3.14.yml/badge.svg)
-[![PyPI version](https://img.shields.io/pypi/v/python-protocol-gateway.svg)](https://pypi.org/project/python-protocol-gateway/)
-[![CodeQL](https://github.com/BuxtonCalvin/PythonProtocolGateway/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/BuxtonCalvin/PythonProtocolGateway/actions/workflows/github-code-scanning/codeql)
+![Python 3.10](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.10.yml/badge.svg)
+![Python 3.11](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.11.yml/badge.svg)
+![Python 3.12](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.12.yml/badge.svg)
+![Python 3.13](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.13.yml/badge.svg)
+![Python 3.13](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.14.yml/badge.svg)
+[![PyPI version](https://img.shields.io/pypi/v/multi-protocol-gateway.svg)](https://pypi.org/project/multi-protocol-gateway/)
+[![CodeQL](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/github-code-scanning/codeql)
 
-**Python Protocol Gateway (PPG)** is a production-grade data bridge for industrial and energy-monitoring hardware. It reads live register data from Modbus RTU/TCP, CAN bus, and proprietary serial protocols, then fans that data out to any combination of MQTT brokers, TimescaleDB, InfluxDB, and JSON outputs — all managed through a built-in web administration UI.
+**Multi Protocol Gateway (MPG)** is a production-grade data bridge for industrial and energy-monitoring hardware. It reads live register data from Modbus RTU/TCP, CAN bus, and proprietary serial protocols, then fans that data out to any combination of MQTT brokers, TimescaleDB, InfluxDB, and JSON outputs — all managed through a built-in web administration UI.
 
-PPG is purpose-built for solar inverters, battery management systems (BMS), energy meters, and any device that speaks Modbus, but its protocol-map architecture means it can be adapted to virtually any register-based hardware.
+MPG is purpose-built for solar inverters, battery management systems (BMS), energy meters, and any device that speaks Modbus, but its protocol-map architecture means it can be adapted to virtually any register-based hardware.
 
 ---
 
@@ -41,14 +40,14 @@ PPG is purpose-built for solar inverters, battery management systems (BMS), ener
 | **Web UI** | Full browser-based configuration and live management on port **1717** |
 | **Protocol library** | 20+ pre-built device protocol maps; live register analysis tool to build new ones |
 | **Config management** | SQLite staging database; changes are previewed and committed — no raw file editing required |
-| **Python versions** | 3.9 – 3.13 |
+| **Python versions** | 3.10 – 3.14 |
 | **Deployment** | Script, systemd service, Docker container, Home Assistant add-on |
 
 ---
 
 ## Web Administration UI
 
-PPG ships with a **FastAPI + Jinja2 web server** on port **1717**. The server is not a simple settings editor — it is the primary interface for managing the entire gateway lifecycle.
+MPG ships with a **FastAPI + Jinja2 web server** on port **1717**. The server is not a simple settings editor — it is the primary interface for managing the entire gateway lifecycle.
 
 ### Dashboard — Device Overview
 
@@ -78,14 +77,14 @@ All edits go through a structured diff engine — the UI shows exactly which row
 
 ### Live Device Analysis
 
-The **Analyze** page is the tool for working with new or undocumented hardware. Select a physical device from the scraper page. Then in the analysis page, and one or more reference protocol maps, then click **Run Analysis**.  PPG then:
+The **Analyze** page is the tool for working with new or undocumented hardware. Select a physical device from the scraper page. Then in the analysis page, and one or more reference protocol maps, then click **Run Analysis**.  MPG then:
 
 1. Performs a live Modbus scan across all input and holding registers in the hardware device
 2. Compares the live scan against every selected protocol map
 3. Scores each protocol map by accuracy — how many documented registers actually appear in the scan within value ranges set in the protocol
 4. Produces per-protocol **Add** and **Remove** action lists, flagging registers that are present in the scan but absent from the default protocol map (candidates to add) and registers in the map that were not found on the device (candidates to remove)
 
-Each suggested change can be individually toggled into or out of the commit queue. When you click **Commit**, PPG writes only the selected changes back to the protocol CSV files and rescans the web database — no manual CSV editing required.
+Each suggested change can be individually toggled into or out of the commit queue. When you click **Commit**, MPG writes only the selected changes back to the protocol CSV files and rescans the web database — no manual CSV editing required.
 
 Analysis results stream back to the browser in real time via **Server-Sent Events (SSE)**, so you see scan progress line by line as registers are polled.
 
@@ -124,7 +123,7 @@ Bridges receive data from scrapers and write it somewhere. They are passive — 
 
 ## Supported Protocols & Devices
 
-PPG ships with pre-built protocol maps for the following manufacturers. Each protocol map is a pair of CSV files (input and holding register maps) plus a JSON descriptor:
+MPG ships with pre-built protocol maps for the following manufacturers. Each protocol map is a pair of CSV files (input and holding register maps) plus a JSON descriptor:
 
 | Manufacturer | Models / Protocols |
 | --- | --- |
@@ -143,13 +142,13 @@ PPG ships with pre-built protocol maps for the following manufacturers. Each pro
 
 For a full list of tested devices and community-reported compatibility, see [`devices_and_protocols.csv`](documentation/usage/devices_and_protocols.csv).
 
-PPG also supports any generic Modbus RTU or TCP device when given a register map — the Live Analysis tool is specifically designed to help build maps for undocumented hardware.
+MPG also supports any generic Modbus RTU or TCP device when given a register map — the Live Analysis tool is specifically designed to help build maps for undocumented hardware.
 
 ---
 
 ## Transport Architecture
 
-PPG separates **scrapers** (devices it reads from) and **bridges** (destinations it writes to). A single gateway instance can run multiple scrapers and multiple bridges simultaneously.
+MPG separates **scrapers** (devices it reads from) and **bridges** (destinations it writes to). A single gateway instance can run multiple scrapers and multiple bridges simultaneously.
 
 ``` text
 Hardware Device
@@ -173,24 +172,24 @@ Each transport is independently configurable with its own scan interval, log lev
 
 ### Recommendation
 
-- It is much easier and far less error prone to install PPG with its associated bridges via docker compose.  A full docker stack is available see [`docker-compose.yml`](documentation/docker/docker-compose.yml).  Make sure to also install the accompanying configuration files .env, mosquitto.conf and PPG.yaml (Grafana provisioning).  However, if you want to install without Docker, please read the following:
+- It is much easier and far less error prone to install MPG with its associated bridges via docker compose.  A full docker stack is available see [`docker-compose.yml`](documentation/docker/docker-compose.yml).  Make sure to also install the accompanying configuration files .env, mosquitto.conf and MPG.yaml (Grafana provisioning).  However, if you want to install without Docker, please read the following:
 
 ### Prerequisites
 
-- Python 3.9 or later (3.10+ recommended)
+- Python 3.10 or later
 - A device connected via USB serial adapter, RS-485 adapter, or network
 
 ### Install
 
 ```bash
-pip install python-protocol-gateway
+pip install multi-protocol-gateway
 ```
 
 Or from source:
 
 ```bash
-git clone https://github.com/BuxtonCalvin/PythonProtocolGateway.git
-cd PythonProtocolGateway
+git clone https://github.com/BuxtonCalvin/MultiProtocolGateway.git
+cd MultiProtocolGateway
 pip install -r requirements.txt
 ```
 
@@ -221,27 +220,27 @@ docker build . -t protocol_gateway
 docker run --device=/dev/ttyUSB0 -p 1717:1717 protocol_gateway
 
 # Or pull from Docker Hub
-docker pull hotn00b/pythonprotocolgateway
+docker pull buxtoncalvin/multiprotocolgateway
 docker run \
   -v $(pwd)/config.cfg:/app/config.cfg \
   --device=/dev/ttyUSB0 \
   -p 1717:1717 \
-  hotn00b/pythonprotocolgateway
+  buxtoncalvin/multiprotocolgateway
 ```
 
-[Docker Hub Repository](https://hub.docker.com/r/hotn00b/pythonprotocolgateway)
+[Docker Hub Repository](https://hub.docker.com/r/buxtoncalvin/multiprotocolgateway)
 
 ---
 
 ## Full Docker Compose Stack
 
-For a complete monitoring stack — PPG + TimescaleDB + InfluxDB + MQTT + pgAdmin + Chronograf + Grafana — see the included [`docker-compose.yml`](documentation/docker/docker-compose.yml) in this repository.
+For a complete monitoring stack — MPG + TimescaleDB + InfluxDB + MQTT + pgAdmin + Chronograf + Grafana — see the included [`docker-compose.yml`](documentation/docker/docker-compose.yml) in this repository.
 
 The stack provides:
 
 | Service | Port | Purpose |
 | --- | --- | --- |
-| **PPG** | 1717 | Gateway web UI and core service |
+| **MPG** | 1717 | Gateway web UI and core service |
 | **TimescaleDB** | 5432 | Time-series PostgreSQL for long-term storage |
 | **InfluxDB** | 8086 | Alternative time-series database |
 | **Mosquitto MQTT** | 1883 / 9001 | MQTT broker for Home Assistant and other subscribers |
@@ -263,7 +262,7 @@ Full documentation for the compose stack is in [`docker-compose.yml`](documentat
 
 ## Installation as a System Service
 
-PPG can run as a systemd service that starts automatically on boot.
+MPG can run as a systemd service that starts automatically on boot.
 
 ```bash
 cp protocol_gateway.example.service /etc/systemd/system/protocol_gateway.service
@@ -275,13 +274,13 @@ sudo systemctl start protocol_gateway.service
 systemctl status protocol_gateway.service
 ```
 
-The short alias `ppg` can be used as the service name if preferred.
+The short alias `mpg` can be used as the service name if preferred.
 
 ---
 
 ## Home Assistant Integration
 
-PPG publishes data to MQTT using Home Assistant's auto-discovery format. Devices appear automatically under **Settings → Devices & Services → MQTT** once the broker is configured on both sides.
+MPG publishes data to MQTT using Home Assistant's auto-discovery format. Devices appear automatically under **Settings → Devices & Services → MQTT** once the broker is configured on both sides.
 
 ### Install Mosquitto on Home Assistant
 
@@ -299,7 +298,7 @@ For connecting an external MQTT broker to Home Assistant, see [this guide](https
 
 ### Troubleshooting: Unknown Status
 
-If all MQTT values appear as "Unknown" immediately after setup, this is a known Home Assistant discovery timing issue. Restart the PPG service and the values will populate correctly.
+If all MQTT values appear as "Unknown" immediately after setup, this is a known Home Assistant discovery timing issue. Restart the MPG service and the values will populate correctly.
 
 ---
 
@@ -331,7 +330,7 @@ Find more protocol documentation here:  [`protocols.md`](documentation/usage/pro
 
 ### Using the Live Analysis Tool to Build New Maps
 
-1. Connect your device and confirm it appears in the PPG dashboard
+1. Connect your device and confirm it appears in the MPG dashboard
 2. Navigate to **Analyze → [Device Name]**
 3. Select one or more reference protocol maps to compare against
 4. Click **Run Analysis** and wait for the scan to complete
@@ -394,8 +393,8 @@ For manufacturer device-specific wiring and installation guides: [devices](docum
 
 ## Contributing & Donations
 
-PPG was built because no working open-source solution existed for this class of hardware. Community protocol maps, bug reports, and pull requests are welcome.
+MPG was built because no working open-source solution existed for this class of hardware. Community protocol maps, bug reports, and pull requests are welcome.
 
-If PPG has saved you time or money, donations and GitHub sponsorships are appreciated and help fund continued development.
+If MPG has saved you time or money, donations and GitHub sponsorships are appreciated and help fund continued development.
 
 [GitHub Sponsors](https://github.com/sponsors/BuxtonCalvin)

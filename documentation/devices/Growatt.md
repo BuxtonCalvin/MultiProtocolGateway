@@ -1,39 +1,44 @@
 # Growatt To MQTT
 
 ## Hardware
+
 1. USB-B or USB-A cable
 2. for models with a DB9 port a DB9 RS232 adapter is required. "Before use RS232 communication, you should make sure the follow PIN1 and PIN2 are OFF"
-3. Connect cable to wifi dongle port; if a alternative usb port exists, try connecting to that one first. 
+3. Connect cable to wifi dongle port; if a alternative usb port exists, try connecting to that one first.
 
 Optional hardware:
-ADUM3160 chipset / USB isolator. The growatt inverter's usb port has a power issue that can effect reliablilty; using an isolator will help mitigate this problem.
-https://www.aliexpress.com/item/1005002959825296.html?spm=a2g0o.order_list.order_list_main.5.51c618021n8SGf
+ADUM3160 chipset / USB isolator. The growatt inverter's usb port has a power issue that can effect reliability; using an isolator will help mitigate this problem.
+<https://www.aliexpress.com/item/1005002959825296.html?spm=a2g0o.order_list.order_list_main.5.51c618021n8SGf>
 
 For best long term reliability, use a rs485 adapter \w rj45 ethernet cable.
 
 ## Configuration
-Follow configuration example for ModBus RTU to MQTT
-https://github.com/HotNoob/PythonProtocolGateway/wiki/Configuration-Examples#modbus-rtu-to-mqtt
 
-```
+Follow configuration example for ModBus RTU to MQTT
+<https://github.com/BuxtonCalvin/MultiProtocolGateway/wiki/Configuration-Examples#modbus-rtu-to-mqtt>
+
+``` ini
 protocol_version = v0.14
 ```
 
 ## Inverter Protocol Select
-```
+
+``` ini
 spf 5000              = v0.14
 spf 12000t dvm-us mpv = v0.14
 ```
 
 ## HomeAssistant Cards
-Here are some example cards. If you want to use them, you will have to change the variable names and others to reflect your configs. 
+
+Here are some example cards. If you want to use them, you will have to change the variable names and others to reflect your configs.
 
 ## PV1 & PV2 Card
-![pv watts](https://github.com/HotNoob/PythonProtocolGateway/assets/2180145/372980f9-f2d6-48e5-9acd-ee519badb61f)
+
+![pv watts](https://github.com/BuxtonCalvin/MultiProtocolGateway/assets/2180145/372980f9-f2d6-48e5-9acd-ee519badb61f)
 <details>
   <summary>code</summary>
 
-```
+``` ini
 type: horizontal-stack
 cards:
   - type: gauge
@@ -67,14 +72,16 @@ cards:
       yellow: 250
       red: 0
 ```
+
 </details>
 
 ## Output Card
-![output](https://github.com/HotNoob/PythonProtocolGateway/assets/2180145/9a129dad-73bc-4401-9746-d7a0dd22cf0a)
+
+![output](https://github.com/BuxtonCalvin/MultiProtocolGateway/assets/2180145/9a129dad-73bc-4401-9746-d7a0dd22cf0a)
 <details>
   <summary>code</summary>
 
-```
+``` ini
 type: horizontal-stack
 cards:
   - type: gauge
@@ -131,4 +138,5 @@ cards:
     max: 50
 
 ```
+
 </details>

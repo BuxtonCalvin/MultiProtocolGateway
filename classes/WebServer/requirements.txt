@@ -1,4 +1,4 @@
-# PPG WebServer dependencies
+# MPG WebServer dependencies
 # Install with: pip install -r classes/WebServer/requirements.txt
 
 fastapi>=0.110.0

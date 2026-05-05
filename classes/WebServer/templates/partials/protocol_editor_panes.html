@@ -10,13 +10,13 @@
 
   <!-- ══ LEFT: PROTOCOL INFO PANE ══ -->
   <aside class="col-span-12 md:col-span-3 h-screen sticky top-14 overflow-y-auto
-                bg-ppg-800 rounded border border-ppg-700 p-3">
+                bg-mpg-800 rounded border border-mpg-700 p-3">
 
-    <h2 class="text-ppg-100 font-semibold text-sm mb-1">
+    <h2 class="text-mpg-100 font-semibold text-sm mb-1">
       {{ protocol_name }}
     </h2>
-    <p class="text-ppg-400 text-xs mb-3">
-      Group: <span class="font-mono text-ppg-300">{{ protocol_group }}</span>
+    <p class="text-mpg-400 text-xs mb-3">
+      Group: <span class="font-mono text-mpg-300">{{ protocol_group }}</span>
     </p>
 
     <!-- Tab summary -->
@@ -24,13 +24,13 @@
       <p class="label mb-1">Available Register Maps</p>
       {% for tab in proto_tabs %}
       <div class="flex items-center justify-between py-1
-                  border-b border-ppg-700/40 last:border-0">
-        <span class="text-ppg-200 text-xs font-mono">{{ tab.registry_type }}</span>
+                  border-b border-mpg-700/40 last:border-0">
+        <span class="text-mpg-200 text-xs font-mono">{{ tab.registry_type }}</span>
         <span class="badge badge-ok text-xs">{{ tab.total }} regs</span>
       </div>
       {% endfor %}
       {% if not proto_tabs %}
-      <p class="text-ppg-500 text-xs italic">No register maps found in database.<br>
+      <p class="text-mpg-500 text-xs italic">No register maps found in database.<br>
         Run a re-scan from the dashboard.</p>
       {% endif %}
     </div>
@@ -39,7 +39,7 @@
     {% if csv_path %}
     <div class="card mt-2">
       <p class="label mb-1">Source File</p>
-      <p class="font-mono text-ppg-400 text-xs break-all">{{ csv_path }}</p>
+      <p class="font-mono text-mpg-400 text-xs break-all">{{ csv_path }}</p>
     </div>
     {% endif %}
 
@@ -51,8 +51,8 @@
         {% for k, v in json_data.items() %}
         {% if not k.endswith('_codes') %}
         <div class="flex justify-between gap-2 text-xs">
-          <dt class="font-mono text-ppg-400 truncate">{{ k }}</dt>
-          <dd class="text-ppg-200 truncate">{{ v }}</dd>
+          <dt class="font-mono text-mpg-400 truncate">{{ k }}</dt>
+          <dd class="text-mpg-200 truncate">{{ v }}</dd>
         </div>
         {% endif %}
         {% endfor %}
@@ -80,7 +80,7 @@
 
     <!-- Tab strip -->
     {% if proto_tabs %}
-    <div class="flex gap-1 mb-3 border-b border-ppg-700" role="tablist">
+    <div class="flex gap-1 mb-3 border-b border-mpg-700" role="tablist">
       {% for tab in proto_tabs %}
       <button class="tab-btn px-4 py-1.5 text-xs font-medium rounded-t
                      {% if loop.first %}tab-active{% else %}tab-inactive{% endif %}"
@@ -92,7 +92,7 @@
               hx-headers='{"Cache-Control": "no-cache"}'
               {% if loop.first %}hx-trigger="load, click"{% else %}hx-trigger="click"{% endif %}>
         {{ tab.registry_type | title }}
-        <span class="text-ppg-300 ml-1 text-xs">({{ tab.total }})</span>
+        <span class="text-mpg-300 ml-1 text-xs">({{ tab.total }})</span>
       </button>
       {% endfor %}
     </div>
@@ -100,9 +100,9 @@
 
     <!-- Protocol table loads here via HTMX -->
     <div id="protocol-table-container"
-         class="overflow-x-auto rounded border border-ppg-700">
+         class="overflow-x-auto rounded border border-mpg-700">
       {% if not proto_tabs %}
-      <div class="px-4 py-8 text-center text-ppg-400 text-sm">
+      <div class="px-4 py-8 text-center text-mpg-400 text-sm">
         No register data found for <strong class="font-mono">{{ protocol_name }}</strong>.<br>
         <button hx-get="/api/scan"
                 hx-swap="none"

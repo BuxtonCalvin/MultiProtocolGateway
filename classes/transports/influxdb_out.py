@@ -352,7 +352,7 @@ class influxdb_out(transport_base):
 
     def write_data(self, data: dict[str, int | float | str ], from_transport: transport_base) -> None:
         # Promote LCDMachineModelCode to device_model if present and meaningful
-        if "LCDMachineModelCode" in data and data["LCDMachineModelCode"] and data["LCDMachineModelCode"] != "PPG":
+        if "LCDMachineModelCode" in data and data["LCDMachineModelCode"] and data["LCDMachineModelCode"] != "MPG":
             from_transport.device_model = str(data["LCDMachineModelCode"])
 
         # Debug logging to track transport data flow
@@ -374,7 +374,7 @@ class influxdb_out(transport_base):
 
     def _process_and_store_data(self, data: dict[str, int | float | str ], from_transport: transport_base):
         # Promote LCDMachineModelCode to device_model if present and meaningful
-        if "LCDMachineModelCode" in data and data["LCDMachineModelCode"] and data["LCDMachineModelCode"] != "PPG":
+        if "LCDMachineModelCode" in data and data["LCDMachineModelCode"] and data["LCDMachineModelCode"] != "MPG":
             from_transport.device_model = str(data["LCDMachineModelCode"])
         if not self.enable_persistent_storage:
             self._log.warning("Persistent storage disabled, data will be lost")
@@ -403,7 +403,7 @@ class influxdb_out(transport_base):
 
     def _process_and_write_data(self, data: dict[str, int | float | str ], from_transport: transport_base):
         # Promote LCDMachineModelCode to device_model if present and meaningful
-        if "LCDMachineModelCode" in data and data["LCDMachineModelCode"] and data["LCDMachineModelCode"] != "PPG":
+        if "LCDMachineModelCode" in data and data["LCDMachineModelCode"] and data["LCDMachineModelCode"] != "MPG":
             from_transport.device_model = str(data["LCDMachineModelCode"])
         # Prepare tags for InfluxDB
         tags = {}
