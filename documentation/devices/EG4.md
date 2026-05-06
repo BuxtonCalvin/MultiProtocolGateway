@@ -18,11 +18,11 @@
 
 ## Raspberry Pi Can Hat
 
-If using a Raspberry Pi Can Hat, The expected pin out RS485 A/B configuration maybe be reversed.
+If using a Raspberry Pi Can Hat, The expected pin out RS485 A/B configuration may be reversed.
 
-If you get the following error while using a Raspberry Pi Can Hat swap your A/B wires:
+If you get the following error while using a Raspberry Pi Can Hat, swap your A/B wires:
 
-```
+``` ini
 ERROR:.transport_base[transport.0]:<bound method ModbusException.__str__ of ModbusIOException()>
 ```
 
@@ -31,16 +31,16 @@ ERROR:.transport_base[transport.0]:<bound method ModbusException.__str__ of Modb
 Follow configuration example for ModBus RTU to MQTT
 <https://github.com/BuxtonCalvin/MultiProtocolGateway/wiki/Configuration-Examples#modbus-rtu-to-mqtt>
 
-#### EG4 6000XP, EG4 18Kpv
+### EG4 6000XP, EG4 18Kpv
 
-```
+``` ini
 protocol_version = eg4_v58
 baud = 19200
 ```
 
-#### EG4 3000EHV inverters
+### EG4 3000EHV inverters
 
-```
+``` ini
 protocol_version = eg4_3000ehv_v1
 ```
 

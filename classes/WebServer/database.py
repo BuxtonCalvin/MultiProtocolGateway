@@ -35,7 +35,7 @@ from .models import (
     SettingDescription,
 )
 
-log: logging.Logger = logging.getLogger(__name__)
+_log: logging.Logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Engine factory
@@ -77,7 +77,7 @@ def init_db(db_path: Path) -> Engine:
         expire_on_commit=False,
     )
     msg: str = f"SQLite staging DB engine created at {db_path}"
-    log.info(msg)
+    _log.info(msg)
     return _engine
 
 
@@ -157,10 +157,10 @@ def run_migrations(db_path: Path, alembic_ini_path: Path) -> None:
         cfg.set_main_option("script_location", str(alembic_ini_path.parent / "migrations"))
 
         alembic_command.upgrade(cfg, "head")
-        log.info("Alembic migrations applied successfully.")
+        _log.info("Alembic migrations applied successfully.")
     except Exception as exc:
         msg: str = f"Alembic migration failed — aborting server startup: {exc}"
-        log.exception(msg)
+        _log.exception(msg)
         raise
 
 
@@ -179,7 +179,7 @@ def ensure_app_state(db: Session) -> AppState:
         db.add(state)
         db.commit()
         db.refresh(state)
-        log.info("AppState row created.")
+        _log.info("AppState row created.")
     return state
 
 

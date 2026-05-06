@@ -8,7 +8,7 @@
 ## Configuration
 
 Follow configuration example for ModBus RTU to MQTT
-https://github.com/BuxtonCalvin/MultiProtocolGateway/wiki/Configuration-Examples#modbus-rtu-to-mqtt
+<https://github.com/BuxtonCalvin/MultiProtocolGateway/wiki/Configuration-Examples#modbus-rtu-to-mqtt>
 
 ``` ini
 protocol_version = sigineer_v0.11

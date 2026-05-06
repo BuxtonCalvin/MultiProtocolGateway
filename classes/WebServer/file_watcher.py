@@ -42,7 +42,7 @@ class _MPGEventHandler:
         try:
             self._scanner.run()
         except Exception as exc:
-            msg = f"Re-scan after file change failed: {exc}"
+            msg: str = f"Re-scan after file change failed: {exc}"
             _log.error(msg)
 
     # watchdog interface

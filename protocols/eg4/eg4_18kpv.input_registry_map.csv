@@ -1,224 +1,224 @@
-register,variable_name,documented_name,unit,data_type,values,note,writable,read_interval
-0,state,State,,,0-65535,For more information,R,
-1,vpv1,Vpv1,0.1V,,0-65535,PV1 voltage,R,
-2,vpv2,Vpv2,0.1V,,0-65535,PV2 voltage,R,
-3,vpv3,Vpv3,0.1V,,0-65535,PV3 voltage,R,
-4,vbat,Vbat,0.1V,,0-65535,Battery voltage,R,
-5,soc,SOC,%,8bit,0-100,Battery capacity,R,
-5.b8,soh,SOH,%,8bit,0-100,Battery State of health,R,
-6,internal_fault,Internal Fault,,,0-65535,For more information,R,
-7,ppv1,Ppv1,W,,0-65535,PV1 power,R,
-8,ppv2,Ppv2,W,,0-65535,PV2 power,R,
-9,ppv3,Ppv3,W,,0-65535,PV3 power,R,
-10,pcharge,Pcharge,W,,0-65535,Charging power (power flowing into the battery),R,
-11,pdischarge,Pdischarge,W,,0-65535,Discharging power (power flowing out of battery),R,
-12,vacr,VacR,0.1V,,0-65535,R-phase utility three phase grid voltage,R,
-13,vacs,VacS,0.1V,,0-65535,S-phase utility three phase grid voltage,R,
-14,vact,VacT,0.1V,,0-65535,T-phase utility three phase grid voltage,R,
-15,fac,Fac,0.01Hz,,0-65535,Utility grid frequency,R,
-16,pinv,Pinv,W,,0-65535,On-gird inverter power (For three phase: R phase),R,
-17,prec,Prec,W,,0-65535,AC charging rectification power (For three phase: R phase),R,
-18,iinvrms,IinvRMS,0.01A,,0-65535,Inverter rms current output (For three phase: R phase),R,
-19,pf,PF,0.001,,0-2000,"Pf x?(0,1000]->x/1000 x?(1000,2000)->(1000-x)/1000",R,
-20,vepsr,VepsR,0.1V,,0-65535,R phase off-grid three phase output voltage,R,
-21,vepss,VepsS,0.1V,,0-65535,S phase off-grid three phase output voltage,R,
-22,vepst,VepsT,0.1V,,0-65535,T phase off-grid three phase output voltage,R,
-23,feps,Feps,0.01Hz,,0-65535,Off-grid output frequency,R,
-24,peps,Peps,W,,0-65535,Off-grid inverter power (For three phase: R phase),R,
-25,seps,Seps,VA,,0-65535,Off-grid apparent power (For three phase: R phase),R,
-26,ptogrid,Ptogrid,W,,0-65535,User on-grid power ( or for three phase: R phase),R,
-27,ptouser,Ptouser,W,,0-65535,Grid power capacity (or for three phase: R phase),R,
-28,epv1_day,Epv1_day,0.1kWh,,0-65535,PV1 power generation today / AC Energy Storage Epv_day,R,
-29,epv2_day,Epv2_day,0.1kWh,,0-65535,PV2 power generation today,R,
-30,epv3_day,Epv3_day,0.1kWh,,0-65535,PV3 power generation today (total PV=PV1+PV2+PV3),R,
-31,einv_day,Einv_day,0.1kWh,,0-65535,Today's on-grid inverter output energy,R,
-32,erec_day,Erec_day,0.1kWh,,0-65535,Today's AC charging rectifier energy,R,
-33,echg_day,Echg_day,0.1kWh,,0-65535,Energy Charge today,R,
-34,edischg_day,Edischg_day,0.1kWh,,0-65535,Energy Discharge today,R,
-35,eeps_day,Eeps_day,0.1kWh,,0-65535,Today's off-grid output energy,R,
-36,etogrid_day,Etogrid_day,0.1kWh,,0-65535,Today's export to grid energy,R,
-37,etouser_day,Etouser_day,0.1kWh,,0-65535,Electricity supplied to user from the grid today,R,
-38,vbus1,Vbus1,0.1V,,0-65535,Voltage of Bus 1,R,
-39,vbus2,Vbus2,0.1V,,0-65535,Voltage of Bus 2,R,
-40,epv1_all_l,Epv1_all_l,0.1kWh,,0-65535,PV1 cumulative power generation/AC energy storage Epv_all Low byte,R,
-41,epv1_all_h,Epv1_all_h,0.1kWh,,0-65535,PV1 cumulative power generation/AC energy storage Epv_all high byte,R,
-42,epv2_all_l,Epv2_all_l,0.1kWh,,0-65535,PV2 cumulative power generation low byte,R,
-43,epv2_all_h,Epv2_all_h,0.1kWh,,0-65535,PV2 cumulative power generation high byte,R,
-44,epv3_all_l,Epv3_all_l,0.1kWh,,0-65535,PV3 cumulative power generation low byte (total PV=PV1+PV2+PV3),R,
-45,epv3_all_h,Epv3_all_h,0.1kWh,,0-65535,PV3 cumulative power generation high byte (total PV=PV1+PV2+PV3),R,
-46,einv_all_l,Einv_all_l,0.1kWh,,0-65535,Inverter output accumulated power low byte,R,
-47,einv_all_h,Einv_all_h,0.1kWh,,0-65535,Inverter output accumulates power high byte,R,
-48,erec_all_l,Erec_all_l,0.1kWh,,0-65535,AC charging accumulates rectified power Low byte,R,
-49,erec_all_h,Erec_all_h,0.1kWh,,0-65535,AC charging accumulates rectified power high byte,R,
-50,echg_all_l,Echg_all_l,0.1kWh,,0-65535,Cumulative charge energy low byte,R,
-51,echg_all_h,Echg_all_h,0.1kWh,,0-65535,Cumulative charge energy high byte,R,
-52,edischg_all_l,Edischg_all_l,0.1kWh,,0-65535,Cumulative discharge charge energy Low byte,R,
-53,edischg_all_h,Edischg_all_h,0.1kWh,,0-65535,Cumulative discharge charge energy High byte,R,
-54,eeps_all_l,Eeps_all_l,0.1kWh,,0-65535,Cumulative inverter off-grid output energy Low byte,R,
-55,eeps_all_h,Eeps_all_h,0.1kWh,,0-65535,Cumulative inverter off-grid output energy High byte,R,
-56,etogrid_all_l,Etogrid_all_l,0.1kWh,,0-65535,Accumulate export energy Low byte,R,
-57,etogrid_all_h,Etogrid_all_h,0.1kWh,,0-65535,Accumulate export energy High byte,R,
-58,etouser_all_l,Etouser_all_l,0.1kWh,,0-65535,Cumulative import energy Low byte,R,
-59,etouser_all_h,Etouser_all_h,0.1kWh,,0-65535,Cumulative import energy high byte,R,
-60,faultcode_l,FaultCode_l,,,0-65535,For more information,R,
-61,faultcode_h,FaultCode_h,,,0-65535,For more information,R,
-62,warningcode_l,WarningCode_l,,,0-65535,For more information,R,
-63,warningcode_h,WarningCode_h,,,0-65535,For more information,R,
-64,tinner,Tinner,celsius,,0-65535,Internal temperature,R,
-65,tradiator1,Tradiator1,celsius,,0-65535,Radiator temperature 1,R,
-66,tradiator2,Tradiator2,celsius,,0-65535,Radiator temperature 2,R,
-67,tbat,Tbat,celsius,,0-65535,Battery temperature,R,
-69,runningtime_l,RunningTime_l,second,,,Runtime duration,R,
-70,runningtime_h,RunningTime_h,second,,,Runtime duration,R,
-71,autoteststart,AutoTestStart,Bit0-3,4bit,,0 - not started 1-Activated 1 - started,R,
-71.b4,ubautoteststatus,UbAutoTestStatus,Bit4-7,4bit,,0-waiting 1-testing 2-test fail 3-V test OK 4-F test OK 5- test pass,R,
-71.b8,ubautoteststep,UbAutoTestStep,Bit8-11,4bit,,1-V1L test 2-V1H 3-F1L test 4-F1H test 5-V2L test 6-V2H test 7-F2L test 8-F2H test,R,
-72,wautotestlimit,wAutoTestLimit,0.1V/0. 01Hz,,,"When ubAuto Test Step=1,2,5,6, is the voltage limit; When ubAutoTest Step=3,4,7,8, it is the frequency limit",R,
-73,uwautotestdefault_time,uwAutoTestDefault_Time,ms,,,,R,
-74,uwautotesttripvalue,uwAutoTestTripValue,0.1V/0. 01Hz,,,"When ubAuto Test Step=1,2,5,6, is the voltage limit; When ubAutoTestStep=3,4,7,8, it is the frequency limit",R,
-75,uwautotesttriptime,uwAutoTestTripTime,ms,,,,R,
-77.b0,acinputtype,ACInputType,Bit0,1bit,0 or 1,0-Grid 1-Generator for 18KHybrid,R,
-77.b1,accoupleinverterflow,ACCoupleInverterFlow,Bit1,1bit,0 or 1,0-no flow 1-show flow,R,
-77.b2,accoupleen,ACCoupleEn,Bit2,1bit,0 or 1,0-Disable 1-Enable,R,
-78,register_78,Register 78,,ushort,0-65535,,R,
-79,register_79,Register 79,,ushort,0-65535,,R,
-80,battypeandbrand,BatTypeAndBrand,,4bit,,For more information,R,
-80.b4,batcomtype,BatComType,,4bit,0 or 1,0-CAN 1-485,R,
-81,maxchgcurr,MaxChgCurr,0.01A,,,The maximum charging current of BMS limits,R,
-82,maxdischgcurr,MaxDischgCurr,0.01A,,,The maximum discharging current of BMS limits,R,
-83,chargevoltrefi,ChargeVoltRefI,0.1V,,500-590,Recommended charging voltage by BMS equating to 50.0V-59.0v. This register acts as a monitor,R,
-84,dischgcutvolt,DischgCutVolt,0.1V,,440-480,Minimum voltage 44-48v level at which the inverter stops drawing power from the connected battery bank,R,
-85,batstatus0_bms,BatStatus0_BMS,,,,Status information of BMS,R,
-86,batstatus1_bms,BatStatus1_BMS,,,,Status information of BMS,R,
-87,batstatus2_bms,BatStatus2_BMS,,,,Status information of BMS,R,
-88,batstatus3_bms,BatStatus3_BMS,,,,Status information of BMS,R,
-89,batstatus4_bms,BatStatus4_BMS,,,,Status information of BMS,R,
-90,batstatus5_bms,BatStatus5_BMS,,,,Status information of BMS,R,
-91,batstatus6_bms,BatStatus6_BMS,,,,Status information of BMS,R,
-92,batstatus7_bms,BatStatus7_BMS,,,,Status information of BMS,R,
-93,batstatus8_bms,BatStatus8_BMS,,,,Status information of BMS,R,
-94,batstatus9_bms,BatStatus9_BMS,,,,Status information of BMS,R,
-95,batstatus_inv,BatStatus_INV,,,,The inverter aggregates lithium battery status information,R,
-96,batparallelnum,BatParallelNum,,,,Number of batteries in parallel,R,
-97,batcapacity,BatCapacity,Ah,,,Battery capacity,R,
-98,batcurrent_bms,BatCurrent_BMS,0.1A,SHORT_LE,,Battery current,R,
-99,faultcode_bms,FaultCode_BMS,,,,Reports the active error status transmitted from the Battery Management System (BMS) to the inverter,R,
-100,warningcode_bms,WarningCode_BMS,,,,Reports non-critical alerts while the FaultCode indicates a system-stopping error,R,
-101,maxcellvolt_bms,MaxCellVolt_BMS,0.001V,,,Maximum voltage of cell,R,
-102,mincellvolt_bms,MinCellVolt_BMS,0.001V,,,Minimum voltage of cell,R,
-103,maxcelltemp_bms,MaxCellTemp_BMS,0.1C,USHORT_LE,,Maximum temperature of cell,R,
-104,mincelltemp_bms,MinCellTemp_BMS,0.1C,USHORT_LE,,Minimum temperature of cell,R,
-105,bmsfwupdatestate,BMSFWUpdateState,,,,1-Upgrade in process 2-Upgrade successful 3- Upgrade failed,R,
-106,cyclecnt_bms,CycleCnt_BMS,,,,Number of charging/discharging cycles,R,
-107,batvoltsample_inv,BatVoltSample_INV,0.1V,,,Inverter samples the battery voltage,R,
-108,t1,T1,0.1C,,,BT temperature for 18k,R,
-109,t2,T2,0.1C,,,Reserved,R,
-110,t3,T3,0.1C,,,Reserved,R,
-111,t4,T4,0.1C,,,Reserved,R,
-112,t5,T5,0.1C,,,Reserved,R,
-113,masterorslave,MasterOrSlave,Bit0~1,2bit,,Inverter is a master or slave.,R,
-113.b2,singleorthreephase,SingleOrThreePhase,Bit2~3,2bit,,1:R 2:S  3:T Parallel phase 1:R 2:S 3:T,R,
-113.b4,resvd,Resvd,Bit4~7,4bit,,Reserved,R,
-113.b8,parallelnum,ParallelNum,Bit8~16,8bit,1-255,Number of inverters in parallel,R,
-114,ongridloadpower,OnGridloadPower,W,,,Load power of the 18k inverter when it is not off-grid,R,
-115,sn_0__year,SN_0__Year,,8bit,[0-9a-zA-Z],The serial number is a ten-digit ASCII code For example: The serial number is AB12345678 SN[0]=0x41(A) : : : : SN[9]=0x38(8),R,
-115.b8,sn_1__week,SN_1__week,,8bit,[0-9a-zA-Z],,R,
-115~119,serial_number,Serial_Number,,ASCII_LE,,Serial Number as one string instead of split,R,
-116,sn_2__week,SN_2__week,,8bit,[0-9a-zA-Z],,R,
-116.b8,sn_3__factory,SN_3__factory,,8bit,[0-9a-zA-Z],,R,
-117,sn_4__product_code,SN_4__product_code,,8bit,[0-9a-zA-Z],,R,
-117.b8,sn_5__product_code,SN_5__product_code,,8bit,[0-9a-zA-Z],,R,
-118,sn_6__serial_number,SN_6__serial_number,,8bit,[0-9a-zA-Z],,R,
-118.b8,sn_7__serial_number,SN_7__serial_number,,8bit,[0-9a-zA-Z],,R,
-119,sn_8__serial_number,SN_8__serial_number,,8bit,[0-9a-zA-Z],,R,
-119.b8,sn_9__serial_number,SN_9__serial_number,,8bit,[0-9a-zA-Z],,R,
-120,vbusp,VBusP,0.1V,,,Half BUS voltage,R,
-121,genvolt,GenVolt,0.1V,,,Generator voltage Voltage of generator for three phase: R phase,R,
-122,genfreq,GenFreq,0.01Hz,,,Generator frequency,R,
-123,genpower,GenPower,W,,,Voltage of generator for three phase: R phase,R,
-124,egen_day,Egen_day,0.1kWh,,,Energy of generator today,R,
-125,egen_all_l,Egen_all_l,0.1kWh,,,Low byte of total generator energy,R,
-126,egen_all_h,Egen_all_h,0.1kWh,,,High byte of total generator energy,R,
-127,epsvoltl1n,EPSVoltL1N,0.1V,,,Voltage of EPS L1N Voltage of generator for three phase: S phase,R,
-128,epsvoltl2n,EPSVoltL2N,0.1V,,,Voltage of EPS L2N Voltage of generator for three phase: T phase,R,
-129,peps_l1n,Peps_L1N,W,,,Active power of EPS L1N Off-grid active power of three phase: S phase,R,
-130,peps_l2n,Peps_L2N,W,,,Active power of EPS L2N Off-grid active power of three phase: T phase,R,
-131,seps_l1n,Seps_L1N,VA,,,Apparent power of EPS L1N Off-grid apparent power of three phase: S phase,R,
-132,seps_l2n,Seps_L2N,VA,,,Apparent power of EPS L2N Off-grid apparent power of three phase: T phase,R,
-133,eepsl1n_day,EepsL1N_day,0.1kWh,,,Daily energy of EPSL1N Off-grid daily energy of three phase: S phase,R,
-134,eepsl2n_day,EepsL2N_day,0.1kWh,,,Daily energy of EPSL2N Off-grid daily energy of three phase: T phase,R,
-135,eepsl1n_all_l,EepsL1N_all_l,0.1kWh,,,Low byte of total EPSL1N energy Total off-grid power of three phase: S phase,R,
-136,eepsl1n_all_h,EepsL1N_all_h,0.1kWh,,,High byte of total EPSL1N energy Total off-grid power of three phase: S phase,R,
-137,eepsl2n_all_l,EepsL2N_all_l,0.1kWh,,,Low word of total EPSL2N energy Total off-grid power of three phase: T phase,R,
-138,eepsl2n_all_h,EepsL2N_all_h,0.1kWh,,,High byte of total EPSL2N energy Total off-grid power of three phase: T phase,R,
-139,register_139,Register 139,,ushort,0-65535,,R,
-140,afci_currch1,AFCI_CurrCH1,mA,,,AFCI current,R,
-141,afci_currch2,AFCI_CurrCH2,mA,,,AFCI current,R,
-142,afci_currch3,AFCI_CurrCH3,mA,,,AFCI current,R,
-143,afci_currch4,AFCI_CurrCH4,mA,,,AFCI current,R,
-144,afciflag_arcalarmch1,AFCIFlag_ArcAlarmCH1,Bit0,1bit,,Arc status of CH1 0-Normal 1-Alarm,R,
-144.b1,afciflag_arcalarmch2,AFCIFlag_ArcAlarmCH2,Bit1,1bit,,Arc status of CH2 0-Normal 1-Alarm,R,
-144.b2,afciflag_arcalarmch3,AFCIFlag_ArcAlarmCH3,Bit2,1bit,,Arc status of CH3 0-Normal 1-Alarm,R,
-144.b3,afciflag_arcalarmch4,AFCIFlag_ArcAlarmCH4,Bit3,1bit,,Arc status of CH4 0-Normal 1-Alarm,R,
-144.b4,afciflag_selftestresultch1,AFCIFlag_SelfTestResultCH1,Bit4,1bit,,Test result of CH1 0-Normal 1-fail,R,
-144.b5,afciflag_selftestresultch2,AFCIFlag_SelfTestResultCH2,Bit5,1bit,,Test result of CH2 0-Normal 1-fail,R,
-144.b6,afciflag_selftestresultch3,AFCIFlag_SelfTestResultCH3,Bit6,1bit,,Test result of CH3 0-Normal 1-fail,R,
-144.b7,afciflag_selftestresultch4,AFCIFlag_SelfTestResultCH4,Bit7,1bit,,Test result of CH4 0-Normal 1-fail,R,
-144.b8,afci_arcalarm_rsvd,AFCI_ArcAlarm_rsvd,Bit8-15,8bit,,Diagnostic alert indicator within the inverter's Modbus map to monitor for arc faults,R,
-145,afci_arcch1,AFCI_ArcCH1,,,,Real time arc of CH1,R,
-146,afci_arcch2,AFCI_ArcCH2,,,,Real time arc of CH2,R,
-147,afci_arcch3,AFCI_ArcCH3,,,,Real time arc of CH3,R,
-148,afci_arcch4,AFCI_ArcCH4,,,,Real time arc of CH4,R,
-149,afci_maxarcch1,AFCI_MaxArcCH1,,,,Max arc of CH1,R,
-150,afci_maxarcch2,AFCI_MaxArcCH2,,,,Max arc of CH2,R,
-151,afci_maxarcch3,AFCI_MaxArcCH3,,,,Max arc of CH3,R,
-152,afci_maxarcch4,AFCI_MaxArcCH4,,,,Max arc of CH4,R,
-153,accouplepower,ACCouplePower,W,,,AC Coupled inverter power,R,
-154,autotesttripvalue_0_,AutoTestTripValue_0_,0.1V/0. 01Hz,,,,R,
-161,autotesttripvalue_7_,AutoTestTripValue_7_,0.1V/0. 01Hz,,,,R,
-162,autotesttriptime__0_,AutoTestTripTime _0_,ms,,,,R,
-169,autotesttriptime__7_,AutoTestTripTime _7_,ms,,,,R,
-170,pload,Pload,W,,,active power (in Watts) currently being utilized by the loads connected to the inverter,R,
-171,eload_day,Eload_day,0.1kWh,,,represents the total energy in kilowatt-hours (kWh) consumed by the loads connected to the inverter for the current day.,R,
-172,eload_alll,Eload_allL,0.1kWh,,,low bit  combine with high bit to get historical total,R,
-173,eload_allh,Eload_allH,0.1kWh,,,high bit cumulative total energy (in kWh) consumed by the load since the system was first installed,R,
-174,switchstate_safetysw,SwitchState_SafetySw,Bit0~4,4bit,0~0x1F,The status of the 5-digit safety DIP switch,R,
-180,pinv_s,Pinv_S,W,,0-65535,On grid inverter power of three phase: S phase,R,
-181,pinv_t,Pinv_T,W,,0-65535,On grid inverter power of three phase: T phase,R,
-182,prec_s,Prec_S,W,,0-65535,Charging rectification power of three phase: S phase,R,
-183,prec_t,Prec_T,W,,0-65535,Charging rectification power of three phase: T phase,R,
-184,ptogrid_s,Ptogrid_S,W,,0-65535,User on-grid power of three phase: S phase,R,
-185,ptogrid_t,Ptogrid_T,W,,0-65535,User on-grid power of three phase: T phase,R,
-186,ptouser_s,Ptouser_S,W,,0-65535,Grid supply power of three phase: S phase,R,
-187,ptouser_t,Ptouser_T,W,,0-65535,Grid supply power of three phase:T phase,R,
-188,genpower_s,GenPower_S,W,,0-65535,Power of generator for three phase: S phase,R,
-189,genpower_t,GenPower_T,W,,0-65535,Power of generator for three phase: T phase,R,
-190,iinvrms_s,IinvRMS_S,0.01,,0-65535,Effective value of three phase inverter current: S phase,R,
-191,iinvrms_t,IinvRMS_T,0.01,,0-65535,Effective value of three phase inverter current: T phase,R,
-192,pf_s,PF_S,0.001,,0-2000,Power factor of phase S in three- phase inverter x?(0,R,
-193,pf_t,PF_T,0.001,,0-2000,Power factor of phase T in three- phase inverter x? (0,R,
-233,register_233,Register 233,,ushort,0-65535,,R,
-236,register_236,Register 236,,ushort,0-65535,,R,
-237,register_237,Register 237,,ushort,0-65535,,R,
-241,register_241,Register 241,,ushort,0-65535,,R,
-242,register_242,Register 242,,ushort,0-65535,,R,
-244,register_244,Register 244,,ushort,0-65535,,R,
-245,register_245,Register 245,,ushort,0-65535,,R,
-252,register_252,Register 252,,ushort,0-65535,,R,
-253,register_253,Register 253,,ushort,0-65535,,R,
-254,register_254,Register 254,,ushort,0-65535,,R,
-257,register_257,Register 257,,ushort,0-65535,,R,
-260,register_260,Register 260,,ushort,0-65535,,R,
-268,register_268,Register 268,,ushort,0-65535,,R,
-400,faultrecord1_yandm,FaultRecord1_YAndM,,,,Fault Records 1_ years & months,R,
-401,faultrecord1_dandh,FaultRecord1_DAndH,,,,Fault Records 1_ days & hours,R,
-402,faultrecord1_mands,FaultRecord1_MAndS,,,,Fault Records 1_ minutes & seconds,R,
-403,faultrecord1_code,FaultRecord1_Code,,,,Fault Records 1_ fault code,R,
-404,faultrecord1_value,FaultRecord1_Value,,,,Fault Records 1_ fault value,R,
-405,faultrecord1_setorclr,FaultRecord1_SetOrClr,,,0~1,Fault Records 1_Fault occurred or cleared (0-fault occurred,R,
-406,faultrecord2_yandm,FaultRecord2_YAndM,,,,Fault Records 2_ years & months,R,
-407,faultrecord2_dandh,FaultRecord2_DAndH,,,,Fault Records 2_ days & hours,R,
-408,faultrecord2_mands,FaultRecord2_MAndS,,,,Fault Records 2_ minutes & seconds,R,
-409,faultrecord2_code,FaultRecord2_Code,,,,Fault Records 2_ fault code,R,
-410,faultrecord2_value,FaultRecord2_Value,,,,Fault Records 2_Fault value,R,
-411,faultrecord2_setorclr,FaultRecord2_SetOrClr,,,0~1,Fault Records 2_Fault occurred or clear (0 - Fault Occurred,R,
+register,variable_name,documented_name,unit,data_type,values,,writable,read_interval,note
+0,state,State,,,0-65535,,R,,see operating mode definition table
+1,vpv1,Vpv1,0.1V,,0-65535,,R,,PV1 voltage
+2,vpv2,Vpv2,0.1V,,0-65535,,R,,PV2 voltage
+3,vpv3,Vpv3,0.1V,,0-65535,,R,,PV3 voltage
+4,vbat,Vbat,0.1V,,0-65535,,R,,Battery voltage
+5,soc,SOC,%,8bit,0-100,,R,,Battery capacity
+5.b8,soh,SOH,%,8bit,0-100,,R,,Battery State of health
+6,internal_fault,Internal Fault,,,0-65535,,R,,For more information
+7,ppv1,Ppv1,W,,0-65535,,R,,PV1 power
+8,ppv2,Ppv2,W,,0-65535,,R,,PV2 power
+9,ppv3,Ppv3,W,,0-65535,,R,,PV3 power
+10,pcharge,Pcharge,W,,0-65535,,R,,Charging power (power flowing into the battery)
+11,pdischarge,Pdischarge,W,,0-65535,,R,,Discharging power (power flowing out of battery)
+12,vacr,VacR,0.1V,,0-65535,,R,,R-phase utility three phase grid voltage
+13,vacs,VacS,0.1V,,0-65535,,R,,S-phase utility three phase grid voltage
+14,vact,VacT,0.1V,,0-65535,,R,,T-phase utility three phase grid voltage
+15,fac,Fac,0.01Hz,,0-65535,,R,,Utility grid frequency
+16,pinv,Pinv,W,,0-65535,,R,,On-gird inverter power (For three phase: R phase)
+17,prec,Prec,W,,0-65535,,R,,AC charging rectification power (For three phase: R phase)
+18,iinvrms,IinvRMS,0.01A,,0-65535,,R,,Inverter rms current output (For three phase: R phase)
+19,pf,PF,0.001,,0-2000,,R,,"Pf x?(0,1000]->x/1000 x?(1000,2000)->(1000-x)/1000"
+20,vepsr,VepsR,0.1V,,0-65535,,R,,R phase off-grid three phase output voltage
+21,vepss,VepsS,0.1V,,0-65535,,R,,S phase off-grid three phase output voltage
+22,vepst,VepsT,0.1V,,0-65535,,R,,T phase off-grid three phase output voltage
+23,feps,Feps,0.01Hz,,0-65535,,R,,Off-grid output frequency
+24,peps,Peps,W,,0-65535,,R,,Off-grid inverter power (For three phase: R phase)
+25,seps,Seps,VA,,0-65535,,R,,Off-grid apparent power (For three phase: R phase)
+26,ptogrid,Ptogrid,W,,0-65535,,R,,User on-grid power ( or for three phase: R phase)
+27,ptouser,Ptouser,W,,0-65535,,R,,Grid power capacity (or for three phase: R phase)
+28,epv1_day,Epv1_day,0.1kWh,,0-65535,,R,,PV1 power generation today / AC Energy Storage Epv_day
+29,epv2_day,Epv2_day,0.1kWh,,0-65535,,R,,PV2 power generation today
+30,epv3_day,Epv3_day,0.1kWh,,0-65535,,R,,PV3 power generation today (total PV=PV1+PV2+PV3)
+31,einv_day,Einv_day,0.1kWh,,0-65535,,R,,Today's on-grid inverter output energy
+32,erec_day,Erec_day,0.1kWh,,0-65535,,R,,Today's AC charging rectifier energy
+33,echg_day,Echg_day,0.1kWh,,0-65535,,R,,Energy Charge today
+34,edischg_day,Edischg_day,0.1kWh,,0-65535,,R,,Energy Discharge today
+35,eeps_day,Eeps_day,0.1kWh,,0-65535,,R,,Today's off-grid output energy
+36,etogrid_day,Etogrid_day,0.1kWh,,0-65535,,R,,Today's export to grid energy
+37,etouser_day,Etouser_day,0.1kWh,,0-65535,,R,,Electricity supplied to user from the grid today
+38,vbus1,Vbus1,0.1V,,0-65535,,R,,Voltage of Bus 1
+39,vbus2,Vbus2,0.1V,,0-65535,,R,,Voltage of Bus 2
+40,epv1_all_l,Epv1_all_l,0.1kWh,,0-65535,,R,,PV1 cumulative power generation/AC energy storage Epv_all Low byte
+41,epv1_all_h,Epv1_all_h,0.1kWh,,0-65535,,R,,PV1 cumulative power generation/AC energy storage Epv_all high byte
+42,epv2_all_l,Epv2_all_l,0.1kWh,,0-65535,,R,,PV2 cumulative power generation low byte
+43,epv2_all_h,Epv2_all_h,0.1kWh,,0-65535,,R,,PV2 cumulative power generation high byte
+44,epv3_all_l,Epv3_all_l,0.1kWh,,0-65535,,R,,PV3 cumulative power generation low byte (total PV=PV1+PV2+PV3)
+45,epv3_all_h,Epv3_all_h,0.1kWh,,0-65535,,R,,PV3 cumulative power generation high byte (total PV=PV1+PV2+PV3)
+46,einv_all_l,Einv_all_l,0.1kWh,,0-65535,,R,,Inverter output accumulated power low byte
+47,einv_all_h,Einv_all_h,0.1kWh,,0-65535,,R,,Inverter output accumulates power high byte
+48,erec_all_l,Erec_all_l,0.1kWh,,0-65535,,R,,AC charging accumulates rectified power Low byte
+49,erec_all_h,Erec_all_h,0.1kWh,,0-65535,,R,,AC charging accumulates rectified power high byte
+50,echg_all_l,Echg_all_l,0.1kWh,,0-65535,,R,,Cumulative charge energy low byte
+51,echg_all_h,Echg_all_h,0.1kWh,,0-65535,,R,,Cumulative charge energy high byte
+52,edischg_all_l,Edischg_all_l,0.1kWh,,0-65535,,R,,Cumulative discharge charge energy Low byte
+53,edischg_all_h,Edischg_all_h,0.1kWh,,0-65535,,R,,Cumulative discharge charge energy High byte
+54,eeps_all_l,Eeps_all_l,0.1kWh,,0-65535,,R,,Cumulative inverter off-grid output energy Low byte
+55,eeps_all_h,Eeps_all_h,0.1kWh,,0-65535,,R,,Cumulative inverter off-grid output energy High byte
+56,etogrid_all_l,Etogrid_all_l,0.1kWh,,0-65535,,R,,Accumulate export energy Low byte
+57,etogrid_all_h,Etogrid_all_h,0.1kWh,,0-65535,,R,,Accumulate export energy High byte
+58,etouser_all_l,Etouser_all_l,0.1kWh,,0-65535,,R,,Cumulative import energy Low byte
+59,etouser_all_h,Etouser_all_h,0.1kWh,,0-65535,,R,,Cumulative import energy high byte
+60,faultcode_l,FaultCode_l,,,0-65535,,R,,For more information
+61,faultcode_h,FaultCode_h,,,0-65535,,R,,For more information
+62,warningcode_l,WarningCode_l,,,0-65535,,R,,For more information
+63,warningcode_h,WarningCode_h,,,0-65535,,R,,For more information
+64,tinner,Tinner,celsius,SHORT,0-65535,,R,,Internal temperature
+65,tradiator1,Tradiator1,celsius,SHORT,0-65535,,R,,Radiator temperature 1
+66,tradiator2,Tradiator2,celsius,SHORT,0-65535,,R,,Radiator temperature 2
+67,tbat,Tbat,celsius,SHORT,0-65535,,R,,Battery temperature
+69,runningtime_l,RunningTime_l,second,,,,R,,Runtime duration
+70,runningtime_h,RunningTime_h,second,,,,R,,Runtime duration
+71.b0,autoteststart,AutoTestStart,Bit0-3,4bit,,,R,,0 - not started 1-Activated 1 - started
+71.b4,ubautoteststatus,UbAutoTestStatus,Bit4-7,4bit,,,R,,0-waiting 1-testing 2-test fail 3-V test OK 4-F test OK 5- test pass
+71.b8,ubautoteststep,UbAutoTestStep,Bit8-11,4bit,,,R,,1-V1L test 2-V1H 3-F1L test 4-F1H test 5-V2L test 6-V2H test 7-F2L test 8-F2H test
+72,wautotestlimit,wAutoTestLimit,0.1V/0. 01Hz,,,,R,,"When ubAuto Test Step=1,2,5,6, is the voltage limit; When ubAutoTest Step=3,4,7,8, it is the frequency limit"
+73,uwautotestdefault_time,uwAutoTestDefault_Time,ms,,,,R,,
+74,uwautotesttripvalue,uwAutoTestTripValue,0.1V/0. 01Hz,,,,R,,"When ubAuto Test Step=1,2,5,6, is the voltage limit; When ubAutoTestStep=3,4,7,8, it is the frequency limit"
+75,uwautotesttriptime,uwAutoTestTripTime,ms,,,,R,,
+77.b0,acinputtype,ACInputType,Bit0,1bit,0 or 1,,R,,0-Grid 1-Generator for 18KPV
+77.b1,accoupleinverterflow,ACCoupleInverterFlow,Bit1,1bit,0 or 1,,R,,0-no flow 1-show flow
+77.b2,accoupleen,ACCoupleEn,Bit2,1bit,0 or 1,,R,,0-Disable 1-Enable
+78,register_78,Register 78,,ushort,0-65535,,R,,Unknown
+79,register_79,Register 79,,ushort,0-65535,,R,,Unknown
+80.b0,battypeandbrand,BatTypeAndBrand,,4bit,,,R,,For more information
+80.b4,batcomtype,BatComType,,4bit,0 or 1,,R,,0-CAN 1-485
+81,maxchgcurr,MaxChgCurr,0.01A,,,,R,,The maximum charging current of BMS limits
+82,maxdischgcurr,MaxDischgCurr,0.01A,,,,R,,The maximum discharging current of BMS limits
+83,chargevoltrefi,ChargeVoltRefI,0.1V,,500-590,,R,,Recommended charging voltage by BMS equating to 50.0V-59.0v. This register acts as a monitor
+84,dischgcutvolt,DischgCutVolt,0.1V,,440-480,,R,,Minimum voltage 44-48v level at which the inverter stops drawing power from the connected battery bank
+85,batstatus0_bms,BatStatus0_BMS,,,,,R,,Status information of BMS
+86,batstatus1_bms,BatStatus1_BMS,,,,,R,,Status information of BMS
+87,batstatus2_bms,BatStatus2_BMS,,,,,R,,Status information of BMS
+88,batstatus3_bms,BatStatus3_BMS,,,,,R,,Status information of BMS
+89,batstatus4_bms,BatStatus4_BMS,,,,,R,,Status information of BMS
+90,batstatus5_bms,BatStatus5_BMS,,,,,R,,Status information of BMS
+91,batstatus6_bms,BatStatus6_BMS,,,,,R,,Status information of BMS
+92,batstatus7_bms,BatStatus7_BMS,,,,,R,,Status information of BMS
+93,batstatus8_bms,BatStatus8_BMS,,,,,R,,Status information of BMS
+94,batstatus9_bms,BatStatus9_BMS,,,,,R,,Status information of BMS
+95,batstatus_inv,BatStatus_INV,,,,,R,,The inverter aggregates lithium battery status information
+96,batparallelnum,BatParallelNum,,,,,R,,Number of batteries in parallel
+97,batcapacity,BatCapacity,Ah,,,,R,,Battery capacity
+98,batcurrent_bms,BatCurrent_BMS,0.01A,SHORT_LE,,,R,,Battery current
+99,faultcode_bms,FaultCode_BMS,,,,,R,,Reports the active error status transmitted from the Battery Management System (BMS) to the inverter
+100,warningcode_bms,WarningCode_BMS,,,,,R,,Reports non-critical alerts while the FaultCode indicates a system-stopping error
+101,maxcellvolt_bms,MaxCellVolt_BMS,0.001V,,,,R,,Maximum voltage of cell
+102,mincellvolt_bms,MinCellVolt_BMS,0.001V,,,,R,,Minimum voltage of cell
+103,maxcelltemp_bms,MaxCellTemp_BMS,0.1C,SHORT_LE,,,R,,Maximum temperature of cell
+104,mincelltemp_bms,MinCellTemp_BMS,0.1C,SHORT_LE,,,R,,Minimum temperature of cell
+105,bmsfwupdatestate,BMSFWUpdateState,,,,,R,,1-Upgrade in process 2-Upgrade successful 3- Upgrade failed
+106,cyclecnt_bms,CycleCnt_BMS,,,,,R,,Number of charging/discharging cycles
+107,batvoltsample_inv,BatVoltSample_INV,0.1V,,,,R,,Inverter samples the battery voltage
+108,t1,T1,0.1C,,,,R,,BT temperature for 18k
+109,t2,T2,0.1C,,,,R,,Reserved
+110,t3,T3,0.1C,,,,R,,Reserved
+111,t4,T4,0.1C,,,,R,,Reserved
+112,t5,T5,0.1C,,,,R,,Reserved
+113.b0,masterorslave,MasterOrSlave,Bit0~1,2bit,,,R,,Inverter is a master or slave.
+113.b2,singleorthreephase,SingleOrThreePhase,Bit2~3,2bit,,,R,,1:R 2:S  3:T Parallel phase 1:R 2:S 3:T
+113.b4,resvd,Resvd,Bit4~7,4bit,,,R,,Reserved
+113.b8,parallelnum,ParallelNum,Bit8~16,8bit,1-255,,R,,Number of inverters in parallel
+114,ongridloadpower,OnGridloadPower,W,,,,R,,Load power of the 18k inverter when it is not off-grid
+115.b0,sn_0__year,SN_0__Year,,8bit,[0-9a-zA-Z],,R,,The serial number is a ten-digit ASCII code For example: The serial number is AB12345678 SN[0]=0x41(A) : : : : SN[9]=0x38(8)
+115.b8,sn_1__week,SN_1__week,,8bit,[0-9a-zA-Z],,R,,
+115~119,serial_number,Serial_Number,,ASCII_LE,,,R,,Serial Number as one string instead of split
+116.b0,sn_2__week,SN_2__week,,8bit,[0-9a-zA-Z],,R,,
+116.b8,sn_3__factory,SN_3__factory,,8bit,[0-9a-zA-Z],,R,,
+117.b0,sn_4__product_code,SN_4__product_code,,8bit,[0-9a-zA-Z],,R,,
+117.b8,sn_5__product_code,SN_5__product_code,,8bit,[0-9a-zA-Z],,R,,
+118.b0,sn_6__serial_number,SN_6__serial_number,,8bit,[0-9a-zA-Z],,R,,
+118.b8,sn_7__serial_number,SN_7__serial_number,,8bit,[0-9a-zA-Z],,R,,
+119.b0,sn_8__serial_number,SN_8__serial_number,,8bit,[0-9a-zA-Z],,R,,
+119.b8,sn_9__serial_number,SN_9__serial_number,,8bit,[0-9a-zA-Z],,R,,
+120,vbusp,VBusP,0.1V,,,,R,,Half BUS voltage
+121,genvolt,GenVolt,0.1V,,,,R,,Generator voltage Voltage of generator for three phase: R phase
+122,genfreq,GenFreq,0.01Hz,,,,R,,Generator frequency
+123,genpower,GenPower,W,,,,R,,Voltage of generator for three phase: R phase
+124,egen_day,Egen_day,0.1kWh,,,,R,,Energy of generator today
+125,egen_all_l,Egen_all_l,0.1kWh,,,,R,,Low byte of total generator energy
+126,egen_all_h,Egen_all_h,0.1kWh,,,,R,,High byte of total generator energy
+127,epsvoltl1n,EPSVoltL1N,0.1V,,,,R,,Voltage of EPS L1N Voltage of generator for three phase: S phase
+128,epsvoltl2n,EPSVoltL2N,0.1V,,,,R,,Voltage of EPS L2N Voltage of generator for three phase: T phase
+129,peps_l1n,Peps_L1N,W,,,,R,,Active power of EPS L1N Off-grid active power of three phase: S phase
+130,peps_l2n,Peps_L2N,W,,,,R,,Active power of EPS L2N Off-grid active power of three phase: T phase
+131,seps_l1n,Seps_L1N,VA,,,,R,,Apparent power of EPS L1N Off-grid apparent power of three phase: S phase
+132,seps_l2n,Seps_L2N,VA,,,,R,,Apparent power of EPS L2N Off-grid apparent power of three phase: T phase
+133,eepsl1n_day,EepsL1N_day,0.1kWh,,,,R,,Daily energy of EPSL1N Off-grid daily energy of three phase: S phase
+134,eepsl2n_day,EepsL2N_day,0.1kWh,,,,R,,Daily energy of EPSL2N Off-grid daily energy of three phase: T phase
+135,eepsl1n_all_l,EepsL1N_all_l,0.1kWh,,,,R,,Low byte of total EPSL1N energy Total off-grid power of three phase: S phase
+136,eepsl1n_all_h,EepsL1N_all_h,0.1kWh,,,,R,,High byte of total EPSL1N energy Total off-grid power of three phase: S phase
+137,eepsl2n_all_l,EepsL2N_all_l,0.1kWh,,,,R,,Low word of total EPSL2N energy Total off-grid power of three phase: T phase
+138,eepsl2n_all_h,EepsL2N_all_h,0.1kWh,,,,R,,High byte of total EPSL2N energy Total off-grid power of three phase: T phase
+139,register_139,Register 139,,ushort,0-65535,,R,,Unknown
+140,afci_currch1,AFCI_CurrCH1,mA,,,,R,,AFCI current
+141,afci_currch2,AFCI_CurrCH2,mA,,,,R,,AFCI current
+142,afci_currch3,AFCI_CurrCH3,mA,,,,R,,AFCI current
+143,afci_currch4,AFCI_CurrCH4,mA,,,,R,,AFCI current
+144.b0,afciflag_arcalarmch1,AFCIFlag_ArcAlarmCH1,Bit0,1bit,,,R,,Arc status of CH1 0-Normal 1-Alarm
+144.b1,afciflag_arcalarmch2,AFCIFlag_ArcAlarmCH2,Bit1,1bit,,,R,,Arc status of CH2 0-Normal 1-Alarm
+144.b2,afciflag_arcalarmch3,AFCIFlag_ArcAlarmCH3,Bit2,1bit,,,R,,Arc status of CH3 0-Normal 1-Alarm
+144.b3,afciflag_arcalarmch4,AFCIFlag_ArcAlarmCH4,Bit3,1bit,,,R,,Arc status of CH4 0-Normal 1-Alarm
+144.b4,afciflag_selftestresultch1,AFCIFlag_SelfTestResultCH1,Bit4,1bit,,,R,,Test result of CH1 0-Normal 1-fail
+144.b5,afciflag_selftestresultch2,AFCIFlag_SelfTestResultCH2,Bit5,1bit,,,R,,Test result of CH2 0-Normal 1-fail
+144.b6,afciflag_selftestresultch3,AFCIFlag_SelfTestResultCH3,Bit6,1bit,,,R,,Test result of CH3 0-Normal 1-fail
+144.b7,afciflag_selftestresultch4,AFCIFlag_SelfTestResultCH4,Bit7,1bit,,,R,,Test result of CH4 0-Normal 1-fail
+144.b8,afci_arcalarm_rsvd,AFCI_ArcAlarm_rsvd,Bit8-15,8bit,,,R,,Diagnostic alert indicator within the inverter's Modbus map to monitor for arc faults
+145,afci_arcch1,AFCI_ArcCH1,,,,,R,,Real time arc of CH1
+146,afci_arcch2,AFCI_ArcCH2,,,,,R,,Real time arc of CH2
+147,afci_arcch3,AFCI_ArcCH3,,,,,R,,Real time arc of CH3
+148,afci_arcch4,AFCI_ArcCH4,,,,,R,,Real time arc of CH4
+149,afci_maxarcch1,AFCI_MaxArcCH1,,,,,R,,Max arc of CH1
+150,afci_maxarcch2,AFCI_MaxArcCH2,,,,,R,,Max arc of CH2
+151,afci_maxarcch3,AFCI_MaxArcCH3,,,,,R,,Max arc of CH3
+152,afci_maxarcch4,AFCI_MaxArcCH4,,,,,R,,Max arc of CH4
+153,accouplepower,ACCouplePower,W,,,,R,,AC Coupled inverter power
+154,autotesttripvalue_0_,AutoTestTripValue_0_,0.1V/0. 01Hz,,,,R,,
+161,autotesttripvalue_7_,AutoTestTripValue_7_,0.1V/0. 01Hz,,,,R,,
+162,autotesttriptime__0_,AutoTestTripTime _0_,ms,,,,R,,
+169,autotesttriptime__7_,AutoTestTripTime _7_,ms,,,,R,,
+170,pload,Pload,W,,,,R,,active power (in Watts) currently being utilized by the loads connected to the inverter
+171,eload_day,Eload_day,0.1kWh,,,,R,,represents the total energy in kilowatt-hours (kWh) consumed by the loads connected to the inverter for the current day.
+172,eload_alll,Eload_allL,0.1kWh,,,,R,,low bit  combine with high bit to get historical total
+173,eload_allh,Eload_allH,0.1kWh,,,,R,,high bit cumulative total energy (in kWh) consumed by the load since the system was first installed
+174,switchstate_safetysw,SwitchState_SafetySw,Bit0~4,4bit,0~0x1F,,R,,The status of the 5-digit safety DIP switch
+180,pinv_s,Pinv_S,W,,0-65535,,R,,On grid inverter power of three phase: S phase
+181,pinv_t,Pinv_T,W,,0-65535,,R,,On grid inverter power of three phase: T phase
+182,prec_s,Prec_S,W,,0-65535,,R,,Charging rectification power of three phase: S phase
+183,prec_t,Prec_T,W,,0-65535,,R,,Charging rectification power of three phase: T phase
+184,ptogrid_s,Ptogrid_S,W,,0-65535,,R,,User on-grid power of three phase: S phase
+185,ptogrid_t,Ptogrid_T,W,,0-65535,,R,,User on-grid power of three phase: T phase
+186,ptouser_s,Ptouser_S,W,,0-65535,,R,,Grid supply power of three phase: S phase
+187,ptouser_t,Ptouser_T,W,,0-65535,,R,,Grid supply power of three phase:T phase
+188,genpower_s,GenPower_S,W,,0-65535,,R,,Power of generator for three phase: S phase
+189,genpower_t,GenPower_T,W,,0-65535,,R,,Power of generator for three phase: T phase
+190,iinvrms_s,IinvRMS_S,0.01,,0-65535,,R,,Effective value of three phase inverter current: S phase
+191,iinvrms_t,IinvRMS_T,0.01,,0-65535,,R,,Effective value of three phase inverter current: T phase
+192,pf_s,PF_S,0.001,,0-2000,,R,,Power factor of phase S in three- phase inverter x?(0
+193,pf_t,PF_T,0.001,,0-2000,,R,,Power factor of phase T in three- phase inverter x? (0
+233,register_233,Register 233,,ushort,0-65535,,R,,Unknown
+236,register_236,Register 236,,ushort,0-65535,,R,,Unknown
+237,register_237,Register 237,,ushort,0-65535,,R,,Unknown
+241,register_241,Register 241,,ushort,0-65535,,R,,Unknown
+242,register_242,Register 242,,ushort,0-65535,,R,,Unknown
+244,register_244,Register 244,,ushort,0-65535,,R,,Unknown
+245,register_245,Register 245,,ushort,0-65535,,R,,Unknown
+252,register_252,Register 252,,ushort,0-65535,,R,,Unknown
+253,register_253,Register 253,,ushort,0-65535,,R,,Unknown
+254,register_254,Register 254,,ushort,0-65535,,R,,Unknown
+257,register_257,Register 257,,ushort,0-65535,,R,,Unknown
+260,register_260,Register 260,,ushort,0-65535,,R,,Unknown
+268,register_268,Register 268,,ushort,0-65535,,R,,Unknown
+400,faultrecord1_yandm,FaultRecord1_YAndM,,,,,R,,Fault Records 1_ years & months
+401,faultrecord1_dandh,FaultRecord1_DAndH,,,,,R,,Fault Records 1_ days & hours
+402,faultrecord1_mands,FaultRecord1_MAndS,,,,,R,,Fault Records 1_ minutes & seconds
+403,faultrecord1_code,FaultRecord1_Code,,,,,R,,Fault Records 1_ fault code
+404,faultrecord1_value,FaultRecord1_Value,,,,,R,,Fault Records 1_ fault value
+405,faultrecord1_setorclr,FaultRecord1_SetOrClr,,,0~1,,R,,Fault Records 1_Fault occurred or cleared (0-fault occurred
+406,faultrecord2_yandm,FaultRecord2_YAndM,,,,,R,,Fault Records 2_ years & months
+407,faultrecord2_dandh,FaultRecord2_DAndH,,,,,R,,Fault Records 2_ days & hours
+408,faultrecord2_mands,FaultRecord2_MAndS,,,,,R,,Fault Records 2_ minutes & seconds
+409,faultrecord2_code,FaultRecord2_Code,,,,,R,,Fault Records 2_ fault code
+410,faultrecord2_value,FaultRecord2_Value,,,,,R,,Fault Records 2_Fault value
+411,faultrecord2_setorclr,FaultRecord2_SetOrClr,,,0~1,,R,,Fault Records 2_Fault occurred or clear (0 - Fault Occurred

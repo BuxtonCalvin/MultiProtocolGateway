@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# --- 1. CONFIG FOLDER LOGIC (Preservation Mode) ---
-# Goal: Create sub-folders and seed them, but don't touch user files.
+# Config folder logic (Preservation Mode) ---
+# Create sub-folders and seed them, but don't touch user files.
 CONFIG_SUBS=("backups" "data-db" "examples")
 
 mkdir -p /app/config
@@ -25,8 +25,8 @@ cp -n /defaults/config/*.csv /app/config/ 2>/dev/null
 cp -n /defaults/config/*.txt /app/config/ 2>/dev/null
 
 
-# --- 2. PROTOCOLS FOLDER LOGIC (Fresh/Sync Mode) ---
-# Goal: Ensure the mounted folder matches the latest protocols in the image.
+# Protocols folder logic (Fresh/Sync Mode) ---
+# Ensure the mounted folder matches the latest protocols in the image.
 echo "Refreshing protocols from image..."
 mkdir -p /app/protocols
 
@@ -35,5 +35,5 @@ mkdir -p /app/protocols
 cp -R /defaults/protocols/. /app/protocols/
 
 
-# --- 3. START THE APP ---
+# Start the App ---
 exec "$@"

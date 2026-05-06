@@ -14,7 +14,7 @@ WORKDIR /app
 # 1. Create the default "seed" directories
 RUN mkdir -p /defaults/config /defaults/protocols
 
-# 2. Copy your local files into the SEED directories
+# 2. Copy local files into the "seed" directories
 COPY ./config/ /defaults/config/
 COPY ./protocols/ /defaults/protocols/
 

@@ -1,9 +1,10 @@
 # SOK to MQTT
 
-```
+``` ini
 transport=modbus_rtu
 protocol_version=pace_bms_v1.3
-```
+
+```ini
 The Battery's RS485 Protocol must be set to: `PACE_MODBUS` 
 
 Plugs into the RS485A port

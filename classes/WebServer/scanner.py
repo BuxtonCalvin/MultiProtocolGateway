@@ -20,8 +20,9 @@ import logging
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, List, Tuple
 
+from sqlalchemy.engine.row import Row
 from sqlalchemy.orm import Session
 
 from .database import refresh_app_state, session_scope
@@ -231,7 +232,7 @@ def _extract_settings_keys_from_ast(py_path: Path) -> dict[str, str]:
     """
     found: dict[str, str] = {}
     try:
-        source = py_path.read_text(encoding="utf-8")
+        source: str = py_path.read_text(encoding="utf-8")
         tree = ast.parse(source)
     except Exception as exc:
         _log.warning(f"AST parse failed for {py_path.name}: {exc}")
@@ -293,7 +294,7 @@ def scan_transport_library(transports_dir: Path) -> dict[str, dict[str, Any]]:
     for py_file in sorted(transports_dir.glob("*.py")):
         if py_file.name.startswith("__"):
             continue
-        stem = py_file.stem
+        stem: str = py_file.stem
 
         # Classification from first-line comment
         classification = "base class"
@@ -314,7 +315,7 @@ def scan_transport_library(transports_dir: Path) -> dict[str, dict[str, Any]]:
             # Bridges: only expose the keys they explicitly read via settings.get(...).
             # Do NOT inject scraper-oriented base keys (protocol_version, read_interval,
             # variable_mask, device_location, bridge, analyze_protocol, etc.).
-            merged = ast_keys
+            merged: dict[str, str] = ast_keys
         else:
             # Scrapers and base classes: supplement AST with the known-keys table
             # so common Modbus/TCP keys are always present even if not in every file.
@@ -349,7 +350,7 @@ def scan_protocols_dir(protocols_dir: Path) -> list[dict[str, Any]]:
     for group_dir in sorted(protocols_dir.iterdir()):
         if not group_dir.is_dir():
             continue
-        group_name = group_dir.name
+        group_name: str = group_dir.name
 
         for proto_file in sorted(group_dir.iterdir()):
             if proto_file.suffix.lower() == ".csv":
@@ -373,15 +374,15 @@ def _parse_protocol_csv(csv_path: Path, group_name: str) -> list[dict[str, Any]]
     * Quoted fields handled by csv.reader so embedded commas in note/values
       columns do not corrupt the register address column.
     * Duplicate register addresses within the same file are deduplicated:
-      the LAST row for a given address wins (matches protocol_settings.py
+      the last row for a given address wins (matches protocol_settings.py
       behavior where later definitions override earlier ones).
     * Column names are normalized to snake_case and matched by multiple
       possible spellings (e.g. "Variable Name" / "variable name" / "variable_name").
     """
-    protocol_name = csv_path.stem  # e.g. "eg4_18kpv_holding"
+    protocol_name: str = csv_path.stem  # e.g. "eg4_18kpv_holding"
 
     # Detect holding vs input from filename
-    name_lower = protocol_name.lower()
+    name_lower: str = protocol_name.lower()
     if "holding" in name_lower:
         registry_type = "holding"
     elif "input" in name_lower:
@@ -496,11 +497,11 @@ def _parse_protocol_csv(csv_path: Path, group_name: str) -> list[dict[str, Any]]
                 if register.lower() in ("register", "reg", "address"):
                     continue
 
-                clean_var = (var_name or doc_name).strip().lower().replace(" ", "_")
+                clean_var: str = (var_name or doc_name).strip().lower().replace(" ", "_")
 
-                write_mode = row.get("write_mode", "R").strip().upper() or "R"
+                write_mode: str = row.get("write_mode", "R").strip().upper() or "R"
 
-                entry = {
+                entry: dict[str, str] = {
                     "protocol_group":    group_name,
                     "protocol_name":     protocol_name,
                     "registry_type":     registry_type,
@@ -612,7 +613,7 @@ def _mark_orphaned_settings(db: Session, seen_keys: set[tuple[str, str]]) -> int
     """
     count = 0
     for row in db.query(Setting).all():
-        key_tuple = (row.section, row.key)
+        key_tuple: tuple[str, str] = (row.section, row.key)
         if key_tuple not in seen_keys:
             if not row.is_orphan:
                 row.is_orphan = True
@@ -657,7 +658,7 @@ def _upsert_protocol_register(db: Session, reg: dict[str, Any]) -> ProtocolRegis
             existing.read_interval     = reg.get("read_interval", "")
             existing.write_mode_protocol = reg["write_mode_protocol"]
         # Note: user_write_enabled / mask_enabled / screen_enabled intentionally
-        # NOT touched here — they are user-controlled toggles.
+        # not touched here — they are user-controlled toggles.
         return existing
 
     # Row not found — attempt INSERT inside a savepoint so a race-condition
@@ -745,7 +746,7 @@ def _load_override_names(
     names: set[str] = set()
     try:
         with open(override_path, newline="", encoding="utf-8", errors="replace") as f:
-            reader = csv.DictReader(f)
+            reader: csv.DictReader[str] = csv.DictReader(f)
             for row in reader:
                 value = (row.get("documented name") or row.get("variable_name") or "").strip()
                 if value:
@@ -774,11 +775,11 @@ def _upsert_device_protocol_selection(
         .first()
     )
 
-    var_key = protocol_row.variable_name.strip().lower().replace(" ", "_")
-    doc_key = protocol_row.documented_name.strip().lower().replace(" ", "_")
-    mask_enabled = var_key in mask_names or doc_key in mask_names
-    screen_enabled = var_key in screen_names or doc_key in screen_names
-    user_write_enabled = var_key in write_names or doc_key in write_names
+    var_key: str = protocol_row.variable_name.strip().lower().replace(" ", "_")
+    doc_key: str = protocol_row.documented_name.strip().lower().replace(" ", "_")
+    mask_enabled: bool = var_key in mask_names or doc_key in mask_names
+    screen_enabled: bool = var_key in screen_names or doc_key in screen_names
+    user_write_enabled: bool = var_key in write_names or doc_key in write_names
 
     if existing:
         existing.mask_enabled_disk = mask_enabled
@@ -813,27 +814,27 @@ def _sync_device_protocol_selections(
     project_root: Path,
     protocols_dir: Path,
 ) -> None:
-    config_dir = project_root / "config"
+    config_dir: Path = project_root / "config"
 
     for section, keys in config_data.items():
         if not section.startswith("transport."):
             continue
 
-        device_name = section.removeprefix("transport.")
-        protocol_version = keys.get("protocol_version", "").strip()
+        device_name: str = section.removeprefix("transport.")
+        protocol_version: str = keys.get("protocol_version", "").strip()
         if not protocol_version:
             continue
 
-        mask_file = keys.get("variable_mask", f"variable_mask_{device_name}.txt").strip() or f"variable_mask_{device_name}.txt"
-        screen_file = keys.get("variable_screen", f"variable_screen_{device_name}.txt").strip() or f"variable_screen_{device_name}.txt"
+        mask_file: str = keys.get("variable_mask", f"variable_mask_{device_name}.txt").strip() or f"variable_mask_{device_name}.txt"
+        screen_file: str = keys.get("variable_screen", f"variable_screen_{device_name}.txt").strip() or f"variable_screen_{device_name}.txt"
 
-        mask_names = _load_filter_names(config_dir / mask_file)
-        screen_names = _load_filter_names(config_dir / screen_file)
+        mask_names: set[str] = _load_filter_names(config_dir / mask_file)
+        screen_names: set[str] = _load_filter_names(config_dir / screen_file)
 
         write_names: set[str] = set()
-        device_write_enabled = keys.get("write_enabled", "false").strip().lower() == "true"
+        device_write_enabled: bool = keys.get("write_enabled", "false").strip().lower() == "true"
         if device_write_enabled:
-            protocol_names = (
+            protocol_names: List[Row[Tuple[str]]] = (
                 db.query(ProtocolRegister.protocol_name)
                 .filter(ProtocolRegister.protocol_name.like(f"{protocol_version}%"))
                 .distinct()
@@ -887,7 +888,7 @@ class Scanner:
 
     def set_cfg_is_truth(self, value: bool = True) -> None:
         """Enable/disable cfg-as-truth mode for the next run() call."""
-        self._cfg_truth_flag = value
+        self._cfg_truth_flag: bool = value
 
     def run(self, db: Session | None = None) -> dict[str, int]:
         """
@@ -924,14 +925,14 @@ class Scanner:
             # ----------------------------------------------------------------
             # 1. Scan config.cfg
             # ----------------------------------------------------------------
-            config_data = _load_config(self.config_path)
-            transport_library = scan_transport_library(self.transports_dir)
+            config_data: dict[str, dict[str, str]] = _load_config(self.config_path)
+            transport_library: dict[str, dict[str, Any]] = scan_transport_library(self.transports_dir)
 
             for section, keys in config_data.items():
                 transport_type = "general"
 
                 if section.startswith("transport."):
-                    transport_type = _classify_transport(section, keys, self.transports_dir)
+                    transport_type: str = _classify_transport(section, keys, self.transports_dir)
                 elif section.lower() == "logging":
                     transport_type = "logging"
 
@@ -951,8 +952,8 @@ class Scanner:
             for section, keys in config_data.items():
                 if not section.startswith("transport."):
                     continue
-                transport_name = keys.get("transport", "").strip()
-                known_keys = KNOWN_TRANSPORT_KEYS.get(transport_name, {})
+                transport_name: str = keys.get("transport", "").strip()
+                known_keys: dict[str, str] = KNOWN_TRANSPORT_KEYS.get(transport_name, {})
                 transport_type = _classify_transport(section, keys, self.transports_dir)
 
                 for k, default_v in known_keys.items():

@@ -8,9 +8,9 @@ permissions:
   
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "TSDB" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "TSDB" ]
 
 jobs:
   build:

@@ -56,8 +56,8 @@ class DiffResult:
     @property
     def summary(self) -> dict[str, int]:
         from collections import Counter
-        sc = Counter(d.change_type for d in self.settings)
-        pc = Counter(d.change_type for d in self.protocols)
+        sc: Counter[str] = Counter(d.change_type for d in self.settings)
+        pc: Counter[str] = Counter(d.change_type for d in self.protocols)
         return {
             "settings_modified": sc["modified"],
             "settings_added": sc["added"],

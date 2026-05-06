@@ -209,7 +209,7 @@ services:
     - TZ=America/Los_Angeles
     volumes:
     - /home/multiprotocolgateway4/config:/app/config
-    - /home/multiprotocolgateway4/protocols/eg4:/app/protocols/eg4
+    - /home/multiprotocolgateway4/protocols:/app/protocols
     - /home/multiprotocolgateway4/timescaledb_backlog:/app/timescaledb_backlog
     - /home/multiprotocolgateway4/logs:/app/logs
 
@@ -242,27 +242,6 @@ services:
    # current data path in timescale.
    - /home/timescaledb:/home/postgres/pgdata
   
-  # name your containers to whatever you want.  The TimescaleDB module sits on top of MPG
-  # This example is for the EG4 18kpv (/app/protocols/eg4), but you can use any volume mappings for your particular inverter.
-  18kPV_timescaledb:
-    container_name: 18kPV_timescaledb
-    image: buxtoncalvin/multiprotocolgateway:latest
-    restart: always
-    security_opt:
-      - apparmor:unconfined
-    environment:
-      - TZ=America/Los_Angeles
-    volumes:
-      - /home/multiprotocolgateway/config:/app/config
-      - /home/multiprotocolgateway/protocols/eg4:/app/protocols/eg4
-      - /home/multiprotocolgateway/timescaledb_backlog:/app/timescaledb_backlog
-      - /home/multiprotocolgateway/logs:/app/logs
-    logging:
-    driver: "json-file"
-    options:
-      max-size: "10m" 
-      max-file: "3"  
-
   grafana:
     container_name: grafana
     image: grafana/grafana:latest
@@ -350,7 +329,7 @@ console = true
 
 # can be any name in the format transport.<name>
 # changing the name will result in a new device being created in the Timescale DB.
-[transport.Inverter1]
+[transport.Inverter]
 log_level = DEBUG
 transport = modbus_tcp
 protocol_version = eg4_18kpv
