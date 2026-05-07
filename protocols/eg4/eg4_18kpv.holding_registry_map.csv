@@ -346,10 +346,10 @@ register,variable_name,documented_name,unit,data_type,values,,writable,read_inte
 217,startpvpower,StartPVpower,0.1kW,,0-120,,W,,
 218,gridpeakshavingsoc1,GridPeakShavingSOC1,%,,0-100,,W,,
 219,gridpeakshavingvolt1,GridPeakShavingVolt1,0.1V,,480-590,,W,,
-220,accouplestartsoc,ACCoupleStartSOC,%,,0-80,,W,,
-221,accoupleendsoc,ACCoupleEndSOC,%,,0-100,,W,,
-222,accouplestartvolt,ACCoupleStartVolt,0.1V,,400-520,,W,,
-223,accoupleendvolt,ACCoupleEndVolt,0.1V,,400-560,,W,,
+220,accouplestartsoc,ACCoupleStartSOC,%,,0-80,,W,,ACCouple SOC start charging point
+221,accoupleendsoc,ACCoupleEndSOC,%,,0-100,,W,,ACCouple SOC stop charging limit
+222,accouplestartvolt,ACCoupleStartVolt,0.1V,,400-520,,W,,ACCouple voltage start charging point
+223,accoupleendvolt,ACCoupleEndVolt,0.1V,,400-560,,W,,ACCouple voltage stop charging point
 224.b0,lcdversion,LCDVersion,,8bit,0-255,,W,,
 224.b8,lcdscreentype,LCDScreenType,,2bit,"{""0"": ""big screen"", ""1"": ""small screen"", ""2"": ""unknown"", ""3"": ""unknown"", ""4"": ""unknown"", ""5"": ""unknown"", ""6"": ""unknown"", ""7"": ""unknown""}",,W,,"0~7, 0 - big screen 1 - small screen"
 224.b10,lcdmachinemodelcode,LCDMachineModelCode,,6bit,"{""0"": ""12K"", ""01"": ""All-in-one"", ""02"": ""Three phase inverter""}",,W,,"0~31, 00:12K 01: All-in-one 02: Three phase inverter"

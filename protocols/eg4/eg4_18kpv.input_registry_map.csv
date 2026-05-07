@@ -135,7 +135,7 @@ register,variable_name,documented_name,unit,data_type,values,,writable,read_inte
 120,vbusp,VBusP,0.1V,,,,R,,Half BUS voltage
 121,genvolt,GenVolt,0.1V,,,,R,,Generator voltage Voltage of generator for three phase: R phase
 122,genfreq,GenFreq,0.01Hz,,,,R,,Generator frequency
-123,genpower,GenPower,W,,,,R,,Voltage of generator for three phase: R phase
+123,genpower,GenPower,W,,,,R,,system uptime counter in seconds misnamed as genpower
 124,egen_day,Egen_day,0.1kWh,,,,R,,Energy of generator today
 125,egen_all_l,Egen_all_l,0.1kWh,,,,R,,Low byte of total generator energy
 126,egen_all_h,Egen_all_h,0.1kWh,,,,R,,High byte of total generator energy

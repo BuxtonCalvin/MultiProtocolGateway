@@ -42,6 +42,6 @@ config/*.*
 config/backups/*.*
 **/__pycache__/
 classes/WebServer/**/__init__.py
-config/data-db/mpg_staging.db
-config/data-db/mpg_staging.db-shm
-config/data-db/mpg_staging.db-wal
+config/data-db/*.*
+protocols/eg4/eg4_ll_s-old.input_registry_map.csv
+protocols/eg4/eg4_ll_s-old.holding_registry_map.csv

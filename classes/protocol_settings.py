@@ -227,6 +227,16 @@ class registry_map_entry:
     has_enum_mapping : bool = False
     ''' indicates if this field has enum mappings that should be treated as strings '''
 
+    hardware_offset : int = 0
+    '''
+    A fixed integer added to the decoded value after unit_mod scaling.
+    Captures firmware bias-encoding conventions such as the EG4-LL temperature
+    threshold registers, which store (actual_degC + 50) as an unsigned byte so
+    that sub-zero thresholds remain positive in the raw register.
+    Set via "offset:<N>" in the CSV values field, e.g. "offset:-50".
+    Applied as: final_value = (raw * unit_mod) + hardware_offset
+    '''
+
     def __str__(self):
         return self.variable_name
 
@@ -301,7 +311,7 @@ class protocol_settings:
             mask_file = transport_settings.get("variable_mask", fallback=mask_file)
             screen_file = transport_settings.get("variable_screen", fallback=screen_file)
 
-        # variable_mask:   if set, ONLY metrics in this file are kept (allowlist)
+        # variable_mask:   if set, only metrics in this file are kept (allowlist)
         # variable_screen: if set, metrics in this file are removed (denylist)
         # if both are set, mask is applied first, then screen
         # files are searched relative to the protocol folder
@@ -663,6 +673,21 @@ class protocol_settings:
                 except ValueError:
                     value_is_json = False
 
+            # Extract hardware_offset from values field before other parsing.
+            # Syntax: "offset:<N>" where N is a signed integer, e.g. "offset:-50".
+            # Captures firmware bias-encoding where the BMS adds a fixed constant
+            # before storing a value (e.g. EG4-LL stores temp_degC + 50 so that
+            # sub-zero thresholds remain non-negative in the raw unsigned register).
+            # The token is stripped from the values string before range/list parsing
+            # so it does not interfere with normal value_min/value_max extraction.
+            hardware_offset: int = 0
+            offset_match: re.Match[str] | None = re.search(r"offset:\s*(?P<offset>-?\d+)", row["values"], re.IGNORECASE)
+            if offset_match:
+                hardware_offset = int(offset_match.group("offset"))
+                # Remove the token (and any surrounding comma/whitespace) so the
+                # remainder of the values string parses normally.
+                row["values"] = re.sub(r",?\s*offset:\s*-?\d+\s*,?", ",", row["values"], flags=re.IGNORECASE).strip(",").strip()
+
             if not value_is_json:
                 if "," in row["values"]:
                     list_matches: Iterator[re.Match[str]] = list_regex.finditer(row["values"])
@@ -810,7 +835,8 @@ class protocol_settings:
                                             read_command = read_command,
                                             read_interval = read_interval,
                                             write_mode = writeMode,
-                                            has_enum_mapping = value_is_json
+                                            has_enum_mapping = value_is_json,
+                                            hardware_offset = hardware_offset,
                                         )
                 registry_map.append(item)
 
@@ -1362,6 +1388,12 @@ class protocol_settings:
             # normalize float → int when appropriate
             if isinstance(value, float) and value.is_integer():
                 value = int(value)
+
+        # Apply hardware offset (bias-encoding correction) after scaling.
+        # e.g. EG4-LL config temp registers store (actual_degC + 50);
+        # hardware_offset = -50 corrects this back to actual_degC.
+        if isinstance(value, (int, float)) and entry.hardware_offset != 0:
+            value = value + entry.hardware_offset
 
         # Normalize numeric type AFTER scaling
         if isinstance(value, float) and value.is_integer():

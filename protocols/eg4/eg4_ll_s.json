@@ -1,4 +1,93 @@
 {
-    "transport" : "modbus_eg4_ll_s_tcp",
-    "batch_size" : 40
+  "_comment": [
+    "EG4-LL Battery — Protocol Codes (PDF V01.06)",
+    "Source: EG4-LL-MODBUS-Communication-Protocol.pdf V01.06 (2017-06-21)",
+    "",
+    "Keys follow the protocol_settings convention: documented_name + '_codes'.",
+    "Registers using Data_Type._16BIT_FLAGS use 'bN' keys (bit index).",
+    "Registers using Data_Type._8BIT use integer string keys (decoded byte value).",
+    "",
+    "WARNING / PROTECTION / ERROR (regs 26-28):",
+    "  Data type _16BIT_FLAGS. Multiple bits may be set simultaneously.",
+    "  These bit layouts are from PDF V01.06 and differ from the newer ll_s firmware.",
+    "  Do NOT apply the ll_s protection bit map to these registers — the bit",
+    "  assignments are completely different (e.g. bit 0 = Pack_OV here vs Cell_OV in ll_s).",
+    "",
+    "STATUS (reg 25, low byte):",
+    "  Data type _8BIT. Mutually exclusive enum values from a single byte.",
+    "  Keys are the decimal string of the raw byte value.",
+    "  High byte of reg 25 is a separate field (heater_state).",
+    "",
+    "HEATER STATE (reg 25, high byte):",
+    "  Data type _8BIT. Two valid values: 0 (off) and 128 (0x80, on)."
+  ],
+
+  "warning_codes": {
+    "_comment": "PDF reg 26. Bit layout from PDF V01.06 §3 Warning register.",
+    "b0":  "Pack_OV",
+    "b1":  "Cell_OV",
+    "b2":  "Pack_UV",
+    "b3":  "Cell_UV",
+    "b4":  "Charge_OC",
+    "b5":  "Discharge_OC",
+    "b6":  "Abnormal_Ambient_Temp",
+    "b7":  "MOS_Overheating",
+    "b8":  "Charge_OT",
+    "b9":  "Discharge_OT",
+    "b10": "Charge_UT",
+    "b11": "Discharge_UT",
+    "b12": "Low_Capacity",
+    "b13": "Float_Stopped"
+  },
+
+  "protection_codes": {
+    "_comment": "PDF reg 27. Same layout as warning except b13 = Discharge_SC (not Float_Stopped).",
+    "b0":  "Pack_OV",
+    "b1":  "Cell_OV",
+    "b2":  "Pack_UV",
+    "b3":  "Cell_UV",
+    "b4":  "Charge_OC",
+    "b5":  "Discharge_OC",
+    "b6":  "Abnormal_Ambient_Temp",
+    "b7":  "MOS_Overheating",
+    "b8":  "Charge_OT",
+    "b9":  "Discharge_OT",
+    "b10": "Charge_UT",
+    "b11": "Discharge_UT",
+    "b12": "Low_Capacity",
+    "b13": "Discharge_SC"
+  },
+
+  "error_code_codes": {
+    "_comment": "PDF reg 28. Sparse bitmask — bits 3 and 5-15 are undefined in the PDF.",
+    "b0": "Voltage_Error",
+    "b1": "Temperature_Error",
+    "b2": "Current_Flow_Error",
+    "b4": "Cell_Unbalance"
+  },
+
+  "status_codes": {
+    "_comment": [
+      "PDF reg 25 LOW BYTE (_8BIT at 25.b0). Mutually exclusive enum.",
+      "Keys are decimal string of the raw byte value (0-255 range).",
+      "High nibble 0x80 = BMS active (managing load), 0x00 = inactive (standby/idle).",
+      "Low nibble encodes operating mode."
+    ],
+    "0":   "Inactive/Standby",
+    "1":   "Inactive/Charging",
+    "2":   "Inactive/Discharging",
+    "4":   "Inactive/Protect",
+    "8":   "Inactive/Charging_Lmt",
+    "128": "Active/Standby",
+    "129": "Active/Charging",
+    "130": "Active/Discharging",
+    "132": "Active/Protect",
+    "136": "Active/Charging_Lmt"
+  },
+
+  "heater_state_codes": {
+    "_comment": "PDF reg 25 HIGH BYTE (_8BIT at 25.b8). 0x80 = heat on, 0x00 = heat off.",
+    "0":   "Off",
+    "128": "On"
+  }
 }
