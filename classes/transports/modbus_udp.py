@@ -1,5 +1,6 @@
 # scraper for Modbus UDP devices, inheriting from modbus_base and implementing UDP-specific client setup and register access logic.
-from typing import cast
+from threading import Lock
+from typing import TYPE_CHECKING, cast
 
 from pymodbus.client.base import ModbusBaseClient
 from pymodbus.client.udp import ModbusUdpClient
@@ -9,6 +10,8 @@ from defs.common import TransportSettings
 
 from .modbus_base import modbus_base
 
+if TYPE_CHECKING:
+    from threading import Lock
 
 class modbus_udp(modbus_base):
 
@@ -42,7 +45,7 @@ class modbus_udp(modbus_base):
             return None
 
         kwargs = self._get_correct_device_arg(kwargs)
-        port_lock = self._get_port_lock()
+        port_lock: Lock = self._get_port_lock()
 
         with port_lock:
         # Try the operation up to 'retries' times

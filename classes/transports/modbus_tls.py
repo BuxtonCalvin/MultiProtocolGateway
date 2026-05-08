@@ -6,6 +6,7 @@ from packaging import version
 from pymodbus import __version__ as pymodbus_version
 from pymodbus.client import ModbusTlsClient
 from pymodbus.client.base import ModbusBaseClient
+from pymodbus.exceptions import ConnectionException, ModbusException, ModbusIOException
 
 from classes.protocol_settings import Registry_Type
 from defs.common import TransportSettings
@@ -104,22 +105,57 @@ class modbus_tls(modbus_base):
             return None
 
         kwargs = self._get_correct_device_arg(kwargs)
+        result: Any = None
         # no need for a lock here since the client handles its own internal locking and
         # we don't have any shared state to protect in this method.  If we were to add retries or other
         # logic that re-enters this method, we would need to add a lock to prevent concurrent access to the client.
-        if registry_type == Registry_Type.INPUT:
-            return self.client.read_input_registers(start, count=count, **kwargs)
-        elif registry_type == Registry_Type.HOLDING:
-            return self.client.read_holding_registers(start, count=count, **kwargs)
-        else:
-            self._log.warning(f"read_registers: unsupported registry_type '{registry_type.name}' for TCP transport — returning None")
+        try:
+            if registry_type == Registry_Type.INPUT:
+                result = self.client.read_input_registers(start, count=count, **kwargs)
+            elif registry_type == Registry_Type.HOLDING:
+                result = self.client.read_holding_registers(start, count=count, **kwargs)
+            else:
+                self._log.warning(f"read_registers: unsupported registry_type '{registry_type.name}' for TCP transport — returning None")
+                return None
+
+            if isinstance(result, ModbusIOException): # pymodbus 3.0+ returns ModbusIOException objects instead of raising them
+                print(f"Modbus IO Exception returned as object: {result}")
+                return None
+
+        except ConnectionException:
+            self._log.error(f"Connection lost to {self.transport_name} at {self.host}:{self.port}")
+            self._log.error(f"❌ [COMMUNICATION LOST] --- Name: {self.transport_name} ---")
+            self.connected = False
+            self._needs_reconnection = True
+            return None
+        except ModbusIOException as e:
+            print(f"Modbus IO Exception caught: {e}")
+            return None
+        except ModbusException as e:
+            self._log.error(f"General Modbus error on {self.transport_name}: {e}")
+            return None
+        except Exception as e:
+            self._log.error(f"Unexpected error during read: {e}")
             return None
 
-    def connect(self) -> None:
+    def connect(self) -> bool:
         if self.client is None:
-            self._log.error(f"Cannot connect '{self.transport_name}' — client not initialized")
+            self._log.error(f"Cannot connect {self.transport_name} — client not initialized")
             self.connected = False
-            return
-        self.connected = cast(bool, self.client.connect())
-        self._log.info(f"Modbus TLS connected: {self.connected} for {self.transport_name} on port {self.port}")
-        super().connect()
+            return False
+
+        try:
+            # pymodbus connect() usually returns True/False
+            self.connected = bool(self.client.connect())
+
+            if self.connected:
+                self._log.info(f"Modbus TLS connected: {self.connected} for {self.transport_name}")
+                super().connect()
+            else:
+                self._log.error(f"Failed to establish TLS connection to {self.host}:{self.port}")
+
+            return self.connected  # noqa: TRY300
+        except Exception as e:
+            self._log.error(f"Exception during connection: {e}")
+            self.connected = False
+            return False

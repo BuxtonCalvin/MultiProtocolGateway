@@ -66,7 +66,9 @@ class modbus_tcp(modbus_base):
 
         kwargs = self._get_correct_device_arg(kwargs)
         result: Any = None
-
+        # no need for a lock here since the client handles its own internal locking and
+        # we don't have any shared state to protect in this method.  If we were to add retries or other
+        # logic that re-enters this method, we would need to add a lock to prevent concurrent access to the client.
         try:
             if registry_type == Registry_Type.INPUT:
                 result = self.client.read_input_registers(start, count=count, **kwargs)
@@ -103,7 +105,7 @@ class modbus_tcp(modbus_base):
 
         return result
 
-    def connect(self) -> bool: # Changed return type to bool
+    def connect(self) -> bool:
         if self.client is None:
             self._log.error(f"Cannot connect {self.transport_name} — client not initialized")
             self.connected = False
@@ -111,7 +113,7 @@ class modbus_tcp(modbus_base):
 
         try:
             # pymodbus connect() usually returns True/False
-            self.connected = cast(bool, self.client.connect())
+            self.connected = bool(self.client.connect())
 
             if self.connected:
                 self._log.info(f"Modbus TCP connected: {self.connected} for {self.transport_name}")

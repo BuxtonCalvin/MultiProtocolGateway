@@ -13,7 +13,7 @@ on top of modbus_tcp.
 Protocol notes
 --------------
 This class targets the EG4-LL battery using the PDF V01.06 register map
-(eg4_ll_pdf_holding_registry_map.csv.
+(eg4_ll_pdf_holding_registry_map.csv / eg4_ll_pdf_input_registry_map.csv).
 That protocol uses a SINGLE Modbus address space, ALL accessed via FC 0x03
 (Read Holding Registers). There is no FC 0x04 input space — do not use the
 input CSV for live reads.
@@ -97,11 +97,11 @@ Manual verification commands (send to RS485 bus to confirm addressing):
 """
 
 from classes.protocol_settings import Registry_Type, registry_map_entry
-from classes.transports.modbus_tcp import modbus_tcp
+from classes.transports.modbus_rtu import modbus_rtu
 from defs.common import TransportSettings
 
 
-class modbus_eg4_ll_s_tcp(modbus_tcp):
+class modbus_eg4_ll_s_tcp(modbus_rtu):
     """
     EG4 LL battery transport over Modbus TCP (Waveshare RS485 bridge),
     targeting the PDF V01.06 register map.

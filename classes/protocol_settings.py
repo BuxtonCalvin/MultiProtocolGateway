@@ -409,6 +409,11 @@ class protocol_settings:
         return {}
 
     def load__json(self, file : str = "", settings_dir : str = "") -> None:
+        """
+        JSON file is doing double duty: it's simultaneously the protocol config file
+        and the code mapping file, separated purely by key naming convention. Settings keys go both places;
+        _codes-suffixed keys stay in self.codes only.
+        """
         if not settings_dir:
             settings_dir = self.settings_dir
 
@@ -520,6 +525,12 @@ class protocol_settings:
             #region read_interval
 
             if "read interval" in row:
+                # support syntax like "10x" to mean 10 times the transport read interval, or "500ms" for fixed ms intervals
+                # only applies this parsing to the read interval column, and not accidentally applies multipliers
+                # to units or other fields that might have similar syntax. That's why the regex is specific to the read interval
+                # field which is checked before applying.  However, JSON protocol settings can still specify "read interval"
+                # with this syntax, and it will be applied without the multiplier to all registers that don't have an override or specific read interval
+                # set in the CSV.
                 row["read interval"] = row["read interval"].lower() #ensure is all lower case
                 match: re.Match[str] | None = read_interval_regex.search(row["read interval"])
                 if match:
