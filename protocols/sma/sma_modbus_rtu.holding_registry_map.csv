@@ -1,0 +1,32 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note
+30051,device_class,Device Class,,U32,,,R,,SMA device class ID; U32 spanning registers 30051-30052
+30053,device_type,Device Type,,U32,,,R,,SMA product type code; U32 spanning 30053-30054
+30057,serial_number,Serial Number,,U32,,,R,,Device serial number; U32 spanning 30057-30058
+30059,software_package,Software Package,,U32,,,R,,Firmware version; U32 spanning 30059-30060
+30201,status_condition,Operating Condition,,U32,"295=OK,303=off,1392=warning,1793=error",,R,,General status; U32 spanning 30201-30202
+30211,grid_relay_status,Grid Relay Status,,U32,"51=open,311=closed",,R,,Transfer switch / grid relay state
+30513,yield_total,Total Yield,Wh,U32,,,R,,Cumulative AC output energy lifetime
+30515,yield_today,Daily Yield,Wh,U32,,,R,,AC output energy today
+30517,error_code,Last Error Code,,U32,,,R,,Most recent fault code; 0 = no fault
+30519,battery_charged_today,Battery Charged Today,Wh,U32,,,R,,Energy charged into battery today
+30521,battery_discharged_today,Battery Discharged Today,Wh,U32,,,R,,Energy discharged from battery today
+30525,operating_hours,Operating Hours,s,U32,,,R,,Cumulative operational seconds
+30769,ac_power_total,AC Active Power Total,W,S32,,,R,,Net AC power; positive=export/supply negative=absorbing
+30775,ac_power_l1,AC Power L1,W,S32,,,R,,AC power phase L1
+30783,ac_voltage_l1,AC Voltage L1,0.01V,U32,,,R,,AC output voltage L1; divide by 100
+30795,ac_current_l1,AC Current L1,0.001A,S32,,,R,,AC current L1; divide by 1000
+30803,ac_frequency,AC Frequency,0.01Hz,U32,,,R,,AC bus frequency; divide by 100
+30845,battery_voltage,Battery Voltage,0.1V,S32,,,R,,Battery terminal voltage; divide by 10
+30847,battery_current,Battery Current,0.1A,S32,,,R,,Battery current; positive=charging; divide by 10
+30849,battery_power,Battery Power,W,S32,,,R,,Battery power; positive=charging
+30851,battery_soc,Battery SOC,%,U32,0-100,,R,,Battery state of charge
+30853,battery_temperature,Battery Temperature,0.1°C,S32,-300-1500,,R,,Battery temperature; divide by 10
+30955,inverter_temperature,Inverter Temperature,0.1°C,S32,-300-1500,,R,,Internal inverter temperature; divide by 10
+30975,operating_mode_active,Active Operating Mode,,U32,"1749=autonomous,1750=grid tied,1779=island,1780=transition",,R,,Current operating topology
+30977,generator_request,Generator Start Request,,U32,"51=no,1069=yes",,R,,Automatic generator start output state
+31021,soc_min_setpoint,SOC Minimum Setpoint,%,U32,0-100,,R/W,,SOC floor before generator request
+31023,soc_max_setpoint,SOC Maximum Setpoint,%,U32,0-100,,R/W,,SOC ceiling / charge stop point
+40009,operating_mode_cmd,Operating Mode Command,,U32,"1749=autonomous,1750=grid tied,1769=stop",,R/W,,Write to change operating mode; see FC06 single register write
+40151,active_power_limit,Active Power Limit,0.01%,U32,0-10000,,R/W,,AC power output ceiling; divide by 100 for percent
+# Register addresses: identical to Modbus TCP register map (function code addressing,not PDU offset),,,,,,,,
+# Serial parameters: 9600 baud,8 data bits,No parity,1 stop bit (9600 8N1),,,,,,

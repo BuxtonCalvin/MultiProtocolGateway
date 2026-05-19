@@ -1,0 +1,34 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note
+F_AC_IN1_IGN,ac_in1_ignored,Ignore AC Input 1,,bool,"0=no,1=yes",,R/W,,Disable AC input 1 (islanding/generator control)
+F_AC_IN2_IGN,ac_in2_ignored,Ignore AC Input 2,,bool,"0=no,1=yes",,R/W,,Disable AC input 2 (Quattro only)
+F_AC_IN_F,ac_in_frequency,AC Input Frequency,Hz,float,45-65,,R,,Mains supply frequency
+F_AC_IN_I_L1,ac_in_current_l1,AC Input Current L1,A,float,,,R,,AC mains input current phase 1
+F_AC_IN_I_L2,ac_in_current_l2,AC Input Current L2,A,float,,,R,,AC mains input current phase 2 (three-phase)
+F_AC_IN_I_L3,ac_in_current_l3,AC Input Current L3,A,float,,,R,,AC mains input current phase 3 (three-phase)
+F_AC_IN_SRC,active_ac_input,Active AC Input Source,,uint8,"1=AC input 1,2=AC input 2,240=none",,R,,Currently connected AC input; Quattro has two AC inputs
+F_AC_IN_V_L1,ac_in_voltage_l1,AC Input Voltage L1,V,float,,,R,,AC mains input voltage phase 1
+F_AC_IN_V_L2,ac_in_voltage_l2,AC Input Voltage L2,V,float,,,R,,AC mains input voltage phase 2 (three-phase)
+F_AC_IN_V_L3,ac_in_voltage_l3,AC Input Voltage L3,V,float,,,R,,AC mains input voltage phase 3 (three-phase)
+F_AC_OUT_F,ac_out_frequency,AC Output Frequency,Hz,float,45-65,,R,,Inverter output frequency
+F_AC_OUT_I_L1,ac_out_current_l1,AC Output Current L1,A,float,,,R,,Inverter AC output current phase 1
+F_AC_OUT_I_L2,ac_out_current_l2,AC Output Current L2,A,float,,,R,,Inverter AC output current phase 2 (three-phase)
+F_AC_OUT_I_L3,ac_out_current_l3,AC Output Current L3,A,float,,,R,,Inverter AC output current phase 3 (three-phase)
+F_AC_OUT_V_L1,ac_out_voltage_l1,AC Output Voltage L1,V,float,,,R,,Inverter AC output voltage phase 1
+F_AC_OUT_V_L2,ac_out_voltage_l2,AC Output Voltage L2,V,float,,,R,,Inverter AC output voltage phase 2 (three-phase)
+F_AC_OUT_V_L3,ac_out_voltage_l3,AC Output Voltage L3,V,float,,,R,,Inverter AC output voltage phase 3 (three-phase)
+F_AUX1,aux_relay_1,Auxiliary Relay 1,,bool,"0=open,1=closed",,R,,Programmable auxiliary relay 1 state
+F_AUX2,aux_relay_2,Auxiliary Relay 2,,bool,"0=open,1=closed",,R,,Programmable auxiliary relay 2 state
+F_CHARGE_STATE,charge_state,Charge State,,uint8,"3=bulk,4=absorption,5=float,6=storage,7=equalize",,R,,Battery charging algorithm state
+F_CHARGER,charger_enabled,Charger Active,,bool,"0=no,1=yes",,R,,Battery charger section active
+F_DC_I,dc_current,DC Battery Current,A,float,-1000-1000,,R,,Battery current; positive=charging negative=discharging
+F_DC_T,dc_temperature,Inverter Temperature,°C,int,-40-100,,R,,Internal inverter temperature
+F_DC_V,dc_voltage,DC Battery Voltage,V,float,0-65,,R,,Battery bank voltage at inverter terminals
+F_ERROR,vebus_error,VE.Bus Error Code,,uint8,0-255,,R,,Error condition code; 0=no error; see VE.Bus error table
+F_HIGHTEMP,high_temp_alarm,High Temperature Alarm,,uint8,"0=ok,1=warning,2=alarm",,R,,Inverter over-temperature alarm state
+F_INVERTER,inverter_enabled,Inverter Active,,bool,"0=no,1=yes",,R,,Inverter section active
+F_LOWBAT,low_battery_alarm,Low Battery Alarm,,uint8,"0=ok,1=warning,2=alarm",,R,,Low battery voltage alarm state
+F_MODE,switch_mode,Switch Mode,,uint8,"1=charger only,2=inverter only,3=on,4=off",,R/W,,Current operating mode; writable to change mode
+F_OVERLOAD,overload_alarm,Overload Alarm,,uint8,"0=ok,1=warning,2=alarm",,R,,AC output overload alarm state
+F_PASSTHRU,passthru_active,Passthrough Active,,bool,"0=no,1=yes",,R,,AC input being passed directly to output
+F_STATE,vebus_state,VE.Bus State,,uint8,"0=off,1=low power,2=fault,3=bulk,4=absorption,5=float,6=storage,7=equalize,8=passthru,9=inverting,10=power assist,11=power supply mode",,R,,Operating state of the VE.Bus system
+F_WARN,warning_flags,Warning Flags,,uint16,0-65535,,R,,Active warning bitmask

@@ -2,47 +2,7 @@
   "byteorder":     "big",
   "batch_size":    "40",
   "read_interval": "5000",
-
-  "warning_codes": {
-    "b0":  "Pack_OV",
-    "b1":  "Cell_OV",
-    "b2":  "Pack_UV",
-    "b3":  "Cell_UV",
-    "b4":  "Charge_OC",
-    "b5":  "Discharge_OC",
-    "b6":  "Abnormal_Ambient_Temp",
-    "b7":  "MOS_Overheating",
-    "b8":  "Charge_OT",
-    "b9":  "Discharge_OT",
-    "b10": "Charge_UT",
-    "b11": "Discharge_UT",
-    "b12": "Low_Capacity",
-    "b13": "Float_Stopped"
-  },
-
-  "protection_codes": {
-    "b0":  "Pack_OV",
-    "b1":  "Cell_OV",
-    "b2":  "Pack_UV",
-    "b3":  "Cell_UV",
-    "b4":  "Charge_OC",
-    "b5":  "Discharge_OC",
-    "b6":  "Abnormal_Ambient_Temp",
-    "b7":  "MOS_Overheating",
-    "b8":  "Charge_OT",
-    "b9":  "Discharge_OT",
-    "b10": "Charge_UT",
-    "b11": "Discharge_UT",
-    "b12": "Low_Capacity",
-    "b13": "Discharge_SC"
-  },
-
-  "error_code_codes": {
-    "b0": "Voltage_Error",
-    "b1": "Temperature_Error",
-    "b2": "Current_Flow_Error",
-    "b4": "Cell_Unbalance"
-  },
+  "send_input_register": false,
 
   "status_codes": {
     "0":   "Inactive/Standby",

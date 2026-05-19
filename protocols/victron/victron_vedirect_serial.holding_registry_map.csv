@@ -1,0 +1,55 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note
+Alarm,alarm_state,Alarm State,,string,"ON,OFF",,R,,General alarm flag
+AR,alarm_reason,Alarm Reason,,uint,0-65535,,R,,Bitmask; see BMV register 266 for bit definitions (BMV only)
+BMV,bmv_model,BMV Model String,,string,,,R,,Model identifier string (e.g. BMV-712 Smart); sent at  only
+CE,consumed_energy,Consumed Energy,mAh,int,,,R,,Ah consumed since last full charge (BMV only; negative value)
+CS,charge_state,Charge State,,uint,"0=off,2=fault,3=bulk,4=absorption,5=float,7=equalize (manual),9=inverting,245=starting up,247=auto equalize,252=external control",,R,,Current charge algorithm or inverter state
+DM,midpoint_deviation,Mid-point Deviation,0.1%,int,-1000-1000,,R,,Mid-point voltage deviation from ideal; divide by 10
+ERR,error_code,Error Code,,uint,0-255,,R,,Active error code; 0=no error; see Victron error code table
+FW,firmware_version,Firmware Version,,string,,,R,,Firmware version (e.g. 0307); sent at  only
+FWE,firmware_version_ext,Firmware Version Extended,,string,,,R,,Extended firmware version (newer devices)
+H1,hist_deepest_discharge,Deepest Discharge,mAh,int,,,R,,Historical deepest discharge depth (BMV only)
+H10,hist_auto_syncs,Automatic Syncs,,uint,0-65535,,R,,Automatic SOC synchronization event count (BMV only)
+H11,hist_low_volt_alarms,Low Voltage Alarms,,uint,0-65535,,R,,Count of low voltage alarm activations (BMV only)
+H12,hist_high_volt_alarms,High Voltage Alarms,,uint,0-65535,,R,,Count of high voltage alarm activations (BMV only)
+H13,hist_low_aux_alarms,Low Aux Voltage Alarms,,uint,0-65535,,R,,Count of low auxiliary voltage alarms (BMV only)
+H14,hist_high_aux_alarms,High Aux Voltage Alarms,,uint,0-65535,,R,,Count of high auxiliary voltage alarms (BMV only)
+H15,hist_min_aux_voltage,Minimum Aux Voltage,mV,int,,,R,,Lowest auxiliary battery voltage recorded (BMV only)
+H16,hist_max_aux_voltage,Maximum Aux Voltage,mV,int,,,R,,Highest auxiliary battery voltage recorded (BMV only)
+H17,hist_yield_total,Yield Total,0.01kWh,uint,,,R,,Total energy harvested since installation (MPPT only); divide by 100
+H18,hist_yield_today_reset,Yield Resets,,uint,0-65535,,R,,Count of yield today counter resets (MPPT only)
+H19,hist_yield_yesterday,Yield Yesterday,0.01kWh,uint,,,R,,Solar energy harvested previous day (MPPT only); divide by 100
+H2,hist_last_discharge,Last Discharge,mAh,int,,,R,,Discharge depth of last cycle (BMV only)
+H20,hist_yield_today,Yield Today,0.01kWh,uint,,,R,,Solar energy harvested today (MPPT only); divide by 100
+H21,hist_max_power_today,Max Power Today,W,uint,0-65535,,R,,Peak PV power today (MPPT only)
+H22,hist_max_power_yesterday,Max Power Yesterday,W,uint,0-65535,,R,,Peak PV power yesterday (MPPT only)
+H23,hist_daily_yield_day,Daily Yield (day counter),0.01kWh,uint,,,R,,Yield for current calendar day (some MPPT firmware)
+H3,hist_avg_discharge,Average Discharge,mAh,int,,,R,,Average discharge per cycle (BMV only)
+H4,hist_charge_cycles,Charge Cycles,,uint,0-65535,,R,,Total charge cycle count (BMV only)
+H5,hist_full_discharges,Full Discharges,,uint,0-65535,,R,,Total full discharge count (BMV only)
+H6,hist_total_ah_drawn,Total Ah Drawn,mAh,int,,,R,,Cumulative Ah withdrawn over device lifetime (BMV only)
+H7,hist_min_voltage,Minimum Voltage,mV,int,,,R,,Lowest battery voltage recorded (BMV only)
+H8,hist_max_voltage,Maximum Voltage,mV,int,,,R,,Highest battery voltage recorded (BMV only)
+H9,hist_days_since_full,Days Since Last Full,days,int,0-65535,,R,,Days since battery was last at 100% SOC (BMV only)
+HSDS,day_sequence,Historical Day Sequence,,uint,0-364,,R,,Day sequence number for historical data indexing (MPPT only)
+I,battery_current,Battery Current,mA,int,-32767-32767,,R,,Battery current; positive=charging negative=discharging; divide by 1000
+I2,aux_current,Auxiliary Current,mA,int,-32767-32767,,R,,Auxiliary input current (multi-input devices)
+IL,load_current,Load Current,mA,int,0-32767,,R,,Load output current (MPPT with load output only)
+LOAD,load_output_state,Load Output State,,string,"ON,OFF",,R,,Load output on/off state (MPPT with load output)
+MON,dc_monitor_mode,DC Monitor Mode,,int,-9-9,,R,,DC monitor mode setting (BMV-712 only)
+MPPT,mppt_mode,MPPT Tracker Mode,,uint,"0=off,1=voltage or current limited,2=MPPT active",,R,,MPPT tracking algorithm state (MPPT only)
+OR,off_reason,Off Reason,,hex,0x0-0xFFFFFFFF,,R,,Bitmask indicating why device is off; 0x00000001=no input power 0x00000002=switched off 0x00000004=remote input
+P,battery_power,Battery Power,W,int,-32767-32767,,R,,Instantaneous battery power (BMV only)
+PID,product_id,Product ID,,hex,0x0-0xFFFF,,R,,Victron product identifier; see Victron PID list
+PPV,pv_power,Panel Power,W,uint,0-32767,,R,,Instantaneous PV array power (MPPT only)
+Relay,relay_state,Relay State,,string,"ON,OFF",,R,,Programmable relay state
+SER#,serial_number,Serial Number,,string,,,R,,Device serial number; sent at  only
+SOC,state_of_charge,State of Charge,0.1%,int,0-1000,,R,,Battery state of charge; divide by 10 for percent (BMV only)
+T,battery_temperature,Battery Temperature,°C,int,-40-100,,R,,Battery temperature (requires optional temp sensor)
+TTG,time_to_go,Time to Go,min,int,0-65535,,R,,Time until battery empty; -1 = not discharging (BMV only)
+V,battery_voltage,Main Battery Voltage,mV,int,0-65535,,R,,Main battery voltage in millivolts; divide by 1000 for volts
+V2,aux_voltage,Auxiliary Voltage,mV,int,0-65535,,R,,Mid-point or starter battery voltage (BMV-702/712 only)
+V3,mid_voltage,Mid-point Voltage,mV,int,0-65535,,R,,Mid-point voltage of battery bank (BMV-702/712 only)
+VM,mid_voltage_alt,Mid-point Voltage (alt),mV,int,0-65535,,R,,Alternate mid-point voltage label used by some firmware versions
+VPV,pv_voltage,Panel Voltage,mV,int,0-65535,,R,,PV array voltage (MPPT only); divide by 1000 for volts
+VS,starter_voltage,Starter Battery Voltage,mV,int,0-65535,,R,,Starter battery voltage (BMV-712 only)

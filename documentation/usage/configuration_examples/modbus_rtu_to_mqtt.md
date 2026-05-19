@@ -1,8 +1,8 @@
-![mpg modbus flow drawio](https://github.com/user-attachments/assets/d9d59dc3-2a0a-4b34-8db7-ac054dccc67e)
+# ModBus RTU to MQTT# Modbus RTU
 
+![mpg modbus flow drawio](../../assets/ModbusRTUToMqtt.png)
 
-### ModBus RTU to MQTT
-```
+``` ini
 [general]
 log_level = DEBUG
 
@@ -46,4 +46,3 @@ json = false
 discovery_enabled = true
 discovery_topic = homeassistant
 ```
-

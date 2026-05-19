@@ -11,7 +11,7 @@ The .csv files hold the registry or address definitions.
 CSV = comma separated values... spreadsheets.
 Delimiter for csv can be , or ; ( not both ).
 
-| variable name | data type | register | documented name | description | writable | values | read interval |
+|register | variable_name | documented_name | unit | data_type | values | writable | read_interval | note
 | -- | -- | -- | -- | -- | -- | -- | -- |
 
 ### variable name

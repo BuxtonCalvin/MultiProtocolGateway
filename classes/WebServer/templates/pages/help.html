@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block title %}Help - MPG Admin{% endblock %}
+
+{% block content %}
+<div class="grid grid-cols-12 gap-4">
+  {% if mode == 'library' %}
+  <aside class="col-span-12 lg:col-span-3 space-y-4">
+    <section>
+      <h2 class="surface-muted text-xs font-semibold uppercase tracking-widest mb-2">Screens</h2>
+      <div class="surface-table rounded border overflow-hidden">
+        {% if screenshots %}
+          {% for item in screenshots %}
+          <a href="{{ item.url }}"
+             class="block px-3 py-2 text-sm surface-text hover:bg-mpg-100 dark:hover:bg-mpg-800 border-b border-mpg-200 dark:border-mpg-700 last:border-b-0">
+            {{ item.title }}
+          </a>
+          {% endfor %}
+        {% else %}
+          <p class="px-3 py-2 text-xs surface-muted">
+            Run <code>python capture_docs.py</code> to create screenshots.
+          </p>
+        {% endif %}
+      </div>
+    </section>
+
+    <section>
+      <h2 class="surface-muted text-xs font-semibold uppercase tracking-widest mb-2">Documentation</h2>
+      <div class="surface-table rounded border overflow-hidden max-h-[62vh] overflow-y-auto">
+        {% set current_folder = namespace(value='') %}
+        {% for doc in docs %}
+          {% if doc.folder != current_folder.value %}
+            {% set current_folder.value = doc.folder %}
+            <div class="px-3 py-1.5 text-[0.68rem] uppercase font-semibold surface-muted bg-mpg-100 dark:bg-mpg-800">
+              {{ doc.folder }}
+            </div>
+          {% endif %}
+          <a href="{{ doc.url }}"
+             {% if doc.is_pdf %}target="_blank" rel="noopener"{% endif %}
+             class="block pl-7 pr-3 py-2 text-sm surface-text hover:bg-mpg-100 dark:hover:bg-mpg-800 border-t border-mpg-200 dark:border-mpg-700">
+            {{ doc.name }}
+          </a>
+        {% endfor %}
+      </div>
+    </section>
+  </aside>
+  {% elif mode == 'documentation' %}
+  <aside class="col-span-12 lg:col-span-3">
+    <h2 class="surface-muted text-xs font-semibold uppercase tracking-widest mb-2">Documentation</h2>
+    <nav class="docs-menu surface-table rounded border overflow-hidden max-h-[calc(100vh-9rem)] overflow-y-auto"
+         aria-label="Documentation files">
+      {% set current_folder = namespace(value='') %}
+      {% for doc in docs %}
+        {% if doc.folder != current_folder.value %}
+          {% set current_folder.value = doc.folder %}
+          <div class="px-3 py-1.5 text-[0.68rem] uppercase font-semibold surface-muted bg-mpg-100 dark:bg-mpg-800">
+            {{ doc.folder }}
+          </div>
+        {% endif %}
+        <a href="{{ doc.url }}"
+           data-doc-path="{{ doc.path }}"
+           {% if selected_doc and selected_doc.path == doc.path %}aria-current="page"{% endif %}
+           {% if doc.is_pdf %}target="_blank" rel="noopener"{% endif %}
+           class="block pl-7 pr-3 py-2 text-sm surface-text hover:bg-mpg-100 dark:hover:bg-mpg-800 border-t border-mpg-200 dark:border-mpg-700
+                  {% if selected_doc and selected_doc.path == doc.path %}bg-mpg-100 dark:bg-mpg-800 font-semibold{% endif %}">
+          {{ doc.name }}
+        </a>
+      {% endfor %}
+    </nav>
+  </aside>
+  {% endif %}
+
+  <section class="col-span-12 {% if mode in ['library', 'documentation'] %}lg:col-span-9{% else %}lg:col-span-12{% endif %} min-w-0">
+    {% if selected_image %}
+      <div class="flex items-center justify-between gap-3 mb-3">
+        <h1 class="surface-title">{{ selected_image.title }}</h1>
+        <a href="/static/annotations.json" class="btn-secondary text-xs">annotations.json</a>
+      </div>
+      {% if selected_image.exists %}
+      <div class="docs-shot-frame">
+        <img id="docs-base-image"
+             src="{{ selected_image.src }}"
+             alt="{{ selected_image.title }} screenshot"
+             class="docs-base-image"
+             data-image-id="{{ selected_image.id }}">
+        <svg id="docs-annotation-layer"
+             class="docs-annotation-layer"
+             viewBox="0 0 100 100"
+             preserveAspectRatio="none"
+             aria-hidden="true"></svg>
+        <div id="docs-callout-layer" class="docs-callout-layer"></div>
+      </div>
+      {% else %}
+      <div class="card surface-text">
+        No screenshot exists for <code>{{ selected_image.id }}</code> yet. Refresh captures with
+        <code>python capture_docs.py</code>.
+      </div>
+      {% endif %}
+    {% elif selected_doc %}
+      <div class="flex items-center justify-between gap-3 mb-3">
+        <h1 class="surface-title">{{ selected_doc.title }}</h1>
+        <a href="{{ selected_doc.raw_url }}" class="btn-secondary text-xs">Open Raw</a>
+      </div>
+      <article class="docs-article">
+        {% if selected_doc.is_markdown %}
+          {{ selected_doc.html | safe }}
+        {% elif selected_doc.is_image %}
+          <img src="{{ selected_doc.raw_url }}" alt="{{ selected_doc.title }}">
+        {% else %}
+          <pre><code>{{ selected_doc.text }}</code></pre>
+        {% endif %}
+      </article>
+    {% else %}
+      <div class="card surface-text">
+        {% if mode == 'documentation' %}
+          Select a documentation file from the menu.
+        {% else %}
+          Select a captured screen or a documentation file from the Help menu.
+        {% endif %}
+      </div>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/help-annotations.js?v=docs-codehilite-2"></script>
+<script>
+  (function() {
+    const active = document.querySelector('.docs-menu [aria-current="page"]');
+    if (!active) return;
+    active.scrollIntoView({ block: 'center', inline: 'nearest' });
+    active.focus({ preventScroll: true });
+  })();
+</script>
+{% endblock %}

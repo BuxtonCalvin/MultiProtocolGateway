@@ -1,0 +1,27 @@
+{
+  "transport": "serial_vedirect",
+
+  "charge_state_codes": {
+    "0": "off",
+    "2": "fault",
+    "3": "bulk",
+    "4": "absorption",
+    "5": "float",
+    "7": "equalize (manual)",
+    "9": "inverting",
+    "245": "starting up",
+    "247": "auto equalize",
+    "252": "external control"
+  },
+
+  "alarm_state_codes": {
+    "OFF": "No alarm",
+    "ON": "Alarm active"
+  },
+
+  "mppt_mode_codes": {
+    "0": "off",
+    "1": "voltage or current limited",
+    "2": "MPPT active"
+  }
+}

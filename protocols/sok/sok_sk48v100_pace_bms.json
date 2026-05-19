@@ -54,7 +54,7 @@
     "b15": "SOC Low alarm"
   },
 
-  "protection_flag_codes": {
+  "protection_flags_codes": {
     "b0": "battery cell over voltage protection",
     "b1": "battery cell low voltage protection",
     "b2": "battery pack over voltage protection",

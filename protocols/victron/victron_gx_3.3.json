@@ -1,5 +1,0 @@
-{
-    "transport" : "modbus_rtu",
-    "send_holding_register": true,
-    "send_input_register" : false
-}

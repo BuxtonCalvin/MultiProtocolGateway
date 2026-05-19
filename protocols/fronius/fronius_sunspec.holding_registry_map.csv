@@ -1,0 +1,81 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note
+40001,sunspec_id,SunSpec ID,,uint32,,,R,,"Fixed value 0x53756E53 (""SunS""); confirms SunSpec compliance"
+40003,sunspec_did,SunSpec Device ID,,uint16,,,R,,Fixed 0x0001 = SunSpec common block
+40004,sunspec_length,Common Block Length,,uint16,,,R,,Fixed value 65 (registers)
+40005,manufacturer,Manufacturer String,,string32,,,R,,Manufacturer name ASCII string (16 registers = 32 chars)
+40021,model_string,Model String,,string32,,,R,,Inverter model name ASCII (16 registers)
+40045,options,Options,,string16,,,R,,Options/features string (8 registers)
+40053,version,Version,,string16,,,R,,Firmware version ASCII string
+40061,serial_number,Serial Number,,string32,,,R,,Device serial number ASCII (16 registers)
+40069,device_address,Modbus Device Address,,uint16,1-247,,R/W,,Current Modbus unit ID; write to change address
+# ─── SunSpec Inverter Model (Float) ──────────────────────────────────────────,,,,,,,,,
+40070,sunspec_inverter_did,Inverter Model ID,,uint16,"111=single-phase,112=split-phase,113=three-phase",,R,,SunSpec model type; determines which phase registers are populated
+40071,inverter_block_length,Inverter Block Length,,uint16,,,R,,Number of registers in this model block (60)
+40072,ac_current_total,AC Total Current,A,float32,,,R,,Total AC output current; float32 across registers 40072-40073
+40074,ac_current_a,AC Phase A Current,A,float32,,,R,,Phase A current; float32 across 40074-40075
+40076,ac_current_b,AC Phase B Current,A,float32,,,R,,Phase B current; 40076-40077 (split/three-phase only)
+40078,ac_current_c,AC Phase C Current,A,float32,,,R,,Phase C current; 40078-40079 (three-phase only)
+40080,ac_voltage_ab,AC Voltage Phase A-B,V,float32,,,R,,Line-to-line voltage A-B; 40080-40081 (three-phase only)
+40082,ac_voltage_bc,AC Voltage Phase B-C,V,float32,,,R,,Line-to-line voltage B-C; 40082-40083 (three-phase only)
+40084,ac_voltage_ca,AC Voltage Phase C-A,V,float32,,,R,,Line-to-line voltage C-A; 40084-40085 (three-phase only)
+40086,ac_voltage_an,AC Voltage Phase A-N,V,float32,,,R,,Phase A to neutral voltage; 40086-40087
+40088,ac_voltage_bn,AC Voltage Phase B-N,V,float32,,,R,,Phase B to neutral voltage; 40088-40089 (three-phase only)
+40090,ac_voltage_cn,AC Voltage Phase C-N,V,float32,,,R,,Phase C to neutral voltage; 40090-40091 (three-phase only)
+40092,ac_power,AC Active Power,W,float32,,,R,,Total AC output power; positive = generating; 40092-40093
+40094,ac_frequency,AC Frequency,Hz,float32,,,R,,Grid frequency; 40094-40095
+40096,ac_apparent_power,AC Apparent Power,VA,float32,,,R,,Total apparent power; 40096-40097
+40098,ac_reactive_power,AC Reactive Power,VAr,float32,,,R,,Total reactive power; 40098-40099
+40100,ac_power_factor,Power Factor,%,float32,-100-100,,R,,Displacement power factor; 40100-40101
+40102,ac_energy_total,AC Lifetime Energy,Wh,float32,,,R,,Cumulative AC energy produced; 40102-40103; monotonic counter
+40104,dc_current,DC Current,A,float32,,,R,,Total DC input current from PV; 40104-40105
+40106,dc_voltage,DC Voltage,V,float32,,,R,,DC input voltage; 40106-40107
+40108,dc_power,DC Power,W,float32,,,R,,DC input power; 40108-40109
+40110,inverter_temperature,Inverter Temperature,°C,float32,,,R,,Cabinet temperature; 40110-40111
+40112,operating_state,Operating State,,uint16,"1=off,2=sleeping,3=waking up,4=MPPT,5=throttled,6=shutting down,7=fault,8=standby",,R,,Current inverter operating state
+40113,vendor_state,Vendor State,,uint16,,,R,,Fronius-specific operating state code
+40114,alarm_1,Event Flags 1,,uint32,,,R,,Alarm bitmask word 1; bit 2=over-temperature bit 3=AC disconnect bit 10=low power
+40116,alarm_2,Event Flags 2,,uint32,,,R,,Alarm bitmask word 2
+# ─── Fronius-Specific Registers (Datamanager / GEN24) ──────────────────────────,,,,,,,,,
+212,f_store_data,Store Data to EEPROM,,uint16,0xFFFF,,R/W,,Write 0xFFFF to persistently store current settings to Datamanager EEPROM
+214,f_active_state_code,Active State Code,,uint16,,,R,,Fronius active state code of inverter; see Fronius state code table
+215,f_reset_event_flags,Reset Event Flags,,uint16,0xFFFF,,W,,Write 0xFFFF to reset all event flags and clear active state code
+216,f_model_type,SunSpec Model Type,,uint16,"1=float,2=integer+SF",,R/W,,Active data model; write 1 or 2 then immediately write 6 to register 216 to confirm
+217,f_storage_restrictions,Storage Restrictions View Mode,,uint16,"0=local,1=global",,R/W,,Scope of IC124 storage control restrictions
+# ─── Site-Level Aggregated Data (Fronius Datamanager only) ────────────────────,,,,,,,,,
+500,f_site_power,Site Power Total,W,uint32,,,R,,Total AC power sum of all connected inverters; 32-bit unsigned
+502,f_site_energy_day,Site Energy Today,Wh,uint64,,,R,,Total AC energy generated today across all inverters; 64-bit
+506,f_site_energy_year,Site Energy This Year,Wh,uint64,,,R,,Total AC energy for current year across all inverters; 64-bit
+510,f_site_energy_total,Site Energy Total,Wh,uint64,,,R,,Lifetime AC energy across all inverters; 64-bit
+# ─── SunSpec Nameplate Model IC120 ────────────────────────────────────────────,,,,,,,,,
+40132,ic120_id,Nameplate Model ID,,uint16,120,,R,,Fixed 120 = SunSpec nameplate model
+40133,ic120_length,Nameplate Block Length,,uint16,,,R,,Number of registers in nameplate block (26)
+40134,der_type,DER Device Type,,uint16,4,,R,,Fixed 4 = PV inverter device type
+40135,rated_power,Rated Power,W,uint16,,,R,,Continuous power output rating; apply WRtg_SF (40136)
+40136,rated_power_sf,Rated Power Scale Factor,,int16,,,R,,Scale factor for WRtg; e.g. -1 means divide by 10
+40137,rated_va,Rated VA,VA,uint16,,,R,,Continuous apparent power rating; apply VARtg_SF (40138)
+40138,rated_va_sf,Rated VA Scale Factor,,int16,,,R,,Scale factor for VARtg
+# ─── SunSpec Basic Settings IC121 ─────────────────────────────────────────────,,,,,,,,,
+40163,ic121_id,Basic Settings Model ID,,uint16,121,,R,,Fixed 121 = SunSpec basic settings model
+40164,ic121_length,Basic Settings Block Length,,uint16,,,R,,Number of registers in block (30)
+40166,active_power_limit_pct,Active Power Limit,0.01%,uint16,0-10000,,R/W,,Maximum active power as percent of rated; divide by 100; 10000 = 100%
+40167,active_power_limit_enabled,Active Power Limit Enable,,uint16,"0=disabled,1=enabled",,R/W,,Enable (1) or disable (0) active power limitation
+# ─── SunSpec Basic Storage Control IC124 (Symo Hybrid / GEN24 with battery) ───,,,,,,,,,
+40358,storage_charge_state,Battery Charge/Discharge Mode,,uint16,"1=off,2=charge,3=discharge,4=hold",,R/W,,Commanded battery operating mode
+40359,storage_charge_power_pct,Storage Charge Power Setpoint,0.01%,uint16,0-10000,,R/W,,Battery charge power as percent of rated; divide by 100
+40361,battery_soc,Battery State of Charge,%,uint16,0-100,,R,,Battery SOC (0-100); read from BMS via inverter
+40362,battery_soh,Battery State of Health,%,uint16,0-100,,R,,Battery health percentage
+40363,battery_status,Battery Status,,uint16,"0=off,1=empty,2=discharging,3=charging,4=full,5=hold,6=testing",,R,,Battery operating state
+,,,,,,,,,
+,,,,,,,,,
+# Fronius Primo / Galvo / Symo / Symo GEN24 / Symo Hybrid / ECO / AGILO,,,,,,,,,
+# Interface: Modbus TCP port 502; unit ID 1 (default; configurable),,,,,,,,,
+# Also Modbus RTU RS485 on COM port (Datamanager 2.0 / 3.0 box); 9600 baud 8N1,,,,,,,,,
+# Enable Modbus: Inverter web UI → Communication → Modbus → Enable TCP/IP,,,,,,,,,
+# Protocol: SunSpec — two model types selectable via register 216:,,,,,,,,,
+#   1 = Float (model IDs 111/112/113): all values are float32; no scale factors needed,,,,,,,,,
+#   2 = Integer + Scale Factor (model IDs 101/102/103): values × 10^SF_register,,,,,,,,,
+# This file covers the FLOAT model (111=single-phase,112=split-phase,113=three-phase),,,,,,,
+# All float32 values span two consecutive 16-bit registers; big-endian,,,,,,,,,
+# NaN = 0x7FC00000 (float) indicates not applicable for current model/phase,,,,,,,,,
+# Fronius-specific registers (F_ prefix) start at address 212 (base 1) / 211 (base 0),,,,,,,,,
+# SunSpec Common Model Block: addresses 40001-40069 (base 1),,,,,,,,,

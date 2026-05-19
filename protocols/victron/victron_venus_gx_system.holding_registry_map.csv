@@ -1,0 +1,24 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note
+800,battery_voltage,System Battery Voltage,0.1V,uint16,0-65535,,R,,Aggregated system battery voltage; divide by 10
+801,battery_current,System Battery Current,0.1A,int16,-3276-3276,,R,,Net battery current (positive=charging); divide by 10
+802,battery_power,System Battery Power,W,int16,-32767-32767,,R,,Net battery power
+803,battery_soc,System Battery SOC,%,uint16,0-100,,R,,System battery state of charge (0-100)
+804,battery_state,Battery State,,uint16,"0=idle,1=charging,2=discharging",,R,,Active battery operating state
+805,battery_consumed_ah,Battery Consumed Ah,0.1Ah,int16,-3276-0,,R,,Ah consumed since last full charge; divide by 10
+806,battery_time_to_go,Battery Time to Go,min,uint16,0-65535,,R,,Estimated time until battery empty; 65535 = not discharging
+807,pv_power,PV Power Total,W,uint16,0-65535,,R,,Combined PV power from all connected solar chargers
+808,ac_consumption_l1,AC Consumption L1,W,uint16,0-65535,,R,,AC load consumption phase 1
+809,ac_consumption_l2,AC Consumption L2,W,uint16,0-65535,,R,,AC load consumption phase 2 (three-phase only)
+810,ac_consumption_l3,AC Consumption L3,W,uint16,0-65535,,R,,AC load consumption phase 3 (three-phase only)
+811,grid_l1_power,Grid Power L1,W,int16,-32767-32767,,R,,Grid/shore power phase 1; positive=import negative=export
+812,grid_l2_power,Grid Power L2,W,int16,-32767-32767,,R,,Grid/shore power phase 2 (three-phase only)
+813,grid_l3_power,Grid Power L3,W,int16,-32767-32767,,R,,Grid/shore power phase 3 (three-phase only)
+814,genset_l1_power,Generator Power L1,W,int16,-32767-32767,,R,,Generator/AC2 input power phase 1
+815,genset_l2_power,Generator Power L2,W,int16,-32767-32767,,R,,Generator/AC2 input power phase 2 (three-phase only)
+816,genset_l3_power,Generator Power L3,W,int16,-32767-32767,,R,,Generator/AC2 input power phase 3 (three-phase only)
+817,active_input_source,Active Input Source,,uint16,"0=not available,1=grid,2=generator,3=shore,240=none",,R,,Currently active AC input type
+818,battery_temperature,Battery Temperature,0.1°C,int16,-3276-3276,,R,,Battery temperature; divide by 10; requires sensor
+819,charger_power,System Charger Power,W,uint16,0-65535,,R,,Power being delivered to battery from all charger sources
+820,dc_power,DC System Power,W,int16,-32767-32767,,R,,Other DC loads/sources not accounted for elsewhere
+821,ve_bus_charge_current,VE.Bus Charge Current,0.1A,int16,-3276-3276,,R,,Charge current from MultiPlus/Quattro; divide by 10
+822,ve_bus_charge_power,VE.Bus Charge Power,W,int16,-32767-32767,,R,,Charge power from MultiPlus/Quattro

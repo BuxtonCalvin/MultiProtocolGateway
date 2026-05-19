@@ -1,0 +1,1386 @@
+﻿{
+  "json_codes_no_csv_match": [
+    {
+      "protocol": "deye_sunsynk/deye_sunsynk",
+      "json_key": "inverter_enabled_codes",
+      "code_base": "inverter_enabled",
+      "loose": []
+    },
+    {
+      "protocol": "deye_sunsynk/deye_sunsynk",
+      "json_key": "overall_state_codes",
+      "code_base": "overall_state",
+      "loose": []
+    },
+    {
+      "protocol": "deye_sunsynk/deye_sunsynk",
+      "json_key": "grid_connected_codes",
+      "code_base": "grid_connected",
+      "loose": []
+    },
+    {
+      "protocol": "deye_sunsynk/deye_sunsynk",
+      "json_key": "generator_input_codes",
+      "code_base": "generator_input",
+      "loose": []
+    },
+    {
+      "protocol": "deye_sunsynk/deye_sunsynk",
+      "json_key": "priority_load_codes",
+      "code_base": "priority_load",
+      "loose": []
+    },
+    {
+      "protocol": "deye_sunsynk/deye_sunsynk",
+      "json_key": "use_timer_codes",
+      "code_base": "use_timer",
+      "loose": []
+    },
+    {
+      "protocol": "deye_sunsynk/deye_sunsynk_hybrid",
+      "json_key": "inverter_enabled_codes",
+      "code_base": "inverter_enabled",
+      "loose": []
+    },
+    {
+      "protocol": "deye_sunsynk/deye_sunsynk_hybrid",
+      "json_key": "overall_state_codes",
+      "code_base": "overall_state",
+      "loose": []
+    },
+    {
+      "protocol": "deye_sunsynk/deye_sunsynk_hybrid",
+      "json_key": "grid_connected_codes",
+      "code_base": "grid_connected",
+      "loose": []
+    },
+    {
+      "protocol": "deye_sunsynk/deye_sunsynk_hybrid",
+      "json_key": "generator_input_codes",
+      "code_base": "generator_input",
+      "loose": []
+    },
+    {
+      "protocol": "deye_sunsynk/deye_sunsynk_hybrid",
+      "json_key": "priority_load_codes",
+      "code_base": "priority_load",
+      "loose": []
+    },
+    {
+      "protocol": "deye_sunsynk/deye_sunsynk_hybrid",
+      "json_key": "use_timer_codes",
+      "code_base": "use_timer",
+      "loose": []
+    },
+    {
+      "protocol": "eg4/eg4_18kpv",
+      "json_key": "batcomtype_codes",
+      "code_base": "batcomtype",
+      "loose": []
+    },
+    {
+      "protocol": "eg4/eg4_18kpv",
+      "json_key": "battypeandbrand_codes",
+      "code_base": "battypeandbrand",
+      "loose": []
+    },
+    {
+      "protocol": "eg4/eg4_18kpv",
+      "json_key": "faultcode_bms_codes",
+      "code_base": "faultcode_bms",
+      "loose": []
+    },
+    {
+      "protocol": "eg4/eg4_18kpv",
+      "json_key": "warningcode_bms_codes",
+      "code_base": "warningcode_bms",
+      "loose": []
+    },
+    {
+      "protocol": "eg4/eg4_18kpv",
+      "json_key": "state_codes",
+      "code_base": "state",
+      "loose": []
+    },
+    {
+      "protocol": "eg4/eg4_18kpv",
+      "json_key": "faultcode_codes",
+      "code_base": "faultcode",
+      "loose": []
+    },
+    {
+      "protocol": "eg4/eg4_18kpv",
+      "json_key": "warningcode_codes",
+      "code_base": "warningcode",
+      "loose": []
+    },
+    {
+      "protocol": "eg4/eg4_18kpv",
+      "json_key": "batcomtype_codes",
+      "code_base": "batcomtype",
+      "loose": []
+    },
+    {
+      "protocol": "eg4/eg4_18kpv",
+      "json_key": "battypeandbrand_codes",
+      "code_base": "battypeandbrand",
+      "loose": []
+    },
+    {
+      "protocol": "eg4/eg4_18kpv",
+      "json_key": "faultcode_bms_codes",
+      "code_base": "faultcode_bms",
+      "loose": []
+    },
+    {
+      "protocol": "eg4/eg4_18kpv",
+      "json_key": "warningcode_bms_codes",
+      "code_base": "warningcode_bms",
+      "loose": []
+    },
+    {
+      "protocol": "eg4/eg4_18kpv",
+      "json_key": "state_codes",
+      "code_base": "state",
+      "loose": []
+    },
+    {
+      "protocol": "eg4/eg4_18kpv",
+      "json_key": "faultcode_codes",
+      "code_base": "faultcode",
+      "loose": []
+    },
+    {
+      "protocol": "eg4/eg4_18kpv",
+      "json_key": "warningcode_codes",
+      "code_base": "warningcode",
+      "loose": []
+    },
+    {
+      "protocol": "eg4/eg4_3000ehv_v1",
+      "json_key": "fault_code_codes",
+      "code_base": "fault_code",
+      "loose": []
+    },
+    {
+      "protocol": "eg4/eg4_3000ehv_v1",
+      "json_key": "obtain_warning_code_codes",
+      "code_base": "obtain_warning_code",
+      "loose": []
+    },
+    {
+      "protocol": "eg4/eg4_3000ehv_v1",
+      "json_key": "working_mode_codes",
+      "code_base": "working_mode",
+      "loose": []
+    },
+    {
+      "protocol": "eg4/eg4_3000ehv_v1",
+      "json_key": "output_mode_codes",
+      "code_base": "output_mode",
+      "loose": []
+    },
+    {
+      "protocol": "eg4/eg4_3000ehv_v1",
+      "json_key": "output_priority_codes",
+      "code_base": "output_priority",
+      "loose": []
+    },
+    {
+      "protocol": "eg4/eg4_3000ehv_v1",
+      "json_key": "input_voltage_range_codes",
+      "code_base": "input_voltage_range",
+      "loose": []
+    },
+    {
+      "protocol": "eg4/eg4_3000ehv_v1",
+      "json_key": "buzzer_mode_codes",
+      "code_base": "buzzer_mode",
+      "loose": []
+    },
+    {
+      "protocol": "eg4/eg4_3000ehv_v1",
+      "json_key": "lcd_backlight_codes",
+      "code_base": "lcd_backlight",
+      "loose": []
+    },
+    {
+      "protocol": "eg4/eg4_3000ehv_v1",
+      "json_key": "battery_charging_priority_codes",
+      "code_base": "battery_charging_priority",
+      "loose": []
+    },
+    {
+      "protocol": "eg4/eg4_3000ehv_v1",
+      "json_key": "remote_switch_codes",
+      "code_base": "remote_switch",
+      "loose": []
+    },
+    {
+      "protocol": "eg4/eg4_ll_s",
+      "json_key": "status_codes",
+      "code_base": "status",
+      "loose": []
+    },
+    {
+      "protocol": "eg4/eg4_ll_s",
+      "json_key": "heater_state_codes",
+      "code_base": "heater_state",
+      "loose": []
+    },
+    {
+      "protocol": "eg4/eg4_v58",
+      "json_key": "batcomtype_codes",
+      "code_base": "batcomtype",
+      "loose": []
+    },
+    {
+      "protocol": "eg4/eg4_v58",
+      "json_key": "battypeandbrand_codes",
+      "code_base": "battypeandbrand",
+      "loose": []
+    },
+    {
+      "protocol": "eg4/eg4_v58",
+      "json_key": "faultcode_bms_codes",
+      "code_base": "faultcode_bms",
+      "loose": []
+    },
+    {
+      "protocol": "eg4/eg4_v58",
+      "json_key": "warningcode_bms_codes",
+      "code_base": "warningcode_bms",
+      "loose": []
+    },
+    {
+      "protocol": "eg4/eg4_v58",
+      "json_key": "state_codes",
+      "code_base": "state",
+      "loose": []
+    },
+    {
+      "protocol": "eg4/eg4_v58",
+      "json_key": "faultcode_codes",
+      "code_base": "faultcode",
+      "loose": []
+    },
+    {
+      "protocol": "eg4/eg4_v58",
+      "json_key": "warningcode_codes",
+      "code_base": "warningcode",
+      "loose": []
+    },
+    {
+      "protocol": "eg4/eg4_v58",
+      "json_key": "batcomtype_codes",
+      "code_base": "batcomtype",
+      "loose": []
+    },
+    {
+      "protocol": "eg4/eg4_v58",
+      "json_key": "battypeandbrand_codes",
+      "code_base": "battypeandbrand",
+      "loose": []
+    },
+    {
+      "protocol": "eg4/eg4_v58",
+      "json_key": "faultcode_bms_codes",
+      "code_base": "faultcode_bms",
+      "loose": []
+    },
+    {
+      "protocol": "eg4/eg4_v58",
+      "json_key": "warningcode_bms_codes",
+      "code_base": "warningcode_bms",
+      "loose": []
+    },
+    {
+      "protocol": "eg4/eg4_v58",
+      "json_key": "state_codes",
+      "code_base": "state",
+      "loose": []
+    },
+    {
+      "protocol": "eg4/eg4_v58",
+      "json_key": "faultcode_codes",
+      "code_base": "faultcode",
+      "loose": []
+    },
+    {
+      "protocol": "eg4/eg4_v58",
+      "json_key": "warningcode_codes",
+      "code_base": "warningcode",
+      "loose": []
+    },
+    {
+      "protocol": "enphase/enphase_iq_gateway_sunspec",
+      "json_key": "inverter_did_codes",
+      "code_base": "inverter_did",
+      "loose": []
+    },
+    {
+      "protocol": "enphase/enphase_iq_gateway_sunspec",
+      "json_key": "operating_state_codes",
+      "code_base": "operating_state",
+      "loose": []
+    },
+    {
+      "protocol": "enphase/enphase_iq_gateway_sunspec",
+      "json_key": "meter_did_codes",
+      "code_base": "meter_did",
+      "loose": []
+    },
+    {
+      "protocol": "enphase/enphase_iq_gateway_sunspec",
+      "json_key": "der_power_limit_enabled_codes",
+      "code_base": "der_power_limit_enabled",
+      "loose": []
+    },
+    {
+      "protocol": "fronius/fronius_sunspec",
+      "json_key": "sunspec_inverter_did_codes",
+      "code_base": "sunspec_inverter_did",
+      "loose": []
+    },
+    {
+      "protocol": "fronius/fronius_sunspec",
+      "json_key": "operating_state_codes",
+      "code_base": "operating_state",
+      "loose": []
+    },
+    {
+      "protocol": "fronius/fronius_sunspec",
+      "json_key": "alarm_1_codes",
+      "code_base": "alarm_1",
+      "loose": []
+    },
+    {
+      "protocol": "fronius/fronius_sunspec",
+      "json_key": "alarm_2_codes",
+      "code_base": "alarm_2",
+      "loose": []
+    },
+    {
+      "protocol": "fronius/fronius_sunspec",
+      "json_key": "f_active_state_code_codes",
+      "code_base": "f_active_state_code",
+      "loose": []
+    },
+    {
+      "protocol": "fronius/fronius_sunspec",
+      "json_key": "vendor_state_codes",
+      "code_base": "vendor_state",
+      "loose": []
+    },
+    {
+      "protocol": "fronius/fronius_sunspec",
+      "json_key": "f_model_type_codes",
+      "code_base": "f_model_type",
+      "loose": []
+    },
+    {
+      "protocol": "fronius/fronius_sunspec",
+      "json_key": "f_storage_restrictions_codes",
+      "code_base": "f_storage_restrictions",
+      "loose": []
+    },
+    {
+      "protocol": "fronius/fronius_sunspec",
+      "json_key": "storage_charge_state_codes",
+      "code_base": "storage_charge_state",
+      "loose": []
+    },
+    {
+      "protocol": "fronius/fronius_sunspec",
+      "json_key": "battery_status_codes",
+      "code_base": "battery_status",
+      "loose": []
+    },
+    {
+      "protocol": "fronius/fronius_sunspec",
+      "json_key": "active_power_limit_enabled_codes",
+      "code_base": "active_power_limit_enabled",
+      "loose": []
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "json_key": "inverter_status_codes",
+      "code_base": "inverter_status",
+      "loose": []
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "json_key": "lcd_language_codes",
+      "code_base": "lcd_language",
+      "loose": []
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "json_key": "priority_codes",
+      "code_base": "priority",
+      "loose": []
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "json_key": "battery_type_codes",
+      "code_base": "battery_type",
+      "loose": []
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "json_key": "pid_status_codes",
+      "code_base": "pid_status",
+      "loose": []
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "json_key": "pidfaultcode_codes",
+      "code_base": "pidfaultcode",
+      "loose": []
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "json_key": "string_prompt_codes",
+      "code_base": "string_prompt",
+      "loose": []
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "json_key": "bafdistatus_codes",
+      "code_base": "bafdistatus",
+      "loose": []
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "json_key": "uwSysWorkMode_codes",
+      "code_base": "uwSysWorkMode",
+      "loose": []
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "json_key": "fault_bit_codes",
+      "code_base": "fault_bit",
+      "loose": []
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "json_key": "warning_bit_codes",
+      "code_base": "warning_bit",
+      "loose": []
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "json_key": "warning_bit_high_codes",
+      "code_base": "warning_bit_high",
+      "loose": []
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "json_key": "inverter_status_codes",
+      "code_base": "inverter_status",
+      "loose": []
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "json_key": "lcd_language_codes",
+      "code_base": "lcd_language",
+      "loose": []
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "json_key": "priority_codes",
+      "code_base": "priority",
+      "loose": []
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "json_key": "battery_type_codes",
+      "code_base": "battery_type",
+      "loose": []
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "json_key": "pid_status_codes",
+      "code_base": "pid_status",
+      "loose": []
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "json_key": "pidfaultcode_codes",
+      "code_base": "pidfaultcode",
+      "loose": []
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "json_key": "string_prompt_codes",
+      "code_base": "string_prompt",
+      "loose": []
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "json_key": "bafdistatus_codes",
+      "code_base": "bafdistatus",
+      "loose": []
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "json_key": "uwSysWorkMode_codes",
+      "code_base": "uwSysWorkMode",
+      "loose": []
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "json_key": "fault_bit_codes",
+      "code_base": "fault_bit",
+      "loose": []
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "json_key": "warning_bit_codes",
+      "code_base": "warning_bit",
+      "loose": []
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "json_key": "warning_bit_high_codes",
+      "code_base": "warning_bit_high",
+      "loose": []
+    },
+    {
+      "protocol": "growatt/growatt_bms_canbus_v1.04",
+      "json_key": "status_codes",
+      "code_base": "status",
+      "loose": []
+    },
+    {
+      "protocol": "growatt/growatt_bms_canbus_v1.04",
+      "json_key": "protection_flags_codes",
+      "code_base": "protection_flags",
+      "loose": []
+    },
+    {
+      "protocol": "growatt/growatt_bms_canbus_v1.04",
+      "json_key": "alarm_flags_codes",
+      "code_base": "alarm_flags",
+      "loose": []
+    },
+    {
+      "protocol": "growatt/growatt_bms_canbus_v1.04",
+      "json_key": "request_and_battery_type_codes",
+      "code_base": "request_and_battery_type",
+      "loose": []
+    },
+    {
+      "protocol": "growatt/growatt_bms_rs485_1xsxxp_ess_v2.01",
+      "json_key": "status_bits_codes",
+      "code_base": "status_bits",
+      "loose": []
+    },
+    {
+      "protocol": "growatt/growatt_bms_rs485_1xsxxp_ess_v2.01",
+      "json_key": "error_codes",
+      "code_base": "error",
+      "loose": []
+    },
+    {
+      "protocol": "growatt/growatt_v0.14",
+      "json_key": "system_status_codes",
+      "code_base": "system_status",
+      "loose": []
+    },
+    {
+      "protocol": "growatt/growatt_v0.14",
+      "json_key": "check_step_codes",
+      "code_base": "check_step",
+      "loose": []
+    },
+    {
+      "protocol": "growatt/growatt_v0.14",
+      "json_key": "production_line_mode_codes",
+      "code_base": "production_line_mode",
+      "loose": []
+    },
+    {
+      "protocol": "growatt/growatt_v0.14",
+      "json_key": "fault_bit_codes",
+      "code_base": "fault_bit",
+      "loose": []
+    },
+    {
+      "protocol": "growatt/growatt_v0.14",
+      "json_key": "warning_bit_codes",
+      "code_base": "warning_bit",
+      "loose": []
+    },
+    {
+      "protocol": "growatt/growatt_v0.14",
+      "json_key": "warning_bit_high_codes",
+      "code_base": "warning_bit_high",
+      "loose": []
+    },
+    {
+      "protocol": "growatt/growatt_v0.14",
+      "json_key": "lcd_language_codes",
+      "code_base": "lcd_language",
+      "loose": []
+    },
+    {
+      "protocol": "growatt/growatt_v0.14",
+      "json_key": "system_status_codes",
+      "code_base": "system_status",
+      "loose": []
+    },
+    {
+      "protocol": "growatt/growatt_v0.14",
+      "json_key": "check_step_codes",
+      "code_base": "check_step",
+      "loose": []
+    },
+    {
+      "protocol": "growatt/growatt_v0.14",
+      "json_key": "production_line_mode_codes",
+      "code_base": "production_line_mode",
+      "loose": []
+    },
+    {
+      "protocol": "growatt/growatt_v0.14",
+      "json_key": "fault_bit_codes",
+      "code_base": "fault_bit",
+      "loose": []
+    },
+    {
+      "protocol": "growatt/growatt_v0.14",
+      "json_key": "warning_bit_codes",
+      "code_base": "warning_bit",
+      "loose": []
+    },
+    {
+      "protocol": "growatt/growatt_v0.14",
+      "json_key": "warning_bit_high_codes",
+      "code_base": "warning_bit_high",
+      "loose": []
+    },
+    {
+      "protocol": "growatt/growatt_v0.14",
+      "json_key": "lcd_language_codes",
+      "code_base": "lcd_language",
+      "loose": []
+    },
+    {
+      "protocol": "hdhk/hdhk_16ch_ac_module",
+      "json_key": "buad_rate_codes",
+      "code_base": "buad_rate",
+      "loose": []
+    },
+    {
+      "protocol": "hdhk/hdhk_16ch_ac_module",
+      "json_key": "check_bit_codes",
+      "code_base": "check_bit",
+      "loose": []
+    },
+    {
+      "protocol": "next_power/next_power_victor_nm_re",
+      "json_key": "settings2_codes",
+      "code_base": "settings2",
+      "loose": []
+    },
+    {
+      "protocol": "pace/pace_bms_v1.3",
+      "json_key": "warning_flag_codes",
+      "code_base": "warning_flag",
+      "loose": []
+    },
+    {
+      "protocol": "pace/pace_bms_v1.3",
+      "json_key": "protection_flag_codes",
+      "code_base": "protection_flag",
+      "loose": []
+    },
+    {
+      "protocol": "pace/pace_bms_v1.3",
+      "json_key": "fault_flag_codes",
+      "code_base": "fault_flag",
+      "loose": []
+    },
+    {
+      "protocol": "pace/pace_bms_v1.3",
+      "json_key": "status_flag_codes",
+      "code_base": "status_flag",
+      "loose": []
+    },
+    {
+      "protocol": "pylon/pylon_can",
+      "json_key": "protection_codes",
+      "code_base": "protection",
+      "loose": []
+    },
+    {
+      "protocol": "pylon/pylon_can",
+      "json_key": "alarm_codes",
+      "code_base": "alarm",
+      "loose": []
+    },
+    {
+      "protocol": "pylon/pylon_can",
+      "json_key": "request_flag_codes",
+      "code_base": "request_flag",
+      "loose": []
+    },
+    {
+      "protocol": "pylon/pylon_rs485_v3.3",
+      "json_key": "protection_codes",
+      "code_base": "protection",
+      "loose": []
+    },
+    {
+      "protocol": "pylon/pylon_rs485_v3.3",
+      "json_key": "alarm_codes",
+      "code_base": "alarm",
+      "loose": []
+    },
+    {
+      "protocol": "sigineer/sigineer_v0.11",
+      "json_key": "system_status_codes",
+      "code_base": "system_status",
+      "loose": []
+    },
+    {
+      "protocol": "sigineer/sigineer_v0.11",
+      "json_key": "check_step_codes",
+      "code_base": "check_step",
+      "loose": []
+    },
+    {
+      "protocol": "sigineer/sigineer_v0.11",
+      "json_key": "production_line_mode_codes",
+      "code_base": "production_line_mode",
+      "loose": []
+    },
+    {
+      "protocol": "sigineer/sigineer_v0.11",
+      "json_key": "Solar_ConnectOKFlag_codes",
+      "code_base": "Solar_ConnectOKFlag",
+      "loose": []
+    },
+    {
+      "protocol": "sigineer/sigineer_v0.11",
+      "json_key": "Solar_BatVoltConsistFlag_codes",
+      "code_base": "Solar_BatVoltConsistFlag",
+      "loose": []
+    },
+    {
+      "protocol": "sigineer/sigineer_v0.11",
+      "json_key": "Solar_TypeSwState_codes",
+      "code_base": "Solar_TypeSwState",
+      "loose": []
+    },
+    {
+      "protocol": "sigineer/sigineer_v0.11",
+      "json_key": "Solar_ModeSwState_codes",
+      "code_base": "Solar_ModeSwState",
+      "loose": []
+    },
+    {
+      "protocol": "sigineer/sigineer_v0.11",
+      "json_key": "fault_bit_codes",
+      "code_base": "fault_bit",
+      "loose": []
+    },
+    {
+      "protocol": "sigineer/sigineer_v0.11",
+      "json_key": "warning_bit_codes",
+      "code_base": "warning_bit",
+      "loose": []
+    },
+    {
+      "protocol": "sigineer/sigineer_v0.11",
+      "json_key": "fault_value_codes",
+      "code_base": "fault_value",
+      "loose": []
+    },
+    {
+      "protocol": "sigineer/sigineer_v0.11",
+      "json_key": "system_status_codes",
+      "code_base": "system_status",
+      "loose": []
+    },
+    {
+      "protocol": "sigineer/sigineer_v0.11",
+      "json_key": "check_step_codes",
+      "code_base": "check_step",
+      "loose": []
+    },
+    {
+      "protocol": "sigineer/sigineer_v0.11",
+      "json_key": "production_line_mode_codes",
+      "code_base": "production_line_mode",
+      "loose": []
+    },
+    {
+      "protocol": "sigineer/sigineer_v0.11",
+      "json_key": "Solar_ConnectOKFlag_codes",
+      "code_base": "Solar_ConnectOKFlag",
+      "loose": []
+    },
+    {
+      "protocol": "sigineer/sigineer_v0.11",
+      "json_key": "Solar_BatVoltConsistFlag_codes",
+      "code_base": "Solar_BatVoltConsistFlag",
+      "loose": []
+    },
+    {
+      "protocol": "sigineer/sigineer_v0.11",
+      "json_key": "Solar_TypeSwState_codes",
+      "code_base": "Solar_TypeSwState",
+      "loose": []
+    },
+    {
+      "protocol": "sigineer/sigineer_v0.11",
+      "json_key": "Solar_ModeSwState_codes",
+      "code_base": "Solar_ModeSwState",
+      "loose": []
+    },
+    {
+      "protocol": "sigineer/sigineer_v0.11",
+      "json_key": "fault_bit_codes",
+      "code_base": "fault_bit",
+      "loose": []
+    },
+    {
+      "protocol": "sigineer/sigineer_v0.11",
+      "json_key": "warning_bit_codes",
+      "code_base": "warning_bit",
+      "loose": []
+    },
+    {
+      "protocol": "sigineer/sigineer_v0.11",
+      "json_key": "fault_value_codes",
+      "code_base": "fault_value",
+      "loose": []
+    },
+    {
+      "protocol": "sma/sma_modbus_rtu",
+      "json_key": "grid_relay_status_codes",
+      "code_base": "grid_relay_status",
+      "loose": []
+    },
+    {
+      "protocol": "sma/sma_modbus_rtu",
+      "json_key": "operating_mode_active_codes",
+      "code_base": "operating_mode_active",
+      "loose": []
+    },
+    {
+      "protocol": "sma/sma_modbus_rtu",
+      "json_key": "generator_request_codes",
+      "code_base": "generator_request",
+      "loose": []
+    },
+    {
+      "protocol": "sma/sma_modbus_rtu",
+      "json_key": "operating_mode_cmd_codes",
+      "code_base": "operating_mode_cmd",
+      "loose": []
+    },
+    {
+      "protocol": "sma/sma_sunny_home_manager",
+      "json_key": "operating_mode_codes",
+      "code_base": "operating_mode",
+      "loose": []
+    },
+    {
+      "protocol": "sma/sma_sunny_island",
+      "json_key": "status_condition_codes",
+      "code_base": "status_condition",
+      "loose": []
+    },
+    {
+      "protocol": "sma/sma_sunny_island",
+      "json_key": "grid_relay_status_codes",
+      "code_base": "grid_relay_status",
+      "loose": []
+    },
+    {
+      "protocol": "sma/sma_sunny_island",
+      "json_key": "backup_mode_active_codes",
+      "code_base": "backup_mode_active",
+      "loose": []
+    },
+    {
+      "protocol": "sma/sma_sunny_island",
+      "json_key": "generator_request_codes",
+      "code_base": "generator_request",
+      "loose": []
+    },
+    {
+      "protocol": "sma/sma_sunny_island",
+      "json_key": "operating_mode_codes",
+      "code_base": "operating_mode",
+      "loose": []
+    },
+    {
+      "protocol": "sma/sma_sunny_island_v1",
+      "json_key": "status_condition_codes",
+      "code_base": "status_condition",
+      "loose": []
+    },
+    {
+      "protocol": "sma/sma_sunny_island_v1",
+      "json_key": "grid_relay_status_codes",
+      "code_base": "grid_relay_status",
+      "loose": []
+    },
+    {
+      "protocol": "sma/sma_sunny_island_v1",
+      "json_key": "backup_mode_active_codes",
+      "code_base": "backup_mode_active",
+      "loose": []
+    },
+    {
+      "protocol": "sma/sma_sunny_island_v1",
+      "json_key": "generator_request_codes",
+      "code_base": "generator_request",
+      "loose": []
+    },
+    {
+      "protocol": "sma/sma_sunny_island_v1",
+      "json_key": "operating_mode_codes",
+      "code_base": "operating_mode",
+      "loose": []
+    },
+    {
+      "protocol": "sma/sma_sunnyboy_tripower",
+      "json_key": "status_condition_codes",
+      "code_base": "status_condition",
+      "loose": []
+    },
+    {
+      "protocol": "sma/sma_sunnyboy_tripower",
+      "json_key": "grid_relay_status_codes",
+      "code_base": "grid_relay_status",
+      "loose": []
+    },
+    {
+      "protocol": "sma/sma_sunnyboy_tripower",
+      "json_key": "derating_active_codes",
+      "code_base": "derating_active",
+      "loose": []
+    },
+    {
+      "protocol": "sma/sma_sunnyboy_tripower",
+      "json_key": "operating_mode_codes",
+      "code_base": "operating_mode",
+      "loose": []
+    },
+    {
+      "protocol": "sma/sma_tripower_storage_hybrid",
+      "json_key": "status_condition_codes",
+      "code_base": "status_condition",
+      "loose": []
+    },
+    {
+      "protocol": "sma/sma_tripower_storage_hybrid",
+      "json_key": "grid_relay_status_codes",
+      "code_base": "grid_relay_status",
+      "loose": []
+    },
+    {
+      "protocol": "sma/sma_tripower_storage_hybrid",
+      "json_key": "battery_status_codes",
+      "code_base": "battery_status",
+      "loose": []
+    },
+    {
+      "protocol": "sma/sma_tripower_storage_hybrid",
+      "json_key": "operating_mode_codes",
+      "code_base": "operating_mode",
+      "loose": []
+    },
+    {
+      "protocol": "sok/sok_sk48v100_pace_bms",
+      "json_key": "charge_status_codes",
+      "code_base": "charge_status",
+      "loose": []
+    },
+    {
+      "protocol": "sok/sok_sk48v100_pace_bms",
+      "json_key": "mos_status_codes",
+      "code_base": "mos_status",
+      "loose": []
+    },
+    {
+      "protocol": "sok/sok_sk48v100_pace_bms",
+      "json_key": "alarm_flags_1_codes",
+      "code_base": "alarm_flags_1",
+      "loose": []
+    },
+    {
+      "protocol": "sok/sok_sk48v100_pace_bms",
+      "json_key": "alarm_flags_2_codes",
+      "code_base": "alarm_flags_2",
+      "loose": []
+    },
+    {
+      "protocol": "sok/sok_sk48v100_pace_bms",
+      "json_key": "warning_flag_codes",
+      "code_base": "warning_flag",
+      "loose": []
+    },
+    {
+      "protocol": "sok/sok_sk48v100_pace_bms",
+      "json_key": "protection_flag_codes",
+      "code_base": "protection_flag",
+      "loose": []
+    },
+    {
+      "protocol": "sok/sok_sk48v100_pace_bms",
+      "json_key": "fault_flag_codes",
+      "code_base": "fault_flag",
+      "loose": []
+    },
+    {
+      "protocol": "sok/sok_sk48v100_pace_bms",
+      "json_key": "status_flag_codes",
+      "code_base": "status_flag",
+      "loose": []
+    },
+    {
+      "protocol": "solaredge/solaredge_sunspec",
+      "json_key": "inverter_did_codes",
+      "code_base": "inverter_did",
+      "loose": []
+    },
+    {
+      "protocol": "solaredge/solaredge_sunspec",
+      "json_key": "operating_state_codes",
+      "code_base": "operating_state",
+      "loose": []
+    },
+    {
+      "protocol": "solaredge/solaredge_sunspec",
+      "json_key": "active_power_limit_enabled_codes",
+      "code_base": "active_power_limit_enabled",
+      "loose": []
+    },
+    {
+      "protocol": "solark/solark_hybrid",
+      "json_key": "inverter_enabled_codes",
+      "code_base": "inverter_enabled",
+      "loose": []
+    },
+    {
+      "protocol": "solark/solark_hybrid",
+      "json_key": "overall_state_codes",
+      "code_base": "overall_state",
+      "loose": []
+    },
+    {
+      "protocol": "solark/solark_hybrid",
+      "json_key": "grid_connected_codes",
+      "code_base": "grid_connected",
+      "loose": []
+    },
+    {
+      "protocol": "solark/solark_hybrid",
+      "json_key": "generator_input_codes",
+      "code_base": "generator_input",
+      "loose": []
+    },
+    {
+      "protocol": "solark/solark_hybrid",
+      "json_key": "priority_load_codes",
+      "code_base": "priority_load",
+      "loose": []
+    },
+    {
+      "protocol": "solark/solark_hybrid",
+      "json_key": "use_timer_codes",
+      "code_base": "use_timer",
+      "loose": []
+    },
+    {
+      "protocol": "solark/solark_v1.1",
+      "json_key": "fault_information_word_1_codes",
+      "code_base": "fault_information_word_1",
+      "loose": []
+    },
+    {
+      "protocol": "solark/solark_v1.1",
+      "json_key": "fault_information_word_2_codes",
+      "code_base": "fault_information_word_2",
+      "loose": []
+    },
+    {
+      "protocol": "solark/solark_v1.1",
+      "json_key": "fault_information_word_3_codes",
+      "code_base": "fault_information_word_3",
+      "loose": []
+    },
+    {
+      "protocol": "solark/solark_v1.1",
+      "json_key": "fault_information_word_4_codes",
+      "code_base": "fault_information_word_4",
+      "loose": []
+    },
+    {
+      "protocol": "srne/srne_2021_v1.96",
+      "json_key": "product_type_codes",
+      "code_base": "product_type",
+      "loose": []
+    },
+    {
+      "protocol": "srne/srne_2021_v1.96",
+      "json_key": "device_charge_state_codes",
+      "code_base": "device_charge_state",
+      "loose": []
+    },
+    {
+      "protocol": "srne/srne_2021_v1.96",
+      "json_key": "device_state_codes",
+      "code_base": "device_state",
+      "loose": []
+    },
+    {
+      "protocol": "srne/srne_v1.7",
+      "json_key": "device_state_codes",
+      "code_base": "device_state",
+      "loose": []
+    },
+    {
+      "protocol": "srne/srne_v1.7",
+      "json_key": "password_protection_status_mark_codes",
+      "code_base": "password_protection_status_mark",
+      "loose": []
+    },
+    {
+      "protocol": "srne/srne_v1.7",
+      "json_key": "record_fault_code_codes",
+      "code_base": "record_fault_code",
+      "loose": []
+    },
+    {
+      "protocol": "srne/srne_v3.9",
+      "json_key": "controller_failure_alarm_high_bits_codes",
+      "code_base": "controller_failure_alarm_high_bits",
+      "loose": []
+    },
+    {
+      "protocol": "srne/srne_v3.9",
+      "json_key": "controller_failure_alarm_low_bits_codes",
+      "code_base": "controller_failure_alarm_low_bits",
+      "loose": []
+    },
+    {
+      "protocol": "victron/victron_gx_generic_canbus",
+      "json_key": "operating_state_codes",
+      "code_base": "operating_state",
+      "loose": []
+    },
+    {
+      "protocol": "victron/victron_gx_v3.3",
+      "json_key": "system/relay/0/state_codes",
+      "code_base": "system/relay/0/state",
+      "loose": []
+    },
+    {
+      "protocol": "victron/victron_gx_v3.3",
+      "json_key": "system/relay/1/state_codes",
+      "code_base": "system/relay/1/state",
+      "loose": []
+    },
+    {
+      "protocol": "victron/victron_gx_v3.3",
+      "json_key": "system/dc/battery/state_codes",
+      "code_base": "system/dc/battery/state",
+      "loose": []
+    },
+    {
+      "protocol": "victron/victron_mk3usb_vebus",
+      "json_key": "vebus_error_codes",
+      "code_base": "vebus_error",
+      "loose": []
+    },
+    {
+      "protocol": "victron/victron_mk3usb_vebus",
+      "json_key": "vebus_state_codes",
+      "code_base": "vebus_state",
+      "loose": []
+    },
+    {
+      "protocol": "victron/victron_mk3usb_vebus",
+      "json_key": "charge_state_codes",
+      "code_base": "charge_state",
+      "loose": []
+    },
+    {
+      "protocol": "victron/victron_mk3usb_vebus",
+      "json_key": "switch_mode_codes",
+      "code_base": "switch_mode",
+      "loose": []
+    },
+    {
+      "protocol": "victron/victron_mk3usb_vebus",
+      "json_key": "active_ac_input_codes",
+      "code_base": "active_ac_input",
+      "loose": []
+    },
+    {
+      "protocol": "victron/victron_mk3usb_vebus",
+      "json_key": "high_temp_alarm_codes",
+      "code_base": "high_temp_alarm",
+      "loose": []
+    },
+    {
+      "protocol": "victron/victron_mk3usb_vebus",
+      "json_key": "low_battery_alarm_codes",
+      "code_base": "low_battery_alarm",
+      "loose": []
+    },
+    {
+      "protocol": "victron/victron_mk3usb_vebus",
+      "json_key": "overload_alarm_codes",
+      "code_base": "overload_alarm",
+      "loose": []
+    },
+    {
+      "protocol": "victron/victron_multiplus_quattro",
+      "json_key": "vebus_error_codes",
+      "code_base": "vebus_error",
+      "loose": []
+    },
+    {
+      "protocol": "victron/victron_multiplus_quattro",
+      "json_key": "vebus_state_codes",
+      "code_base": "vebus_state",
+      "loose": []
+    },
+    {
+      "protocol": "victron/victron_multiplus_quattro",
+      "json_key": "switch_mode_codes",
+      "code_base": "switch_mode",
+      "loose": []
+    },
+    {
+      "protocol": "victron/victron_multiplus_quattro",
+      "json_key": "active_ac_input_codes",
+      "code_base": "active_ac_input",
+      "loose": []
+    },
+    {
+      "protocol": "victron/victron_phoenix_inverter",
+      "json_key": "device_state_codes",
+      "code_base": "device_state",
+      "loose": []
+    },
+    {
+      "protocol": "victron/victron_phoenix_inverter",
+      "json_key": "alarm_low_battery_codes",
+      "code_base": "alarm_low_battery",
+      "loose": []
+    },
+    {
+      "protocol": "victron/victron_phoenix_inverter",
+      "json_key": "alarm_high_temp_codes",
+      "code_base": "alarm_high_temp",
+      "loose": []
+    },
+    {
+      "protocol": "victron/victron_phoenix_inverter",
+      "json_key": "alarm_overload_codes",
+      "code_base": "alarm_overload",
+      "loose": []
+    },
+    {
+      "protocol": "victron/victron_phoenix_inverter",
+      "json_key": "alarm_short_circuit_codes",
+      "code_base": "alarm_short_circuit",
+      "loose": []
+    },
+    {
+      "protocol": "victron/victron_phoenix_inverter",
+      "json_key": "relay_state_codes",
+      "code_base": "relay_state",
+      "loose": []
+    },
+    {
+      "protocol": "victron/victron_phoenix_inverter",
+      "json_key": "alarm_ripple_codes",
+      "code_base": "alarm_ripple",
+      "loose": []
+    },
+    {
+      "protocol": "victron/victron_smartsolar_mppt",
+      "json_key": "charger_error_codes",
+      "code_base": "charger_error",
+      "loose": []
+    },
+    {
+      "protocol": "victron/victron_smartsolar_mppt",
+      "json_key": "charger_state_codes",
+      "code_base": "charger_state",
+      "loose": []
+    },
+    {
+      "protocol": "victron/victron_smartsolar_mppt",
+      "json_key": "tracker_mode_codes",
+      "code_base": "tracker_mode",
+      "loose": []
+    },
+    {
+      "protocol": "victron/victron_vedirect_serial",
+      "json_key": "charge_state_codes",
+      "code_base": "charge_state",
+      "loose": []
+    },
+    {
+      "protocol": "victron/victron_vedirect_serial",
+      "json_key": "alarm_state_codes",
+      "code_base": "alarm_state",
+      "loose": []
+    },
+    {
+      "protocol": "victron/victron_vedirect_serial",
+      "json_key": "mppt_mode_codes",
+      "code_base": "mppt_mode",
+      "loose": []
+    },
+    {
+      "protocol": "victron/victron_venus_gx_system",
+      "json_key": "system/relay/0/state_codes",
+      "code_base": "system/relay/0/state",
+      "loose": []
+    },
+    {
+      "protocol": "victron/victron_venus_gx_system",
+      "json_key": "system/dc/battery/state_codes",
+      "code_base": "system/dc/battery/state",
+      "loose": []
+    },
+    {
+      "protocol": "voltronic/voltronic_bms_2020_03_25",
+      "json_key": "cell_voltage_state_codes",
+      "code_base": "cell_voltage_state",
+      "loose": []
+    },
+    {
+      "protocol": "voltronic/voltronic_bms_2020_03_25",
+      "json_key": "bms_temperature_state_codes",
+      "code_base": "bms_temperature_state",
+      "loose": []
+    },
+    {
+      "protocol": "voltronic/voltronic_bms_v1.1",
+      "json_key": "cell_voltage_state_codes",
+      "code_base": "cell_voltage_state",
+      "loose": []
+    },
+    {
+      "protocol": "voltronic/voltronic_bms_v1.1",
+      "json_key": "bms_temperature_state_codes",
+      "code_base": "bms_temperature_state",
+      "loose": []
+    }
+  ],
+  "csv_registers_missing_json_codes": []
+}
+MATCHED 0

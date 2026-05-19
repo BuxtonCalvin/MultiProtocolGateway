@@ -1,0 +1,41 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note
+30051,device_class,Device Class,,U32,,,R,,SMA device class; 8009 = battery inverter
+30053,device_type,Device Type,,U32,,,R,,SMA product type code
+30057,serial_number,Serial Number,,U32,,,R,,Device serial number
+30059,software_package,Software Package,,U32,,,R,,Firmware version
+30201,status_condition,Operating Condition,,U32,"295=OK,303=off,1392=warning,1793=error",,R,,General device operating status
+30211,grid_relay_status,Grid Relay / Transfer Switch,,U32,"51=open,311=closed",,R,,Island / grid transfer relay state
+30513,yield_total,Total Yield,Wh,U32,,,R,,Cumulative AC energy output lifetime
+30515,yield_today,Yield,Wh,U32,,,R,,AC energy output today
+30519,battery_charged_today,Battery Energy Charged Today,Wh,U32,,,R,,Energy charged into battery today
+30521,battery_discharged_today,Battery Energy Discharged Today,Wh,U32,,,R,,Energy discharged from battery today
+30525,operating_hours,Operating Hours,s,U32,,,R,,Cumulative operational seconds
+30769,ac_power_total,AC Active Power Total,W,S32,,,R,,Total AC power; positive=supplying load negative=absorbing
+30775,ac_power_l1,AC Active Power L1,W,S32,,,R,,AC active power phase L1
+30777,ac_power_l2,AC Active Power L2,W,S32,,,R,,AC active power phase L2 (three-phase Sunny Island cluster)
+30779,ac_power_l3,AC Active Power L3,W,S32,,,R,,AC active power phase L3 (three-phase Sunny Island cluster)
+30783,ac_voltage_l1,AC Voltage L1,0.01V,U32,,,R,,AC output/bus voltage L1; divide by 100
+30785,ac_voltage_l2,AC Voltage L2,0.01V,U32,,,R,,AC output/bus voltage L2; divide by 100
+30787,ac_voltage_l3,AC Voltage L3,0.01V,U32,,,R,,AC output/bus voltage L3; divide by 100
+30795,ac_current_l1,AC Current L1,0.001A,S32,,,R,,AC output current L1; divide by 1000
+30797,ac_current_l2,AC Current L2,0.001A,S32,,,R,,AC output current L2; divide by 1000
+30799,ac_current_l3,AC Current L3,0.001A,S32,,,R,,AC output current L3; divide by 1000
+30803,ac_frequency,AC Output Frequency,0.01Hz,U32,4500-6500,,R,,AC bus frequency; divide by 100
+30835,pv_dc_voltage,DC Input Voltage (PV / AC Charger Bus),0.01V,S32,,,R,,DC bus voltage at battery terminals (same as battery voltage for SI)
+30845,battery_voltage,Battery Voltage,0.1V,S32,-32767-32767,,R,,Battery terminal voltage; divide by 10
+30847,battery_current,Battery Current,0.1A,S32,-32767-32767,,R,,Battery current; positive=charging negative=discharging; divide by 10
+30849,battery_power,Battery Power,W,S32,-2147483648-2147483647,,R,,Battery power; positive=charging negative=discharging
+30851,battery_soc,Battery State of Charge,%,U32,0-100,,R,,Battery SOC (0-100)
+30853,battery_temperature,Battery Temperature,0.1°C,S32,-300-1500,,R,,Battery temperature; divide by 10; requires compatible BMS or sensor
+30955,inverter_temperature,Inverter Temperature,0.1°C,S32,-300-1500,,R,,Internal inverter temperature; divide by 10
+30963,external_grid_power,External Grid Power,W,S32,,,R,,Power from external grid connection (positive=import); requires external meter
+30965,load_power,AC Load Power,W,U32,,,R,,Total load power being served by the Sunny Island
+30975,backup_mode_active,Backup / Island Mode Active,,U32,"51=grid connected,1779=island mode,1780=transition",,R,,Current operating topology
+30977,generator_request,Generator Start Request,,U32,"51=no request,1069=request active",,R,,Automatic generator start signal state
+31005,battery_charge_voltage_setpoint,Battery Charge Voltage Setpoint,0.01V,U32,,,R/W,,Target charge voltage; divide by 100
+31007,battery_discharge_limit,Battery Discharge Limit,W,U32,,,R/W,,Maximum battery discharge power limit
+31009,battery_charge_limit,Battery Charge Limit,W,U32,,,R/W,,Maximum battery charge power limit
+31021,soc_setpoint_min,SOC Minimum Setpoint,%,U32,0-100,,R/W,,Minimum SOC before generator start request
+31023,soc_setpoint_max,SOC Maximum Setpoint,%,U32,0-100,,R/W,,SOC at which charging stops (charge limit)
+40009,operating_mode,Operating Mode,,U32,"1749=autonomous,1750=grid tied,1769=stop",,R/W,,Island or grid-connected mode selection
+40151,active_power_limit,Active Power Limit,0.01%,U32,0-10000,,R/W,,AC power output limit as percent of rated; divide by 100

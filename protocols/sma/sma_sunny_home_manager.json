@@ -1,0 +1,9 @@
+{
+  "transport": "modbus_rtu",
+
+  "operating_mode_codes": {
+    "1749": "normal",
+    "1750": "self-consumption optimized",
+    "1769": "stop"
+  }
+}

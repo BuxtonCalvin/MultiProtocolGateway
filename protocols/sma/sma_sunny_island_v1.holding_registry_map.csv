@@ -1,0 +1,28 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note
+x305.0,Battery Voltage Inverter,Battery Voltage Inverter,0.1V,USHORT,,,,,Battery voltage measured by Sunny Island
+X305.2,Battery Current Inverter,Battery Current Inverter,0.1A,SHORT,,,,,"Battery current measured by Sunny Island, (negative while charging)"
+X305.4,Battery Temperature Inverter,Battery Temperature Inverter,0.1C,SHORT,,,,,Battery temperature measured by Battery/ Sunny Island
+X305.6,SOC Battery,SOC Battery,0.10%,SHORT,,,,,State of charge of the battery received from the external BMS
+x306.0,SOH Battery,SOH Battery,1.00%,USHORT,,,,,State of health of the battery received from the external BMS
+X306.2,Charging procedure,Charging procedure,,BYTE,,,,,Charging mode of the SunnyIsland internal Battery Management. If external BMS is selected displayed value is 10
+X306.3,Operating state,Operating state,,BYTE,"{""0"" : """", ""1"" : ""Operating"", ""3"" : ""Warning"", ""4"" : ""Failure""}",,,,Operating state of the inverter --- (0); Operating (1); Warning (3); Failure (4) Valid only for SI6.0H-11; FW Release 2.1
+X306.4,Error Messages,Error Messages,,USHORT,,,,,Number of the error message
+X306.6,Battery charging voltage,Battery charging voltage,0.1V,USHORT,,,,,Current set point of charging voltage
+x307,Relay state,Relay state,,16BIT_FLAGS,,,,,state of the relay bitcoded
+x351.0,Battery charge voltage,Battery charge voltage,0.1V,USHORT,41~63,,,,Set point for battery charge voltage
+x351.2,DC charge current limitation,DC charge current limitation,0.1A,SHORT,0~1200,,,,DC charge current limitation
+x351.4,DC discharge current limitation,DC discharge current limitation,0.1A,SHORT,0~1200,,,,DC discharge current limitation
+x351.6,Battery discharge voltage,Battery discharge voltage,0.1V,USHORT,41~48,,,,Voltage discharge limit
+x355.0,State of Charge,State of Charge,%,USHORT,0~100,,,,State of Charge (SOC) value from an external BMS
+x355.2,State of Health,State of Health,%,USHORT,0~100,,,,State of Health (SOH) value from external Battery Management
+x355.4,High Res State of Charge,High Res State of Charge,0.01%,USHORT,0~100,,,,High resolution SOC value: It allows more sophisticated protection of the battery
+x356.0,Battery Voltage,Battery Voltage,0.01V,SHORT,,,,,Measured actual Battery Voltage value from external BMS
+x356.2,Battery Current,Battery Current,0.1A,SHORT,,,,,Measured actual Battery Current value from external BMS
+X356.4,Battery Temperature,Battery Temperature,0.1C,SHORT,,,,,Measured actual Battery Temperature value from external BMS
+x35A.0,External Alarm 1,External Alarm 1,,8BIT_FLAGS,"{""b0"": ""General arrive"", ""b1"": ""General leave"",  ""b2"": ""Battery High Voltage arrive"", ""b3"": ""Battery High Voltage leave"", ""b4"": ""Battery Low Voltage arrive"", ""b5"": ""Battery Low Voltage leave"", ""b6"": ""Battery High Temp arrive"", ""b7"": ""Battery High Temp leave""}",,,,
+X35A.1,External Alarm 2,External Alarm 2,,8BIT_FLAGS,"{""b0"": ""Battery High Current Charge arrive"", ""b1"": ""Battery High Current Charge leave"",  ""b2"": ""Contactor arrive"", ""b3"": ""Contactor leave "", ""b4"": ""Short circuit arrive"", ""b5"": ""Short circuit leave"", ""b6"": ""BMS internal arrive"", ""b7"": ""BMS internal leave""}",,,,
+X35A.2,External Alarm 3,External Alarm 3,,8BIT_FLAGS,"{""b0"": ""Cell Imbalance arrive"", ""b1"": ""Cell Imbalance leave"",  ""b2"": ""Arrives Reserved"", ""b3"": ""Leaves Reserved"", ""b4"": ""Arrives Reserved"", ""b5"": ""Leaves Reserved"", ""b6"": ""Arrives Reserved"", ""b7"": ""Leaves Reserved""}",,,,
+X35A.3,External Warning 1,External Warning 1,,8BIT_FLAGS,"{""b0"": ""General arrive"", ""b1"": ""General leave"",  ""b2"": ""Battery High Voltage arrive"", ""b3"": ""Battery High Voltage leave"", ""b4"": ""Battery Low Voltage arrive"", ""b5"": ""Battery Low Voltage leave"", ""b6"": ""Battery High Temp arrive"", ""b7"": ""Battery High Temp leave""}",,,,
+X35A.4,External Warning 2,External Warning 2,,8BIT_FLAGS,"{""b0"": ""Battery Low Temp arrive"", ""b1"": ""Battery Low Temp leaves"",  ""b2"": ""Battery High Temp Charge arrive"", ""b3"": ""Battery High Temp Charge leave"", ""b4"": ""Battery Low Temp Charge arrive"", ""b5"": ""Battery Low Temp Charge leave"", ""b6"": ""Battery High Current arrive"", ""b7"": ""Battery High Current leaves""}",,,,
+X35A.5,External Warning 3,External Warning 3,,8BIT_FLAGS,"{""b0"": ""Battery High Current Charge arrive"", ""b1"": ""Battery High Current Charge leave"",  ""b2"": ""Contactor arrive"", ""b3"": ""Contactor leave"", ""b4"": ""Short circuit arrive"", ""b5"": ""Short circuit leaves"", ""b6"": ""BMS internal arrive"", ""b7"": ""BMS internal leave""}",,,,
+X35A.6,External Warning 4,External Warning 4,,8BIT_FLAGS,"{""b0"": ""Cell Imbalance arrive"", ""b1"": ""Cell Imbalance leave"",  ""b2"": ""Reserved arrive"", ""b3"": ""Reserved leave"", ""b4"": ""Reserved arrive"", ""b5"": ""Reserved leave"", ""b6"": ""Reserved arrive"", ""b7"": ""Reserved leave""}",,,,

@@ -1,0 +1,1629 @@
+{
+  "matched_count": 179,
+  "json_codes_without_csv_register": [
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "json_key": "bafdistatus_codes",
+      "code_base": "bafdistatus",
+      "suggested_json_key": "bafdistatus_codes",
+      "similar_registers": []
+    },
+    {
+      "protocol": "growatt/growatt_bms_rs485_1xsxxp_ess_v2.01",
+      "json_key": "status_bits_codes",
+      "code_base": "status_bits",
+      "suggested_json_key": "status_bits_codes",
+      "similar_registers": []
+    },
+    {
+      "protocol": "growatt/growatt_bms_rs485_1xsxxp_ess_v2.01",
+      "json_key": "error_codes",
+      "code_base": "error",
+      "suggested_json_key": "error_codes",
+      "similar_registers": []
+    },
+    {
+      "protocol": "pylon/pylon_rs485_v3.3",
+      "json_key": "protection_codes",
+      "code_base": "protection",
+      "suggested_json_key": "protection_codes",
+      "similar_registers": []
+    },
+    {
+      "protocol": "pylon/pylon_rs485_v3.3",
+      "json_key": "alarm_codes",
+      "code_base": "alarm",
+      "suggested_json_key": "alarm_codes",
+      "similar_registers": [
+        {
+          "register": "x4644",
+          "doc": "battery_1_alarm",
+          "var": "battery_1_alarm"
+        }
+      ]
+    },
+    {
+      "protocol": "sigineer/sigineer_v0.11",
+      "json_key": "Solar_BatVoltConsistFlag_codes",
+      "code_base": "solar_batvoltconsistflag",
+      "suggested_json_key": "solar_batvoltconsistflag_codes",
+      "similar_registers": [
+        {
+          "register": "221",
+          "doc": "solar_batvoltconsistfl_ag",
+          "var": "solar_batvoltconsistfl_ag"
+        }
+      ]
+    },
+    {
+      "protocol": "sma/sma_sunny_island_v1",
+      "json_key": "status_condition_codes",
+      "code_base": "status_condition",
+      "suggested_json_key": "status_condition_codes",
+      "similar_registers": []
+    },
+    {
+      "protocol": "sma/sma_sunny_island_v1",
+      "json_key": "grid_relay_status_codes",
+      "code_base": "grid_relay_status",
+      "suggested_json_key": "grid_relay_status_codes",
+      "similar_registers": []
+    },
+    {
+      "protocol": "sma/sma_sunny_island_v1",
+      "json_key": "backup_mode_active_codes",
+      "code_base": "backup_mode_active",
+      "suggested_json_key": "backup_mode_active_codes",
+      "similar_registers": []
+    },
+    {
+      "protocol": "sma/sma_sunny_island_v1",
+      "json_key": "generator_request_codes",
+      "code_base": "generator_request",
+      "suggested_json_key": "generator_request_codes",
+      "similar_registers": []
+    },
+    {
+      "protocol": "sma/sma_sunny_island_v1",
+      "json_key": "operating_mode_codes",
+      "code_base": "operating_mode",
+      "suggested_json_key": "operating_mode_codes",
+      "similar_registers": []
+    },
+    {
+      "protocol": "sok/sok_sk48v100_pace_bms",
+      "json_key": "warning_flag_codes",
+      "code_base": "warning_flag",
+      "suggested_json_key": "warning_flag_codes",
+      "similar_registers": []
+    },
+    {
+      "protocol": "sok/sok_sk48v100_pace_bms",
+      "json_key": "fault_flag_codes",
+      "code_base": "fault_flag",
+      "suggested_json_key": "fault_flag_codes",
+      "similar_registers": []
+    },
+    {
+      "protocol": "sok/sok_sk48v100_pace_bms",
+      "json_key": "status_flag_codes",
+      "code_base": "status_flag",
+      "suggested_json_key": "status_flag_codes",
+      "similar_registers": []
+    },
+    {
+      "protocol": "victron/victron_multiplus_quattro",
+      "json_key": "switch_mode_codes",
+      "code_base": "switch_mode",
+      "suggested_json_key": "switch_mode_codes",
+      "similar_registers": []
+    },
+    {
+      "protocol": "victron/victron_venus_gx_system",
+      "json_key": "system/relay/0/state_codes",
+      "code_base": "system/relay/0/state",
+      "suggested_json_key": "system/relay/0/state_codes",
+      "similar_registers": []
+    },
+    {
+      "protocol": "victron/victron_venus_gx_system",
+      "json_key": "system/dc/battery/state_codes",
+      "code_base": "system/dc/battery/state",
+      "suggested_json_key": "system/dc/battery/state_codes",
+      "similar_registers": []
+    },
+    {
+      "protocol": "voltronic/voltronic_bms_2020_03_25",
+      "json_key": "cell_voltage_state_codes",
+      "code_base": "cell_voltage_state",
+      "suggested_json_key": "cell_voltage_state_codes",
+      "similar_registers": []
+    },
+    {
+      "protocol": "voltronic/voltronic_bms_2020_03_25",
+      "json_key": "bms_temperature_state_codes",
+      "code_base": "bms_temperature_state",
+      "suggested_json_key": "bms_temperature_state_codes",
+      "similar_registers": []
+    },
+    {
+      "protocol": "voltronic/voltronic_bms_v1.1",
+      "json_key": "cell_voltage_state_codes",
+      "code_base": "cell_voltage_state",
+      "suggested_json_key": "cell_voltage_state_codes",
+      "similar_registers": []
+    },
+    {
+      "protocol": "voltronic/voltronic_bms_v1.1",
+      "json_key": "bms_temperature_state_codes",
+      "code_base": "bms_temperature_state",
+      "suggested_json_key": "bms_temperature_state_codes",
+      "similar_registers": []
+    }
+  ],
+  "csv_fault_alarm_without_json_codes": [
+    {
+      "protocol": "eg4/eg4_18kpv",
+      "register": "11.b1",
+      "name": "resetsetting_alltodefault",
+      "csv": "eg4_18kpv.holding_registry_map.csv",
+      "note": "Reset all settings"
+    },
+    {
+      "protocol": "eg4/eg4_18kpv",
+      "register": "11.b3",
+      "name": "resetsetting_faultrecordclr",
+      "csv": "eg4_18kpv.holding_registry_map.csv",
+      "note": "Clear the failure record"
+    },
+    {
+      "protocol": "eg4/eg4_18kpv",
+      "register": "179.b2",
+      "name": "ufunctionen2_afcialarmclr",
+      "csv": "eg4_18kpv.holding_registry_map.csv",
+      "note": "1"
+    },
+    {
+      "protocol": "eg4/eg4_18kpv",
+      "register": "6",
+      "name": "internalfault",
+      "csv": "eg4_18kpv.input_registry_map.csv",
+      "note": "Internal Fault"
+    },
+    {
+      "protocol": "eg4/eg4_18kpv",
+      "register": "73",
+      "name": "uwautotestdefault_time",
+      "csv": "eg4_18kpv.input_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "eg4/eg4_18kpv",
+      "register": "144.b0",
+      "name": "afciflag_arcalarmch1",
+      "csv": "eg4_18kpv.input_registry_map.csv",
+      "note": "Arc status of CH1 0-Normal 1-Alarm"
+    },
+    {
+      "protocol": "eg4/eg4_18kpv",
+      "register": "144.b1",
+      "name": "afciflag_arcalarmch2",
+      "csv": "eg4_18kpv.input_registry_map.csv",
+      "note": "Arc status of CH2 0-Normal 1-Alarm"
+    },
+    {
+      "protocol": "eg4/eg4_18kpv",
+      "register": "144.b2",
+      "name": "afciflag_arcalarmch3",
+      "csv": "eg4_18kpv.input_registry_map.csv",
+      "note": "Arc status of CH3 0-Normal 1-Alarm"
+    },
+    {
+      "protocol": "eg4/eg4_18kpv",
+      "register": "144.b3",
+      "name": "afciflag_arcalarmch4",
+      "csv": "eg4_18kpv.input_registry_map.csv",
+      "note": "Arc status of CH4 0-Normal 1-Alarm"
+    },
+    {
+      "protocol": "eg4/eg4_18kpv",
+      "register": "144.b8",
+      "name": "afci_arcalarm_rsvd",
+      "csv": "eg4_18kpv.input_registry_map.csv",
+      "note": "Diagnostic alert indicator within the inverter's Modbus map to monitor for arc faults"
+    },
+    {
+      "protocol": "eg4/eg4_18kpv",
+      "register": "400",
+      "name": "faultrecord1_yandm",
+      "csv": "eg4_18kpv.input_registry_map.csv",
+      "note": "Fault Records 1_ years & months"
+    },
+    {
+      "protocol": "eg4/eg4_18kpv",
+      "register": "401",
+      "name": "faultrecord1_dandh",
+      "csv": "eg4_18kpv.input_registry_map.csv",
+      "note": "Fault Records 1_ days & hours"
+    },
+    {
+      "protocol": "eg4/eg4_18kpv",
+      "register": "402",
+      "name": "faultrecord1_mands",
+      "csv": "eg4_18kpv.input_registry_map.csv",
+      "note": "Fault Records 1_ minutes & seconds"
+    },
+    {
+      "protocol": "eg4/eg4_18kpv",
+      "register": "403",
+      "name": "faultrecord1_code",
+      "csv": "eg4_18kpv.input_registry_map.csv",
+      "note": "Fault Records 1_ fault code"
+    },
+    {
+      "protocol": "eg4/eg4_18kpv",
+      "register": "404",
+      "name": "faultrecord1_value",
+      "csv": "eg4_18kpv.input_registry_map.csv",
+      "note": "Fault Records 1_ fault value"
+    },
+    {
+      "protocol": "eg4/eg4_18kpv",
+      "register": "405",
+      "name": "faultrecord1_setorclr",
+      "csv": "eg4_18kpv.input_registry_map.csv",
+      "note": "Fault Records 1_Fault occurred or cleared (0-fault occurred"
+    },
+    {
+      "protocol": "eg4/eg4_18kpv",
+      "register": "406",
+      "name": "faultrecord2_yandm",
+      "csv": "eg4_18kpv.input_registry_map.csv",
+      "note": "Fault Records 2_ years & months"
+    },
+    {
+      "protocol": "eg4/eg4_18kpv",
+      "register": "407",
+      "name": "faultrecord2_dandh",
+      "csv": "eg4_18kpv.input_registry_map.csv",
+      "note": "Fault Records 2_ days & hours"
+    },
+    {
+      "protocol": "eg4/eg4_18kpv",
+      "register": "408",
+      "name": "faultrecord2_mands",
+      "csv": "eg4_18kpv.input_registry_map.csv",
+      "note": "Fault Records 2_ minutes & seconds"
+    },
+    {
+      "protocol": "eg4/eg4_18kpv",
+      "register": "409",
+      "name": "faultrecord2_code",
+      "csv": "eg4_18kpv.input_registry_map.csv",
+      "note": "Fault Records 2_ fault code"
+    },
+    {
+      "protocol": "eg4/eg4_18kpv",
+      "register": "410",
+      "name": "faultrecord2_value",
+      "csv": "eg4_18kpv.input_registry_map.csv",
+      "note": "Fault Records 2_Fault value"
+    },
+    {
+      "protocol": "eg4/eg4_18kpv",
+      "register": "411",
+      "name": "faultrecord2_setorclr",
+      "csv": "eg4_18kpv.input_registry_map.csv",
+      "note": "Fault Records 2_Fault occurred or clear (0 - Fault Occurred"
+    },
+    {
+      "protocol": "eg4/eg4_3000ehv_v1",
+      "register": "426",
+      "name": "exit_the_fault_mode",
+      "csv": "eg4_3000ehv_v1.holding_registry_map.csv",
+      "note": "1: Exit the fault state(only when the inverter enters the fault mode , it could be available )"
+    },
+    {
+      "protocol": "eg4/eg4_v58",
+      "register": "11.b1",
+      "name": "resetsetting_alltodefault",
+      "csv": "eg4_v58.holding_registry_map.csv",
+      "note": "Reset all settings"
+    },
+    {
+      "protocol": "eg4/eg4_v58",
+      "register": "11.b3",
+      "name": "resetsetting_faultrecordclr",
+      "csv": "eg4_v58.holding_registry_map.csv",
+      "note": "Clear the failure record"
+    },
+    {
+      "protocol": "eg4/eg4_v58",
+      "register": "179.b2",
+      "name": "ufunctionen2_afcialarmclr",
+      "csv": "eg4_v58.holding_registry_map.csv",
+      "note": "1"
+    },
+    {
+      "protocol": "eg4/eg4_v58",
+      "register": "6",
+      "name": "internalfault",
+      "csv": "eg4_v58.input_registry_map.csv",
+      "note": "Internal Fault"
+    },
+    {
+      "protocol": "eg4/eg4_v58",
+      "register": "73",
+      "name": "uwautotestdefault_time",
+      "csv": "eg4_v58.input_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "eg4/eg4_v58",
+      "register": "144.b0",
+      "name": "afciflag_arcalarmch1",
+      "csv": "eg4_v58.input_registry_map.csv",
+      "note": "Arc status of CH1 0-Normal 1-Alarm"
+    },
+    {
+      "protocol": "eg4/eg4_v58",
+      "register": "144.b1",
+      "name": "afciflag_arcalarmch2",
+      "csv": "eg4_v58.input_registry_map.csv",
+      "note": "Arc status of CH2 0-Normal 1-Alarm"
+    },
+    {
+      "protocol": "eg4/eg4_v58",
+      "register": "144.b2",
+      "name": "afciflag_arcalarmch3",
+      "csv": "eg4_v58.input_registry_map.csv",
+      "note": "Arc status of CH3 0-Normal 1-Alarm"
+    },
+    {
+      "protocol": "eg4/eg4_v58",
+      "register": "144.b3",
+      "name": "afciflag_arcalarmch4",
+      "csv": "eg4_v58.input_registry_map.csv",
+      "note": "Arc status of CH4 0-Normal 1-Alarm"
+    },
+    {
+      "protocol": "eg4/eg4_v58",
+      "register": "144.b8",
+      "name": "afci_arcalarm_rsvd",
+      "csv": "eg4_v58.input_registry_map.csv",
+      "note": "Diagnostic alert indicator within the inverter's Modbus map to monitor for arc faults"
+    },
+    {
+      "protocol": "eg4/eg4_v58",
+      "register": "400",
+      "name": "faultrecord1_yandm",
+      "csv": "eg4_v58.input_registry_map.csv",
+      "note": "Fault Records 1_ years & months"
+    },
+    {
+      "protocol": "eg4/eg4_v58",
+      "register": "401",
+      "name": "faultrecord1_dandh",
+      "csv": "eg4_v58.input_registry_map.csv",
+      "note": "Fault Records 1_ days & hours"
+    },
+    {
+      "protocol": "eg4/eg4_v58",
+      "register": "402",
+      "name": "faultrecord1_mands",
+      "csv": "eg4_v58.input_registry_map.csv",
+      "note": "Fault Records 1_ minutes & seconds"
+    },
+    {
+      "protocol": "eg4/eg4_v58",
+      "register": "403",
+      "name": "faultrecord1_code",
+      "csv": "eg4_v58.input_registry_map.csv",
+      "note": "Fault Records 1_ fault code"
+    },
+    {
+      "protocol": "eg4/eg4_v58",
+      "register": "404",
+      "name": "faultrecord1_value",
+      "csv": "eg4_v58.input_registry_map.csv",
+      "note": "Fault Records 1_ fault value"
+    },
+    {
+      "protocol": "eg4/eg4_v58",
+      "register": "405",
+      "name": "faultrecord1_setorclr",
+      "csv": "eg4_v58.input_registry_map.csv",
+      "note": "Fault Records 1_Fault occurred or cleared (0-fault occurred"
+    },
+    {
+      "protocol": "eg4/eg4_v58",
+      "register": "406",
+      "name": "faultrecord2_yandm",
+      "csv": "eg4_v58.input_registry_map.csv",
+      "note": "Fault Records 2_ years & months"
+    },
+    {
+      "protocol": "eg4/eg4_v58",
+      "register": "407",
+      "name": "faultrecord2_dandh",
+      "csv": "eg4_v58.input_registry_map.csv",
+      "note": "Fault Records 2_ days & hours"
+    },
+    {
+      "protocol": "eg4/eg4_v58",
+      "register": "408",
+      "name": "faultrecord2_mands",
+      "csv": "eg4_v58.input_registry_map.csv",
+      "note": "Fault Records 2_ minutes & seconds"
+    },
+    {
+      "protocol": "eg4/eg4_v58",
+      "register": "409",
+      "name": "faultrecord2_code",
+      "csv": "eg4_v58.input_registry_map.csv",
+      "note": "Fault Records 2_ fault code"
+    },
+    {
+      "protocol": "eg4/eg4_v58",
+      "register": "410",
+      "name": "faultrecord2_value",
+      "csv": "eg4_v58.input_registry_map.csv",
+      "note": "Fault Records 2_Fault value"
+    },
+    {
+      "protocol": "eg4/eg4_v58",
+      "register": "411",
+      "name": "faultrecord2_setorclr",
+      "csv": "eg4_v58.input_registry_map.csv",
+      "note": "Fault Records 2_Fault occurred or clear (0 - Fault Occurred"
+    },
+    {
+      "protocol": "eg4/eg4_v58",
+      "register": "997",
+      "name": "faultrecord100_code",
+      "csv": "eg4_v58.input_registry_map.csv",
+      "note": "Fault record 100: fault code; registers 994-999 are the last fault record block"
+    },
+    {
+      "protocol": "enphase/enphase_iq_gateway_sunspec",
+      "register": "40108",
+      "name": "event_flags_1",
+      "csv": "enphase_iq_gateway_sunspec.holding_registry_map.csv",
+      "note": "Alarm bitmask word 1; 40108-40109"
+    },
+    {
+      "protocol": "enphase/enphase_iq_gateway_sunspec",
+      "register": "40110",
+      "name": "event_flags_2",
+      "csv": "enphase_iq_gateway_sunspec.holding_registry_map.csv",
+      "note": "Alarm bitmask word 2; 40110-40111"
+    },
+    {
+      "protocol": "fronius/fronius_sunspec",
+      "register": "215",
+      "name": "reset_event_flags",
+      "csv": "fronius_sunspec.holding_registry_map.csv",
+      "note": "Write 0xFFFF to reset all event flags and clear active state code"
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "register": "81",
+      "name": "pv_voltage_high_fault",
+      "csv": "growatt_2020_v1.24.holding_registry_map.csv",
+      "note": "PV Voltage High Fault"
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "register": "3025",
+      "name": "vbatwarning",
+      "csv": "growatt_2020_v1.24.holding_registry_map.csv",
+      "note": "\"Battery-low\" warning setup voltage; 4800; extra: Lead acid battery LV voltage"
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "register": "3105",
+      "name": "fault_maincode",
+      "csv": "growatt_2020_v1.24.input_registry_map.csv",
+      "note": "Inverter fault maincode"
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "register": "115",
+      "name": "binvallfaultcode",
+      "csv": "growatt_2020_v1.24.input_registry_map.csv",
+      "note": "bINVAllFaultCode; MAX"
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "register": "990",
+      "name": "pv_warning_value",
+      "csv": "growatt_2020_v1.24.input_registry_map.csv",
+      "note": "PV Warning Value (PV9-PV16) Contains PV9~16 abnormal"
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "register": "180",
+      "name": "dsp075_warning_value",
+      "csv": "growatt_2020_v1.24.input_registry_map.csv",
+      "note": "DSP075 Warning Value"
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "register": "181",
+      "name": "dsp075_fault_value",
+      "csv": "growatt_2020_v1.24.input_registry_map.csv",
+      "note": "DSP075 Fault Value"
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "register": "229",
+      "name": "bfanfaultbit",
+      "csv": "growatt_2020_v1.24.input_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "register": "1001",
+      "name": "systemfault_word0",
+      "csv": "growatt_2020_v1.24.input_registry_map.csv",
+      "note": "System fault word0"
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "register": "1002",
+      "name": "systemfault_word1",
+      "csv": "growatt_2020_v1.24.input_registry_map.csv",
+      "note": "System fault word1"
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "register": "1003",
+      "name": "systemfault_word2",
+      "csv": "growatt_2020_v1.24.input_registry_map.csv",
+      "note": "System fault word2"
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "register": "1004",
+      "name": "systemfault_word3",
+      "csv": "growatt_2020_v1.24.input_registry_map.csv",
+      "note": "System fault word3"
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "register": "1005",
+      "name": "systemfault_word4",
+      "csv": "growatt_2020_v1.24.input_registry_map.csv",
+      "note": "System fault word4"
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "register": "1006",
+      "name": "systemfault_word5",
+      "csv": "growatt_2020_v1.24.input_registry_map.csv",
+      "note": "System fault word5"
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "register": "1007",
+      "name": "systemfault_word6",
+      "csv": "growatt_2020_v1.24.input_registry_map.csv",
+      "note": "System fault word6"
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "register": "1008",
+      "name": "systemfault_word7",
+      "csv": "growatt_2020_v1.24.input_registry_map.csv",
+      "note": "System fault word7"
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "register": "1157",
+      "name": "firstbattfaultsn",
+      "csv": "growatt_2020_v1.24.input_registry_map.csv",
+      "note": "FirstBattFaultSn"
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "register": "1158",
+      "name": "second_battfaultsn",
+      "csv": "growatt_2020_v1.24.input_registry_map.csv",
+      "note": "Second BattFaultSn"
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "register": "1159",
+      "name": "third_battfaultsn",
+      "csv": "growatt_2020_v1.24.input_registry_map.csv",
+      "note": "Third BattFaultSn"
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "register": "1160",
+      "name": "fourth_battfaultsn",
+      "csv": "growatt_2020_v1.24.input_registry_map.csv",
+      "note": "Fourth BattFaultSn"
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "register": "1161",
+      "name": "battery_history_fault_code_1",
+      "csv": "growatt_2020_v1.24.input_registry_map.csv",
+      "note": "Battery history fault code 1"
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "register": "1162",
+      "name": "battery_history_fault_code_2",
+      "csv": "growatt_2020_v1.24.input_registry_map.csv",
+      "note": "Battery history fault code 2"
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "register": "1163",
+      "name": "battery_history_fault_code_3",
+      "csv": "growatt_2020_v1.24.input_registry_map.csv",
+      "note": "Battery history fault code 3"
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "register": "1164",
+      "name": "battery_history_fault_code_4",
+      "csv": "growatt_2020_v1.24.input_registry_map.csv",
+      "note": "Battery history fault code 4"
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "register": "1165",
+      "name": "battery_history_fault_code_5",
+      "csv": "growatt_2020_v1.24.input_registry_map.csv",
+      "note": "Battery history fault code 5"
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "register": "1166",
+      "name": "battery_history_fault_code_6",
+      "csv": "growatt_2020_v1.24.input_registry_map.csv",
+      "note": "Battery history fault code 6"
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "register": "1167",
+      "name": "battery_history_fault_code_7",
+      "csv": "growatt_2020_v1.24.input_registry_map.csv",
+      "note": "Battery history fault code 7"
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "register": "1168",
+      "name": "battery_history_fault_code_8",
+      "csv": "growatt_2020_v1.24.input_registry_map.csv",
+      "note": "Battery history fault code 8"
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "register": "3107",
+      "name": "fault_subcode",
+      "csv": "growatt_2020_v1.24.input_registry_map.csv",
+      "note": "Inverter fault subcode"
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "register": "3167",
+      "name": "faultcode",
+      "csv": "growatt_2020_v1.24.input_registry_map.csv",
+      "note": "Storge device fault code"
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "register": "3204",
+      "name": "bmsfault",
+      "csv": "growatt_2020_v1.24.input_registry_map.csv",
+      "note": "BMS Fault1"
+    },
+    {
+      "protocol": "growatt/growatt_2020_v1.24",
+      "register": "3205",
+      "name": "bmsfault2",
+      "csv": "growatt_2020_v1.24.input_registry_map.csv",
+      "note": "BMS Fault2"
+    },
+    {
+      "protocol": "growatt/growatt_v0.14",
+      "register": "107",
+      "name": "audioalarmen",
+      "csv": "growatt_v0.14.holding_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "growatt/growatt_v0.14",
+      "register": "43",
+      "name": "warning_value",
+      "csv": "growatt_v0.14.input_registry_map.csv",
+      "note": "warning value"
+    },
+    {
+      "protocol": "pace/pace_bms_v1.3",
+      "register": "60",
+      "name": "pack_ov_alarm",
+      "csv": "pace_bms_v1.3.holding_registry_map.csv",
+      "note": "length: 2byte"
+    },
+    {
+      "protocol": "pace/pace_bms_v1.3",
+      "register": "64",
+      "name": "cell_ov_alarm",
+      "csv": "pace_bms_v1.3.holding_registry_map.csv",
+      "note": "length: 2byte"
+    },
+    {
+      "protocol": "pace/pace_bms_v1.3",
+      "register": "68",
+      "name": "pack_uv_alarm",
+      "csv": "pace_bms_v1.3.holding_registry_map.csv",
+      "note": "length: 2byte"
+    },
+    {
+      "protocol": "pace/pace_bms_v1.3",
+      "register": "72",
+      "name": "cell_uv_alarm",
+      "csv": "pace_bms_v1.3.holding_registry_map.csv",
+      "note": "length: 2byte"
+    },
+    {
+      "protocol": "pace/pace_bms_v1.3",
+      "register": "76",
+      "name": "charging_oc_alarm",
+      "csv": "pace_bms_v1.3.holding_registry_map.csv",
+      "note": "length: 2byte"
+    },
+    {
+      "protocol": "pace/pace_bms_v1.3",
+      "register": "79",
+      "name": "discharging_oc_alarm",
+      "csv": "pace_bms_v1.3.holding_registry_map.csv",
+      "note": "length: 2byte"
+    },
+    {
+      "protocol": "pace/pace_bms_v1.3",
+      "register": "84",
+      "name": "charging_ot_alarm",
+      "csv": "pace_bms_v1.3.holding_registry_map.csv",
+      "note": "length: 2byte"
+    },
+    {
+      "protocol": "pace/pace_bms_v1.3",
+      "register": "87",
+      "name": "discharging_ot_alarm",
+      "csv": "pace_bms_v1.3.holding_registry_map.csv",
+      "note": "length: 2byte"
+    },
+    {
+      "protocol": "pace/pace_bms_v1.3",
+      "register": "90",
+      "name": "charging_ut_alarm",
+      "csv": "pace_bms_v1.3.holding_registry_map.csv",
+      "note": "length: 2byte"
+    },
+    {
+      "protocol": "pace/pace_bms_v1.3",
+      "register": "93",
+      "name": "discharging_ut_alarm",
+      "csv": "pace_bms_v1.3.holding_registry_map.csv",
+      "note": "length: 2byte"
+    },
+    {
+      "protocol": "pace/pace_bms_v1.3",
+      "register": "96",
+      "name": "mosfet_ot_alarm",
+      "csv": "pace_bms_v1.3.holding_registry_map.csv",
+      "note": "length: 2byte; Or invalid parameters in BMS-4820"
+    },
+    {
+      "protocol": "pace/pace_bms_v1.3",
+      "register": "99",
+      "name": "environment_ot_alarm",
+      "csv": "pace_bms_v1.3.holding_registry_map.csv",
+      "note": "length: 2byte"
+    },
+    {
+      "protocol": "pace/pace_bms_v1.3",
+      "register": "102",
+      "name": "environment_ut_alarm",
+      "csv": "pace_bms_v1.3.holding_registry_map.csv",
+      "note": "length: 2byte"
+    },
+    {
+      "protocol": "pace/pace_bms_v1.3",
+      "register": "112",
+      "name": "soc_alarm_threshold",
+      "csv": "pace_bms_v1.3.holding_registry_map.csv",
+      "note": "length: 2byte"
+    },
+    {
+      "protocol": "pylon/pylon_rs485_v3.3",
+      "register": "x4644",
+      "name": "battery_1_alarm",
+      "csv": "pylon_rs485_v3.3.holding_registry_map.csv",
+      "note": "read command: 0x01; todo"
+    },
+    {
+      "protocol": "sigineer/sigineer_v0.11",
+      "register": "43",
+      "name": "warning_value",
+      "csv": "sigineer_v0.11.input_registry_map.csv",
+      "note": "warning value"
+    },
+    {
+      "protocol": "sigineer/sigineer_v0.11",
+      "register": "181",
+      "name": "solar1_faultcode",
+      "csv": "sigineer_v0.11.input_registry_map.csv",
+      "note": "Solar Charger1 FaultCode"
+    },
+    {
+      "protocol": "sigineer/sigineer_v0.11",
+      "register": "182",
+      "name": "solar1_warningcode",
+      "csv": "sigineer_v0.11.input_registry_map.csv",
+      "note": "Solar Charger1 WarningCode"
+    },
+    {
+      "protocol": "sigineer/sigineer_v0.11",
+      "register": "201",
+      "name": "solar2_faultcode",
+      "csv": "sigineer_v0.11.input_registry_map.csv",
+      "note": "Solar Charger2 FaultCode"
+    },
+    {
+      "protocol": "sigineer/sigineer_v0.11",
+      "register": "202",
+      "name": "solar2_warningcode",
+      "csv": "sigineer_v0.11.input_registry_map.csv",
+      "note": "Solar Charger2 WarningCode"
+    },
+    {
+      "protocol": "solaredge/solaredge_sunspec",
+      "register": "40109",
+      "name": "alarm_bitmask_1",
+      "csv": "solaredge_sunspec.holding_registry_map.csv",
+      "note": "Event flag bitmask word 1; spans 40109-40110"
+    },
+    {
+      "protocol": "solaredge/solaredge_sunspec",
+      "register": "40111",
+      "name": "alarm_bitmask_2",
+      "csv": "solaredge_sunspec.holding_registry_map.csv",
+      "note": "Event flag bitmask word 2; spans 40111-40112"
+    },
+    {
+      "protocol": "solaredge/solaredge_sunspec",
+      "register": "40113",
+      "name": "alarm_bitmask_3",
+      "csv": "solaredge_sunspec.holding_registry_map.csv",
+      "note": "Event flag bitmask word 3"
+    },
+    {
+      "protocol": "solaredge/solaredge_sunspec",
+      "register": "40115",
+      "name": "alarm_bitmask_4",
+      "csv": "solaredge_sunspec.holding_registry_map.csv",
+      "note": "Event flag bitmask word 4"
+    },
+    {
+      "protocol": "srne/srne_v1.7",
+      "register": "x200",
+      "name": "fault_bits_1",
+      "csv": "srne_v1.7.holding_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "srne/srne_v1.7",
+      "register": "x201",
+      "name": "fault_bits_2",
+      "csv": "srne_v1.7.holding_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "srne/srne_v1.7",
+      "register": "x202",
+      "name": "fault_bits_3",
+      "csv": "srne_v1.7.holding_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "srne/srne_v1.7",
+      "register": "x203",
+      "name": "fault_bits_4",
+      "csv": "srne_v1.7.holding_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "srne/srne_v1.7",
+      "register": "x204",
+      "name": "fault_code_1",
+      "csv": "srne_v1.7.holding_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "srne/srne_v1.7",
+      "register": "x205",
+      "name": "fault_code_2",
+      "csv": "srne_v1.7.holding_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "srne/srne_v1.7",
+      "register": "x206",
+      "name": "fault_code_3",
+      "csv": "srne_v1.7.holding_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "srne/srne_v1.7",
+      "register": "x207",
+      "name": "fault_code_4",
+      "csv": "srne_v1.7.holding_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "srne/srne_v1.7",
+      "register": "x226",
+      "name": "inverter_fault_state",
+      "csv": "srne_v1.7.holding_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "srne/srne_v1.7",
+      "register": "xE00C",
+      "name": "under_voltage_warning_voltage",
+      "csv": "srne_v1.7.holding_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "srne/srne_v1.7",
+      "register": "xF800~xF80F",
+      "name": "faulthistoryrecord00",
+      "csv": "srne_v1.7.holding_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "srne/srne_v1.7",
+      "register": "xF810~xF81F",
+      "name": "faulthistoryrecord01",
+      "csv": "srne_v1.7.holding_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "srne/srne_v1.7",
+      "register": "xF820~xF82F",
+      "name": "faulthistoryrecord02",
+      "csv": "srne_v1.7.holding_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "srne/srne_v1.7",
+      "register": "xF830~xF83F",
+      "name": "faulthistoryrecord03",
+      "csv": "srne_v1.7.holding_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "srne/srne_v1.7",
+      "register": "xF840~xF84F",
+      "name": "faulthistoryrecord04",
+      "csv": "srne_v1.7.holding_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "srne/srne_v1.7",
+      "register": "xF850~xF85F",
+      "name": "faulthistoryrecord05",
+      "csv": "srne_v1.7.holding_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "srne/srne_v1.7",
+      "register": "xF860~xF86F",
+      "name": "faulthistoryrecord06",
+      "csv": "srne_v1.7.holding_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "srne/srne_v1.7",
+      "register": "xF870~xF87F",
+      "name": "faulthistoryrecord07",
+      "csv": "srne_v1.7.holding_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "srne/srne_v1.7",
+      "register": "xF880~xF88F",
+      "name": "faulthistoryrecord08",
+      "csv": "srne_v1.7.holding_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "srne/srne_v1.7",
+      "register": "xF890~xF89F",
+      "name": "faulthistoryrecord09",
+      "csv": "srne_v1.7.holding_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "srne/srne_v1.7",
+      "register": "xF8A0~xF8AF",
+      "name": "faulthistoryrecord10",
+      "csv": "srne_v1.7.holding_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "srne/srne_v1.7",
+      "register": "xF8B0~xF8BF",
+      "name": "faulthistoryrecord11",
+      "csv": "srne_v1.7.holding_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "srne/srne_v1.7",
+      "register": "xF8C0~xF8CF",
+      "name": "faulthistoryrecord12",
+      "csv": "srne_v1.7.holding_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "srne/srne_v1.7",
+      "register": "xF8D0~xF8DF",
+      "name": "faulthistoryrecord13",
+      "csv": "srne_v1.7.holding_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "srne/srne_v1.7",
+      "register": "xF8E0~xF8EF",
+      "name": "faulthistoryrecord14",
+      "csv": "srne_v1.7.holding_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "srne/srne_v1.7",
+      "register": "xF8F0~xF8FF",
+      "name": "faulthistoryrecord15",
+      "csv": "srne_v1.7.holding_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "srne/srne_v3.9",
+      "register": "0xE00C",
+      "name": "under_voltage_warning_level",
+      "csv": "srne_v3.9.holding_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "victron/victron_gx_generic_canbus",
+      "register": "x35A.0",
+      "name": "external_alarm_1",
+      "csv": "victron_gx_generic_canbus.holding_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "victron/victron_gx_generic_canbus",
+      "register": "X35A.1",
+      "name": "external_alarm_2",
+      "csv": "victron_gx_generic_canbus.holding_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "victron/victron_gx_generic_canbus",
+      "register": "X35A.2",
+      "name": "external_alarm_3",
+      "csv": "victron_gx_generic_canbus.holding_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "victron/victron_gx_generic_canbus",
+      "register": "X35A.3",
+      "name": "external_warning_1",
+      "csv": "victron_gx_generic_canbus.holding_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "victron/victron_gx_generic_canbus",
+      "register": "X35A.4",
+      "name": "external_warning_2",
+      "csv": "victron_gx_generic_canbus.holding_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "victron/victron_gx_generic_canbus",
+      "register": "X35A.5",
+      "name": "external_warning_3",
+      "csv": "victron_gx_generic_canbus.holding_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "victron/victron_gx_generic_canbus",
+      "register": "X35A.6",
+      "name": "external_warning_4",
+      "csv": "victron_gx_generic_canbus.holding_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "victron/victron_mk3usb_vebus",
+      "register": "F_WARN",
+      "name": "warning_flags",
+      "csv": "victron_mk3usb_vebus.holding_registry_map.csv",
+      "note": "Active warning bitmask"
+    },
+    {
+      "protocol": "victron/victron_vedirect_serial",
+      "register": "AR",
+      "name": "alarm_reason",
+      "csv": "victron_vedirect_serial.holding_registry_map.csv",
+      "note": "Bitmask; see BMV register 266 for bit definitions (BMV only)"
+    },
+    {
+      "protocol": "victron/victron_vedirect_serial",
+      "register": "H11",
+      "name": "low_voltage_alarms",
+      "csv": "victron_vedirect_serial.holding_registry_map.csv",
+      "note": "Count of low voltage alarm activations (BMV only)"
+    },
+    {
+      "protocol": "victron/victron_vedirect_serial",
+      "register": "H12",
+      "name": "high_voltage_alarms",
+      "csv": "victron_vedirect_serial.holding_registry_map.csv",
+      "note": "Count of high voltage alarm activations (BMV only)"
+    },
+    {
+      "protocol": "victron/victron_vedirect_serial",
+      "register": "H13",
+      "name": "low_aux_voltage_alarms",
+      "csv": "victron_vedirect_serial.holding_registry_map.csv",
+      "note": "Count of low auxiliary voltage alarms (BMV only)"
+    },
+    {
+      "protocol": "victron/victron_vedirect_serial",
+      "register": "H14",
+      "name": "high_aux_voltage_alarms",
+      "csv": "victron_vedirect_serial.holding_registry_map.csv",
+      "note": "Count of high auxiliary voltage alarms (BMV only)"
+    },
+    {
+      "protocol": "voltronic/voltronic_bms_v1.1",
+      "register": "231",
+      "name": "warning_flag",
+      "csv": "voltronic_bms_v1.1.holding_registry_map.csv",
+      "note": "See description-1"
+    },
+    {
+      "protocol": "voltronic/voltronic_bms_v1.1",
+      "register": "233",
+      "name": "status_fault_flag",
+      "csv": "voltronic_bms_v1.1.holding_registry_map.csv",
+      "note": "See description-3"
+    },
+    {
+      "protocol": "voltronic/voltronic_bms_v1.1",
+      "register": "60",
+      "name": "pack_ov_alarm",
+      "csv": "voltronic_bms_v1.1.holding_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "voltronic/voltronic_bms_v1.1",
+      "register": "64",
+      "name": "cell_ov_alarm",
+      "csv": "voltronic_bms_v1.1.holding_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "voltronic/voltronic_bms_v1.1",
+      "register": "68",
+      "name": "pack_uv_alarm",
+      "csv": "voltronic_bms_v1.1.holding_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "voltronic/voltronic_bms_v1.1",
+      "register": "72",
+      "name": "cell_uv_alarm",
+      "csv": "voltronic_bms_v1.1.holding_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "voltronic/voltronic_bms_v1.1",
+      "register": "76",
+      "name": "charging_oc_alarm",
+      "csv": "voltronic_bms_v1.1.holding_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "voltronic/voltronic_bms_v1.1",
+      "register": "79",
+      "name": "discharging_oc_alarm",
+      "csv": "voltronic_bms_v1.1.holding_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "voltronic/voltronic_bms_v1.1",
+      "register": "84",
+      "name": "charging_ot_alarm",
+      "csv": "voltronic_bms_v1.1.holding_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "voltronic/voltronic_bms_v1.1",
+      "register": "87",
+      "name": "discharging_ot_alarm",
+      "csv": "voltronic_bms_v1.1.holding_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "voltronic/voltronic_bms_v1.1",
+      "register": "90",
+      "name": "charging_ut_alarm",
+      "csv": "voltronic_bms_v1.1.holding_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "voltronic/voltronic_bms_v1.1",
+      "register": "93",
+      "name": "discharging_ut_alarm",
+      "csv": "voltronic_bms_v1.1.holding_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "voltronic/voltronic_bms_v1.1",
+      "register": "96",
+      "name": "mosfet_ot_alarm",
+      "csv": "voltronic_bms_v1.1.holding_registry_map.csv",
+      "note": "Or invalid parameters in BMS-4820"
+    },
+    {
+      "protocol": "voltronic/voltronic_bms_v1.1",
+      "register": "99",
+      "name": "environment_ot_alarm",
+      "csv": "voltronic_bms_v1.1.holding_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "voltronic/voltronic_bms_v1.1",
+      "register": "102",
+      "name": "environment_ut_alarm",
+      "csv": "voltronic_bms_v1.1.holding_registry_map.csv",
+      "note": ""
+    },
+    {
+      "protocol": "voltronic/voltronic_bms_v1.1",
+      "register": "112",
+      "name": "soc_alarm_threshold",
+      "csv": "voltronic_bms_v1.1.holding_registry_map.csv",
+      "note": ""
+    }
+  ],
+  "matched_sample": [
+    {
+      "protocol": "deye_sunsynk/deye_sunsynk",
+      "code_base": "inverter_enabled",
+      "register": "43",
+      "csv": "deye_sunsynk.holding_registry_map.csv"
+    },
+    {
+      "protocol": "deye_sunsynk/deye_sunsynk",
+      "code_base": "overall_state",
+      "register": "59",
+      "csv": "deye_sunsynk.holding_registry_map.csv"
+    },
+    {
+      "protocol": "deye_sunsynk/deye_sunsynk",
+      "code_base": "fault_1",
+      "register": "103",
+      "csv": "deye_sunsynk.holding_registry_map.csv"
+    },
+    {
+      "protocol": "deye_sunsynk/deye_sunsynk",
+      "code_base": "fault_2",
+      "register": "104",
+      "csv": "deye_sunsynk.holding_registry_map.csv"
+    },
+    {
+      "protocol": "deye_sunsynk/deye_sunsynk",
+      "code_base": "fault_3",
+      "register": "105",
+      "csv": "deye_sunsynk.holding_registry_map.csv"
+    },
+    {
+      "protocol": "deye_sunsynk/deye_sunsynk",
+      "code_base": "fault_4",
+      "register": "106",
+      "csv": "deye_sunsynk.holding_registry_map.csv"
+    },
+    {
+      "protocol": "deye_sunsynk/deye_sunsynk",
+      "code_base": "grid_connected",
+      "register": "194",
+      "csv": "deye_sunsynk.holding_registry_map.csv"
+    },
+    {
+      "protocol": "deye_sunsynk/deye_sunsynk",
+      "code_base": "generator_input",
+      "register": "235",
+      "csv": "deye_sunsynk.holding_registry_map.csv"
+    },
+    {
+      "protocol": "deye_sunsynk/deye_sunsynk",
+      "code_base": "priority_load",
+      "register": "243",
+      "csv": "deye_sunsynk.holding_registry_map.csv"
+    },
+    {
+      "protocol": "deye_sunsynk/deye_sunsynk",
+      "code_base": "use_timer",
+      "register": "248",
+      "csv": "deye_sunsynk.holding_registry_map.csv"
+    },
+    {
+      "protocol": "deye_sunsynk/deye_sunsynk_hybrid",
+      "code_base": "inverter_enabled",
+      "register": "43",
+      "csv": "deye_sunsynk_hybrid.holding_registry_map.csv"
+    },
+    {
+      "protocol": "deye_sunsynk/deye_sunsynk_hybrid",
+      "code_base": "overall_state",
+      "register": "59",
+      "csv": "deye_sunsynk_hybrid.holding_registry_map.csv"
+    },
+    {
+      "protocol": "deye_sunsynk/deye_sunsynk_hybrid",
+      "code_base": "fault_1",
+      "register": "103",
+      "csv": "deye_sunsynk_hybrid.holding_registry_map.csv"
+    },
+    {
+      "protocol": "deye_sunsynk/deye_sunsynk_hybrid",
+      "code_base": "fault_2",
+      "register": "104",
+      "csv": "deye_sunsynk_hybrid.holding_registry_map.csv"
+    },
+    {
+      "protocol": "deye_sunsynk/deye_sunsynk_hybrid",
+      "code_base": "fault_3",
+      "register": "105",
+      "csv": "deye_sunsynk_hybrid.holding_registry_map.csv"
+    },
+    {
+      "protocol": "deye_sunsynk/deye_sunsynk_hybrid",
+      "code_base": "fault_4",
+      "register": "106",
+      "csv": "deye_sunsynk_hybrid.holding_registry_map.csv"
+    },
+    {
+      "protocol": "deye_sunsynk/deye_sunsynk_hybrid",
+      "code_base": "grid_connected",
+      "register": "194",
+      "csv": "deye_sunsynk_hybrid.holding_registry_map.csv"
+    },
+    {
+      "protocol": "deye_sunsynk/deye_sunsynk_hybrid",
+      "code_base": "generator_input",
+      "register": "235",
+      "csv": "deye_sunsynk_hybrid.holding_registry_map.csv"
+    },
+    {
+      "protocol": "deye_sunsynk/deye_sunsynk_hybrid",
+      "code_base": "priority_load",
+      "register": "243",
+      "csv": "deye_sunsynk_hybrid.holding_registry_map.csv"
+    },
+    {
+      "protocol": "deye_sunsynk/deye_sunsynk_hybrid",
+      "code_base": "use_timer",
+      "register": "248",
+      "csv": "deye_sunsynk_hybrid.holding_registry_map.csv"
+    },
+    {
+      "protocol": "eg4/eg4_18kpv",
+      "code_base": "state",
+      "register": "0",
+      "csv": "eg4_18kpv.input_registry_map.csv"
+    },
+    {
+      "protocol": "eg4/eg4_18kpv",
+      "code_base": "battypeandbrand",
+      "register": "80.b0",
+      "csv": "eg4_18kpv.input_registry_map.csv"
+    },
+    {
+      "protocol": "eg4/eg4_18kpv",
+      "code_base": "batcomtype",
+      "register": "80.b4",
+      "csv": "eg4_18kpv.input_registry_map.csv"
+    },
+    {
+      "protocol": "eg4/eg4_18kpv",
+      "code_base": "faultcode_bms",
+      "register": "99",
+      "csv": "eg4_18kpv.input_registry_map.csv"
+    },
+    {
+      "protocol": "eg4/eg4_18kpv",
+      "code_base": "warningcode_bms",
+      "register": "100",
+      "csv": "eg4_18kpv.input_registry_map.csv"
+    },
+    {
+      "protocol": "eg4/eg4_18kpv",
+      "code_base": "faultcode",
+      "match_type": "aggregate_bit_registers",
+      "register_count": 32,
+      "registers_sample": [
+        "60.b0",
+        "60.b1",
+        "60.b2"
+      ]
+    },
+    {
+      "protocol": "eg4/eg4_18kpv",
+      "code_base": "warningcode",
+      "match_type": "aggregate_bit_registers",
+      "register_count": 32,
+      "registers_sample": [
+        "62.b0",
+        "62.b1",
+        "62.b2"
+      ]
+    },
+    {
+      "protocol": "eg4/eg4_3000ehv_v1",
+      "code_base": "fault_code",
+      "register": "100~101",
+      "csv": "eg4_3000ehv_v1.holding_registry_map.csv"
+    },
+    {
+      "protocol": "eg4/eg4_3000ehv_v1",
+      "code_base": "obtain_warning_code",
+      "register": "108~109",
+      "csv": "eg4_3000ehv_v1.holding_registry_map.csv"
+    },
+    {
+      "protocol": "eg4/eg4_3000ehv_v1",
+      "code_base": "working_mode",
+      "register": "201",
+      "csv": "eg4_3000ehv_v1.holding_registry_map.csv"
+    },
+    {
+      "protocol": "eg4/eg4_3000ehv_v1",
+      "code_base": "output_mode",
+      "register": "300",
+      "csv": "eg4_3000ehv_v1.holding_registry_map.csv"
+    },
+    {
+      "protocol": "eg4/eg4_3000ehv_v1",
+      "code_base": "output_priority",
+      "register": "301",
+      "csv": "eg4_3000ehv_v1.holding_registry_map.csv"
+    },
+    {
+      "protocol": "eg4/eg4_3000ehv_v1",
+      "code_base": "input_voltage_range",
+      "register": "302",
+      "csv": "eg4_3000ehv_v1.holding_registry_map.csv"
+    },
+    {
+      "protocol": "eg4/eg4_3000ehv_v1",
+      "code_base": "buzzer_mode",
+      "register": "303",
+      "csv": "eg4_3000ehv_v1.holding_registry_map.csv"
+    },
+    {
+      "protocol": "eg4/eg4_3000ehv_v1",
+      "code_base": "lcd_backlight",
+      "register": "305",
+      "csv": "eg4_3000ehv_v1.holding_registry_map.csv"
+    },
+    {
+      "protocol": "eg4/eg4_3000ehv_v1",
+      "code_base": "battery_charging_priority",
+      "register": "331",
+      "csv": "eg4_3000ehv_v1.holding_registry_map.csv"
+    },
+    {
+      "protocol": "eg4/eg4_3000ehv_v1",
+      "code_base": "remote_switch",
+      "register": "420",
+      "csv": "eg4_3000ehv_v1.holding_registry_map.csv"
+    },
+    {
+      "protocol": "eg4/eg4_ll_s",
+      "code_base": "status",
+      "register": "25.b0",
+      "csv": "eg4_ll_s.holding_registry_map.csv"
+    },
+    {
+      "protocol": "eg4/eg4_ll_s",
+      "code_base": "heater_state",
+      "register": "25.b8",
+      "csv": "eg4_ll_s.holding_registry_map.csv"
+    },
+    {
+      "protocol": "eg4/eg4_v58",
+      "code_base": "state",
+      "register": "0",
+      "csv": "eg4_v58.input_registry_map.csv"
+    },
+    {
+      "protocol": "eg4/eg4_v58",
+      "code_base": "battypeandbrand",
+      "register": "80.b0",
+      "csv": "eg4_v58.input_registry_map.csv"
+    },
+    {
+      "protocol": "eg4/eg4_v58",
+      "code_base": "batcomtype",
+      "register": "80.b4",
+      "csv": "eg4_v58.input_registry_map.csv"
+    },
+    {
+      "protocol": "eg4/eg4_v58",
+      "code_base": "faultcode_bms",
+      "register": "99",
+      "csv": "eg4_v58.input_registry_map.csv"
+    },
+    {
+      "protocol": "eg4/eg4_v58",
+      "code_base": "warningcode_bms",
+      "register": "100",
+      "csv": "eg4_v58.input_registry_map.csv"
+    },
+    {
+      "protocol": "eg4/eg4_v58",
+      "code_base": "faultcode",
+      "match_type": "aggregate_bit_registers",
+      "register_count": 32,
+      "registers_sample": [
+        "60.b0",
+        "60.b1",
+        "60.b2"
+      ]
+    },
+    {
+      "protocol": "eg4/eg4_v58",
+      "code_base": "warningcode",
+      "match_type": "aggregate_bit_registers",
+      "register_count": 32,
+      "registers_sample": [
+        "62.b0",
+        "62.b1",
+        "62.b2"
+      ]
+    },
+    {
+      "protocol": "enphase/enphase_iq_gateway_sunspec",
+      "code_base": "inverter_did",
+      "register": "40070",
+      "csv": "enphase_iq_gateway_sunspec.holding_registry_map.csv"
+    },
+    {
+      "protocol": "enphase/enphase_iq_gateway_sunspec",
+      "code_base": "operating_state",
+      "register": "40106",
+      "csv": "enphase_iq_gateway_sunspec.holding_registry_map.csv"
+    },
+    {
+      "protocol": "enphase/enphase_iq_gateway_sunspec",
+      "code_base": "meter_did",
+      "register": "40121",
+      "csv": "enphase_iq_gateway_sunspec.holding_registry_map.csv"
+    },
+    {
+      "protocol": "enphase/enphase_iq_gateway_sunspec",
+      "code_base": "der_power_limit_enabled",
+      "register": "707",
+      "csv": "enphase_iq_gateway_sunspec.holding_registry_map.csv"
+    }
+  ]
+}

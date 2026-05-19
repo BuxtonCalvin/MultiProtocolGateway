@@ -1,6 +1,7 @@
 # Modbus base transport class with shared client management, register failure tracking, and protocol analysis support
 import inspect
 import re
+import struct
 import threading
 import time
 from dataclasses import dataclass, field
@@ -257,13 +258,9 @@ class modbus_base(transport_base):
         return kwargs
 
     def _entry_byte_order(self, entry: registry_map_entry) -> str:
-        return entry.data_byteorder or self._protocol.byteorder
+        return self._protocol.get_entry_byteorder(entry)
 
-    def _register_words_to_bytes(
-        self,
-        register_values: list[int],
-        byte_order: str,
-    ) -> bytes:
+    def _register_words_to_bytes(self, register_values: list[int], byte_order: str,) -> bytes:
         words = [value & 0xFFFF for value in register_values]
         if byte_order == "little":
             words.reverse()
@@ -279,9 +276,7 @@ class modbus_base(transport_base):
         return words
 
     def _entry_word_count(self, entry: registry_map_entry) -> int:
-        if entry.data_type in (Data_Type.UINT, Data_Type.INT, Data_Type._32BIT_FLAGS):
-            return 2
-        return 1
+        return self._protocol.entry_word_count(entry)
 
     def write_registers(self, start_register: int, values: list[int], **kwargs: Any) -> None:
         if not self.write_enabled:
@@ -573,80 +568,80 @@ class modbus_base(transport_base):
     def read_serial_number(self) -> str:
         """
         Attempts to read the device serial number from registers.
-        Tries 'Serial_Number' variable first in INPUT then HOLDING registers,
-        then falls back to reading individual 'Serial No N' holding registers.
-        Returns empty string if serial number cannot be determined.
+        Tries 'Serial_Number' variable first, then falls back to
+        concatenating 'Serial No 1-5' for both Holding and Input registers.
+        Respects the send_holding_register and send_input_register flags to determine which registry types to read from.
         """
 
-        # 1. Try single-register serial number variable — INPUT then HOLDING
-        for registry_type in (Registry_Type.INPUT, Registry_Type.HOLDING):
-            self._log.info(
-                f"Looking for serial_number variable in "
-                f"{registry_type.name} registers..."
-            )
-            result = self.read_variable("Serial_Number", registry_type)
-            serial_number: str = str(result) if result is not None else ""
-            self._log.info(f"Read SN from {registry_type.name}: {serial_number}")
-            if serial_number and serial_number != "None":
-                return serial_number
+        # Try single-register 'Serial_Number' variable
+        if self.send_holding_register:
+            sn: str | None = self._read_sn_from_registry(Registry_Type.HOLDING)
+            if sn:
+                return sn
 
-        # 2. Fall back to concatenating Serial No 1-5 holding registers
-        serial_number = ""
-        sn2: str = ""
-        sn3: str = ""
-        fields: list[str] = [
-            "Serial No 1", "Serial No 2", "Serial No 3",
-            "Serial No 4", "Serial No 5"
-        ]
+        if self.send_input_register:
+            sn: str | None = self._read_sn_from_registry(Registry_Type.INPUT)
+            if sn:
+                return sn
 
-        for reg_field in fields:
-            self._log.info(f"Reading {reg_field}")
-            registry_entry: registry_map_entry | None = self._protocol.get_holding_registry_entry(reg_field)
-
-            if registry_entry is None:
-                self._log.debug(f"{reg_field} not found in protocol registry — skipping")
+        # Fall back to concatenating Serial No 1-5
+        # Checks Holding first, then Input if flags allow
+        for r_type in [Registry_Type.HOLDING, Registry_Type.INPUT]:
+            if r_type == Registry_Type.HOLDING and not self.send_holding_register:
+                continue
+            if r_type == Registry_Type.INPUT and not self.send_input_register:
                 continue
 
-            self._log.info(f"Reading {reg_field} (register {registry_entry.register})")
+            sn_result = self._read_concatenated_sn(r_type)
+            if sn_result:
+                return sn_result
 
-            data: dict[int, int] = self.read_modbus_registers(
-                start=registry_entry.register,
-                end=registry_entry.register,
-                registry_type=Registry_Type.HOLDING
-            )
+        return ""
 
-            if not data or registry_entry.register not in data:
-                self._log.critical(
-                    f"Failed to get serial number register ({reg_field}) — "
-                    f"no data returned"
-                )
-                return ""   # critical failure — return empty, let caller handle
+    def _read_sn_from_registry(self, registry_type) -> str | None:
+        """Helper for single-variable lookup."""
+        self._log.info(f"Looking for serial_number in {registry_type.name}...")
+        result: int | float | str | None = self.read_variable("Serial_Number", registry_type)
+        if result is not None:
+            sn = str(result)
+            if sn and sn != "None":
+                self._log.info(f"Read SN from {registry_type.name}: {sn}")
+                return sn
+        return None
 
-            register_value: int = data[registry_entry.register]
-            serial_number = serial_number + str(register_value)
+    def _read_concatenated_sn(self, r_type) -> str:
+        """Helper to build SN from multiple registers (Serial No 1-5)."""
+        sn_decoded = ""
+        fields = ["Serial No 1", "Serial No 2", "Serial No 3", "Serial No 4", "Serial No 5"]
 
-            data_bytes: bytes = register_value.to_bytes(
-                (register_value.bit_length() + 7) // 8,
-                byteorder="big"
-            )
+        for snfield in fields:
+            # Use appropriate lookup method for the registry type
+            if r_type == Registry_Type.HOLDING:
+                entry = self._protocol.get_registry_entry(snfield, registry_type=Registry_Type.HOLDING)
+            else:
+                entry = self._protocol.get_registry_entry(snfield, registry_type=Registry_Type.INPUT)
+
+            if entry is None:
+                continue
+
+            data: Dict[int, int] = self.read_modbus_registers(start=entry.register, end=entry.register, registry_type=r_type)
+            if not data or entry.register not in data:
+                return "" # Treat partial failure as total failure for SN integrity
+
+            val: int = data[entry.register]
             try:
-                decoded: str = data_bytes.decode("utf-8")
-                sn2 = sn2 + decoded
-                sn3 = decoded + sn3
-            except UnicodeDecodeError as e:
-                self._log.warning(
-                    f"Could not decode serial number bytes for {reg_field}: {e}"
-                )
+                # Convert register int to bytes then decode utf-8
+                chunk = val.to_bytes((val.bit_length() + 7) // 8, "big").decode("utf-8")
+                sn_decoded += chunk
+            except UnicodeDecodeError:
+                self._log.warning(f"Could not decode {field} in {r_type.name}")
 
             time.sleep(self.modbus_delay * 2)
 
-        self._log.debug(f"Serial number sn2: {sn2}")
-        self._log.debug(f"Serial number sn3: {sn3}")
-
-        if not re.search(r"[^a-zA-Z0-9_]", sn2):
-            serial_number = sn2
-
-        return serial_number
+        # Validate the final string (alphanumeric and underscores only)
+        if sn_decoded and not re.search(r"[^a-zA-Z0-9_]", sn_decoded):
+            return sn_decoded
+        return ""
 
     def enable_write(self) -> None:
         if self.write_enabled and self.write_mode == TransportWriteMode.UNSAFE:
@@ -1358,7 +1353,7 @@ class modbus_base(transport_base):
 
         raw_registers: list[int] = []
         for offset in range(word_count):
-            raw_word = registry.get(entry.register + offset)
+            raw_word: int | None = registry.get(entry.register + offset)
             if raw_word is None:
                 self._log.error(
                     f"WRITE_ERROR: Register {entry.register + offset} not found in registry "
@@ -1367,10 +1362,10 @@ class modbus_base(transport_base):
                 return
             raw_registers.append(raw_word)
 
-        byte_order = self._entry_byte_order(entry)
-        raw_bytes = self._register_words_to_bytes(raw_registers, byte_order)
-        raw_value = int.from_bytes(raw_bytes, byteorder="big", signed=False)
-        total_bits = len(raw_bytes) * 8
+        byte_order: str = self._entry_byte_order(entry)
+        raw_bytes: bytes = self._register_words_to_bytes(raw_registers, byte_order)
+        raw_value: int = int.from_bytes(raw_bytes, byteorder="big", signed=False)
+        total_bits: int = len(raw_bytes) * 8
 
         if entry.variable_name not in info:
             self._log.error(
@@ -1439,6 +1434,32 @@ class modbus_base(transport_base):
                 byte_order,
             )
 
+        elif entry.data_type == Data_Type.ACC32:
+            int_val = int(float(value))
+            if int_val < 0 or int_val > 0xFFFFFFFF:
+                self._log.error(
+                    f"WRITE_ERROR: Value '{int_val}' out of ACC32 range for "
+                    f"'{entry.variable_name}'. Unsafe to write."
+                )
+                return
+            register_values = self._bytes_to_register_words(
+                int_val.to_bytes(4, byteorder="big", signed=False),
+                byte_order,
+            )
+
+        elif entry.data_type == Data_Type.UINT64:
+            int_val = int(float(value))
+            if int_val < 0 or int_val > 0xFFFFFFFFFFFFFFFF:
+                self._log.error(
+                    f"WRITE_ERROR: Value '{int_val}' out of UINT64 range for "
+                    f"'{entry.variable_name}'. Unsafe to write."
+                )
+                return
+            register_values = self._bytes_to_register_words(
+                int_val.to_bytes(8, byteorder="big", signed=False),
+                byte_order,
+            )
+
         elif entry.data_type == Data_Type.INT:
             int_val = int(float(value))
             if int_val < -2147483648 or int_val > 2147483647:
@@ -1449,6 +1470,18 @@ class modbus_base(transport_base):
                 return
             register_values = self._bytes_to_register_words(
                 int_val.to_bytes(4, byteorder="big", signed=True),
+                byte_order,
+            )
+
+        elif entry.data_type == Data_Type.FLOAT32:
+            register_values = self._bytes_to_register_words(
+                struct.pack(">f", float(value)),
+                byte_order,
+            )
+
+        elif entry.data_type == Data_Type.FLOAT64:
+            register_values = self._bytes_to_register_words(
+                struct.pack(">d", float(value)),
                 byte_order,
             )
 

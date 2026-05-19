@@ -1,0 +1,35 @@
+{
+  "dashboard": [
+    {
+      "id": "dashboard-status",
+      "x_percent": 12,
+      "y_percent": 18,
+      "label_x_percent": 18,
+      "label_y_percent": 14,
+      "label": "Gateway status cards summarize staged configuration, protocol changes, and scan timing.",
+      "shape_type": "dot"
+    },
+    {
+      "id": "dashboard-devices",
+      "x_percent": 58,
+      "y_percent": 28,
+      "label_x_percent": 64,
+      "label_y_percent": 24,
+      "width_percent": 34,
+      "height_percent": 18,
+      "label": "Configured scrapers and bridges link directly to their setup screens.",
+      "shape_type": "rect"
+    },
+    {
+      "id": "dashboard",
+      "x_percent": 58,
+      "y_percent": 28,
+      "label_x_percent": 64,
+      "label_y_percent": 24,
+      "width_percent": 34,
+      "height_percent": 18,
+      "label": "Configured scrapers and bridges link directly to their setup screens.",
+      "shape_type": "rect"
+    }    
+  ]
+}

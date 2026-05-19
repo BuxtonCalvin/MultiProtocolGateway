@@ -204,7 +204,7 @@ class modbus_eg4_ll_s_tcp(modbus_rtu):
     def _load_holding_registers(self) -> None:
         """
         Read BMS config/threshold registers once on startup and cache
-        the decoded values.
+        the decoded values. This is used for balancing state inference and to expose config values in the info dict.
 
         All PDF V01.06 registers use FC 0x03 (Read Holding Registers),
         so Registry_Type.HOLDING is correct here.  modbus_tcp.read_registers()
@@ -249,14 +249,9 @@ class modbus_eg4_ll_s_tcp(modbus_rtu):
             return
 
         try:
-            self._holding_cache = self.protocolSettings.process_registery(
-                raw, holding_map
-            )
+            self._holding_cache = self.protocolSettings.process_registery(raw, holding_map)
         except Exception:
-            self._log.exception(
-                "process_registery failed for HOLDING registers on %s",
-                self.transport_name,
-            )
+            self._log.exception("process_registery failed for HOLDING registers on %s", self.transport_name)
 
         self._holding_loaded = True
         self._log.info(

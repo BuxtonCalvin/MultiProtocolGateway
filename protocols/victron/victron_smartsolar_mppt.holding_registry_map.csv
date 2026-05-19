@@ -1,0 +1,22 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note
+771,charger_error,Charger Error,,uint16,0-255,,R,,Error code; 0 = no error; see Victron error code table
+772,pv_voltage,PV Array Voltage,0.01V,uint16,0-65535,,R,,Solar panel array voltage; divide by 100
+773,pv_current,PV Array Current,0.1A,uint16,0-6553,,R,,Solar panel array current; divide by 10
+774,pv_power,PV Array Power,W,uint16,0-65535,,R,,Solar panel array power (instantaneous)
+775,battery_voltage,Battery Voltage,0.01V,uint16,0-65535,,R,,Battery terminal voltage; divide by 100
+776,battery_current,Battery Current,0.1A,int16,-3276-3276,,R,,Battery charge current (positive=charging); divide by 10
+777,battery_temperature,Battery Temperature,0.01°C,int16,-27315-32767,,R,,Battery temperature if sensor fitted; divide by 100; offset -273.15 for Kelvin
+778,charger_state,Charger State,,uint16,"0=off,2=fault,3=bulk,4=absorption,5=float,6=storage,7=equalize,11=power supply mode",,R,,Current charge algorithm state
+779,charge_power,Charge Power,W,uint16,0-65535,,R,,Power being delivered to battery
+780,yield_today,Yield Today,0.01kWh,uint16,0-65535,daily,R,,Solar energy harvested since midnight; divide by 100
+781,yield_yesterday,Yield Yesterday,0.01kWh,uint16,0-65535,daily,R,,Solar energy harvested previous day; divide by 100
+782,max_power_today,Max Power Today,W,uint16,0-65535,daily,R,,Peak PV power recorded today
+783,max_power_yesterday,Max Power Yesterday,W,uint16,0-65535,daily,R,,Peak PV power recorded yesterday
+784,yield_total,Yield Total,0.01kWh,uint32,0-4294967295,daily,R,,Lifetime solar yield; 32-bit register; divide by 100
+785,yield_total_hi,Yield Total High Word,0.01kWh,uint16,0-65535,daily,R,,High word of 32-bit lifetime yield register
+786,tracker_mode,Tracker Operation Mode,,uint16,"0=off,1=voltage or current limited,2=MPPT active",,R,,MPPT tracker operating state
+788,maximum_charge_current,Maximum Charge Current,A,uint16,0-65535,,R/W,,Configured maximum charge current limit
+790,equalization_duration,Equalization Duration,min,uint16,0-1440,,R/W,,Equalization charge duration in minutes
+791,absorption_duration,Absorption Duration,min,uint16,0-1440,,R/W,,Maximum absorption phase duration
+792,absorption_voltage,Absorption Voltage,0.01V,uint16,0-6553,,R/W,,Target voltage for absorption phase; divide by 100
+793,float_voltage,Float Voltage,0.01V,uint16,0-6553,,R/W,,Target voltage for float phase; divide by 100

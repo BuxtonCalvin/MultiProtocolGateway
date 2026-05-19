@@ -20,7 +20,7 @@
     {
         "1" : "PV1   charge   power check",
         "2" : "PV2   charge   power check",
-        "3" : "AC    charge    Powercheck"
+        "3" : "AC    charge   power check"
     },
     "production_line_mode_codes" :
     {

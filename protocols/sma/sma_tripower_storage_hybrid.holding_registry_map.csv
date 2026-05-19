@@ -1,0 +1,50 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note
+30051,device_class,Device Class,,U32,,,R,,SMA device class; 8009 = battery inverter / storage system
+30053,device_type,Device Type,,U32,,,R,,SMA product type code
+30057,serial_number,Serial Number,,U32,,,R,,Device serial number
+30059,software_package,Software Package,,U32,,,R,,Firmware version
+30201,status_condition,Operating Condition,,U32,"295=OK,303=off,1392=warning,1793=error",,R,,General device operating status
+30211,grid_relay_status,Grid Relay Status,,U32,"51=open,311=closed",,R,,Grid connection relay state
+30513,pv_yield_total,PV Total Yield,Wh,U32,,,R,,Cumulative PV AC energy generated lifetime
+30515,pv_yield_today,PV  Yield,Wh,U32,,,R,,PV AC energy generated today
+30517,battery_charged_total,Battery Charged Total,Wh,U32,,,R,,Cumulative energy charged into battery lifetime
+30519,battery_discharged_total,Battery Discharged Total,Wh,U32,,,R,,Cumulative energy discharged from battery lifetime
+30525,operating_hours,Operating Hours,s,U32,,,R,,Cumulative operational seconds
+30769,ac_power_total,AC Active Power Total,W,S32,,,R,,Net AC power at grid connection; positive=export negative=import
+30771,ac_apparent_power,AC Apparent Power,VA,S32,,,R,,AC apparent power
+30775,ac_power_l1,AC Active Power L1,W,S32,,,R,,AC power phase L1
+30777,ac_power_l2,AC Active Power L2,W,S32,,,R,,AC power phase L2
+30779,ac_power_l3,AC Active Power L3,W,S32,,,R,,AC power phase L3
+30783,ac_voltage_l1,AC Voltage L1,0.01V,U32,,,R,,Grid voltage phase L1; divide by 100
+30785,ac_voltage_l2,AC Voltage L2,0.01V,U32,,,R,,Grid voltage phase L2; divide by 100
+30787,ac_voltage_l3,AC Voltage L3,0.01V,U32,,,R,,Grid voltage phase L3; divide by 100
+30795,ac_current_l1,AC Current L1,0.001A,S32,,,R,,AC current phase L1; divide by 1000
+30797,ac_current_l2,AC Current L2,0.001A,S32,,,R,,AC current phase L2; divide by 1000
+30799,ac_current_l3,AC Current L3,0.001A,S32,,,R,,AC current phase L3; divide by 1000
+30803,grid_frequency,Grid Frequency,0.01Hz,U32,,,R,,Grid frequency; divide by 100
+30835,pv_voltage_a,PV DC Voltage Input A,0.01V,S32,,,R,,PV string tracker A voltage; divide by 100
+30837,pv_current_a,PV DC Current Input A,0.001A,S32,,,R,,PV string tracker A current; divide by 1000
+30839,pv_power_a,PV DC Power Input A,W,S32,,,R,,PV string tracker A power
+30841,pv_voltage_b,PV DC Voltage Input B,0.01V,S32,,,R,,PV string tracker B voltage (dual-tracker models); divide by 100
+30843,pv_current_b,PV DC Current Input B,0.001A,S32,,,R,,PV string tracker B current; divide by 1000
+30845,pv_power_b,PV DC Power Input B,W,S32,,,R,,PV string tracker B power
+30849,battery_voltage,Battery Voltage,0.01V,U32,,,R,,Battery DC bus voltage; divide by 100
+30851,battery_current,Battery Current,0.001A,S32,,,R,,Battery DC current; positive=charging negative=discharging; divide by 1000
+30853,battery_power,Battery Charging Power,W,S32,,,R,,Battery power; positive=charging negative=discharging
+30855,battery_soc,Battery State of Charge,%,U32,0-100,,R,,Battery SOC (0-100 percent)
+30857,battery_temperature,Battery Temperature,0.1°C,S32,-300-1500,,R,,Battery temperature (from BMS via CAN); divide by 10
+30859,battery_status,Battery Operating Status,,U32,"303=off,2291=OK,2292=charging,2293=discharging,2294=standby,16777213=n/a",,R,,Battery operating state reported by BMS
+30861,battery_error_code,Battery Error Code,,U32,0-65535,,R,,BMS error code; 0=no error
+30867,battery_charge_voltage_limit,Battery Charge Voltage Limit,0.01V,U32,,,R,,Maximum charge voltage reported by BMS; divide by 100
+30869,battery_discharge_voltage_limit,Battery Discharge Voltage Limit,0.01V,U32,,,R,,Minimum discharge voltage reported by BMS; divide by 100
+30871,battery_charge_current_limit,Battery Charge Current Limit,0.001A,U32,,,R,,Maximum charge current reported by BMS; divide by 1000
+30873,battery_discharge_current_limit,Battery Discharge Current Limit,0.001A,U32,,,R,,Maximum discharge current reported by BMS; divide by 1000
+30953,inverter_temperature,Inverter Temperature,0.1°C,S32,,,R,,Internal inverter temperature; divide by 10
+40009,operating_mode,Operating Mode,,U32,"1749=normal,1750=self-consumption,1779=forced charge,1780=forced discharge,1781=zero export,1793=stop",,R/W,,Inverter operating strategy
+40151,active_power_limit,Active Power Limit,0.01%,U32,0-10000,,R/W,,Maximum AC export power as percent of rated; divide by 100
+40155,power_factor_setpoint,Power Factor Setpoint,0.001,S32,-1000-1000,,R/W,,Target power factor; divide by 1000
+40200,battery_charge_limit_setpoint,Battery Charge Power Limit,W,U32,,,R/W,,Maximum battery charge power setpoint
+40202,battery_discharge_limit_setpoint,Battery Discharge Power Limit,W,U32,,,R/W,,Maximum battery discharge power setpoint
+40210,min_soc_setpoint,Minimum SOC Setpoint,%,U32,0-100,,R/W,,Minimum battery SOC before discharge stops
+40212,max_soc_setpoint,Maximum SOC Setpoint,%,U32,0-100,,R/W,,SOC target at end of charge cycle
+# Battery interface: high-voltage DC bus (LG Chem,BYD,SMA-compatible HV batteries) or,,,,,,,

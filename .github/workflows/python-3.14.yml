@@ -1,16 +1,18 @@
 # This workflow will install Python dependencies, run tests and lint with a variety of Python versions
 # For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-python
 
-name: Python 3.13
+name: Python 3.14
 
 permissions:
   contents: read
 
 on:
   push:
-    branches: [ "TSDB" ]
+    branches: [ "TSDB*" ]
   pull_request:
-    branches: [ "TSDB" ]
+    branches: [ "TSDB*" ]
+
+  workflow_dispatch:
 
 jobs:
   build:
@@ -37,7 +39,6 @@ jobs:
         # stop the build if there are Python syntax errors or undefined names
         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
 
-        # don't care about coding standards
         # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
         # flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
     - name: Test with pytest

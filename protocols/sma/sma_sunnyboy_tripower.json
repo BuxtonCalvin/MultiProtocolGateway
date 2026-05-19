@@ -1,0 +1,30 @@
+{
+  "transport": "modbus_rtu",
+
+  "status_condition_codes": {
+    "295": "OK",
+    "303": "off",
+    "1392": "warning",
+    "1793": "error",
+    "2119": "waiting for PV voltage"
+  },
+
+  "grid_relay_status_codes": {
+    "51": "open",
+    "311": "closed",
+    "16777213": "n/a"
+  },
+
+  "derating_active_codes": {
+    "303": "no derating",
+    "1069": "temperature derating",
+    "1070": "overfrequency derating",
+    "1071": "external limitation"
+  },
+
+  "operating_mode_codes": {
+    "1756": "normal",
+    "1781": "forced zero output",
+    "1792": "active power limit"
+  }
+}

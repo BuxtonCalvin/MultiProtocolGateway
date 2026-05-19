@@ -1,4 +1,4 @@
-variable name,data type,register,documented name,unit,values,writable,note
-,ASCII,2~6,Serial Number,,,,
-,ASCII,7~9,Firmware Version,,,,
-,1bit,229.b4,Smart Load 1 Grid On ,,,,uncertain of accuracy
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note
+2~6,,Serial Number,,ASCII,,,,,
+7~9,,Firmware Version,,ASCII,,,,,
+229.b4,,Smart Load 1 Grid On,,1bit,,,,,uncertain of accuracy

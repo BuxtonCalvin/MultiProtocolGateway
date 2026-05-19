@@ -1,6 +1,6 @@
 #
 
-![mpg canbus diagram drawio](https://github.com/user-attachments/assets/17d1ea02-2414-4289-b295-cd5099679cba)
+![mpg canbus diagram drawio](../../assets/CanbusToMqtt.png)
 
 ## CanBus to MQTT
 

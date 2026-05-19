@@ -1,6 +1,9 @@
 # Bridge module for JSON output transport that writes data to a file or stdout, with optional pretty printing and metadata inclusion.
 import json
 import sys
+import time
+from datetime import datetime
+from pathlib import Path
 from typing import TextIO
 
 from defs.common import TransportSettings, strtobool
@@ -15,6 +18,7 @@ class json_out(transport_base):
     append_mode: bool = False
     include_timestamp: bool = True
     include_device_info: bool = True
+    use_utc_timestamp: bool = True
 
     file_handle: TextIO | None = None
 
@@ -23,7 +27,9 @@ class json_out(transport_base):
         self.pretty_print = strtobool(settings.get("pretty_print", fallback=self.pretty_print))
         self.append_mode = strtobool(settings.get("append_mode", fallback=self.append_mode))
         self.include_timestamp = strtobool(settings.get("include_timestamp", fallback=self.include_timestamp))
+        self.use_utc_timestamp = strtobool(settings.get("use_utc_timestamp", fallback=self.use_utc_timestamp))
         self.include_device_info = strtobool(settings.get("include_device_info", fallback=self.include_device_info))
+
         super().__init__(settings)
 
     def connect(self):
@@ -34,8 +40,22 @@ class json_out(transport_base):
             self.file_handle = sys.stdout
         else:
             try:
+                # Get the root path (3 levels up from this file)
+                project_root = Path(__file__).resolve().parent.parent.parent.parent
+
+                # Force path to look relative by stripping leading slashes/drives
+                clean_setting: str = self.output_file.lstrip("\\/")
+                file_path: Path = project_root / clean_setting
+
+                # Create folders and file if missing
+                file_path.parent.mkdir(parents=True, exist_ok=True)
+                if not file_path.exists():
+                    file_path.touch()
+
                 mode = "a" if self.append_mode else "w"
-                self.file_handle = open(self.output_file, mode, encoding='utf-8')
+                self.file_handle = open(
+                    file_path, mode, encoding="utf-8"
+                )
                 self.connected = True
             except Exception as e:
                 self._log.error(f"Failed to open output file {self.output_file}: {e}")
@@ -68,8 +88,10 @@ class json_out(transport_base):
 
         # Add timestamp if enabled
         if self.include_timestamp:
-            import time
-            output_data["timestamp"] = time.time()
+            if self.use_utc_timestamp:
+                output_data["timestamp"] = str(time.time())
+            else:
+                output_data["timestamp"] = str(datetime.now().astimezone())
 
         # Add the actual data
         output_data["data"] = data

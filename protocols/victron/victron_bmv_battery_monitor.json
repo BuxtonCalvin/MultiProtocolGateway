@@ -1,0 +1,26 @@
+{
+  "transport": "modbus_rtu",
+  "send_holding_register": true,
+  "send_input_register": false,
+
+  "alarm_codes": {
+    "0": "no alarm",
+    "1": "alarm"
+  },
+
+  "relay_state_codes": {
+    "0": "open",
+    "1": "closed"
+  },
+
+  "alarm_reason_codes": {
+    "b1":  "low SOC",
+    "b2":  "low voltage",
+    "b4":  "high voltage",
+    "b8":  "low starter voltage",
+    "b16": "high starter voltage",
+    "b32": "low temperature",
+    "b64": "high temperature",
+    "b256": "mid voltage"
+  }
+}

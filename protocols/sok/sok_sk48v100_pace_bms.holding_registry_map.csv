@@ -1,0 +1,76 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note
+# ─── Pack Summary Registers ───────────────────────────────────────────────────,,,,,,,,,
+0,pack_voltage,Pack Voltage,10mV,uint16,0-65535,,R,,Total battery pack voltage; multiply by 0.01 for volts (10mV resolution)
+1,pack_current,Pack Current,10mA,int16,-32767-32767,,R,,Pack current; positive=charging negative=discharging; multiply by 0.01 for amps
+2,pack_soc,State of Charge,%,uint16,0-1000,,R,,Battery SOC; multiply by 0.1 for percent (0.1% resolution)
+3,pack_soh,State of Health,%,uint16,0-1000,,R,,Battery health; multiply by 0.1 for percent
+4,remaining_capacity,Remaining Capacity,10mAh,uint16,0-65535,,R,,Remaining usable capacity; multiply by 0.01 for Ah
+5,full_capacity,Full Charge Capacity,10mAh,uint16,0-65535,,R,,Current full-charge capacity (degrades with age); multiply by 0.01 for Ah
+6,design_capacity,Design Capacity,10mAh,uint16,0-65535,,R,,Rated nominal capacity from factory; multiply by 0.01 for Ah
+7,cycle_count,Cycle Count,,uint16,0-65535,,R,,Number of full charge/discharge cycles completed
+8,average_cell_voltage,Average Cell Voltage,mV,uint16,0-5000,,R,,Average voltage across all 16 cells (mV)
+9,max_cell_voltage,Maximum Cell Voltage,mV,uint16,0-5000,,R,,Highest individual cell voltage in pack (mV)
+10,min_cell_voltage,Minimum Cell Voltage,mV,uint16,0-5000,,R,,Lowest individual cell voltage in pack (mV)
+11,cell_voltage_delta,Cell Voltage Delta,mV,uint16,0-5000,,R,,Spread between max and min cell voltages (mV)
+12,max_cell_temp,Maximum Cell Temperature,0.1°C,int16,-600-1500,,R,,Highest cell temperature; multiply by 0.1
+13,min_cell_temp,Minimum Cell Temperature,0.1°C,int16,-600-1500,,R,,Lowest cell temperature; multiply by 0.1
+14,average_cell_temp,Average Cell Temperature,0.1°C,int16,-600-1500,,R,,Mean cell temperature; multiply by 0.1
+15,bms_temperature,BMS Board Temperature,0.1°C,int16,-600-1500,,R,,BMS PCB temperature; multiply by 0.1
+16,pack_power,Pack Power,W,int16,-32767-32767,,R,,Instantaneous pack power; positive=charging negative=discharging
+# ─── Cell Voltage Registers (16 cells) ───────────────────────────────────────,,,,,,,,,
+20,cell_1_voltage,Cell 1 Voltage,mV,uint16,2500-4250,,R,,Individual LFP cell 1 voltage (mV)
+21,cell_2_voltage,Cell 2 Voltage,mV,uint16,2500-4250,,R,,Individual LFP cell 2 voltage
+22,cell_3_voltage,Cell 3 Voltage,mV,uint16,2500-4250,,R,,Individual LFP cell 3 voltage
+23,cell_4_voltage,Cell 4 Voltage,mV,uint16,2500-4250,,R,,Individual LFP cell 4 voltage
+24,cell_5_voltage,Cell 5 Voltage,mV,uint16,2500-4250,,R,,Individual LFP cell 5 voltage
+25,cell_6_voltage,Cell 6 Voltage,mV,uint16,2500-4250,,R,,Individual LFP cell 6 voltage
+26,cell_7_voltage,Cell 7 Voltage,mV,uint16,2500-4250,,R,,Individual LFP cell 7 voltage
+27,cell_8_voltage,Cell 8 Voltage,mV,uint16,2500-4250,,R,,Individual LFP cell 8 voltage
+28,cell_9_voltage,Cell 9 Voltage,mV,uint16,2500-4250,,R,,Individual LFP cell 9 voltage
+29,cell_10_voltage,Cell 10 Voltage,mV,uint16,2500-4250,,R,,Individual LFP cell 10 voltage
+30,cell_11_voltage,Cell 11 Voltage,mV,uint16,2500-4250,,R,,Individual LFP cell 11 voltage
+31,cell_12_voltage,Cell 12 Voltage,mV,uint16,2500-4250,,R,,Individual LFP cell 12 voltage
+32,cell_13_voltage,Cell 13 Voltage,mV,uint16,2500-4250,,R,,Individual LFP cell 13 voltage
+33,cell_14_voltage,Cell 14 Voltage,mV,uint16,2500-4250,,R,,Individual LFP cell 14 voltage
+34,cell_15_voltage,Cell 15 Voltage,mV,uint16,2500-4250,,R,,Individual LFP cell 15 voltage
+35,cell_16_voltage,Cell 16 Voltage,mV,uint16,2500-4250,,R,,Individual LFP cell 16 voltage; P16S = 16S pack
+# ─── Temperature Sensors ──────────────────────────────────────────────────────,,,,,,,,,
+40,temp_sensor_1,Temperature Sensor 1,0.1°C,int16,-600-1500,,R,,Cell group temperature sensor 1; multiply by 0.1
+41,temp_sensor_2,Temperature Sensor 2,0.1°C,int16,-600-1500,,R,,Cell group temperature sensor 2; multiply by 0.1
+42,temp_sensor_3,Temperature Sensor 3,0.1°C,int16,-600-1500,,R,,Cell group temperature sensor 3; multiply by 0.1
+43,temp_sensor_4,Temperature Sensor 4,0.1°C,int16,-600-1500,,R,,Cell group temperature sensor 4 (if fitted)
+# ─── Status and Alarm Registers ───────────────────────────────────────────────,,,,,,,,,
+50,charge_status,Charge Status,,uint16,"0=idle,1=charging,2=discharging,3=standby",,R,,Current BMS operating mode
+51,balance_status,Cell Balance Status,,uint16,0-65535,,R,,Bitmask; each bit = one cell; 1=balancing active for that cell; bit 0=cell 1
+52,alarm_flags_1,Alarm Flags 1,,uint16,0-65535,,R,,Bitmask word 1; bit 0=pack overvoltage bit 1=pack undervoltage bit 2=cell overvoltage bit 3=cell undervoltage bit 4=charge overcurrent bit 5=discharge overcurrent bit 6=overtemperature bit 7=undertemperature
+53,alarm_flags_2,Alarm Flags 2,,uint16,0-65535,,R,,Bitmask word 2; bit 0=BMS overtemperature bit 1=cell imbalance alarm bit 2=short circuit bit 3=charge MOS fault bit 4=discharge MOS fault
+54,protection_flags,Protection Status,,uint16,0-65535,,R,,Bitmask of active protection trips; 1=protection engaged; see alarm_flags bit definitions
+55,mos_status,MOSFET Status,,uint16,0-3,,R,,Bit 0=charge FET enabled bit 1=discharge FET enabled; both 1=normal operation
+# ─── Rated Parameters (read-only configuration) ──────────────────────────────,,,,,,,,,
+60,rated_voltage,Rated Voltage,10mV,uint16,,,R,,Battery nominal voltage; multiply by 0.01 (should be ~51.2V for 16S LFP)
+61,rated_capacity,Rated Capacity,10mAh,uint16,,,R,,Factory rated capacity; multiply by 0.01 for Ah (should be ~100Ah)
+62,rated_charge_current,Rated Charge Current,10mA,uint16,,,R,,Maximum charge current rating; multiply by 0.01 for amps
+63,rated_discharge_current,Rated Discharge Current,10mA,uint16,,,R,,Maximum discharge current rating; multiply by 0.01 for amps
+# ─── Protection Thresholds (writable — caution) ──────────────────────────────,,,,,,,,,
+70,overvoltage_protection,Pack Overvoltage Protection,10mV,uint16,,,R/W,,Pack voltage above which charging is cut off; multiply by 0.01
+71,undervoltage_protection,Pack Undervoltage Protection,10mV,uint16,,,R/W,,Pack voltage below which discharging is cut off; multiply by 0.01
+72,cell_overvoltage_protection,Cell Overvoltage Protection,mV,uint16,2500-4350,,R/W,,Single cell voltage cutoff for charge; typically 3600mV for LFP
+73,cell_undervoltage_protection,Cell Undervoltage Protection,mV,uint16,2000-3500,,R/W,,Single cell voltage cutoff for discharge; typically 2800mV for LFP
+74,overtemperature_charge,Overtemperature Charge,0.1°C,int16,,,R/W,,Temperature above which charging stops; typically 450 (45.0°C)
+75,overtemperature_discharge,Overtemperature Discharge,0.1°C,int16,,,R/W,,Temperature above which discharging stops; typically 750 (75.0°C)
+76,undertemperature_charge,Undertemperature Charge,0.1°C,int16,,,R/W,,Temperature below which charging stops (prevents cold charging); typically -100 (-10.0°C)
+77,undertemperature_discharge,Undertemperature Discharge,0.1°C,int16,,,R/W,,Temperature below which discharging stops; typically -200 (-20.0°C)
+,,,,,,,,,
+,,,,,,,,,
+# SOK SK48V100 48V 100Ah LiFePO4 Server Rack Battery — BMS Modbus RS485,,,,,,,,,
+# Internal BMS: PACE BMS model P16S100A; protocol: PACE_MODBUS (RS485 variant),,,,,,,,,
+# Interface: RS485A port (RJ45 on front panel); also CAN bus (separate port),,,,,,,,,
+# RS485 wiring: RJ45 port; pin 4 = Data+ (A); pin 5 = Data- (B); pin 6 = GND,,,,,,,,,
+#   Multi-battery daisy chain: RS485B port of unit N → RS485A port of unit N+1,,,,,,,,,
+#   Set DIP switch on each battery to unique address (1=ON = address 1; etc.),,,,,,,,,
+#   Master battery DIP: address 1; do NOT set any battery to address 0x00 (master mode disables RS485),,,,,,,,,
+# Serial parameters: 9600 baud,8 data bits,No parity,1 stop bit (9600 8N1),,,,,,
+# Modbus function code: FC03 (read holding registers); FC06 / FC16 (write),,,,,,,,,
+# Unit ID: DIP-switch selected (1 = default master; 1-8 for parallel stacks),,,,,,,,,
+# All values are uint16 unless noted; scaling in note column,,,,,,,,,
+# PACE BMS register map; addresses are decimal (0-based PDU address),,,,,,,,,

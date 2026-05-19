@@ -1,0 +1,30 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note
+259,battery_voltage,Battery Voltage,0.01V,int16,-3276-3276,,R,,Main battery voltage; divide by 100
+260,battery_current,Battery Current,0.1A,int16,-3276-3276,,R,,Battery current; positive=charging negative=discharging; divide by 10
+261,battery_power,Battery Power,W,int16,-32767-32767,,R,,Instantaneous battery power; positive=charging
+262,battery_soc,State of Charge,%,uint16,0-1000,,R,,Battery SOC; divide by 10 for percent
+263,time_to_go,Time to Go,min,uint16,0-65534,,R,,Estimated runtime at current load; 65535 = infinite (charging)
+264,alarm,Alarm,,uint16,"0=no alarm,1=alarm",,R,,General alarm flag; check alarm reason register for detail
+265,relay_state,Relay State,,uint16,"0=open,1=closed",,R,,State of the BMV programmable relay
+266,alarm_reason,Alarm Reason,,uint16,0-65535,,R,,Bitmask; bit 1=low SOC bit 2=low voltage bit 4=high voltage bit 8=low starter bit 16=high starter bit 32=low temp bit 64=high temp bit 256=mid voltage
+267,midpoint_voltage,Midpoint Voltage,0.01V,uint16,0-65535,,R,,Midpoint battery bank voltage (BMV-702/712 only)
+268,midpoint_deviation,Midpoint Deviation,0.1%,int16,-1000-1000,,R,,Midpoint voltage deviation; divide by 10 for percent
+269,starter_voltage,Starter Battery Voltage,0.01V,int16,-3276-3276,,R,,Auxiliary/starter battery voltage (BMV-702/712 only)
+270,history_deepest_discharge,Deepest Discharge,Ah,int16,-32767-0,,R,,Deepest discharge depth recorded (negative value)
+271,history_last_discharge,Last Discharge,Ah,int16,-32767-0,,R,,Discharge depth of last discharge cycle
+272,history_average_discharge,Average Discharge,Ah,int16,-32767-0,,R,,Average discharge depth over all cycles
+273,history_charge_cycles,Charge Cycles,,uint16,0-65535,,R,,Total number of complete charge cycles
+274,history_full_discharges,Full Discharges,,uint16,0-65535,,R,,Total number of full discharge events
+275,history_total_ah_drawn,Total Ah Drawn,Ah,int32,,,R,,Cumulative Ah withdrawn from battery over lifetime
+276,history_min_battery_voltage,Minimum Battery Voltage,0.01V,uint16,0-65535,,R,,Lowest battery voltage ever recorded
+277,history_max_battery_voltage,Maximum Battery Voltage,0.01V,uint16,0-65535,,R,,Highest battery voltage ever recorded
+278,history_time_since_last_full,Time Since Last Full Charge,min,uint16,0-65535,,R,,Minutes since battery was last fully charged
+279,history_auto_syncs,Automatic Syncs,,uint16,0-65535,,R,,Number of automatic synchronization events
+280,history_low_voltage_alarms,Low Voltage Alarms,,uint16,0-65535,,R,,Count of low voltage alarm events
+281,history_high_voltage_alarms,High Voltage Alarms,,uint16,0-65535,,R,,Count of high voltage alarm events
+282,history_low_starter_alarms,Low Starter Alarms,,uint16,0-65535,,R,,Count of low starter voltage alarms
+283,history_high_starter_alarms,High Starter Alarms,,uint16,0-65535,,R,,Count of high starter voltage alarms
+284,history_discharged_energy,Total Discharged Energy,0.01kWh,uint32,,,R,,Lifetime energy discharged; divide by 100
+285,history_charged_energy,Total Charged Energy,0.01kWh,uint32,,,R,,Lifetime energy charged; divide by 100
+287,battery_temperature,Battery Temperature,0.01K,uint16,0-65535,,R,,Battery temperature in Kelvin; subtract 273.15 for Celsius; requires temp sensor
+288,instantaneous_power,Instantaneous Power,W,int16,-32767-32767,,R,,Real-time battery power (duplicate of 261 for some firmware versions)

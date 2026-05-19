@@ -65,6 +65,7 @@ from sqlalchemy import (
     Engine,
     Float,
     ForeignKey,
+    Identity,
     Inspector,
     Integer,
     PrimaryKeyConstraint,
@@ -114,7 +115,7 @@ class Base(DeclarativeBase):
 class ProtocolRegistry(Base):
     __tablename__ = "protocol_registry"
 
-    protocol_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    protocol_id: Mapped[int] = mapped_column(Integer, Identity(cache=1),primary_key=True, autoincrement=True)
     protocol_name: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     wide_table_name: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # None = narrow only (>200 metrics)
@@ -146,7 +147,7 @@ class ProtocolRegistry(Base):
 class MetricCatalog(Base):
     __tablename__: str = "metric_catalog"
 
-    catalog_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    catalog_id: Mapped[int] = mapped_column(Integer, Identity(cache=1), primary_key=True, autoincrement=True)
     protocol_id: Mapped[int] = mapped_column(ForeignKey("protocol_registry.protocol_id"), nullable=False)
     metric_name: Mapped[str] = mapped_column(Text, nullable=False)
     clean_column_name: Mapped[str] = mapped_column(Text, nullable=False)
@@ -167,7 +168,7 @@ class MetricCatalog(Base):
 class DeviceInfo(Base):
     __tablename__: str = "device_info"
 
-    device_info_id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    device_info_id: Mapped[int] = mapped_column(Integer, Identity(cache=1), primary_key=True, autoincrement=True)
     protocol_id: Mapped[Optional[int]] = mapped_column(ForeignKey("protocol_registry.protocol_id"), nullable=True, index=True)
     device_identifier: Mapped[Optional[str]] = mapped_column(Text, index=True)
     device_serial_number: Mapped[Optional[str]] = mapped_column(Text)
@@ -434,14 +435,18 @@ class timescaledb(transport_base):
         # 32-bit Unsigned/Signed
         "UINT": "BIGINT",
         "INT": "INTEGER",
+        "UINT64": "NUMERIC",
+        "ACC32": "BIGINT",
         # Flags & Bits (Integers for Delta-Delta compression)
         "_8BIT_FLAGS": "SMALLINT",
         "_16BIT_FLAGS": "INTEGER",
         "_32BIT_FLAGS": "BIGINT",
         # Strings (Dictionary compression)
         "ASCII": "TEXT",
-        "ASCII_LE": "TEXT",
         "HEX": "TEXT",
+        "STRING": "TEXT",
+        "STRING16": "TEXT",
+        "STRING32": "TEXT",
         "_1BIT": "BOOLEAN",
 
         # 1. Unsigned Bit-lengths (_2BIT to _15BIT)
@@ -1145,12 +1150,14 @@ class timescaledb(transport_base):
 
         t_name: str = from_transport.transport_name
 
-        # 1. Fast path — verified and cached this session, no DB needed.
+        # Fast path — verified and cached this session, no DB needed.  False if transport_name is missing
+        # from the cache for any reason, including a name change, which is safe since the DB will be the source of truth on the first
+        # call and will populate the cache.
         if t_name in self._device_cache and t_name in self._verified_devices:
             return self._device_cache.get(t_name) or 100
 
-        # 2. Slow path — first packet for this transport this session.
-        #    Lock prevents two concurrent threads racing to insert the same row.
+        # Slow path — first packet for this transport this session.
+        # Lock prevents two concurrent threads racing to insert the same row.
         with self._device_lock:
 
             # Double-check inside the lock in case another thread just resolved it.
@@ -1401,7 +1408,7 @@ class timescaledb(transport_base):
                             d_type: str = self._timescale_type(d,u)
 
                             if clean_value:
-                                # Update the data_type,unit_mod and notes fields in metric_catalog for a matching metric
+                                # Update the data_type, unit_mod and notes fields in metric_catalog for a matching metric
                                 # from the csv files.  All corrections/updates should take place in the CSV or the UI in the webserver.
                                 session.execute(
                                     text("""
@@ -1684,7 +1691,7 @@ class timescaledb(transport_base):
     def _register_protocol_schema(self, protocol: str, registry_map: dict[Registry_Type, list[registry_map_entry]]) -> None:
         """
         Ensures wide table columns and metric_catalog entries exist for
-        all metrics in this protocol's registry map.
+        all metrics in this protocol's registry map that have been filtered in by the variable_mask/variable_screen config.
         Each protocol gets its own wide table: device_metrics_wide__{protocol}
         The narrow table is shared across all protocols.
         """
@@ -2055,7 +2062,19 @@ class timescaledb(transport_base):
                 reading_time = datetime.fromisoformat(reading_time)
 
             narrow_mappings: list = []
+            processed_descriptions: dict = {}
+
+            # Pass 1: Process and harvest all descriptions first
             for key, value in newData.items():
+                if key.endswith("_desc"):
+                    clean_key = key.removesuffix("_desc")
+                    processed_descriptions[clean_key] = value
+
+            # Pass 2: Build the rows and skip the original '_desc' keys
+            for key, value in newData.items():
+                if key.endswith("_desc"):
+                    continue  # Skips this iteration so no row is created or appended
+
                 row = {
                     "m_time": reading_time,
                     "device_info_id": device_info_id,
@@ -2073,6 +2092,10 @@ class timescaledb(transport_base):
                 else:
                     row["metric_ascii"] = str(value) if value is not None else None
                     row["metric_value"] = 0.0
+
+                # Upsert the matching description to the ascii field from Pass 1 for the code metric
+                if row["metric_name"] in processed_descriptions:
+                    row["metric_ascii"] = processed_descriptions[row["metric_name"]]
 
                 narrow_mappings.append(row)
 

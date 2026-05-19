@@ -1,0 +1,40 @@
+{
+  "transport": "modbus_rtu",
+
+  "device_state_codes": {
+    "0": "off",
+    "1": "low power",
+    "2": "fault",
+    "9": "inverting"
+  },
+
+  "alarm_low_battery_codes": {
+    "0": "ok",
+    "1": "alarm"
+  },
+
+  "alarm_high_temp_codes": {
+    "0": "ok",
+    "1": "alarm"
+  },
+
+  "alarm_overload_codes": {
+    "0": "ok",
+    "1": "alarm"
+  },
+
+  "alarm_short_circuit_codes": {
+    "0": "ok",
+    "1": "alarm"
+  },
+
+  "relay_state_codes": {
+    "0": "open",
+    "1": "closed"
+  },
+
+  "alarm_ripple_codes": {
+    "0": "ok",
+    "1": "alarm"
+  }
+}

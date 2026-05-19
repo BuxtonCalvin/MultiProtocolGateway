@@ -318,7 +318,7 @@ The CSV files use `,` as delimiter (OpenOffice/LibreOffice compatible) and suppo
 | `variable_name` | Friendly name used in MQTT topics and DB columns |
 | `documented_name` | Original name from the device manual |
 | `data_type` | e.g. `int16`, `uint16`, `float32`, `bit` |
-| `unit` | e.g. `V`, `A`, `W`, `°C` |
+| `unit` | e.g. `V`, `A`, `W`, `°C`, 1 , .01 , 10 etc. |
 | `values` | Valid range or enumeration |
 | `read_interval` | Override the global poll interval for this register |
 | `writable` | `R` (read-only) or `RW` (writable) |

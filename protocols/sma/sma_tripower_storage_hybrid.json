@@ -1,0 +1,33 @@
+{
+  "transport": "modbus_rtu",
+
+  "status_condition_codes": {
+    "295": "OK",
+    "303": "off",
+    "1392": "warning",
+    "1793": "error"
+  },
+
+  "grid_relay_status_codes": {
+    "51": "open",
+    "311": "closed"
+  },
+
+  "battery_status_codes": {
+    "303": "off",
+    "2291": "OK",
+    "2292": "charging",
+    "2293": "discharging",
+    "2294": "standby",
+    "16777213": "n/a"
+  },
+
+  "operating_mode_codes": {
+    "1749": "normal",
+    "1750": "self-consumption",
+    "1779": "forced charge",
+    "1780": "forced discharge",
+    "1781": "zero export",
+    "1793": "stop"
+  }
+}

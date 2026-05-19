@@ -1,0 +1,29 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note
+43,inverter_enabled,inverter_enabled,,uint16,"0=off,1=on",,R/W,,Enable or disable inverter output
+59,overall_state,overall_state,,uint16,"0=standby,1=self-check,2=normal,3=alarm,4=fault",,R,,Inverter operating state
+103,fault_1,fault_1,,uint16,,,R,,Fault bitmask word 1; see fault_1_codes in deye_sunsynk_hybrid.json
+104,fault_2,fault_2,,uint16,,,R,,Fault bitmask word 2
+105,fault_3,fault_3,,uint16,,,R,,Fault bitmask word 3
+106,fault_4,fault_4,,uint16,,,R,,Fault bitmask word 4
+108,grid_charge_enabled,Grid Charge,binary,uint16,0:Off; 1:On,,W,,Toggle grid charging
+127,max_charge_current,Max Charge Amps,1A,uint16,0-300,,W,,Max charge limit
+128,max_discharge_current,Max Discharge Amps,1A,uint16,0-300,,W,,Max discharge limit
+166,charge_limit_soc,Charge Limit SOC,1%,uint16,0-100,,W,,Charge target %
+167,discharge_limit_soc,Discharge Limit SOC,1%,uint16,0-100,,W,,Discharge cutoff %
+182,total_battery_capacity,Battery Capacity,1Ah,uint16,0-65535,,W,,Battery total capacity
+186,pv1_power,PV1 Power,1W,uint16,0-65535,,R,,PV1 input power
+187,pv2_power,PV2 Power,1W,uint16,0-65535,,R,,PV2 input power
+529,daily_production,Day Active Energy,0.1kWh,uint16,0-65535,,R,,Daily solar production
+531,total_production,Total Active Energy,0.1kWh,uint32,0-4294967295,,R,,Lifetime solar production
+584,battery_voltage,Battery Voltage,0.01V,uint16,0-65535,,R,,Battery voltage
+586,battery_current,Battery Current,0.01A,int16,-32768-32767,,R,,Battery current (pos=charge)
+589,battery_soc,Battery State of Charge,1%,uint16,0-100,,R,,Battery percentage
+590,battery_power,Battery Power,1W,int16,-32768-32767,,R,,Battery power (pos=charge)
+598,grid_active_power,Grid Total Power,1W,int16,-32768-32767,,R,,Grid power (pos=import)
+601,load_active_power,Load Total Power,1W,uint16,0-65535,,R,,House consumption
+606,grid_frequency,Grid Frequency,0.01Hz,uint16,0-65535,,R,,Grid frequency
+194,grid_connected,grid_connected,,uint16,"0=disconnected,1=connected",,R,,Grid relay/connection status
+235,generator_input,generator_input,,uint16,"0=disable,1=output,2=input",,R/W,,AUX port function configuration
+243,priority_load,priority_load,,uint16,"0=battery,1=load",,R/W,,Energy dispatch priority
+248,use_timer,use_timer,,uint16,"0=off,1=on",,R/W,,Enable time-of-use schedule
+620,internal_temp,Inverter Temperature,0.1C,int16,-32768-32767,,R,,Radiator temperature

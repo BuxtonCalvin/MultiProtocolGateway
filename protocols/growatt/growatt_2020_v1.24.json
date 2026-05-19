@@ -63,7 +63,17 @@
     "4": "Flash module"
   },
 
-  "fault_bit_codes": {
+  "fault_bitcode_h_codes": {
+    "b2": "Over Temperature",
+    "b3": "Bat Voltage High",
+    "b5": "Output short",
+    "b6": "Output voltage high",
+    "b7": "Over Load",
+    "b8": "Bus voltage high",
+    "b9": "Bus start fail"
+  },
+
+  "fault_bitcode_l_codes": {
     "2": "Over Temperature",
     "3": "Bat Voltage High",
     "5": "Output short",
@@ -83,7 +93,7 @@
     "81": "host loss"
   },
 
-  "warning_bit_codes": {
+  "warning_bit_h_codes": {
     "b0": "Fan_lock_warning",
     "b1": "Over_charge",
     "b2": "Battery_voltage_low",
@@ -102,7 +112,7 @@
     "b15": "Pv_power_insufficient"
   },
 
-  "warning_bit_high_codes": {
+  "warn_subcode_codes": {
     "b0": "No bat parallel disable",
     "b1": "Parallel version different",
     "b2": "Unknown",

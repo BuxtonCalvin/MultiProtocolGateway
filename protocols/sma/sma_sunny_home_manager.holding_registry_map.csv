@@ -1,0 +1,33 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note
+30051,device_class,Device Class,,U32,,,R,,SMA device class; 8000 = energy manager
+30053,device_type,Device Type,,U32,,,R,,SMA product type code
+30057,serial_number,Serial Number,,U32,,,R,,Home Manager serial number
+30059,software_package,Software Package,,U32,,,R,,Firmware version
+30201,status_condition,Operating Condition,,U32,"295=OK,1392=warning,1793=error",,R,,Overall system status
+30513,pv_yield_total,PV Total Yield,Wh,U32,,,R,,Cumulative PV energy fed to grid + consumed since installation
+30515,pv_yield_today,PV  Yield,Wh,U32,,,R,,PV AC energy generated today
+30517,grid_feed_in_total,Grid Feed-in Total,Wh,U32,,,R,,Cumulative energy exported to grid
+30519,grid_purchase_total,Grid Purchase Total,Wh,U32,,,R,,Cumulative energy imported from grid
+30521,self_consumption_total,Self-Consumption Total,Wh,U32,,,R,,Cumulative PV energy consumed on-site (not exported)
+30523,self_sufficiency_today,Self-Sufficiency Today,%,U32,0-100,,R,,Percentage of today's consumption covered by PV
+30525,battery_charge_total,Battery Charge Total,Wh,U32,,,R,,Cumulative energy charged into storage (if battery present)
+30527,battery_discharge_total,Battery Discharge Total,Wh,U32,,,R,,Cumulative energy discharged from storage
+30529,home_consumption_total,Home Consumption Total,Wh,U32,,,R,,Total household energy consumed (grid + PV + battery)
+30769,pv_power,PV Power Total,W,S32,,,R,,Real-time total PV generation across all connected inverters
+30771,grid_power,Grid Power,W,S32,-2147483648-2147483647,,R,,Real-time grid exchange; positive=import negative=export
+30773,home_consumption_power,Home Consumption Power,W,U32,,,R,,Real-time total household power demand
+30775,battery_power,Battery Power,W,S32,,,R,,Real-time battery power; positive=charging negative=discharging
+30777,battery_soc,Battery State of Charge,%,U32,0-100,,R,,Aggregated battery SOC if storage system connected
+30779,grid_voltage_l1,Grid Voltage L1,0.01V,U32,,,R,,Grid voltage phase L1 at meter point; divide by 100
+30781,grid_voltage_l2,Grid Voltage L2,0.01V,U32,,,R,,Grid voltage phase L2; divide by 100
+30783,grid_voltage_l3,Grid Voltage L3,0.01V,U32,,,R,,Grid voltage phase L3; divide by 100
+30785,grid_current_l1,Grid Current L1,0.001A,S32,,,R,,Grid current phase L1; divide by 1000; positive=import
+30787,grid_current_l2,Grid Current L2,0.001A,S32,,,R,,Grid current phase L2; divide by 1000
+30789,grid_current_l3,Grid Current L3,0.001A,S32,,,R,,Grid current phase L3; divide by 1000
+30791,grid_power_l1,Grid Power L1,W,S32,,,R,,Grid active power phase L1; positive=import negative=export
+30793,grid_power_l2,Grid Power L2,W,S32,,,R,,Grid active power phase L2
+30795,grid_power_l3,Grid Power L3,W,S32,,,R,,Grid active power phase L3
+30803,grid_frequency,Grid Frequency,0.01Hz,U32,4500-6500,,R,,Grid frequency; divide by 100
+30805,power_factor,Power Factor,0.001,S32,-1000-1000,,R,,System displacement power factor; divide by 1000
+40009,operating_mode,Operating Mode,,U32,"1749=normal,1750=self-consumption optimized,1769=stop",,R/W,,Home Manager operating strategy
+40151,grid_feed_limit,Grid Feed-in Limit,0.01%,U32,0-10000,,R/W,,Maximum grid feed-in as percent of installed PV power; regulatory limit

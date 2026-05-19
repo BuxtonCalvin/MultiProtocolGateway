@@ -1,0 +1,91 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note
+# ─── SunSpec Common Model Block ────────────────────────────────────────────────,,,,,,,,,
+40001,sunspec_id,SunSpec ID,,uint32,,,R,,"Fixed 0x53756E53 (""SunS""); spans registers 40001-40002"
+40003,sunspec_did,Common Block DID,,uint16,1,,R,,Fixed 1; SunSpec common model identifier
+40004,common_length,Common Block Length,,uint16,65,,R,,Always 65 registers
+40005,manufacturer,Manufacturer,,string32,,,R,,"Fixed ""SolarEdge""; ASCII string across 16 registers (32 chars)"
+40021,model,Inverter Model,,string32,,,R,,"Model string e.g. ""SE5000H""; 16 registers"
+40045,options,Options,,string16,,,R,,Feature options string
+40053,version,CPU Version,,string16,,,R,,"CPU firmware version e.g. ""0002.0611"""
+40061,serial_number,Serial Number,,string32,,,R,,Inverter serial number ASCII
+40069,device_address,Modbus Device Address,,uint16,1-247,,R,,Configured Modbus unit ID
+# ─── SunSpec Inverter Model (Integer + Scale Factor) ─────────────────────────,,,,,,,,,
+# Addresses 40070-40131; DID: 101=single-phase 102=split-phase 103=three-phase,,,,,,,,,
+40070,inverter_did,Inverter Model DID,,uint16,"101=single-phase,102=split-phase,103=three-phase",,R,,Determines which phase registers are populated (others return NaN)
+40071,inverter_length,Inverter Block Length,,uint16,,,R,,Number of registers in this model block
+40072,ac_current_total,AC Current Total,A×SF,uint16,0-65535,,R,,Total AC output current; apply I_SF at 40076; actual A = raw × 10^SF
+40073,ac_current_a,AC Phase A Current,A×SF,uint16,,,R,,Phase A current; apply I_SF (40076)
+40074,ac_current_b,AC Phase B Current,A×SF,uint16,,,R,,Phase B current; apply I_SF; NaN if single-phase
+40075,ac_current_c,AC Phase C Current,A×SF,uint16,,,R,,Phase C current; apply I_SF; three-phase only
+40076,ac_current_sf,Current Scale Factor,,int16,-10-10,,R,,Exponent for current registers; e.g. -2 means divide by 100
+40077,ac_voltage_ab,AC Voltage Phase A-B,V×SF,uint16,,,R,,Line-to-line voltage A-B; apply V_SF (40083)
+40078,ac_voltage_bc,AC Voltage Phase B-C,V×SF,uint16,,,R,,Line-to-line voltage B-C; apply V_SF; three-phase only
+40079,ac_voltage_ca,AC Voltage Phase C-A,V×SF,uint16,,,R,,Line-to-line voltage C-A; apply V_SF; three-phase only
+40080,ac_voltage_an,AC Voltage Phase A-N,V×SF,uint16,,,R,,Phase A to neutral voltage; apply V_SF
+40081,ac_voltage_bn,AC Voltage Phase B-N,V×SF,uint16,,,R,,Phase B to neutral; NaN if single-phase
+40082,ac_voltage_cn,AC Voltage Phase C-N,V×SF,uint16,,,R,,Phase C to neutral; three-phase only
+40083,ac_voltage_sf,Voltage Scale Factor,,int16,-10-10,,R,,Exponent for all AC voltage registers
+40084,ac_power,AC Active Power,W×SF,int16,-32767-32767,,R,,Total AC output power; apply W_SF (40085); positive = generating
+40085,ac_power_sf,Power Scale Factor,,int16,-10-10,,R,,Exponent for AC power; e.g. -1 means divide by 10
+40086,ac_frequency,AC Frequency,Hz×SF,uint16,4500-6500,,R,,Grid frequency; apply Hz_SF (40087)
+40087,ac_frequency_sf,Frequency Scale Factor,,int16,-10-10,,R,,Exponent for frequency register
+40088,ac_apparent_power,AC Apparent Power,VA×SF,int16,,,R,,Apparent power; apply VA_SF (40089)
+40089,ac_apparent_power_sf,Apparent Power Scale Factor,,int16,-10-10,,R,,Exponent for apparent power
+40090,ac_reactive_power,AC Reactive Power,VAr×SF,int16,,,R,,Reactive power; apply VAr_SF (40091)
+40091,ac_reactive_power_sf,Reactive Power Scale Factor,,int16,-10-10,,R,,Exponent for reactive power
+40092,ac_power_factor,Power Factor,%×SF,int16,-100-100,,R,,Displacement power factor; apply PF_SF (40093)
+40093,ac_power_factor_sf,Power Factor Scale Factor,,int16,-10-10,,R,,Exponent for power factor
+40094,ac_energy_total,AC Lifetime Energy,Wh,acc32,,daily,R,,Cumulative AC energy (Wh); 32-bit accumulator; spans 40094-40095; apply E_SF (40096)
+40096,ac_energy_sf,Energy Scale Factor,,uint16,-10-10,,R,,Exponent for energy registers
+40097,dc_current,DC Current,A×SF,uint16,,,R,,DC input current (from PV); apply DC_I_SF (40098)
+40098,dc_current_sf,DC Current Scale Factor,,int16,-10-10,,R,,Exponent for DC current
+40099,dc_voltage,DC Voltage,V×SF,uint16,,,R,,DC input voltage (from PV string); apply DC_V_SF (40100)
+40100,dc_voltage_sf,DC Voltage Scale Factor,,int16,-10-10,,R,,Exponent for DC voltage
+40101,dc_power,DC Power,W×SF,int16,,,R,,DC input power; apply DC_W_SF (40102)
+40102,dc_power_sf,DC Power Scale Factor,,int16,-10-10,,R,,Exponent for DC power
+40103,inverter_temperature,Heat Sink Temperature,°C×SF,int16,,,R,,Inverter heat sink temperature; apply T_SF (40106)
+40104,temp_other_1,Other Temperature 1,°C×SF,int16,,,R,,Additional temperature sensor 1 (NaN if not available)
+40105,temp_other_2,Other Temperature 2,°C×SF,int16,,,R,,Additional temperature sensor 2
+40106,temperature_sf,Temperature Scale Factor,,int16,-10-10,,R,,Exponent for temperature registers
+40107,operating_state,Operating State,,uint16,"1=off,2=sleeping,3=waking,4=MPPT,5=throttled,6=shutting down,7=fault,8=standby,9=no power",,R,,Current inverter operational state
+40108,vendor_state,Vendor Status,,uint16,,,R,,SolarEdge-specific extended status code
+40109,alarm_1,Alarm Bitmask 1,,uint32,,,R,,Event flag bitmask word 1; spans 40109-40110
+40111,alarm_2,Alarm Bitmask 2,,uint32,,,R,,Event flag bitmask word 2; spans 40111-40112
+40113,alarm_3,Alarm Bitmask 3,,uint32,,,R,,Event flag bitmask word 3
+40115,alarm_4,Alarm Bitmask 4,,uint32,,,R,,Event flag bitmask word 4
+# ─── SunSpec Nameplate Model IC120 ────────────────────────────────────────────,,,,,,,,,
+40121,ic120_did,Nameplate Model DID,,uint16,120,,R,,Fixed 120; SunSpec nameplate ratings model
+40123,der_type,DER Device Type,,uint16,4,,R,,Fixed 4 = PV inverter
+40124,rated_power,Rated Power,W×SF,uint16,,,R,,Continuous power output rating; apply WRtg_SF (40125)
+40125,rated_power_sf,Rated Power Scale Factor,,int16,,,R,,Exponent for rated power
+# ─── SunSpec Basic Settings IC121 ─────────────────────────────────────────────,,,,,,,,,
+40149,ic121_did,Basic Settings Model DID,,uint16,121,,R,,Fixed 121; SunSpec basic settings model
+40151,active_power_limit_pct,Active Power Limit,0.01%,uint16,0-10000,as-needed,R/W,,Max active power as percent of rated; divide by 100; 10000=100%
+40152,active_power_limit_sf,Power Limit Scale Factor,,int16,,,R,,Exponent for power limit register
+40153,active_power_limit_enabled,Active Power Limit Enable,,uint16,"0=disabled,1=enabled",as-needed,R/W,,Enable (1) or disable (0) power limiting; write before or after limit
+# ─── SolarEdge Device-Specific Storage / Battery Registers ─────────────────,,,,,,,,,
+# Available on SolarEdge StorEdge inverters and Energy Hub inverters with battery,,,,,,,,,
+# Battery registers are exposed via the SolarEdge DC-coupled storage interface,,,,,,,,,
+62836,battery_1_temperature,Battery 1 Temperature,°C,float32,,,R,,Battery 1 temperature from BMS; float32; spans 62836-62837
+62852,battery_1_voltage,Battery 1 Voltage,V,float32,,,R,,Battery 1 DC bus voltage; float32; spans 62852-62853
+62854,battery_1_current,Battery 1 Current,A,float32,,,R,,Battery 1 current; positive=charging; float32
+62856,battery_1_power,Battery 1 Power,W,float32,,,R,,Battery 1 power; positive=charging; float32
+62852,battery_1_soe,Battery 1 State of Energy,%,float32,0-100,,R,,Battery energy level (SOC in percent); float32; vendor terminology is SOE
+62874,battery_1_status,Battery 1 Status,,uint32,,,R,,Battery operating status bitmask
+62900,battery_2_voltage,Battery 2 Voltage,V,float32,,,R,,Battery 2 voltage (if second battery string fitted); float32
+62902,battery_2_current,Battery 2 Current,A,float32,,,R,,Battery 2 current; float32
+62904,battery_2_power,Battery 2 Power,W,float32,,,R,,Battery 2 power; float32
+62924,battery_2_soe,Battery 2 State of Energy,%,float32,0-100,,R,,Battery 2 SOC percent; float32
+,,,,,,,,,
+# SolarEdge grid-tied inverters — all models with SetApp configuration or firmware 3.xxxx+,,,,,,,,,
+# Models: SE3000H/SE3800/SE4000H/SE5000H/SE5K/SE6000H/SE7K (single-phase),,,,,,,,,
+#   SE10K/SE12.5K/SE15K/SE25K (three-phase) and Synergy multi-phase series,,,,,,,,,
+# Interface A: Modbus TCP port 502 (disabled by default; enable in SetApp: Site Communication → Modbus TCP),,,,,,,,,
+# Interface B: Modbus RTU RS485; default 115200 baud 8N1 (configurable 9600-115200 bps),,,,,,,,,
+#   Enable: SetApp → Commissioning → Site Communication → RS485-1 → Protocol → SunSpec (Non-SE Logger),,,,,,,,,
+#   Set RS485-1 → Device ID to unique unit ID (1-247),,,,,,,,,
+# IMPORTANT: SolarEdge supports ONE Modbus master at a time — either RTU or TCP,not both,,,,,,,,
+# Protocol: SunSpec integer + scale factor model (IDs 101/102/103),,,,,,,,,
+# Register addressing: register 40001 = Modbus PDU address 40000 (subtract 1 when coding requests),,,,,,,,,
+# All multi-register values: big-endian (high register first); apply SF register as value x 10^SF,,,,,,,,,
+# NaN: int16 = 0x8000; uint16 = 0xFFFF; int32/acc32 = 0x80000000,,,,,,,,,

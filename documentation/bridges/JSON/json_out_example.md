@@ -58,7 +58,7 @@ include_device_info = true
 ## Configuration Options
 
 | Option | Type | Default | Description |
-|--------|------|---------|-------------|
+| -- | -- | -- | -- |
 | `output_file` | string | `stdout` | Output destination. Use `stdout` for console output or a file path |
 | `pretty_print` | boolean | `true` | Whether to format JSON with indentation |
 | `append_mode` | boolean | `false` | Whether to append to file instead of overwriting |
@@ -141,4 +141,4 @@ pretty_print = false
 append_mode = false
 include_timestamp = true
 include_device_info = false
-``` 
+```

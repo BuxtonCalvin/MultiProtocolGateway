@@ -42,6 +42,7 @@ from .routers.analysis import router as analysis_router
 from .routers.commit import router as commit_router
 from .routers.devices import get_app_state
 from .routers.devices import router as devices_router
+from .routers.help import router as help_router
 from .routers.pages import router as pages_router
 from .routers.protocols import router as protocols_router
 from .routers.transport_settings import router as transport_settings_router
@@ -304,6 +305,7 @@ def create_app(
     app.include_router(protocols_router)
     app.include_router(commit_router)
     app.include_router(analysis_router)
+    app.include_router(help_router)
     app.include_router(pages_router)
 
     # ------------------------------------------------------------------

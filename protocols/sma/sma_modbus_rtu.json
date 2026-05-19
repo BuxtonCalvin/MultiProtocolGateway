@@ -1,0 +1,29 @@
+{
+  "transport": "canbus",
+  "baud": 500000,
+  "byteorder": "little",
+  "send_input_register": false,
+
+  "grid_relay_status_codes": {
+    "51": "open",
+    "311": "closed"
+  },
+
+  "operating_mode_active_codes": {
+    "1749": "autonomous",
+    "1750": "grid tied",
+    "1779": "island",
+    "1780": "transition"
+  },
+
+  "generator_request_codes": {
+    "51": "no",
+    "1069": "yes"
+  },
+
+  "operating_mode_cmd_codes": {
+    "1749": "autonomous",
+    "1750": "grid tied",
+    "1769": "stop"
+  }
+}

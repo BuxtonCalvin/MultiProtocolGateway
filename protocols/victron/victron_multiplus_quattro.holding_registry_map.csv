@@ -1,0 +1,37 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note
+3,ac_in_voltage_l1,AC Input Voltage L1,0.1V,uint16,0-6553,,R,,AC input voltage phase 1; divide by 10 for volts
+4,ac_in_voltage_l2,AC Input Voltage L2,0.1V,uint16,0-6553,,R,,AC input voltage phase 2 (three-phase only)
+5,ac_in_voltage_l3,AC Input Voltage L3,0.1V,uint16,0-6553,,R,,AC input voltage phase 3 (three-phase only)
+6,ac_out_voltage_l1,AC Output Voltage L1,0.1V,uint16,0-6553,,R,,AC output voltage phase 1; divide by 10
+7,ac_out_voltage_l2,AC Output Voltage L2,0.1V,uint16,0-6553,,R,,AC output voltage phase 2 (three-phase only)
+8,ac_out_voltage_l3,AC Output Voltage L3,0.1V,uint16,0-6553,,R,,AC output voltage phase 3 (three-phase only)
+9,ac_out_current_l1,AC Output Current L1,0.1A,int16,-3276-3276,,R,,AC output current phase 1; divide by 10
+10,ac_out_current_l2,AC Output Current L2,0.1A,int16,-3276-3276,,R,,AC output current phase 2 (three-phase only)
+11,ac_out_current_l3,AC Output Current L3,0.1A,int16,-3276-3276,,R,,AC output current phase 3 (three-phase only)
+12,ac_out_power_l1,AC Output Power L1,W,int16,-32767-32767,,R,,AC output power phase 1
+13,ac_out_power_l2,AC Output Power L2,W,int16,-32767-32767,,R,,AC output power phase 2 (three-phase only)
+14,ac_out_power_l3,AC Output Power L3,W,int16,-32767-32767,,R,,AC output power phase 3 (three-phase only)
+15,ac_in_current_l1,AC Input Current L1,0.1A,int16,-3276-3276,,R,,AC input current phase 1; divide by 10
+16,ac_in_current_l2,AC Input Current L2,0.1A,int16,-3276-3276,,R,,AC input current phase 2 (three-phase only)
+17,ac_in_current_l3,AC Input Current L3,0.1A,int16,-3276-3276,,R,,AC input current phase 3 (three-phase only)
+18,ac_in_power_l1,AC Input Power L1,W,int16,-32767-32767,,R,,AC input power phase 1
+19,ac_in_power_l2,AC Input Power L2,W,int16,-32767-32767,,R,,AC input power phase 2 (three-phase only)
+20,ac_in_power_l3,AC Input Power L3,W,int16,-32767-32767,,R,,AC input power phase 3 (three-phase only)
+21,ac_in_frequency_l1,AC Input Frequency L1,0.01Hz,uint16,4500-6500,,R,,AC input frequency phase 1; divide by 100
+22,ac_out_frequency,AC Output Frequency,0.01Hz,uint16,4500-6500,,R,,AC output frequency; divide by 100
+33,switch_position,Switch Position,,uint16,"1=charger only,2=inverter only,3=on,4=off",,R/W,,Current operating mode
+56,ac_in_power_total,AC Input Power Total,W,int16,-32767-32767,,R,,Sum of all phases AC input power
+57,ac_out_power_total,AC Output Power Total,W,int16,-32767-32767,,R,,Sum of all phases AC output power
+64,passthru_active,Passthrough Active,,uint16,"0=no,1=yes",,R,,1 when AC input is being passed through to output
+65,charger_active,Charger Active,,uint16,"0=no,1=yes",,R,,1 when battery charging is active
+66,inverter_active,Inverter Active,,uint16,"0=no,1=yes",,R,,1 when inverter output is active
+67,lowbat_alarm,Low Battery Alarm,,uint16,"0=ok,1=warning,2=alarm",,R,,Low battery alarm state
+68,temp_alarm,Temperature Alarm,,uint16,"0=ok,1=warning,2=alarm",,R,,Over-temperature alarm state
+71,vebus_state,VE.Bus State,,uint16,"0=off,1=low power,2=fault,3=bulk,4=absorption,5=float,6=storage,7=equalize,8=passthru,9=inverting,10=power assist,11=power supply,252=bulk protection",,R,,VE.Bus operating state
+72,vebus_error,VE.Bus Error,,uint16,0-255,,R,,Error code; 0 = no error
+843,battery_voltage,Battery Voltage,0.01V,uint16,0-65535,,R,,Battery DC voltage; divide by 100
+844,battery_current,Battery Current,0.1A,int16,-3276-3276,,R,,Battery DC current; positive=charging negative=discharging; divide by 10
+845,battery_soc,Battery State of Charge,%,uint16,0-1000,,R,,Battery SOC; divide by 10 for percent
+855,active_input,Active AC Input,,uint16,"0=AC input 1,1=AC input 2,240=disconnected",,R,,Which AC input is currently active
+856,ac_input_1_ignore,Ignore AC Input 1,,uint16,"0=no,1=yes",,R/W,,Prevent system from using AC input 1
+857,ac_input_2_ignore,Ignore AC Input 2,,uint16,"0=no,1=yes",,R/W,,Prevent system from using AC input 2 (Quattro only)

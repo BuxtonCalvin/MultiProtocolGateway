@@ -75,7 +75,7 @@ When data becomes stale:
 One row per metric per timestamp.
 
 | Column | Description |
-| ------ | ------------ |
+| --- | --- |
 | m_time | Timestamp |
 | device_info_id | Device identifier ID |
 | metric | Metric name |
@@ -92,7 +92,7 @@ One row per metric per timestamp.
 One row per timestamp with multiple metric columns.
 
 | Column | Description |
-| ------ | ------------- |
+| --- | --- |
 | m_time | Timestamp |
 | device_info_id | Device identifier ID |
 | inverter_power | Example metric |
@@ -108,7 +108,7 @@ One row per timestamp with multiple metric columns.
 ### 4.3 Device Info Table
 
 | Column | Description |
-| ------ | ------------- |
+| --- | --- |
 | device_info_id | Device Identifier ID |
 | device_identifier | Device or Inverter Identifier ** |
 | device_serial_number | Device or Inverter Serial Number ** |
@@ -124,7 +124,7 @@ One row per timestamp with multiple metric columns.
 ### 4.4 Metric Catalog
 
 | Column | Description |
-| ------ | ------------- |
+| --- | --- |
 | id | Metric Unique ID |
 | metric_name | Metric Name as shown in the MPG Registry |
 | clean_column_name | Metric Name sanitized for SQL |

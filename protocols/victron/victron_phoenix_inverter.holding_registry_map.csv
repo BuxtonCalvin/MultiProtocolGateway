@@ -1,0 +1,16 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note
+3,mode,Device Mode,,uint16,"2=on,4=off,5=eco",,R/W,,Operating mode; write to switch inverter on/off or to ECO mode
+6,dc_voltage,DC Input Voltage,0.01V,uint16,0-65535,,R,,Battery/DC input voltage; divide by 100
+7,dc_current,DC Input Current,0.1A,int16,-3276-3276,,R,,Battery/DC input current; divide by 10
+8,dc_power,DC Input Power,W,int16,-32767-32767,,R,,Battery/DC input power
+9,ac_out_voltage_l1,AC Output Voltage,0.01V,uint16,0-65535,,R,,AC output voltage; divide by 100
+10,ac_out_current_l1,AC Output Current,0.1A,int16,-3276-3276,,R,,AC output current; divide by 10
+11,ac_out_power_l1,AC Output Power,W,int16,-32767-32767,,R,,AC output power
+12,ac_out_apparent_power,AC Output Apparent Power,VA,uint16,0-65535,,R,,AC output apparent power (VA)
+13,device_state,Device State,,uint16,"0=off,1=low power,2=fault,9=inverting",,R,,Current operational state
+14,alarm_low_battery,Low Battery Alarm,,uint16,"0=ok,1=alarm",,R,,Low battery voltage alarm
+15,alarm_high_temp,High Temperature Alarm,,uint16,"0=ok,1=alarm",,R,,Over-temperature alarm
+16,alarm_overload,Overload Alarm,,uint16,"0=ok,1=alarm",,R,,Output overload alarm
+17,alarm_short_circuit,Short Circuit Alarm,,uint16,"0=ok,1=alarm",,R,,Short circuit protection triggered
+18,relay_state,Relay State,,uint16,"0=open,1=closed",,R,,Programmable relay output state
+19,alarm_ripple,Ripple Alarm,,uint16,"0=ok,1=alarm",,R,,Excessive AC ripple on DC input alarm

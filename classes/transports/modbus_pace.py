@@ -1,4 +1,8 @@
 # scraper for PACE BMS devices over RS-232/RS-485 serial using the proprietary binary protocol.
+# Since pymodbus 3.x dropped the binary framer, this transport handles raw serial communication directly
+# via pyserial, mapping register reads to standard Modbus function codes framed in PACE's binary envelope.
+# modbus_base is used for the register mapping and processing logic, while this transport focuses on
+# the framing, CRC, and serial I/O specific to PACE BMS devices.
 """
 PACE BMS serial transport.
 

@@ -1,0 +1,42 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note
+30051,device_class,Device Class,,U32,,,R,,SMA device class identifier; 8007 = PV inverter
+30053,device_type,Device Type,,U32,,,R,,SMA product type code; see SMA device type table
+30057,serial_number,Serial Number,,U32,,,R,,Device serial number
+30059,software_package,Software Package,,U32,,,R,,Firmware version encoded as 32-bit value
+30201,status_condition,Operating Condition,,U32,"295=OK,303=off,1392=warning,1793=error,2119=waiting for PV voltage",,R,,General device operating status
+30211,grid_relay_status,Grid Relay Status,,U32,"51=open,311=closed,16777213=n/a",,R,,State of the grid-tie relay
+30213,derating_active,Active Power Limitation Reason,,U32,"303=no derating,1069=temperature derating,1070=overfrequency derating,1071=external limitation",,R,,Reason active power output is being reduced
+30513,yield_total,Total Yield,Wh,U32,0-4294967295,,R,,Cumulative AC energy output over device lifetime (Wh); 32-bit
+30515,yield_today,Yield,Wh,U32,0-4294967295,,R,,AC energy output since midnight local time (Wh)
+30517,error_code,Last Error Code,,U32,0-65535,,R,,Most recent error/fault code; 0 = no error
+30521,recommended_action,Recommended Action,,U32,,,R,,SMA recommended action code for current condition
+30525,operating_hours,Operating Hours,s,U32,,,R,,Cumulative seconds device has been in operation
+30527,feed_in_hours,Feed-in Time,s,U32,,,R,,Cumulative seconds device has been actively feeding grid
+30535,dc_power_total,DC Input Power Total,W,S32,-2147483648-2147483647,,R,,Total DC power from all PV string inputs combined
+30769,ac_power_total,AC Active Power Total,W,S32,-2147483648-2147483647,,R,,Total AC active power output across all phases
+30771,ac_apparent_power_total,AC Apparent Power Total,VA,S32,,,R,,Total AC apparent power across all phases
+30773,ac_reactive_power_total,AC Reactive Power Total,VAr,S32,,,R,,Total AC reactive power across all phases
+30775,ac_power_l1,AC Active Power L1,W,S32,,,R,,AC active power phase L1 (Tripower only)
+30777,ac_power_l2,AC Active Power L2,W,S32,,,R,,AC active power phase L2 (Tripower only)
+30779,ac_power_l3,AC Active Power L3,W,S32,,,R,,AC active power phase L3 (Tripower only)
+30783,ac_voltage_l1,AC Voltage L1,0.01V,U32,0-65535,,R,,Grid voltage phase L1 (line-to-neutral); divide by 100
+30785,ac_voltage_l2,AC Voltage L2,0.01V,U32,0-65535,,R,,Grid voltage phase L2; divide by 100 (Tripower only)
+30787,ac_voltage_l3,AC Voltage L3,0.01V,U32,0-65535,,R,,Grid voltage phase L3; divide by 100 (Tripower only)
+30795,ac_current_l1,AC Current L1,0.001A,S32,,,R,,AC output current phase L1; divide by 1000
+30797,ac_current_l2,AC Current L2,0.001A,S32,,,R,,AC output current phase L2; divide by 1000 (Tripower only)
+30799,ac_current_l3,AC Current L3,0.001A,S32,,,R,,AC output current phase L3; divide by 1000 (Tripower only)
+30803,grid_frequency,Grid Frequency,0.01Hz,U32,4500-6500,,R,,Grid/output AC frequency; divide by 100
+30805,power_factor,Displacement Power Factor,0.001,S32,-1000-1000,,R,,Cos phi at grid connection point; divide by 1000
+30835,dc_voltage_a,DC Voltage Input A,0.01V,S32,,,R,,PV string A input voltage; divide by 100
+30837,dc_current_a,DC Current Input A,0.001A,S32,,,R,,PV string A input current; divide by 1000
+30839,dc_power_a,DC Power Input A,W,S32,,,R,,PV string A input power
+30841,dc_voltage_b,DC Voltage Input B,0.01V,S32,,,R,,PV string B input voltage; divide by 100 (dual-tracker models only)
+30843,dc_current_b,DC Current Input B,0.001A,S32,,,R,,PV string B input current; divide by 1000 (dual-tracker models only)
+30845,dc_power_b,DC Power Input B,W,S32,,,R,,PV string B input power (dual-tracker models only)
+30953,inverter_temperature,Inverter Temperature,0.1°C,S32,-300-1500,,R,,Internal heat sink temperature; divide by 10
+31793,ac_power_setpoint,Active Power Setpoint,%,S32,0-10000,,R/W,,Active power limitation setpoint in percent of rated power; divide by 100; 10000 = 100%
+31795,reactive_power_setpoint,Reactive Power Setpoint,VAr,S32,,,R/W,,Reactive power setpoint; signed; positive = inductive
+40029,operating_mode,Operating Mode,,U32,"1756=normal,1781=forced zero output,1792=active power limit",,R/W,,Inverter operating mode control
+40151,active_power_limit_percent,Active Power Limit,0.01%,U32,0-10000,,R/W,,Upper active power limit as percent of rated; divide by 100
+40155,power_factor_setpoint,Power Factor Setpoint,0.001,S32,-1000-1000,,R/W,,Target displacement power factor; divide by 1000
+# NaN values: U32 0xFFFFFFFF,S32 0x80000000 indicate not available / not applicable,,,,,,,,

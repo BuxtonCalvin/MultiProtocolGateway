@@ -1,279 +1,256 @@
-register,variable_name,documented_name,unit,data_type,values,writable,read_interval,note
-# ============================================================,,,,,,,,
-# EG4-LL Battery — HOLDING Register Map (PDF V01.06),,,,,,,,
-# Source:  EG4-LL-MODBUS-Communication-Protocol.pdf V01.06 (2017-06-21),,,,,,,,
-# Verified: venus-os_dbus-serialbattery/bms/eg4_ll.py (Pfitz Jan 2026),,,,,,,,
-#,,,,,,,,
-# ALL registers use Modbus FC 0x03 (Read Holding Registers).,,,,,,,,
-# The PDF defines a single address space; R vs RW indicates whether,,,,,,,,
-# FC 0x10 writes are accepted — it is NOT a separate address space.,,,,,,,,
-#,,,,,,,,
-# R  = read-only  (BMS NACKs FC 0x10 writes),,,,,,,,
-# W  = read/write (BMS accepts FC 0x10 writes),,,,,,,,
-#,,,,,,,,
-# DATA TYPES,,,,,,,,
-#   USHORT   16-bit unsigned int (2 bytes),,,,,,,,
-#   SHORT    16-bit signed int   (2 bytes  two's complement),,,,,,,,
-#   UINT     32-bit unsigned int (4 bytes); expressed here as _h/_l USHORT pairs.,,,,,,,,
-#            The loader auto-promotes a _h/_l pair to UINT and drops the _h suffix.,,,,,,,,
-#   _8BIT    8-bit unsigned field extracted from a 16-bit register.,,,,,,,,
-#            .b8 = high byte (bits 8-15)   .b0 = low byte (bits 0-7),,,,,,,,
-#   _8SBIT   8-bit signed field (same addressing as _8BIT but sign-extended).,,,,,,,,
-#            Used for temperature sensor bytes confirmed as s8 in eg4_ll.py.,,,,,,,,
-#   ASCII    Multi-register ASCII string expressed as a register range.,,,,,,,,
-#            The loader concatenates all words and strips null characters.,,,,,,,,
-#,,,,,,,,
-# REGISTER 25 — SPLIT BYTE,,,,,,,,
-#   The PDF notes that the high byte of reg 25 carries the heater state,,,,,,,,
-#   (0x80 = on  0x00 = off) and the low byte carries the operating status code.,,,,,,,,
-#   eg4_ll.py confirms: packet[53]=heater hi-byte  packet[54]=status lo-byte.,,,,,,,,
-#   Mapped as two _8BIT entries at 25.b8 and 25.b0.,,,,,,,,
-#,,,,,,,,
-# REGISTER 89 — SPLIT BYTE,,,,,,,,
-#   eg4_ll.py reads Charge_OC_Times from offset 91 (hi byte of reg 89) and,,,,,,,,
-#   Discharge_OC_Times from offset 92 (lo byte of reg 89) as unsigned bytes.,,,,,,,,
-#   Mapped as two _8BIT entries at 89.b8 and 89.b0.,,,,,,,,
-#,,,,,,,,
-# TEMPERATURE SENSOR BYTES (regs 33-35),,,,,,,,
-#   eg4_ll.py uses s8() (signed) to read sensor bytes. _8SBIT is used here.,,,,,,,,
-#   Two sensors per register: .b8 = high byte  .b0 = low byte.,,,,,,,,
-#   The PDF documents 6 sensors (regs 33-35); eg4_ll.py reads only sensors,,,,,,,,
-#   1-4 (regs 33-34). Sensors 5-6 (reg 35) are included but may read 0.,,,,,,,,
-#,,,,,,,,
-# CONFIG TEMPERATURE ENCODING (regs 90-104),,,,,,,,
-#   eg4_ll.py applies:  actual_degC = raw_value - 50,,,,,,,,
-#   The -50 offset is a BMS firmware encoding not shown in the PDF unit column.,,,,,,,,
-#   The unit_mod in the CSV is 1 (whole degC per LSB after offset is applied).,,,,,,,,
-"#   Each affected register is flagged with ""offset: raw-50=degC"" in its note.",,,,,,,,
-#   Your application layer must subtract 50 from raw reads before display/use.,,,,,,,,
-#,,,,,,,,
-# CONFIG REGISTER BASE ADDRESS,,,,,,,,
-"#   eg4_ll.py bmsConfigCommandRoot = b""\x03\x00\x2d\x00\x5b""",,,,,,,,
-#   start = 0x002D = 45  count = 0x5B = 91 (covers absolute regs 45-135).,,,,,,,,
-#   All config register numbers below are ABSOLUTE Modbus addresses verified,,,,,,,,
-#   by back-calculating from eg4_ll.py packet byte offsets:,,,,,,,,
-#     absolute_register = 45 + (packet_offset - 3) / 2,,,,,,,,
-#,,,,,,,,
-# UNKNOWN/RESERVED GAPS,,,,,,,,
-#   Regs 39-55: between cell data and config blocks; not read by any command.,,,,,,,,
-#   Regs 45-55: within bmsConfig window (offsets 3-24) — code skips them.,,,,,,,,
-#   Regs 73-77: within bmsConfig window (offsets 59-68) — code skips them.,,,,,,,,
-#   These are omitted from the CSV; the batch range calculator will include,,,,,,,,
-#   them in read requests but their values are not decoded.,,,,,,,,
-# ============================================================,,,,,,,,
-,,,,,,,,
-# -----------------------------------------------------------,,,,,,,,
-# CELL DATA BLOCK  (cellCommandRoot: FC 0x03  start=0  count=39),,,,,,,,
-"# eg4_ll.py: b""\x03\x00\x00\x00\x27"" — regs 0-38  reply=83 bytes",,,,,,,,
-# -----------------------------------------------------------,,,,,,,,
-,,,,,,,,
-# --- Pack-level measurements (regs 0-1) ---,,,,,,,,
-,,,,,,,,
-0,pack_voltage,pack_voltage,0.01V,USHORT,0-65535,R,,Pack voltage. PDF: 10 mV/LSB = 0.01 V. Verified: eg4_ll.py u16(offset 3)/100.
-1,pack_current,pack_current,0.01A,SHORT,-65535,R,,Pack current. PDF: 10 mA/LSB = 0.01 A. Positive=charging Negative=discharging. Verified: eg4_ll.py s16(offset 5)/100.
-,,,,,,,,
-# --- Individual cell voltages (regs 2-17) ---,,,,,,,,
-# PDF: 16 cells USHORT in mV. eg4_ll.py reads raw/1000 to display in V; raw unit is mV.,,,,,,,,
-,,,,,,,,
-2,cell_01_voltage,cell_01_voltage,1mV,USHORT,0-65535,R,,Cell 1 voltage. eg4_ll.py u16(offset 7)/1000 V; raw is mV.
-3,cell_02_voltage,cell_02_voltage,1mV,USHORT,0-65535,R,,Cell 2 voltage.
-4,cell_03_voltage,cell_03_voltage,1mV,USHORT,0-65535,R,,Cell 3 voltage.
-5,cell_04_voltage,cell_04_voltage,1mV,USHORT,0-65535,R,,Cell 4 voltage.
-6,cell_05_voltage,cell_05_voltage,1mV,USHORT,0-65535,R,,Cell 5 voltage.
-7,cell_06_voltage,cell_06_voltage,1mV,USHORT,0-65535,R,,Cell 6 voltage.
-8,cell_07_voltage,cell_07_voltage,1mV,USHORT,0-65535,R,,Cell 7 voltage.
-9,cell_08_voltage,cell_08_voltage,1mV,USHORT,0-65535,R,,Cell 8 voltage.
-10,cell_09_voltage,cell_09_voltage,1mV,USHORT,0-65535,R,,Cell 9 voltage.
-11,cell_10_voltage,cell_10_voltage,1mV,USHORT,0-65535,R,,Cell 10 voltage.
-12,cell_11_voltage,cell_11_voltage,1mV,USHORT,0-65535,R,,Cell 11 voltage.
-13,cell_12_voltage,cell_12_voltage,1mV,USHORT,0-65535,R,,Cell 12 voltage.
-14,cell_13_voltage,cell_13_voltage,1mV,USHORT,0-65535,R,,Cell 13 voltage.
-15,cell_14_voltage,cell_14_voltage,1mV,USHORT,0-65535,R,,Cell 14 voltage.
-16,cell_15_voltage,cell_15_voltage,1mV,USHORT,0-65535,R,,Cell 15 voltage.
-17,cell_16_voltage,cell_16_voltage,1mV,USHORT,0-65535,R,,Cell 16 voltage.
-,,,,,,,,
-# --- Pack temperature summary (regs 18-20) ---,,,,,,,,
-# PDF: SHORT degC whole-degree resolution.,,,,,,,,
-# eg4_ll.py reads temperature_mos = s16(offset 39) -> reg 18 confirmed.,,,,,,,,
-# Regs 19-20 (temp_avg  temp_max) are within the read window but not separately,,,,,,,,
-# decoded by eg4_ll.py; they are present and valid per the PDF.,,,,,,,,
-,,,,,,,,
-18,temp_pcb,temp_pcb,1C,SHORT,-140,R,,PCB/MOSFET temperature. PDF: Temp of PCB SHORT degC. Verified: eg4_ll.py s16(offset 39) -> reg 18.
-19,temp_avg,temp_avg,1C,SHORT,-140,R,,Average cell temperature. PDF: Temp Avg SHORT degC. Present in read window; not decoded separately by eg4_ll.py.
-20,temp_max,temp_max,1C,SHORT,-140,R,,Maximum cell temperature. PDF: Temp Max SHORT degC. Present in read window; not decoded separately by eg4_ll.py.
-,,,,,,,,
-# --- Capacity and charge limits (regs 21-22) ---,,,,,,,,
-# eg4_ll.py: capacity_remain=u16(offset 45)->reg 21  max_charge_current=u16(offset 47)->reg 22.,,,,,,,,
-# No unit specified in PDF for either; no scaling applied in code.,,,,,,,,
-,,,,,,,,
-21,cap_remaining,cap_remaining,,USHORT,0-65535,R,,Remaining capacity. PDF: Cap Remaining USHORT no unit. Verified: eg4_ll.py u16(offset 45) -> reg 21.
-22,max_charge_current,max_charge_current,,USHORT,0-65535,R,,Maximum charging current. PDF: Max charging Current USHORT no unit. Verified: eg4_ll.py u16(offset 47) -> reg 22.
-,,,,,,,,
-# --- State indicators (regs 23-24) ---,,,,,,,,
-# eg4_ll.py: soh=u16(offset 49)->reg 23  soc=u16(offset 51)->reg 24.,,,,,,,,
-,,,,,,,,
-23,soh,soh,%,USHORT,0-100,R,,State of Health 0-100%. Verified: eg4_ll.py u16(offset 49) -> reg 23.
-24,soc,soc,%,USHORT,0-100,R,,State of Charge 0-100%. Verified: eg4_ll.py u16(offset 51) -> reg 24.
-,,,,,,,,
-# --- Status and heater byte (reg 25 — split) ---,,,,,,,,
-# PDF: reg 25 high byte = heat state (0x80=on 0x00=off); low byte = operating status code.,,,,,,,,
-# eg4_ll.py: heater_hex=packet[53] (hi byte)  status code in packet[54] (lo byte).,,,,,,,,
-# Status code values (low byte only):,,,,,,,,
-#   0x00=Inactive/Standby  0x01=Inactive/Charging  0x02=Inactive/Discharging,,,,,,,,
-#   0x04=Inactive/Protect  0x08=Inactive/Charging_Lmt,,,,,,,,
-#   0x80=Active/Standby    0x81=Active/Charging     0x82=Active/Discharging,,,,,,,,
-#   0x84=Active/Protect    0x88=Active/Charging_Lmt,,,,,,,,
-,,,,,,,,
-25.b8,heater_state,heater_state,,_8BIT,0-255,R,,Heater state. High byte of reg 25. eg4_ll.py packet[53]. 0x80=Heat On 0x00=Heat Off.
-25.b0,status,status,,_8BIT,0-255,R,,Operating status code. Low byte of reg 25. eg4_ll.py packet[54]. See status code values in comment above.
-,,,,,,,,
-# --- Warning / protection / error flags (regs 26-28) ---,,,,,,,,
-# eg4_ll.py: warning=packet[55:57]->reg 26  protection=packet[57:59]->reg 27  error=packet[59:61]->reg 28.,,,,,,,,
-# Warning bits (reg 26):,,,,,,,,
-#   0x0001=Pack_OV   0x0002=Cell_OV   0x0004=Pack_UV   0x0008=Cell_UV,,,,,,,,
-#   0x0010=Charge_OC  0x0020=Discharge_OC  0x0040=Abnormal_Ambient_Temp,,,,,,,,
-#   0x0080=MOS_Overheating  0x0100=Charge_OT  0x0200=Discharge_OT,,,,,,,,
-#   0x0400=Charge_UT  0x0800=Discharge_UT  0x1000=Low_Capacity  0x2000=Float_Stopped,,,,,,,,
-# Protection bits (reg 27): identical layout except 0x2000=Discharge_SC,,,,,,,,
-# Error bits (reg 28):,,,,,,,,
-#   0x0001=Voltage_Error  0x0002=Temperature_Error  0x0004=Current_Flow_Error  0x0010=Cell_Unbalance,,,,,,,,
-,,,,,,,,
-26,warning,warning,,_16BIT_FLAGS,,R,,Warning flags 16-bit. eg4_ll.py packet[55:57] -> reg 26. See bit definitions in comment above.
-27,protection,protection,,_16BIT_FLAGS,,R,,Protection flags 16-bit. eg4_ll.py packet[57:59] -> reg 27. Same layout as warning except 0x2000=Discharge_SC.
-28,error_code,error_code,,_16BIT_FLAGS,,R,,Error code flags 16-bit. eg4_ll.py packet[59:61] -> reg 28. See bit definitions in comment above.
-,,,,,,,,
-# --- Cycle count (regs 29-30  4-byte ULONG  RW) ---,,,,,,,,
-# eg4_ll.py: cycles=u32(offset 61)->regs 29-30 confirmed. Range per PDF: 1-65535.,,,,,,,,
-"# _h/_l pair: loader auto-promotes to UINT named ""cycle_count"".",,,,,,,,
-,,,,,,,,
-29,cycle_count_h,cycle_count_h,,USHORT,0-65535,W,,Cycle count high word. eg4_ll.py u32(offset 61) -> regs 29-30. Loader pairs with _l to form UINT.
-30,cycle_count_l,cycle_count_l,,USHORT,0-65535,W,,Cycle count low word. Loader pairs with _h to form 32-bit UINT named cycle_count.
-,,,,,,,,
-# --- Full capacity (regs 31-32  4-byte ULONG  RW) ---,,,,,,,,
-# eg4_ll.py: capacity=u32(offset 65)/3600/1000 Ah -> regs 31-32 confirmed.,,,,,,,,
-# PDF unit: mAS (milliamp-seconds). /3600 = mAh  /1000 = Ah.,,,,,,,,
-# CSV stores raw mAS; the /3600/1000 conversion is done at the application layer.,,,,,,,,
-,,,,,,,,
-31,full_capacity_h,full_capacity_h,mAS,USHORT,0-65535,W,,Full capacity high word. PDF: mAS. eg4_ll.py u32(offset 65)/3600/1000 = Ah. Loader pairs with _l to form UINT.
-32,full_capacity_l,full_capacity_l,mAS,USHORT,0-65535,W,,Full capacity low word. Loader pairs with _h to form 32-bit UINT named full_capacity.
-,,,,,,,,
-# --- Per-sensor temperature array (regs 33-35) ---,,,,,,,,
-# eg4_ll.py: s8() at offsets 69-72 -> regs 33-34  confirmed SIGNED bytes.,,,,,,,,
-# Two sensors per 16-bit register: .b8=high byte  .b0=low byte.,,,,,,,,
-# PDF documents 6 sensors (regs 33-35); eg4_ll.py reads only sensors 1-4.,,,,,,,,
-# Sensors 5-6 (reg 35) included here but may read 0 if hardware absent.,,,,,,,,
-,,,,,,,,
-33.b8,temp_sensor_1,temp_sensor_1,1C,_8SBIT,-125,R,,Temperature sensor 1. High byte of reg 33. eg4_ll.py s8(offset 69). Signed degC.
-33.b0,temp_sensor_2,temp_sensor_2,1C,_8SBIT,-125,R,,Temperature sensor 2. Low byte of reg 33. eg4_ll.py s8(offset 70). Signed degC.
-34.b8,temp_sensor_3,temp_sensor_3,1C,_8SBIT,-125,R,,Temperature sensor 3. High byte of reg 34. eg4_ll.py s8(offset 71). Signed degC.
-34.b0,temp_sensor_4,temp_sensor_4,1C,_8SBIT,-125,R,,Temperature sensor 4. Low byte of reg 34. eg4_ll.py s8(offset 72). Signed degC.
-35.b8,temp_sensor_5,temp_sensor_5,1C,_8SBIT,-125,R,,Temperature sensor 5. High byte of reg 35. PDF only; not read by eg4_ll.py. May be 0 if sensor absent.
-35.b0,temp_sensor_6,temp_sensor_6,1C,_8SBIT,-125,R,,Temperature sensor 6. Low byte of reg 35. PDF only; not read by eg4_ll.py. May be 0 if sensor absent.
-,,,,,,,,
-# --- Cell configuration and balance (regs 36-38) ---,,,,,,,,
-# eg4_ll.py: cell_count=u16(offset 75)->reg 36 confirmed.,,,,,,,,
-,,,,,,,,
-36,cell_num,cell_num,,USHORT,48214,W,,Number of cells in series string. eg4_ll.py u16(offset 75) -> reg 36. RW per PDF.
-37,designed_capacity,designed_capacity,0.1AH,USHORT,0-65535,R,,Designed battery capacity. PDF: 0.1 AH/LSB. raw*0.1=Ah. Not read by eg4_ll.py; present in cell read window.
-38,cell_balance_status,cell_balance_status,,USHORT,,R,,Cell balance flags. bit0=Cell_1_Balanced...bit15=Cell_16_Balanced. Not read by eg4_ll.py; present in cell read window.
-,,,,,,,,
-# -----------------------------------------------------------,,,,,,,,
-# CONFIG / THRESHOLD BLOCK  (bmsConfigCommandRoot: FC 0x03  start=45  count=91),,,,,,,,
-"# eg4_ll.py: b""\x03\x00\x2d\x00\x5b"" — abs regs 45-135  reply=187 bytes",,,,,,,,
-# Absolute register = 45 + (packet_offset - 3) / 2,,,,,,,,
-# Regs 45-55 and 73-77 are within the read window but unused (reserved/unknown).,,,,,,,,
-# -----------------------------------------------------------,,,,,,,,
-,,,,,,,,
-# --- Balancing thresholds (regs 56-58) ---,,,,,,,,
-,,,,,,,,
-56,balance_volt,balance_volt,0.001V,USHORT,2000-4000,W,,Minimum cell voltage to enable balancing. eg4_ll.py offset 25-27. raw*0.001=V (e.g. 3400=3.400 V).
-57,balance_volt_diff,balance_volt_diff,0.001V,USHORT,0-1000,W,,Cell voltage delta threshold to trigger balancing. eg4_ll.py offset 27-29. raw*0.001=V.
-58,low_cap_warn,low_cap_warn,%,USHORT,0-100,W,,SOC level that triggers low capacity warning. eg4_ll.py offset 29-31.
-,,,,,,,,
-# --- Cell undervoltage thresholds (regs 61-63) ---,,,,,,,,
-,,,,,,,,
-61,cell_uv_warn,cell_uv_warn,0.001V,USHORT,2000-3500,W,,Cell undervoltage WARNING threshold. eg4_ll.py offset 35-37. raw*0.001=V.
-62,cell_uv_protect,cell_uv_protect,0.001V,USHORT,1500-3200,W,,Cell undervoltage PROTECTION threshold. eg4_ll.py offset 37-39. raw*0.001=V.
-63,cell_uv_release,cell_uv_release,0.001V,USHORT,2000-3500,W,,Cell undervoltage RELEASE (recovery) threshold. eg4_ll.py offset 39-41. raw*0.001=V.
-,,,,,,,,
-# --- Pack undervoltage thresholds (regs 64-66) ---,,,,,,,,
-,,,,,,,,
-64,pack_uv_warn,pack_uv_warn,0.01V,USHORT,0-65535,W,,Pack undervoltage WARNING threshold. eg4_ll.py offset 41-43. raw*0.01=V.
-65,pack_uv_protect,pack_uv_protect,0.01V,USHORT,0-65535,W,,Pack undervoltage PROTECTION threshold. eg4_ll.py offset 43-45. raw*0.01=V.
-66,pack_uv_release,pack_uv_release,0.01V,USHORT,0-65535,W,,Pack undervoltage RELEASE (recovery) threshold. eg4_ll.py offset 45-47. raw*0.01=V.
-,,,,,,,,
-# --- Cell overvoltage thresholds (regs 67-69) ---,,,,,,,,
-,,,,,,,,
-67,cell_ov_warn,cell_ov_warn,0.001V,USHORT,3000-4200,W,,Cell overvoltage WARNING threshold. eg4_ll.py offset 47-49. raw*0.001=V.
-68,cell_ov_protect,cell_ov_protect,0.001V,USHORT,3200-4500,W,,Cell overvoltage PROTECTION threshold. eg4_ll.py offset 49-51. raw*0.001=V.
-69,cell_ov_release,cell_ov_release,0.001V,USHORT,3000-4200,W,,Cell overvoltage RELEASE (recovery) threshold. eg4_ll.py offset 51-53. raw*0.001=V.
-,,,,,,,,
-# --- Pack overvoltage thresholds (regs 70-72) ---,,,,,,,,
-,,,,,,,,
-70,pack_ov_warn,pack_ov_warn,0.01V,USHORT,0-65535,W,,Pack overvoltage WARNING threshold. eg4_ll.py offset 53-55. raw*0.01=V.
-71,pack_ov_protect,pack_ov_protect,0.01V,USHORT,0-65535,W,,Pack overvoltage PROTECTION threshold. eg4_ll.py offset 55-57. raw*0.01=V.
-72,pack_ov_release,pack_ov_release,0.01V,USHORT,0-65535,W,,Pack overvoltage RELEASE (recovery) threshold. eg4_ll.py offset 57-59. raw*0.01=V.
-,,,,,,,,
-# --- OC release timers (regs 78-79) ---,,,,,,,,
-,,,,,,,,
-78,discharge_oc_release,discharge_oc_release,,USHORT,0-3600,W,,Discharge overcurrent protection release time in seconds. eg4_ll.py offset 69-71.
-79,charge_oc_release,charge_oc_release,,USHORT,0-3600,W,,Charge overcurrent protection release time in seconds. eg4_ll.py offset 71-73.
-,,,,,,,,
-# --- Current protection thresholds (regs 80-88) ---,,,,,,,,
-,,,,,,,,
-80,charge_oc1_protect,charge_oc1_protect,0.01A,USHORT,0-65535,W,,Charge overcurrent level 1 PROTECTION threshold. eg4_ll.py offset 73-75. raw*0.01=A.
-81,discharge_oc1_protect,discharge_oc1_protect,0.01A,USHORT,0-65535,W,,Discharge overcurrent level 1 PROTECTION threshold. eg4_ll.py offset 75-77. raw*0.01=A.
-82,short_circuit_current,short_circuit_current,0.01A,USHORT,0-65535,W,,Short circuit / instantaneous overcurrent threshold. eg4_ll.py offset 77-79. raw*0.01=A.
-83,charge_oc2_protect,charge_oc2_protect,0.01A,USHORT,0-65535,W,,Charge overcurrent level 2 PROTECTION threshold. eg4_ll.py offset 79-81. raw*0.01=A.
-84,discharge_oc2_protect,discharge_oc2_protect,0.01A,USHORT,0-65535,W,,Discharge overcurrent level 2 PROTECTION threshold. eg4_ll.py offset 81-83. raw*0.01=A.
-85,charge_oc1_delay,charge_oc1_delay,,USHORT,0-255,W,,Charge OC1 trip delay in seconds. eg4_ll.py offset 83-85.
-86,charge_oc2_delay,charge_oc2_delay,,USHORT,0-255,W,,Charge OC2 trip delay in seconds. eg4_ll.py offset 85-87.
-87,discharge_oc1_delay,discharge_oc1_delay,,USHORT,0-255,W,,Discharge OC1 trip delay in seconds. eg4_ll.py offset 87-89.
-88,discharge_oc2_delay,discharge_oc2_delay,,USHORT,0-255,W,,Discharge OC2 trip delay in seconds. eg4_ll.py offset 89-91.
-,,,,,,,,
-# --- OC retry counts (reg 89 — split) ---,,,,,,,,
-# eg4_ll.py: Charge_OC_Times at offset 91 (hi byte of reg 89),,,,,,,,
-#            Discharge_OC_Times at offset 92 (lo byte of reg 89). Both unsigned bytes.,,,,,,,,
-,,,,,,,,
-89.b8,charge_oc_times,charge_oc_times,,_8BIT,0-255,W,,Charge overcurrent retry count. High byte of reg 89. eg4_ll.py offset 91 (1 byte).
-89.b0,discharge_oc_times,discharge_oc_times,,_8BIT,0-255,W,,Discharge overcurrent retry count. Low byte of reg 89. eg4_ll.py offset 92 (1 byte).
-,,,,,,,,
-# --- Charge temperature thresholds (regs 90-95) ---,,,,,,,,
-# ENCODING: BMS stores (actual_degC + 50) in each register.,,,,,,,,
-# eg4_ll.py: get_temp() = int.from_bytes(�  signed=True) - 50,,,,,,,,
-# Application layer must apply: actual_degC = raw - 50,,,,,,,,
-,,,,,,,,
-90,charge_ut_warn,charge_ut_warn,1C,SHORT,offset:-50,W,,Charge undertemperature WARNING. eg4_ll.py offset 93-95. offset: raw-50=degC.
-91,charge_ut_protect,charge_ut_protect,1C,SHORT,offset:-50,W,,Charge undertemperature PROTECTION. eg4_ll.py offset 95-97. offset: raw-50=degC.
-92,charge_ut_release,charge_ut_release,1C,SHORT,offset:-50,W,,Charge undertemperature RELEASE. eg4_ll.py offset 97-99. offset: raw-50=degC.
-93,charge_ot_warn,charge_ot_warn,1C,SHORT,offset:-50,W,,Charge overtemperature WARNING. eg4_ll.py offset 99-101. offset: raw-50=degC.
-94,charge_ot_protect,charge_ot_protect,1C,SHORT,offset:-50,W,,Charge overtemperature PROTECTION. eg4_ll.py offset 101-103. offset: raw-50=degC.
-95,charge_ot_release,charge_ot_release,1C,SHORT,offset:-50,W,,Charge overtemperature RELEASE. eg4_ll.py offset 103-105. offset: raw-50=degC.
-,,,,,,,,
-# --- Discharge temperature thresholds (regs 96-101) ---,,,,,,,,
-,,,,,,,,
-96,discharge_ut_warn,discharge_ut_warn,1C,SHORT,offset:-50,W,,Discharge undertemperature WARNING. eg4_ll.py offset 105-107. offset: raw-50=degC.
-97,discharge_ut_protect,discharge_ut_protect,1C,SHORT,offset:-50,W,,Discharge undertemperature PROTECTION. eg4_ll.py offset 107-109. offset: raw-50=degC.
-98,discharge_ut_release,discharge_ut_release,1C,SHORT,offset:-50,W,,Discharge undertemperature RELEASE. eg4_ll.py offset 109-111. offset: raw-50=degC.
-99,discharge_ot_warn,discharge_ot_warn,1C,SHORT,offset:-50,W,,Discharge overtemperature WARNING. eg4_ll.py offset 111-113. offset: raw-50=degC.
-100,discharge_ot_protect,discharge_ot_protect,1C,SHORT,offset:-50,W,,Discharge overtemperature PROTECTION. eg4_ll.py offset 113-115. offset: raw-50=degC.
-101,discharge_ot_release,discharge_ot_release,1C,SHORT,offset:-50,W,,Discharge overtemperature RELEASE. eg4_ll.py offset 115-117. offset: raw-50=degC.
-,,,,,,,,
-# --- PCB/MOSFET temperature thresholds (regs 102-104) ---,,,,,,,,
-,,,,,,,,
-102,pcb_ot_warn,pcb_ot_warn,1C,SHORT,offset:-50,W,,PCB/MOSFET overtemperature WARNING. eg4_ll.py offset 117-119. offset: raw-50=degC.
-103,pcb_ot_protect,pcb_ot_protect,1C,SHORT,offset:-50,W,,PCB/MOSFET overtemperature PROTECTION. eg4_ll.py offset 119-121. offset: raw-50=degC.
-104,pcb_ot_release,pcb_ot_release,1C,SHORT,offset:-50,W,,PCB/MOSFET overtemperature RELEASE. eg4_ll.py offset 121-123. offset: raw-50=degC.
-,,,,,,,,
-# -----------------------------------------------------------,,,,,,,,
-# IDENTITY BLOCK  (hwCommandRoot: FC 0x03  start=105  count=23),,,,,,,,
-"# eg4_ll.py: b""\x03\x00\x69\x00\x17"" — abs regs 105-127  reply=51 bytes",,,,,,,,
-# Byte offsets back-calculated from eg4_ll.py read_hw_details():,,,,,,,,
-#   model:      result[2:25]  -> regs 105-116 (24 bytes  includes byte_count prefix),,,,,,,,
-#   fw_version: result[27:33] -> regs 117-119 (6 bytes  format e.g. V03R04),,,,,,,,
-#   serial_no:  result[33:48] -> regs 120-127 (15 bytes; code appends BMS ID),,,,,,,,
-# -----------------------------------------------------------,,,,,,,,
-,,,,,,,,
-105-116,model,model,,ASCII,,R,,Product model number. eg4_ll.py result[2:25] -> regs 105-116. 24-byte ASCII string.
-117-119,fw_version,fw_version,,ASCII,,R,,BMS firmware version. eg4_ll.py result[27:33] -> regs 117-119. 6-byte ASCII string e.g. V03R04.
-120-127,serial_no,serial_no,,ASCII,,W,,Product serial number. eg4_ll.py result[33:48] -> regs 120-127. 16-byte ASCII string. RW per PDF.
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note
+0,pack_voltage,pack_voltage,0.01V,USHORT,0-65535,,R,,Pack voltage. PDF: 10 mV/LSB = 0.01 V. Verified: u16(offset 3)/100.
+1,pack_current,pack_current,0.01A,SHORT,-65535,,R,,Pack current. PDF: 10 mA/LSB = 0.01 A. Positive=charging Negative=discharging. Verified: s16(offset 5)/100.
+2,cell_01_voltage,cell_01_voltage,1mV,USHORT,0-65535,,R,,Cell 1 voltage.  u16(offset 7)/1000 V; raw is mV.
+3,cell_02_voltage,cell_02_voltage,1mV,USHORT,0-65535,,R,,Cell 2 voltage.
+4,cell_03_voltage,cell_03_voltage,1mV,USHORT,0-65535,,R,,Cell 3 voltage.
+5,cell_04_voltage,cell_04_voltage,1mV,USHORT,0-65535,,R,,Cell 4 voltage.
+6,cell_05_voltage,cell_05_voltage,1mV,USHORT,0-65535,,R,,Cell 5 voltage.
+7,cell_06_voltage,cell_06_voltage,1mV,USHORT,0-65535,,R,,Cell 6 voltage.
+8,cell_07_voltage,cell_07_voltage,1mV,USHORT,0-65535,,R,,Cell 7 voltage.
+9,cell_08_voltage,cell_08_voltage,1mV,USHORT,0-65535,,R,,Cell 8 voltage.
+10,cell_09_voltage,cell_09_voltage,1mV,USHORT,0-65535,,R,,Cell 9 voltage.
+11,cell_10_voltage,cell_10_voltage,1mV,USHORT,0-65535,,R,,Cell 10 voltage.
+12,cell_11_voltage,cell_11_voltage,1mV,USHORT,0-65535,,R,,Cell 11 voltage.
+13,cell_12_voltage,cell_12_voltage,1mV,USHORT,0-65535,,R,,Cell 12 voltage.
+14,cell_13_voltage,cell_13_voltage,1mV,USHORT,0-65535,,R,,Cell 13 voltage.
+15,cell_14_voltage,cell_14_voltage,1mV,USHORT,0-65535,,R,,Cell 14 voltage.
+16,cell_15_voltage,cell_15_voltage,1mV,USHORT,0-65535,,R,,Cell 15 voltage.
+17,cell_16_voltage,cell_16_voltage,1mV,USHORT,0-65535,,R,,Cell 16 voltage.
+18,temp_pcb,temp_pcb,1C,SHORT,-140,,R,,PCB/MOSFET temperature. PDF: Temp of PCB SHORT degC. Verified:  s16(offset 39) -> reg 18.
+19,temp_avg,temp_avg,1C,SHORT,-140,,R,,Average cell temperature. PDF: Temp Avg SHORT degC. Present in read window; not decoded separately by .
+20,temp_max,temp_max,1C,SHORT,-140,,R,,Maximum cell temperature. PDF: Temp Max SHORT degC. Present in read window; not decoded separately by .
+21,cap_remaining,cap_remaining,,USHORT,0-65535,,R,,Remaining capacity. PDF: Cap Remaining USHORT no unit. Verified:  u16(offset 45) -> reg 21.
+22,max_charge_current,max_charge_current,,USHORT,0-65535,,R,,Maximum charging current. PDF: Max charging Current USHORT no unit. Verified:  u16(offset 47) -> reg 22.
+23,soh,soh,%,USHORT,0-100,,R,,State of Health 0-100%. Verified:  u16(offset 49) -> reg 23.
+24,soc,soc,%,USHORT,0-100,,R,,State of Charge 0-100%. Verified:  u16(offset 51) -> reg 24.
+25.b0,status,status,,_8BIT,0-255,,R,,Operating status code. Low byte of reg 25.  packet[54]. See status code values in comment below.
+25.b8,heater_state,heater_state,,_8BIT,0-255,,R,,Heater state. High byte of reg 25.  packet[53]. 0x80=Heat On 0x00=Heat Off.
+26.b0,warning_pack_ov,Warning Pack OV,,1bit,"{""0"":"""",""1"":""Pack_OV""}",,R,,
+26.b1,warning_cell_ov,Warning Cell OV,,1bit,"{""0"":"""",""1"":""Cell_OV""}",,R,,
+26.b2,warning_pack_uv,Warning Pack UV,,1bit,"{""0"":"""",""1"":""Pack_UV""}",,R,,
+26.b3,warning_cell_uv,Warning Cell UV,,1bit,"{""0"":"""",""1"":""Cell_UV""}",,R,,
+26.b4,warning_charge_oc,Warning Charge OC,,1bit,"{""0"":"""",""1"":""Charge_OC""}",,R,,
+26.b5,warning_discharge_oc,Warning Discharge OC,,1bit,"{""0 "":"""",""1"":""Discharge_OC""}",,R,,
+26.b6,warning_amb_temp,Warning Abnormal Amb Temp,,1bit,"{""0"":"""",""1"":""Abnormal_Ambient_Temp""}",,R,,
+26.b7,warning_mos_overheat,Warning MOS Overheat,,1bit,"{""0"":"""",""1"":""MOS_Overheating""}",,R,,
+26.b8,warning_charge_ot,Warning Charge OT,,1bit,"{""0"":"""",""1"":""Charge_OT""}",,R,,
+26.b9,warning_discharge_ot,Warning Discharge OT,,1bit,"{""0"":"""",""1"":""Discharge_OT""}",,R,,
+26.b10,warning_charge_ut,Warning Charge UT,,1bit,"{""0"":"""",""1"":""Charge_UT""}",,R,,
+26.b11,warning_discharge_ut,Warning Discharge UT,,1bit,"{""0"":"""",""1"":""Discharge_UT""}",,R,,
+26.b12,warning_low_capacity,Warning Low Capacity,,1bit,"{""0"":"""",""1"":""Low_Capacity""}",,R,,
+26.b13,warning_float_stopped,Warning Float Stopped,,1bit,"{""0"":"""",""1"":""Float_Stopped""}",,R,,
+26.b14,warning_inactive_protect,Warning Inactive/Protect,,1bit,"{""0"":"""",""1"":""Inactive/Protect""}",,R,,
+26.b15,warning_inactive_charging_lmt,Warning Inactive/Charging_Lmt,,1bit,"{""0"":"""",""1"":""Inactive/Charging_Lmt""}",,R,,
+27.b0,protection_pack_ov,ProtectionPack OV,,1bit,"{""0"":"""",""1"":""Pack_OV""}",,R,,
+27.b1,protection_cell_ov,Protection Cell OV,,1bit,"{""0"":"""",""1"":""Cell_OV""}",,R,,
+27.b2,protection_pack_uv,Protection Pack UV,,1bit,"{""0"":"""",""1"":""Pack_UV""}",,R,,
+27.b3,protection_cell_uv,Protection Cell UV,,1bit,"{""0"":"""",""1"":""Cell_UV""}",,R,,
+27.b4,protection_charge_oc,Protection Charge OC,,1bit,"{""0"":"""",""1"":""Charge_OC""}",,R,,
+27.b5,protection_discharge_oc,Protection Discharge OC,,1bit,"{""0"":"""",""1"":""Discharge_OC""}",,R,,
+27.b6,protection_amb_temp,Protection Abnormal Amb Temp,,1bit,"{""0"":"""",""1"":""Abnormal_Ambient_Temp""}",,R,,
+27.b7,protection_mos_overheat,Protection MOS Overheat,,1bit,"{""0"":"""",""1"":""MOS_Overheating""}",,R,,
+27.b8,protection_charge_ot,Protection Charge OT,,1bit,"{""0"":"""",""1"""":""""Charge_OT""""}""",,R,,
+27.b9,protection_discharge_ot,Protection Discharge OT,,1bit,"{""0"":"""",""1"":""Discharge_OT""}",,R,,
+27.b10,protection_charge_ut,Protection Charge UT,,1bit,"{""0"":"""",""1"":""Charge_UT""}",,R,,
+27.b11,protection_discharge_ut,Protection Discharge UT,,1bit,"{""0"":"""",""1"":""Discharge_UT""}",,R,,
+27.b12,protection_low_capacity,Protection Low Capacity,,1bit,"{""0"":"""",""1"":""Low_Capacity""}",,R,,
+27.b13,protection_float_stopped,Protection Float Stopped,,1bit,"{""0"":"""",""1"":""Float_Stopped""}",,R,,
+27.b14,protection_inactive_protect,Protection Inactive/Protect,,1bit,"{""0"":"""",""1"":""Inactive/Protect""}",,R,,
+27.b15,protection_inactive_charging_lmt,Protection Inactive/Charging_Lmt,,1bit,"{""0"":"""",""1"":""Inactive/Charging_Lmt""}",,R,,
+28.b0,error_voltage_error,Error Voltage_Error,,1bit,"{""0"":"""",""1"":""Pack_OV""}",,R,,
+28.b1,error_temperature_error,Error Temperature_Error,,1bit,"{""0"":"""",""1"":""Temperature_Error""}",,R,,
+28.b2,error_current_flow_error,Error Current_Flow_Error,,1bit,"{""0"":"""",""1"":""Current_Flow_Error""}",,R,,
+28.b4,error_cell_unbalance,Error Cell_Unbalance,,1bit,"{""0"":"""",""1"":""Cell_Unbalance""}",,R,,
+29,cycle_count_h,cycle_count_h,,USHORT,0-65535,,W,,Cycle count high word.  u32(offset 61) -> regs 29-30. Loader pairs with _l to form UINT.
+30,cycle_count_l,cycle_count_l,,USHORT,0-65535,,W,,Cycle count low word. Loader pairs with _h to form 32-bit UINT named cycle_count.
+31,full_capacity_h,full_capacity_h,mAS,USHORT,0-65535,,W,,Full capacity high word. PDF: mAS.  u32(offset 65)/3600/1000 = Ah. Loader pairs with _l to form UINT.
+32,full_capacity_l,full_capacity_l,mAS,USHORT,0-65535,,W,,Full capacity low word. Loader pairs with _h to form 32-bit UINT named full_capacity.
+33.b0,temp_sensor_2,temp_sensor_2,1C,_8SBIT,-125,,R,,Temperature sensor 2. Low byte of reg 33.  s8(offset 70). Signed degC.
+33.b8,temp_sensor_1,temp_sensor_1,1C,_8SBIT,-125,,R,,Temperature sensor 1. High byte of reg 33.  s8(offset 69). Signed degC.
+34.b0,temp_sensor_4,temp_sensor_4,1C,_8SBIT,-125,,R,,Temperature sensor 4. Low byte of reg 34.  s8(offset 72). Signed degC.
+34.b8,temp_sensor_3,temp_sensor_3,1C,_8SBIT,-125,,R,,Temperature sensor 3. High byte of reg 34.  s8(offset 71). Signed degC.
+35.b0,temp_sensor_6,temp_sensor_6,1C,_8SBIT,-125,,R,,Temperature sensor 6. Low byte of reg 35. PDF only; not read by . May be 0 if sensor absent.
+35.b8,temp_sensor_5,temp_sensor_5,1C,_8SBIT,-125,,R,,Temperature sensor 5. High byte of reg 35. PDF only; not read by . May be 0 if sensor absent.
+36,cell_num,cell_num,,USHORT,48214,,W,,Number of cells in series string.  u16(offset 75) -> reg 36. RW per PDF.
+37,designed_capacity,designed_capacity,0.1AH,USHORT,0-65535,,R,,Designed battery capacity. PDF: 0.1 AH/LSB. raw*0.1=Ah. Not read by ; present in cell read window.
+38,cell_balance_status,cell_balance_status,,USHORT,,,R,,Cell balance flags. bit0=Cell_1_Balanced...bit15=Cell_16_Balanced. Not read by ; present in cell read window.
+56,balance_volt,balance_volt,0.001V,USHORT,2000-4000,,W,,Minimum cell voltage to enable balancing.  offset 25-27. raw*0.001=V (e.g. 3400=3.400 V).
+57,balance_volt_diff,balance_volt_diff,0.001V,USHORT,0-1000,,W,,Cell voltage delta threshold to trigger balancing.  offset 27-29. raw*0.001=V.
+58,low_cap_warn,low_cap_warn,%,USHORT,0-100,,W,,SOC level that triggers low capacity warning.  offset 29-31.
+61,cell_uv_warn,cell_uv_warn,0.001V,USHORT,2000-3500,,W,,Cell undervoltage WARNING threshold.  offset 35-37. raw*0.001=V.
+62,cell_uv_protect,cell_uv_protect,0.001V,USHORT,1500-3200,,W,,Cell undervoltage PROTECTION threshold.  offset 37-39. raw*0.001=V.
+63,cell_uv_release,cell_uv_release,0.001V,USHORT,2000-3500,,W,,Cell undervoltage RELEASE (recovery) threshold.  offset 39-41. raw*0.001=V.
+64,pack_uv_warn,pack_uv_warn,0.01V,USHORT,0-65535,,W,,Pack undervoltage WARNING threshold.  offset 41-43. raw*0.01=V.
+65,pack_uv_protect,pack_uv_protect,0.01V,USHORT,0-65535,,W,,Pack undervoltage PROTECTION threshold.  offset 43-45. raw*0.01=V.
+66,pack_uv_release,pack_uv_release,0.01V,USHORT,0-65535,,W,,Pack undervoltage RELEASE (recovery) threshold.  offset 45-47. raw*0.01=V.
+67,cell_ov_warn,cell_ov_warn,0.001V,USHORT,3000-4200,,W,,Cell overvoltage WARNING threshold.  offset 47-49. raw*0.001=V.
+68,cell_ov_protect,cell_ov_protect,0.001V,USHORT,3200-4500,,W,,Cell overvoltage PROTECTION threshold.  offset 49-51. raw*0.001=V.
+69,cell_ov_release,cell_ov_release,0.001V,USHORT,3000-4200,,W,,Cell overvoltage RELEASE (recovery) threshold.  offset 51-53. raw*0.001=V.
+70,pack_ov_warn,pack_ov_warn,0.01V,USHORT,0-65535,,W,,Pack overvoltage WARNING threshold.  offset 53-55. raw*0.01=V.
+71,pack_ov_protect,pack_ov_protect,0.01V,USHORT,0-65535,,W,,Pack overvoltage PROTECTION threshold.  offset 55-57. raw*0.01=V.
+72,pack_ov_release,pack_ov_release,0.01V,USHORT,0-65535,,W,,Pack overvoltage RELEASE (recovery) threshold.  offset 57-59. raw*0.01=V.
+78,discharge_oc_release,discharge_oc_release,,USHORT,0-3600,,W,,Discharge overcurrent protection release time in seconds.  offset 69-71.
+79,charge_oc_release,charge_oc_release,,USHORT,0-3600,,W,,Charge overcurrent protection release time in seconds.  offset 71-73.
+80,charge_oc1_protect,charge_oc1_protect,0.01A,USHORT,0-65535,,W,,Charge overcurrent level 1 PROTECTION threshold.  offset 73-75. raw*0.01=A.
+81,discharge_oc1_protect,discharge_oc1_protect,0.01A,USHORT,0-65535,,W,,Discharge overcurrent level 1 PROTECTION threshold.  offset 75-77. raw*0.01=A.
+82,short_circuit_current,short_circuit_current,0.01A,USHORT,0-65535,,W,,Short circuit / instantaneous overcurrent threshold.  offset 77-79. raw*0.01=A.
+83,charge_oc2_protect,charge_oc2_protect,0.01A,USHORT,0-65535,,W,,Charge overcurrent level 2 PROTECTION threshold.  offset 79-81. raw*0.01=A.
+84,discharge_oc2_protect,discharge_oc2_protect,0.01A,USHORT,0-65535,,W,,Discharge overcurrent level 2 PROTECTION threshold.  offset 81-83. raw*0.01=A.
+85,charge_oc1_delay,charge_oc1_delay,,USHORT,0-255,,W,,Charge OC1 trip delay in seconds.  offset 83-85.
+86,charge_oc2_delay,charge_oc2_delay,,USHORT,0-255,,W,,Charge OC2 trip delay in seconds.  offset 85-87.
+87,discharge_oc1_delay,discharge_oc1_delay,,USHORT,0-255,,W,,Discharge OC1 trip delay in seconds.  offset 87-89.
+88,discharge_oc2_delay,discharge_oc2_delay,,USHORT,0-255,,W,,Discharge OC2 trip delay in seconds.  offset 89-91.
+89.b0,discharge_oc_times,discharge_oc_times,,_8BIT,0-255,,W,,Discharge overcurrent retry count. Low byte of reg 89.  offset 92 (1 byte).
+89.b8,charge_oc_times,charge_oc_times,,_8BIT,0-255,,W,,Charge overcurrent retry count. High byte of reg 89.  offset 91 (1 byte).
+90,charge_ut_warn,charge_ut_warn,1C,SHORT,,,W,"{""Offset"":-50}",Charge undertemperature WARNING.  offset 93-95. offset: raw-50=degC.
+91,charge_ut_protect,charge_ut_protect,1C,SHORT,,,W,"{""Offset"":-50}",Charge undertemperature PROTECTION.  offset 95-97. offset: raw-50=degC.
+92,charge_ut_release,charge_ut_release,1C,SHORT,,,W,"{""Offset"":-50}",Charge undertemperature RELEASE.  offset 97-99. offset: raw-50=degC.
+93,charge_ot_warn,charge_ot_warn,1C,SHORT,,,W,"{""Offset"":-50}",Charge overtemperature WARNING.  offset 99-101. offset: raw-50=degC.
+94,charge_ot_protect,charge_ot_protect,1C,SHORT,,,W,"{""Offset"":-50}",Charge overtemperature PROTECTION.  offset 101-103. offset: raw-50=degC.
+95,charge_ot_release,charge_ot_release,1C,SHORT,,,W,"{""Offset"":-50}",Charge overtemperature RELEASE.  offset 103-105. offset: raw-50=degC.
+96,discharge_ut_warn,discharge_ut_warn,1C,SHORT,,,W,"{""Offset"":-50}",Discharge undertemperature WARNING.  offset 105-107. offset: raw-50=degC.
+97,discharge_ut_protect,discharge_ut_protect,1C,SHORT,,,W,"{""Offset"":-50}",Discharge undertemperature PROTECTION.  offset 107-109. offset: raw-50=degC.
+98,discharge_ut_release,discharge_ut_release,1C,SHORT,,,W,"{""Offset"":-50}",Discharge undertemperature RELEASE.  offset 109-111. offset: raw-50=degC.
+99,discharge_ot_warn,discharge_ot_warn,1C,SHORT,,,W,"{""Offset"":-50}",Discharge overtemperature WARNING.  offset 111-113. offset: raw-50=degC.
+100,discharge_ot_protect,discharge_ot_protect,1C,SHORT,,,W,"{""Offset"":-50}",Discharge overtemperature PROTECTION.  offset 113-115. offset: raw-50=degC.
+101,discharge_ot_release,discharge_ot_release,1C,SHORT,,,W,"{""Offset"":-50}",Discharge overtemperature RELEASE.  offset 115-117. offset: raw-50=degC.
+102,pcb_ot_warn,pcb_ot_warn,1C,SHORT,,,W,"{""Offset"":-50}",PCB/MOSFET overtemperature WARNING.  offset 117-119. offset: raw-50=degC.
+103,pcb_ot_protect,pcb_ot_protect,1C,SHORT,,,W,"{""Offset"":-50}",PCB/MOSFET overtemperature PROTECTION.  offset 119-121. offset: raw-50=degC.
+104,pcb_ot_release,pcb_ot_release,1C,SHORT,,,W,"{""Offset"":-50}",PCB/MOSFET overtemperature RELEASE.  offset 121-123. offset: raw-50=degC.
+105-116,model,model,,ASCII,,,R,,Product model number.  result[2:25] -> regs 105-116. 24-byte ASCII string.
+117-119,fw_version,fw_version,,ASCII,,,R,,BMS firmware version.  result[27:33] -> regs 117-119. 6-byte ASCII string e.g. V03R04.
+120-127,serial_no,serial_no,,ASCII,,,W,,Product serial number.  result[33:48] -> regs 120-127. 16-byte ASCII string. RW per PDF.
+#,,,,,,,,,
+#,,,,,,,,,
+#,,,,,,,,,
+#,,,,,,,,,
+,,,,,,,,,
+#            .b8 = high byte (bits 8-15)   .b0 = low byte (bits 0-7),,,,,,,,,
+#            Discharge_OC_Times at offset 92 (lo byte of reg 89). Both unsigned bytes.,,,,,,,,,
+#            The loader auto-promotes a _h/_l pair to UINT and drops the _h suffix.,,,,,,,,,
+#            The loader concatenates all words and strips null characters.,,,,,,,,,
+#            Used for temperature sensor bytes confirmed as s8 in .,,,,,,,,,
+#     absolute_register = 45 + (packet_offset - 3) / 2,,,,,,,,,
+#   (0x80 = on  0x00 = off) and the low byte carries the operating status code.,,,,,,,,,
+#   0x0001=Pack_OV   0x0002=Cell_OV   0x0004=Pack_UV   0x0008=Cell_UV,,,,,,,,,
+#   0x0001=Voltage_Error  0x0002=Temperature_Error  0x0004=Current_Flow_Error  0x0010=Cell_Unbalance,,,,,,,,,
+#   0x0010=Charge_OC  0x0020=Discharge_OC  0x0040=Abnormal_Ambient_Temp,,,,,,,,,
+#   0x0080=MOS_Overheating  0x0100=Charge_OT  0x0200=Discharge_OT,,,,,,,,,
+#   0x00=Inactive/Standby  0x01=Inactive/Charging  0x02=Inactive/Discharging,,,,,,,,,
+#   0x0400=Charge_UT  0x0800=Discharge_UT  0x1000=Low_Capacity  0x2000=Float_Stopped,,,,,,,,,
+#   0x04=Inactive/Protect  0x08=Inactive/Charging_Lmt,,,,,,,,,
+#   0x80=Active/Standby    0x81=Active/Charging     0x82=Active/Discharging,,,,,,,,,
+#   0x84=Active/Protect    0x88=Active/Charging_Lmt,,,,,,,,,
+#   1-4 (regs 33-34). Sensors 5-6 (reg 35) are included but may read 0.,,,,,,,,,
+#   _8BIT    8-bit unsigned field extracted from a 16-bit register.,,,,,,,,,
+#   _8SBIT   8-bit signed field (same addressing as _8BIT but sign-extended).,,,,,,,,,
+#   All config register numbers below are ABSOLUTE Modbus addresses verified,,,,,,,,,
+#   ASCII    Multi-register ASCII string expressed as a register range.,,,,,,,,,
+#   by back-calculating from  packet byte offsets:,,,,,,,,,
+#   Discharge_OC_Times from offset 92 (lo byte of reg 89) as unsigned bytes.,,,,,,,,,
+"#   Each affected register is flagged with """"offset: raw-50=degC"""" in its note.""",,,,,,,,,
+#    applies:  actual_degC = raw_value - 50,,,,,,,,,
+"#    bmsConfigCommandRoot = b""""\x03\x00\x2d\x00\x5b""""""",,,,,,,,,
+#    confirms: packet[53]=heater hi-byte  packet[54]=status lo-byte.,,,,,,,,,
+#    reads Charge_OC_Times from offset 91 (hi byte of reg 89) and,,,,,,,,,
+#    uses s8() (signed) to read sensor bytes. _8SBIT is used here.,,,,,,,,,
+#   fw_version: result[27:33] -> regs 117-119 (6 bytes  format e.g. V03R04),,,,,,,,,
+#   Mapped as two _8BIT entries at 25.b8 and 25.b0.,,,,,,,,,
+#   Mapped as two _8BIT entries at 89.b8 and 89.b0.,,,,,,,,,
+#   model:      result[2:25]  -> regs 105-116 (24 bytes  includes byte_count prefix),,,,,,,,,
+#   Regs 39-55: between cell data and config blocks; not read by any command.,,,,,,,,,
+#   Regs 45-55: within bmsConfig window (offsets 3-24) â€” code skips them.,,,,,,,,,
+#   Regs 73-77: within bmsConfig window (offsets 59-68) â€” code skips them.,,,,,,,,,
+#   serial_no:  result[33:48] -> regs 120-127 (15 bytes; code appends BMS ID),,,,,,,,,
+#   SHORT    16-bit signed int   (2 bytes  two's complement),,,,,,,,,
+#   start = 0x002D = 45  count = 0x5B = 91 (covers absolute regs 45-135).,,,,,,,,,
+#   The -50 offset is a BMS firmware encoding not shown in the PDF unit column.,,,,,,,,,
+#   The PDF documents 6 sensors (regs 33-35);  reads only sensors,,,,,,,,,
+#   The PDF notes that the high byte of reg 25 carries the heater state,,,,,,,,,
+#   The unit_mod in the CSV is 1 (whole degC per LSB after offset is applied).,,,,,,,,,
+#   them in read requests but their values are not decoded.,,,,,,,,,
+#   These are omitted from the CSV; the batch range calculator will include,,,,,,,,,
+#   Two sensors per register: .b8 = high byte  .b0 = low byte.,,,,,,,,,
+#   UINT     32-bit unsigned int (4 bytes); expressed here as _h/_l USHORT pairs.,,,,,,,,,
+#   USHORT   16-bit unsigned int (2 bytes),,,,,,,,,
+#   Your application layer must subtract 50 from raw reads before display/use.,,,,,,,,,
+# --- Balancing thresholds (regs 56-58) ---,,,,,,,,,
+# --- Capacity and charge limits (regs 21-22) ---,,,,,,,,,
+# --- Cell configuration and balance (regs 36-38) ---,,,,,,,,,
+# --- Cell overvoltage thresholds (regs 67-69) ---,,,,,,,,,
+# --- Cell undervoltage thresholds (regs 61-63) ---,,,,,,,,,
+# --- Charge temperature thresholds (regs 90-95) ---,,,,,,,,,
+# --- Current protection thresholds (regs 80-88) ---,,,,,,,,,
+# --- Cycle count (regs 29-30  4-byte ULONG  RW) ---,,,,,,,,,
+# --- Discharge temperature thresholds (regs 96-101) ---,,,,,,,,,
+# --- Full capacity (regs 31-32  4-byte ULONG  RW) ---,,,,,,,,,
+# --- Individual cell voltages (regs 2-17) ---,,,,,,,,,
+# --- OC release timers (regs 78-79) ---,,,,,,,,,
+# --- OC retry counts (reg 89 â€” split) ---,,,,,,,,,
+# --- Pack overvoltage thresholds (regs 70-72) ---,,,,,,,,,
+# --- Pack temperature summary (regs 18-20) ---,,,,,,,,,
+# --- Pack undervoltage thresholds (regs 64-66) ---,,,,,,,,,
+# --- Pack-level measurements (regs 0-1) ---,,,,,,,,,
+# --- PCB/MOSFET temperature thresholds (regs 102-104) ---,,,,,,,,,
+# --- Per-sensor temperature array (regs 33-35) ---,,,,,,,,,
+# --- State indicators (regs 23-24) ---,,,,,,,,,
+# --- Status and heater byte (reg 25 â€” split) ---,,,,,,,,,
+# --- Warning / protection / error flags (regs 26-28) ---,,,,,,,,,
+# -----------------------------------------------------------,,,,,,,,,
+# -----------------------------------------------------------,,,,,,,,,
+# ============================================================,,,,,,,,,
+# ============================================================,,,,,,,,,
+"# _h/_l pair: loader auto-promotes to UINT named """"cycle_count"""".""",,,,,,,,,
+# Absolute register = 45 + (packet_offset - 3) / 2,,,,,,,,,
+# ALL registers use Modbus FC 0x03 (Read Holding Registers).,,,,,,,,,
+# Application layer must apply: actual_degC = raw - 50,,,,,,,,,
+# Byte offsets back-calculated from  read_hw_details():,,,,,,,,,
+# CELL DATA BLOCK  (cellCommandRoot: FC 0x03  start=0  count=39),,,,,,,,,
+# CONFIG / THRESHOLD BLOCK  (bmsConfigCommandRoot: FC 0x03  start=45  count=91),,,,,,,,,
+# CONFIG REGISTER BASE ADDRESS,,,,,,,,,
+# CONFIG TEMPERATURE ENCODING (regs 90-104),,,,,,,,,
+# CSV stores raw mAS; the /3600/1000 conversion is done at the application layer.,,,,,,,,,
+# DATA TYPES,,,,,,,,,
+# decoded by ; they are present and valid per the PDF.,,,,,,,,,
+# EG4-LL Battery â€” HOLDING Register Map (PDF V01.06),,,,,,,,,
+#  reads temperature_mos = s16(offset 39) -> reg 18 confirmed.,,,,,,,,,
+"# : b""""\x03\x00\x00\x00\x27"""" â€” regs 0-38  reply=83 bytes""",,,,,,,,,
+"# : b""""\x03\x00\x2d\x00\x5b"""" â€” abs regs 45-135  reply=187 bytes""",,,,,,,,,
+"# : b""""\x03\x00\x69\x00\x17"""" â€” abs regs 105-127  reply=51 bytes""",,,,,,,,,
+# : capacity=u32(offset 65)/3600/1000 Ah -> regs 31-32 confirmed.,,,,,,,,,
+# : capacity_remain=u16(offset 45)->reg 21  max_charge_current=u16(offset 47)->reg 22.,,,,,,,,,
+# : cell_count=u16(offset 75)->reg 36 confirmed.,,,,,,,,,
+# : Charge_OC_Times at offset 91 (hi byte of reg 89),,,,,,,,,
+# : cycles=u32(offset 61)->regs 29-30 confirmed. Range per PDF: 1-65535.,,,,,,,,,
+# : get_temp() = int.from_bytes(…  signed=True) - 50,,,,,,,,,
+# : heater_hex=packet[53] (hi byte)  status code in packet[54] (lo byte).,,,,,,,,,
+# : s8() at offsets 69-72 -> regs 33-34  confirmed SIGNED bytes.,,,,,,,,,
+# : soh=u16(offset 49)->reg 23  soc=u16(offset 51)->reg 24.,,,,,,,,,
+# : warning=packet[55:57]->reg 26  protection=packet[57:59]->reg 27  error=packet[59:61]->reg 28.,,,,,,,,,
+# ENCODING: BMS stores (actual_degC + 50) in each register.,,,,,,,,,
+# Error bits (reg 28):,,,,,,,,,
+# FC 0x10 writes are accepted â€” it is NOT a separate address space.,,,,,,,,,
+# IDENTITY BLOCK  (hwCommandRoot: FC 0x03  start=105  count=23),,,,,,,,,
+# No unit specified in PDF for either; no scaling applied in code.,,,,,,,,,
+# PDF documents 6 sensors (regs 33-35);  reads only sensors 1-4.,,,,,,,,,
+# PDF unit: mAS (milliamp-seconds). /3600 = mAh  /1000 = Ah.,,,,,,,,,
+# PDF: 16 cells USHORT in mV.  reads raw/1000 to display in V; raw unit is mV.,,,,,,,,,
+# PDF: reg 25 high byte = heat state (0x80=on 0x00=off); low byte = operating status code.,,,,,,,,,
+# PDF: SHORT degC whole-degree resolution.,,,,,,,,,
+# Protection bits (reg 27): identical layout except 0x2000=Discharge_SC,,,,,,,,,
+# R  = read-only  (BMS NACKs FC 0x10 writes),,,,,,,,,
+# REGISTER 25 SPLIT BYTE,,,,,,,,,
+# REGISTER 89 SPLIT BYTE,,,,,,,,,
+# Regs 19-20 (temp_avg  temp_max) are within the read window but not separately,,,,,,,,,
+# Regs 45-55 and 73-77 are within the read window but unused (reserved/unknown).,,,,,,,,,
+# Sensors 5-6 (reg 35) included here but may read 0 if hardware absent.,,,,,,,,,
+# Source:  EG4-LL-MODBUS-Communication-Protocol.pdf V01.06 (2017-06-21),,,,,,,,,
+# Status code values (low byte only):,,,,,,,,,
+# TEMPERATURE SENSOR BYTES (regs 33-35),,,,,,,,,
+# The PDF defines a single address space; R vs RW indicates whether,,,,,,,,,
+# Two sensors per 16-bit register: .b8=high byte  .b0=low byte.,,,,,,,,,
+# UNKNOWN/RESERVED GAPS,,,,,,,,,
+# Verified: venus-os_dbus-serialbattery/bms/ (Pfitz Jan 2026),,,,,,,,,
+# W  = read/write (BMS accepts FC 0x10 writes),,,,,,,,,
+# Warning bits (reg 26):,,,,,,,,,

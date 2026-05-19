@@ -51,7 +51,7 @@ connection_timeout = 10
 ### Configuration Options
 
 | Option | Default | Description |
-|--------|---------|-------------|
+| --- | --- | --- |
 | `host` | `localhost` | InfluxDB server hostname or IP address |
 | `port` | `8086` | InfluxDB server port |
 | `database` | `solar` | Database name (will be created if it doesn't exist) |
@@ -71,17 +71,20 @@ connection_timeout = 10
 The InfluxDB transport includes robust connection monitoring to handle network issues and server restarts:
 
 ### Automatic Health Checks
+
 - Performs connection health checks every 30 seconds
 - Uses InfluxDB ping command to verify connectivity
 - Automatically attempts reconnection if connection is lost
 
 ### Reconnection Logic
+
 - Attempts reconnection up to `reconnect_attempts` times
 - Waits `reconnect_delay` seconds between attempts
 - Preserves buffered data during reconnection attempts
 - Retries failed writes after successful reconnection
 
 ### Error Recovery
+
 - Gracefully handles network timeouts and connection drops
 - Maintains data integrity by not losing buffered points
 - Provides detailed logging for troubleshooting
@@ -91,6 +94,7 @@ The InfluxDB transport includes robust connection monitoring to handle network i
 The InfluxDB output creates data points with the following structure:
 
 ### Tags (if `include_device_info = true`)
+
 - `device_identifier`: Device serial number (lowercase)
 - `device_name`: Device name
 - `device_manufacturer`: Device manufacturer
@@ -99,11 +103,14 @@ The InfluxDB output creates data points with the following structure:
 - `transport`: Source transport name
 
 ### Fields
+
 All device data values are stored as fields. The transport automatically converts:
+
 - Numeric strings to integers or floats
 - Non-numeric strings remain as strings
 
 ### Time
+
 - Uses current timestamp in nanoseconds (if `include_timestamp = true`)
 - Can be disabled for custom timestamp handling
 
@@ -133,18 +140,21 @@ measurement = inverter_data
 ## Installation
 
 1. Install the required dependency:
+
    ```bash
    pip install influxdb
    ```
 
 2. Or add to your requirements.txt:
-   ```
+
+   ``` ini
    influxdb
    ```
 
 ## InfluxDB Setup
 
 1. Install InfluxDB v1:
+
    ```bash
    # Ubuntu/Debian
    sudo apt install influxdb influxdb-client
@@ -155,6 +165,7 @@ measurement = inverter_data
    ```
 
 2. Create a database (optional - will be created automatically):
+
    ```bash
    echo "CREATE DATABASE solar" | influx
    ```
@@ -188,22 +199,26 @@ InfluxDB data can be easily visualized in Grafana:
 ## Troubleshooting
 
 ### Connection Issues
+
 - Verify InfluxDB is running: `systemctl status influxdb`
 - Check firewall settings for port 8086
 - Verify host and port configuration
 - Check connection timeout settings if using slow networks
 
 ### Authentication Issues
+
 - Ensure username/password are correct
 - Check InfluxDB user permissions
 
 ### Data Not Appearing
+
 - Check log levels for detailed error messages
 - Verify database exists and is accessible
 - Check batch settings - data may be buffered
 - Look for reconnection messages in logs
 
 ### Data Stops After Some Time
+
 - **Most Common Issue**: Network connectivity problems or InfluxDB server restarts
 - Check logs for reconnection attempts and failures
 - Verify InfluxDB server is stable and not restarting
@@ -211,7 +226,8 @@ InfluxDB data can be easily visualized in Grafana:
 - Monitor network connectivity between gateway and InfluxDB server
 
 ### Performance
+
 - Adjust `batch_size` and `batch_timeout` for your use case
 - Larger batches reduce network overhead but increase memory usage
 - Shorter timeouts provide more real-time data but increase network traffic
-- Increase `connection_timeout` for slow networks 
+- Increase `connection_timeout` for slow networks

@@ -1,0 +1,58 @@
+{
+  "transport": "modbus_rtu",
+
+  "vebus_error_codes": {
+    "0": "No error",
+    "1": "Device switched off because one of the other phases switched off",
+    "2": "New and old type MK2 protocol mixed in the system",
+    "3": "Not all, or more than, the expected devices were found",
+    "4": "No other device found",
+    "5": "Overvoltage on AC out",
+    "6": "Error in DDC Program",
+    "7": "External device connected, assistant required",
+    "8": "Ground relay test failed",
+    "10": "System time synchronisation problem",
+    "11": "Relay Test Fault",
+    "12": "Config mismatch with 2nd MCU",
+    "14": "Device cannot transmit data",
+    "15": "VE.Bus combination error",
+    "16": "VE.Bus dongle is missing",
+    "17": "Phase master missing",
+    "18": "AC Over-voltage on output of slave while switched off",
+    "19": "Slave does not have AC input",
+    "20": "Configuration mismatch",
+    "22": "Device cannot function as slave",
+    "24": "Switch-over system protection initiated",
+    "25": "Incompatible VE.Bus configuration",
+    "26": "Internal error",
+    "128": "Connect prevented by failing relay test"
+  },
+
+  "vebus_state_codes": {
+    "0": "off",
+    "1": "low power",
+    "2": "fault",
+    "3": "bulk",
+    "4": "absorption",
+    "5": "float",
+    "6": "storage",
+    "7": "equalize",
+    "8": "passthru",
+    "9": "inverting",
+    "10": "power assist",
+    "11": "power supply mode"
+  },
+
+  "switch_mode_codes": {
+    "1": "charger only",
+    "2": "inverter only",
+    "3": "on",
+    "4": "off"
+  },
+
+  "active_ac_input_codes": {
+    "1": "AC input 1",
+    "2": "AC input 2",
+    "240": "none"
+  }
+}

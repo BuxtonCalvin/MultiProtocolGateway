@@ -1,0 +1,47 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note
+0:1.4.0,power_import_total,Active Power Draw Total,0.1W,U32,0-4294967295,,R,,Total active power being imported from grid across all phases; divide by 10
+0:1.8.0,energy_import_total,Total Energy Drawn,Ws,U64,0-18446744073709551615,,R,,Cumulative grid import energy (Watt-seconds); divide by 3600000 for kWh; 64-bit
+0:10.4.0,apparent_power_export_total,Apparent Power Feed Total,0.1VA,U32,,,R,,Total apparent power export; divide by 10
+0:13.4.0,power_factor_total,Power Factor Total,0.001,U32,0-1000,,R,,Aggregate displacement power factor; divide by 1000
+0:14.4.0,grid_frequency,Grid Frequency,0.001Hz,U32,49000-51000,,R,,Grid frequency; divide by 1000
+0:2.4.0,power_export_total,Active Power Feed Total,0.1W,U32,0-4294967295,,R,,Total active power being exported to grid across all phases; divide by 10
+0:2.8.0,energy_export_total,Total Energy Fed,Ws,U64,,,R,,Cumulative grid export energy (Watt-seconds); divide by 3600000 for kWh; 64-bit
+0:21.4.0,power_import_l1,Active Power Draw L1,0.1W,U32,,,R,,Active power import phase L1; divide by 10
+0:21.8.0,energy_import_l1,Energy Drawn L1,Ws,U64,,,R,,Cumulative import energy phase L1
+0:22.4.0,power_export_l1,Active Power Feed L1,0.1W,U32,,,R,,Active power export phase L1; divide by 10
+0:22.8.0,energy_export_l1,Energy Fed L1,Ws,U64,,,R,,Cumulative export energy phase L1
+0:23.4.0,reactive_power_import_l1,Reactive Power Draw L1,0.1VAr,U32,,,R,,Reactive power import phase L1; divide by 10
+0:24.4.0,reactive_power_export_l1,Reactive Power Feed L1,0.1VAr,U32,,,R,,Reactive power export phase L1; divide by 10
+0:29.4.0,apparent_power_import_l1,Apparent Power Draw L1,0.1VA,U32,,,R,,Apparent power import phase L1; divide by 10
+0:3.4.0,reactive_power_import_total,Reactive Power Draw Total,0.1VAr,U32,,,R,,Total reactive power import; divide by 10
+0:3.8.0,reactive_energy_import_total,Reactive Energy Drawn,VARs,U64,,,R,,Cumulative reactive energy import; divide by 3600000 for kVArh
+0:30.4.0,apparent_power_export_l1,Apparent Power Feed L1,0.1VA,U32,,,R,,Apparent power export phase L1; divide by 10
+0:31.4.0,current_l1,Current L1,0.001A,U32,,,R,,RMS current phase L1; divide by 1000
+0:32.4.0,voltage_l1,Voltage L1,0.001V,U32,,,R,,RMS voltage phase L1 (line-to-neutral); divide by 1000
+0:33.4.0,power_factor_l1,Power Factor L1,0.001,U32,0-1000,,R,,Displacement power factor phase L1; divide by 1000
+0:4.4.0,reactive_power_export_total,Reactive Power Feed Total,0.1VAr,U32,,,R,,Total reactive power export; divide by 10
+0:4.8.0,reactive_energy_export_total,Reactive Energy Fed,VARs,U64,,,R,,Cumulative reactive energy export; divide by 3600000 for kVArh
+0:41.4.0,power_import_l2,Active Power Draw L2,0.1W,U32,,,R,,Active power import phase L2; divide by 10
+0:41.8.0,energy_import_l2,Energy Drawn L2,Ws,U64,,,R,,Cumulative import energy phase L2
+0:42.4.0,power_export_l2,Active Power Feed L2,0.1W,U32,,,R,,Active power export phase L2; divide by 10
+0:42.8.0,energy_export_l2,Energy Fed L2,Ws,U64,,,R,,Cumulative export energy phase L2
+0:43.4.0,reactive_power_import_l2,Reactive Power Draw L2,0.1VAr,U32,,,R,,Reactive power import phase L2; divide by 10
+0:44.4.0,reactive_power_export_l2,Reactive Power Feed L2,0.1VAr,U32,,,R,,Reactive power export phase L2; divide by 10
+0:49.4.0,apparent_power_import_l2,Apparent Power Draw L2,0.1VA,U32,,,R,,Apparent power import phase L2; divide by 10
+0:50.4.0,apparent_power_export_l2,Apparent Power Feed L2,0.1VA,U32,,,R,,Apparent power export phase L2; divide by 10
+0:51.4.0,current_l2,Current L2,0.001A,U32,,,R,,RMS current phase L2; divide by 1000
+0:52.4.0,voltage_l2,Voltage L2,0.001V,U32,,,R,,RMS voltage phase L2; divide by 1000
+0:53.4.0,power_factor_l2,Power Factor L2,0.001,U32,0-1000,,R,,Displacement power factor phase L2; divide by 1000
+0:61.4.0,power_import_l3,Active Power Draw L3,0.1W,U32,,,R,,Active power import phase L3; divide by 10
+0:61.8.0,energy_import_l3,Energy Drawn L3,Ws,U64,,,R,,Cumulative import energy phase L3
+0:62.4.0,power_export_l3,Active Power Feed L3,0.1W,U32,,,R,,Active power export phase L3; divide by 10
+0:62.8.0,energy_export_l3,Energy Fed L3,Ws,U64,,,R,,Cumulative export energy phase L3
+0:63.4.0,reactive_power_import_l3,Reactive Power Draw L3,0.1VAr,U32,,,R,,Reactive power import phase L3; divide by 10
+0:64.4.0,reactive_power_export_l3,Reactive Power Feed L3,0.1VAr,U32,,,R,,Reactive power export phase L3; divide by 10
+0:69.4.0,apparent_power_import_l3,Apparent Power Draw L3,0.1VA,U32,,,R,,Apparent power import phase L3; divide by 10
+0:70.4.0,apparent_power_export_l3,Apparent Power Feed L3,0.1VA,U32,,,R,,Apparent power export phase L3; divide by 10
+0:71.4.0,current_l3,Current L3,0.001A,U32,,,R,,RMS current phase L3; divide by 1000
+0:72.4.0,voltage_l3,Voltage L3,0.001V,U32,,,R,,RMS voltage phase L3; divide by 1000
+0:73.4.0,power_factor_l3,Power Factor L3,0.001,U32,0-1000,,R,,Displacement power factor phase L3; divide by 1000
+0:9.4.0,apparent_power_import_total,Apparent Power Draw Total,0.1VA,U32,,,R,,Total apparent power import; divide by 10
+144:0.0.0,sw_version,Software Version,,U32,,,R,,Device firmware version (non-OBIS channel; in SMA extension block)
