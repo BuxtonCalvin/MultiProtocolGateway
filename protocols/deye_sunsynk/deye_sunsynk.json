@@ -1,0 +1,38 @@
+{
+  "send_input_register": false,
+  "batch_size": 40,
+
+  "inverter_enabled_codes": {
+    "0": "off",
+    "1": "on"
+  },
+
+  "overall_state_codes": {
+    "0": "standby",
+    "1": "self-check",
+    "2": "normal",
+    "3": "alarm",
+    "4": "fault"
+  },
+
+  "grid_connected_codes": {
+    "0": "disconnected",
+    "1": "connected"
+  },
+
+  "generator_input_codes": {
+    "0": "disable",
+    "1": "output",
+    "2": "input"
+  },
+
+  "priority_load_codes": {
+    "0": "battery",
+    "1": "load"
+  },
+
+  "use_timer_codes": {
+    "0": "off",
+    "1": "on"
+  }
+}

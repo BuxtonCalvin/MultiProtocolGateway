@@ -1,0 +1,40 @@
+{
+  "transport": "modbus_rtu",
+  "baud": 9600,
+  "send_holding_register": true,
+  "send_input_register": false,
+
+  "inverter_enabled_codes": {
+    "0": "off",
+    "1": "on"
+  },
+
+  "overall_state_codes": {
+    "0": "standby",
+    "1": "self-check",
+    "2": "normal",
+    "3": "alarm",
+    "4": "fault"
+  },
+
+  "grid_connected_codes": {
+    "0": "no",
+    "1": "yes"
+  },
+
+  "generator_input_codes": {
+    "0": "disable",
+    "1": "output",
+    "2": "input"
+  },
+
+  "priority_load_codes": {
+    "0": "battery priority",
+    "1": "load priority"
+  },
+
+  "use_timer_codes": {
+    "0": "off",
+    "1": "on"
+  }
+}
