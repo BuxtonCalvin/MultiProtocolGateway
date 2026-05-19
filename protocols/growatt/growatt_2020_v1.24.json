@@ -1,7 +1,118 @@
 {
-    "transport" : "modbus_rtu",
-    "empty_codes" : 
-    {
-        "0" : "TODO"
-    }
+  "transport": "modbus_rtu",
+
+  "inverter_status_codes": {
+    "0": "waiting",
+    "1": "normal",
+    "3": "fault"
+  },
+
+  "lcd_language_codes": {
+    "0": "Italian",
+    "1": "English",
+    "2": "German",
+    "3": "Spanish",
+    "4": "French",
+    "5": "Chinese",
+    "6": "Polish",
+    "7": "Portuguese",
+    "8": "Hungary"
+  },
+
+  "priority_codes": {
+    "0": "Load First",
+    "1": "Battery First",
+    "2": "Grid First"
+  },
+
+  "battery_type_codes": {
+    "0": "Lead-acid",
+    "1": "Lithium battery"
+  },
+
+  "pid_status_codes": {
+    "1": "Wait Status",
+    "2": "Normal Status",
+    "3": "Fault Status"
+  },
+
+  "pidfaultcode_codes": {
+    "b0": "Output over voltage",
+    "b1": "ISO fault",
+    "b2": "BUS voltage abnormal"
+  },
+
+  "string_prompt_codes": {
+    "b0": "String Unmatch",
+    "b1": "StrDisconnect",
+    "b2": "StrCurrentUnblance"
+  },
+
+  "bafdistatus_codes": {
+    "0": "Waiting",
+    "1": "Self-check state",
+    "2": "Detect pull arc state",
+    "3": "Fault",
+    "4": "Update"
+  },
+
+  "uwSysWorkMode_codes": {
+    "0": "waiting module",
+    "1": "Self-test mode",
+    "3": "SysFault module",
+    "4": "Flash module"
+  },
+
+  "fault_bit_codes": {
+    "2": "Over Temperature",
+    "3": "Bat Voltage High",
+    "5": "Output short",
+    "6": "Output voltage high",
+    "7": "Over Load",
+    "8": "Bus voltage high",
+    "9": "Bus start fail",
+    "51": "Over current",
+    "52": "Bus voltage low",
+    "53": "inverter softstart fail",
+    "56": "battery open",
+    "58": "output voltage low",
+    "60": "negtive power",
+    "61": "PV voltage high",
+    "62": "SCI com error",
+    "80": "can fault",
+    "81": "host loss"
+  },
+
+  "warning_bit_codes": {
+    "b0": "Fan_lock_warning",
+    "b1": "Over_charge",
+    "b2": "Battery_voltage_low",
+    "b3": "Over_load",
+    "b4": "Op_power_derating",
+    "b5": "Solar_stop_due_to_bat_low",
+    "b6": "Solar_stop_due_to_Pv_high",
+    "b7": "Solar_stop_due_to_over_load",
+    "b8": "Grid_different",
+    "b9": "Grid_phase_error",
+    "b10": "Op_phase_loss",
+    "b11": "Over_temprature",
+    "b12": "Buck_current_over",
+    "b13": "Battery_disconnected",
+    "b14": "BMS_com_error",
+    "b15": "Pv_power_insufficient"
+  },
+
+  "warning_bit_high_codes": {
+    "b0": "No bat parallel disable",
+    "b1": "Parallel version different",
+    "b2": "Unknown",
+    "b3": "Capacity different",
+    "b4": "Host Loss",
+    "b5": "BmsCellOverVolt",
+    "b6": "BmsTotalOverVolt",
+    "b7": "BmsDischgOverCurr",
+    "b8": "BmsChgOverCurr",
+    "b9": "BmsOverTemp",
+    "b10": "Battery voltage consistent"
+  }
 }

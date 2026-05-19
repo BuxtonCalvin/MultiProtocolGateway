@@ -1,0 +1,76 @@
+{
+  "batch_size":    "40",
+  "read_interval": "5000",
+  "send_input_register": false,
+
+  "sunspec_inverter_did_codes": {
+    "111": "single-phase",
+    "112": "split-phase",
+    "113": "three-phase"
+  },
+
+  "operating_state_codes": {
+    "1": "off",
+    "2": "sleeping",
+    "3": "waking up",
+    "4": "MPPT",
+    "5": "throttled",
+    "6": "shutting down",
+    "7": "fault",
+    "8": "standby"
+  },
+
+  "alarm_1_codes": {
+    "b0":  "Ground fault",
+    "b1":  "DC over voltage",
+    "b2":  "Over temperature",
+    "b3":  "AC disconnect",
+    "b4":  "DC disconnect",
+    "b5":  "Grid disconnect",
+    "b6":  "Cabinet open",
+    "b7":  "Manual shutdown",
+    "b8":  "Over temperature (alternate)",
+    "b9":  "Over frequency",
+    "b10": "Low power",
+    "b11": "Under frequency",
+    "b12": "AC over voltage",
+    "b13": "AC under voltage",
+    "b14": "Blown string fuse",
+    "b15": "Under temperature",
+    "b16": "Generic memory map error",
+    "b17": "Hardware test failure"
+  },
+
+  "f_model_type_codes": {
+    "1": "float",
+    "2": "integer+SF",
+    "6": "confirm write (write after selecting model type)"
+  },
+
+  "f_storage_restrictions_codes": {
+    "0": "local",
+    "1": "global"
+  },
+
+  "storage_charge_state_codes": {
+    "1": "off",
+    "2": "charge",
+    "3": "discharge",
+    "4": "hold"
+  },
+
+  "battery_status_codes": {
+    "0": "off",
+    "1": "empty",
+    "2": "discharging",
+    "3": "charging",
+    "4": "full",
+    "5": "hold",
+    "6": "testing"
+  },
+
+  "active_power_limit_enabled_codes": {
+    "0": "disabled",
+    "1": "enabled"
+  }
+}
