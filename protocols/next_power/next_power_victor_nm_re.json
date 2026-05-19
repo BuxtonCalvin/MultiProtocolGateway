@@ -1,7 +1,19 @@
 {
-    "transport" : "modbus_rtu",
-    "baud" : 2400,
-    "batch_size" : 32,
-    "send_holding_register": true,
-    "send_input_register" : false
+  "transport": "modbus_rtu",
+  "baud": 2400,
+  "batch_size": 32,
+  "send_holding_register": true,
+  "send_input_register": false,
+
+  "settings2_codes": {
+    "b0":  "Settings",
+    "b1":  "record fault code",
+    "b2":  "equalization",
+    "b4":  "equalize impatiently",
+    "b8":  "restart on overload",
+    "b10": "restart on overheat",
+    "b11": "beep on primary power fail",
+    "b12": "return to default screen",
+    "b13": "overload bypass"
+  }
 }

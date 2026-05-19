@@ -1,5 +1,30 @@
 {
-    "NOTE" : "INCOMPLETE - WORK IN PROGRESS",
-    "transport" : "modbus_rtu",
-    "baud" : 9600
+  "NOTE": "INCOMPLETE - WORK IN PROGRESS",
+  "transport": "modbus_rtu",
+  "baud": 9600,
+
+  "status_bits_codes": {
+    "0": "soft_starting",
+    "1": "stand by",
+    "2": "charging",
+    "3": "discharging"
+  },
+
+  "error_codes": {
+    "b0":  "OCD (Over Current Discharge) protection",
+    "b1":  "SCD (Short Circuit Discharge) protection",
+    "b2":  "OV (Over Voltage) protection",
+    "b3":  "UV (Under Voltage) protection",
+    "b4":  "OTD (Over Temperature Discharge) protection",
+    "b5":  "OTC (Over Temperature Charge) protection",
+    "b6":  "UTD (Under Temperature Discharge) protection",
+    "b7":  "UTC (Under Temperature Charge) protection",
+    "b8":  "Soft start fail",
+    "b9":  "Permanent Fault",
+    "b10": "Delta V Fail",
+    "b11": "OCC (Over Current Charge) protection",
+    "b12": "OT (MOS Over Temperature) protection",
+    "b13": "OT (Environment Over Temperature) protection",
+    "b14": "UT (Environment Under Temperature) protection"
+  }
 }

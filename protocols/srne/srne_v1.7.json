@@ -1,5 +1,30 @@
 {
-    "transport" : "modbus_rtu",
-    "send_holding_register": true,
-    "send_input_register" : false
+  "transport": "modbus_rtu",
+  "send_holding_register": true,
+  "send_input_register": false,
+
+  "device_state_codes": {
+    "0":  "Power-up delay",
+    "1":  "Waiting state",
+    "2":  "Initialization",
+    "3":  "Soft start",
+    "4":  "Mains powered operation",
+    "5":  "Inverter powered operation",
+    "6":  "Inverter to mains",
+    "7":  "Mains to inverter",
+    "8":  "Battery activate",
+    "9":  "Shutdown by user",
+    "10": "Fault"
+  },
+
+  "password_protection_status_mark_codes": {
+    "0": "No password entered by the user",
+    "1": "User password has been entered",
+    "4": "Manufacturer password has been entered"
+  },
+
+  "record_fault_code_codes": {
+    "0": "Disable",
+    "1": "Enable"
+  }
 }

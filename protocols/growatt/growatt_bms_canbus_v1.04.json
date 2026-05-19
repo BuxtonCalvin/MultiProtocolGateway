@@ -1,4 +1,54 @@
 {
-    "transport" : "canbus",
-    "baud" : 500000
+  "transport": "canbus",
+  "baud": 500000,
+
+  "status_codes": {
+    "b0": "charging",
+    "b1": "stand by",
+    "b0&b1": "discharging"
+  },
+
+  "protection_flags_codes": {
+    "b0":  "Soft start fail",
+    "b1":  "Module under voltage",
+    "b2":  "Module over voltage",
+    "b3":  "Cell under voltage",
+    "b4":  "Cell over voltage",
+    "b5":  "SCD (Short Circuit Discharge) protection",
+    "b6":  "Charge over current",
+    "b7":  "DisCharge over current",
+    "b10": "Delta V Fail",
+    "b11": "System error",
+    "b12": "UTC (Under Temperature Charge) protection",
+    "b13": "UTD (Under Temperature Discharge) protection",
+    "b14": "OTC (Over Temperature Charge) protection",
+    "b15": "OTD (Over Temperature Discharge) protection"
+  },
+
+  "alarm_flags_codes": {
+    "b2":  "Module under voltage",
+    "b3":  "Module over voltage",
+    "b4":  "Cell over voltage",
+    "b5":  "Cell under voltage",
+    "b6":  "Charge over current",
+    "b7":  "DisCharge over current",
+    "b8":  "Internal communication fail",
+    "b9":  "Pack before turn off",
+    "b10": "Delta V Fail",
+    "b11": "UTC (Under Temperature Charge) protection",
+    "b12": "UTD (Under Temperature Discharge) protection",
+    "b13": "OTC (Over Temperature Charge) protection",
+    "b14": "OTD (Over Temperature Discharge) protection"
+  },
+
+  "request_and_battery_type_codes": {
+    "b7": "Charge enable",
+    "b6": "Discharge enable",
+    "b5": "Request force charge I (Strong charge mark 1)",
+    "b4": "Request force charge II (Strong charge mark 2)",
+    "b3": "00: Lithium Iron Phosphate (LiFePO4) battery",
+    "b2": "01: Nickel Cobalt Manganese (NCM) battery",
+    "b1": "10: Lithium Titanate (LTO) battery",
+    "b0": "11: Reserved"
+  }
 }

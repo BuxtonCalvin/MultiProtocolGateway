@@ -1,6 +1,25 @@
 {
-    "transport" : "modbus_rtu",
-    "batch_size": 7,
-    "send_holding_register": true,
-    "send_input_register" : false
+  "transport": "modbus_rtu",
+  "batch_size": 7,
+  "send_holding_register": true,
+  "send_input_register": false,
+
+  "buad_rate_codes": {
+    "0": "9600",
+    "1": "1200",
+    "2": "2400",
+    "3": "4800",
+    "4": "9600",
+    "5": "19200",
+    "6": "38400",
+    "7": "57600",
+    "8": "115200"
+  },
+
+  "check_bit_codes": {
+    "0": "N, 8, 1",
+    "1": "E, 8, 1",
+    "2": "O, 8, 1",
+    "3": "N, 8, 2"
+  }
 }

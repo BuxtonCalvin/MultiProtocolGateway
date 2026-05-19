@@ -1,5 +1,29 @@
 {
-    "transport" : "modbus_rtu",
-    "send_holding_register": true,
-    "send_input_register" : false
+  "transport": "modbus_rtu",
+  "send_holding_register": true,
+  "send_input_register": false,
+
+  "product_type_codes": {
+    "0": "domestic controller",
+    "1": "controller for street light",
+    "3": "grid-connected inverter",
+    "4": "all-in-one solar charger inverter",
+    "5": "power frequency off-grid"
+  },
+
+  "device_charge_state_codes": {
+    "0": "Charge off",
+    "1": "Quick charge",
+    "2": "Const voltage charge",
+    "4": "Float charge",
+    "6": "Li battery activate",
+    "8": "Full"
+  },
+
+  "device_state_codes": {
+    "0": "Initialization",
+    "1": "Standby",
+    "2": "AC power operation",
+    "3": "Inverter operation"
+  }
 }
