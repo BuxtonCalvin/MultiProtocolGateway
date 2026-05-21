@@ -313,6 +313,14 @@ class protocol_settings:
         self._log: logging.Logger = logging.getLogger(__name__)
         self._log.setLevel(self._log_level)
 
+        # DEBUG-IDENTITY: confirms this exact file is executing
+        import os as _os
+        self._log.warning(
+            f"[DEBUG-IDENTITY] protocol_settings loaded from: {_os.path.abspath(__file__)} "
+            f"| BUILD-TAG: 2026-05-19-FIX-ALL "
+            f"| protocol={protocol}"
+        )
+
         self.protocol: str = protocol
         self.transport: str = ""
         self.registry_map: dict[Registry_Type, list[registry_map_entry]] = {}
@@ -870,43 +878,59 @@ class protocol_settings:
                         continue
 
             # Merge _h/_l register pairs into single 32-bit entries.
-            # The _h row (index-1) survives; the _l row (index) is deleted.
-            # The _l row carries Register_Endian:little for all 32-bit accumulator
-            # pairs. We must copy its adjustments to the surviving _h row BEFORE
-            # deleting it, otherwise the byte-order annotation is permanently lost
-            # and _register_words_to_bytes always assembles words in big-endian
-            # order, producing wrong values for all 32-bit accumulators.
-            for index in reversed(range(len(registry_map))):
+            # CSV layout: _l at lower register address (lower list index N),
+            #             _h at higher register address (list index N+1).
+            # The _l row survives as the combined entry; the _h row is deleted.
+            # The _l row already carries Register_Endian:little — no propagation needed.
+
+            # DEBUG-MERGE: log every _l entry to show what the merge loop will examine
+            _l_candidates = [
+                (registry_map[i].documented_name, registry_map[i+1].documented_name)
+                for i in range(len(registry_map) - 1)
+                if registry_map[i].documented_name.endswith('_l')
+            ]
+            self._log.warning(
+                f"[DEBUG-MERGE] path={path} "
+                f"_l_candidates (index, index+1)={_l_candidates}"
+            )
+
+            for index in reversed(range(len(registry_map) - 1)):
                 item = registry_map[index]
-                if index > 0:
-                    if (
-                        item.documented_name.endswith("_l")
-                        and registry_map[index - 1].documented_name.replace("_h", "_l") == item.documented_name
-                    ):
-                        combined_item = registry_map[index - 1]
+                next_item = registry_map[index + 1]
+                if (
+                    item.documented_name.endswith("_l")
+                    and next_item.documented_name == item.documented_name[:-2] + "_h"
+                ):
+                    # _l row is the surviving combined entry
+                    combined_item = item
 
-                        if not combined_item.data_type or combined_item.data_type == Data_Type.USHORT:
-                            if registry_map[index].data_type != Data_Type.USHORT:
-                                combined_item.data_type = registry_map[index].data_type
-                            else:
-                                combined_item.data_type = Data_Type.UINT
+                    if not combined_item.data_type or combined_item.data_type == Data_Type.USHORT:
+                        if next_item.data_type != Data_Type.USHORT:
+                            combined_item.data_type = next_item.data_type
+                        else:
+                            combined_item.data_type = Data_Type.UINT
 
-                        if combined_item.documented_name == combined_item.variable_name:
-                            combined_item.variable_name = combined_item.variable_name[:-2].strip()
+                    if combined_item.documented_name == combined_item.variable_name:
+                        combined_item.variable_name = combined_item.variable_name[:-2].strip()
 
-                        combined_item.documented_name = combined_item.documented_name[:-2].strip()
+                    combined_item.documented_name = combined_item.documented_name[:-2].strip()
 
-                        if not combined_item.unit:
-                            combined_item.unit = registry_map[index].unit
-                            combined_item.unit_mod = registry_map[index].unit_mod
+                    if not combined_item.unit:
+                        combined_item.unit = next_item.unit
+                        combined_item.unit_mod = next_item.unit_mod
 
-                        # FIX: propagate adjustments from _l to the surviving _h row.
-                        # Only copies when the _h row has no adjustments of its own,
-                        # so explicit _h annotations are never silently overwritten.
-                        if not combined_item.adjustments and registry_map[index].adjustments:
-                            combined_item.adjustments = dict(registry_map[index].adjustments)
+                    # Copy adjustments from _h if _l has none
+                    if not combined_item.adjustments and next_item.adjustments:
+                        combined_item.adjustments = dict(next_item.adjustments)
 
-                        del registry_map[index]
+                    self._log.warning(
+                        f"[DEBUG-MERGE] MERGED: '{combined_item.variable_name}' "
+                        f"reg={combined_item.register} "
+                        f"dtype={combined_item.data_type} "
+                        f"unit_mod={combined_item.unit_mod} "
+                        f"adj={combined_item.adjustments}"
+                    )
+                    del registry_map[index + 1]
 
             # Apply variable mask (allowlist)
             if self.variable_mask:
@@ -1113,9 +1137,12 @@ class protocol_settings:
         # memoryview slices do not support + concatenation.
         register = bytes(register)
 
-        # Default fallback: single 16-bit big-endian unsigned read.
-        # Always big-endian — wire bytes are in Modbus standard order.
-        value: int | float | str = int.from_bytes(register[:2], byteorder="big", signed=False)
+        # Default fallback: single 16-bit read.
+        # Swap bytes for little-endian single-register entries.
+        _fb = register[:2]
+        if word_order == "little" and len(_fb) == 2:
+            _fb = bytes([_fb[1], _fb[0]])
+        value: int | float | str = int.from_bytes(_fb, byteorder="big", signed=False)
 
         if entry.data_type == Data_Type.UINT:
             # Multi-word: word_order controls whether low or high word came first.
@@ -1153,11 +1180,31 @@ class protocol_settings:
                 raw_bytes = register[6:8] + register[4:6] + register[2:4] + register[0:2]
             value = struct.unpack(">d", raw_bytes)[0]
         elif entry.data_type == Data_Type.USHORT:
-            # Single register — always big-endian wire bytes.
-            value = int.from_bytes(register[:2], byteorder="big", signed=False)
+            # Single register. Swap bytes for little-endian entries.
+            raw_bytes = register[:2]
+            if word_order == "little":
+                raw_bytes = bytes([raw_bytes[1], raw_bytes[0]])
+            value = int.from_bytes(raw_bytes, byteorder="big", signed=False)
         elif entry.data_type == Data_Type.SHORT:
-            # Single register — always big-endian wire bytes.
-            value = int.from_bytes(register[:2], byteorder="big", signed=True)
+            # Single register. Wire bytes are Modbus big-endian.
+            # For Register_Endian:little the hardware sends bytes swapped,
+            # so reverse them before sign-extending.
+            raw_bytes = register[:2]
+            _WATCH3 = {'tinner','tradiator1','tradiator2','tbat',
+                       'maxcelltemp_bms','mincelltemp_bms','batcurrent_bms'}
+            if entry.variable_name in _WATCH3:
+                self._log.warning(
+                    f"[DEBUG-BYTES-SHORT] {entry.variable_name} "
+                    f"wire={raw_bytes.hex()} word_order={word_order}"
+                )
+            if word_order == "little":
+                raw_bytes = bytes([raw_bytes[1], raw_bytes[0]])
+            value = int.from_bytes(raw_bytes, byteorder="big", signed=True)
+            if entry.variable_name in _WATCH3:
+                self._log.warning(
+                    f"[DEBUG-BYTES-SHORT] {entry.variable_name} "
+                    f"after_swap={raw_bytes.hex()} value={value}"
+                )
         elif entry.data_type in (Data_Type._16BIT_FLAGS, Data_Type._8BIT_FLAGS, Data_Type._32BIT_FLAGS):
             # Single or double-register flags. Always big-endian wire bytes per Modbus spec.
             val: int = int.from_bytes(register, byteorder="big", signed=False)
@@ -1408,10 +1455,26 @@ class protocol_settings:
             if endian is not None:
                 endian_str = str(endian).strip().lower()
                 if endian_str in ("little", "le"):
+                    _WATCH = {'tinner','tradiator1','tradiator2','tbat',
+                              'maxcelltemp_bms','mincelltemp_bms','batcurrent_bms',
+                              'epv1_all','epv2_all','echg_all','erec_all'}
+                    if entry.variable_name in _WATCH:
+                        self._log.warning(
+                            f"[DEBUG-BYTEORDER] {entry.variable_name} adj={entry.adjustments} "
+                            f"→ byte_order=little"
+                        )
                     return "little"
                 if endian_str in ("big", "be"):
                     return "big"
                 self._log.warning(f"Unsupported Register_Endian '{endian}' for {entry.variable_name}")
+        else:
+            _WATCH2 = {'tinner','tradiator1','tradiator2','tbat',
+                       'maxcelltemp_bms','mincelltemp_bms','batcurrent_bms'}
+            if entry.variable_name in _WATCH2:
+                self._log.warning(
+                    f"[DEBUG-BYTEORDER] {entry.variable_name} adjustments=EMPTY "
+                    f"→ byte_order=big (annotation missing!)"
+                )
         return byte_order
 
     def apply_adjustments(
@@ -1581,12 +1644,24 @@ class protocol_settings:
             # maxcelltemp_bms, mincelltemp_bms) the two bytes within the
             # 16-bit register must be swapped before sign-extending.
             raw = registry[entry.register] & 0xFFFF
+            _WATCH4 = {'tinner','tradiator1','tradiator2','tbat',
+                       'maxcelltemp_bms','mincelltemp_bms','batcurrent_bms'}
+            if entry.variable_name in _WATCH4:
+                self._log.warning(
+                    f"[DEBUG-USHORT-SHORT] {entry.variable_name} "
+                    f"raw=0x{raw:04X} byte_order={byte_order}"
+                )
             if byte_order == "little":
                 raw = self._swap_bytes_16(raw)
             if raw & (1 << 15):
                 value = raw - (1 << 16)
             else:
                 value = raw
+            if entry.variable_name in _WATCH4:
+                self._log.warning(
+                    f"[DEBUG-USHORT-SHORT] {entry.variable_name} "
+                    f"after_swap=0x{raw:04X} value={value}"
+                )
 
         elif entry.data_type == Data_Type.INT:
             register_bytes = self._register_words_to_bytes(registry, entry.register, 2, byte_order)
@@ -1740,6 +1815,17 @@ class protocol_settings:
 
             raw = registry[entry.register]
 
+            # _WATCH5 = {'tinner','tradiator1','tradiator2','tbat',
+            #            'maxcelltemp_bms','mincelltemp_bms','batcurrent_bms',
+            #            'epv1_all','epv2_all','epv1_all_l','runningtime'}
+            # if entry.variable_name in _WATCH5:
+            #     self._log.warning(
+            #         f"[DEBUG-DISPATCH] {entry.variable_name} "
+            #         f"reg={entry.register} dtype={entry.data_type.name} "
+            #         f"adj={entry.adjustments} "
+            #         f"raw_type={type(raw).__name__} "
+            #         f"raw_value={raw!r}"
+            #     )
             if isinstance(raw, (bytes, tuple)):
                 bytes_registry: Mapping[int, bytes | tuple[bytes, float]] = cast(Mapping[int, bytes | tuple[bytes, float]], registry)
                 value: int | float | str | None = self.process_register_bytes(bytes_registry, entry)

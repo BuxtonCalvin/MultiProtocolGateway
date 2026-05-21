@@ -124,10 +124,10 @@ register,variable_name,documented_name,unit,data_type,values,read_interval,writa
 63.b29,,WarningCode_W029,,1bit,0-1,,R,,W029 EPS / off-grid over voltage
 63.b30,,WarningCode_W030,,1bit,0-1,,R,,W030 Meter reversed connection
 63.b31,,WarningCode_W031,,1bit,0-1,,R,,W031 DCV / EPS DC voltage high
-64,,Tinner,celsius,SHORT,0-65535,,R,"{""Register_Endian"":""little""}",Internal temperature
-65,,Tradiator1,celsius,SHORT,0-65535,,R,"{""Register_Endian"":""little""}",Radiator temperature 1
-66,,Tradiator2,celsius,SHORT,0-65535,,R,"{""Register_Endian"":""little""}",Radiator temperature 2
-67,,Tbat,celsius,SHORT,0-65535,,R,"{""Register_Endian"":""little""}",Battery temperature
+64,,Tinner,celsius,SHORT,0-65535,,R,"",Internal temperature
+65,,Tradiator1,celsius,SHORT,0-65535,,R,"",Radiator temperature 1
+66,,Tradiator2,celsius,SHORT,0-65535,,R,"",Radiator temperature 2
+67,,Tbat,,SHORT,0-65535,,R,"",Battery Over-Current Protection (OCP) count.  Will show as 2 for debug.
 69,,RunningTime_l,second,,,,R,"{""Register_Endian"":""little""}",Runtime duration
 70,,RunningTime_h,second,,,,R,,Runtime duration
 71.b0,,AutoTestStart,,4bit,,,R,,0 - not started 1-Activated 1 - started
@@ -161,13 +161,13 @@ register,variable_name,documented_name,unit,data_type,values,read_interval,writa
 95,,BatStatus_INV,,,,,R,,The inverter aggregates lithium battery status information
 96,,BatParallelNum,,,,,R,,Number of batteries in parallel
 97,,BatCapacity,Ah,,,,R,,Battery capacity
-98,,BatCurrent_BMS,0.01A,SHORT,,,R,"{""Register_Endian"":""little""}",Battery current
+98,,BatCurrent_BMS,0.01A,SHORT,,,R,"",Battery current
 99,,FaultCode_BMS,,,,,R,,Reports the active error status transmitted from the Battery Management System (BMS) to the inverter
 100,,WarningCode_BMS,,,,,R,,Reports non-critical alerts while the FaultCode indicates a system-stopping error
 101,,MaxCellVolt_BMS,0.001V,,,,R,,Maximum voltage of cell
 102,,MinCellVolt_BMS,0.001V,,,,R,,Minimum voltage of cell
-103,,MaxCellTemp_BMS,0.1C,SHORT,,,R,"{""Register_Endian"":""little""}",Maximum temperature of cell
-104,,MinCellTemp_BMS,0.1C,SHORT,,,R,"{""Register_Endian"":""little""}",Minimum temperature of cell
+103,,MaxCellTemp_BMS,0.1C,SHORT,,,R,"",Maximum temperature of cell
+104,,MinCellTemp_BMS,0.1C,SHORT,,,R,"",Minimum temperature of cell
 105,,BMSFWUpdateState,,,,,R,,1-Upgrade in process 2-Upgrade successful 3- Upgrade failed
 106,,CycleCnt_BMS,,,,,R,,Number of charging/discharging cycles
 107,,BatVoltSample_INV,0.1V,,,,R,,Inverter samples the battery voltage
@@ -181,7 +181,7 @@ register,variable_name,documented_name,unit,data_type,values,read_interval,writa
 113.b4,,Resvd,Bit4~7,4bit,,,R,,Reserved
 113.b8,,ParallelNum,,8bit,1-255,,R,,Number of inverters in parallel
 114,,OnGridloadPower,W,,,,R,,Load power of the 18k inverter when it is not off-grid
-115~119,,Serial_NumbeR,,ASCII,,,R,"{""Register_Endian"":""little""}",Serial Number as one string instead of split
+115~119,,Serial_Number,,ASCII,,,R,"{""Register_Endian"":""little""}",Serial Number as one string instead of split
 115.b0,,SN_0__YeaR,,8bit,[0-9a-zA-Z],,R,,The serial number is a ten-digit ASCII code For example: The serial number is AB12345678 SN[0]=0x41(A) : : : : SN[9]=0x38(8)
 115.b8,,SN_1__week,,8bit,[0-9a-zA-Z],,R,,
 116.b0,,SN_2__week,,8bit,[0-9a-zA-Z],,R,,

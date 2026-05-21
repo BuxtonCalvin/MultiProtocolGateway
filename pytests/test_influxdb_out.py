@@ -3,15 +3,28 @@
 Test for InfluxDB output transport
 """
 
-import time
-import unittest
-from typing import cast
-from unittest.mock import Mock, patch
 
-from classes.transports.influxdb_out import influxdb_out
-from defs.common import TransportSettings
-from protocol_gateway import CustomConfigParser as ConfigParser
+import sys
+from pathlib import Path
 
+# Get the absolute path of the current script
+script_path = Path(__file__).resolve()
+
+# Go up two levels to reach the root/parent folder
+root_folder = script_path.parent.parent
+
+
+if str(root_folder) not in sys.path:
+    sys.path.insert(0, str(root_folder))
+
+import time  # noqa: E402, I001
+import unittest # noqa: E402
+from typing import cast # noqa: E402
+from unittest.mock import Mock, patch # noqa: E402
+
+from classes.transports.influxdb_out import influxdb_out # noqa: E402
+from defs.common import TransportSettings # noqa: E402
+from protocol_gateway import CustomConfigParser as ConfigParser  # noqa: E402
 
 class TestInfluxDBOut(unittest.TestCase):
     """Test cases for InfluxDB output transport"""

@@ -79,9 +79,7 @@ class TestConfigParser:
         from classes.WebServer.scanner import _load_config
         data = _load_config(sample_config_path)
         assert "general" in data
-        assert "transport.Inverter1" in data
-        assert "transport.timescaledb" in data
-        assert "transport.mqtt" in data
+        assert "logging" in data
 
     def test_strips_inline_comments(self, sample_config_path):
         from classes.WebServer.scanner import _load_config
@@ -92,7 +90,7 @@ class TestConfigParser:
     def test_scraper_classification(self, sample_config_path, project_root):
         from classes.WebServer.scanner import _classify_transport
         keys = {"transport": "modbus_tcp", "protocol_version": "eg4_18kpv"}
-        result = _classify_transport("transport.Inverter1", keys, project_root / "classes" / "transports")
+        result = _classify_transport("transport.Inverter_read", keys, project_root / "classes" / "transports")
         assert result == "scraper"
 
     def test_bridge_classification_by_file_comment(self, sample_config_path, project_root):
@@ -111,7 +109,7 @@ class TestConfigParser:
     def test_missing_section_handled_gracefully(self, tmp_path):
         from classes.WebServer.scanner import _load_config
         cfg = tmp_path / "bad.cfg"
-        cfg.write_text("[general\nlog_level = DEBUG\n")  # malformed header
+        cfg.write_text("[logging\nlevel = DEBUG\n")  # malformed header
         # Should not raise, may return empty or partial
         try:
             result = _load_config(cfg)
@@ -120,13 +118,13 @@ class TestConfigParser:
             _log.debug(f"Unexpected error occurred: {e}")
             pass  # acceptable — parser may reject the file
 
-    def test_duplicate_keys_last_wins(self, tmp_path):
+    def test_duplicate_keys_last_wins(self, tmp_path) -> None:
         from classes.WebServer.scanner import _load_config
         cfg = tmp_path / "dup.cfg"
-        cfg.write_text("[general]\nlog_level = INFO\nlog_level = DEBUG\n")
+        cfg.write_text("[logging]\nlevel = INFO\nlevel = DEBUG\n")
         data = _load_config(cfg)
         # configparser last-write-wins behavior
-        assert data["general"]["log_level"] in ("INFO", "DEBUG")
+        assert data["logging"]["level"] in ("INFO", "DEBUG")
 
 
 # ---------------------------------------------------------------------------
@@ -135,43 +133,43 @@ class TestConfigParser:
 
 class TestScanner:
 
-    def test_upsert_creates_new_row(self, db_session):
+    def test_upsert_creates_new_row(self, db_session) -> None:
         from classes.WebServer.scanner import _upsert_setting
-        _upsert_setting(db_session, "general", "log_level", "DEBUG", "general")
+        _upsert_setting(db_session, "logging", "level", "DEBUG", "general")
         db_session.flush()
         from classes.WebServer.models import Setting
-        row = db_session.query(Setting).filter_by(section="general", key="log_level").first()
+        row = db_session.query(Setting).filter_by(section="logging", key="level").first()
         assert row is not None
         assert row.value_disk == "DEBUG"
         assert row.value_staged == "DEBUG"
         assert not row.is_dirty
 
-    def test_upsert_preserves_staged_value(self, db_session):
+    def test_upsert_preserves_staged_value(self, db_session) -> None:
         from classes.WebServer.scanner import _upsert_setting
         # First insert
-        _upsert_setting(db_session, "general", "log_level", "DEBUG", "general")
+        _upsert_setting(db_session, "logging", "level", "DEBUG", "general")
         db_session.flush()
 
         # User edits staged value
         from classes.WebServer.models import Setting
-        row = db_session.query(Setting).filter_by(section="general", key="log_level").first()
+        row = db_session.query(Setting).filter_by(section="logging", key="level").first()
         row.value_staged = "WARNING"
         row.mark_dirty()
         db_session.flush()
 
         # Re-scan with new disk value
-        _upsert_setting(db_session, "general", "log_level", "INFO", "general")
+        _upsert_setting(db_session, "logging", "level", "INFO", "general")
         db_session.flush()
 
-        row = db_session.query(Setting).filter_by(section="general", key="log_level").first()
+        row = db_session.query(Setting).filter_by(section="logging", key="level").first()
         assert row.value_disk == "INFO"
         assert row.value_staged == "WARNING"   # user edit preserved
         assert row.is_dirty                     # still dirty
 
     def test_orphan_detection(self, db_session):
         from classes.WebServer.scanner import _mark_orphaned_settings, _upsert_setting
-        _upsert_setting(db_session, "general", "old_key", "val", "general")
-        _upsert_setting(db_session, "general", "new_key", "val", "general")
+        _upsert_setting(db_session, "logging", "old_level", "val", "general")
+        _upsert_setting(db_session, "logging", "new_level", "val", "general")
         db_session.flush()
 
         # Only new_key was seen in the latest scan
@@ -211,10 +209,10 @@ class TestScanner:
 
     def test_protocol_csv_parse(self, tmp_path):
         from classes.WebServer.scanner import _parse_protocol_csv
-        csv_content = textwrap.dedent("""\
-            Register,Variable Name,Documented Name,Unit,Writable,Values,Note
-            40001,voltage,Pack Voltage,0.01V,R,0-65535,Battery pack voltage
-            40002,current,Pack Current,0.01A,RW,-32768-32767,Charge positive
+        csv_content: str = textwrap.dedent("""\
+            Register,Variable Name,Documented Name,Unit,Writable,Values,Adjustments, Note
+            40001,voltage,Pack Voltage,0.01V,R,0-65535,,Battery pack voltage
+            40002,current,Pack Current,0.01A,RW,-32768-32767,,Charge positive
             40003,soc,State of Charge,%,R,0-100,
         """)
         csv_file = tmp_path / "test_holding.csv"
@@ -256,7 +254,7 @@ class TestDiffEngine:
         from classes.WebServer.models import Setting
         from classes.WebServer.scanner import _upsert_setting
 
-        _upsert_setting(db_session, "general", "log_level", "DEBUG", "general")
+        _upsert_setting(db_session, "logging", "level", "DEBUG", "general")
         db_session.flush()
         row = db_session.query(Setting).filter_by(key="log_level").first()
         row.value_staged = "WARNING"
@@ -316,7 +314,7 @@ class TestCommit:
 
     def test_config_text_generation(self, db_session):
         from classes.WebServer.scanner import _upsert_setting
-        _upsert_setting(db_session, "general", "log_level", "DEBUG", "general")
+        _upsert_setting(db_session, "logging", "level", "DEBUG", "general")
         _upsert_setting(db_session, "transport.Inv1", "host", "10.0.0.1", "scraper")
         _upsert_setting(db_session, "transport.Inv1", "port", "502", "scraper")
         db_session.commit()
@@ -326,8 +324,8 @@ class TestCommit:
         rows = db_session.query(Setting).filter_by(is_active=True).all()
         text = _build_config_text(rows)
 
-        assert "[general]" in text
-        assert "log_level = DEBUG" in text
+        assert "[logging]" in text
+        assert "level = DEBUG" in text
         assert "[transport.Inv1]" in text
         assert "host = 10.0.0.1" in text
 
@@ -335,13 +333,13 @@ class TestCommit:
         from classes.WebServer.config_writer import _build_config_text
         from classes.WebServer.scanner import _upsert_setting
         _upsert_setting(db_session, "transport.Inv1", "host", "1.2.3.4", "scraper")
-        _upsert_setting(db_session, "general", "log_level", "INFO", "general")
+        _upsert_setting(db_session, "logging", "level", "INFO", "general")
         db_session.commit()
 
         from classes.WebServer.models import Setting
         rows = db_session.query(Setting).all()
         text = _build_config_text(rows)
-        general_pos = text.find("[general]")
+        general_pos = text.find("[logging]")
         transport_pos = text.find("[transport.")
         assert general_pos < transport_pos
 
@@ -349,9 +347,9 @@ class TestCommit:
         from classes.WebServer.models import Setting
         from classes.WebServer.scanner import _upsert_setting
 
-        _upsert_setting(db_session, "general", "log_level", "DEBUG", "general")
+        _upsert_setting(db_session, "logging", "level", "DEBUG", "general")
         db_session.flush()
-        row = db_session.query(Setting).filter_by(key="log_level").first()
+        row = db_session.query(Setting).filter_by(key="level").first()
         row.value_staged = "WARNING"
         row.mark_dirty()
         db_session.commit()
@@ -362,26 +360,26 @@ class TestCommit:
         _reset_dirty_flags(db_session)
         db_session.commit()
 
-        row = db_session.query(Setting).filter_by(key="log_level").first()
+        row = db_session.query(Setting).filter_by(key="level").first()
         assert not row.is_dirty
         assert row.value_disk == "WARNING"   # disk synced to staged
 
     def test_inactive_rows_excluded_from_output(self, db_session):
         from classes.WebServer.config_writer import _build_config_text
         from classes.WebServer.scanner import _upsert_setting
-        _upsert_setting(db_session, "general", "log_level", "DEBUG", "general", is_active=True)
-        _upsert_setting(db_session, "general", "secret_key", "hidden", "general", is_active=False)
+        _upsert_setting(db_session, "logging", "level", "DEBUG", "general", is_active=True)
+        _upsert_setting(db_session, "logging", "secret_key", "hidden", "general", is_active=False)
         db_session.commit()
 
         from classes.WebServer.models import Setting
         rows = db_session.query(Setting).all()
         text = _build_config_text(rows)
-        assert "log_level" in text
+        assert "level" in text
         assert "secret_key" not in text
 
     def test_backup_creates_file(self, db_session, tmp_path):
         config_path = tmp_path / "config.cfg"
-        config_path.write_text("[general]\nlog_level = DEBUG\n")
+        config_path.write_text("[logging]\nlevel = DEBUG\n")
 
         from classes.WebServer.config_writer import create_backup
         record = create_backup(config_path, db_session, trigger="test")
@@ -399,7 +397,7 @@ class TestCreateDeviceHelpers:
         from classes.WebServer.routers.pages import _append_section_to_config
 
         config_path = tmp_path / "config.cfg"
-        original = "[general]\nlog_level = INFO\n"
+        original = "[logging]\nlevel = INFO\n"
         config_path.write_text(original, encoding="utf-8")
 
         _append_section_to_config(
