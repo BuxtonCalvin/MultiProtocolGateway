@@ -19,11 +19,11 @@ from ..services.protocol_service import get_protocol_groups
 
 router = APIRouter(tags=["help"])
 
-WEB_DIR = Path(__file__).resolve().parents[1]
-STATIC_DIR = WEB_DIR / "static"
-SCREENSHOT_DIR = STATIC_DIR / "screenshots"
-ANNOTATIONS_PATH = STATIC_DIR / "annotations.json"
-DOCUMENTATION_DIR = WEB_DIR.parents[1] / "documentation"
+WEB_DIR: Path = Path(__file__).resolve().parents[1]
+STATIC_DIR: Path = WEB_DIR / "static"
+SCREENSHOT_DIR: Path = STATIC_DIR / "screenshots"
+ANNOTATIONS_PATH: Path = STATIC_DIR / "annotations.json"
+DOCUMENTATION_DIR: Path = WEB_DIR.parents[1] / "documentation"
 
 
 class Annotation(BaseModel):
@@ -75,7 +75,7 @@ def _load_annotations() -> dict[str, list[Annotation]]:
 def _doc_tree() -> list[dict[str, Any]]:
     if not DOCUMENTATION_DIR.exists():
         return []
-    allowed = {
+    allowed: set[str] = {
         ".md", ".pdf", ".png", ".jpg", ".jpeg", ".gif", ".txt", ".example",
         ".conf", ".yml", ".yaml", ".json",
     }
@@ -86,7 +86,7 @@ def _doc_tree() -> list[dict[str, Any]]:
             continue
         if path.suffix.lower() not in allowed and ".example" not in path.name:
             continue
-        rel = path.relative_to(DOCUMENTATION_DIR).as_posix()
+        rel: str = path.relative_to(DOCUMENTATION_DIR).as_posix()
         parts = rel.split("/")
         docs.append({
             "title": path.stem.replace("_", " ").replace("-", " ").title(),
@@ -120,7 +120,7 @@ def _screenshot_list() -> list[dict[str, str]]:
 
 
 def _image_id_from_path(path: str) -> str:
-    normalized = path.split("?", 1)[0].strip("/")
+    normalized: str = path.split("?", 1)[0].strip("/")
     if not normalized:
         return "dashboard"
     return re.sub(r"[^a-z0-9._-]+", "-", normalized.lower().replace("/", "__")).strip("-")
@@ -129,10 +129,10 @@ def _image_id_from_path(path: str) -> str:
 def _resolve_doc_target(target: str, doc_path: str) -> str:
     if re.match(r"^[a-z]+://", target) or target.startswith("#"):
         return target
-    doc_dir = Path(doc_path).parent.as_posix()
+    doc_dir: str = Path(doc_path).parent.as_posix()
     target_path, fragment = target.split("#", 1) if "#" in target else (target, "")
-    rel = (Path(doc_dir) / target_path).as_posix() if doc_dir != "." else target_path
-    href = _doc_url(rel)
+    rel: str = (Path(doc_dir) / target_path).as_posix() if doc_dir != "." else target_path
+    href: str = _doc_url(rel)
     if fragment:
         href = f"{href}#{quote(fragment, safe='')}"
     return href
@@ -161,8 +161,7 @@ def _markdown_to_html(markdown: str, doc_path: str) -> str:
     markdown = _rewrite_markdown_links(markdown, doc_path)
     try:
         import markdown as markdown_lib
-        # FIX: Renamed 'rendered' to 'lib_rendered' to avoid type conflict
-        lib_rendered = markdown_lib.markdown(
+        lib_rendered: str = markdown_lib.markdown(
             markdown,
             extensions=["fenced_code", "tables", "toc", "sane_lists", "codehilite"],
             extension_configs={
@@ -197,7 +196,7 @@ def _markdown_to_html(markdown: str, doc_path: str) -> str:
         if line.strip().startswith("```"):
             close_list()
             rendered.append("</code></pre>" if in_code else "<pre><code>")
-            in_code = not in_code
+            in_code: bool = not in_code
             continue
         if in_code:
             rendered.append(html.escape(line))
@@ -207,13 +206,13 @@ def _markdown_to_html(markdown: str, doc_path: str) -> str:
             close_list()
             rendered.append("")
             continue
-        heading = re.match(r"^(#{1,4})\s+(.*)$", stripped)
+        heading: re.Match[str] | None = re.match(r"^(#{1,4})\s+(.*)$", stripped)
         if heading:
             close_list()
-            level = len(heading.group(1))
+            level: int = len(heading.group(1))
             rendered.append(f"<h{level}>{html.escape(heading.group(2))}</h{level}>")
             continue
-        item = re.match(r"^[-*]\s+(.*)$", stripped)
+        item: re.Match[str] | None = re.match(r"^[-*]\s+(.*)$", stripped)
         if item:
             if not in_list:
                 rendered.append("<ul>")
@@ -232,7 +231,7 @@ def _markdown_to_html(markdown: str, doc_path: str) -> str:
 
 
 def _render_inline(text: str, link_resolver) -> str:
-    escaped = html.escape(text)
+    escaped: str = html.escape(text)
     escaped = re.sub(
         r"!\[([^\]]*)\]\(([^)]+)\)",
         lambda m: (
@@ -331,7 +330,7 @@ async def help_file(doc_path: str):
 @router.get("/pages/help/docs/{doc_path:path}", response_class=HTMLResponse, response_model=None)
 async def help_doc(request: Request, doc_path: str):
     doc_path = unquote(doc_path)
-    doc_file = _safe_child(DOCUMENTATION_DIR, doc_path)
+    doc_file: Path = _safe_child(DOCUMENTATION_DIR, doc_path)
     if not doc_file.exists() or not doc_file.is_file():
         raise HTTPException(status_code=404, detail="Document not found")
 

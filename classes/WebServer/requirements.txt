@@ -1,5 +1,6 @@
 # MPG WebServer dependencies
 # Install with: pip install -r classes/WebServer/requirements.txt
+# This file is a subset of the full requirements for the MPG project, focused on the WebServer components.
 
 fastapi>=0.110.0
 uvicorn[standard]>=0.29.0

@@ -26,6 +26,7 @@ include_device_info = true
 transport = json_out
 # Output to a file
 output_file = /path/to/output.json
+use_utc_timestamp = false
 # Append to file instead of overwriting (default: false)
 append_mode = false
 pretty_print = true
@@ -52,6 +53,7 @@ output_file = /var/log/inverter_data.json
 pretty_print = false
 append_mode = true
 include_timestamp = true
+use_utc_timestamp = false
 include_device_info = true
 ```
 
@@ -60,6 +62,7 @@ include_device_info = true
 | Option | Type | Default | Description |
 | -- | -- | -- | -- |
 | `output_file` | string | `stdout` | Output destination. Use `stdout` for console output or a file path |
+| `use_utc_timestamp` | boolean | `false` | Whether to use UTC time or the local time of the machine running json_out |
 | `pretty_print` | boolean | `true` | Whether to format JSON with indentation |
 | `append_mode` | boolean | `false` | Whether to append to file instead of overwriting |
 | `include_timestamp` | boolean | `true` | Whether to include Unix timestamp in output |
@@ -79,7 +82,7 @@ The JSON output includes the following structure:
     "serial_number": "Serial Number",
     "transport": "transport_name"
   },
-  "timestamp": 1703123456.789,
+  "timestamp": 1703123456.789,   #  UTC Unix time or local time if the flag is set false.
   "data": {
     "variable_name": "value",
     "another_variable": "another_value"
@@ -116,6 +119,7 @@ transport = json_out
 output_file = stdout
 pretty_print = true
 include_timestamp = true
+use_utc_timestamp = false
 include_device_info = true
 ```
 
@@ -128,6 +132,7 @@ output_file = /var/log/inverter_data.log
 pretty_print = false
 append_mode = true
 include_timestamp = true
+use_utc_timestamp = true
 include_device_info = false
 ```
 
@@ -140,5 +145,6 @@ output_file = /tmp/inverter_data.json
 pretty_print = false
 append_mode = false
 include_timestamp = true
+use_utc_timestamp = false
 include_device_info = false
 ```

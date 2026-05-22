@@ -34,4 +34,4 @@ pretty_print = true
 include_timestamp = true
 use_utc_timestamp = false
 include_device_info = true
-output_file = output.json
+output_file = /json_out/output.json

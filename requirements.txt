@@ -16,3 +16,4 @@ python-multipart>=0.0.9    # required for form parsing in FastAPI
 watchdog>=4.0.0            # file watcher
 aiofiles>=23.2.1           # static file serving
 Pygments>=2.15.1           # for syntax highlighting in FastAPI docs
+influxdb3-python

@@ -31,6 +31,7 @@ bridge = transport.json_out
 # JSON output transport - writes data to stdout
 transport = json_out
 output_file = stdout
+use_utc_timestamp = false
 pretty_print = true
 include_timestamp = true
 include_device_info = true
