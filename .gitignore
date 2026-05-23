@@ -25,6 +25,7 @@ python_protocol_gateway.egg-info/*
 
 #ignore inflxudb files
 inflxudb_backlog/*
+inflxudb3_backlog/*
 
 #ignore dumps for dev
 tools/dumps/*
@@ -43,5 +44,4 @@ config/backups/*.*
 **/__pycache__/
 classes/WebServer/**/__init__.py
 config/data-db/*.*
-protocols/eg4/eg4_ll_s-old.input_registry_map.csv
-protocols/eg4/eg4_ll_s-old.holding_registry_map.csv
+

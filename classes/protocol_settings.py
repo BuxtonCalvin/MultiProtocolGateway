@@ -446,17 +446,17 @@ class protocol_settings:
         and variable-name conventions.
         """
         for key_base in (entry.documented_name, entry.variable_name):
-            code_dict = self.get_code_dict(key_base + "_codes")
+            code_dict: dict[str, str] = self.get_code_dict(key_base + "_codes")
             if code_dict:
                 return code_dict
         return {}
 
     def _code_description_for_value(self, entry: registry_map_entry, value: int | float | str) -> str | None:
-        code_dict = self.get_entry_code_dict(entry)
+        code_dict: dict[str, str] = self.get_entry_code_dict(entry)
         if not code_dict:
             return None
 
-        lookup_keys = [str(value)]
+        lookup_keys: list[str] = [str(value)]
         try:
             lookup_keys.insert(0, str(int(float(value))))
         except (TypeError, ValueError):
@@ -963,7 +963,7 @@ class protocol_settings:
         to be automatically included in the output without needing to be manually
         added to the registry map CSV.
         """
-        existing_names = {entry.variable_name for entry in registry_map}
+        existing_names: set[str] = {entry.variable_name for entry in registry_map}
         additions: list[registry_map_entry] = []
 
         for entry in registry_map:
@@ -972,7 +972,7 @@ class protocol_settings:
             if not self.get_entry_code_dict(entry):
                 continue
 
-            desc_name = f"{entry.variable_name}_desc"
+            desc_name: str = f"{entry.variable_name}_desc"
             if desc_name in existing_names:
                 continue
             if desc_name.lower() in self.variable_screen:
@@ -987,7 +987,7 @@ class protocol_settings:
                     register_byte=entry.register_byte,
                     variable_name=desc_name,
                     documented_name=f"{entry.documented_name}_desc",
-                    note=f"Decoded description for {entry.variable_name}",
+                    note=f"Decoded description for {entry.note}" if entry.note else f"Decoded description for {entry.variable_name}",
                     unit="",
                     unit_mod=1.0,
                     adjustments={},
@@ -1029,7 +1029,7 @@ class protocol_settings:
         ranges: list[tuple[int, int]] = []
 
         for start in range(0, max_register + 1, max_batch_size):
-            end = start + max_batch_size
+            end: int = start + max_batch_size
 
             window_min = None
             window_max = None
@@ -1043,12 +1043,12 @@ class protocol_settings:
                         if not init:
                             register.next_read_timestamp = timestamp_ms + register.read_interval
 
-                        register_end = register.register + self.entry_word_count(register) - 1
+                        register_end: int = register.register + self.entry_word_count(register) - 1
 
                         if window_min is None or register.register < window_min:
-                            window_min = register.register
+                            window_min: int | None = register.register
                         if window_max is None or register_end > window_max:
-                            window_max = register_end
+                            window_max: int | None = register_end
 
             if window_min is not None and window_max is not None:
                 ranges.append((window_min, window_max - window_min + 1))
@@ -1226,7 +1226,7 @@ class protocol_settings:
                     # use the integer value decoded with the correct byte_order
                     # rather than indexing raw bytes directly. The previous approach
                     # used register_bytes[byte] which assumes big-endian physical
-                    # byte layout and gives wrong results for little-endian entries.
+                    # byte layout, giving wrong results for little-endian entries.
                     for i in range(start_bit, end_bit):
                         if (val >> i) & 1:
                             flag_index: str = "b" + str(i)
@@ -1698,7 +1698,7 @@ class protocol_settings:
             start_bit: int = entry.register_bit if entry.register_bit >= 0 else 0
             end_bit: int = start_bit + bit_size
 
-            code_dict = self.get_code_dict(entry.documented_name + "_codes")
+            code_dict: dict[str, str] = self.get_code_dict(entry.documented_name + "_codes")
 
             flags = []
             for i in range(start_bit, end_bit):
@@ -1889,7 +1889,7 @@ class protocol_settings:
         """
         code_dict: dict[str, str] = self.get_entry_code_dict(entry)
         if code_dict:
-            lookup_keys = [str(val)]
+            lookup_keys: list[str] = [str(val)]
             try:
                 lookup_keys.insert(0, str(int(float(val))))
             except (TypeError, ValueError):

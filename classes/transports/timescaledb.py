@@ -614,11 +614,15 @@ class timescaledb(transport_base):
         self.write_requires_complete_cycle = settings.getboolean("write_requires_complete_cycle", fallback=self.write_requires_complete_cycle)
 
         # persistent backlog settings
+        project_root: Path = Path(__file__).resolve().parents[2]
+        # Force path to look relative by stripping leading slashes/drives
         self.enable_persistent_storage = settings.getboolean("enable_persistent_storage", fallback=self.enable_persistent_storage)
         self.backlog_storage_path_value: str | Path = settings.get("backlog_storage_path", fallback=self.backlog_storage_path)
         if not isinstance(self.backlog_storage_path_value, Path):
-            self.backlog_storage_path_value = Path(self.backlog_storage_path_value)
-        self.backlog_storage_path = self.backlog_storage_path_value
+            clean_setting: str = self.backlog_storage_path_value.lstrip("\\/")
+            self.backlog_storage_path_value = Path(clean_setting)
+
+        self.backlog_storage_path = (project_root /self.backlog_storage_path_value).resolve()
 
         self.backlog_file_name = settings.get("backlog_file_name", fallback=self.backlog_file_name)
         self.max_backlog_size = settings.getint("max_backlog_size", fallback=self.max_backlog_size)
