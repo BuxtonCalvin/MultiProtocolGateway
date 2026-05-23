@@ -4,7 +4,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import TextIO
+from typing import Literal, TextIO
 
 from defs.common import TransportSettings, strtobool
 
@@ -32,31 +32,46 @@ class json_out(transport_base):
 
         super().__init__(settings)
 
-    def connect(self):
+    def connect(self) -> None:
         """Initialize the output file handle"""
         self._log.info("json_out connect")
 
         if self.output_file.lower() == "stdout":
             self.file_handle = sys.stdout
+        # we want to output to a file, so we need to handle path creation and file opening
         else:
             try:
-                # Get the root path (3 levels up from this file)
-                project_root = Path(__file__).resolve().parent.parent.parent.parent
+                project_root: Path = Path(__file__).resolve().parents[2]
 
-                # Force path to look relative by stripping leading slashes/drives
-                clean_setting: str = self.output_file.lstrip("\\/")
-                file_path: Path = project_root / clean_setting
+                # Parse the provided output setting
+                user_path = Path(self.output_file)
 
-                # Create folders and file if missing
+                # Does the setting include an extension/folders?
+                if user_path.suffix:
+                    # User gave a full path with a filename (e.g. 'output/results.json')
+                    file_path = (project_root / user_path).resolve()
+                else:
+                    # User gave a name or folder only (e.g. 'my_data' or 'my_file.txt')
+                    clean_dir = user_path.parent if user_path.parent != Path('.') else Path()
+                    custom_name = user_path.name if user_path.name else f"JSON_{self.transport_name}.json"
+
+                    # Fallback to default name if only a directory was passed
+                    if not user_path.name:
+                        custom_name = f"JSON_{self.transport_name}.json"
+
+                    file_path = (project_root / clean_dir / custom_name).resolve()
+
+                # Create folders if missing
                 file_path.parent.mkdir(parents=True, exist_ok=True)
+
+                # 3. Handle file creation and opening
                 if not file_path.exists():
                     file_path.touch()
 
-                mode = "a" if self.append_mode else "w"
-                self.file_handle = open(
-                    file_path, mode, encoding="utf-8"
-                )
+                mode: Literal["a", "w"] = "a" if self.append_mode else "w"
+                self.file_handle = open(file_path, mode, encoding="utf-8")
                 self.connected = True
+
             except Exception as e:
                 self._log.error(f"Failed to open output file {self.output_file}: {e}")
                 self.connected = False
@@ -116,7 +131,7 @@ class json_out(transport_base):
             self._log.error(f"Failed to write to output: {e}")
             self.connected = False
 
-    def init_bridge(self, from_transport: transport_base):
+    def init_bridge(self, from_transport: transport_base) -> None:
         """Initialize bridge - not needed for JSON output"""
         pass
 
