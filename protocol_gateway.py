@@ -28,8 +28,9 @@ import sys
 from configparser import ConfigParser, NoOptionError, NoSectionError
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TextIO, cast
 
+from classes.messaging.message_handler import MessageHandler
 from classes.protocol_settings import (
     protocol_settings,
     registry_map_entry,
@@ -39,12 +40,12 @@ from defs.common import TransportSettings
 
 __logo = """
 
-███╗   ███╗██╗   ██╗██╗     ████████╗██╗
-████╗ ████║██║   ██║██║     ╚══██╔══╝██║
-██╔████╔██║██║   ██║██║        ██║   ██║
-██║╚██╔╝██║██║   ██║██║        ██║   ██║
-██║ ╚═╝ ██║╚██████╔╝███████╗   ██║   ██║
-╚═╝     ╚═╝ ╚═════╝ ╚══════╝   ╚═╝   ╚═╝
+███╗   ███╗██╗   ██╗██╗   ████████╗██╗
+████╗ ████║██║   ██║██║   ╚══██╔══╝██║
+██╔████╔██║██║   ██║██║      ██║   ██║
+██║╚██╔╝██║██║   ██║██║      ██║   ██║
+██║ ╚═╝ ██║╚██████╔╝███████╗ ██║   ██║
+╚═╝     ╚═╝ ╚═════╝ ╚══════╝ ╚═╝   ╚═╝
 
 ██████╗ ██████╗  ██████╗ ████████╗ ██████╗  ██████╗ ██████╗ ██╗          ██████╗  █████╗ ████████╗███████╗██╗    ██╗ █████╗ ██╗   ██╗
 ██╔══██╗██╔══██╗██╔═══██╗╚══██╔══╝██╔═══██╗██╔════╝██╔═══██╗██║         ██╔════╝ ██╔══██╗╚══██╔══╝██╔════╝██║    ██║██╔══██╗╚██╗ ██╔╝
@@ -132,9 +133,9 @@ class CustomConfigParser(ConfigParser):
         raise ValueError(msg)
 class NetworkError(Enum):
     # Standard codes
-    CONN_RESET = '104' # Errno 104 - Connection reset by peer (common for MQTT disconnects)
-    BROKEN_PIPE = '32' # Errno 32 - Broken pipe (common for MQTT disconnects)
-    TIMED_OUT = '110' # Errno 110 - Connection timed out (common for network issues)
+    CONN_RESET = '104'       # Errno 104 - Connection reset by peer (common for MQTT disconnects)
+    BROKEN_PIPE = '32'       # Errno 32 - Broken pipe (common for MQTT disconnects)
+    TIMED_OUT = '110'        # Errno 110 - Connection timed out (common for network issues)
     # Additional common codes
     CONN_REFUSED = '111'     # ECONNREFUSED
     NET_UNREACHABLE = '101'  # ENETUNREACH
@@ -219,6 +220,8 @@ class Protocol_Gateway:
     Main class, implementing the Inverters to MQTT/Database functionality
     """
     _logging_initialized = False
+    _messaging_initialized: bool = False
+
     @classmethod
     def _setup_logging(cls, cfg: ConfigParser) -> None:
         """
@@ -299,11 +302,26 @@ class Protocol_Gateway:
 
         # Optional console logging
         if cfg.getboolean("logging", "console", fallback=False):
-            console = logging.StreamHandler()
+            console: logging.StreamHandler[TextIO] = logging.StreamHandler()
             console.setFormatter(formatter)
             root.addHandler(console)
 
         cls._logging_initialized = True
+
+    @classmethod
+    def _setup_messaging(cls, cfg: ConfigParser) -> None:
+        """
+        Initialise the application-wide messaging subsystem.
+
+        Reads the [messages] section of config.cfg and wires up every
+        enabled notification service (Pushover, Telegram, …).  Mirrors
+        _setup_logging: safe to call multiple times, no-op after first
+        successful initialization.
+        """
+        if cls._messaging_initialized:
+            return
+        MessageHandler.setup(cfg)
+        cls._messaging_initialized = True
 
     @staticmethod
     def _compact_thread_label(label: str, max_length: int = 80) -> str:
@@ -378,6 +396,8 @@ class Protocol_Gateway:
         self.__settings.read(self.config_file.as_posix())
 
         self._setup_logging(self.__settings)
+        self._setup_messaging(self.__settings)
+
 
         ##[general]
         self._read_mode_raw: str = self.__settings.get("general", "read_mode", fallback="sequential").strip().lower()

@@ -448,6 +448,8 @@ def _parse_protocol_csv(csv_path: Path, group_name: str) -> list[dict[str, Any]]
                 "value":           "values",
                 "range":           "values",
                 "values_range":    "values",
+                # adjustments
+                "adjustments":     "adjustments",
                 # note
                 "note":            "note",
                 "notes":           "note",
@@ -511,6 +513,7 @@ def _parse_protocol_csv(csv_path: Path, group_name: str) -> list[dict[str, Any]]
                     "unit":              row.get("unit", ""),
                     "data_type":         row.get("data_type", ""),
                     "values_range":      row.get("values", ""),
+                    "adjustments":       row.get("adjustments", ""),
                     "note":              row.get("note", ""),
                     "read_interval":     row.get("read_interval", ""),
                     "write_mode_protocol": write_mode,
@@ -542,6 +545,7 @@ def _parse_protocol_json(json_path: Path, group_name: str) -> list[dict[str, Any
             "unit": "",
             "data_type": "json",
             "values_range": "",
+            "adjustments": f"JSON config file: {len(data)} keys",
             "note": f"JSON config file: {len(data)} keys",
             "read_interval": "",
             "write_mode_protocol": "R",
@@ -654,6 +658,7 @@ def _upsert_protocol_register(db: Session, reg: dict[str, Any]) -> ProtocolRegis
             existing.unit              = reg.get("unit", "")
             existing.data_type         = reg.get("data_type", "")
             existing.values_range      = reg.get("values_range", "")
+            existing.adjustments       = reg.get("adjustments", "")
             existing.note              = reg.get("note", "")
             existing.read_interval     = reg.get("read_interval", "")
             existing.write_mode_protocol = reg["write_mode_protocol"]
@@ -675,6 +680,7 @@ def _upsert_protocol_register(db: Session, reg: dict[str, Any]) -> ProtocolRegis
                 unit                 = reg.get("unit", ""),
                 data_type            = reg.get("data_type", ""),
                 values_range         = reg.get("values_range", ""),
+                adjustments          = reg.get("adjustments", ""),
                 note                 = reg.get("note", ""),
                 read_interval        = reg.get("read_interval", ""),
                 write_mode_protocol  = reg["write_mode_protocol"],

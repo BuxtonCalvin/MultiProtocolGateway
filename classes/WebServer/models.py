@@ -127,6 +127,7 @@ class ProtocolRegister(Base):
     unit: Mapped[str | None] = mapped_column(String(32), nullable=True)
     data_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
     values_range: Mapped[str | None] = mapped_column(Text, nullable=True)
+    adjustments: Mapped[str | None] = mapped_column(Text, nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     read_interval: Mapped[str | None] = mapped_column(String(32), nullable=True)
 

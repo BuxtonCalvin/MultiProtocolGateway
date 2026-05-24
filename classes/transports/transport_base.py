@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Callable, Iterator, Optional
 
+from classes.messaging.message_handler import send_message as _send_message
 from classes.protocol_settings import (
     Registry_Type,
     protocol_settings,
@@ -310,6 +311,32 @@ class transport_base:
     def _emit_message( self, entry: registry_map_entry, value: int | float | str ) -> None:
         if self.on_message is not None:
             self.on_message(self, entry, value)
+
+    def send_message(self, message: str, title: str = "", priority: int = 0, services: "list[str] | str | None" = None, **kwargs) -> None:
+        """
+        Send a notification through all configured messaging services
+        (Pushover, Telegram, …).
+
+        This is a convenience wrapper around the module-level
+        ``send_message()`` function so any transport subclass can call:
+
+            self.send_message("Battery critically low", title="MPG Alert", priority=1)
+
+        Parameters
+        ----------
+        message:
+            Notification body (required).
+        title:
+            Short heading.  When omitted the default_title from [messages]
+            config is used.
+        priority:
+            Pushover-style integer priority: -2 (silent) … 2 (emergency).
+            Telegram maps values > 0 to a sound-on notification, ≤ 0 to
+            silent.
+        **kwargs:
+            Forwarded to the underlying driver for future extensibility.
+        """
+        _send_message(message=message, title=title, priority=priority, services=services, **kwargs)
 
     #region - modbus
     #might limit to modbus_base only. not sure; might also apply to future protocols

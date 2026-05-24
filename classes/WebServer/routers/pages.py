@@ -112,6 +112,51 @@ async def logging_settings_page(request: Request):
         context={**_base_context(request, nav), "settings": settings},
     )
 
+@router.get("/pages/messaging-settings", response_class=HTMLResponse, response_model=None)
+async def messaging_settings_page(request: Request):
+    """Render the [messages] config section as an editable settings page."""
+    with session_scope() as db:
+        nav: NavData = get_nav_data(db)
+        settings: List[Setting] = (
+            db.query(Setting)
+            .filter_by(section="messages")
+            .order_by(Setting.key)
+            .all()
+        )
+    return request.app.state.templates.TemplateResponse(
+        request=request,
+        name="pages/messaging_settings.html",
+        context={**_base_context(request, nav), "settings": settings},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Messaging test endpoint
+# ---------------------------------------------------------------------------
+
+@router.post("/api/devices/general/messages/test")
+async def messaging_test(request: Request) -> dict[str, str]:
+    """
+    Send a test notification through every active messaging service.
+    Returns 200 on success, 500 if no handler is initialized or all
+    services fail.
+    """
+    from classes.messaging.message_handler import _handler  # noqa: PLC0415
+
+    if _handler is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Messaging subsystem is not initialized. "
+                   "Check that [messages] enabled = true in config.cfg and restart.",
+        )
+
+    from classes.messaging.message_handler import send_message  # noqa: PLC0415
+    send_message(
+        message="This is a test notification from MPG Admin.",
+        title="MPG Test",
+        priority=0,
+    )
+    return {"status": "sent"}
 
 @router.get("/pages/view-log", response_class=HTMLResponse, response_model=None)
 async def view_log_page(request: Request):

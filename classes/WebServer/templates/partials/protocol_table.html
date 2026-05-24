@@ -24,7 +24,8 @@
           <th class="px-2 py-2 text-left w-16 cursor-pointer select-none" scope="col" data-sort-key="unit">Unit</th>
           <th class="px-2 py-2 text-left w-20 cursor-pointer select-none" scope="col" data-sort-key="type">Type</th>
           <th class="px-2 py-2 text-left w-32 cursor-pointer select-none" scope="col" data-sort-key="range">Range</th>
-          <th class="px-2 py-2 text-left w-16 cursor-pointer select-none" scope="col" data-sort-key="protocol_write">P/W</th>
+          <th class="px-2 py-2 text-left w-16 cursor-pointer select-none" scope="col" data-sort-key="protocol_write">R/W</th>
+          <th class="px-2 py-2 text-left w-56 cursor-pointer select-none" scope="col" data-sort-key="adjustments">Adjustments</th>
           <th class="px-2 py-2 text-left min-w-[28rem] cursor-pointer select-none" scope="col" data-sort-key="note">Notes</th>
         </tr>
       </thead>
@@ -40,6 +41,7 @@
             data-sort-unit="{{ (row.unit or '') | lower }}"
             data-sort-type="{{ (row.data_type or '') | lower }}"
             data-sort-range="{{ (row.values_range or '') | lower }}"
+            data-sort-adjustments="{{ (row.adjustments or '') | lower }}"
             data-sort-note="{{ (row.note or '') | lower }}"
             data-sort-protocol_write="{{ row.write_mode_protocol }}"
             data-mask="{{ 1 if row.mask_enabled else 0 }}"
@@ -175,6 +177,20 @@
             {% endif %}
           </td>
 
+          <td class="px-2 py-1.5 text-mpg-500 dark:text-mpg-100" title="{{ row.adjustments or '' }}" role="cell">
+            {% if device_name %}
+            {{ row.adjustments or '' }}
+            {% else %}
+            <input type="text"
+                   class="w-full bg-mpg-200 border border-mpg-400 rounded px-1 py-0.5 surface-title dark:bg-mpg-700/75 dark:border-mpg-500 dark:text-mpg-50"
+                   value="{{ row.adjustments or '' }}"
+                   hx-patch="/api/protocols/{{ row.id }}/field"
+                   hx-on:htmx:config-request="event.detail.parameters = {field: 'adjustments', value: this.value}"
+                   hx-swap="none"
+                   hx-trigger="change delay:300ms">
+            {% endif %}
+          </td>
+
           <td class="px-2 py-1.5 text-mpg-500 dark:text-mpg-100" title="{{ row.note or '' }}" role="cell">
             {% if device_name %}
             {{ row.note or '' }}
@@ -187,7 +203,8 @@
                    hx-swap="none"
                    hx-trigger="change delay:300ms">
             {% endif %}
-          </td>
+          </td>          
+
         </tr>
         {% endfor %}
 

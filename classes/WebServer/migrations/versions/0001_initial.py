@@ -48,6 +48,7 @@ def upgrade() -> None:
         sa.Column("unit", sa.String(32), nullable=True),
         sa.Column("data_type", sa.String(32), nullable=True),
         sa.Column("values_range", sa.Text, nullable=True),
+        sa.Column("adjustments", sa.Text, nullable=True),
         sa.Column("note", sa.Text, nullable=True),
         sa.Column("read_interval", sa.String(32), nullable=True),
         sa.Column("write_mode_protocol", sa.String(8), default="R"),
