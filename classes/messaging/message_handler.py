@@ -95,7 +95,6 @@ def send_message(
     **kwargs:
         Passed through to each service driver for future extensibility.
     """
-    global _handler
     if _handler is None:
         _log.debug("MessageHandler not initialized — message dropped: %s", message)
         return
