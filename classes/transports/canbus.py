@@ -25,6 +25,7 @@ import sys
 import threading
 import time
 from collections import OrderedDict
+from threading import Lock
 
 import can
 
@@ -34,7 +35,8 @@ from ..protocol_settings import Registry_Type, protocol_settings, registry_map_e
 from .transport_base import transport_base
 
 
-class canbus(transport_base):
+class canbus(transport_base):
+
     transport_type = "scraper"
     ''' canbus is a more passive protocol; todo to include active commands to trigger canbus responses '''
 
@@ -58,7 +60,7 @@ class canbus(transport_base):
     thread: threading.Thread | None = None
     ''' main thread for async loop'''
 
-    lock: threading.Lock | None = None
+    lock: Lock | None = None
 
     cache: OrderedDict[int, tuple[bytes, float]] | None = None
     ''' cache, key is id, value is tuple (data, timestamp)'''
