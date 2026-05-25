@@ -1,3 +1,20 @@
+# Description: scraper transport for serial communication with SOI/EOI framing, supporting both synchronous and asynchronous modes.
+# File: serial_frame_transport.py
+#
+# Copyright 2026 Kevin Burke
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://apache.org
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # scraper transport for serial communication with SOI/EOI framing, supporting both synchronous and asynchronous modes.
 from classes.protocol_settings import Registry_Type, registry_map_entry
 from classes.transports.serial_frame_client import serial_frame_client
@@ -5,7 +22,8 @@ from classes.transports.transport_base import TransportWriteMode, transport_base
 from defs.common import TransportSettings
 
 
-class serial_frame_transport(transport_base):
+class serial_frame_transport(transport_base):
+    transport_type = "scraper"
     """
     Transport that communicates over a serial port using an SOI/EOI framing
     protocol, implemented via serial_frame_client.

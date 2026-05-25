@@ -1,3 +1,20 @@
+# Description: Modbus base transport class with shared client management, register failure tracking, and protocol analysis support
+# File: modbus_base.py
+#
+# Copyright 2026 Kevin Burke
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://apache.org
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # Modbus base transport class with shared client management, register failure tracking, and protocol analysis support
 import inspect
 import re
@@ -141,7 +158,8 @@ class RegisterFailureTracker:
             remaining = self.disabled_until - time.time()
             return max(0, remaining)
 class modbus_base(transport_base):
-
+
+    transport_type = "base class"
     #this is specifically static
     clients : dict[str, ModbusBaseClient] = {}
     ''' str is identifier, dict of clients when multiple transports use the same ports '''

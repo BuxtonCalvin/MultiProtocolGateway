@@ -1,3 +1,21 @@
+# Description: Bridge module for JSON output transport that writes data to a file or stdout, with optional pretty printing and metadata inclusion.
+# File: json_out.py
+#
+# forked from json_out.py in the original PythonProtocolGateway repository by Jared Mauch
+# Copyright 2026 Kevin Burke
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://apache.org
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # Bridge module for JSON output transport that writes data to a file or stdout, with optional pretty printing and metadata inclusion.
 import json
 import sys
@@ -12,6 +30,8 @@ from .transport_base import transport_base
 
 
 class json_out(transport_base):
+
+    transport_type = "bridge"
     ''' JSON output transport that writes data to a file or stdout '''
     output_file: str = "stdout"
     pretty_print: bool = True

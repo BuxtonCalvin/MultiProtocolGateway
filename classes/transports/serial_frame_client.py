@@ -1,3 +1,20 @@
+# Description: scraper transport class for serial communication with SOI/EOI framing, supporting both synchronous and asynchronous modes. Does not implement any protocol-specific logic, just the framing and serial communication. Can...
+# File: serial_frame_client.py
+#
+# Copyright 2026 Kevin Burke
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://apache.org
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # scraper transport class for serial communication with SOI/EOI framing, supporting both synchronous and asynchronous modes.
 # Does not implement any protocol-specific logic, just the framing and serial communication. Can be used as a base
 # for custom serial protocols that use simple start/end framing.
@@ -8,7 +25,8 @@ from typing import Callable
 import serial
 
 
-class serial_frame_client():
+class serial_frame_client():
+    transport_type = "base class"
     ''' basic serial client implementing an empty SOI/EOI frame'''
     client : serial.Serial
     running : bool = False

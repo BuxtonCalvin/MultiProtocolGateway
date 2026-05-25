@@ -1,20 +1,30 @@
 # bridge transport module for TimescaleDB, implementing a high-performance transport that writes protocol metrics
 # to a TimescaleDB database with support for hypertables, continuous aggregates, rollups, and persistent disk backlog.
 """
+File: timescaledb.py
 timescaledb transport bridge module is free software written by Kevin Burke: you can redistribute it and/or modify
 it under the terms of the GNU Affero General Public License as published by
 the Free Software Foundation, either version 3 of the License, or any later version.
+
+Copyright 2026 Kevin Burke
 
 timescaledb transport bridge module is distributed in the hope that it will be useful,
 but WITHOUT ANY WARRANTY; without even the implied warranty of
 MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU Affero General Public License for more details.
 
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+
 You can find a copy of the GNU Affero General Public License in the documentation/bridges/timescaledb folder.
 If not, see <https://www.gnu.org>.
 ----------------------------------------------------------------------------------------------------------------------
 timescaledb transport bridge module (with rollup continuous aggregates) and persistent disk backlog.
-python > 3.9 is required, 3.13 is recommended for best performance and latest features.
+python > 3.10 is required, 3.13 is recommended for best performance and latest features.
 The transport uses the latest SQLAlchemy version for database interactions and supports automatic schema management,
 including dynamic column creation based on the protocol registry, hypertable setup, and continuous
 aggregate rollups for efficient querying of historical data.
@@ -407,12 +417,14 @@ class TimescaleDBConnectionManager:
 # TimescaleDB transport bridge class
 class timescaledb(transport_base):
 
+
+    transport_type = "bridge"
     """
     TimescaleDB transport bridge with hypertable, continuous aggregates and rollup support.
     The class uses background threads for auto-refresh of rollups and stale data detection.
     Uses a global sqlalchemy session for most database operations.
     """
-    __version__: str = "0.9.0"
+    __version__: str = "1.0.0"
 
     # -------------------------
     # Default settings (overridable by settings SectionProxy)
@@ -566,7 +578,7 @@ class timescaledb(transport_base):
         """
 
         """
-        0.9.0 Initial Commit
+        1.0.0 Initial Production Version
 
         """
         # Per-protocol state — populated as init_bridge is called for each scraper

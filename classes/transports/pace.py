@@ -1,3 +1,20 @@
+# Description: This module uses a long obsolete CRC-16 algorithm that is not compatible with the standard CRC-16 implementations in pymodbus and elsewhere.
+# File: pace.py
+#
+# Copyright 2026 Kevin Burke
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://apache.org
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """This module uses a long obsolete CRC-16 algorithm that is not compatible with
 the standard CRC-16 implementations in pymodbus and elsewhere.
 It is recommended to use the modbus_pace transport instead, which uses the standard CRC-16 algorithm
@@ -305,7 +322,8 @@ class CustomModbusSerialClient(ModbusSerialClient):
 
 
 class pace:
-
+
+    transport_type = "scraper"
     port : str = "/dev/ttyUSB0"
     baudrate : int = 9600
     client : CustomModbusSerialClient

@@ -1,3 +1,20 @@
+# Description: scanner.py — The authoritative source-of-truth builder for the staging DB.
+# File: scanner.py
+#
+# Copyright 2026 Kevin Burke
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://apache.org
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """
 scanner.py — The authoritative source-of-truth builder for the staging DB.
 
@@ -189,31 +206,71 @@ def _classify_transport(section: str, keys: dict[str, str], transports_dir: Path
     """
     Returns "scraper", "bridge", or "general".
 
-    Priority:
-    1. If section has protocol_version → scraper
-    2. Read first line of the matching .py file in transports_dir
-       - "# scraper" → scraper
-       - "# bridge"  → bridge
-    3. Fall back to "general"
+    Classification is declared by the transport class itself via its
+    class-level transport_type attribute. This avoids relying on comments
+    while still keeping the scanner import-free.
     """
-    if "protocol_version" in keys and keys["protocol_version"].strip():
-        return "scraper"
-
     transport_type: str = keys.get("transport", "").strip()
     if transport_type:
         py_file: Path = transports_dir / f"{transport_type}.py"
-        if py_file.exists():
-            try:
-                first_line: str = py_file.read_text(encoding="utf-8").splitlines()[0].strip()
-                if first_line.startswith("#"):
-                    word: str = first_line.lstrip("#").strip().lower().split()[0]
-                    if word in ("scraper", "bridge"):
-                        return word
-            except Exception as exc:
-                _log.warning(f"Parse class files read failed for {py_file}: {exc}")
-                pass
+        classification = _transport_type_from_ast(py_file)
+        if classification in ("scraper", "bridge"):
+            return classification
 
     return "general"
+
+
+def _transport_type_from_ast(py_file: Path) -> str:
+    """
+    Read a transport module's class-level transport_type value without
+    importing the module. Importing transport modules can touch hardware,
+    network clients, or optional database libraries, so AST parsing is the
+    safest source of truth for WebServer discovery.
+    """
+    if not py_file.exists():
+        return "base class"
+
+    try:
+        source: str = py_file.read_text(encoding="utf-8")
+        tree = ast.parse(source)
+    except Exception as exc:
+        _log.warning(f"AST transport_type parse failed for {py_file.name}: {exc}")
+        return "base class"
+
+    valid_types = {"scraper", "bridge", "base class", "general"}
+    module_stem = py_file.stem
+    discovered: list[tuple[str, str]] = []
+
+    for node in tree.body:
+        if not isinstance(node, ast.ClassDef):
+            continue
+        for stmt in node.body:
+            target_name = ""
+            value_node: ast.AST | None = None
+            if isinstance(stmt, ast.Assign):
+                for target in stmt.targets:
+                    if isinstance(target, ast.Name) and target.id == "transport_type":
+                        target_name = target.id
+                        value_node = stmt.value
+                        break
+            elif isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
+                if stmt.target.id == "transport_type":
+                    target_name = stmt.target.id
+                    value_node = stmt.value
+
+            if target_name and isinstance(value_node, ast.Constant) and isinstance(value_node.value, str):
+                value = value_node.value.strip().lower()
+                if value in valid_types:
+                    discovered.append((node.name, value))
+
+    for class_name, value in discovered:
+        if class_name == module_stem:
+            return value
+
+    if discovered:
+        return discovered[0][1]
+
+    return "base class"
 
 
 # ---------------------------------------------------------------------------
@@ -296,17 +353,7 @@ def scan_transport_library(transports_dir: Path) -> dict[str, dict[str, Any]]:
             continue
         stem: str = py_file.stem
 
-        # Classification from first-line comment
-        classification = "base class"
-        try:
-            first_line = py_file.read_text(encoding="utf-8").splitlines()[0].strip()
-            if first_line.startswith("#"):
-                word = first_line.lstrip("#").strip().lower()
-                if word.split()[0] in ("scraper", "bridge"):
-                    classification = word.split()[0]
-        except Exception as exc:
-            _log.warning(f"Parse class files scan failed for {py_file}: {exc}")
-            pass
+        classification = _transport_type_from_ast(py_file)
 
         # Keys from AST scan of this file
         ast_keys = _extract_settings_keys_from_ast(py_file)

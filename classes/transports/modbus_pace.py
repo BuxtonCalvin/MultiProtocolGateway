@@ -1,3 +1,20 @@
+# Description: scraper for PACE BMS devices over RS-232/RS-485 serial using the proprietary binary protocol. Since pymodbus 3.x dropped the binary framer, this transport handles raw serial communication directly
+# File: modbus_pace.py
+#
+# Copyright 2026 Kevin Burke
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://apache.org
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # scraper for PACE BMS devices over RS-232/RS-485 serial using the proprietary binary protocol.
 # Since pymodbus 3.x dropped the binary framer, this transport handles raw serial communication directly
 # via pyserial, mapping register reads to standard Modbus function codes framed in PACE's binary envelope.
@@ -132,7 +149,8 @@ class _PaceResponse:
         return resp
 
 
-class pace(modbus_base):
+class pace(modbus_base):
+    transport_type = "scraper"
     """
     PACE BMS transport bridge for MPG.
 

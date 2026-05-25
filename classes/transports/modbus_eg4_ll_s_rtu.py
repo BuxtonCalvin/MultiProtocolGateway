@@ -1,3 +1,20 @@
+# Description: Scraper for EG4 LL rack batteries (PDF V01.06 protocol) via Modbus TCP through a Waveshare RS485 bridge, inheriting from modbus_tcp but adding
+# File: modbus_eg4_ll_s_rtu.py
+#
+# Copyright 2026 Kevin Burke
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://apache.org
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 # Scraper for EG4 LL rack batteries (PDF V01.06 protocol) via Modbus TCP
 # through a Waveshare RS485 bridge, inheriting from modbus_tcp but adding
 # EG4-specific derived-field logic on top of the TCP transport.
@@ -101,7 +118,8 @@ from classes.transports.modbus_rtu import modbus_rtu
 from defs.common import TransportSettings
 
 
-class modbus_eg4_ll_s_tcp(modbus_rtu):
+class modbus_eg4_ll_s_tcp(modbus_rtu):
+    transport_type = "scraper"
     """
     EG4 LL battery transport over Modbus TCP (Waveshare RS485 bridge),
     targeting the PDF V01.06 register map.
