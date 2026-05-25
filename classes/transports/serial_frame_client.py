@@ -15,6 +15,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import annotations
+
 # scraper transport class for serial communication with SOI/EOI framing, supporting both synchronous and asynchronous modes.
 # Does not implement any protocol-specific logic, just the framing and serial communication. Can be used as a base
 # for custom serial protocols that use simple start/end framing.

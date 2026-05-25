@@ -15,6 +15,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import annotations
+
 # scraper for PACE BMS devices over RS-232/RS-485 serial using the proprietary binary protocol.
 # Since pymodbus 3.x dropped the binary framer, this transport handles raw serial communication directly
 # via pyserial, mapping register reads to standard Modbus function codes framed in PACE's binary envelope.

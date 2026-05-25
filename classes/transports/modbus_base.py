@@ -15,6 +15,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import annotations
+
 # Modbus base transport class with shared client management, register failure tracking, and protocol analysis support
 import inspect
 import re

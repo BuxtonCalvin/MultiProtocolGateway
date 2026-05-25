@@ -20,6 +20,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 
+from __future__ import annotations
+
 You can find a copy of the GNU Affero General Public License in the documentation/bridges/timescaledb folder.
 If not, see <https://www.gnu.org>.
 ----------------------------------------------------------------------------------------------------------------------
@@ -65,9 +67,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from threading import Lock, RLock
-from typing import Any, Callable, List, Literal, Optional, Tuple
+from typing import Any, Callable, List, Literal, Optional, Protocol, Tuple, Union
 
-import requests
 from sqlalchemy import (
     Boolean,
     Connection,
@@ -519,13 +520,6 @@ class timescaledb(transport_base):
 
     current_metric_count: int = 0
 
-    # pushover notification settings for stale data alerts.
-    # These are optional and can be configured by the user if they want
-    # to receive pushover notifications when stale data is detected.
-    enable_pushover: bool = False
-    pushover_token: str = ""
-    pushover_user: str = ""
-
     # write_requires_complete_cycle is used to prevent writing incomplete batches of data to the database,
     # which can cause issues with rollup continuous aggregates and data integrity.
     # When True, the transport will only write data to the database once it has received a complete cycle
@@ -656,12 +650,8 @@ class timescaledb(transport_base):
             "enable_rollups": settings.getboolean("enable_rollups", fallback=self.enable_rollups),
         }
 
-        # pushover settings
-        self.enable_pushover: bool = settings.getboolean("enable_pushover", fallback=self.enable_pushover)
-        self.pushover_token: str = settings.get("pushover_token", fallback=self.pushover_token)
-        self.pushover_user: str = settings.get("pushover_user", fallback=self.pushover_user)
-
-        # 3. Explicitly set bridge name if not set by user, since this transport doesn't have a device name from an upstream transport to pull from.
+        # Explicitly set bridge name if not set by user, since this transport doesn't have a device name from an
+        # upstream transport to pull from.
         self.device_name = settings.get("device_name", fallback="TimescaleDB MPG Bridge")
 
         super().__init__(settings)
@@ -753,6 +743,11 @@ class timescaledb(transport_base):
                 self.backlog_storage_path.mkdir(parents=True, exist_ok=True)
             except Exception as e:
                 self._log.error(f"Failed to create backlog storage directory '{self.backlog_storage_path}': {e}")
+                self.send_message(
+                    message=f"Error: Unable to create backlog storage directory at '{self.backlog_storage_path}'. Check logs for details.",
+                    title="Backlog Storage Error",
+                    priority=1, services=["pushover"]
+                )
                 raise
         # full path to backlog file
         self.backlog_file_path: Path = self.backlog_storage_path / f"{self.backlog_file_name}.jsonl"
@@ -761,6 +756,7 @@ class timescaledb(transport_base):
             backlog_file_path=self.backlog_file_path,
             max_backlog_age=self.max_backlog_age,
             max_backlog_size=self.max_backlog_size,
+            send_message = self.send_message,
             flush_queue=self._flush_queue,
             flush_event=self._flush_event,
             backlog_lock=self._backlog_lock,
@@ -780,6 +776,11 @@ class timescaledb(transport_base):
         except Exception as e:
             self._log.error(f"Initial connect failed: {e}")
             self._set_tsdb_connected(conn_value = False, conn_reason = "Initial connect was not successful")
+            self.send_message(
+                message="Error: Unable to connect to TimescaleDB at startup. Check logs for details. Will keep retrying in the background.",
+                title="TimescaleDB Connection Error",
+                priority=1, services=["pushover"]
+            )
 
         """
             Attribute:
@@ -831,8 +832,8 @@ class timescaledb(transport_base):
             except Exception as e:
                 self._log.error(f"Orphaned lock cleanup failed: {e}")
 
-        # create ORM tables. DeviceInfo, DeviceMetricsNarrow.  MetricCatalog for dynamic column names.
-        # ProtocolRegistry for protocol metadata.
+            # create ORM tables. DeviceInfo, DeviceMetricsNarrow.  MetricCatalog for dynamic column names.
+            # ProtocolRegistry for protocol metadata.
             try:
                 self._create_tables()
 
@@ -847,6 +848,11 @@ class timescaledb(transport_base):
         except Exception as e:
             self._set_tsdb_connected(conn_value = False, conn_reason ="Connect unsuccessful")
             self._log.error(f"connect() failed: {e}")
+            self.send_message(
+                message="Error: Unable to connect to TimescaleDB at startup. Check logs for details. Will keep retrying in the background.",
+                title="TimescaleDB Connection Error",
+                priority=1, services=["pushover"]
+            )
             raise
 
     # Centralize state transitions for tsdb_connected helper
@@ -905,6 +911,11 @@ class timescaledb(transport_base):
                     self._set_tsdb_connected(conn_value = False, conn_reason = "reconnect unsuccessful")
                     self._log.warning(f"Reconnect attempt {attempt_no} failed during connect(): {e}")
                     self._log.warning(f"❌ [COMMUNICATION LOST] --- Name: {self.transport_name} ---")
+                    self.send_message(
+                        message=f"Reconnect attempt {attempt_no} failed: Unable to connect to TimescaleDB. Will keep retrying in the background. Check logs for details.",
+                        title="TimescaleDB Reconnect Failed",
+                        priority=1, services=["pushover"]
+                    )
 
                 with self._reconnect_lock:
                     tsdb_connected: bool = self.tsdb_connected
@@ -934,6 +945,11 @@ class timescaledb(transport_base):
                                 self.backlog.replay_to_queue()
                     except Exception as e:
                         self._log.error(f"Backlog flush failed after reconnect: {e}")
+                        self.send_message(
+                            message="Error: Backlog flush failed after reconnect. Check logs for details.",
+                            title="TimescaleDB Backlog Flush Error",
+                            priority=1, services=["pushover"]
+                        )
 
                     break
 
@@ -1765,8 +1781,8 @@ class timescaledb(transport_base):
                 my_session_factory=self.SessionFactory,
                 my_engine=self.engine,
                 migration_in_progress=self.migration_in_progress,
-                send_pushover_message = self._send_pushover_message,
                 log=self._log,
+                send_message=self.send_message,
                 backlog_lock=self._backlog_lock,
                 flush_queue=self._flush_queue,
                 backlog=self.backlog,
@@ -2317,58 +2333,12 @@ class timescaledb(transport_base):
 
         # 5. Notify
         try:
-            if getattr(self, "enable_pushover", False):
-                minutes: float = total_stale_elapsed.total_seconds() / 60
-                msg: str = (f"Transport [{transport_id}] stale for {minutes:.1f} mins. "
-                    f"Attempt {state['stale_event_count']} of {self.max_stale_attempts}.")
-                self._send_pushover_message(title="Transport Stale", message=msg)
+            minutes: float = total_stale_elapsed.total_seconds() / 60
+            msg: str = (f"Transport [{transport_id}] stale for {minutes:.1f} mins. "
+                f"Attempt {state['stale_event_count']} of {self.max_stale_attempts}.")
+            self.send_message(message=msg,title="MPG Alert", priority=1, services=["pushover"])
         except Exception:
             self._log.exception(f"[{transport_id}] Failed sending Pushover notification.")
-
-
-    def _send_pushover_message(self, title: str, message: str) -> None:
-        """
-
-        Sends a notification through the Pushover service, if enabled.
-
-        This method is used to notify operators of critical conditions such as
-        stale-data detection, reconnection attempts, or prolonged database
-        outages. Pushover integration must be explicitly enabled and configured
-        via `pushover_enabled`, `pushover_token`, and `pushover_user`.
-
-        Args:
-            title (str): Short title summarizing the notification event.
-            message (str): Detailed message describing the condition or alert.
-
-        Raises:
-            Exception: Network errors, authentication issues, or Pushover API
-            failures are caught and logged but do not interrupt program flow.
-
-        """
-        try:
-
-            token: str = self.pushover_token
-            user: str = self.pushover_user
-
-            if not token or not user:
-                self._log.error("Pushover enabled but missing token or user key.")
-                return
-
-            requests.post(
-                "https://api.pushover.net/1/messages.json",
-                data={
-                    "token": token,
-                    "user": user,
-                    "title": title,
-                    "message": message,
-                },
-                timeout=5
-            )
-
-            self._log.info("Pushover notification sent.")
-
-        except Exception:
-            self._log.exception("Failed to send Pushover notification.")
 
 
     # -------------------------
@@ -2417,6 +2387,16 @@ class timescaledb(transport_base):
                     self._log.error(f"Exception in __del__: {e}")
                 except Exception:
                     self._log.error(f"Exception in __del__: {e}")
+class SendMessageProtocol(Protocol):
+    def __call__(
+        self,
+        message: str,
+        title: str = "",
+        priority: int = 0,
+        services: Optional[Union[list[str], str]] = None,
+        **kwargs
+    ) -> None:
+        ...
 class BacklogManager:
     """
     Manages persistent backlog storage and replay for TimescaleDB writes.
@@ -2438,6 +2418,7 @@ class BacklogManager:
         backlog_file_path: Path,
         max_backlog_age: int,
         max_backlog_size: int,
+        send_message: SendMessageProtocol,
         flush_queue: queue.Queue,
         flush_event: threading.Event,
         backlog_lock: threading.RLock,
@@ -2447,6 +2428,7 @@ class BacklogManager:
         self.backlog_file_path: Path  = backlog_file_path
         self.max_backlog_age: int = max_backlog_age
         self.max_backlog_size: int = max_backlog_size
+        self.send_message: SendMessageProtocol = send_message
         self._flush_queue: queue.Queue = flush_queue
         self._flush_event: threading.Event = flush_event
         self._backlog_lock: threading.RLock = backlog_lock
@@ -2487,8 +2469,13 @@ class BacklogManager:
 
             self._log.info("Loaded %d points from disk", len(loaded))
 
-        except Exception:
-            self._log.exception("Failed to process backlog file")
+        except Exception as e:
+            self._log.exception (f"Failed to process backlog file: {e}")
+            self.send_message(
+                message="Failed to load backlog from disk. Check logs for details.",
+                title="Backlog Load Error",
+                priority=1, services=["pushover"]
+            )
 
     def enqueue(self, point: dict) -> None:
         if isinstance(point, list):
@@ -2535,6 +2522,11 @@ class BacklogManager:
                 f.write(json_string + "\n")
         except Exception as e:
             self._log.error(f"Failed to append point to backlog disk: {e}")
+            self.send_message(
+                message="Failed to write point to backlog on disk. Check logs for details.",
+                title="Backlog Write Error",
+                priority=1, services=["pushover"]
+            )
             raise
 
     def _sync_to_disk(self) -> None:
@@ -2548,9 +2540,12 @@ class BacklogManager:
                         f.write(json.dumps(p, default=str) + "\n")
             except Exception as e:
                 self._log.error(f"Failed to sync backlog to disk: {e}")
+                self.send_message(
+                    message="Failed to sync backlog to disk. Check logs for details.",
+                    title="Backlog Sync Error",
+                    priority=1, services=["pushover"]
+                )
                 raise
-
-
 class RollupManager:
     """ summary logic
         The RollupManger class creates the structures that enable TimescaleDB rollup views.
@@ -2593,8 +2588,8 @@ class RollupManager:
         my_session_factory: sessionmaker[Session],
         my_engine: Engine,
         migration_in_progress: threading.Event,
-        send_pushover_message: Callable[[str, str], None],
         log: logging.Logger,
+        send_message:  SendMessageProtocol,
         backlog_lock: threading.RLock,
         flush_queue: queue.Queue,
         backlog: BacklogManager,
@@ -2605,8 +2600,8 @@ class RollupManager:
         self.SessionFactory: sessionmaker[Session] = my_session_factory
         self.engine: Engine = my_engine
         self.migration_in_progress: threading.Event = migration_in_progress
-        self._send_pushover_message: Callable[[str, str], None] = send_pushover_message
         self._log: logging.Logger = log
+        self.send_message:  SendMessageProtocol = send_message
         self._backlog_lock: threading.RLock = backlog_lock
         self._flush_queue: queue.Queue  = flush_queue
         self.backlog: 'BacklogManager'  = backlog
@@ -4137,15 +4132,15 @@ class RollupManager:
                         if not res:
                             break
 
-                        if res.wait_event_type == 'Lock':
-                            self._send_pushover_message(
-                            f"⚠️ {view_name} is BLOCKED by a lock.",
-                                (
-                                f"The refresh for {view_name} has been running for over 30 seconds "
-                                f"and is currently blocked by a lock. Please investigate the "
-                                f"database locks to ensure the refresh can complete successfully."
-                                )
-                            )
+                        if res.wait_event_type == Lock:
+                            msg: str = (
+                                f"⚠️ {view_name} is BLOCKED by a lock.\n"
+                                f"The refresh for {view_name} has been running for over 30 seconds and is "
+                                f"currently blocked by a lock. Please investigate the database locks to ensure "
+                                f"the refresh can complete successfully."
+    )
+                            self.send_message(message=msg, title="MPG Alert", priority=1, services=['pushover'])
+
 
                         # Sleep in small increments to remain responsive to the stop_signal
                         for _ in range(30):

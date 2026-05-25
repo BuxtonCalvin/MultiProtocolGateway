@@ -15,6 +15,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import annotations
+
 # based on https://github.com/nythepegasus/pushover-client
 import mimetypes
 from time import time

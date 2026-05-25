@@ -15,6 +15,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import annotations
+
 # Scraper for EG4 LL rack batteries (PDF V01.06 protocol) via Modbus TCP
 # through a Waveshare RS485 bridge, inheriting from modbus_tcp but adding
 # EG4-specific derived-field logic on top of the TCP transport.

@@ -16,6 +16,8 @@
 # limitations under the License.
 
 ''' simulate modbus tcp server for testing mpg '''
+from __future__ import annotations
+
 import json
 
 from modbus_tk import hooks, modbus_tcp

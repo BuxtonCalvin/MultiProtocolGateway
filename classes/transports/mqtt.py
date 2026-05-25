@@ -15,6 +15,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import annotations
+
 # bridge transport module for MQTT, implementing a publish-subscribe mechanism
 # to relay data between the protocol scrapers and an MQTT broker, with support for Home Assistant discovery.
 import atexit

@@ -19,6 +19,8 @@
 """
 Main module for Inverters ModBus RTU data to MQTT
 """
+from __future__ import annotations
+
 import importlib
 import sys
 import threading

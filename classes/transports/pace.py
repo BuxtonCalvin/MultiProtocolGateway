@@ -30,6 +30,8 @@ Use the modbus_rtu transport or the modbus_pace transport instead for new projec
 standard CRC-16 algorithm and are compatible with a wider range of Modbus devices.
 """
 
+from __future__ import annotations
+
 import logging
 import struct
 import time

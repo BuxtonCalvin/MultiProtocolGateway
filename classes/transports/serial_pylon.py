@@ -15,6 +15,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import annotations
+
 # scraper transport for serial communication with Pylontech batteries, using their
 # specific ASCII Hex protocol with SOI/EOI framing and checksum validation.
 import struct

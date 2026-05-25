@@ -15,6 +15,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import annotations
+
 # scraper for Modbus RTU devices over RS-232/RS-485 serial, inheriting from modbus_base and implementing
 # RTU-specific client setup and register access logic.
 

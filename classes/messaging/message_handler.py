@@ -162,6 +162,7 @@ class MessageHandler:
             return
 
         default_title: str = cfg.get("messages", "default_title", fallback="MPG Notification")
+        # priority_service: str = cfg.get("messages", "priority", fallback="pushover").strip().lower()
         instance = cls(cfg, default_title)
         _handler = instance
         cls._initialized = True
@@ -269,6 +270,7 @@ class MessageHandler:
             ``None``  → all active services.
             ``str``   → single service by name (case-insensitive).
             ``list``  → explicit subset of services (case-insensitive).
+            ``priority`` -> priority service name from config used to set service.
         """
         effective_title: str = title or self._default_title
 

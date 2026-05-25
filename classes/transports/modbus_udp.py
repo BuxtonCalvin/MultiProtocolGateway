@@ -15,6 +15,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import annotations
+
 # scraper for Modbus UDP devices, inheriting from modbus_base and implementing UDP-specific client setup and register access logic.
 from threading import Lock
 from typing import TYPE_CHECKING, cast

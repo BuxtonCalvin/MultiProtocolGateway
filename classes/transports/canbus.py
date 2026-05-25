@@ -15,6 +15,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import annotations
+
 # Scraper for canbus data; because canbus is passive, we read the bus and store results in a cache,
 # then process the cache to return values for the protocol. This allows us to read the bus as fast
 # as possible, and process the data at a more reasonable rate for the protocol.
@@ -80,10 +82,9 @@ class canbus(transport_base):
     ''' CAN ID known to carry the serial number; read from settings, or discovered by sniffing. '''
 
     def __init__(self, settings: TransportSettings, protocolSettings: protocol_settings | None = None) -> None:
-        #  Removed the string-quoted forward reference "protocol_settings | None".
-        # PEP 649 (lazy annotation evaluation) is the default in 3.14, so forward references
-        # in annotations no longer need to be quoted strings. Using the bare type is cleaner
-        # and consistent with the rest of the codebase.
+        # Annotations are postponed for Python 3.10+ compatibility, so the
+        # concrete protocol_settings type can be used here without import-time
+        # evaluation of the union expression.
         super().__init__(settings)
 
         # check if running on windows or linux
