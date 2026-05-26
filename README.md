@@ -8,7 +8,13 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://github.com/jBuxtonCalvin/MultiProtocolGateway/blob/main/LICENSE)
 [![CodeQL Status](https://img.shields.io/github/actions/workflow/status/BuxtonCalvin/MultiProtocolGateway/codeql.yml)](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/codeql.yml)
 
-**Multi Protocol Gateway (MPG)** is a production-grade data bridge for industrial and energy-monitoring hardware. It reads live register data from Modbus RTU/TCP, CAN bus, and proprietary serial protocols, then fans that data out to any combination of MQTT brokers, TimescaleDB, InfluxDB, and JSON outputs — all managed through a built-in web administration UI.
+**Multi Protocol Gateway (MPG)** is a production-grade data bridge for industrial and energy-monitoring hardware.
+
+🙏 Credits
+
+This application was inspired by and built upon the excellent work by [@HotNoob](https://github.com/HotNoob/PythonProtocolGateway) and their PythonProtocolGateway project and the precedent project [@andiburger/growatt2mqtt](https://github.com/andiburger/growatt2mqtt). We extend our sincere gratitude for their efforts in solar inverter data management.  MPG diverges from these efforts with Web UI Management, concurrent Multi-Protocol capability, multiple concurrent bridges, extended hardware device support and all with a completely re-factored data read and write logic.
+
+MPG reads live register data from Modbus RTU/TCP, CAN bus, and proprietary serial protocols, then fans that data out to any combination of MQTT brokers, TimescaleDB, InfluxDB, and JSON outputs — all managed through a built-in web administration UI.  It is planned to extend hardware reads to include rest apis as well as proprietary protocols that do not rely on serial data.
 
 MPG is purpose-built for solar inverters, battery management systems (BMS), energy meters, and any device that speaks Modbus, but its protocol-map architecture means it can be adapted to virtually any register-based hardware.
 
@@ -108,7 +114,7 @@ A reference page listing all available settings with their definitions.
 
 Bridges receive data from scrapers and write it somewhere. They are passive — they do not poll.  Here are two database bridges:
 
-- InfluxDB
+- InfluxDB 1.X and 3.x versions
   - Advanced Features
     [`influxdb_advanced_features.md`](documentation/bridges/InfluxDB/influxdb_advanced_features.md)
 
@@ -127,18 +133,24 @@ MPG ships with pre-built protocol maps for the following manufacturers. Each pro
 
 | Manufacturer | Models / Protocols |
 | --- | --- |
-| **EG4** | EG4 inverters (v58, 3000EHV, 18kpv, Gridboss), EG4 LL-S (RS-485 & TCP) |
-| **Growatt** | v0.14 (2020+), BMS CAN v1.04, BMS RS-485 |
-| **Sigineer** | v0.11 |
-| **SolArk** | 8K/12K (v1.1) |
-| **SRNE** | v1.7, v1.96, v3.9 |
+| **Deye Sunsynk** | Deye Sunsynk Inverters (SUN-3K/5K/8K/12K-SG Series Hybrid, Deye Micro SUN Series) |
+| **EG4** | EG4 inverters (v58, 3000EHV, 18kpv, Gridboss, 6000XP, 12000XP, FlexBOSS21), EG4 LL-S (RS-485 & TCP) |
+| **Enphase** | Enphase micro inverters (IQ7, IQ7+, IQ8, IQ8Plus, IQ8M, IQ8A Series) |
+| **Fronius** | Fronius Inverters (Primo, Symo, Galvo, Eco, Gen24 Plus Series) |
+| **Growatt** | v0.14 (2020+), BMS CAN v1.04, BMS RS-485 (MIN 3000-10000TL-X, SPF 3000-5000TL LVM, SPH, MOD, MAX Series) |
+| **HDHK** | 16-channel AC module |
+| **Next Power** | Victor NM RE |
 | **PACE BMS** | v1.3 |
 | **Pylon** | CAN, RS-485 v3.3 |
-| **Victron** | GX v3.3, GX Generic CAN |
-| **Voltronic** | BMS 2020-03-25, BMS v1.1 |
-| **SMA** | Sunny Island v1 |
-| **Next Power** | Victor NM RE |
-| **HDHK** | 16-channel AC module |
+| **Sigineer** | v0.11 (Sigineer M3000, M6000 Series Inverter/Chargers) |
+| **SMA** | Sunny Island v1, Sunny Boy Tri Power, SMA Modbus (Core1, Sunny Tripower X, Sunny Boy Smart Energy) |
+| **SOK** | Sok Inverters (SOK 48V 100Ah / SK48V100 Server Rack Integrated Protocols) |
+| **Solar Edge** | Solar Edge Inverters |
+| **SolArk** | 8K/12K (v1.1) (Sol-Ark 5K, 8K, 12K, 15K, 30K-3P All-In-One Hybrid) |
+| **SRNE** | v1.7, v1.96, v3.9 (ASF/ASP Split-Phase, HYP, HESP Hybrid, HF/HFP Series) |
+| **Sungrow** | Sungrow inverters (SG Series String, SH5.0/6.0/8.0/10RT Hybrid, SG350HX) |
+| **Victron** | GX v3.3, GX Generic CAN, Smartsolar (MultiPlus, MultiPlus-II, Quattro, EasySolar, Phoenix Inverters) |
+| **Voltronic** | BMS 2020-03-25, BMS v1.1 (Axpert Max, Axpert King, Infinisolar, VM II/III/IV Series) |
 
 For a full list of tested devices and community-reported compatibility, see [`devices_and_protocols.csv`](documentation/usage/devices_and_protocols.csv).
 
