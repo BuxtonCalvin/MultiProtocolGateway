@@ -21,11 +21,13 @@ classes/transports/*custom*
 #ignore pypi / pyproject.toml output 
 dist/*
 build/*
-python_protocol_gateway.egg-info/*
+multi_protocol_gateway.egg-info/*
 
 #ignore inflxudb files
 inflxudb_backlog/*
 inflxudb3_backlog/*
+
+timescaledb_backlog/*
 
 #ignore dumps for dev
 tools/dumps/*
@@ -34,7 +36,6 @@ uv.lock
 
 ruff.toml
 pyproject.toml
-pytests/test_timescaledb_out.py
 
 logs/*
 files_to_ignore.txt

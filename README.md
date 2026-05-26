@@ -4,9 +4,9 @@
 ![Python 3.11](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.11.yml/badge.svg)
 ![Python 3.12](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.12.yml/badge.svg)
 ![Python 3.13](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.13.yml/badge.svg)
-![Python 3.13](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.14.yml/badge.svg)
-[![PyPI version](https://img.shields.io/pypi/v/multi-protocol-gateway.svg)](https://pypi.org/project/multi-protocol-gateway/)
-[![CodeQL](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/github-code-scanning/codeql)
+![Python 3.14](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.14.yml/badge.svg)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://github.com/jBuxtonCalvin/MultiProtocolGateway/blob/main/LICENSE)
+[![CodeQL](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/codeql/badge.svg)](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/codeql)
 
 **Multi Protocol Gateway (MPG)** is a production-grade data bridge for industrial and energy-monitoring hardware. It reads live register data from Modbus RTU/TCP, CAN bus, and proprietary serial protocols, then fans that data out to any combination of MQTT brokers, TimescaleDB, InfluxDB, and JSON outputs — all managed through a built-in web administration UI.
 
