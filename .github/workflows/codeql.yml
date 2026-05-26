@@ -11,6 +11,7 @@ on:
     paths-ignore:
       - '**/*.md'
       - 'docs/**'
+  workflow_dispatch:
   schedule:
     - cron: '17 11 * * 4'
 
