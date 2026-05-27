@@ -3,7 +3,7 @@
 > **Supported Models:** Sol-Ark 5K · 8K · 12K (Indoor & Outdoor) · 15K-2P · 15K-2P-N
 > **Protocol:** Modbus RTU over RS485 · Solarman V5 TCP (port 8899 via dongle)
 > **Interface:** RJ45 RS485 port · screw terminal block (15K)
-> **Status:** Untested / Unconfirmed — community reports available. Requires MPG v1.1.3 or higher.
+> **Status:** Untested / Unconfirmed — community reports available. Requires MPG v1.0.0 or higher.
 
 ---
 

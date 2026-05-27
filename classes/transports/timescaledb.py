@@ -745,8 +745,8 @@ class timescaledb(transport_base):
                 self._log.error(f"Failed to create backlog storage directory '{self.backlog_storage_path}': {e}")
                 self.send_message(
                     message=f"Error: Unable to create backlog storage directory at '{self.backlog_storage_path}'. Check logs for details.",
-                    title="Backlog Storage Error",
-                    priority=1, services=["pushover"]
+                    title="MPG Backlog Storage Error",
+                    priority=1
                 )
                 raise
         # full path to backlog file
@@ -778,8 +778,8 @@ class timescaledb(transport_base):
             self._set_tsdb_connected(conn_value = False, conn_reason = "Initial connect was not successful")
             self.send_message(
                 message="Error: Unable to connect to TimescaleDB at startup. Check logs for details. Will keep retrying in the background.",
-                title="TimescaleDB Connection Error",
-                priority=1, services=["pushover"]
+                title="MPG TimescaleDB Connection Error",
+                priority=1
             )
 
         """
@@ -850,8 +850,8 @@ class timescaledb(transport_base):
             self._log.error(f"connect() failed: {e}")
             self.send_message(
                 message="Error: Unable to connect to TimescaleDB at startup. Check logs for details. Will keep retrying in the background.",
-                title="TimescaleDB Connection Error",
-                priority=1, services=["pushover"]
+                title="MPG TimescaleDB Connection Error",
+                priority=1
             )
             raise
 
@@ -913,8 +913,8 @@ class timescaledb(transport_base):
                     self._log.warning(f"❌ [COMMUNICATION LOST] --- Name: {self.transport_name} ---")
                     self.send_message(
                         message=f"Reconnect attempt {attempt_no} failed: Unable to connect to TimescaleDB. Will keep retrying in the background. Check logs for details.",
-                        title="TimescaleDB Reconnect Failed",
-                        priority=1, services=["pushover"]
+                        title="MPG TimescaleDB Reconnect Failed",
+                        priority=1
                     )
 
                 with self._reconnect_lock:
@@ -947,8 +947,8 @@ class timescaledb(transport_base):
                         self._log.error(f"Backlog flush failed after reconnect: {e}")
                         self.send_message(
                             message="Error: Backlog flush failed after reconnect. Check logs for details.",
-                            title="TimescaleDB Backlog Flush Error",
-                            priority=1, services=["pushover"]
+                            title="MPG TimescaleDB Backlog Flush Error",
+                            priority=1
                         )
 
                     break
@@ -2336,9 +2336,9 @@ class timescaledb(transport_base):
             minutes: float = total_stale_elapsed.total_seconds() / 60
             msg: str = (f"Transport [{transport_id}] stale for {minutes:.1f} mins. "
                 f"Attempt {state['stale_event_count']} of {self.max_stale_attempts}.")
-            self.send_message(message=msg,title="MPG Alert", priority=1, services=["pushover"])
+            self.send_message(message=msg,title="MPG Stale Event Alert", priority=1)
         except Exception:
-            self._log.exception(f"[{transport_id}] Failed sending Pushover notification.")
+            self._log.exception(f"[{transport_id}] Failed sending MPG notification.")
 
 
     # -------------------------
@@ -2473,8 +2473,8 @@ class BacklogManager:
             self._log.exception (f"Failed to process backlog file: {e}")
             self.send_message(
                 message="Failed to load backlog from disk. Check logs for details.",
-                title="Backlog Load Error",
-                priority=1, services=["pushover"]
+                title="MPG Backlog Load Error",
+                priority=1
             )
 
     def enqueue(self, point: dict) -> None:
@@ -2524,8 +2524,8 @@ class BacklogManager:
             self._log.error(f"Failed to append point to backlog disk: {e}")
             self.send_message(
                 message="Failed to write point to backlog on disk. Check logs for details.",
-                title="Backlog Write Error",
-                priority=1, services=["pushover"]
+                title="MPG Backlog Write Error",
+                priority=1
             )
             raise
 
@@ -2542,8 +2542,8 @@ class BacklogManager:
                 self._log.error(f"Failed to sync backlog to disk: {e}")
                 self.send_message(
                     message="Failed to sync backlog to disk. Check logs for details.",
-                    title="Backlog Sync Error",
-                    priority=1, services=["pushover"]
+                    title="MPG Backlog Sync Error",
+                    priority=1
                 )
                 raise
 class RollupManager:
@@ -4098,7 +4098,7 @@ class RollupManager:
     def _start_refresh_watchdog_helper(self, view_name: str) -> List[bool]:
         """
         This watchdog runs in a separate thread to monitor the progress of a continuous aggregate refresh.
-        It periodically checks the pg_stat_activity for the refresh query and sends a Pushover alert
+        It periodically checks the pg_stat_activity for the refresh query and sends an MPG alert
         if it detects that the refresh is blocked by locks for an extended period (e.g., 30 seconds).
         Parameters:
             view_name (str): The name of the continuous aggregate view being refreshed, used for monitoring and alerting purposes.
@@ -4139,7 +4139,7 @@ class RollupManager:
                                 f"currently blocked by a lock. Please investigate the database locks to ensure "
                                 f"the refresh can complete successfully."
     )
-                            self.send_message(message=msg, title="MPG Alert", priority=1, services=['pushover'])
+                            self.send_message(message=msg, title="MPG Blocked View Alert", priority=1)
 
 
                         # Sleep in small increments to remain responsive to the stop_signal

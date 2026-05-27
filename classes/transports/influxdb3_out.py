@@ -157,6 +157,11 @@ class influxdb3_out(transport_base):
         except Exception as e:
             self._log.error(f"Failed to initialize persistent storage: {e}")
             self.enable_persistent_storage = False
+            self.send_message(
+                message="Error: Failed to initialize persistent storage for InfluxDB backlog. Check logs for details.",
+                title="MPG InfluxDB Backlog Initialization Error",
+                priority=1
+            )
 
     def _load_backlog(self) -> None:
         """Load backlog points from persistent storage."""
@@ -192,6 +197,11 @@ class influxdb3_out(transport_base):
             self.backlog_file.write_bytes(pickle.dumps(self.backlog_points))
         except Exception as e:
             self._log.error(f"Failed to save backlog: {e}")
+            self.send_message(
+                message="Error: Failed to save InfluxDB backlog. Check logs for details.",
+                title="MPG InfluxDB Backlog Save Error",
+                priority=1
+            )
 
     def _add_to_backlog(self, point: InfluxPoint) -> None:
         """Add a point dict to the persistent backlog."""
@@ -300,6 +310,11 @@ class influxdb3_out(transport_base):
                     self._health_check()
                 except Exception as e:
                     self._log.warning(f"Periodic connection check failed: {e}")
+                    self.send_message(
+                        message="Error: Periodic connection check failed. Check logs for details.",
+                        title="MPG InfluxDB Connection Error",
+                        priority=1
+                    )
                     return self._attempt_reconnect()
             else:
                 return self._attempt_reconnect()
@@ -318,6 +333,11 @@ class influxdb3_out(transport_base):
             return True  # noqa: TRY300
         except Exception as e:
             self._log.warning(f"Connection check failed: {e}")
+            self.send_message(
+                message="Error: Periodic connection check failed. Check logs for details.",
+                title="MPG InfluxDB Connection Error",
+                priority=1
+            )
             return self._attempt_reconnect()
 
     def _attempt_reconnect(self) -> bool:
@@ -365,6 +385,11 @@ class influxdb3_out(transport_base):
                     time.sleep(delay)
 
         self._log.error(f"Failed to reconnect after {self.reconnect_attempts} attempts")
+        self.send_message(
+            message="Warning: Failed to reconnect InfluxDB client during reconnect attempt. Check logs for details.",
+            title="MPG InfluxDB Reconnect Warning",
+            priority=1
+        )
         self.connected = False
         return False
 

@@ -33,7 +33,7 @@ from ..services.protocol_service import (
     update_protocol_register_field,
 )
 
-_log = logging.getLogger(__name__)
+_log: logging.Logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/protocols", tags=["protocols"])
 
@@ -78,9 +78,9 @@ def tab_counts(
             )
             .all()
         )
-        write_count  = sum(1 for s in sels if s.user_write_enabled)
-        mask_count   = sum(1 for s in sels if s.mask_enabled)
-        screen_count = sum(1 for s in sels if s.screen_enabled)
+        write_count: int  = sum(1 for s in sels if s.user_write_enabled)
+        mask_count: int   = sum(1 for s in sels if s.mask_enabled)
+        screen_count: int = sum(1 for s in sels if s.screen_enabled)
         _log.debug(f"write_count: {write_count}, mask_count: {mask_count},  screen_count: ", {screen_count})
     return {"write_count": write_count, "mask_count": mask_count, "screen_count": screen_count}
 

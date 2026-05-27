@@ -41,7 +41,7 @@ from ..services.device_service import (
     get_orphaned_settings,
 )
 
-_log = logging.getLogger(__name__)
+_log: logging.Logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/devices", tags=["devices"])
 
 

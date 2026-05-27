@@ -18,7 +18,7 @@
 """Capture documentation screenshots for the MPG Web UI.
 
 Usage:
-    python capture_docs.py --base-url http://10.17.1.100:1717
+    python capture_docs.py --base-url http://10.17.x.y:1717
 
 The crawler follows internal links, waits for network idle on every route, and
 writes full-page PNGs to static/screenshots. By default it injects a small

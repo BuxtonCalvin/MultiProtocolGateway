@@ -30,7 +30,7 @@ description = "Reads live register data from Modbus RTU/TCP, CAN bus, and propri
 readme = "README.md"
 license = "Apache-2.0"
 authors = [{ name = "BuxtonCalvin", email = "buxtoncalvin@gmail.com" }]
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dynamic = ["dependencies", "optional-dependencies"]
 
 [project.scripts]

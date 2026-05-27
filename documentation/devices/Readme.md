@@ -28,10 +28,14 @@
 | [Enphase](Enphase.md) | IQ7/IQ8 Microinverters, IQ Battery, IQ Gateway | Ethernet (LAN REST API) | HTTP JSON API | [Enphase.md](Enphase.md) |
 | [Fronius](Fronius.md) | Primo GEN24, Symo GEN24, Symo, Primo | Ethernet / RS485 (GEN24) | Modbus TCP / JSON API | [Fronius.md](Fronius.md) |
 | [Growatt](Growatt.md) | SPF 5000, 6000, 12000T DVM-US MPV | USB / RS485 | Modbus RTU | [Growatt.md](Growatt.md) |
+| [HDHK](HDHK.md) | 16-channel AC current/frequency module | RS485 terminal | Modbus RTU | [HDHK.md](HDHK.md) |
+| [Next Power](Next_Power.md) | Victor NM-ECO-LV 3.6KW/6.2KW Plus | RS485 communication port | Modbus RTU | [Next_Power.md](Next_Power.md) |
 | [Sigineer](Sigineer.md) | Sigineer inverter/charger series | USB | Modbus RTU | [Sigineer.md](Sigineer.md) |
 | [SMA](SMA.md) | Sunny Boy, Sunny Tripower, Sunny Island | Ethernet / RS485 (add-on) | Modbus TCP | [SMA.md](SMA.md) |
 | [Sol-Ark](SolArk.md) | 5K, 8K, 12K, 15K-2P | RS485 RJ45 / terminal block | Modbus RTU | [SolArk.md](SolArk.md) |
 | [SolarEdge](SolarEdge.md) | HD-Wave SE series, StorEdge, Home Hub | Ethernet / RS485 terminal block | Modbus TCP / RTU (SunSpec) | [SolarEdge.md](SolarEdge.md) |
+| [SRNE](SRNE.md) | ASF/ASP, HYP, HESP, HF/HFP | RS485 | Modbus RTU | [SRNE.md](SRNE.md) |
+| [Sungrow](Sungrow.md) | SG Series, SHxxRT, SG350HX | RS485 / Ethernet | Modbus RTU / TCP | [Sungrow.md](Sungrow.md) |
 | [Victron Energy](Victron.md) | MultiPlus, MultiPlus-II, Quattro, Cerbo GX | Ethernet / VE.Bus / VE.Direct | MQTT native (Venus OS) | [Victron.md](Victron.md) |
 
 ### Batteries
@@ -39,7 +43,10 @@
 | Manufacturer | Key Models | Interface | Protocol | Guide |
 | --- | --- | --- | --- | --- |
 | [AOLithium](AOLithium.md) | AOLithium 48V rack batteries | RS485A RJ45 / CAN RJ45 | Voltronic RS485 / Victron CAN | [AOLithium.md](AOLithium.md) |
+| [PACE BMS](PACE.md) | PACE RS485 v1.3 compatible batteries | RS485 | PACE BMS Modbus RTU | [PACE.md](PACE.md) |
+| [Pylon / Pylontech](Pylon.md) | Low-voltage Pylontech batteries | RS485 / CAN | Pylon serial / CAN | [Pylon.md](Pylon.md) |
 | [SOK / PACE BMS](SOK.md) | SOK 48V 100AH, Jakiper 48V 100AH | RS485A RJ45 | PACE BMS Modbus RTU | [SOK.md](SOK.md) |
+| [Voltronic](Voltronic.md) | Axpert, Infinisolar, VM II/III/IV compatible BMS | RS485 | Voltronic BMS Modbus RTU | [Voltronic.md](Voltronic.md) |
 
 ---
 

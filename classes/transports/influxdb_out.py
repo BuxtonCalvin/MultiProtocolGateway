@@ -163,8 +163,8 @@ class influxdb_out(transport_base):
             self.enable_persistent_storage = False
             self.send_message(
                 message="Error: Failed to initialize persistent storage for InfluxDB backlog. Check logs for details.",
-                title="InfluxDB Backlog Initialization Error",
-                priority=1, services=["pushover"]
+                title="MPG InfluxDB Backlog Initialization Error",
+                priority=1
             )
 
     def _load_backlog(self) -> None:
@@ -203,8 +203,8 @@ class influxdb_out(transport_base):
             self._log.error(f"Failed to save backlog: {e}")
             self.send_message(
                 message="Error: Failed to save InfluxDB backlog. Check logs for details.",
-                title="InfluxDB Backlog Save Error",
-                priority=1, services=["pushover"]
+                title="MPG InfluxDB Backlog Save Error",
+                priority=1
             )
 
     def _add_to_backlog(self, point: InfluxPoint) -> None:
@@ -303,8 +303,8 @@ class influxdb_out(transport_base):
                     self._log.warning(f"Periodic connection check failed: {e}")
                     self.send_message(
                         message="Error: Periodic connection check failed. Check logs for details.",
-                        title="InfluxDB Connection Error",
-                        priority=1, services=["pushover"]
+                        title="MPG InfluxDB Connection Error",
+                        priority=1
                     )
                     return self._attempt_reconnect()
             else:
@@ -326,8 +326,8 @@ class influxdb_out(transport_base):
             self._log.warning(f"Connection check failed: {e}")
             self.send_message(
                 message="Error: Connection check failed. Check logs for details.",
-                title="InfluxDB Connection Error",
-                priority=1, services=["pushover"]
+                title="MPG InfluxDB Connection Error",
+                priority=1
             )
             return self._attempt_reconnect()
 
@@ -381,8 +381,8 @@ class influxdb_out(transport_base):
         self._log.error(f"Failed to reconnect after {self.reconnect_attempts} attempts")
         self.send_message(
             message="Warning: Failed to reconnect InfluxDB client during reconnect attempt. Check logs for details.",
-            title="InfluxDB Reconnect Warning",
-            priority=1, services=["pushover"]
+            title="MPG InfluxDB Reconnect Warning",
+            priority=1
         )
         self.connected = False
         return False

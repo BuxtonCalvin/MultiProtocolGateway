@@ -1,5 +1,7 @@
 # Multi Protocol Gateway
 
+**Multi Protocol Gateway (MPG)** is a production-grade data bridge for industrial and energy-monitoring hardware.
+
 ![Python 3.10](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.10.yml/badge.svg)
 ![Python 3.11](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.11.yml/badge.svg)
 ![Python 3.12](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.12.yml/badge.svg)
@@ -8,11 +10,11 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://github.com/jBuxtonCalvin/MultiProtocolGateway/blob/main/LICENSE)
 [![CodeQL Status](https://img.shields.io/github/actions/workflow/status/BuxtonCalvin/MultiProtocolGateway/codeql.yml)](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/codeql.yml)
 
-**Multi Protocol Gateway (MPG)** is a production-grade data bridge for industrial and energy-monitoring hardware.
+## 🙏 Credits
 
-🙏 Credits
+This application was inspired by and built upon the excellent work by [@HotNoob](https://github.com/HotNoob/PythonProtocolGateway) and their PythonProtocolGateway project and its precedent project [@andiburger](https://github.com/andiburger/growatt2mqtt). We extend our sincere gratitude for their efforts in solar inverter data management.  MPG diverges from these efforts with Web UI Management, concurrent multi-protocol capability, multiple concurrent bridges, extended hardware device support and all with a completely re-factored data read and write logic.
 
-This application was inspired by and built upon the excellent work by [@HotNoob](https://github.com/HotNoob/PythonProtocolGateway) and their PythonProtocolGateway project and the precedent project [@andiburger/growatt2mqtt](https://github.com/andiburger/growatt2mqtt). We extend our sincere gratitude for their efforts in solar inverter data management.  MPG diverges from these efforts with Web UI Management, concurrent Multi-Protocol capability, multiple concurrent bridges, extended hardware device support and all with a completely re-factored data read and write logic.
+## What MPG does
 
 MPG reads live register data from Modbus RTU/TCP, CAN bus, and proprietary serial protocols, then fans that data out to any combination of MQTT brokers, TimescaleDB, InfluxDB, and JSON outputs — all managed through a built-in web administration UI.  It is planned to extend hardware reads to include rest apis as well as proprietary protocols that do not rely on serial data.
 
@@ -44,7 +46,7 @@ MPG is purpose-built for solar inverters, battery management systems (BMS), ener
 | **Input protocols** | Modbus RTU, Modbus TCP, Modbus TLS, Modbus UDP, CAN bus, PACE BMS serial, Pylon serial, EG4 LL-S RS-485 |
 | **Output transports** | MQTT, TimescaleDB (PostgreSQL hypertable), InfluxDB, JSON file |
 | **Web UI** | Full browser-based configuration and live management on port **1717** |
-| **Protocol library** | 20+ pre-built device protocol maps; live register analysis tool to build new ones |
+| **Protocol library** | 30+ pre-built device protocol maps; live register analysis tool to build new ones |
 | **Config management** | SQLite staging database; changes are previewed and committed — no raw file editing required |
 | **Python versions** | 3.10 – 3.14 |
 | **Deployment** | Script, systemd service, Docker container, Home Assistant add-on |
@@ -131,26 +133,26 @@ Bridges receive data from scrapers and write it somewhere. They are passive — 
 
 MPG ships with pre-built protocol maps for the following manufacturers. Each protocol map is a pair of CSV files (input and holding register maps) plus a JSON descriptor:
 
-| Manufacturer | Models / Protocols |
-| --- | --- |
-| **Deye Sunsynk** | Deye Sunsynk Inverters (SUN-3K/5K/8K/12K-SG Series Hybrid, Deye Micro SUN Series) |
-| **EG4** | EG4 inverters (v58, 3000EHV, 18kpv, Gridboss, 6000XP, 12000XP, FlexBOSS21), EG4 LL-S (RS-485 & TCP) |
-| **Enphase** | Enphase micro inverters (IQ7, IQ7+, IQ8, IQ8Plus, IQ8M, IQ8A Series) |
-| **Fronius** | Fronius Inverters (Primo, Symo, Galvo, Eco, Gen24 Plus Series) |
-| **Growatt** | v0.14 (2020+), BMS CAN v1.04, BMS RS-485 (MIN 3000-10000TL-X, SPF 3000-5000TL LVM, SPH, MOD, MAX Series) |
-| **HDHK** | 16-channel AC module |
-| **Next Power** | Victor NM RE |
-| **PACE BMS** | v1.3 |
-| **Pylon** | CAN, RS-485 v3.3 |
-| **Sigineer** | v0.11 (Sigineer M3000, M6000 Series Inverter/Chargers) |
-| **SMA** | Sunny Island v1, Sunny Boy Tri Power, SMA Modbus (Core1, Sunny Tripower X, Sunny Boy Smart Energy) |
-| **SOK** | Sok Inverters (SOK 48V 100Ah / SK48V100 Server Rack Integrated Protocols) |
-| **Solar Edge** | Solar Edge Inverters |
-| **SolArk** | 8K/12K (v1.1) (Sol-Ark 5K, 8K, 12K, 15K, 30K-3P All-In-One Hybrid) |
-| **SRNE** | v1.7, v1.96, v3.9 (ASF/ASP Split-Phase, HYP, HESP Hybrid, HF/HFP Series) |
-| **Sungrow** | Sungrow inverters (SG Series String, SH5.0/6.0/8.0/10RT Hybrid, SG350HX) |
-| **Victron** | GX v3.3, GX Generic CAN, Smartsolar (MultiPlus, MultiPlus-II, Quattro, EasySolar, Phoenix Inverters) |
-| **Voltronic** | BMS 2020-03-25, BMS v1.1 (Axpert Max, Axpert King, Infinisolar, VM II/III/IV Series) |
+| Manufacturer | Models / Protocols | Link |
+| --- | --- | --- |
+| **Deye Sunsynk** | Deye Sunsynk Inverters (SUN-3K/5K/8K/12K-SG Series Hybrid, Deye Micro SUN Series) | **[`View Deye Sunsynk`](documentation\devices\Deye_Sunsynk.md)** |
+| **EG4** | EG4 inverters (v58, 3000EHV, 18kpv, Gridboss, 6000XP, 12000XP, FlexBOSS21), EG4 LL-S (RS-485 & TCP) | **[`View EG4`](documentation\devices\EG4.md)** |
+| **Enphase** | Enphase micro inverters (IQ7, IQ7+, IQ8, IQ8Plus, IQ8M, IQ8A Series) | **[`View Enphase`](documentation\devices\Enphase.md)** |
+| **Fronius** | Fronius Inverters (Primo, Symo, Galvo, Eco, Gen24 Plus Series) | **[`View Fronius`](documentation\devices\Fronius.md)** |
+| **Growatt** | v0.14 (2020+), BMS CAN v1.04, BMS RS-485 (MIN 3000-10000TL-X, SPF 3000-5000TL LVM, SPH, MOD, MAX Series) | **[`View Growatt`](documentation\devices\Growatt.md)** |
+| **HDHK** | 16-channel AC module | **[`View HDHK`](documentation\devices\HDHK.md)** |
+| **Next Power** | Victor NM RE | **[`View Next Power`](documentation\devices\Next_Power.md)** |
+| **PACE BMS** | v1.3 | **[`View PACE BMS`](documentation\devices\PACE.md)** |
+| **Pylon** | CAN, RS-485 v3.3 | **[`View Pylon`](documentation\devices\Pylon.md)** |
+| **Sigineer** | v0.11 (Sigineer M3000, M6000 Series Inverter/Chargers) | **[`View Sigineer`](documentation\devices\Sigineer.md)** |
+| **SMA** | Sunny Island v1, Sunny Boy Tri Power, SMA Modbus (Core1, Sunny Tripower X, Sunny Boy Smart Energy) | **[`View SMA`](documentation\devices\SMA.md)** |
+| **SOK** | Sok Inverters (SOK 48V 100Ah / SK48V100 Server VRack Integrated Protocols) | **[`View SOK`](documentation\devices\SOK.md)** |
+| **Solar Edge** | Solar Edge Inverters | **[`View Solar Edge`](documentation\devices\SolarEdge.md)** |
+| **SolArk** | 8K/12K (v1.1) (Sol-Ark 5K, 8K, 12K, 15K, 30K-3P All-In-One Hybrid) | **[`View Solark`](documentation\devices\Solark.md)** |
+| **SRNE** | v1.7, v1.96, v3.9 (ASF/ASP Split-Phase, HYP, HESP Hybrid, HF/HFP Series) | **[`View SRNE`](documentation\devices\SRNE.md)** |
+| **Sungrow** | Sungrow inverters (SG Series String, SH5.0/6.0/8.0/10RT Hybrid, SG350HX) | **[`View Sungrow`](documentation\devices\Sungrow.md)** |
+| **Victron** | GX v3.3, GX Generic CAN, Smartsolar (MultiPlus, MultiPlus-II, Quattro, EasySolar, Phoenix Inverters) | **[`View Victron`](documentation\devices\Victron.md)** |
+| **Voltronic** | BMS 2020-03-25, BMS v1.1 (Axpert Max, Axpert King, Infinisolar, VM II/III/IV Series) | **[`View Voltronic`](documentation\devices\Voltronic.md)** |
 
 For a full list of tested devices and community-reported compatibility, see [`devices_and_protocols.csv`](documentation/usage/devices_and_protocols.csv).
 
@@ -235,7 +237,6 @@ docker run --device=/dev/ttyUSB0 -p 1717:1717 protocol_gateway
 docker pull buxtoncalvin/multiprotocolgateway
 docker run \
   -v $(pwd)/config.cfg:/app/config.cfg \
-  --device=/dev/ttyUSB0 \
   -p 1717:1717 \
   buxtoncalvin/multiprotocolgateway
 ```
@@ -318,7 +319,7 @@ If all MQTT values appear as "Unknown" immediately after setup, this is a known 
 
 Each supported device has a protocol directory under `protocols/` containing:
 
-- **`<name>.json`** — device metadata: transport type, default settings, protocol group
+- **`<name>.json`** — device metadata: transport type, default settings, lookup descriptions for codes
 - **`<name>.input_registry_map.csv`** — read-only (input) Modbus registers
 - **`<name>.holding_registry_map.csv`** — read/write (holding) Modbus registers
 
@@ -334,6 +335,7 @@ The CSV files use `,` as delimiter (OpenOffice/LibreOffice compatible) and suppo
 | `values` | Valid range or enumeration |
 | `read_interval` | Override the global poll interval for this register |
 | `writable` | `R` (read-only) or `RW` (writable) |
+| `adjustments` | JSON encoded code to enable special register handling |
 | `note` | Free-form note shown in the web UI |
 
 Variable names have been normalized for readability. To use original documented names, clear the `variable_name` column in the CSV or edit via the Protocol Editor in the web UI.
@@ -387,6 +389,7 @@ Key settings available on every transport:
 | --- | --- | --- |
 | `device_name` | | Unique identifier linking scraper and bridge |
 | `protocol_version` | | Protocol map to load (e.g. `growatt_v0.14`) |
+| `batch_size` | 40 | Number of registers to batch read per a given poll |
 | `read_interval` | `15` | Seconds between register polls |
 | `bridge` | | Output transport section name |
 | `log_level` | `INFO` | Per-transport log verbosity |
@@ -395,7 +398,7 @@ Key settings available on every transport:
 | `variable_mask` | | Path to allowlist file |
 | `variable_screen` | | Path to blocklist file |
 
-For Modbus transports, additional keys include `host`, `port`, `unit_id`, `batch_size`, `max_retries_per_block`, and `disable_duration_hours`.
+For Modbus transports, additional keys include `host`, `port`, `unit_id`,  `max_retries_per_block`, and `disable_duration_hours`.
 
 Full configuration documentation: [`transports.md`](documentation/usage/transports.md)
 
@@ -405,7 +408,7 @@ For manufacturer device-specific wiring and installation guides: [devices](docum
 
 ## Contributing & Donations
 
-MPG was built because no working open-source solution existed for this class of hardware. Community protocol maps, bug reports, and pull requests are welcome.
+MPG was built because no working open-source solution existed that could poll disparate devices at the same time, and then send that disparate data to disparate outputs. Community protocol maps, bug reports, and pull requests are welcome.
 
 If MPG has saved you time or money, donations and GitHub sponsorships are appreciated and help fund continued development.
 

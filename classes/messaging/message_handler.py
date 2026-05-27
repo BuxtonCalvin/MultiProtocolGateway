@@ -162,7 +162,6 @@ class MessageHandler:
             return
 
         default_title: str = cfg.get("messages", "default_title", fallback="MPG Notification")
-        # priority_service: str = cfg.get("messages", "priority", fallback="pushover").strip().lower()
         instance = cls(cfg, default_title)
         _handler = instance
         cls._initialized = True
@@ -270,7 +269,6 @@ class MessageHandler:
             ``None``  → all active services.
             ``str``   → single service by name (case-insensitive).
             ``list``  → explicit subset of services (case-insensitive).
-            ``priority`` -> priority service name from config used to set service.
         """
         effective_title: str = title or self._default_title
 
@@ -325,7 +323,7 @@ class MessageHandler:
         """
         if service == "pushover":
             # Clamp priority to the Pushover range [-2, 2]
-            p = max(-2, min(2, priority))
+            p: int = max(-2, min(2, priority))
             return MessageCls(message=text, title=title, priority=p)  # type: ignore[call-arg]
 
         if service == "telegram":
