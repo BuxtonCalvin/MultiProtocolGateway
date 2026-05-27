@@ -114,7 +114,7 @@ A reference page listing all available settings with their definitions.
 
 ### Bridges
 
-Bridges receive data from scrapers and write it somewhere. They are passive — they do not poll.  Here are two database bridges:
+Bridges receive data from scrapers and write it somewhere. They are passive — they do not poll.  Here are overviews of two database bridges:
 
 - InfluxDB 1.X and 3.x versions
   - Advanced Features
@@ -125,7 +125,17 @@ Bridges receive data from scrapers and write it somewhere. They are passive — 
 
 - TimeScaledDB
   - Readme
-[`timescaledb_protocol_gateway.md`](documentation/bridges/TimeScaleDB/timescaledb_protocol_gateway.md)
+    [`TimescaleDB`](documentation/bridges/TimeScaleDB/timescaledb_protocol_gateway.md)
+
+Here are the overviews of the MQTT and JSON bridges
+
+- MQTT
+  - Readme
+    [`MQTT`](documentation/bridges/MQTT/MQTT_bridge.md)
+
+- JSON
+  - Readme
+    [`JSON`](documentation/bridges/JSON/json_out_example.md)
 
 ---
 
