@@ -135,24 +135,24 @@ MPG ships with pre-built protocol maps for the following manufacturers. Each pro
 
 | Manufacturer | Models / Protocols | Link |
 | --- | --- | --- |
-| **Deye Sunsynk** | Deye Sunsynk Inverters (SUN-3K/5K/8K/12K-SG Series Hybrid, Deye Micro SUN Series) | **[`View Deye Sunsynk`](documentation\devices\Deye_Sunsynk.md)** |
-| **EG4** | EG4 inverters (v58, 3000EHV, 18kpv, Gridboss, 6000XP, 12000XP, FlexBOSS21), EG4 LL-S (RS-485 & TCP) | **[`View EG4`](documentation\devices\EG4.md)** |
-| **Enphase** | Enphase micro inverters (IQ7, IQ7+, IQ8, IQ8Plus, IQ8M, IQ8A Series) | **[`View Enphase`](documentation\devices\Enphase.md)** |
-| **Fronius** | Fronius Inverters (Primo, Symo, Galvo, Eco, Gen24 Plus Series) | **[`View Fronius`](documentation\devices\Fronius.md)** |
-| **Growatt** | v0.14 (2020+), BMS CAN v1.04, BMS RS-485 (MIN 3000-10000TL-X, SPF 3000-5000TL LVM, SPH, MOD, MAX Series) | **[`View Growatt`](documentation\devices\Growatt.md)** |
-| **HDHK** | 16-channel AC module | **[`View HDHK`](documentation\devices\HDHK.md)** |
-| **Next Power** | Victor NM RE | **[`View Next Power`](documentation\devices\Next_Power.md)** |
-| **PACE BMS** | v1.3 | **[`View PACE BMS`](documentation\devices\PACE.md)** |
-| **Pylon** | CAN, RS-485 v3.3 | **[`View Pylon`](documentation\devices\Pylon.md)** |
-| **Sigineer** | v0.11 (Sigineer M3000, M6000 Series Inverter/Chargers) | **[`View Sigineer`](documentation\devices\Sigineer.md)** |
-| **SMA** | Sunny Island v1, Sunny Boy Tri Power, SMA Modbus (Core1, Sunny Tripower X, Sunny Boy Smart Energy) | **[`View SMA`](documentation\devices\SMA.md)** |
-| **SOK** | Sok Inverters (SOK 48V 100Ah / SK48V100 Server VRack Integrated Protocols) | **[`View SOK`](documentation\devices\SOK.md)** |
-| **Solar Edge** | Solar Edge Inverters | **[`View Solar Edge`](documentation\devices\SolarEdge.md)** |
-| **SolArk** | 8K/12K (v1.1) (Sol-Ark 5K, 8K, 12K, 15K, 30K-3P All-In-One Hybrid) | **[`View Solark`](documentation\devices\Solark.md)** |
-| **SRNE** | v1.7, v1.96, v3.9 (ASF/ASP Split-Phase, HYP, HESP Hybrid, HF/HFP Series) | **[`View SRNE`](documentation\devices\SRNE.md)** |
-| **Sungrow** | Sungrow inverters (SG Series String, SH5.0/6.0/8.0/10RT Hybrid, SG350HX) | **[`View Sungrow`](documentation\devices\Sungrow.md)** |
-| **Victron** | GX v3.3, GX Generic CAN, Smartsolar (MultiPlus, MultiPlus-II, Quattro, EasySolar, Phoenix Inverters) | **[`View Victron`](documentation\devices\Victron.md)** |
-| **Voltronic** | BMS 2020-03-25, BMS v1.1 (Axpert Max, Axpert King, Infinisolar, VM II/III/IV Series) | **[`View Voltronic`](documentation\devices\Voltronic.md)** |
+| **Deye Sunsynk** | Deye Sunsynk Inverters (SUN-3K/5K/8K/12K-SG Series Hybrid, Deye Micro SUN Series) | **[`View Deye Sunsynk`](documentation/devices/Deye_Sunsynk.md)** |
+| **EG4** | EG4 inverters (v58, 3000EHV, 18kpv, Gridboss, 6000XP, 12000XP, FlexBOSS21), EG4 LL-S (RS-485 & TCP) | **[`View EG4`](documentation/devices/EG4.md)** |
+| **Enphase** | Enphase micro inverters (IQ7, IQ7+, IQ8, IQ8Plus, IQ8M, IQ8A Series) | **[`View Enphase`](documentation/devices/Enphase.md)** |
+| **Fronius** | Fronius Inverters (Primo, Symo, Galvo, Eco, Gen24 Plus Series) | **[`View Fronius`](documentation/devices/Fronius.md)** |
+| **Growatt** | v0.14 (2020+), BMS CAN v1.04, BMS RS-485 (MIN 3000-10000TL-X, SPF 3000-5000TL LVM, SPH, MOD, MAX Series) | **[`View Growatt`](documentation/devices/Growatt.md)** |
+| **HDHK** | 16-channel AC module | **[`View HDHK`](documentation/devices/HDHK.md)** |
+| **Next Power** | Victor NM RE | **[`View Next Power`](documentation/devices/Next_Power.md)** |
+| **PACE BMS** | v1.3 | **[`View PACE BMS`](documentation/devices/PACE.md)** |
+| **Pylon** | CAN, RS-485 v3.3 | **[`View Pylon`](documentation/devices/Pylon.md)** |
+| **Sigineer** | v0.11 (Sigineer M3000, M6000 Series Inverter/Chargers) | **[`View Sigineer`](documentation/devices/Sigineer.md)** |
+| **SMA** | Sunny Island v1, Sunny Boy Tri Power, SMA Modbus (Core1, Sunny Tripower X, Sunny Boy Smart Energy) | **[`View SMA`](documentation/devices/SMA.md)** |
+| **SOK** | Sok Inverters (SOK 48V 100Ah / SK48V100 Server VRack Integrated Protocols) | **[`View SOK`](documentation/devices/SOK.md)** |
+| **Solar Edge** | Solar Edge Inverters | **[`View Solar Edge`](documentation/devices/SolarEdge.md)** |
+| **SolArk** | 8K/12K (v1.1) (Sol-Ark 5K, 8K, 12K, 15K, 30K-3P All-In-One Hybrid) | **[`View Solark`](documentation/devices/Solark.md)** |
+| **SRNE** | v1.7, v1.96, v3.9 (ASF/ASP Split-Phase, HYP, HESP Hybrid, HF/HFP Series) | **[`View SRNE`](documentation/devices/SRNE.md)** |
+| **Sungrow** | Sungrow inverters (SG Series String, SH5.0/6.0/8.0/10RT Hybrid, SG350HX) | **[`View Sungrow`](documentation/devices/Sungrow.md)** |
+| **Victron** | GX v3.3, GX Generic CAN, Smartsolar (MultiPlus, MultiPlus-II, Quattro, EasySolar, Phoenix Inverters) | **[`View Victron`](documentation/devices/Victron.md)** |
+| **Voltronic** | BMS 2020-03-25, BMS v1.1 (Axpert Max, Axpert King, Infinisolar, VM II/III/IV Series) | **[`View Voltronic`](documentation/devices/Voltronic.md)** |
 
 For a full list of tested devices and community-reported compatibility, see [`devices_and_protocols.csv`](documentation/usage/devices_and_protocols.csv).
 

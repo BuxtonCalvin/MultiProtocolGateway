@@ -6,7 +6,7 @@ The first is .json, which contains the default settings and optional lookup code
 
 The second are .csv files that hold the registry or address definitions.
 
-There are four types of modbus registery files: Coils, Discrete, Input and Holding.  Modbus is the standard used by most inverters for serial communication.
+There are four types of modbus registery files: Coil, Discrete, Input and Holding.  Modbus is the standard used by most inverters for serial communication.
 
 | Data-Type | Address-Prefix | Access-Type | Size | Description |
 | -- | -- | -- | -- | -- |
