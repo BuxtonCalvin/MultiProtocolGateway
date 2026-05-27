@@ -148,7 +148,7 @@ MPG ships with pre-built protocol maps for the following manufacturers. Each pro
 | **SMA** | Sunny Island v1, Sunny Boy Tri Power, SMA Modbus (Core1, Sunny Tripower X, Sunny Boy Smart Energy) | **[`View SMA`](documentation/devices/SMA.md)** |
 | **SOK** | Sok Inverters (SOK 48V 100Ah / SK48V100 Server VRack Integrated Protocols) | **[`View SOK`](documentation/devices/SOK.md)** |
 | **Solar Edge** | Solar Edge Inverters | **[`View Solar Edge`](documentation/devices/SolarEdge.md)** |
-| **SolArk** | 8K/12K (v1.1) (Sol-Ark 5K, 8K, 12K, 15K, 30K-3P All-In-One Hybrid) | **[`View Solark`](documentation/devices/Solark.md)** |
+| **SolArk** | 8K/12K (v1.1) (Sol-Ark 5K, 8K, 12K, 15K, 30K-3P All-In-One Hybrid) | **[`View SolArk`](documentation/devices/SolArk.md)** |
 | **SRNE** | v1.7, v1.96, v3.9 (ASF/ASP Split-Phase, HYP, HESP Hybrid, HF/HFP Series) | **[`View SRNE`](documentation/devices/SRNE.md)** |
 | **Sungrow** | Sungrow inverters (SG Series String, SH5.0/6.0/8.0/10RT Hybrid, SG350HX) | **[`View Sungrow`](documentation/devices/Sungrow.md)** |
 | **Victron** | GX v3.3, GX Generic CAN, Smartsolar (MultiPlus, MultiPlus-II, Quattro, EasySolar, Phoenix Inverters) | **[`View Victron`](documentation/devices/Victron.md)** |
