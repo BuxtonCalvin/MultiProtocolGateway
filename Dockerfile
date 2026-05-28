@@ -29,11 +29,12 @@ COPY --from=builder /install /usr/local
 WORKDIR /app
 
 # 1. Create the default "seed" directories
-RUN mkdir -p /defaults/config /defaults/protocols
+RUN mkdir -p /defaults/config /defaults/protocols /defaults/documentation
 
 # 2. Copy local files into the "seed" directories
 COPY ./config/ /defaults/config/
 COPY ./protocols/ /defaults/protocols/
+COPY ./documentation/ /defaults/documentation/
 
 # 3. Copy app logic
 COPY protocol_gateway.py /app/
