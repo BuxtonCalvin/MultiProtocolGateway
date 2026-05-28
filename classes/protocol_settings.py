@@ -159,7 +159,7 @@ class Data_Type(Enum):
 
     @classmethod
     def getSize(cls, data_type: "Data_Type") -> int:
-        sizes = {
+        sizes: dict[Data_Type, int] = {
             Data_Type.BYTE: 8,
             Data_Type.USHORT: 16,
             Data_Type.UINT: 32,
@@ -226,8 +226,11 @@ class WriteMode(Enum):
 
 
 class Registry_Type(Enum):
-    ZERO = 0x00
     ''' for protocols that don't have a command / registry type '''
+    ZERO = 0x00
+
+    COIL = 0x01
+    DISCRETE = 0x02
     HOLDING = 0x03
     INPUT = 0x04
 
@@ -417,10 +420,12 @@ class protocol_settings:
         return entries
 
     def get_registry_map(self, registry_type: Registry_Type = Registry_Type.ZERO) -> list[registry_map_entry]:
-        return self.registry_map[registry_type]
+        """Return the registry map for the given type, or an empty list if not loaded."""
+        return self.registry_map.get(registry_type, [])
 
     def get_registry_ranges(self, registry_type: Registry_Type) -> list[tuple[int, int]]:
-        return self.registry_map_ranges[registry_type]
+        """Return the pre-calculated register ranges for the given type, or an empty list if not loaded."""
+        return self.registry_map_ranges.get(registry_type, [])
 
     def get_registry_entry(self, name: str, registry_type: Optional[Registry_Type] = None) -> Optional[registry_map_entry]:
         """Retrieve a registry entry, optionally filtering by type."""
@@ -531,17 +536,17 @@ class protocol_settings:
     def load__registry(self, path: str, registry_type: Registry_Type = Registry_Type.INPUT) -> list[registry_map_entry]:
         registry_map: list[registry_map_entry] = []
 
-        register_regex = re.compile(
+        register_regex: re.Pattern[str] = re.compile(
             r"(?P<register>\d{1,5}|0x[0-9A-Fa-f]{1,4})"
             r"(?:\.b(?P<bit_start>\d{1,2})(?:-(?P<bit_end>\d{1,2}))?)?"
             r"(?:\.(?P<byte>\d{1,2}))?"
         )
 
-        read_interval_regex = re.compile(r"(?P<value>[\.\d]+)(?P<unit>[xs]|ms)")
-        data_type_regex = re.compile(r"(?P<datatype>\w+)\.(?P<length>\d+)")
-        range_regex = re.compile(r"(?P<reverse>r|)(?P<start>(?:0?x[\da-z]+|[\d]+))[\-~](?P<end>(?:0?x[\da-z]+|[\d]+))")
-        ascii_value_regex = re.compile(r"(?P<regex>^\[.+\]$)")
-        list_regex = re.compile(r"\s*(?:(?P<range_start>(?:0?x[\da-z]+|[\d]+))-(?P<range_end>(?:0?x[\da-z]+|[\d]+))|(?P<element>[^,\s][^,]*?))\s*(?:,|$)")
+        read_interval_regex: re.Pattern[str] = re.compile(r"(?P<value>[\.\d]+)(?P<unit>[xs]|ms)")
+        data_type_regex: re.Pattern[str] = re.compile(r"(?P<datatype>\w+)\.(?P<length>\d+)")
+        range_regex: re.Pattern[str] = re.compile(r"(?P<reverse>r|)(?P<start>(?:0?x[\da-z]+|[\d]+))[\-~](?P<end>(?:0?x[\da-z]+|[\d]+))")
+        ascii_value_regex: re.Pattern[str] = re.compile(r"(?P<regex>^\[.+\]$)")
+        list_regex: re.Pattern[str] = re.compile(r"\s*(?:(?P<range_start>(?:0?x[\da-z]+|[\d]+))-(?P<range_end>(?:0?x[\da-z]+|[\d]+))|(?P<element>[^,\s][^,]*?))\s*(?:,|$)")
 
         transport_read_interval: int = 1000
         if self.transport_settings is not None:

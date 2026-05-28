@@ -12,7 +12,7 @@
 
 ## 🙏 Credits
 
-This application was inspired by and built upon the excellent work by [@HotNoob](https://github.com/HotNoob/PythonProtocolGateway) and their PythonProtocolGateway project and its precedent project [@andiburger](https://github.com/andiburger/growatt2mqtt). We extend our sincere gratitude for their efforts in solar inverter data management.  MPG diverges from these efforts with Web UI Management, concurrent multi-protocol capability, multiple concurrent bridges, extended hardware device support and all with a completely re-factored data read and write logic.
+This application was inspired by and built upon the excellent work by [@HotNoob](https://github.com/HotNoob/PythonProtocolGateway) and their PythonProtocolGateway project and its precedent project [@andiburger](https://github.com/andiburger/growatt2mqtt). We extend our sincere gratitude for their efforts in solar inverter data management.  MPG diverges from these efforts with Web UI Management, concurrent multi-protocol capability, multiple concurrent bridges, extended hardware device support including coils and discrete registers, and all with completely re-factored data read and write logic that hardens checks against bad data.
 
 ## What MPG does
 
@@ -330,8 +330,11 @@ If all MQTT values appear as "Unknown" immediately after setup, this is a known 
 Each supported device has a protocol directory under `protocols/` containing:
 
 - **`<name>.json`** — device metadata: transport type, default settings, lookup descriptions for codes
-- **`<name>.input_registry_map.csv`** — read-only (input) Modbus registers
 - **`<name>.holding_registry_map.csv`** — read/write (holding) Modbus registers
+  **additional optional registers**  - per manufacturer device properties
+- **`<name>.input_registry_map.csv`** — read-only (input) Modbus registers
+- **`<name>.coil_registry_map.csv`** — read/write (coil) Modbus registers
+- **`<name>.discrete_registry_map.csv`** — read-only (discrete) Modbus registers
 
 The CSV files use `,` as delimiter (OpenOffice/LibreOffice compatible) and support the following columns:
 

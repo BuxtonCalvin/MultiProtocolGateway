@@ -86,7 +86,7 @@ MODBUS_EXCEPTION_DESCRIPTIONS: dict[ExcCodes, str] = {
     ExcCodes.GATEWAY_NO_RESPONSE: "The gateway target device failed to respond."
 }
 
-def interpret_modbus_exception_code(code):
+def interpret_modbus_exception_code(code) -> str:
     """
     Interpret a Modbus exception response code and return human-readable information.
 
@@ -126,7 +126,7 @@ class RegisterFailureTracker:
     def record_failure(self, max_failures: int = 5, disable_duration_hours: int = 12) -> bool:
         """Record a failed read attempt"""
         with self._lock:
-            current_time = time.time()
+            current_time: float = time.time()
             self.failure_count += 1
             self.last_failure_time = current_time
 
@@ -136,10 +136,10 @@ class RegisterFailureTracker:
                 return True  # Indicates this range should be disabled
             return False
 
-    def record_success(self):
+    def record_success(self) -> None:
         """Record a successful read attempt"""
         with self._lock:
-            current_time = time.time()
+            current_time: float = time.time()
             self.last_success_time = current_time
             # Reset failure count on success
             self.failure_count = 0
@@ -157,10 +157,11 @@ class RegisterFailureTracker:
         with self._lock:
             if self.disabled_until == 0:
                 return 0
-            remaining = self.disabled_until - time.time()
+            remaining: float = self.disabled_until - time.time()
             return max(0, remaining)
 class modbus_base(transport_base):
-
+
+
     transport_type = "base class"
     #this is specifically static
     clients : dict[str, ModbusBaseClient] = {}
@@ -210,6 +211,8 @@ class modbus_base(transport_base):
 
         self.send_holding_register : bool = True
         self.send_input_register : bool = True
+        self.send_coil_register: bool = True
+        self.send_discrete_register: bool = True
 
         # Register failure tracking - make instance-specific
         self.enable_register_failure_tracking: bool = True
@@ -222,6 +225,7 @@ class modbus_base(transport_base):
         # Initialize instance-specific register failure tracking
         self.register_failure_trackers: dict[str, RegisterFailureTracker] = {}
         self._failure_tracking_lock = threading.Lock()
+        self._last_disabled_status_log: float = 0.0
 
         # Register failure tracking settings
         self.enable_register_failure_tracking = settings.getboolean("enable_register_failure_tracking", fallback=self.enable_register_failure_tracking)
@@ -235,12 +239,20 @@ class modbus_base(transport_base):
         if "send_holding_register" in self._protocol.settings:
             self.send_holding_register = strtobool(self._protocol.settings["send_holding_register"])
 
+        if "send_coil_register" in self._protocol.settings:
+            self.send_coil_register = strtobool(self._protocol.settings["send_coil_register"])
+
+        if "send_discrete_register" in self._protocol.settings:
+            self.send_discrete_register = strtobool(self._protocol.settings["send_discrete_register"])
+
         if "batch_delay" in self._protocol.settings:
             self.modbus_delay = float(self._protocol.settings["batch_delay"])
 
         # allow enable/disable of which registers to send
         self.send_holding_register = settings.getboolean("send_holding_register", fallback=self.send_holding_register)
         self.send_input_register = settings.getboolean("send_input_register", fallback=self.send_input_register)
+        self.send_coil_register = settings.getboolean("send_coil_register", fallback=self.send_coil_register)
+        self.send_discrete_register = settings.getboolean("send_discrete_register", fallback=self.send_discrete_register)
         self.modbus_delay = settings.getfloat(["batch_delay", "modbus_delay"], fallback=self.modbus_delay)
         self.modbus_delay_setting = self.modbus_delay
 
@@ -255,6 +267,28 @@ class modbus_base(transport_base):
             raise RuntimeError(msg)
 
         return self.protocolSettings
+
+    def _should_send_registry_type(self, registry_type: Registry_Type) -> bool:
+        """
+        Return False when the given registry type has been disabled via the
+        send_*_register flags, or when no registry map was loaded for it.
+        Centralizes the repeated per-type enable/disable checks so callers
+        (read_data, read_group_data, read_data_iter) stay clean.
+        """
+        flag_map: dict[Registry_Type, bool] = {
+            Registry_Type.INPUT:    self.send_input_register,
+            Registry_Type.HOLDING:  self.send_holding_register,
+            Registry_Type.COIL:     self.send_coil_register,
+            Registry_Type.DISCRETE: self.send_discrete_register,
+        }
+        if not flag_map.get(registry_type, True):
+            return False
+        if registry_type not in self._protocol.registry_map:
+            self._log.debug(
+                f"Skipping {registry_type.name} — no registry map loaded for {self.transport_name}"
+            )
+            return False
+        return True
 
     def _get_correct_device_arg(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         # 1. Identify which keyword the current Pymodbus version expects
@@ -281,22 +315,57 @@ class modbus_base(transport_base):
         return self._protocol.get_entry_byteorder(entry)
 
     def _register_words_to_bytes(self, register_values: list[int], byte_order: str,) -> bytes:
-        words = [value & 0xFFFF for value in register_values]
+        words: list[int] = [value & 0xFFFF for value in register_values]
         if byte_order == "little":
             words.reverse()
         return b"".join(word.to_bytes(2, byteorder="big", signed=False) for word in words)
 
     def _bytes_to_register_words(self, data: bytes, byte_order: str) -> list[int]:
         if len(data) % 2 != 0:
-            msg = f"Expected even byte count for register write, got {len(data)}"
+            msg: str = f"Expected even byte count for register write, got {len(data)}"
             raise ValueError(msg)
-        words = [int.from_bytes(data[i:i + 2], byteorder="big", signed=False) for i in range(0, len(data), 2)]
+        words: list[int] = [int.from_bytes(data[i:i + 2], byteorder="big", signed=False) for i in range(0, len(data), 2)]
         if byte_order == "little":
             words.reverse()
         return words
 
     def _entry_word_count(self, entry: registry_map_entry) -> int:
         return self._protocol.entry_word_count(entry)
+
+    def _extract_response_values(
+        self,
+        response: Any,
+        registry_type: Registry_Type,
+        register_range: tuple[int, int],
+    ) -> dict[int, int] | None:
+        """
+        Extract register values from a pymodbus response object into a flat
+        {address: value} dict, handling the two distinct response shapes:
+
+          - INPUT / HOLDING  → response.registers  (list[int], 16-bit words)
+          - COIL / DISCRETE  → response.bits       (list[bool], one bit each)
+
+        Returns None if the response is missing the expected attribute or the
+        attribute itself is None (treated as a read failure by callers).
+        Coil/discrete bit values are stored as 0 or 1 so they are compatible
+        with the rest of the int-keyed registry pipeline.
+        """
+        start_addr, count = register_range
+
+        if registry_type in (Registry_Type.COIL, Registry_Type.DISCRETE):
+            if not hasattr(response, "bits") or response.bits is None:
+                return None
+            return {
+                start_addr + i: int(bool(response.bits[i]))
+                for i in range(min(count, len(response.bits)))
+            }
+        else:
+            if not hasattr(response, "registers") or response.registers is None:
+                return None
+            return {
+                start_addr + i: response.registers[i]
+                for i in range(min(count, len(response.registers)))
+            }
 
     def write_registers(self, start_register: int, values: list[int], **kwargs: Any) -> None:
         if not self.write_enabled:
@@ -308,6 +377,18 @@ class modbus_base(transport_base):
         port_lock = self._get_port_lock()
         with port_lock:
             self.client.write_registers(start_register, values, **kwargs)
+
+    def write_coil(self, register: int, value: bool, **kwargs: Any) -> None:
+        """Write a single coil (bit) register using Modbus function code 0x05."""
+        if not self.write_enabled:
+            return
+        if self.client is None:
+            self._log.error("write_coil called before client was initialized")
+            return
+        kwargs = self._get_correct_device_arg(kwargs)
+        port_lock = self._get_port_lock()
+        with port_lock:
+            self.client.write_coil(register, value, **kwargs)
 
     def _get_port_identifier(self) -> str:
         """
@@ -332,7 +413,7 @@ class modbus_base(transport_base):
 
     def _get_port_lock(self) -> threading.Lock:
         """Get or create a lock for this transport's port"""
-        port_id = self._get_port_identifier()
+        port_id: str = self._get_port_identifier()
 
         with self._clients_lock:
             if port_id not in self._client_locks:
@@ -419,7 +500,7 @@ class modbus_base(transport_base):
             - `successful_ranges`: List of ranges with no failures
 
                 Each range entry contains:
-                - `registry_type`: INPUT or HOLDING
+                - `registry_type`: INPUT, HOLDING, COIL or DISCRETE
                 - `range`: Register range (e.g., "994-999")
                 - `failure_count`: Number of failures
                 - `last_failure_time`: Timestamp of last failure
@@ -549,10 +630,9 @@ class modbus_base(transport_base):
             self._needs_reconnection = False
 
             # Reset protocol settings timestamps to ensure fresh reading
-            for registry_type in [Registry_Type.INPUT, Registry_Type.HOLDING]:
-                if registry_type in self._protocol.registry_map:
-                    for entry in self._protocol.registry_map[registry_type]:
-                        entry.next_read_timestamp = 0.0
+            for registry_type in [Registry_Type.INPUT, Registry_Type.HOLDING, Registry_Type.COIL, Registry_Type.DISCRETE]:
+                for entry in self._protocol.registry_map.get(registry_type, []):
+                    entry.next_read_timestamp = 0.0
 
     def cleanup(self) -> None:
         """Clean up transport resources and close connections"""
@@ -637,7 +717,7 @@ class modbus_base(transport_base):
         for snfield in fields:
             # Use appropriate lookup method for the registry type
             if r_type == Registry_Type.HOLDING:
-                entry = self._protocol.get_registry_entry(snfield, registry_type=Registry_Type.HOLDING)
+                entry: registry_map_entry | None = self._protocol.get_registry_entry(snfield, registry_type=Registry_Type.HOLDING)
             else:
                 entry = self._protocol.get_registry_entry(snfield, registry_type=Registry_Type.INPUT)
 
@@ -698,19 +778,37 @@ class modbus_base(transport_base):
             if not self.write_enabled:  # guard for checking inverter scraper flag to allow write back to the inverter.
                 return
 
-            registry_map: list[registry_map_entry] = self._protocol.get_registry_map(Registry_Type.HOLDING)
+            # Search writable registry types in priority order.
+            # COIL is included because coil registers support writes.
+            # DISCRETE is intentionally excluded — discrete inputs are read-only by the Modbus spec.
+            writable_registry_types = [
+                (Registry_Type.HOLDING, self._protocol.get_registry_map(Registry_Type.HOLDING)),
+                (Registry_Type.COIL,    self._protocol.get_registry_map(Registry_Type.COIL)),
+            ]
 
             for variable_name, value in data.items():
                 entry: registry_map_entry | None = None
-                for e in registry_map:
-                    if e.variable_name == variable_name:
-                        entry = e
+                matched_registry_type: Registry_Type = Registry_Type.HOLDING
+
+                for reg_type, registry_map in writable_registry_types:
+                    for e in registry_map:
+                        if e.variable_name == variable_name:
+                            entry = e
+                            matched_registry_type = reg_type
+                            break
+                    if entry is not None:
                         break
 
                 if entry is not None:
+                    # Respect the entry's write_mode — skip read-only and disabled entries.
+                    if entry.write_mode in (WriteMode.READ, WriteMode.READDISABLED):
+                        self._log.debug(
+                            f"Skipping write for '{variable_name}' — write_mode is {entry.write_mode.name}"
+                        )
+                        continue
                     # Pass value through unchanged — write_variable handles
                     # int, float, and str (code values) natively
-                    self.write_variable(entry, value, Registry_Type.HOLDING)
+                    self.write_variable(entry, value, matched_registry_type)
 
             time.sleep(self.modbus_delay) #sleep in between requests so modbus can rest
 
@@ -724,20 +822,18 @@ class modbus_base(transport_base):
             self._log.debug(f"Reading data from {self.transport_name}: address={address_info}, port={port_info}")
 
             info: dict[str, int | float | str] = {}
-            #modbus - only read input/holding registries
-            for registry_type in (Registry_Type.INPUT, Registry_Type.HOLDING):
+            #modbus - only read input/holding/coil/discrete registries
+            for registry_type in (Registry_Type.INPUT, Registry_Type.HOLDING, Registry_Type.COIL, Registry_Type.DISCRETE):
 
-                #enable / disable input/holding register
-                if registry_type == Registry_Type.INPUT and not self.send_input_register:
-                    continue
-
-                if registry_type == Registry_Type.HOLDING and not self.send_holding_register:
+                if not self._should_send_registry_type(registry_type):
                     continue
 
                 #calculate ranges dynamically -- for variable read timing
-                ranges = self._protocol.calculate_registry_ranges(self._protocol.registry_map[registry_type],
-                                                                         self._protocol.registry_map_size[registry_type],
-                                                                         timestamp=self.last_read_time)
+                ranges = self._protocol.calculate_registry_ranges(
+                    self._protocol.registry_map[registry_type],
+                    self._protocol.registry_map_size[registry_type],
+                    timestamp=self.last_read_time,
+                )
 
                 self._log.info(f"Reading {registry_type.name} registers for {self.transport_name}: {len(ranges)} ranges")
                 if len(ranges) == 0:
@@ -771,14 +867,12 @@ class modbus_base(transport_base):
                 self._log.info("Register is Empty; transport busy?")
 
             # Log disabled ranges status periodically (every 10 minutes)
-            if self.enable_register_failure_tracking and hasattr(self, '_last_disabled_status_log') and time.time() - self._last_disabled_status_log > 600:
+            if self.enable_register_failure_tracking and time.time() - self._last_disabled_status_log > 600:
                 disabled_ranges = self._get_disabled_ranges_info()
                 if disabled_ranges:
                     self._log.info(f"Currently disabled register ranges: {len(disabled_ranges)}")
                     for range_info in disabled_ranges:
                         self._log.info(f"  - {range_info}")
-                self._last_disabled_status_log = time.time()
-            elif not hasattr(self, '_last_disabled_status_log'):
                 self._last_disabled_status_log = time.time()
 
             self._finish_cycle_tracking(info)
@@ -801,11 +895,8 @@ class modbus_base(transport_base):
 
             info: dict[str, int | float | str] = {}
 
-            for registry_type in (Registry_Type.INPUT, Registry_Type.HOLDING):
-                if registry_type == Registry_Type.INPUT and not self.send_input_register:
-                    continue
-
-                if registry_type == Registry_Type.HOLDING and not self.send_holding_register:
+            for registry_type in (Registry_Type.INPUT, Registry_Type.HOLDING, Registry_Type.COIL, Registry_Type.DISCRETE):
+                if not self._should_send_registry_type(registry_type):
                     continue
 
                 union_entries: list[registry_map_entry] = []
@@ -830,7 +921,7 @@ class modbus_base(transport_base):
                 if not union_entries:
                     continue
 
-                ranges = self._protocol.calculate_registry_ranges(
+                ranges: list[tuple[int, int]] = self._protocol.calculate_registry_ranges(
                     union_entries,
                     max_register,
                     timestamp=self.last_read_time,
@@ -842,7 +933,7 @@ class modbus_base(transport_base):
                     f"{len(ranges)} ranges across {len(union_entries)} entries"
                 )
 
-                registry = self.read_modbus_registers(ranges=ranges, registry_type=registry_type)
+                registry: Dict[int, int] = self.read_modbus_registers(ranges=ranges, registry_type=registry_type)
 
                 if registry:
                     info.update(self._protocol.process_registery(registry, union_entries))
@@ -871,15 +962,15 @@ class modbus_base(transport_base):
         )
         return timeout_per_block * max(total_ranges, 5)
 
-    def validate_protocol(self, registry_type: Registry_Type = Registry_Type.HOLDING) -> float:
+    def validate_protocol(self, registry_type: Registry_Type) -> float:
         """
         Validates the protocol by reading registers and scoring results
         against expected value ranges defined in the protocol CSV.
 
         Args:
-            registry_type: Which register bank to validate.
-                        Defaults to HOLDING since write validation
-                        requires confirmed holding register access.
+            registry_type: Which register bank to validate (required).
+                           Pass Registry_Type.HOLDING for write validation,
+                           Registry_Type.INPUT for read validation.
         Returns:
             Score percentage 0.0-100.0 indicating proportion of registers
             returning valid values.
@@ -930,6 +1021,8 @@ class modbus_base(transport_base):
         batch_size: int = 50,
         delay: float = 0.05,
         include_holding: bool = True,
+        include_coil: bool = False,
+        include_discrete: bool = False,
         progress_cb=None,
     ) -> dict[str, dict[int, int]]:
         """
@@ -943,6 +1036,8 @@ class modbus_base(transport_base):
         """
         input_result: dict[int, int] = {}
         holding_result: dict[int, int] = {}
+        coil_result: dict[int, int] = {}
+        discrete_result: dict[int, int] = {}
 
         self._log.info(
             "[%s] Starting analysis scan: range=%d-%d batch=%d — "
@@ -953,41 +1048,16 @@ class modbus_base(transport_base):
             batch_size,
         )
 
-        def _normalize_register_values(values, addr: int, reg_count: int) -> list[Any]:
-            if values is None:
-                msg: str = f"read_registers returned None for range {addr}-{addr + reg_count - 1}"
-                raise RuntimeError(msg)
-
-            # read_registers returns a pymodbus response object whose integer
-            # register values live in the .registers attribute.  Extract that
-            # list before any further processing.  If the transport subclass
-            # already returns a plain list (e.g. a mock or future subclass),
-            # pass it through unchanged.
-            if hasattr(values, "registers"):
-                values = values.registers
-            elif not isinstance(values, list):
-                values = [values]
-
-            if len(values) != reg_count:
-                self._log.debug(
-                    "[%s] Partial read: expected=%d got=%d at %d",
-                    self.transport_name,
-                    reg_count,
-                    len(values),
-                    addr,
-                )
-
-            return values
-
         def scan_range(registry_type: Registry_Type, result_dict: dict[int, int]) -> None:
             total_reads = 0
             failures = 0
             phase = registry_type.name.lower()
-            total_batches = max(1, (end - start) // batch_size + 1)
+            total_batches: int = max(1, (end - start) // batch_size + 1)
             batches_done = 0
 
             for addr in range(start, end + 1, batch_size):
                 range_count: int = min(batch_size, end - addr + 1)
+                register_range = (addr, range_count)
 
                 # NOTE: deliberately bypass the failure tracker here.
                 # capture_analysis_scan is an intentional dense sweep of the
@@ -998,17 +1068,23 @@ class modbus_base(transport_base):
                 # this scan never pollutes the scraper's disabled-range state.
 
                 try:
-                    values = self.read_registers(
+                    response = self.read_registers(
                         addr,
                         range_count,
                         registry_type=registry_type,
                     )
-                    values = _normalize_register_values(values, addr, range_count)
+                    if response is None:
+                        msg = f"read_registers returned None for range {addr}-{addr + range_count - 1}"
+                        raise RuntimeError(msg)  # noqa: TRY301
 
-                    for i, val in enumerate(values):
-                        if val is not None:
-                            result_dict[addr + i] = val
+                    extracted: Dict[int, int] | None = self._extract_response_values(response, registry_type, register_range)
+                    if extracted is None:
+                        msg: str = (f"Response for {registry_type.name} {addr}-{addr + range_count - 1} "
+                            f"missing expected attribute (.registers or .bits)")
 
+                        raise RuntimeError(msg)  # noqa: TRY301
+
+                    result_dict.update(extracted)
                     total_reads += 1
                 except Exception as exc:
                     failures += 1
@@ -1051,8 +1127,12 @@ class modbus_base(transport_base):
             scan_range(Registry_Type.INPUT, input_result)
             if include_holding:
                 scan_range(Registry_Type.HOLDING, holding_result)
+            if include_coil:
+                scan_range(Registry_Type.COIL, coil_result)
+            if include_discrete:
+                scan_range(Registry_Type.DISCRETE, discrete_result)
 
-        return {"input": input_result, "holding": holding_result}
+        return {"input": input_result, "holding": holding_result, "coil": coil_result, "discrete": discrete_result}
 
     # ------------------------------------------------------------------
     # Range-validation helpers used by analyze_protocols
@@ -1108,7 +1188,7 @@ class modbus_base(transport_base):
         parts = [p.strip() for p in s.split(",")]
         if len(parts) > 1:
             try:
-                floats = [float(p) for p in parts if p]
+                floats: list[float] = [float(p) for p in parts if p]
                 if floats:
                     return floats
             except ValueError as exc:
@@ -1177,9 +1257,11 @@ class modbus_base(transport_base):
         (e.g. free text) are treated as in-range (no penalty) so that
         unspecified ranges do not unfairly reduce the score.
         """
-        scan = self.capture_analysis_scan(progress_cb=progress_cb, batch_size=batch_size)
-        raw_input = scan["input"]
-        raw_holding = scan["holding"]
+        scan: Dict[str, Dict[int, int]] = self.capture_analysis_scan(progress_cb=progress_cb, batch_size=batch_size)
+        raw_input: Dict[int, int] = scan["input"]
+        raw_holding: Dict[int, int] = scan["holding"]
+        raw_coil: Dict[int, int] = scan["coil"]
+        raw_discrete: Dict[int, int] = scan["discrete"]
 
         protocols: dict[str, protocol_settings] = {}
         for name in protocol_names:
@@ -1190,18 +1272,15 @@ class modbus_base(transport_base):
 
         results: dict[str, Any] = {}
         for name, proto in protocols.items():
-            # Explicitly load both registry types before scoring.
+            # Explicitly load registry types before scoring.
             # get_registry_map() does a bare dict lookup with no load
             # fallback, so we must call load_registry_map() first.
-            for reg_type in [Registry_Type.INPUT, Registry_Type.HOLDING]:
+            for reg_type in [Registry_Type.INPUT, Registry_Type.HOLDING, Registry_Type.COIL, Registry_Type.DISCRETE]:
                 if reg_type not in proto.registry_map:
                     try:
                         proto.load_registry_map(reg_type)
                     except Exception as exc:
-                        self._log.warning(
-                            "Could not load %s registry for %s: %s",
-                            reg_type.name, name, exc
-                        )
+                        self._log.warning("Could not load %s registry for %s: %s", reg_type.name, name, exc)
 
             protocol_result: dict[str, Any] = {
                 "protocol_name": name,
@@ -1213,10 +1292,12 @@ class modbus_base(transport_base):
             for reg_type, reg_key, raw_map in (
                 (Registry_Type.INPUT, "input", raw_input),
                 (Registry_Type.HOLDING, "holding", raw_holding),
+                (Registry_Type.COIL, "coil", raw_coil),
+                (Registry_Type.DISCRETE, "discrete", raw_discrete),
             ):
                 # Safe access — fall back to empty list if load failed
-                entries = proto.registry_map.get(reg_type, [])
-                decoded_values = proto.process_registery(raw_map, entries) if (raw_map and entries) else {}
+                entries: list[registry_map_entry] = proto.registry_map.get(reg_type, [])
+                decoded_values: Dict[str, int | float | str] = proto.process_registery(raw_map, entries) if (raw_map and entries) else {}
 
                 known_registers: set[int] = {
                     entry.register for entry in entries
@@ -1274,9 +1355,9 @@ class modbus_base(transport_base):
                     # base_valid False → 0.0 regardless of range
 
                 total = len(readable_entries)
-                missing_in_scan = sorted(reg for reg in known_registers if reg not in raw_map)
-                unknown_in_scan = sorted(reg for reg in raw_map.keys() if reg not in known_registers)
-                accuracy = round((matches / total) * 100, 2) if total else 0.0
+                missing_in_scan: list[int] = sorted(reg for reg in known_registers if reg not in raw_map)
+                unknown_in_scan: list[int] = sorted(reg for reg in raw_map.keys() if reg not in known_registers)
+                accuracy: float = round((matches / total) * 100, 2) if total else 0.0
 
                 # --- removable suggestions ---
                 # Bug fix: use register as the primary key so entries are
@@ -1304,16 +1385,16 @@ class modbus_base(transport_base):
                             "note": entry.note or "",
                         })
 
-                # --- addable suggestions ---
+                # TODO
                 # Include out_of_range so the UI can warn when a newly
                 # discovered register's raw value is already outside the
                 # default documented range.
                 addable: list[dict[str, Any]] = []
                 default_range_str = "0-65535"
-                default_constraint = self._parse_values_range(default_range_str)
+                default_constraint: tuple[float, float] | list[float] | None = self._parse_values_range(default_range_str)
                 for reg in unknown_in_scan:
-                    raw_val = raw_map.get(reg)
-                    out_of_range = (
+                    raw_val: int | None = raw_map.get(reg)
+                    out_of_range: bool = (
                         raw_val is not None
                         and not self._value_in_range(raw_val, default_constraint)
                     )
@@ -1357,10 +1438,24 @@ class modbus_base(transport_base):
 
 
     def write_variable(self, entry : registry_map_entry, value :int | float | str, registry_type : Registry_Type = Registry_Type.HOLDING) -> None:
-        """ writes a value to a ModBus register; todo: registry_type to handle other write functions"""
+        """ writes a value to a ModBus register"""
 
         if isinstance(value, str):
             value = value.strip().lower()
+
+        # ------------------------------------------------------------------ #
+        # COIL fast path — booleans need no multi-word read-back, no type     #
+        # encoding, and no byte-order handling.  Resolve the value to a bool  #
+        # and write directly via FC 0x05.                                      #
+        # ------------------------------------------------------------------ #
+        if registry_type == Registry_Type.COIL:
+            if isinstance(value, str):
+                coil_bool: bool = value not in ("0", "false", "off", "no", "")
+            else:
+                coil_bool = bool(int(float(value))) if value != "" else False
+            self._log.info(f"WRITE COIL: {entry.variable_name} => {coil_bool} to Register {entry.register}")
+            self.write_coil(entry.register, coil_bool)
+            return
 
         temp_map: list[registry_map_entry] = [entry]
         word_count = self._entry_word_count(entry)
@@ -1388,9 +1483,7 @@ class modbus_base(transport_base):
         total_bits: int = len(raw_bytes) * 8
 
         if entry.variable_name not in info:
-            self._log.error(
-                f"WRITE_ERROR: Could not decode current value for '{entry.variable_name}'. Unsafe to write."
-            )
+            self._log.error(f"WRITE_ERROR: Could not decode current value for '{entry.variable_name}'. Unsafe to write.")
             return
 
         #read current decoded value
@@ -1630,11 +1723,16 @@ class modbus_base(transport_base):
             f"WRITE: {current_value} => {value} "
             f"( {raw_registers} => {register_values} ) to Register {entry.register}"
         )
-        if len(register_values) == 1:
+
+        # Coil registers use a dedicated single-bit write function.
+        # Holding/input registers use the standard word-oriented write path.
+        if registry_type == Registry_Type.COIL:
+            coil_value: bool = bool(register_values[0]) if register_values else False
+            self.write_coil(entry.register, coil_value)
+        elif len(register_values) == 1:
             self.write_register(entry.register, register_values[0])
         else:
             self.write_registers(entry.register, register_values)
-        #entry.next_read_timestamp = 0 #ensure is read next interval
 
 
     def read_variable(self, variable_name : str, registry_type : Registry_Type, entry : registry_map_entry | None = None) -> int | float | str | None:
@@ -1642,7 +1740,7 @@ class modbus_base(transport_base):
         if variable_name:
             variable_name = variable_name.strip().lower().replace(" ", "_")
 
-        registry_map = self._protocol.get_registry_map(registry_type)
+        registry_map: list[registry_map_entry] = self._protocol.get_registry_map(registry_type)
 
         if entry is None:
             for e in registry_map:
@@ -1803,13 +1901,10 @@ class modbus_base(transport_base):
             if retry < 0:
                 retry = 0
 
-            # Only process registers if we have a valid response
-            if register is not None and hasattr(register, 'registers') and register.registers is not None:
-                # combine registers into "registry"
-                i = -1
-                while(i := i + 1 ) < register_range[1]:
-                    #print(str(i) + " => " + str(i+range[0]))
-                    registry[i+register_range[0]] = register.registers[i]
+            # Extract values — handles both .registers (INPUT/HOLDING) and .bits (COIL/DISCRETE)
+            extracted = self._extract_response_values(register, registry_type, register_range)
+            if extracted is not None:
+                registry.update(extracted)
 
         return registry
 
@@ -1856,12 +1951,9 @@ class modbus_base(transport_base):
                 yield register_range, None
             else:
                 self._record_register_read_success(register_range, registry_type)
-                result = {
-                    i + register_range[0]: register.registers[i]
-                    for i in range(register_range[1])
-                    if register.registers is not None
-                }
-                yield register_range, result
+                # Extract values — handles .registers (INPUT/HOLDING) and .bits (COIL/DISCRETE)
+                result = self._extract_response_values(register, registry_type, register_range)
+                yield register_range, result if result is not None else {}
 
     def read_data_iter(self) -> Iterator[bool]:
         """
@@ -1872,23 +1964,12 @@ class modbus_base(transport_base):
         retrieve whatever has been collected so far.
         """
         self._start_cycle_tracking()
-        self._partial_registry: dict[int, int] = {}
-        self._partial_info: dict[str, int | float | str] = {}
 
-        for registry_type in (Registry_Type.INPUT, Registry_Type.HOLDING):
-            if registry_type == Registry_Type.INPUT and not self.send_input_register:
-                continue
-            if registry_type == Registry_Type.HOLDING and not self.send_holding_register:
+        for registry_type in (Registry_Type.INPUT, Registry_Type.HOLDING, Registry_Type.COIL, Registry_Type.DISCRETE):
+            if not self._should_send_registry_type(registry_type):
                 continue
 
-            # Guard: skip registry types that were never loaded (no CSV file).
-            # Without this, registry_map[registry_type] raises KeyError which
-            # propagates out of the generator frame and surfaces as an unhandled
-            # exception at the next() call site in run_transport.
-            if registry_type not in self._protocol.registry_map:
-                continue
-
-            ranges = self._protocol.calculate_registry_ranges(
+            ranges: list[tuple[int, int]] = self._protocol.calculate_registry_ranges(
                 self._protocol.registry_map[registry_type],
                 self._protocol.registry_map_size[registry_type],
                 timestamp=self.last_read_time

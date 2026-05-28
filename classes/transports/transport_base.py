@@ -282,6 +282,8 @@ class transport_base:
 
     def _start_cycle_tracking(self) -> None:
         self._last_cycle_result = TransportCycleResult()
+        self._partial_info: dict[str, int | float | str] = {}
+        self._partial_registry: dict[int, int] = {}
 
     def _cycle_expect_unit(self, count: int = 1) -> None:
         self._last_cycle_result.expected_units += count
@@ -364,17 +366,24 @@ class transport_base:
     def write_register(self, register : int, value : int, **kwargs) -> None:
         pass
 
-    def analyse_protocol(self) -> None:
+    def write_coil(self, register: int, value: bool, **kwargs) -> None:
+        """Write a single coil (bit) register. Modbus FC 0x05.
+        Override in modbus_base; base no-op prevents AttributeError on non-modbus transports.
+        """
         pass
 
+    def validate_protocol(self, registry_type: Registry_Type) -> float:
+        """
+        Validates the protocol by reading registers and scoring results.
+        Args:
+            registry_type: Which register type to validate against (required).
+                           Callers must be explicit — HOLDING for write validation,
+                           INPUT for read validation.
+        Returns:
+            Score percentage 0-100 indicating valid register reads.
+        """
+        return 0.0
 
-def validate_protocol(self, registry_type: Registry_Type = Registry_Type.INPUT) -> float:
-    """
-    Validates the protocol by reading registers and scoring results.
-    Args:
-        registry_type: Which register type to validate against.
-    Returns:
-        Score percentage 0-100 indicating valid register reads.
-    """
-    return 0.0
+    def analyse_protocol(self) -> None:
+        pass
     #endregion
