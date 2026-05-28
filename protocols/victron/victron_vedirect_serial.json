@@ -1,5 +1,9 @@
 {
   "transport": "serial_vedirect",
+  "send_holding_register": true,
+  "send_input_register": false,
+  "send_coil_register": false,
+  "send_discrete_register": false,  
 
   "charge_state_codes": {
     "0": "off",

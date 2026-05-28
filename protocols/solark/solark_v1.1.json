@@ -3,6 +3,8 @@
   "baud": 9600,
   "send_holding_register": true,
   "send_input_register": false,
+  "send_coil_register": false,
+  "send_discrete_register": false,
 
   "fault_information_word_1_codes": {
     "b7":  "GFDI_Relay_Failure - F08",

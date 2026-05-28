@@ -2,5 +2,9 @@
     "transport" : "modbus_rtu",
     "baud" : 19200,
     "batch_size" : 40,
+    "send_holding_register": true,
+    "send_input_register": true,
+    "send_coil_register": false,
+    "send_discrete_register": false,    
     "note" : "the base of this is from https://github.com/galets/eg4-modbus-monitor/tree/master / https://raw.githubusercontent.com/galets/eg4-modbus-monitor/refs/heads/master/src/registers-gridboss.yaml"
 }

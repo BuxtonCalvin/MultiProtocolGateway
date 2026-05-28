@@ -1,6 +1,10 @@
 {
   "transport": "serial_pylon",
   "baud": 115200,
+  "send_holding_register": true,
+  "send_input_register": false,
+  "send_coil_register": false,
+  "send_discrete_register": false,
 
   "protection_codes": {
     "b1":  "cell or module over voltage",

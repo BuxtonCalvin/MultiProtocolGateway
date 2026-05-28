@@ -18,8 +18,8 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from collections import defaultdict
+from pathlib import Path
 
 d = json.loads(
     Path(__file__).with_name("_register_code_mismatch_report.json").read_text(encoding="utf-8")

@@ -1,3 +1,7 @@
 {
-  "transport": "modbus_rtu"
+  "transport": "modbus_rtu",
+  "send_holding_register": true,
+  "send_input_register": false,
+  "send_coil_register": false,
+  "send_discrete_register": false
 }

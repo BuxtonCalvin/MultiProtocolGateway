@@ -1,5 +1,8 @@
 {
+  "send_holding_register": true,
   "send_input_register": false,
+  "send_coil_register": false,
+  "send_discrete_register": false,
   "batch_size": 40,
 
   "inverter_enabled_codes": {

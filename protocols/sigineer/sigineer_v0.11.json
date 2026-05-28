@@ -1,5 +1,9 @@
 {
     "transport" : "modbus_rtu",
+    "send_holding_register": true,
+    "send_input_register": true,
+    "send_coil_register": false,
+    "send_discrete_register": false,
     "system_status_codes" : 
     {
         "0" : "StandBy",

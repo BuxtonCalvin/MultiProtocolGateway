@@ -2,6 +2,8 @@
   "transport": "modbus_rtu",
   "send_holding_register": true,
   "send_input_register": false,
+  "send_coil_register": false,
+  "send_discrete_register": false,
 
   "controller_failure_alarm_high_bits_codes": {
     "b0":  "reserved",

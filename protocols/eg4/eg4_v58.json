@@ -1,5 +1,9 @@
 {
   "batch_size": 40,
+  "send_holding_register": true,
+  "send_input_register": true,
+  "send_coil_register": false,
+  "send_discrete_register": false,
 
   "batcomtype_codes": {
     "0": "Lead-Acid",

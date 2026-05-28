@@ -1,5 +1,9 @@
 {
   "transport": "modbus_rtu",
+  "send_holding_register": true,
+  "send_input_register": false,
+  "send_coil_register": false,
+  "send_discrete_register": false,  
 
   "status_condition_codes": {
     "295": "OK",

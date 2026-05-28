@@ -4,6 +4,8 @@
   "batch_size": 32,
   "send_holding_register": true,
   "send_input_register": false,
+  "send_coil_register": false,
+  "send_discrete_register": false,
 
   "settings2_codes": {
     "b0":  "Settings",

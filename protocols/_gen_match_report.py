@@ -21,8 +21,8 @@ import csv
 import itertools
 import json
 import re
-from pathlib import Path
 from collections import defaultdict
+from pathlib import Path
 
 protocols = Path(__file__).parent
 
@@ -174,7 +174,7 @@ for (folder, base), paths in sorted(groups.items()):
             }
         )
 
-out = protocols / "_register_code_mismatch_report.json"
+out: Path = protocols / "_register_code_mismatch_report.json"
 out.write_text(
     json.dumps(
         {

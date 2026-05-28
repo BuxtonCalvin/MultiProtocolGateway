@@ -713,7 +713,7 @@
       "register": "3167",
       "name": "faultcode",
       "csv": "growatt_2020_v1.24.input_registry_map.csv",
-      "note": "Storge device fault code"
+      "note": "Storage device fault code"
     },
     {
       "protocol": "growatt/growatt_2020_v1.24",

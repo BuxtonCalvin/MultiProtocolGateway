@@ -1,7 +1,10 @@
 {
-  "NOTE": "INCOMPLETE - WORK IN PROGRESS",
   "transport": "modbus_rtu",
   "baud": 9600,
+  "send_holding_register": true,
+  "send_input_register": false,
+  "send_coil_register": false,
+  "send_discrete_register": false,
 
   "status_bits_codes": {
     "0": "soft_starting",

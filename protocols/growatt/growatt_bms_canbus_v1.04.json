@@ -1,6 +1,10 @@
 {
   "transport": "canbus",
   "baud": 500000,
+  "send_holding_register": false,
+  "send_input_register": false,
+  "send_coil_register": false,
+  "send_discrete_register": false,
 
   "status_codes": {
     "b0": "charging",

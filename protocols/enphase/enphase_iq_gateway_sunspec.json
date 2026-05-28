@@ -1,7 +1,10 @@
 {
   "batch_size": "40",
   "read_interval": "5000",
+  "send_holding_register": true,
   "send_input_register": false,
+  "send_coil_register": false,
+  "send_discrete_register": false,
 
   "inverter_did_codes": {
     "101": "single-phase",
