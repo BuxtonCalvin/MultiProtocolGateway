@@ -28,20 +28,20 @@ RUN apk add --no-cache bash
 COPY --from=builder /install /usr/local
 WORKDIR /app
 
-# 1. Create the default "seed" directories
-RUN mkdir -p /defaults/config /defaults/protocols /defaults/documentation
+# Create the default "seed" directories
+RUN mkdir -p /defaults/config /defaults/protocols
 
-# 2. Copy local files into the "seed" directories
+# Copy local files into the "seed" directories
 COPY ./config/ /defaults/config/
 COPY ./protocols/ /defaults/protocols/
-COPY ./documentation/ /defaults/documentation/
 
-# 3. Copy app logic
+# Copy app logic
 COPY protocol_gateway.py /app/
 COPY defs/ /app/defs/
 COPY classes /app/classes/
+COPY documentation/ /app/documentation/
 
-# 4. Set up entrypoint
+# Set up entrypoint
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
