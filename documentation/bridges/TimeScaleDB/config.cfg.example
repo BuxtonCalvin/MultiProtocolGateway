@@ -1,39 +1,124 @@
 [general]
-read_mode = sequential
+read_mode = interleaved
 
 [logging]
 log_dir = logs
-log_file = gateway.log
-level = INFO
-# weekly | daily | size
-rotation = weekly         
-# Monday rollover
-when = W0                  
+log_file = MPG.log
+level = DEBUG
+rotation = weekly
+when = W0
 interval = 1
-# keep 4 weeks
-backup_count = 4           
-# 100MB (only if size-based)
-max_bytes = 104857600 
+backup_count = 4
+max_bytes = 104857600
 console = true
 
-# can be any name in the format transport.<name>
-# changing the name will result in a new device being created in the Timescale DB.
-[transport.Inverter1]
+[messages]
+enabled = true
+default_title = MPG Notification
+pushover_enabled = true
+pushover_api_token = azs5ghrj7cugjsdfkjgnke9hfrkkhm5dd
+pushover_user_key = uh6193sgfjogsfjd594juw9qt5x
+telegram_enabled = true
+telegram_bot_token = 7056410669:AAHiVtZsfdgsdfJq0ezPIs3s2El0
+telegram_chat_ids = -1005269010370
+
+[transport.Inverter_read]
 log_level = DEBUG
 transport = modbus_tcp
 protocol_version = eg4_18kpv
-write_enabled = false
 host = 10.17.2.65
 port = 502
-bridge = transport.timescaledb
 read_interval = 15
+variable_mask = variable_mask_Inverter_read.txt
+device_location = home
+write_enabled = false
+device_manufacturer = EG4
+device_model = 18KPV
+device_name = EG4 18kpv1
+device_serial_number = 4066670074
+bridge = transport.timescaledb, transport.influxdb
+batch_size = 40
 
-# Device descriptions used by Timescale for scraping an inverter/device.
-manufacturer = EG4
-model = 18KPV
-serial_number = 4066670074
-location = home
-name = EG$ 18kPV1
+[transport.eg4_ll_s_1]
+log_level = DEBUG
+transport = modbus_eg4_ll_s_tcp
+protocol_version = eg4_ll_s
+host = 10.17.2.66
+port = 502
+slave_id = 1
+read_interval = 15
+bridge = transport.timescaledb
+device_location = home
+write_enabled = false
+device_manufacturer = EG4
+device_model = LL-S
+device_name = Battery 1
+send_input_register = false
+batch_size = 10
+
+[transport.eg4_ll_s_2]
+log_level = DEBUG
+transport = modbus_eg4_ll_s_tcp
+protocol_version = eg4_ll_s
+host = 10.17.2.66
+port = 502
+slave_id = 2
+read_interval = 15
+bridge = transport.timescaledb
+device_location = home
+write_enabled = false
+device_manufacturer = EG4
+device_model = LL-S
+device_name = Battery 2
+send_input_register = false
+send_coil_register = false
+send_discrete_register = false
+batch_size = 10
+
+[transport.influxdb]
+transport = influxdb_out
+host = 10.17.2.42
+port = 8086
+database = openLuup
+username = KevinB
+password = SoleSole12
+measurement = device_data
+include_timestamp = true
+include_device_info = true
+batch_size = 100
+batch_timeout = 10.0
+log_level = DEBUG
+
+[transport.inverter_write]
+log_level = DEBUG
+transport = modbus_tcp
+protocol_version = eg4_18kpv
+host = 10.17.2.65
+port = 502
+read_interval = 20
+variable_mask = variable_mask_inverter_write.txt
+bridge = transport.mqtt
+device_location = home
+write_enabled = true
+device_manufacturer = EG4
+device_model = 18KPV
+device_name = EG4 18kpv Write
+device_serial_number = 4066670074
+write_type = write
+batch_size = 40
+
+[transport.mqtt]
+transport = mqtt
+host = 10.17.2.42
+port = 1883
+base_topic = inverter_write
+error_topic = /error
+json = false
+discovery_enabled = true
+discovery_topic = solar
+log_level = DEBUG
+username = KevinB
+password = SoleSole12
 
 [transport.timescaledb]
 log_level = DEBUG
@@ -41,47 +126,24 @@ transport = timescaledb
 host = 10.17.2.42
 port = 5431
 database = solar1
-username =  your-username
-password = your-password
-
-### All of the below are optional and are set to defaults if not specified
-# force float coerces all values obtained to be of the float type.
+username = KevinB
+password = SoleSole12
 force_float = true
-
-# persistent backlog settings
 enable_persistent_storage = true
 backlog_storage_path = timescaledb_backlog
 backlog_file_name = no_connect_backlog
-
-# max data points to store in backlog
 max_backlog_size = 10000
-# seconds-->  equal to 24 hours
-max_backlog_age = 86400 
-
-# TSDB Connection monitoring settings
+max_backlog_age = 86400
 reconnect_attempts = 5
-# minutes
 reconnect_delay = 5
-
-# Exponential backoff settings (reconnect delay increases exponentially on each failure)
 use_exponential_backoff = true
-# minutes --> 5 hours
 max_reconnect_delay = 300
-
-## hypertable and rollup options
-# changing rollup settings after data has been written, will result in automatic view deletions and rebuilds
-migrate_data = True
-enable_compression = True
-enable_rollups = True
-# Seconds between rollup refreshes (6 hours)
+migrate_data = true
+enable_compression = true
+enable_rollups = true
 auto_refresh_interval = 21600
-enable_auto_refresh = True
+enable_auto_refresh = true
 drop_after = 1 year
-
-# stale data cleanup settings minutes --> 5 hours
 stale_data_timeout = 300
-
-# pushover settings / disable if you don't use pushover.
-enable_pushover = True
-pushover_token = your-token
-pushover_user = your-userid
+device_name = TimescaleDB MPG Bridge
+write_requires_complete_cycle = true

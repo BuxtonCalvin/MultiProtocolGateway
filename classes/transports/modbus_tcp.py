@@ -32,8 +32,9 @@ from defs.common import TransportSettings
 from .modbus_base import modbus_base
 
 
-class modbus_tcp(modbus_base):
-    transport_type = "scraper"
+class modbus_tcp(modbus_base):
+
+    transport_type: str = "scraper"
     pymodbus_slave_arg: str = "unit"  # default legacy device arg
     client = cast(ModbusBaseClient, ModbusTcpClient)
 
@@ -68,17 +69,6 @@ class modbus_tcp(modbus_base):
         with self._clients_lock:
             modbus_base.clients[client_str] = self.client
 
-    def write_register(self, register: int, value: int, **kwargs) -> None:
-        if not self.write_enabled:  # guard for checking inverter scraper flag to allow write back to the inverter.
-            return
-        if self.client is None:
-            self._log.error("write_register called before client was initialized")
-            return
-        kwargs = self._get_correct_device_arg(kwargs)
-        port_lock = self._get_port_lock()
-        with port_lock:
-            self.client.write_register(register, value, **kwargs) #function code 0x06 writes to holding register
-
     def read_registers(self, start: int, count: int = 1, registry_type: Registry_Type = Registry_Type.INPUT, **kwargs: Any) -> Any:
         if self.client is None:
             self._log.error("read_registers called before client was initialized")
@@ -94,6 +84,10 @@ class modbus_tcp(modbus_base):
                 result = self.client.read_input_registers(start, count=count, **kwargs)
             elif registry_type == Registry_Type.HOLDING:
                 result = self.client.read_holding_registers(start, count=count, **kwargs)
+            elif registry_type == Registry_Type.COIL:
+                result = self.client.read_coils(start, count=count, **kwargs)
+            elif registry_type == Registry_Type.DISCRETE:
+                result = self.client.read_discrete_inputs(start, count=count, **kwargs)
             else:
                 self._log.warning(f"read_registers: unsupported registry_type '{registry_type.name}' for TCP transport — returning None")
                 return None

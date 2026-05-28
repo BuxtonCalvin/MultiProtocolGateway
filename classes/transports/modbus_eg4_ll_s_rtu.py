@@ -14,9 +14,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
-from __future__ import annotations
-
 # Scraper for EG4 LL rack batteries (PDF V01.06 protocol) via Modbus TCP
 # through a Waveshare RS485 bridge, inheriting from modbus_tcp but adding
 # EG4-specific derived-field logic on top of the TCP transport.
@@ -115,13 +112,16 @@ Manual verification commands (send to RS485 bus to confirm addressing):
   (Each asks for pack voltage at register 0 — a safe probe register.)
 """
 
+from __future__ import annotations
+
 from classes.protocol_settings import Registry_Type, registry_map_entry
 from classes.transports.modbus_rtu import modbus_rtu
 from defs.common import TransportSettings
 
 
-class modbus_eg4_ll_s_tcp(modbus_rtu):
-    transport_type = "scraper"
+class modbus_eg4_ll_s_rtu(modbus_rtu):
+
+    transport_type: str = "scraper"
     """
     EG4 LL battery transport over Modbus TCP (Waveshare RS485 bridge),
     targeting the PDF V01.06 register map.

@@ -14,9 +14,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
-from __future__ import annotations
-
 # scraper for PACE BMS devices over RS-232/RS-485 serial using the proprietary binary protocol.
 # Since pymodbus 3.x dropped the binary framer, this transport handles raw serial communication directly
 # via pyserial, mapping register reads to standard Modbus function codes framed in PACE's binary envelope.
@@ -37,6 +34,8 @@ CRC-16 is computed over address + function + data using the standard
 Modbus CRC-16 table (same polynomial as RTU).
 Rewrite of the original pace.py module to incorporate modern Pymodbus versions.
 """
+from __future__ import annotations
+
 import struct
 import threading
 from typing import Any, Optional
@@ -133,11 +132,14 @@ class _PaceResponse:
     """
     Wraps raw register bytes from a PACE BMS response into an object
     that satisfies the interface expected by modbus_base.read_modbus_registers.
-    Specifically, it exposes a .registers list of ints and .isError() method.
+    Exposes either .registers (INPUT/HOLDING) or .bits (COIL/DISCRETE)
+    depending on how the instance was constructed, mirroring the two
+    pymodbus response shapes handled by modbus_base._extract_response_values.
     """
 
     def __init__(self, registers: list[int]) -> None:
         self.registers: list[int] = registers
+        self.bits: list[bool] | None = None   # populated for COIL/DISCRETE responses
         self._error: bool = False
 
     def isError(self) -> bool:
@@ -150,9 +152,17 @@ class _PaceResponse:
         resp._error = True
         return resp
 
+    @classmethod
+    def from_bits(cls, bits: list[bool]) -> "_PaceResponse":
+        """Create a coil/discrete response carrying boolean bit values."""
+        resp = cls([])
+        resp.bits = bits
+        return resp
 
-class pace(modbus_base):
-    transport_type = "scraper"
+
+class pace(modbus_base):
+
+    transport_type: str = "scraper"
     """
     PACE BMS transport bridge for MPG.
 
@@ -309,6 +319,52 @@ class pace(modbus_base):
 
         return registers
 
+    def _parse_bit_response(self, data: bytes, expected_count: int) -> Optional[list[bool]]:
+        """
+        Parse a PACE coil/discrete read response (FC 0x01 / 0x02) into a list of bools.
+
+        Response structure:
+            [ slave_id ][ func_code ][ byte_count ][ data bytes... ][ crc_hi ][ crc_lo ]
+
+        Coil/discrete values are packed 8 per byte, LSB first per the Modbus spec.
+
+        Args:
+            data:           Raw response bytes including CRC
+            expected_count: Expected number of coil/discrete bits
+
+        Returns:
+            List of bool values, or None if malformed/CRC error
+        """
+        min_length: int = 5
+        if len(data) < min_length:
+            self._log.warning(
+                f"PACE bit response too short: {len(data)} bytes (expected at least {min_length})"
+            )
+            return None
+
+        if not self._verify_response_crc(data):
+            self._log.error(f"PACE bit response CRC mismatch — discarding frame. Data: {data.hex()}")
+            return None
+
+        byte_count: int = data[2]
+        expected_bytes: int = (expected_count + 7) // 8   # ceil(count / 8)
+
+        if byte_count != expected_bytes:
+            self._log.warning(
+                f"PACE bit response byte count mismatch: got {byte_count}, expected {expected_bytes}"
+            )
+            return None
+
+        bits: list[bool] = []
+        for byte_idx in range(byte_count):
+            byte_val: int = data[3 + byte_idx]
+            for bit_idx in range(8):
+                if len(bits) >= expected_count:
+                    break
+                bits.append(bool((byte_val >> bit_idx) & 1))
+
+        return bits
+
     # -----------------------------------------------------------------------
     # Register reads — overrides modbus_base.read_registers
     # -----------------------------------------------------------------------
@@ -328,6 +384,10 @@ class pace(modbus_base):
             function_code: int = 0x04
         elif registry_type == Registry_Type.HOLDING:
             function_code = 0x03
+        elif registry_type == Registry_Type.COIL:
+            function_code = 0x01
+        elif registry_type == Registry_Type.DISCRETE:
+            function_code = 0x02
         else:
             self._log.warning(
                 f"PACE BMS: unsupported registry_type "
@@ -346,13 +406,15 @@ class pace(modbus_base):
 
                 # Expected response size:
                 # slave_id(1) + func_code(1) + byte_count(1) + data(count*2) + crc(2)
+                # For coils/discrete: data is ceil(count/8) bytes, but we use count*2
+                # as an upper bound and let _parse_register_response validate the byte count.
                 expected_size: int = 5 + (count * 2)
                 response: bytes = self._serial.read(expected_size)
 
-                if len(response) != expected_size:
+                if len(response) < 5:
                     self._log.warning(
                         f"PACE BMS short response: got {len(response)} bytes, "
-                        f"expected {expected_size} for {count} registers "
+                        f"expected at least 5 for {count} registers "
                         f"starting at {start}"
                     )
                     return _PaceResponse.error()
@@ -362,12 +424,17 @@ class pace(modbus_base):
                 self.connected = False
                 return _PaceResponse.error()
 
-        registers: Optional[list[int]] = self._parse_register_response(response, count)
-
-        if registers is None:
-            return _PaceResponse.error()
-
-        return _PaceResponse(registers)
+        # Route response parsing based on register type
+        if registry_type in (Registry_Type.COIL, Registry_Type.DISCRETE):
+            bits = self._parse_bit_response(response, count)
+            if bits is None:
+                return _PaceResponse.error()
+            return _PaceResponse.from_bits(bits)
+        else:
+            registers = self._parse_register_response(response, count)
+            if registers is None:
+                return _PaceResponse.error()
+            return _PaceResponse(registers)
 
     def write_register(self, register: int, value: int, **kwargs: Any) -> None:
         """
@@ -402,4 +469,42 @@ class pace(modbus_base):
 
             except serial.SerialException as e:
                 self._log.error(f"PACE BMS write_register serial error: {e}")
+                self.connected = False
+
+    def write_coil(self, register: int, value: bool, **kwargs: Any) -> None:
+        """
+        Write a single coil to the PACE BMS device.
+        Uses Modbus function code 0x05 (Write Single Coil).
+        Coil ON = 0xFF00, coil OFF = 0x0000 per the Modbus specification.
+        """
+        if not self.write_enabled:
+            return
+        if self._serial is None or not self._serial.is_open:
+            self._log.error("PACE BMS write_coil called but serial port is not open")
+            return
+
+        coil_value: int = 0xFF00 if value else 0x0000
+        payload: bytes = struct.pack(">BBHH", self.slave_id, 0x05, register, coil_value)
+        crc: int = _compute_crc16(payload)
+        request: bytes = payload + struct.pack(">H", crc)
+
+        with self._serial_lock:
+            try:
+                self._serial.reset_input_buffer()
+                self._serial.write(request)
+                self._serial.flush()
+
+                # Echo response for write single coil is the same 8 bytes as the request
+                response: bytes = self._serial.read(8)
+                if len(response) < 8:
+                    self._log.warning(
+                        f"PACE BMS write_coil short echo: {len(response)} bytes for coil {register}"
+                    )
+                    return
+
+                if not self._verify_response_crc(response):
+                    self._log.error(f"PACE BMS write_coil CRC mismatch for coil {register}")
+
+            except serial.SerialException as e:
+                self._log.error(f"PACE BMS write_coil serial error: {e}")
                 self.connected = False

@@ -33,8 +33,9 @@ if TYPE_CHECKING:
     from threading import Lock
 
 class modbus_udp(modbus_base):
-
-    transport_type = "scraper"
+
+
+    transport_type: str = "scraper"
     def __init__(self, settings : TransportSettings) -> None:
         super().__init__(settings)
 
@@ -75,7 +76,16 @@ class modbus_udp(modbus_base):
                         response = self.client.read_input_registers(start, count=count, **kwargs)
                     elif registry_type == Registry_Type.HOLDING:
                         response = self.client.read_holding_registers(start, count=count, **kwargs)
-                    response = None
+                    elif registry_type == Registry_Type.COIL:
+                        response = self.client.read_coils(start, count=count, **kwargs)
+                    elif registry_type == Registry_Type.DISCRETE:
+                        response = self.client.read_discrete_inputs(start, count=count, **kwargs)
+                    else:
+                        self._log.warning(
+                            f"read_registers: unsupported registry_type '{registry_type.name}' for UDP transport — returning None"
+                        )
+                        return None
+
                     # Check if we actually received a valid response packet back
                     # Pymodbus returns an Exception object (not raises it) on failure
                     if response is not None and not response.isError():
@@ -89,17 +99,6 @@ class modbus_udp(modbus_base):
             # If the loop finishes without returning, all retries failed
             self._log.error(f"Failed to read {registry_type} after {self.retries} attempts.")
             return None
-
-    def write_register(self, register: int, value: int, **kwargs) -> None:
-        if not self.write_enabled:
-            return
-        if self.client is None:
-            self._log.error("write_register called before client was initialized")
-            return
-        kwargs = self._get_correct_device_arg(kwargs)
-        port_lock = self._get_port_lock()
-        with port_lock:
-            self.client.write_register(register, value, **kwargs) #function code 0x06 writes to holding register
 
     def connect(self) -> None:
         if self.client is None:

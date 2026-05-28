@@ -15,10 +15,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from __future__ import annotations
 
 # scraper for Modbus RTU devices over RS-232/RS-485 serial, inheriting from modbus_base and implementing
 # RTU-specific client setup and register access logic.
+
+from __future__ import annotations
 
 from threading import Lock
 from typing import TYPE_CHECKING, Any, cast
@@ -41,8 +42,8 @@ if TYPE_CHECKING:
 
 class modbus_rtu(modbus_base):
 
-
-    transport_type = "scraper"
+
+    transport_type: str = "scraper"
     def __init__(self, settings : TransportSettings) -> None:
         super().__init__(settings)
         self.client: ModbusBaseClient | None = None
@@ -101,6 +102,10 @@ class modbus_rtu(modbus_base):
                     result = self.client.read_input_registers(start, count=count, **kwargs)
                 elif registry_type == Registry_Type.HOLDING:
                     result = self.client.read_holding_registers(start, count=count, **kwargs)
+                elif registry_type == Registry_Type.COIL:
+                    result = self.client.read_coils(start, count=count, **kwargs)
+                elif registry_type == Registry_Type.DISCRETE:
+                    result = self.client.read_discrete_inputs(start, count=count, **kwargs)
                 else:
                     self._log.warning(
                         f"read_registers: unsupported registry_type '{registry_type.name}' for RTU transport — returning None")
@@ -124,19 +129,6 @@ class modbus_rtu(modbus_base):
             except Exception as e:
                 self._log.error(f"Unexpected error during read: {e}")
                 return None
-
-    def write_register(self, register : int, value : int, **kwargs):
-        if not self.write_enabled:
-            return
-        if self.client is None:
-            self._log.error("write_register called before client was initialized")
-            return
-        kwargs = self._get_correct_device_arg(kwargs)
-
-        # Use port-specific lock for thread-safe access
-        port_lock: Lock = self._get_port_lock()
-        with port_lock:
-            self.client.write_register(register, value, **kwargs) #function code 0x06 writes to holding register
 
     def connect(self) -> bool:
         if self.client is None:
