@@ -67,29 +67,6 @@ networks:
         - subnet: 10.17.0.0/24
 
 # =============================================================================
-# VOLUMES
-# =============================================================================
-volumes:
-  mpg_config:
-    driver: local
-  timescaledb_data:
-    driver: local
-  influxdb_data:
-    driver: local
-  influxdb_config:
-    driver: local
-  mosquitto_data:
-    driver: local
-  mosquitto_log:
-    driver: local
-  pgadmin_data:
-    driver: local
-  chronograf_data:
-    driver: local
-  grafana_data:
-    driver: local
-
-# =============================================================================
 # SERVICES
 # =============================================================================
 services:
