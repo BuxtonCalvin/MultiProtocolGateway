@@ -61,6 +61,8 @@ MPG ships with a **FastAPI + Jinja2 web server** on port **1717**. The server is
 
 The index page lists every configured **scraper** (input device) and **bridge** (output transport) in a single panel. Each entry shows its transport class, connection host/port, and real-time connection status. From here you can navigate directly into any device's settings or protocol editor.
 
+![Dashboard](classes/WebServer/static/screenshots/dashboard.png)
+
 ### Device Settings Pane
 
 Each device gets a dedicated settings pane with a three-column table:
@@ -68,6 +70,8 @@ Each device gets a dedicated settings pane with a three-column table:
 - **Active** — toggle a setting in or out of the generated `config.cfg` without deleting it
 - **Staged value** — the value that will be written on the next commit; highlighted amber when it differs from the on-disk value
 - **Default** — the fallback value from the transport module, shown for reference
+
+![Devices](classes/WebServer/static/screenshots/device__inverter_write.png)
 
 Changes are submitted via HTMX PATCH calls and buffered in a SQLite staging database. Nothing touches `config.cfg` until you explicitly commit.
 
@@ -81,6 +85,12 @@ The protocol editor provides a full in-browser spreadsheet-style view of the reg
 - Manage orphaned rows (registers present in the DB but no longer in the CSV)
 - Import and export register maps as CSV or JSON
 
+![Protocols](classes/WebServer/static/screenshots/protocol.png)
+
+You can also edit the protocol json file.  This file provides default configurations (which can be over-ridden in the config.cfg) and code lookup descriptions which will then populate your output data.
+
+![Protocol JSON](classes/WebServer/static/screenshots/protocol_json.png)
+
 All edits go through a structured diff engine — the UI shows exactly which rows will be added, modified, or removed before anything is written.
 
 ### Live Device Analysis
@@ -92,29 +102,45 @@ The **Analyze** page is the tool for working with new or undocumented hardware. 
 3. Scores each protocol map by accuracy — how many documented registers actually appear in the scan within value ranges set in the protocol
 4. Produces per-protocol **Add** and **Remove** action lists, flagging registers that are present in the scan but absent from the default protocol map (candidates to add) and registers in the map that were not found on the device (candidates to remove)
 
+![Analysis](classes/WebServer/static/screenshots/analysis.png)
+
 Each suggested change can be individually toggled into or out of the commit queue. When you click **Commit**, MPG writes only the selected changes back to the protocol CSV files and rescans the web database — no manual CSV editing required.
 
 Analysis results stream back to the browser in real time via **Server-Sent Events (SSE)**, so you see scan progress line by line as registers are polled.
 
 ### Global & Logging Settings
 
-Separate pages manage gateway-wide settings (scan interval, precision, write permissions) and logging configuration (log level per transport, log rotation). Both pages write through the same staging/commit pipeline as device settings.
+Separate pages manage gateway-wide settings: Read mode, logging configuration (log level per transport, log rotation), messages. Pages write through the same staging/commit pipeline as device settings.
+
+![Read Mode](classes/WebServer/static/screenshots/read_mode.png)
+
+![Logging](classes/WebServer/static/screenshots/logging-settings.png)
 
 ### Log Viewer
 
 A dedicated page streams the live gateway log to the browser, making it easy to watch register reads, MQTT publishes, and error traces without SSH access.
 
+![Log Viewer](classes/WebServer/static/screenshots/view_log.png)
+
 ### Transport Library
 
 A reference page listing all available transport classes — scraper types (Modbus variants, CAN bus, serial) and bridge types (MQTT, TimescaleDB, InfluxDB, JSON) — with their configurable parameters.
+
+![Transport Library](classes/WebServer/static/screenshots/transport_library.png)
 
 ### Settings
 
 A reference page listing all available settings with their definitions.
 
+![Settings](classes/WebServer/static/screenshots/transport_settings.png)
+
 ### Bridges
 
-Bridges receive data from scrapers and write it somewhere. They are passive — they do not poll.  Here are overviews of two database bridges:
+Bridges receive data from scrapers and write it somewhere. They are passive — they do not poll.
+
+![Bridge](classes/WebServer/static/screenshots/bridge__timescaledb.png)
+
+Here are overviews of two database bridges:
 
 - InfluxDB 1.X and 3.x versions
   - Advanced Features
