@@ -1,35 +1,22 @@
-# Description: ============================================================================= Multi Protocol Gateway — Full Monitoring Stack
+# Description: Multi Protocol Gateway — Full Monitoring Stack
 # File: docker-compose.yml
-#
-# Copyright 2026 Kevin Burke
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://apache.org
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 # =============================================================================
 # Multi Protocol Gateway — Full Monitoring Stack
 # =============================================================================
 #
 # Services included:
-#   mpg          - Multi Protocol Gateway (web UI on :1717)
-#   timescaledb  - TimescaleDB / PostgreSQL (:5432)
-#   influxdb     - InfluxDB v1.x (:8086)
-#   mosquitto    - Eclipse Mosquitto MQTT broker (:1883, :9001 websocket)
-#   pgadmin      - pgAdmin 4 web UI (:5050)
-#   chronograf   - InfluxDB web dashboard (:8888)
-#   grafana      - Grafana visualization (:3000)
+#   mpg            - Multi Protocol Gateway (web UI on :1717)
+#   timescaledb    - TimescaleDB / PostgreSQL (:5432)
+#   influxdb       - InfluxDB v1.x (:8086)
+#   influxdb3      - InfluxDB v3.x (:8181)
+#   influxdb3-explorer - influxdb3-explorer v1.8 (8888)
+#   mosquitto      - Eclipse Mosquitto MQTT broker (:1883, :9001 websocket)
+#   pgadmin        - pgAdmin 4 web UI (:5050)
+#   chronograf     - InfluxDB web dashboard (:8888)
+#   grafana        - Grafana visualization (:3000)
 #
 # Usage:
-#   1. Copy this file and the companion configs to your deployment directory:
+#   1. Copy this file and the companion configs to your docker compose deployment directory:
 #        cp docker-compose.yml /opt/mpg/docker-compose.yml
 #
 #   2. Create the .env file from the example and set your passwords:
@@ -48,8 +35,10 @@
 #   6. Open the MPG web UI at http://localhost:1717 to configure your devices.
 #
 # Notes:
-#   - MPG requires access to a serial/USB device for Modbus RTU.
+#   - MPG requires access to a serial/USB device for Modbus RTU if
+#     you're accessing data via a serial connection.
 #     Add your device path under the `devices:` key in the mpg service.
+#     Other wise, you need to provide access to a tcp-to-serial bridge device.
 #     For Modbus TCP only, remove the `devices:` section entirely.
 #   - All persistent data is stored in named Docker volumes by default.
 #     Override VOLUME_BASE in .env to store data on the host filesystem.
@@ -75,7 +64,7 @@ networks:
     driver: bridge
     ipam:
       config:
-        - subnet: 172.28.0.0/24
+        - subnet: 10.17.0.0/24
 
 # =============================================================================
 # VOLUMES
@@ -109,13 +98,14 @@ services:
   # Multi Protocol Gateway
   # ---------------------------------------------------------------------------
   mpg:
-    image: buxtoncalvin/multiprotocolgateway:latest
+    image: buxtoncalvin/mpg:latest
     container_name: mpg
     <<: [*restart-policy, *default-logging]
     ports:
       - "${MPG_PORT:-1717}:1717"
     volumes:
-      - mpg_config:/app/config
+      - mpg/mpg_config:/app/config
+      - mpg/mpg_protocols:/app/protocols
       # Mount your config.cfg directly if you manage it outside the UI:
       # - ./config/config.cfg:/app/config.cfg
     environment:
@@ -126,13 +116,14 @@ services:
     #   - /dev/ttyACM0:/dev/ttyACM0
     networks:
       - mpg_internal
-    depends_on:
-      timescaledb:
-        condition: service_healthy
-      influxdb:
-        condition: service_healthy
-      mosquitto:
-        condition: service_started
+    # Uncomment each bridge that you use.
+    # depends_on:
+    #   timescaledb:
+    #     condition: service_healthy
+    #   influxdb:
+    #     condition: service_healthy
+    #   mosquitto:
+    #     condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:1717/"]
       interval: 30s
@@ -150,9 +141,8 @@ services:
     ports:
       - "${TIMESCALE_PORT:-5432}:5432"
     volumes:
-      - timescaledb_data:/var/lib/postgresql/data
-      # Optional: mount init SQL to create MPG schema on first boot
-      # - ./config/timescaledb/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - mpg/timescaledb/timescaledb_data:/var/lib/postgresql/data
+
     environment:
       POSTGRES_DB: ${TIMESCALE_DB:-mpg}
       POSTGRES_USER: ${TIMESCALE_USER:-mpg}
@@ -167,18 +157,19 @@ services:
       retries: 10
       start_period: 30s
 
+  # User either/or version 1.x or 3.x
   # ---------------------------------------------------------------------------
   # InfluxDB  (v1.x — compatible with MPG's influxdb_out transport)
   # ---------------------------------------------------------------------------
   influxdb:
-    image: influxdb:1.11
-    container_name: mpg_influxdb
+    image: influxdb:1.8.0
+    container_name: mpg_influxdb1_8
     <<: [*restart-policy, *default-logging]
     ports:
       - "${INFLUXDB_PORT:-8086}:8086"
     volumes:
-      - influxdb_data:/var/lib/influxdb
-      - influxdb_config:/etc/influxdb
+      - mpg/influxdb/influxdb_data:/var/lib/influxdb
+      - mpg/influxdb/influxdb_config:/etc/influxdb
     environment:
       INFLUXDB_DB: ${INFLUXDB_DB:-mpg}
       INFLUXDB_ADMIN_USER: ${INFLUXDB_ADMIN_USER:-admin}
@@ -197,6 +188,47 @@ services:
       start_period: 20s
 
   # ---------------------------------------------------------------------------
+  # InfluxDB  (v3.x — compatible with MPG's influxdb_out transport)
+  # ---------------------------------------------------------------------------
+  influxdb3:
+    image: influxdb:3-core
+    container_name: influxdb_v3
+    <<: [*restart-policy, *default-logging]
+    ports:
+      - "8181:8181" # Native v3 API port
+    volumes:
+      - mpg/influxdb3/influxdb3_data:/var/lib/influxdb3/data
+    networks:
+      - mpg_internal      
+    command:
+      - influxdb3
+      - serve
+      - --node-id=node0
+      - --cluster-id=cluster0
+      - --object-store=file
+      - --data-dir=/var/lib/influxdb3/data
+  
+  # If using influxdb3 -- influxdb3 configuration ui tool
+  explorer:
+    # explicit consistent stable version is 1.8.0
+    image: influxdata/influxdb3-ui:1.8.0
+    container_name: influxdb3-explorer
+    <<: [*restart-policy, *default-logging]
+    ports:
+      - "8888:8080"
+    volumes:
+      - mpg/influxdb3/db:/db:rw
+      # set the params for influxdb3 in the config.json file
+      - mpg/influxdb3/config:/app-root/config:ro
+    environment:
+      - SESSION_SECRET_KEY=${INFLUXDB_SESSION_SECRET_KEY:?INFLUXDB_SESSION_SECRET_KEY must be set in .env}
+    command:
+      - --mode=admin      
+    networks:
+      - mpg_internal            
+
+
+  # ---------------------------------------------------------------------------
   # Eclipse Mosquitto  (MQTT broker)
   # Port 1883 = standard MQTT
   # Port 9001 = MQTT over WebSocket (for browser-based clients / Home Assistant)
@@ -209,9 +241,9 @@ services:
       - "${MQTT_PORT:-1883}:1883"
       - "${MQTT_WS_PORT:-9001}:9001"
     volumes:
-      - ./config/mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
-      - mosquitto_data:/mosquitto/data
-      - mosquitto_log:/mosquitto/log
+      - mpg/mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mpg/mosquitto/mosquitto_data:/mosquitto/data
+      - mpg/mosquitto/mosquitto_log:/mosquitto/log
     environment:
       TZ: ${TZ:-UTC}
     networks:
@@ -233,9 +265,7 @@ services:
     ports:
       - "${PGADMIN_PORT:-5050}:80"
     volumes:
-      - pgadmin_data:/var/lib/pgadmin
-      # Optional: pre-register the TimescaleDB server on first boot
-      # - ./config/pgadmin/servers.json:/pgadmin4/servers.json:ro
+      - mpg/pgadmin/pgadmin_data:/var/lib/pgadmin
     environment:
       PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:?PGADMIN_EMAIL must be set in .env}
       PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:?PGADMIN_PASSWORD must be set in .env}
@@ -249,7 +279,7 @@ services:
         condition: service_healthy
 
   # ---------------------------------------------------------------------------
-  # Chronograf  (InfluxDB web dashboard)
+  # Chronograf  (InfluxDB 1.x web dashboard)  
   # ---------------------------------------------------------------------------
   chronograf:
     image: chronograf:1.10
@@ -258,7 +288,7 @@ services:
     ports:
       - "${CHRONOGRAF_PORT:-8888}:8888"
     volumes:
-      - chronograf_data:/var/lib/chronograf
+      - mpg/chronograf/chronograf_data:/var/lib/chronograf
     environment:
       INFLUXDB_URL: http://influxdb:8086
       INFLUXDB_USERNAME: ${INFLUXDB_ADMIN_USER:-admin}
@@ -280,10 +310,10 @@ services:
     ports:
       - "${GRAFANA_PORT:-3000}:3000"
     volumes:
-      - grafana_data:/var/lib/grafana
-      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+      - mpg/grafana/grafana_data:/var/lib/grafana
+      - mpg/grafana/provisioning:/etc/grafana/provisioning:ro
       # Optional: mount pre-built dashboards
-      # - ./config/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      # - mpg/grafana/config/grafana/dashboards:/var/lib/grafana/dashboards:ro
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:?GRAFANA_PASSWORD must be set in .env}
