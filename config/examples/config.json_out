@@ -12,6 +12,17 @@ backup_count = 4
 max_bytes = 104857600
 console = true
 
+[messages]
+enabled = true
+default_title = MPG Notification
+pushover_enabled = true
+pushover_api_token = azs5ghrj7cu6qte9hfrkkhm5dd
+pushover_user_key = uh6193ey3y7cfony594juw9qt5x
+telegram_enabled = true
+telegram_bot_token = 7051560669:AAHZolX0WOAEF7J2ANJq0ezPIs3s2El0
+telegram_chat_ids = -1002111140370
+
+
 [transport.Inverter_read]
 log_level = DEBUG
 transport = modbus_tcp

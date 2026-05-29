@@ -1,11 +1,10 @@
-# use the web server at host:1717 to configure this file.
 [general]
-read_mode = interleaved  # sequential, concurrent
+read_mode = interleaved
 
 [logging]
-level = DEBUG
 log_dir = logs
 log_file = MPG.log
+level = DEBUG
 rotation = weekly
 when = W0
 interval = 1
@@ -13,80 +12,111 @@ backup_count = 4
 max_bytes = 104857600
 console = true
 
+[messages]
+enabled = true
+default_title = MPG Notification
+pushover_enabled = true
+pushover_api_token = azs5ghrj7cu6qte9hfrkkhm5dd
+pushover_user_key = uh6193ey3y7cfony594juw9qt5x
+telegram_enabled = true
+telegram_bot_token = 7051560669:AAHZolX0WOAEF7J2ANJq0ezPIs3s2El0
+telegram_chat_ids = -1002111140370
+
 [transport.Inverter_read]
 log_level = DEBUG
 transport = modbus_tcp
 protocol_version = eg4_18kpv
-write = false
 host = 10.17.2.65
 port = 502
 read_interval = 15
 variable_mask = variable_mask_Inverter_read.txt
 device_location = home
+write_enabled = false
 device_manufacturer = EG4
 device_model = 18KPV
 device_name = EG4 18kpv1
 device_serial_number = 4066670074
-bridge = transport.timescaledb
+bridge = transport.timescaledb, transport.influxdb
+batch_size = 40
 
 [transport.inverter_write]
 log_level = DEBUG
 transport = modbus_tcp
 protocol_version = eg4_18kpv
-write = true
 host = 10.17.2.65
 port = 502
-read_interval = 30
+read_interval = 20
 variable_mask = variable_mask_inverter_write.txt
+bridge = transport.mqtt
 device_location = home
 device_manufacturer = EG4
 device_model = 18KPV
 device_name = EG4 18kpv Write
 device_serial_number = 4066670074
-bridge = transport.mqtt
+write_enabled = true
+write_type = write
+batch_size = 40
 
 [transport.eg4_ll_s_1]
 log_level = DEBUG
 transport = modbus_eg4_ll_s_tcp
 protocol_version = eg4_ll_s
-write = false
 host = 10.17.2.66
 port = 502
 slave_id = 1
 read_interval = 15
+bridge = transport.timescaledb
 device_location = home
+write_enabled = false
 device_manufacturer = EG4
 device_model = LL-S
 device_name = Battery 1
-bridge = transport.timescaledb
+send_input_register = false
+batch_size = 10
 
 [transport.eg4_ll_s_2]
 log_level = DEBUG
 transport = modbus_eg4_ll_s_tcp
 protocol_version = eg4_ll_s
-write = false
 host = 10.17.2.66
 port = 502
 slave_id = 2
 read_interval = 15
+bridge = transport.timescaledb
 device_location = home
+write_enabled = false
 device_manufacturer = EG4
 device_model = LL-S
 device_name = Battery 2
-bridge = transport.timescaledb
+send_input_register = false
+batch_size = 10
+
+[transport.influxdb]
+transport = influxdb_out
+host = 10.17.2.42
+port = 8086
+database = openLuup
+username = yourusername
+password = yourpassword
+measurement = device_data
+include_timestamp = true
+include_device_info = true
+batch_size = 100
+batch_timeout = 10.0
+log_level = DEBUG
 
 [transport.mqtt]
-log_level = DEBUG
 transport = mqtt
 host = 10.17.2.42
 port = 1883
-user = user
-pass = pass
-base_topic = inverter_data
+base_topic = inverter_write
 error_topic = /error
 json = false
 discovery_enabled = true
 discovery_topic = solar
+log_level = DEBUG
+username = yourusername
+password = yourpassword
 
 [transport.timescaledb]
 log_level = DEBUG
@@ -94,8 +124,8 @@ transport = timescaledb
 host = 10.17.2.42
 port = 5431
 database = solar1
-username = user
-password = pass
+username = yourusername
+password = yourpassword
 force_float = true
 enable_persistent_storage = true
 backlog_storage_path = timescaledb_backlog
@@ -106,15 +136,12 @@ reconnect_attempts = 5
 reconnect_delay = 5
 use_exponential_backoff = true
 max_reconnect_delay = 300
-migrate_data = True
-enable_compression = True
-enable_rollups = True
+migrate_data = true
+enable_compression = true
+enable_rollups = true
 auto_refresh_interval = 21600
-enable_auto_refresh = True
+enable_auto_refresh = true
 drop_after = 1 year
 stale_data_timeout = 300
-enable_pushover = True
-pushover_token = your_pushover_token
-pushover_user = your_pushover_user
 device_name = TimescaleDB MPG Bridge
-write_requires_complete_cycle = True
+write_requires_complete_cycle = true
