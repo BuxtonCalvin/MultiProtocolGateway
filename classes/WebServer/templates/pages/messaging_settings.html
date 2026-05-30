@@ -21,7 +21,7 @@
 {% block title %}Messaging Settings — MPG Admin{% endblock %}
 
 {% block content %}
-<div class="max-w-2xl mx-auto">
+<div class="max-w-5xl mx-auto">
   <h1 class="surface-title font-bold text-xl mb-1">Messaging Settings</h1>
   <p class="surface-muted text-sm mb-6">
     Settings from the <code class="font-mono surface-code">[messages]</code> section of config.cfg.
@@ -29,218 +29,225 @@
   </p>
 
   {# ------------------------------------------------------------------ #}
-  {# Global toggle row                                                   #}
+  {# Two-column layout: General (left) | Message Services (right)       #}
   {# ------------------------------------------------------------------ #}
-  {% set global = settings | selectattr("key", "eq", "enabled") | first | default(none) %}
-  {% if global %}
-  <div class="card mb-4 px-4 py-3 flex items-center justify-between gap-4">
-    <div>
-      <span class="font-mono surface-text text-sm font-medium">enabled</span>
-      <span class="surface-subtle text-xs ml-2">Master switch — disables all services when false</span>
-      {% if global.is_dirty %}<span class="text-dirty text-xs ml-1" title="Unsaved change">*</span>{% endif %}
-    </div>
-    <select id="ms-{{ global.id }}"
-            class="theme-input rounded px-2 py-1 font-mono text-sm
-                   focus:outline-none focus:ring-1 focus:ring-accent"
-            aria-label="enabled"
-            hx-patch="/api/devices/general/messages/{{ global.id }}"
-            name="value_staged"
-            hx-swap="none"
-            hx-trigger="change delay:200ms">
-      <option value="true"  {% if (global.value_staged or "")|lower == "true"  %}selected{% endif %}>true</option>
-      <option value="false" {% if (global.value_staged or "")|lower == "false" %}selected{% endif %}>false</option>
-    </select>
-  </div>
-  {% endif %}
+  <div class="flex gap-6 items-start">
 
-  {# ------------------------------------------------------------------ #}
-  {# Per-service panels                                                  #}
-  {# ------------------------------------------------------------------ #}
-  {% for service_label, service_prefix in [("Pushover", "pushover"), ("Telegram", "telegram")] %}
+    {# ================================================================ #}
+    {# LEFT COLUMN — General settings + master enabled switch           #}
+    {# ================================================================ #}
+    <div class="w-[28rem] flex-shrink-0">
+      <div class="card mb-4" id="ms-panel-general">
+        <div class="px-4 pt-3 pb-2 border-b border-mpg-700/40">
+          <h2 class="font-semibold surface-text text-base">General</h2>
+        </div>
 
-  {# Build the per-service list using a plain loop — selectattr("startswith") is not supported #}
-  {% set svc_settings = [] %}
-  {% for s in settings %}
-    {% if s.key.startswith(service_prefix) %}
-      {% set _ = svc_settings.append(s) %}
-    {% endif %}
-  {% endfor %}
+        <div class="space-y-1 px-4 py-3">
 
-  {# Find the _enabled row for the panel header toggle #}
-  {% set svc_enabled = none %}
-  {% for s in svc_settings %}
-    {% if s.key == service_prefix ~ "_enabled" %}
-      {% set svc_enabled = s %}
-    {% endif %}
-  {% endfor %}
+          {# ── Master enabled toggle (was the standalone card) ── #}
+          {% set global = settings | selectattr("key", "eq", "enabled") | first | default(none) %}
+          {% if global %}
+          <div class="grid grid-cols-[1fr_auto] gap-3 items-center py-1
+                      border-b border-mpg-700/30">
+            <div>
+              <label class="font-mono surface-text text-sm font-medium" for="ms-{{ global.id }}">enabled</label>
+              <span class="surface-subtle text-xs block mt-0.5">Master switch — disables all services when false</span>
+              {% if global.is_dirty %}<span class="text-dirty text-xs ml-1" title="Unsaved change">*</span>{% endif %}
+            </div>
+            <select id="ms-{{ global.id }}"
+                    class="theme-input rounded px-2 py-1 font-mono text-sm
+                           focus:outline-none focus:ring-1 focus:ring-accent"
+                    aria-label="enabled"
+                    hx-patch="/api/devices/general/messages/{{ global.id }}"
+                    name="value_staged"
+                    hx-swap="none"
+                    hx-trigger="change delay:200ms">
+              <option value="true"  {% if (global.value_staged or "")|lower == "true"  %}selected{% endif %}>true</option>
+              <option value="false" {% if (global.value_staged or "")|lower == "false" %}selected{% endif %}>false</option>
+            </select>
+          </div>
+          {% endif %}
 
-  <div class="card mb-6" id="ms-panel-{{ service_prefix }}">
-    <div class="flex items-center justify-between px-4 pt-3 pb-2 border-b border-mpg-700/40">
-      <h2 class="font-semibold surface-text text-base">{{ service_label }}</h2>
+          {# ── Other general/shared keys (default_title, etc.) ── #}
+          {% set other = [] %}
+          {% for s in settings %}
+            {% if not s.key.startswith("pushover") and not s.key.startswith("telegram") and s.key != "enabled" %}
+              {% set _ = other.append(s) %}
+            {% endif %}
+          {% endfor %}
 
-      {# Enabled toggle for this service #}
-      {% if svc_enabled %}
-      <div class="flex items-center gap-2 text-xs surface-muted">
-        <label for="ms-{{ svc_enabled.id }}">enabled</label>
-        <select id="ms-{{ svc_enabled.id }}"
-                class="theme-input rounded px-1 py-0.5 font-mono text-xs
-                       focus:outline-none focus:ring-1 focus:ring-accent"
-                aria-label="{{ svc_enabled.key }}"
-                hx-patch="/api/devices/general/messages/{{ svc_enabled.id }}"
-                name="value_staged"
+          {% for s in other %}
+          <div class="py-1 border-b border-mpg-700/30 last:border-0
+                      {% if s.is_dirty %}bg-dirty/5 rounded px-2{% endif %}">
+            <div class="flex items-center justify-between mb-1">
+              <div class="flex items-center gap-1">
+                <label class="font-mono surface-text text-sm font-medium" for="ms-{{ s.id }}">{{ s.key }}</label>
+                {% if s.default_value %}
+                <span class="surface-subtle text-xs">(default: {{ s.default_value }})</span>
+                {% endif %}
+                {% if s.is_dirty %}<span class="text-dirty text-xs" title="Unsaved change">*</span>{% endif %}
+              </div>
+              <input type="checkbox"
+                     class="accent-accent w-3.5 h-3.5 flex-shrink-0"
+                     {% if s.is_active %}checked{% endif %}
+                     title="Include in config.cfg"
+                     aria-label="Active: {{ s.key }}"
+                     hx-patch="/api/devices/general/messages/{{ s.id }}"
+                     hx-on:htmx:config-request="event.detail.parameters = {is_active: this.checked}"
+                     hx-swap="none"
+                     hx-trigger="change">
+            </div>
+            <input id="ms-{{ s.id }}"
+                   type="text"
+                   class="theme-input rounded px-2 py-1 font-mono text-sm w-full
+                          focus:outline-none focus:ring-1 focus:ring-accent"
+                   value="{{ s.value_staged or '' }}"
+                   aria-label="{{ s.key }}"
+                   hx-patch="/api/devices/general/messages/{{ s.id }}"
+                   name="value_staged"
+                   hx-swap="none"
+                   hx-trigger="change delay:400ms"
+                   onchange="updateMessagingHelpText(this)">
+            <div id="ms-help-{{ s.id }}" class="surface-subtle text-xs leading-5 mt-0.5"></div>
+          </div>
+          {% endfor %}
+
+        </div>
+      </div>
+
+      {# ── Test button (bottom of General column) ── #}
+      {% if settings %}
+      <div class="flex flex-col gap-2">
+        <button type="button"
+                class="px-4 py-1.5 rounded bg-accent hover:bg-accent-dark text-white text-sm font-medium
+                       focus:outline-none focus:ring-2 focus:ring-accent"
+                hx-post="/api/devices/general/messages/test"
                 hx-swap="none"
-                hx-trigger="change delay:200ms">
-          <option value="true"  {% if (svc_enabled.value_staged or "")|lower == "true"  %}selected{% endif %}>true</option>
-          <option value="false" {% if (svc_enabled.value_staged or "")|lower == "false" %}selected{% endif %}>false</option>
-        </select>
-        {% if svc_enabled.is_dirty %}<span class="text-dirty" title="Unsaved change">*</span>{% endif %}
+                hx-trigger="click">
+          Send test message
+        </button>
+        <span id="ms-test-result" class="text-xs surface-muted" aria-live="polite"></span>
       </div>
       {% endif %}
     </div>
 
-    <div class="space-y-1 px-4 py-3" id="ms-rows-{{ service_prefix }}">
-      {% for s in svc_settings %}
-      {% if s.key != service_prefix ~ "_enabled" %}
-      <div class="grid grid-cols-[1fr_minmax(0,1fr)_1.5rem_minmax(0,12rem)] gap-3 items-center py-1
-                  border-b border-mpg-700/30 last:border-0
-                  {% if s.is_dirty %}bg-dirty/5 rounded px-2{% endif %}">
+    {# ================================================================ #}
+    {# RIGHT COLUMN — Message Services                                  #}
+    {# ================================================================ #}
+    <div class="flex-1 min-w-0">
+      <div class="card mb-4 px-4 pt-3 pb-2 border-b border-mpg-700/40 rounded-t">
+        <h2 class="font-semibold surface-text text-base">Message Services</h2>
+      </div>
 
-        {# Key label — strip the service prefix for a cleaner display #}
-        <div>
-          <label class="font-mono surface-text text-sm font-medium" for="ms-{{ s.id }}">
-            {{ s.key | replace(service_prefix ~ "_", "") }}
-          </label>
-          {% if s.default_value %}
-          <span class="surface-subtle text-xs ml-2">default: {{ s.default_value }}</span>
-          {% endif %}
-          {% if s.is_dirty %}<span class="text-dirty text-xs ml-1" title="Unsaved change">*</span>{% endif %}
-        </div>
+      {# ── Per-service panels ── #}
+      {% for service_label, service_prefix in [("Pushover", "pushover"), ("Telegram", "telegram")] %}
 
-        {# Password input for credential fields, with reveal toggle #}
-        {% set is_secret = "token" in s.key or "key" in s.key or "password" in s.key %}
-        {% if is_secret %}
-        <div class="relative flex items-center col-span-1">
-          <input id="ms-{{ s.id }}"
-                 type="password"
-                 class="theme-input rounded px-2 py-1 pr-8 font-mono text-sm w-full
-                        focus:outline-none focus:ring-1 focus:ring-accent"
-                 value="{{ s.value_staged or '' }}"
-                 aria-label="{{ s.key }}"
-                 hx-patch="/api/devices/general/messages/{{ s.id }}"
-                 name="value_staged"
-                 hx-swap="none"
-                 hx-trigger="change delay:400ms"
-                 onchange="updateMessagingHelpText(this)">
-          <button type="button"
-                  class="absolute right-1.5 text-mpg-400 hover:text-mpg-200
-                         focus:outline-none focus:ring-1 focus:ring-accent rounded"
-                  aria-label="Toggle visibility"
-                  onclick="toggleReveal(this)">
-            {# Eye icon — switches to eye-slash on reveal #}
-            <svg class="w-4 h-4 eye-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                    d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                    d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7
-                       -1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
-            </svg>
-          </button>
-        </div>
-        {% else %}
-        <input id="ms-{{ s.id }}"
-               type="text"
-               class="theme-input rounded px-2 py-1 font-mono text-sm col-span-1
-                      focus:outline-none focus:ring-1 focus:ring-accent"
-               value="{{ s.value_staged or '' }}"
-               aria-label="{{ s.key }}"
-               hx-patch="/api/devices/general/messages/{{ s.id }}"
-               name="value_staged"
-               hx-swap="none"
-               hx-trigger="change delay:400ms"
-               onchange="updateMessagingHelpText(this)">
+      {% set svc_settings = [] %}
+      {% for s in settings %}
+        {% if s.key.startswith(service_prefix) %}
+          {% set _ = svc_settings.append(s) %}
         {% endif %}
-
-        {# Active checkbox #}
-        <input type="checkbox"
-               class="accent-accent w-3.5 h-3.5"
-               {% if s.is_active %}checked{% endif %}
-               title="Include in config.cfg"
-               aria-label="Active: {{ s.key }}"
-               hx-patch="/api/devices/general/messages/{{ s.id }}"
-               hx-on:htmx:config-request="event.detail.parameters = {is_active: this.checked}"
-               hx-swap="none"
-               hx-trigger="change">
-
-        {# Inline help #}
-        <div id="ms-help-{{ s.id }}" class="surface-subtle text-xs leading-5"></div>
-      </div>
-      {% endif %}
       {% endfor %}
 
-      {% if svc_settings | length == 0 %}
-      <p class="surface-muted text-sm py-2">
-        No {{ service_label }} settings found. Add
-        <code class="font-mono surface-code">{{ service_prefix }}_enabled</code> and
-        <code class="font-mono surface-code">{{ service_prefix }}_*</code> keys to config.cfg.
-      </p>
-      {% endif %}
-    </div>
-  </div>
-  {% endfor %}
+      {% set svc_enabled = svc_settings | selectattr("key", "eq", service_prefix ~ "_enabled") | first | default(none) %}
 
-  {# ------------------------------------------------------------------ #}
-  {# General / shared keys (default_title, etc.)                         #}
-  {# ------------------------------------------------------------------ #}
-  {% set other = [] %}
-  {% for s in settings %}
-    {% if not s.key.startswith("pushover") and not s.key.startswith("telegram") and s.key != "enabled" %}
-      {% set _ = other.append(s) %}
-    {% endif %}
-  {% endfor %}
+      <div class="card mb-4" id="ms-panel-{{ service_prefix }}">
+        {# Panel header with "Enable" checkbox (not service name repeated) #}
+        <div class="flex items-center justify-between px-4 pt-3 pb-2 border-b border-mpg-700/40">
+          <h2 class="font-semibold surface-text text-base">{{ service_label }}</h2>
 
-  {% if other %}
-  <div class="card mb-6" id="ms-panel-general">
-    <div class="px-4 pt-3 pb-2 border-b border-mpg-700/40">
-      <h2 class="font-semibold surface-text text-base">General</h2>
-    </div>
-    <div class="space-y-1 px-4 py-3">
-      {% for s in other %}
-      <div class="grid grid-cols-[1fr_minmax(0,1fr)_1.5rem_minmax(0,12rem)] gap-3 items-center py-1
-                  border-b border-mpg-700/30 last:border-0
-                  {% if s.is_dirty %}bg-dirty/5 rounded px-2{% endif %}">
-        <div>
-          <label class="font-mono surface-text text-sm font-medium" for="ms-{{ s.id }}">{{ s.key }}</label>
-          {% if s.default_value %}
-          <span class="surface-subtle text-xs ml-2">default: {{ s.default_value }}</span>
+          {% if svc_enabled %}
+          <div class="flex items-center gap-2 text-xs surface-muted">
+            <label for="cb-svc-{{ service_prefix }}" class="cursor-pointer select-none">Enable</label>
+            <input type="checkbox"
+                   id="cb-svc-{{ service_prefix }}"
+                   class="accent-accent w-4 h-4 rounded"
+                   title="Enable {{ service_label }} service"
+                   aria-label="Enable {{ service_label }}"
+                   {% if (svc_enabled.value_staged or "")|lower == "true" %}checked{% endif %}
+                   hx-patch="/api/devices/general/messages/{{ svc_enabled.id }}"
+                   hx-on:htmx:config-request="event.detail.parameters = {value_staged: this.checked ? 'true' : 'false'}"
+                   hx-swap="none"
+                   hx-trigger="change delay:200ms">
+            {% if svc_enabled.is_dirty %}<span class="text-dirty" title="Unsaved change">*</span>{% endif %}
+          </div>
           {% endif %}
-          {% if s.is_dirty %}<span class="text-dirty text-xs ml-1" title="Unsaved change">*</span>{% endif %}
         </div>
-        <input id="ms-{{ s.id }}"
-               type="text"
-               class="theme-input rounded px-2 py-1 font-mono text-sm
-                      focus:outline-none focus:ring-1 focus:ring-accent"
-               value="{{ s.value_staged or '' }}"
-               aria-label="{{ s.key }}"
-               hx-patch="/api/devices/general/messages/{{ s.id }}"
-               name="value_staged"
-               hx-swap="none"
-               hx-trigger="change delay:400ms"
-               onchange="updateMessagingHelpText(this)">
-        <input type="checkbox"
-               class="accent-accent w-3.5 h-3.5"
-               {% if s.is_active %}checked{% endif %}
-               title="Include in config.cfg"
-               aria-label="Active: {{ s.key }}"
-               hx-patch="/api/devices/general/messages/{{ s.id }}"
-               hx-on:htmx:config-request="event.detail.parameters = {is_active: this.checked}"
-               hx-swap="none"
-               hx-trigger="change">
-        <div id="ms-help-{{ s.id }}" class="surface-subtle text-xs leading-5"></div>
+
+        {# Service key rows (excluding _enabled which is handled in header) #}
+        <div class="space-y-1 px-4 py-3" id="ms-rows-{{ service_prefix }}">
+          {% for s in svc_settings %}
+          {% if s.key != service_prefix ~ "_enabled" %}
+          <div class="grid grid-cols-[14rem_minmax(0,1fr)] gap-4 items-center py-1
+                      border-b border-mpg-700/30 last:border-0
+                      {% if s.is_dirty %}bg-dirty/5 rounded px-2{% endif %}">
+
+            {# Key label + helper text stacked #}
+            <div>
+              <label class="font-mono surface-text text-sm font-medium" for="ms-{{ s.id }}">
+                {{ s.key | replace(service_prefix ~ "_", "") }}
+              </label>
+              {% if s.is_dirty %}<span class="text-dirty text-xs ml-1" title="Unsaved change">*</span>{% endif %}
+              {% if s.default_value %}
+              <span class="surface-subtle text-xs block">default: {{ s.default_value }}</span>
+              {% endif %}
+              {# Helper text under the key name #}
+              <div class="text-xs surface-muted font-sans mt-0.5">
+                {% if "token" in s.key and service_prefix == "telegram" %}
+                  Bot token provided by @BotFather
+                {% elif "ids" in s.key and service_prefix == "telegram" %}
+                  Comma-separated recipient IDs
+                {% endif %}
+              </div>
+            </div>
+
+            {# Password / Text inputs — chat_ids gets the same reveal treatment as tokens/keys #}
+            {% set is_secret = "token" in s.key or "key" in s.key or "password" in s.key or "ids" in s.key %}
+            {% if is_secret %}
+            <div class="relative flex items-center">
+              <input id="ms-{{ s.id }}"
+                     type="password"
+                     class="theme-input rounded px-2 py-1 pr-8 font-mono text-sm w-full
+                            focus:outline-none focus:ring-1 focus:ring-accent"
+                     value="{{ s.value_staged or '' }}"
+                     aria-label="{{ s.key }}"
+                     hx-patch="/api/devices/general/messages/{{ s.id }}"
+                     name="value_staged"
+                     hx-swap="none"
+                     hx-trigger="change delay:400ms">
+              <button type="button"
+                      class="absolute right-1.5 text-mpg-400 hover:text-mpg-200
+                             focus:outline-none focus:ring-1 focus:ring-accent rounded"
+                      aria-label="Toggle visibility"
+                      onclick="toggleReveal(this)">
+                <svg class="w-4 h-4 eye-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7 -1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                </svg>
+              </button>
+            </div>
+            {% else %}
+            <input id="ms-{{ s.id }}"
+                   type="text"
+                   class="theme-input rounded px-2 py-1 font-mono text-sm w-full
+                          focus:outline-none focus:ring-1 focus:ring-accent"
+                   value="{{ s.value_staged or '' }}"
+                   aria-label="{{ s.key }}"
+                   hx-patch="/api/devices/general/messages/{{ s.id }}"
+                   name="value_staged"
+                   hx-swap="none"
+                   hx-trigger="change delay:400ms">
+            {% endif %}
+
+          </div>
+          {% endif %}
+          {% endfor %}
+        </div>
       </div>
       {% endfor %}
-    </div>
-  </div>
-  {% endif %}
+
+    </div>{# end right column #}
+  </div>{# end two-column flex #}
 
   {% if not settings %}
   <div class="card px-4 py-6 text-center surface-muted text-sm">
@@ -249,22 +256,6 @@
   </div>
   {% endif %}
 
-  {# ------------------------------------------------------------------ #}
-  {# Test button                                                         #}
-  {# ------------------------------------------------------------------ #}
-  {% if settings %}
-  <div class="flex gap-3 mt-2">
-    <button type="button"
-            class="px-4 py-1.5 rounded bg-accent hover:bg-accent-dark text-white text-sm font-medium
-                   focus:outline-none focus:ring-2 focus:ring-accent"
-            hx-post="/api/devices/general/messages/test"
-            hx-swap="none"
-            hx-trigger="click">
-      Send test message
-    </button>
-    <span id="ms-test-result" class="text-xs surface-muted self-center" aria-live="polite"></span>
-  </div>
-  {% endif %}
 </div>
 
 <script>
@@ -272,10 +263,8 @@
     const input = btn.closest('.relative').querySelector('input');
     const isHidden = input.type === 'password';
     input.type = isHidden ? 'text' : 'password';
-    // Swap the icon: filled eye ↔ struck-through eye
     const svg = btn.querySelector('svg');
     if (isHidden) {
-      // eye-slash (currently revealed)
       svg.innerHTML = `
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
               d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.542-7
@@ -283,7 +272,6 @@
                  c4.478 0 8.268 2.943 9.542 7a9.966 9.966 0 01-4.17 5.385
                  M15 12a3 3 0 11-6 0 3 3 0 016 0zM3 3l18 18"/>`;
     } else {
-      // open eye (currently hidden)
       svg.innerHTML = `
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
               d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>

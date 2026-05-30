@@ -46,6 +46,7 @@ class DeviceRegisterView:
     unit: str | None
     data_type: str | None
     values_range: str | None
+    adjustments: str | None
     note: str | None
     read_interval: str | None
     write_mode_protocol: str
@@ -108,6 +109,7 @@ def get_protocol_registers(
                 unit=row.unit,
                 data_type=row.data_type,
                 values_range=row.values_range,
+                adjustments=row.adjustments,
                 note=row.note,
                 read_interval=row.read_interval,
                 write_mode_protocol=row.write_mode_protocol,

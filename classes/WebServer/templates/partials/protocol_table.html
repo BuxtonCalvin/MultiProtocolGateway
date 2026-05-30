@@ -196,13 +196,14 @@
             {% endif %}
           </td>
 
-          <td class="px-2 py-1.5 text-mpg-500 dark:text-mpg-100" title="{{ row.adjustments or '' }}" role="cell">
+          <td class="px-2 py-1.5 text-mpg-500 dark:text-mpg-100 font-mono text-xs break-all"
+              title="{{ row.adjustments | string if row.adjustments else '' }}" role="cell">
             {% if device_name %}
-            {{ row.adjustments or '' }}
+            {{ row.adjustments | string if row.adjustments else '' }}
             {% else %}
             <input type="text"
                    class="w-full bg-mpg-200 border border-mpg-400 rounded px-1 py-0.5 surface-title dark:bg-mpg-700/75 dark:border-mpg-500 dark:text-mpg-50"
-                   value="{{ row.adjustments or '' }}"
+                   value="{{ row.adjustments | string if row.adjustments else '' }}"
                    hx-patch="/api/protocols/{{ row.id }}/field"
                    hx-on:htmx:config-request="event.detail.parameters = {field: 'adjustments', value: this.value}"
                    hx-swap="none"

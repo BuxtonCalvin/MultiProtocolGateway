@@ -186,17 +186,18 @@
     </div>
 
     <div class="space-y-0.5" id="settings-rows" role="table" aria-label="Device settings for {{ device.name }}">
-      <div class="grid grid-cols-[1.5rem_1fr_7rem] gap-1 text-mpg-300 text-xs
+      <div class="grid grid-cols-[1.5rem_1fr_7rem_5rem] gap-1 text-mpg-400 text-xs
                   uppercase tracking-wide px-1 pb-1 border-b border-mpg-700"
            role="row">
         <span role="columnheader" aria-label="Active">A</span>
         <span role="columnheader">Key</span>
         <span role="columnheader">Value</span>
+        <span role="columnheader" class="text-mpg-500" title="Default / fallback value from transport module">Default</span>
       </div>
 
       {% for s in settings %}
       {% if s.key not in ("transport", "bridge", "protocol_version", "log_level", "analyze_protocol", "analyze_protocol_save_load") and (not s.is_orphan or s.is_active) and not (s.key == "write_type" and not ns_w.write_enabled) %}
-      <div class="grid grid-cols-[1.5rem_1fr_7rem] gap-1 items-center px-1 py-0.5
+      <div class="grid grid-cols-[1.5rem_1fr_7rem_5rem] gap-1 items-center px-1 py-0.5
                   rounded text-xs
                   {% if s.is_dirty %}bg-dirty/10 border-l-2 border-dirty{% endif %}
                   {% if s.is_orphan %}bg-red-900/20 opacity-60{% endif %}
@@ -244,6 +245,12 @@
                  hx-swap="none"
                  hx-trigger="change delay:400ms">
         </div>
+
+        <div role="cell"
+             class="font-mono text-mpg-400 text-xs truncate leading-tight self-center"
+             title="{{ s.default_value or '—' }}">
+          {{ s.default_value or '—' }}
+        </div>        
       </div>
       {% endif %}
       {% endfor %}

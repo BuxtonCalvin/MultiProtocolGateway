@@ -101,16 +101,16 @@ class canbus(transport_base):
 
         self.baudrate = settings.getint(["baudrate", "bitrate"], self.baudrate)
         self.interface = settings.get(["interface", "bustype"], self.interface).lower()
-        self.cacheTimeout = settings.getint(["cacheTimeout", "cache_timeout"], self.cacheTimeout)
+        self.cacheTimeout = settings.getint(["cacheTimeout"], self.cacheTimeout)
 
         # Serial number: accept a pre-configured value or a pinned CAN ID.
         # Both are resolved here from settings so no attribute-scope errors
         # can occur later when these values are needed inside helper methods.
-        sn_from_settings: str = settings.get(["serial_number", "sn"], "").strip()
+        sn_from_settings: str = settings.get(["serial_number"], "").strip()
         if sn_from_settings:
             self.device_serial_number = sn_from_settings
 
-        raw_sn_can_id: str = settings.get(["serial_number_can_id", "sn_can_id"], "").strip()
+        raw_sn_can_id: str = settings.get(["serial_number_can_id"], "").strip()
         if raw_sn_can_id:
             try:
                 self.serial_number_can_id = int(raw_sn_can_id, 0)  # accepts 0x1A2 or decimal

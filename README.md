@@ -16,7 +16,7 @@ This application was inspired by and built upon the excellent work by [@HotNoob]
 
 ## What MPG does
 
-MPG reads live register data from Modbus RTU/TCP, CAN bus, and proprietary serial protocols, then fans that data out to any combination of MQTT brokers, TimescaleDB, InfluxDB, and JSON outputs — all managed through a built-in web administration UI.  It is planned to extend hardware reads to include rest apis as well as proprietary protocols that do not rely on serial data.
+MPG reads live register data from Modbus RTU/TCP, CAN bus, and proprietary serial protocols, then fans that data out to any combination of MQTT brokers, TimescaleDB, InfluxDB, and JSON outputs — all managed through a built-in web administration UI.  It is planned to extend hardware reads to include REST apis as well as proprietary protocols that do not rely on serial data.
 
 MPG is purpose-built for solar inverters, battery management systems (BMS), energy meters, and any device that speaks Modbus, but its protocol-map architecture means it can be adapted to virtually any register-based hardware.
 
@@ -26,7 +26,7 @@ MPG is purpose-built for solar inverters, battery management systems (BMS), ener
 
 - [Feature Overview](#feature-overview)
 - [Web Administration UI](#web-administration-ui)
-- [Supported Protocols & Devices](#supported-protocols--devices)
+- [Supported Protocols & Hardware Devices](#supported-protocols--hardware-devices)
 - [Transport Architecture](#transport-architecture)
 - [Quick Start](#quick-start)
 - [Full Docker Compose Stack](#full-docker-compose-stack)
@@ -65,15 +65,18 @@ The index page lists every configured **scraper** (input device) and **bridge** 
 
 ### Device Settings Pane
 
-Each device gets a dedicated settings pane with a three-column table:
+On the left side of the page, each device gets a dedicated settings pane with a four-column table:
 
-- **Active** — toggle a setting in or out of the generated `config.cfg` without deleting it
-- **Staged value** — the value that will be written on the next commit; highlighted amber when it differs from the on-disk value
+- **(A)ctive** — toggle a checkbox setting in or out of the generated `config.cfg`
+- **Key** — the setting key name.
+- **Value** — the value that will be written on the next commit; highlighted amber when it differs from the on-disk value
 - **Default** — the fallback value from the transport module, shown for reference
 
-![Devices](classes/WebServer/static/screenshots/device__inverter_write.png)
+![Devices](classes/WebServer/static/screenshots/device__inverter_read.png)
 
 Changes are submitted via HTMX PATCH calls and buffered in a SQLite staging database. Nothing touches `config.cfg` until you explicitly commit.
+
+#### Create Device
 
 ### Protocol Editor
 
@@ -85,7 +88,7 @@ The protocol editor provides a full in-browser spreadsheet-style view of the reg
 - Manage orphaned rows (registers present in the DB but no longer in the CSV)
 - Import and export register maps as CSV or JSON
 
-![Protocols](classes/WebServer/static/screenshots/protocol.png)
+![Protocols](classes/WebServer/static/screenshots/protocols.png)
 
 You can also edit the protocol json file.  This file provides default configurations (which can be over-ridden in the config.cfg) and code lookup descriptions which will then populate your output data.
 
@@ -116,6 +119,8 @@ Separate pages manage gateway-wide settings: Read mode, logging configuration (l
 
 ![Logging](classes/WebServer/static/screenshots/logging-settings.png)
 
+![Messages](classes/WebServer/static/screenshots/messages.png)
+
 ### Log Viewer
 
 A dedicated page streams the live gateway log to the browser, making it easy to watch register reads, MQTT publishes, and error traces without SSH access.
@@ -138,7 +143,7 @@ A reference page listing all available settings with their definitions.
 
 Bridges receive data from scrapers and write it somewhere. They are passive — they do not poll.
 
-![Bridge](classes/WebServer/static/screenshots/bridge__timescaledb.png)
+![Bridges](classes/WebServer/static/screenshots/bridge__timescaledb.png)
 
 Here are overviews of two database bridges:
 
@@ -165,7 +170,7 @@ Here are the overviews of the MQTT and JSON bridges
 
 ---
 
-## Supported Protocols & Devices
+## Supported Protocols & Hardware Devices
 
 MPG ships with pre-built protocol maps for the following manufacturers. Each protocol map is a pair of CSV files (input and holding register maps) plus a JSON descriptor:
 
@@ -428,7 +433,7 @@ Key settings available on every transport:
 | --- | --- | --- |
 | `device_name` | | Unique identifier linking scraper and bridge |
 | `protocol_version` | | Protocol map to load (e.g. `growatt_v0.14`) |
-| `batch_size` | 40 | Number of registers to batch read per a given poll |
+| `batch_size` | `40` | Number of registers to batch read per a given poll |
 | `read_interval` | `15` | Seconds between register polls |
 | `bridge` | | Output transport section name |
 | `log_level` | `INFO` | Per-transport log verbosity |
