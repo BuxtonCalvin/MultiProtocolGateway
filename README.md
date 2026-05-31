@@ -76,7 +76,11 @@ On the left side of the page, each device gets a dedicated settings pane with a 
 
 Changes are submitted via HTMX PATCH calls and buffered in a SQLite staging database. Nothing touches `config.cfg` until you explicitly commit.
 
-#### Create Device
+### Create Device
+
+The create device wizard walks you through creating a scraper device from scratch.
+
+![Create Device](classes/WebServer/static/screenshots/create_device.png)
 
 ### Protocol Editor
 
@@ -147,20 +151,20 @@ Bridges receive data from scrapers and write it somewhere. They are passive — 
 
 Here are overviews of two database bridges:
 
-- InfluxDB 1.X and 3.x versions
+- InfluxDB 1.X and 3.x versions   [![InfluxDB](https://shields.io)](https://influxdata.com)
   - Advanced Features
     [`influxdb_advanced_features.md`](documentation/bridges/InfluxDB/influxdb_advanced_features.md)
 
   - Troubleshooting
     [`troubleshooting_influxdb.md`](documentation/bridges/InfluxDB/troubleshooting_influxdb.md)
 
-- TimeScaledDB
+- TimeScaledDB [![TimescaleDB](https://shields.io)](https://timescale.com)
   - Readme
     [`TimescaleDB`](documentation/bridges/TimeScaleDB/timescaledb_protocol_gateway.md)
 
 Here are the overviews of the MQTT and JSON bridges
 
-- MQTT
+- MQTT  [![Mosquitto](https://shields.io)](https://mosquitto.org)
   - Readme
     [`MQTT`](documentation/bridges/MQTT/MQTT_bridge.md)
 
@@ -227,7 +231,7 @@ Each transport is independently configurable with its own scan interval, log lev
 
 ### Recommendation
 
-- It is much easier and far less error prone to install MPG with its associated bridges via docker compose.  A full docker stack is available see [`docker-compose.yml`](documentation/docker/docker-compose.yml).  Make sure to also install the accompanying configuration files .env, mosquitto.conf and MPG.yaml (Grafana provisioning).  However, if you want to install without Docker, please read the following:
+- It is much easier and far less error prone to install MPG with its associated bridges via docker compose.  A full docker stack is available see [`docker-compose.yml`](documentation/docker/docker-compose.yml).  Remove those applications that you do not want to use from the compose file. Make sure to also install the accompanying configuration files .env, mosquitto.conf and MPG.yaml (Grafana provisioning).  However, if you want to install without Docker, please read the following:
 
 ### Prerequisites
 
@@ -236,11 +240,7 @@ Each transport is independently configurable with its own scan interval, log lev
 
 ### Install
 
-```bash
-pip install multi-protocol-gateway
-```
-
-Or from source:
+From source:
 
 ```bash
 git clone https://github.com/BuxtonCalvin/MultiProtocolGateway.git
@@ -336,7 +336,7 @@ The short alias `mpg` can be used as the service name if preferred.
 
 MPG publishes data to MQTT using Home Assistant's auto-discovery format. Devices appear automatically under **Settings → Devices & Services → MQTT** once the broker is configured on both sides.
 
-### Install Mosquitto on Home Assistant
+### Install Mosquitto on Home Assistant (if not installed via docker)
 
 ``` txt
 Settings → Add-Ons → Add-On Store → Mosquitto broker
@@ -444,7 +444,9 @@ Key settings available on every transport:
 
 For Modbus transports, additional keys include `host`, `port`, `unit_id`,  `max_retries_per_block`, and `disable_duration_hours`.
 
-Full configuration documentation: [`transports.md`](documentation/usage/transports.md)
+Full configuration documentation: [`transports.md`](documentation/usage/transports.md) and for full settings available:
+
+![Settings](classes/WebServer/static/screenshots/transport_settings.png)
 
 For manufacturer device-specific wiring and installation guides: [devices](documentation/devices)
 

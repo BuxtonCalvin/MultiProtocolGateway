@@ -221,7 +221,7 @@ class WriteMode(Enum):
             "WO": "WRITEONLY"
         }
 
-        member_name = alias.get(name, "READ")
+        member_name: str = alias.get(name, "READ")
         return cls[member_name]
 
 
@@ -283,10 +283,10 @@ class registry_map_entry:
     description_source: str = ""
     ''' variable_name of the source metric when this is a synthetic _desc entry '''
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.variable_name
 
-    def __eq__(self, other):
+    def __eq__(self, other) -> bool:
         return (
             isinstance(other, registry_map_entry)
             and self.register == other.register
@@ -296,8 +296,317 @@ class registry_map_entry:
             and self.register_byte == other.register_byte
         )
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return hash((self.variable_name, self.register_bit, self.register_byte, self.registry_type))
+
+
+_DEFAULT_BYTEORDER: Literal["little", "big"] = "big"
+"""Modbus almost always defaults to big-endian word order."""
+
+
+class DataAdjustments:
+    """Parses, queries, and applies CSV-driven adjustments for registry entries.
+
+    Construct once per ``protocol_settings`` instance, passing the protocol's
+    default byte order and the shared logger.  The byte order stored here is the
+    protocol-level default; individual entries may override it via the
+    ``Register_Endian`` adjustment key.
+
+    All public methods are pure with respect to external state — they read only
+    from the supplied ``entry.adjustments`` dict and the value being transformed.
+    Adding a new adjustment type (a new stage or a new key such as Scale_Factor
+    or Clamp) should require changes only within this class.
+    """
+
+    def __init__(self, log: logging.Logger, default_byteorder: Literal["little", "big"] = _DEFAULT_BYTEORDER,) -> None:
+        self._log: logging.Logger = log
+        self.default_byteorder: Literal["little", "big"] = default_byteorder
+
+    # ------------------------------------------------------------------
+    # Parsing
+    # ------------------------------------------------------------------
+
+    def parse_adjustments(self, raw_adjustments: str | None) -> dict[str, Any]:
+        """Parse the CSV adjustments field into a plain dict.
+
+        Canonical form is a JSON object.  Simple shorthand such as
+        ``"Offset:-50"`` is also accepted.
+        """
+        text: str = (raw_adjustments or "").strip()
+        if not text:
+            return {}
+
+        if text.startswith("{"):
+            try:
+                parsed = json.loads(text)
+                if isinstance(parsed, dict):
+                    return parsed
+                else:
+                    self._log.warning(f"Ignoring non-object adjustments JSON: {text}")
+                    return {}
+            except json.JSONDecodeError as e:
+                self._log.warning(f"Invalid adjustments JSON '{text}': {e}")
+                return {}
+
+        key, sep, value = text.partition(":")
+        if not sep:
+            self._log.warning(f"Ignoring malformed adjustments field: {text}")
+            return {}
+
+        key: str = key.strip()
+        value: str = value.strip()
+        try:
+            return {key: json.loads(value)}
+        except json.JSONDecodeError:
+            return {key: value}
+
+    # ------------------------------------------------------------------
+    # Lookup helpers
+    # ------------------------------------------------------------------
+
+    def get_adjustment(self, entry: "registry_map_entry", name: str) -> Any | None:
+        """Return the value for *name* from ``entry.adjustments`` (case-insensitive)."""
+        target: str = name.lower()
+        for key, value in entry.adjustments.items():
+            if key.lower() == target:
+                return value
+        return None
+
+    def get_entry_byteorder(self, entry: "registry_map_entry") -> Literal["little", "big"]:
+        """Return the effective byte order for *entry*.
+
+        Defaults to ``self.default_byteorder`` (set at construction time from
+        the protocol-level ``byteorder`` setting).  Can be overridden per-entry
+        via ``Register_Endian`` in the CSV adjustments column.
+        """
+        if entry.adjustments:
+            endian = self.get_adjustment(entry, "Register_Endian")
+            if endian is not None:
+                endian_str: str = str(endian).strip().lower()
+                if endian_str in ("little", "le"):
+                    return "little"
+                if endian_str in ("big", "be"):
+                    return "big"
+                self._log.warning(
+                    f"Unsupported Register_Endian '{endian}' for {entry.variable_name}"
+                )
+        return self.default_byteorder
+
+    # ------------------------------------------------------------------
+    # Application
+    # ------------------------------------------------------------------
+
+    def apply_adjustments(
+        self,
+        value: int | float | str,
+        entry: "registry_map_entry",
+        stage: Literal["byteorder", "post_decode", "context"],
+        context: Mapping[str, int | float | str] | None = None,
+    ) -> int | float | str:
+        """Central adjustment dispatcher for CSV-driven post-processing.
+
+        Stages
+        ------
+        byteorder
+            Determine byte order before raw bytes are decoded.
+            Only relevant when the entry carries a ``Register_Endian``
+            adjustment.
+        post_decode
+            Apply ``unit_mod`` scaling and any numeric adjustments
+            (``Offset``, ``High_Low``) after the raw value has been decoded.
+            ``unit_mod`` is **always** applied here regardless of whether
+            other adjustments are present.
+        context
+            Apply conditional transforms that depend on sibling metric values
+            (e.g. direction-aware sign flipping).
+        """
+
+        # ------------------------------------------------------------------ #
+        # byteorder stage                                                      #
+        # ------------------------------------------------------------------ #
+        if stage == "byteorder":
+            if not entry.adjustments:
+                return value
+            endian = self.get_adjustment(entry, "Register_Endian")
+            if endian is None:
+                return value
+            endian_str: str = str(endian).strip().lower()
+            if endian_str in ("little", "le"):
+                return "little"
+            if endian_str in ("big", "be"):
+                return "big"
+            self._log.warning(
+                f"Unsupported Register_Endian adjustment '{endian}' for {entry.variable_name}"
+            )
+            return value
+
+        # ------------------------------------------------------------------
+        # post_decode stage
+        # unit_mod must always be applied; it is independent of adjustments.
+        # ------------------------------------------------------------------
+        if stage == "post_decode":
+            if not isinstance(value, (int, float)):
+                return value
+
+            adjusted: int | float = value
+
+            # High_Low encodes the complete scaling formula (e.g. x/1000),
+            # so unit_mod must NOT also be applied — the formula is the
+            # complete transform.
+            high_low = self.get_adjustment(entry, "High_Low") if entry.adjustments else None
+            if high_low is not None:
+                adjusted = self.apply_range_formula(float(adjusted), str(high_low))
+            else:
+                if entry.unit_mod != 1.0:
+                    adjusted = adjusted * entry.unit_mod
+
+                if entry.adjustments:
+                    offset = self.get_adjustment(entry, "Offset")
+                    if offset is not None:
+                        try:
+                            adjusted = adjusted + float(offset)
+                        except (TypeError, ValueError):
+                            self._log.warning(
+                                f"Unsupported Offset adjustment '{offset}' for {entry.variable_name}"
+                            )
+
+            if isinstance(adjusted, float) and adjusted.is_integer():
+                return int(adjusted)
+            return adjusted
+
+        # ------------------------------------------------------------------
+        # context stage
+        # Context transforms are opt-in and only apply when an explicit
+        # Context adjustment is defined.
+        # ------------------------------------------------------------------
+        if stage == "context":
+            if not entry.adjustments:
+                return value
+            if context is None or not isinstance(value, (int, float)):
+                return value
+
+            context_adjustment = self.get_adjustment(entry, "Context")
+            if not isinstance(context_adjustment, dict):
+                return value
+
+            key: str = str(context_adjustment.get("key", "")).strip()
+            if not key or key not in context:
+                self._log.debug(
+                    f"Context adjustment for {entry.variable_name} waiting for key '{key}'"
+                )
+                return value
+
+            cases = context_adjustment.get("cases", {})
+            formula = ""
+            context_value: int | float | str = context[key]
+            if isinstance(cases, dict):
+                formula = str(cases.get(str(context_value), cases.get(context_value, "")))
+            if not formula:
+                formula = str(context_adjustment.get("default", ""))
+            if not formula:
+                return value
+
+            expression: str = formula.replace("x", str(float(value)))
+            try:
+                adjusted_context: int | float = self.safe_eval_expression(expression)
+                if isinstance(adjusted_context, float) and adjusted_context.is_integer():
+                    return int(adjusted_context)
+                else:
+                    return adjusted_context
+            except Exception as e:
+                self._log.warning(
+                    f"Failed context adjustment '{formula}' for {entry.variable_name}: {e}"
+                )
+                return value
+
+        return value  # unreachable but satisfies type checker
+
+    def apply_range_formula(self, raw_value: float, logic: str) -> float:
+        """Apply conditional range formulas based on *raw_value*.
+
+        Used by the ``High_Low`` adjustment key.  Each block in *logic* takes
+        the form ``x?(lo,hi)->formula`` and the matching block's formula is
+        evaluated with ``x`` substituted by *raw_value*.
+        """
+        cleaned_logic: str = logic.replace(" ", "")
+
+        pattern = (
+            r"x\?\s*[\(\[]\s*([\-0-9.]+)\s*,\s*([\-0-9.]+)\s*[\)\]]\s*->\s*(.+?)(?=x\?|$)"
+        )
+        logic_blocks = re.findall(pattern, cleaned_logic)
+
+        for lower, upper, formula in logic_blocks:
+            lower_f = float(lower)
+            upper_f = float(upper)
+
+            if lower_f < raw_value <= upper_f:
+                expression = formula.replace("x", str(raw_value))
+                try:
+                    evaluated: int | float = self.safe_eval_expression(expression)
+                    self._log.debug(
+                        f"Successful range formula evaluation {evaluated} for value {raw_value}"
+                    )
+                    return float(evaluated)
+                except Exception as e:
+                    self._log.warning(
+                        f"Failed range formula evaluation {expression} for value {raw_value}: {e}"
+                    )
+                    return raw_value
+
+        return raw_value
+
+    def safe_eval_expression(self, expression: str) -> int | float:
+        """Safely evaluate arithmetic expressions using AST parsing.
+
+        Supports: ``+ - * / // % **``
+
+        Does **not** allow function calls, attribute access, imports,
+        variables, comprehensions, lambdas, or arbitrary execution.
+        """
+
+        def _safe_eval(node: ast.AST) -> int | float:
+            if isinstance(node, ast.Expression):
+                return _safe_eval(node.body)
+
+            if isinstance(node, ast.Constant):
+                if isinstance(node.value, (int, float)):
+                    return node.value
+                msg: str = f"Unsupported constant: {type(node.value)}"
+                raise ValueError(msg)
+
+            if isinstance(node, ast.BinOp):
+                left: int | float = _safe_eval(node.left)
+                right: int | float = _safe_eval(node.right)
+
+                ops: dict[type, Any] = {
+                    ast.Add:      lambda a, b: a + b,
+                    ast.Sub:      lambda a, b: a - b,
+                    ast.Mult:     lambda a, b: a * b,
+                    ast.Div:      lambda a, b: a / b,
+                    ast.FloorDiv: lambda a, b: a // b,
+                    ast.Mod:      lambda a, b: a % b,
+                    ast.Pow:      lambda a, b: a ** b,
+                }
+
+                op_type = type(node.op)
+                if op_type not in ops:
+                    msg = f"Unsupported operator: {op_type.__name__}"
+                    raise ValueError(msg)
+                return ops[op_type](left, right)
+
+            if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
+                return -_safe_eval(node.operand)
+
+            msg = f"Unsupported AST node: {type(node).__name__}"
+            raise TypeError(msg)
+
+        expression = re.sub(r"\s+", "", expression)
+        tree: ast.Expression = ast.parse(expression, mode="eval")
+        result: int | float = _safe_eval(tree)
+
+        if isinstance(result, float) and result.is_integer():
+            return int(result)
+        return result
 
 
 class protocol_settings:
@@ -334,15 +643,6 @@ class protocol_settings:
         self._log_level = getattr(logging, logging.getLevelName(logging.getLogger().getEffectiveLevel()), logging.INFO)
         self._log: logging.Logger = logging.getLogger(__name__)
         self._log.setLevel(self._log_level)
-
-        # DEBUG-IDENTITY: confirms this exact file is executing
-        # import os as _os
-        # self._log.warning(
-        #     f"[DEBUG-IDENTITY] protocol_settings loaded from: {_os.path.abspath(__file__)} "
-        #     f"| BUILD-TAG: 2026-05-19-FIX-ALL "
-        #     f"| protocol={protocol}"
-        # )
-
         self.protocol: str = protocol
         self.transport: str = ""
         self.registry_map: dict[Registry_Type, list[registry_map_entry]] = {}
@@ -390,6 +690,11 @@ class protocol_settings:
             else:
                 self._log.warning(f"Invalid byteorder '{raw_byteorder}' in protocol settings — using default 'big'")
 
+        # DataAdjustments owns all adjustment parsing/application logic.
+        # Constructed here, after byteorder is resolved, so it captures the
+        # correct protocol-level default (nearly always 'big' for Modbus).
+        self._adjustments: DataAdjustments = DataAdjustments(self._log, self.byteorder)
+
         for registry_type in Registry_Type:
             self.load_registry_map(registry_type)
 
@@ -409,7 +714,7 @@ class protocol_settings:
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 for line in f:
-                    clean_line = line.strip().lower()
+                    clean_line: str = line.strip().lower()
                     if not clean_line or clean_line.startswith('#'):
                         continue
                     entries.append(clean_line)
@@ -429,7 +734,7 @@ class protocol_settings:
 
     def get_registry_entry(self, name: str, registry_type: Optional[Registry_Type] = None) -> Optional[registry_map_entry]:
         """Retrieve a registry entry, optionally filtering by type."""
-        cleaned_name = name.strip().lower().replace(" ", "_")
+        cleaned_name: str = name.strip().lower().replace(" ", "_")
 
         if registry_type is not None:
             for item in self.registry_map.get(registry_type, []):
@@ -523,7 +828,7 @@ class protocol_settings:
         overrides = {key: {} for key in keys}
 
         with open(override_path, newline="", encoding="latin-1") as csvfile:
-            reader = csv.DictReader(csvfile)
+            reader: csv.DictReader[str] = csv.DictReader(csvfile)
             for row in reader:
                 for key in keys:
                     if key in row:
@@ -666,7 +971,7 @@ class protocol_settings:
             if "data type" in row and row["data type"]:
                 data_type_str: str = ''
 
-                matches = data_type_regex.search(row["data type"])
+                matches: re.Match[str] | None = data_type_regex.search(row["data type"])
                 if matches:
                     data_type_len = int(matches.group("length"))
                     data_type_str = matches.group("datatype")
@@ -678,7 +983,7 @@ class protocol_settings:
                     self._log.warning(f"Unknown data type '{row['data type']}' for variable '{variable_name}' in path: {path}. Defaulting to USHORT.")
                     data_type = Data_Type.USHORT
                 else:
-                    data_type = data_type_parsed
+                    data_type: Data_Type = data_type_parsed
 
             # Guard: some registry maps duplicate the bit index in the unit column
             # for 1bit/nbit rows (e.g. 21.b11,...,11,1bit,...). That numeric token
@@ -797,7 +1102,7 @@ class protocol_settings:
                     return
 
             else:
-                range_match = range_regex.search(row["register"])
+                range_match: re.Match[str] | None = range_regex.search(row["register"])
                 if not range_match:
                     if "[" in row["register"]:
                         self._log.info(f"Deferred dynamic register expression: {row['register']}")
@@ -877,10 +1182,10 @@ class protocol_settings:
             if first_row.count(";") < first_row.count(","):
                 delimeter = ","
 
-            first_row = re.sub(r"\s+" + re.escape(delimeter) + "|" + re.escape(delimeter) + r"\s+", delimeter, first_row)
+            first_row: str = re.sub(r"\s+" + re.escape(delimeter) + "|" + re.escape(delimeter) + r"\s+", delimeter, first_row)
             csvfile = itertools.chain([first_row], csvfile)
 
-            reader = csv.DictReader(csvfile, delimiter=delimeter)
+            reader: csv.DictReader[str] = csv.DictReader(csvfile, delimiter=delimeter)
 
             for row in reader:
                 process_row(row)
@@ -908,25 +1213,27 @@ class protocol_settings:
             # The _l row already carries Register_Endian:little — no propagation needed.
 
             # DEBUG-MERGE: log every _l entry to show what the merge loop will examine
-            _l_candidates = [
-                (registry_map[i].documented_name, registry_map[i+1].documented_name)
-                for i in range(len(registry_map) - 1)
-                if registry_map[i].documented_name.endswith('_l')
-            ]
+
+            # _l_candidates: list[tuple[str, str]] = [
+            #     (registry_map[i].documented_name, registry_map[i+1].documented_name)
+            #     for i in range(len(registry_map) - 1)
+            #     if registry_map[i].documented_name.endswith('_l')
+            # ]
+
             # self._log.warning(
             #     f"[DEBUG-MERGE] path={path} "
             #     f"_l_candidates (index, index+1)={_l_candidates}"
             # )
 
             for index in reversed(range(len(registry_map) - 1)):
-                item = registry_map[index]
-                next_item = registry_map[index + 1]
+                item: registry_map_entry = registry_map[index]
+                next_item: registry_map_entry = registry_map[index + 1]
                 if (
                     item.documented_name.endswith("_l")
                     and next_item.documented_name == item.documented_name[:-2] + "_h"
                 ):
                     # _l row is the surviving combined entry
-                    combined_item = item
+                    combined_item: registry_map_entry = item
 
                     if not combined_item.data_type or combined_item.data_type == Data_Type.USHORT:
                         if next_item.data_type != Data_Type.USHORT:
@@ -1118,7 +1425,7 @@ class protocol_settings:
 
         size: int = 0
         for item in self.registry_map[registry_type]:
-            item_end_register = item.register + self.entry_word_count(item) - 1
+            item_end_register: int = item.register + self.entry_word_count(item) - 1
             if item_end_register > size:
                 size = item_end_register
 
@@ -1163,7 +1470,7 @@ class protocol_settings:
 
         # Default fallback: single 16-bit read.
         # Swap bytes for little-endian single-register entries.
-        _fb = register[:2]
+        _fb: bytes = register[:2]
         if word_order == "little" and len(_fb) == 2:
             _fb = bytes([_fb[1], _fb[0]])
         value: int | float | str = int.from_bytes(_fb, byteorder="big", signed=False)
@@ -1189,7 +1496,7 @@ class protocol_settings:
                 raw_bytes = register[6:8] + register[4:6] + register[2:4] + register[0:2]
             value = int.from_bytes(raw_bytes, byteorder="big", signed=False)
         elif entry.data_type == Data_Type.ACC32:
-            raw_bytes = register[:4]
+            raw_bytes: bytes = register[:4]
             if word_order == "little":
                 raw_bytes = register[2:4] + register[0:2]
             value = int.from_bytes(raw_bytes, byteorder="big", signed=False)
@@ -1360,7 +1667,7 @@ class protocol_settings:
         if entry.concatenate and entry.concatenate_registers:
             return len(entry.concatenate_registers)
 
-        word_counts = {
+        word_counts: dict[Data_Type, int] = {
             Data_Type.UINT: 2,
             Data_Type.INT: 2,
             Data_Type.FLOAT32: 2,
@@ -1427,79 +1734,16 @@ class protocol_settings:
         return raw_bytes.decode("utf-8", errors="replace").replace("\x00", "").strip()
 
     def parse_adjustments(self, raw_adjustments: str | None) -> dict[str, Any]:
-        """
-        Parse the CSV adjustments field.
-        Canonical form is a JSON object. Simple shorthand such as "Offset:-50"
-        is also accepted.
-        """
-        text: str = (raw_adjustments or "").strip()
-        if not text:
-            return {}
-
-        if text.startswith("{"):
-            try:
-                parsed = json.loads(text)
-                if isinstance(parsed, dict):
-                    return parsed
-                else:
-                    self._log.warning(f"Ignoring non-object adjustments JSON: {text}")
-                    return {}
-            except json.JSONDecodeError as e:
-                self._log.warning(f"Invalid adjustments JSON '{text}': {e}")
-                return {}
-
-        key, sep, value = text.partition(":")
-        if not sep:
-            self._log.warning(f"Ignoring malformed adjustments field: {text}")
-            return {}
-
-        key: str = key.strip()
-        value: str = value.strip()
-        try:
-            return {key: json.loads(value)}
-        except json.JSONDecodeError:
-            return {key: value}
+        """Delegate to DataAdjustments.parse_adjustments."""
+        return self._adjustments.parse_adjustments(raw_adjustments)
 
     def get_adjustment(self, entry: registry_map_entry, name: str) -> Any | None:
-        target: str = name.lower()
-        for key, value in entry.adjustments.items():
-            if key.lower() == target:
-                return value
-        return None
+        """Delegate to DataAdjustments.get_adjustment."""
+        return self._adjustments.get_adjustment(entry, name)
 
     def get_entry_byteorder(self, entry: registry_map_entry) -> Literal['little', 'big']:
-        """
-        Return the effective byte order for this entry.
-        Defaults to the protocol-level byteorder; can be overridden per-entry
-        via Register_Endian in the CSV adjustments column.
-        """
-        byte_order: Literal['little', 'big'] = self.byteorder
-        if entry.adjustments:
-            endian = self.get_adjustment(entry, "Register_Endian")
-            if endian is not None:
-                endian_str: str = str(endian).strip().lower()
-                if endian_str in ("little", "le"):
-                    # _WATCH = {'tinner','tradiator1','tradiator2','tbat',
-                    #           'maxcelltemp_bms','mincelltemp_bms','batcurrent_bms',
-                    #           'epv1_all','epv2_all','echg_all','erec_all'}
-                    # if entry.variable_name in _WATCH:
-                    #     self._log.warning(
-                    #         f"[DEBUG-BYTEORDER] {entry.variable_name} adj={entry.adjustments} "
-                    #         f"→ byte_order=little"
-                    #     )
-                    return "little"
-                if endian_str in ("big", "be"):
-                    return "big"
-                self._log.warning(f"Unsupported Register_Endian '{endian}' for {entry.variable_name}")
-        # else:
-        #     _WATCH2 = {'tinner','tradiator1','tradiator2','tbat',
-        #                'maxcelltemp_bms','mincelltemp_bms','batcurrent_bms'}
-        #     if entry.variable_name in _WATCH2:
-        #         self._log.warning(
-        #             f"[DEBUG-BYTEORDER] {entry.variable_name} adjustments=EMPTY "
-        #             f"→ byte_order=big (annotation missing!)"
-        #         )
-        return byte_order
+        """Delegate to DataAdjustments.get_entry_byteorder."""
+        return self._adjustments.get_entry_byteorder(entry)
 
     def apply_adjustments(
         self,
@@ -1508,124 +1752,8 @@ class protocol_settings:
         stage: Literal["byteorder", "post_decode", "context"],
         context: Mapping[str, int | float | str] | None = None,
     ) -> int | float | str:
-        """
-        Central adjustment dispatcher for CSV-driven post-processing.
-
-        Stages:
-          byteorder  — determine byte order before raw bytes are decoded.
-                       Only relevant when entry has a Register_Endian adjustment.
-          post_decode — apply unit_mod scaling and any numeric adjustments
-                        (Offset, High_Low) after the raw value has been decoded.
-                        unit_mod is ALWAYS applied here regardless of whether
-                        other adjustments are present.
-          context    — apply conditional transforms that depend on sibling
-                       metric values (e.g. direction-aware sign flipping).
-        """
-
-        # ------------------------------------------------------------------ #
-        # byteorder stage                                                      #
-        # Early-exit is correct here: if there are no adjustments there is    #
-        # nothing to do. byte order comes from get_entry_byteorder() which    #
-        # already handles the default, so this stage is only reached when the  #
-        # caller explicitly needs to resolve Register_Endian.                  #
-        # ------------------------------------------------------------------ #
-        if stage == "byteorder":
-            if not entry.adjustments:
-                return value
-            endian = self.get_adjustment(entry, "Register_Endian")
-            if endian is None:
-                return value
-            endian_str: str = str(endian).strip().lower()
-            if endian_str in ("little", "le"):
-                return "little"
-            if endian_str in ("big", "be"):
-                return "big"
-            self._log.warning(f"Unsupported Register_Endian adjustment '{endian}' for {entry.variable_name}")
-            return value
-
-        # ------------------------------------------------------------------ #
-        # post_decode stage                                                    #
-        #                                                                      #
-        # previously the function returned early when entry.adjustments   #
-        # was empty, which silently skipped unit_mod scaling for the majority  #
-        # of registers (those with no explicit adjustments in the CSV).        #
-        # unit_mod must always be applied here; it is independent of the       #
-        # adjustments dict.                                                    #
-        # ------------------------------------------------------------------ #
-        if stage == "post_decode":
-            if not isinstance(value, (int, float)):
-                return value
-
-            adjusted: int | float = value
-
-            # High_Low encodes the scaling formula directly (e.g. x/1000),
-            # so unit_mod must NOT also be applied — the formula is the
-            # complete transform.
-            high_low = self.get_adjustment(entry, "High_Low") if entry.adjustments else None
-            if high_low is not None:
-                adjusted = self.apply_range_formula(float(adjusted), str(high_low))
-            else:
-                # Apply unit_mod unconditionally — this is the primary scaling
-                # path for the vast majority of registers.
-                if entry.unit_mod != 1.0:
-                    adjusted = adjusted * entry.unit_mod
-
-                # Apply Offset after scaling if present
-                if entry.adjustments:
-                    offset = self.get_adjustment(entry, "Offset")
-                    if offset is not None:
-                        try:
-                            adjusted = adjusted + float(offset)
-                        except (TypeError, ValueError):
-                            self._log.warning(f"Unsupported Offset adjustment '{offset}' for {entry.variable_name}")
-
-            # Collapse float to int when the value is whole (e.g. 52.0 → 52)
-            if isinstance(adjusted, float) and adjusted.is_integer():
-                return int(adjusted)
-            return adjusted
-
-        # ------------------------------------------------------------------ #
-        # context stage                                                        #
-        # Early-exit is correct here: context transforms are opt-in and only  #
-        # apply when an explicit Context adjustment is defined.                #
-        # ------------------------------------------------------------------ #
-        if stage == "context":
-            if not entry.adjustments:
-                return value
-            if context is None or not isinstance(value, (int, float)):
-                return value
-
-            context_adjustment = self.get_adjustment(entry, "Context")
-            if not isinstance(context_adjustment, dict):
-                return value
-
-            key: str = str(context_adjustment.get("key", "")).strip()
-            if not key or key not in context:
-                self._log.debug(f"Context adjustment for {entry.variable_name} waiting for key '{key}'")
-                return value
-
-            cases = context_adjustment.get("cases", {})
-            formula = ""
-            context_value = context[key]
-            if isinstance(cases, dict):
-                formula = str(cases.get(str(context_value), cases.get(context_value, "")))
-            if not formula:
-                formula = str(context_adjustment.get("default", ""))
-            if not formula:
-                return value
-
-            expression = formula.replace("x", str(float(value)))
-            try:
-                adjusted_context = self.safe_eval_expression(expression)
-                if isinstance(adjusted_context, float) and adjusted_context.is_integer():
-                    return int(adjusted_context)
-                else:
-                    return adjusted_context
-            except Exception as e:
-                self._log.warning(f"Failed context adjustment '{formula}' for {entry.variable_name}: {e}")
-                return value
-
-        return value  # unreachable but satisfies type checker
+        """Delegate to DataAdjustments.apply_adjustments."""
+        return self._adjustments.apply_adjustments(value, entry, stage, context)
 
     def process_register_ushort(self, registry: Mapping[int, int], entry: registry_map_entry) -> int | float | str | None:
         """Process a ushort (integer-per-register) registry entry into a typed value."""
@@ -1633,7 +1761,7 @@ class protocol_settings:
         byte_order: Literal['little', 'big'] = self.get_entry_byteorder(entry)
 
         if entry.data_type == Data_Type.UINT:
-            register_bytes = self._register_words_to_bytes(registry, entry.register, 2, byte_order)
+            register_bytes: bytes | None = self._register_words_to_bytes(registry, entry.register, 2, byte_order)
             if register_bytes is None:
                 return None
             value = int.from_bytes(register_bytes, byteorder="big", signed=False)
@@ -1740,13 +1868,13 @@ class protocol_settings:
 
         elif entry.data_type.value > 400:  # signed-magnitude bit types
             bit_size = Data_Type.getSize(entry.data_type)
-            bit_index = entry.register_bit if entry.register_bit >= 0 else 0
+            bit_index: int = entry.register_bit if entry.register_bit >= 0 else 0
             # swap bytes before bit extraction for little-endian entries
             register_int = registry[entry.register] & 0xFFFF
             if byte_order == "little":
-                register_int = self._swap_bytes_16(register_int)
-            sign_bit = (register_int >> bit_index) & 1
-            magnitude = (register_int >> (bit_index + 1)) & ((1 << (bit_size - 1)) - 1)
+                register_int: int = self._swap_bytes_16(register_int)
+            sign_bit: int = (register_int >> bit_index) & 1
+            magnitude: int = (register_int >> (bit_index + 1)) & ((1 << (bit_size - 1)) - 1)
             value = -magnitude if sign_bit else magnitude
 
         elif entry.data_type.value > 300:  # signed bit types
@@ -1756,8 +1884,8 @@ class protocol_settings:
             register_int = registry[entry.register] & 0xFFFF
             if byte_order == "little":
                 register_int = self._swap_bytes_16(register_int)
-            raw_bits = (register_int >> bit_index) & ((1 << bit_size) - 1)
-            sign_mask = 1 << (bit_size - 1)
+            raw_bits: int = (register_int >> bit_index) & ((1 << bit_size) - 1)
+            sign_mask: int = 1 << (bit_size - 1)
             if raw_bits & sign_mask:
                 value = raw_bits - (1 << bit_size)
             else:
@@ -1776,7 +1904,7 @@ class protocol_settings:
             # Extract the low byte of the register.
             # For little-endian entries swap first so "low byte" is the correct
             # physical byte per the hardware spec.
-            raw = registry[entry.register] & 0xFFFF
+            raw: int = registry[entry.register] & 0xFFFF
             if byte_order == "little":
                 raw = self._swap_bytes_16(raw)
             value = raw & 0xFF
@@ -1788,13 +1916,13 @@ class protocol_settings:
             value = raw.to_bytes(2, byteorder="big").hex()
 
         elif entry.data_type == Data_Type.ASCII:
-            raw_bytes = self._register_words_to_bytes(registry, entry.register, 1, byte_order)
+            raw_bytes: bytes | None = self._register_words_to_bytes(registry, entry.register, 1, byte_order)
             if raw_bytes is None:
                 return None
             value = self._decode_text_bytes(raw_bytes)
 
         elif entry.data_type in (Data_Type.STRING, Data_Type.STRING16, Data_Type.STRING32):
-            word_count = self.entry_word_count(entry)
+            word_count: int = self.entry_word_count(entry)
             raw_bytes = self._register_words_to_bytes(registry, entry.register, word_count, byte_order)
             if raw_bytes is None:
                 return None
@@ -1834,7 +1962,7 @@ class protocol_settings:
             if entry.register not in registry:
                 continue
 
-            raw = registry[entry.register]
+            raw: int | bytes | tuple[bytes, float] = registry[entry.register]
 
             # _WATCH5 = {'tinner','tradiator1','tradiator2','tbat',
             #            'maxcelltemp_bms','mincelltemp_bms','batcurrent_bms',
@@ -1880,7 +2008,7 @@ class protocol_settings:
                         del concatenate_registry[key]
 
                     if entry.data_type == Data_Type.ASCII:
-                        concatenated_value = concatenated_value.replace("\x00", " ").strip()
+                        concatenated_value: str = concatenated_value.replace("\x00", " ").strip()
 
                     info[entry.variable_name] = concatenated_value
             else:
@@ -1890,14 +2018,14 @@ class protocol_settings:
             if entry.variable_name in info:
                 info[entry.variable_name] = self.apply_adjustments(info[entry.variable_name], entry, "context", info)
 
-        entries_by_name = {entry.variable_name: entry for entry in registry_map}
+        entries_by_name: dict[str, registry_map_entry] = {entry.variable_name: entry for entry in registry_map}
         for entry in registry_map:
             if not entry.description_source:
                 continue
             source_name: str = entry.description_source
             if source_name not in info:
                 continue
-            source_entry = entries_by_name.get(source_name)
+            source_entry: registry_map_entry | None = entries_by_name.get(source_name)
             if source_entry is None:
                 continue
             description: str | None = self._code_description_for_value(source_entry, info[source_name])
@@ -1957,58 +2085,8 @@ class protocol_settings:
         return 0
 
     def safe_eval_expression(self, expression: str) -> int | float:
-        """
-        Safely evaluate arithmetic expressions using AST parsing.
-        Supports: + - * / // % **
-        Does NOT allow function calls, attribute access, imports, variables,
-        comprehensions, lambdas, or arbitrary execution.
-        """
-
-        def _safe_eval(node: ast.AST) -> int | float:
-            if isinstance(node, ast.Expression):
-                return _safe_eval(node.body)
-
-            elif isinstance(node, ast.Constant):
-                if isinstance(node.value, (int, float)):
-                    return node.value
-                msg = f"Unsupported constant: {type(node.value)}"
-                raise ValueError(msg)
-
-            elif isinstance(node, ast.BinOp):
-                left: int | float = _safe_eval(node.left)
-                right: int | float = _safe_eval(node.right)
-
-                ops: dict[type, Any] = {
-                    ast.Add:      lambda a, b: a + b,
-                    ast.Sub:      lambda a, b: a - b,
-                    ast.Mult:     lambda a, b: a * b,
-                    ast.Div:      lambda a, b: a / b,
-                    ast.FloorDiv: lambda a, b: a // b,
-                    ast.Mod:      lambda a, b: a % b,
-                    ast.Pow:      lambda a, b: a ** b,
-                }
-
-                op_type = type(node.op)
-                if op_type not in ops:
-                    msg = f"Unsupported operator: {op_type.__name__}"
-                    raise ValueError(msg)
-
-                return ops[op_type](left, right)
-
-            elif isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
-                return -_safe_eval(node.operand)
-
-            msg = f"Unsupported AST node: {type(node).__name__}"
-            raise TypeError(msg)
-
-        expression = re.sub(r"\s+", "", expression)
-        tree: ast.Expression = ast.parse(expression, mode="eval")
-        result: int | float = _safe_eval(tree)
-
-        if isinstance(result, float) and result.is_integer():
-            return int(result)
-
-        return result
+        """Delegate to DataAdjustments.safe_eval_expression."""
+        return self._adjustments.safe_eval_expression(expression)
 
     def evaluate_expressions(self, expression: str, variables: dict[str, str | float | int]) -> list[str]:
         """
@@ -2018,7 +2096,7 @@ class protocol_settings:
         """
 
         def evaluate_variables(expr: str) -> str:
-            var_pattern = re.compile(r"\[([^\[\]]+)\]")
+            var_pattern: re.Pattern[str] = re.compile(r"\[([^\[\]]+)\]")
 
             def replace_vars(match: re.Match[str]) -> str:
                 var_name = match.group(1)
@@ -2035,8 +2113,8 @@ class protocol_settings:
             if not match:
                 return [expr]
 
-            range_start = int(match.group("start"))
-            range_end = int(match.group("end"))
+            range_start: int = int(match.group("start"))
+            range_end: int = int(match.group("end"))
 
             if range_start > range_end:
                 range_start, range_end = range_end, range_start
@@ -2061,32 +2139,13 @@ class protocol_settings:
 
             return math_pattern.sub(replace_maths, expr)
 
-        substituted = evaluate_variables(expression)
+        substituted: str = evaluate_variables(expression)
         expanded: list[str] = evaluate_ranges(substituted)
         return [evaluate_math(r) for r in expanded]
 
     def apply_range_formula(self, raw_value: float, logic: str) -> float:
-        """Apply conditional range formulas based on raw_value."""
-        cleaned_logic: str = logic.replace(" ", "")
-
-        pattern = r"x\?\s*[\(\[]\s*([\-0-9.]+)\s*,\s*([\-0-9.]+)\s*[\)\]]\s*->\s*(.+?)(?=x\?|$)"
-        logic_blocks = re.findall(pattern, cleaned_logic)
-
-        for lower, upper, formula in logic_blocks:
-            lower_f = float(lower)
-            upper_f = float(upper)
-
-            if lower_f < raw_value <= upper_f:
-                expression = formula.replace("x", str(raw_value))
-                try:
-                    evaluated_expression: int | float = self.safe_eval_expression(expression)
-                    self._log.debug(f"Successful range formula evaluation {evaluated_expression} for value {raw_value}")
-                    return float(evaluated_expression)
-                except Exception as e:
-                    self._log.warning(f"Failed range formula evaluation {expression} for value {raw_value}: {e}")
-                    return raw_value
-
-        return raw_value
+        """Delegate to DataAdjustments.apply_range_formula."""
+        return self._adjustments.apply_range_formula(raw_value, logic)
 
     def resolve_dynamic_registry_entries(self, live_values: dict[str, int | float | str]) -> None:
         """
@@ -2101,7 +2160,7 @@ class protocol_settings:
 
         for row in self.dynamic_registry_rows.copy():
             try:
-                resolved_registers = self.evaluate_expressions(row["register"], live_values)
+                resolved_registers: list[str] = self.evaluate_expressions(row["register"], live_values)
 
                 for resolved_register in resolved_registers:
                     resolved_row: dict[str, str] = dict(row)
