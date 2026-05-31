@@ -151,20 +151,20 @@ Bridges receive data from scrapers and write it somewhere. They are passive — 
 
 Here are overviews of two database bridges:
 
-- InfluxDB 1.X and 3.x versions   [![InfluxDB](https://shields.io)](https://influxdata.com)
+- InfluxDB 1.X and 3.x versions [![InfluxDB](https://img.shields.io/badge/InfluxDB-22ADF6?logo=influxdb&logoColor=fff)](https://influxdata.com)
   - Advanced Features
     [`influxdb_advanced_features.md`](documentation/bridges/InfluxDB/influxdb_advanced_features.md)
 
   - Troubleshooting
     [`troubleshooting_influxdb.md`](documentation/bridges/InfluxDB/troubleshooting_influxdb.md)
 
-- TimeScaledDB [![TimescaleDB](https://shields.io)](https://timescale.com)
+- TimeScaledDB [![TimescaleDB](https://img.shields.io/badge/Postgres-%23316192.svg?logo=postgresql&logoColor=white)](https://timescale.com)
   - Readme
     [`TimescaleDB`](documentation/bridges/TimeScaleDB/timescaledb_protocol_gateway.md)
 
 Here are the overviews of the MQTT and JSON bridges
 
-- MQTT  [![Mosquitto](https://shields.io)](https://mosquitto.org)
+- MQTT [![Mosquitto](https://img.shields.io/badge/Eclipse-FE7A16.svg?logo=Eclipse&logoColor=white)](https://mosquitto.org)
   - Readme
     [`MQTT`](documentation/bridges/MQTT/MQTT_bridge.md)
 
@@ -446,7 +446,7 @@ For Modbus transports, additional keys include `host`, `port`, `unit_id`,  `max_
 
 Full configuration documentation: [`transports.md`](documentation/usage/transports.md) and for full settings available:
 
-![Settings](classes/WebServer/static/screenshots/transport_settings.png)
+![Settings](classes/WebServer/static/screenshots/transport_settings_trunc.png)
 
 For manufacturer device-specific wiring and installation guides: [devices](documentation/devices)
 
