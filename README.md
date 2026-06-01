@@ -12,7 +12,7 @@
 
 ## 🙏 Credits
 
-This application was inspired by and built upon the excellent work by [@HotNoob](https://github.com/HotNoob/PythonProtocolGateway) and their PythonProtocolGateway project and its precedent project [@andiburger](https://github.com/andiburger/growatt2mqtt). We extend our sincere gratitude for their efforts in solar inverter data management.  MPG diverges from these efforts with Web UI Management, concurrent multi-protocol capability, multiple concurrent bridges, extended hardware device support including coils and discrete registers, and all with completely re-factored data read and write logic that hardens checks against bad data.
+This application was inspired by and built upon the excellent work by [@HotNoob](https://github.com/HotNoob/PythonProtocolGateway) and their PythonProtocolGateway project and its precedent project [@andiburger](https://github.com/andiburger/growatt2mqtt). We extend our sincere gratitude for their efforts in solar inverter data management. MPG diverges from these efforts with Web UI Management, concurrent multi-protocol capability, multiple concurrent bridges, extended hardware device support including coils and discrete registers, and all with completely re-factored data read and write logic that hardens checks against bad data.
 
 ## What MPG does
 
@@ -180,24 +180,29 @@ MPG ships with pre-built protocol maps for the following manufacturers. Each pro
 
 | Manufacturer | Models / Protocols | Link |
 | --- | --- | --- |
-| **Deye Sunsynk** | Deye Sunsynk Inverters (SUN-3K/5K/8K/12K-SG Series Hybrid, Deye Micro SUN Series) | **[`View Deye Sunsynk`](documentation/devices/Deye_Sunsynk.md)** |
-| **EG4** | EG4 inverters (v58, 3000EHV, 18kpv, Gridboss, 6000XP, 12000XP, FlexBOSS21), EG4 LL-S (RS-485 & TCP) | **[`View EG4`](documentation/devices/EG4.md)** |
-| **Enphase** | Enphase micro inverters (IQ7, IQ7+, IQ8, IQ8Plus, IQ8M, IQ8A Series) | **[`View Enphase`](documentation/devices/Enphase.md)** |
-| **Fronius** | Fronius Inverters (Primo, Symo, Galvo, Eco, Gen24 Plus Series) | **[`View Fronius`](documentation/devices/Fronius.md)** |
-| **Growatt** | v0.14 (2020+), BMS CAN v1.04, BMS RS-485 (MIN 3000-10000TL-X, SPF 3000-5000TL LVM, SPH, MOD, MAX Series) | **[`View Growatt`](documentation/devices/Growatt.md)** |
-| **HDHK** | 16-channel AC module | **[`View HDHK`](documentation/devices/HDHK.md)** |
-| **Next Power** | Victor NM RE | **[`View Next Power`](documentation/devices/Next_Power.md)** |
-| **PACE BMS** | v1.3 | **[`View PACE BMS`](documentation/devices/PACE.md)** |
-| **Pylon** | CAN, RS-485 v3.3 | **[`View Pylon`](documentation/devices/Pylon.md)** |
-| **Sigineer** | v0.11 (Sigineer M3000, M6000 Series Inverter/Chargers) | **[`View Sigineer`](documentation/devices/Sigineer.md)** |
-| **SMA** | Sunny Island v1, Sunny Boy Tri Power, SMA Modbus (Core1, Sunny Tripower X, Sunny Boy Smart Energy) | **[`View SMA`](documentation/devices/SMA.md)** |
-| **SOK** | Sok Inverters (SOK 48V 100Ah / SK48V100 Server VRack Integrated Protocols) | **[`View SOK`](documentation/devices/SOK.md)** |
-| **Solar Edge** | Solar Edge Inverters | **[`View Solar Edge`](documentation/devices/SolarEdge.md)** |
-| **SolArk** | 8K/12K (v1.1) (Sol-Ark 5K, 8K, 12K, 15K, 30K-3P All-In-One Hybrid) | **[`View SolArk`](documentation/devices/SolArk.md)** |
-| **SRNE** | v1.7, v1.96, v3.9 (ASF/ASP Split-Phase, HYP, HESP Hybrid, HF/HFP Series) | **[`View SRNE`](documentation/devices/SRNE.md)** |
-| **Sungrow** | Sungrow inverters (SG Series String, SH5.0/6.0/8.0/10RT Hybrid, SG350HX) | **[`View Sungrow`](documentation/devices/Sungrow.md)** |
-| **Victron** | GX v3.3, GX Generic CAN, Smartsolar (MultiPlus, MultiPlus-II, Quattro, EasySolar, Phoenix Inverters) | **[`View Victron`](documentation/devices/Victron.md)** |
-| **Voltronic** | BMS 2020-03-25, BMS v1.1 (Axpert Max, Axpert King, Infinisolar, VM II/III/IV Series) | **[`View Voltronic`](documentation/devices/Voltronic.md)** |
+| **APsystems** | APsystems ECU SunSpec gateway (`apsystems_ecu_sunspec` via Modbus TCP) | **[`View APsystems`](documentation/devices/APsystems.md)** |
+| **Deye Sunsynk** | Hybrid Inverters (`deye_sunsynk` via Modbus), Extended Map (`deye_sunsynk_hybrid` via Modbus) | **[`View Deye Sunsynk`](documentation/devices/Deye_Sunsynk.md)** |
+| **EG4** | 18KPV Inverter (`eg4_18kpv` via Modbus), 3000EHV Inverter (`eg4_3000ehv_v1` via Modbus RTU), GridBOSS / Related Equipment (`eg4_gridboss_re` via Modbus RTU), LL-S Battery (`eg4_ll_s` via Modbus RTU), 6000XP / 12000XP / 18KPV Family (`eg4_v58` via Modbus) | **[`View EG4`](documentation/devices/EG4.md)** |
+| **Enphase** | Enphase IQ Gateway SunSpec (`enphase_iq_gateway_sunspec` via Modbus) | **[`View Enphase`](documentation/devices/Enphase.md)** |
+| **FoxESS** | H1 LAN / KH / H3-style holding-register map (`foxess_h1_lan` via Modbus TCP) | **[`View FoxESS`](documentation/devices/FoxESS.md)** |
+| **Fronius** | Fronius SunSpec Inverters (`fronius_sunspec` via Modbus) | **[`View Fronius`](documentation/devices/Fronius.md)** |
+| **Growatt** | Inverter Protocol v1.24 (`growatt_2020_v1.24` via Modbus RTU), BMS CAN Bus v1.04 (`growatt_bms_canbus_v1.04` via CAN bus), BMS RS-485 1xSxxP ESS v2.01 (`growatt_bms_rs485_1xsxxp_ess_v2.01` via Modbus RTU), SPF / Off-Grid Protocol v0.14 (`growatt_v0.14` via Modbus RTU) | **[`View Growatt`](documentation/devices/Growatt.md)** |
+| **HDHK** | 16-channel AC Power Monitor (`hdhk_16ch_ac_module` via Modbus RTU) | **[`View HDHK`](documentation/devices/HDHK.md)** |
+| **Huawei** | Huawei SUN2000 Inverters (`huawei_sun2000` via Modbus TCP) | **[`View Huawei`](documentation/devices/Huawei.md)** |
+| **Next Power** | Next Power Victor NM RE (`next_power_victor_nm_re` via Modbus RTU) | **[`View Next Power`](documentation/devices/Next_Power.md)** |
+| **PACE BMS** | PACE BMS RS-485 v1.3 (`pace_bms_v1.3` via Modbus RTU) | **[`View PACE BMS`](documentation/devices/PACE.md)** |
+| **Pylon** | Low-Voltage CAN Bus (`pylon_can` via CAN bus), Low-Voltage RS-485 v3.3 (`pylon_rs485_v3.3` via Pylon serial) | **[`View Pylon`](documentation/devices/Pylon.md)** |
+| **Sigineer** | Solar Inverter / Charger v0.11 (`sigineer_v0.11` via Modbus RTU) | **[`View Sigineer`](documentation/devices/Sigineer.md)** |
+| **SMA** | Energy Meter Speedwire (`sma_energy_meter_speedwire` via Modbus RTU), CAN / Modbus RTU Map (`sma_modbus_rtu` via CAN bus), Sunny Home Manager (`sma_sunny_home_manager` via Modbus RTU), Sunny Island (`sma_sunny_island` via Modbus RTU), Sunny Island v1 (`sma_sunny_island_v1` via Modbus RTU), Sunny Boy / Tripower (`sma_sunnyboy_tripower` via Modbus RTU), Tripower Storage Hybrid (`sma_tripower_storage_hybrid` via Modbus RTU) | **[`View SMA`](documentation/devices/SMA.md)** |
+| **SOK** | SOK SK48V100 / PACE BMS (`sok_sk48v100_pace_bms` via Modbus RTU) | **[`View SOK`](documentation/devices/SOK.md)** |
+| **Solar Edge** | SolarEdge SunSpec Inverters (`solaredge_sunspec` via Modbus) | **[`View Solar Edge`](documentation/devices/SolarEdge.md)** |
+| **SolaX** | X1/X3 Hybrid G4-style Inverters (`solax_hybrid_g4` via Modbus TCP) | **[`View SolaX`](documentation/devices/SolaX.md)** |
+| **SolArk** | Hybrid Inverter (`solark_hybrid` via Modbus RTU), Modbus v1.1 (`solark_v1.1` via Modbus RTU) | **[`View SolArk`](documentation/devices/SolArk.md)** |
+| **Solis** | Hybrid Inverters (`solis_hybrid` via Modbus TCP), String Inverters (`solis_string` via Modbus TCP) | **[`View Solis`](documentation/devices/Solis.md)** |
+| **SRNE** | Energy-Storage Inverter v1.96 (`srne_2021_v1.96` via Modbus RTU), Energy-Storage Inverter v1.7 (`srne_v1.7` via Modbus RTU), Controller / Inverter v3.9 (`srne_v3.9` via Modbus RTU) | **[`View SRNE`](documentation/devices/SRNE.md)** |
+| **Sungrow** | SH / RS / RT Hybrid Inverters (`sungrow_hybrid` via Modbus TCP), SG-series String Inverters (`sungrow_sg` via Modbus TCP) | **[`View Sungrow`](documentation/devices/Sungrow.md)** |
+| **Victron** | BMV Battery Monitor (`victron_bmv_battery_monitor` via Modbus RTU), GX Generic CAN Bus (`victron_gx_generic_canbus` via CAN bus), GX v3.3 (`victron_gx_v3.3` via Modbus RTU), MK3-USB VE.Bus (`victron_mk3usb_vebus` via Modbus RTU), MultiPlus / Quattro (`victron_multiplus_quattro` via Modbus RTU), Phoenix Inverter (`victron_phoenix_inverter` via Modbus RTU), SmartSolar MPPT (`victron_smartsolar_mppt` via Modbus RTU), VE.Direct Serial Devices (`victron_vedirect_serial` via VE.Direct serial), Venus GX System (`victron_venus_gx_system` via Modbus RTU) | **[`View Victron`](documentation/devices/Victron.md)** |
+| **Voltronic** | BMS 2020-03-25 (`voltronic_bms_2020_03_25` via Modbus RTU), BMS v1.1 (`voltronic_bms_v1.1` via Modbus RTU) | **[`View Voltronic`](documentation/devices/Voltronic.md)** |
 
 For a full list of tested devices and community-reported compatibility, see [`devices_and_protocols.csv`](documentation/usage/devices_and_protocols.csv).
 
