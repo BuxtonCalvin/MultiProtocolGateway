@@ -192,7 +192,7 @@
         <span role="columnheader" aria-label="Active">A</span>
         <span role="columnheader">Key</span>
         <span role="columnheader">Value</span>
-        <span role="columnheader" class="text-mpg-500" title="Default / fallback value from transport module">Default</span>
+        <span role="columnheader" class="text-accent" title="Default / fallback value from transport module">Default</span>
       </div>
 
       {% for s in settings %}
@@ -200,13 +200,12 @@
       <div class="grid grid-cols-[1.5rem_1fr_7rem_5rem] gap-1 items-center px-1 py-0.5
                   rounded text-xs
                   {% if s.is_dirty %}bg-dirty/10 border-l-2 border-dirty{% endif %}
-                  {% if s.is_orphan %}bg-red-900/20 opacity-60{% endif %}
-                  {% if not s.is_active %}opacity-40{% endif %}
+                  {% if s.is_orphan %}bg-red-900/20{% endif %}
                   hover:bg-mpg-700/50 group"
            role="row"
            aria-label="{{ s.key }}">
 
-        <div role="cell">
+        <div role="cell" class="{% if not s.is_active %}opacity-40{% endif %}">
           <input type="checkbox"
                  class="accent-accent w-3 h-3"
                  {% if s.is_active %}checked{% endif %}
@@ -219,7 +218,7 @@
         </div>
 
         <div role="cell"
-             class="font-mono text-mpg-200 truncate"
+             class="font-mono text-mpg-200 truncate {% if s.is_orphan %}opacity-60{% endif %} {% if not s.is_active %}opacity-40{% endif %}"
              title="{{ s.key }}{% if s.default_value %} (default: {{ s.default_value }}){% endif %}">
           {{ s.key }}
           {% if s.is_orphan %}
@@ -230,7 +229,7 @@
           {% endif %}
         </div>
 
-        <div role="cell">
+        <div role="cell" class="{% if not s.is_active %}opacity-40{% endif %}">
           <input type="text"
                  class="w-full bg-mpg-900 border border-mpg-600 rounded px-1 py-0.5
                         text-mpg-100 font-mono text-xs
@@ -247,7 +246,8 @@
         </div>
 
         <div role="cell"
-             class="font-mono text-mpg-400 text-xs truncate leading-tight self-center"
+             class="font-mono text-xs truncate leading-tight self-center
+                    {% if s.default_value %}text-accent{% else %}text-mpg-400{% endif %}"
              title="{{ s.default_value or '—' }}">
           {{ s.default_value or '—' }}
         </div>        
@@ -370,15 +370,15 @@
 
     const textInput = row.querySelector('input[type=text]');
 
-    // 1. Sync active/inactive visual state on the row and text input
+    // 1. Sync active/inactive visual state — dim only the first 3 cells,
+    //    leaving the default-value cell (4th) always at full opacity.
     if (resp.is_active !== undefined) {
+      const dimCells = Array.from(row.querySelectorAll('[role=cell]')).slice(0, 3);
       if (resp.is_active) {
-        // Activating: remove dim, enable input, restore value if needed
-        row.classList.remove('opacity-40');
+        dimCells.forEach(c => c.classList.remove('opacity-40'));
         if (textInput) textInput.disabled = false;
       } else {
-        // Deactivating: dim the row, disable input, clear displayed value
-        row.classList.add('opacity-40');
+        dimCells.forEach(c => c.classList.add('opacity-40'));
         if (textInput) {
           textInput.disabled = true;
           textInput.value = '';

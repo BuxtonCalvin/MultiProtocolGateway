@@ -75,7 +75,7 @@
         <span role="columnheader" aria-label="Active">A</span>
         <span role="columnheader">Key</span>
         <span role="columnheader">Value</span>
-        <span role="columnheader" class="text-mpg-500" title="Default / fallback value from transport module">Default</span>
+        <span role="columnheader" class="text-accent" title="Default / fallback value from transport module">Default</span>
       </div>
 
       {% for s in settings if s.key != "log_level" %}
@@ -83,11 +83,10 @@
                   rounded text-xs
                   {% if s.is_dirty %}bg-dirty/10 border-l-2 border-dirty{% endif %}
                   {% if s.is_orphan %}bg-red-900/20{% endif %}
-                  {% if not s.is_active %}opacity-70{% endif %}
                   hover:bg-mpg-700/50"
            role="row">
 
-        <div role="cell">
+        <div role="cell" class="{% if not s.is_active %}opacity-70{% endif %}">
           <input type="checkbox"
                  class="accent-accent w-3 h-3"
                  {% if s.is_active %}checked{% endif %}
@@ -100,14 +99,14 @@
         </div>
 
         <div role="cell"
-             class="font-mono text-mpg-100 truncate"
+             class="font-mono text-mpg-100 truncate {% if not s.is_active %}opacity-70{% endif %}"
              title="{{ s.key }}">
           {{ s.key }}
           {% if s.is_orphan %}<span class="text-danger text-xs ml-1">⚑</span>{% endif %}
           {% if s.is_dirty %}<span class="text-dirty text-xs ml-1">●</span>{% endif %}
         </div>
 
-        <div role="cell">
+        <div role="cell" class="{% if not s.is_active %}opacity-70{% endif %}">
           <input type="text"
                  class="w-full bg-mpg-900 border border-mpg-600 rounded px-1 py-0.5
                         text-mpg-100 font-mono text-xs
@@ -124,7 +123,8 @@
         </div>
 
         <div role="cell"
-             class="font-mono text-mpg-400 text-xs truncate leading-tight self-center"
+             class="font-mono text-xs truncate leading-tight self-center
+                    {% if s.default_value %}text-accent{% else %}text-mpg-400{% endif %}"
              title="{{ s.default_value or '—' }}">
           {{ s.default_value or '—' }}
         </div>
@@ -262,11 +262,12 @@
 
     const textInput = row.querySelector('input[type=text]');
     if (resp.is_active !== undefined) {
+      const dimCells = Array.from(row.querySelectorAll('[role=cell]')).slice(0, 3);
       if (resp.is_active) {
-        row.classList.remove('opacity-40');
+        dimCells.forEach(c => c.classList.remove('opacity-70'));
         if (textInput) textInput.disabled = false;
       } else {
-        row.classList.add('opacity-40');
+        dimCells.forEach(c => c.classList.add('opacity-70'));
         if (textInput) { textInput.disabled = true; textInput.value = ''; }
       }
     }
