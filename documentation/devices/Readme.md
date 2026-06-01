@@ -24,16 +24,21 @@
 | Manufacturer | Key Models | Interface | Protocol | Guide |
 | --- | --- | --- | --- | --- |
 | [Deye / Sunsynk](Deye_Sunsynk.md) | SUN-xK-SG04LP3, SG05LP3, Sunsynk 5–16kW | RS485 RJ45 / Solarman TCP 8899 | Modbus RTU | [Deye_Sunsynk.md](Deye_Sunsynk.md) |
+| [APsystems](APsystems.md) | ECU-R, ECU-C gateways | Ethernet / RS485 | SunSpec Modbus | [APsystems.md](APsystems.md) |
 | [EG4](EG4.md) | 6000XP, 12000XP, 18KPV, 3000EHV | RS485 RJ45 | Modbus RTU | [EG4.md](EG4.md) |
 | [Enphase](Enphase.md) | IQ7/IQ8 Microinverters, IQ Battery, IQ Gateway | Ethernet (LAN REST API) | HTTP JSON API | [Enphase.md](Enphase.md) |
+| [FoxESS](FoxESS.md) | H1, KH, H3-style inverters | LAN / RS485 | Modbus TCP / RTU | [FoxESS.md](FoxESS.md) |
 | [Fronius](Fronius.md) | Primo GEN24, Symo GEN24, Symo, Primo | Ethernet / RS485 (GEN24) | Modbus TCP / JSON API | [Fronius.md](Fronius.md) |
 | [Growatt](Growatt.md) | SPF 5000, 6000, 12000T DVM-US MPV | USB / RS485 | Modbus RTU | [Growatt.md](Growatt.md) |
 | [HDHK](HDHK.md) | 16-channel AC current/frequency module | RS485 terminal | Modbus RTU | [HDHK.md](HDHK.md) |
+| [Huawei](Huawei.md) | SUN2000 residential/commercial inverters | Ethernet / RS485 | Modbus TCP / RTU | [Huawei.md](Huawei.md) |
 | [Next Power](Next_Power.md) | Victor NM-ECO-LV 3.6KW/6.2KW Plus | RS485 communication port | Modbus RTU | [Next_Power.md](Next_Power.md) |
 | [Sigineer](Sigineer.md) | Sigineer inverter/charger series | USB | Modbus RTU | [Sigineer.md](Sigineer.md) |
 | [SMA](SMA.md) | Sunny Boy, Sunny Tripower, Sunny Island | Ethernet / RS485 (add-on) | Modbus TCP | [SMA.md](SMA.md) |
 | [Sol-Ark](SolArk.md) | 5K, 8K, 12K, 15K-2P | RS485 RJ45 / terminal block | Modbus RTU | [SolArk.md](SolArk.md) |
 | [SolarEdge](SolarEdge.md) | HD-Wave SE series, StorEdge, Home Hub | Ethernet / RS485 terminal block | Modbus TCP / RTU (SunSpec) | [SolarEdge.md](SolarEdge.md) |
+| [SolaX](SolaX.md) | X1/X3 Hybrid G4-style inverters | Ethernet / RS485 | Modbus TCP / RTU | [SolaX.md](SolaX.md) |
+| [Solis / Ginlong](Solis.md) | String and hybrid inverters | Ethernet logger / RS485 | Modbus TCP / RTU | [Solis.md](Solis.md) |
 | [SRNE](SRNE.md) | ASF/ASP, HYP, HESP, HF/HFP | RS485 | Modbus RTU | [SRNE.md](SRNE.md) |
 | [Sungrow](Sungrow.md) | SG Series, SHxxRT, SG350HX | RS485 / Ethernet | Modbus RTU / TCP | [Sungrow.md](Sungrow.md) |
 | [Victron Energy](Victron.md) | MultiPlus, MultiPlus-II, Quattro, Cerbo GX | Ethernet / VE.Bus / VE.Direct | MQTT native (Venus OS) | [Victron.md](Victron.md) |

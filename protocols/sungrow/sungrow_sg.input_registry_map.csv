@@ -1,0 +1,48 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note
+5000,system_clock_year,System clock year,,USHORT,,,R,,Optional real-time clock field
+5001,system_clock_month,System clock month,,USHORT,1-12,,R,,Optional real-time clock field
+5002,system_clock_day,System clock day,,USHORT,1-31,,R,,Optional real-time clock field
+5003,system_clock_hour,System clock hour,,USHORT,0-23,,R,,Optional real-time clock field
+5005,system_clock_second,System clock second,,USHORT,0-59,,R,,Optional real-time clock field
+5004,total_power_yields,Total power yields,kWh,UINT,,,R,,Cumulative inverter energy yield
+5006,total_running_time,Total running time,h,UINT,,,R,,Cumulative inverter running time
+5008,internal_temperature,Internal temperature,0.1C,SHORT,,,R,,Inverter internal temperature
+5011,dc_voltage_1,DC voltage 1,0.1V,USHORT,,,R,,PV input or MPPT 1 voltage
+5012,dc_current_1,DC current 1,0.1A,USHORT,,,R,,PV input or MPPT 1 current
+5013,dc_voltage_2,DC voltage 2,0.1V,USHORT,,,R,,PV input or MPPT 2 voltage
+5014,dc_current_2,DC current 2,0.1A,USHORT,,,R,,PV input or MPPT 2 current
+5015,dc_voltage_3,DC voltage 3,0.1V,USHORT,,,R,,PV input or MPPT 3 voltage
+5016,dc_current_3,DC current 3,0.1A,USHORT,,,R,,PV input or MPPT 3 current
+5017,total_dc_power,Total DC power,W,UINT,,,R,,Total PV/DC input power
+5019,ac_voltage_ab,AB line voltage / phase A voltage,0.1V,USHORT,,,R,,Line-to-line voltage or phase A voltage depending on output type
+5020,ac_voltage_bc,BC line voltage / phase B voltage,0.1V,USHORT,,,R,,Line-to-line voltage or phase B voltage depending on output type
+5021,ac_voltage_ca,CA line voltage / phase C voltage,0.1V,USHORT,,,R,,Line-to-line voltage or phase C voltage depending on output type
+5022,phase_a_current,Phase A current,0.1A,USHORT,,,R,,AC phase A current
+5023,phase_b_current,Phase B current,0.1A,USHORT,,,R,,AC phase B current
+5024,phase_c_current,Phase C current,0.1A,USHORT,,,R,,AC phase C current
+5031,total_active_power,Total active power,W,UINT,,,R,,Total inverter active power
+5033,reactive_power,Reactive power,var,INT,,,R,,Total reactive power; signed
+5035,power_factor,Power factor,0.001,SHORT,-1000-1000,,R,,Positive/negative sign follows inverter firmware convention
+5036,grid_frequency,Grid frequency,0.1Hz,USHORT,,,R,,Grid frequency
+5038,work_state,Work state,,USHORT,,,R,,See work_state_codes in JSON
+5049,nominal_reactive_output_power,Nominal reactive output power,kvar,USHORT,,,R,,Nameplate reactive output power
+5071,parallel_ground_impedance,Impedance to ground in parallel connection,,USHORT,,,R,,Available only on supported models
+5081,work_state_32,Work state,,UINT,,,R,,Extended work-state value on supported models
+5113,daily_running_time,Daily running time,min,USHORT,,,R,,Running minutes today
+5114,present_country,Present country,,USHORT,,,R,,Country/grid-code identifier
+5115,dc_voltage_4,DC voltage 4,0.1V,USHORT,,,R,,PV input or MPPT 4 voltage
+5116,dc_current_4,DC current 4,0.1A,USHORT,,,R,,PV input or MPPT 4 current
+5128,monthly_power_yields,Monthly power yields,kWh,UINT,,,R,,Energy yield this month
+5146,negative_voltage_to_ground,Negative voltage to ground,0.1V,SHORT,,,R,,Negative pole voltage to ground
+5147,bus_voltage,Bus voltage,0.1V,USHORT,,,R,,DC bus voltage
+5148,grid_frequency_alt,Grid frequency,0.1Hz,USHORT,,,R,,Alternate grid-frequency register on supported models
+7013,input_current_1,Current of 1st input,0.1A,USHORT,,,R,,String/input current 1
+7014,input_current_2,Current of 2nd input,0.1A,USHORT,,,R,,String/input current 2
+7015,input_current_3,Current of 3rd input,0.1A,USHORT,,,R,,String/input current 3
+7016,input_current_4,Current of 4th input,0.1A,USHORT,,,R,,String/input current 4
+7017,input_current_5,Current of 5th input,0.1A,USHORT,,,R,,String/input current 5
+7018,input_current_6,Current of 6th input,0.1A,USHORT,,,R,,String/input current 6
+7019,input_current_7,Current of 7th input,0.1A,USHORT,,,R,,String/input current 7
+7020,input_current_8,Current of 8th input,0.1A,USHORT,,,R,,String/input current 8
+7021,input_current_9,Current of 9th input,0.1A,USHORT,,,R,,String/input current 9
+# Source notes: common Sungrow SG Modbus telemetry block from public SG register-map listings. Some vendor documents describe addresses as one-based; these addresses follow the Modbus addresses used by common client integrations.,,,,,,,,,

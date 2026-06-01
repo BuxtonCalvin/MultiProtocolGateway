@@ -1,0 +1,29 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note
+30016,master_version,Master version,,USHORT,,,R,,Firmware version register for H1 LAN / KH / H3 families
+30017,slave_version,Slave version,,USHORT,,,R,,Firmware version register
+30018,manager_version,Manager version,,USHORT,,,R,,Firmware version register
+31000,pv1_voltage,PV1 voltage,0.1V,USHORT,,,R,,PV1 voltage for H1 LAN / KH pre-133 / H3 set style maps
+31001,pv1_current,PV1 current,0.1A,USHORT,,,R,,PV1 current
+31002,pv1_power,PV1 power,0.001kW,USHORT,,,R,,PV1 power
+31003,pv2_voltage,PV2 voltage,0.1V,USHORT,,,R,,PV2 voltage
+31004,pv2_current,PV2 current,0.1A,USHORT,,,R,,PV2 current
+31005,pv2_power,PV2 power,0.001kW,USHORT,,,R,,PV2 power
+31039,pv3_voltage,PV3 voltage,0.1V,USHORT,,,R,,PV3 voltage on supported KH/H3 variants
+31040,pv3_current,PV3 current,0.1A,USHORT,,,R,,PV3 current on supported KH/H3 variants
+31041,pv3_power,PV3 power,0.001kW,USHORT,,,R,,PV3 power on supported KH/H3 variants
+31006,grid_voltage,Grid voltage,0.1V,USHORT,,,R,,Grid voltage
+31007,grid_current,Grid current,0.1A,SHORT,,,R,,Grid current
+31008,grid_power,Grid power,W,INT,,,R,,Grid power; sign convention is firmware-specific
+31012,battery_voltage,Battery voltage,0.1V,USHORT,,,R,,Battery voltage
+31013,battery_current,Battery current,0.1A,SHORT,,,R,,Battery current
+31014,battery_power,Battery power,W,INT,,,R,,Battery power
+31015,battery_soc,Battery SOC,%,USHORT,0-100,,R,,Battery state of charge
+31018,inverter_temperature,Inverter temperature,0.1C,SHORT,,,R,,Inverter temperature
+31024,load_power,Load power,W,INT,,,R,,Load power
+31026,today_pv_energy,Today PV energy,0.1kWh,USHORT,,,R,,Daily PV energy
+31027,total_pv_energy,Total PV energy,0.1kWh,UINT,,,R,,Lifetime PV energy
+31029,today_grid_export,Today grid export,0.1kWh,USHORT,,,R,,Daily export energy
+31030,total_grid_export,Total grid export,0.1kWh,UINT,,,R,,Lifetime export energy
+31032,today_grid_import,Today grid import,0.1kWh,USHORT,,,R,,Daily import energy
+31033,total_grid_import,Total grid import,0.1kWh,UINT,,,R,,Lifetime import energy
+# Source: nathanmarlor/foxess_modbus register-map documentation. FoxESS maps are highly model/firmware dependent; this file targets H1 LAN / KH pre-133 / H3 set style holding-register layouts only.,,,,,,,,,

@@ -16,7 +16,7 @@ This application was inspired by and built upon the excellent work by [@HotNoob]
 
 ## What MPG does
 
-MPG reads live register data from Modbus RTU/TCP, CAN bus, and proprietary serial protocols, then fans that data out to any combination of MQTT brokers, TimescaleDB, InfluxDB, and JSON outputs — all managed through a built-in web administration UI.  It is planned to extend hardware reads to include REST apis as well as proprietary protocols that do not rely on serial data.
+MPG reads live register data from Modbus RTU/TCP, CAN bus, and proprietary serial protocols, then fans that data out to any combination of MQTT brokers, Timescale DB, InfluxDB, and JSON outputs — all managed through a built-in web administration UI.  It is planned to extend hardware reads to include REST apis as well as proprietary protocols that do not rely on serial data.
 
 MPG is purpose-built for solar inverters, battery management systems (BMS), energy meters, and any device that speaks Modbus, but its protocol-map architecture means it can be adapted to virtually any register-based hardware.
 
@@ -44,9 +44,9 @@ MPG is purpose-built for solar inverters, battery management systems (BMS), ener
 | Capability | Details |
 | --- | --- |
 | **Input protocols** | Modbus RTU, Modbus TCP, Modbus TLS, Modbus UDP, CAN bus, PACE BMS serial, Pylon serial, EG4 LL-S RS-485 |
-| **Output transports** | MQTT, TimescaleDB (PostgreSQL hypertable), InfluxDB, JSON file |
+| **Output transports** | MQTT, Timescale DB (PostgreSQL hypertable), InfluxDB, JSON file |
 | **Web UI** | Full browser-based configuration and live management on port **1717** |
-| **Protocol library** | 30+ pre-built device protocol maps; live register analysis tool to build new ones |
+| **Protocol library** | 50+ pre-built device protocol maps; live register analysis tool to build new ones |
 | **Config management** | SQLite staging database; changes are previewed and committed — no raw file editing required |
 | **Python versions** | 3.10 – 3.14 |
 | **Deployment** | Script, systemd service, Docker container, Home Assistant add-on |
@@ -158,9 +158,9 @@ Here are overviews of two database bridges:
   - Troubleshooting
     [`troubleshooting_influxdb.md`](documentation/bridges/InfluxDB/troubleshooting_influxdb.md)
 
-- TimeScaledDB [![TimescaleDB](https://img.shields.io/badge/Postgres-%23316192.svg?logo=postgresql&logoColor=white)](https://timescale.com)
+- TimeScale DB [![Timescale DB](https://img.shields.io/badge/Postgres-%23316192.svg?logo=postgresql&logoColor=white)](https://timescale.com)
   - Readme
-    [`TimescaleDB`](documentation/bridges/TimeScaleDB/timescaledb_protocol_gateway.md)
+    [`Timescale DB`](documentation/bridges/TimeScaleDB/timescaledb_protocol_gateway.md)
 
 Here are the overviews of the MQTT and JSON bridges
 
@@ -288,17 +288,17 @@ docker run \
 
 ## Full Docker Compose Stack
 
-For a complete monitoring stack — MPG + TimescaleDB + InfluxDB + MQTT + pgAdmin + Chronograf + Grafana — see the included [`docker-compose.yml`](documentation/docker/docker-compose.yml) in this repository.
+For a complete monitoring stack — MPG + Timescale DB + InfluxDB + MQTT + pgAdmin + Chronograf + Grafana — see the included [`docker-compose.yml`](documentation/docker/docker-compose.yml) in this repository.
 
 The stack provides:
 
 | Service | Port | Purpose |
 | --- | --- | --- |
 | **MPG** | 1717 | Gateway web UI and core service |
-| **TimescaleDB** | 5432 | Time-series PostgreSQL for long-term storage |
+| **Timescale DB** | 5432 | Time-series PostgreSQL for long-term storage |
 | **InfluxDB** | 8086 | Alternative time-series database |
 | **Mosquitto MQTT** | 1883 / 9001 | MQTT broker for Home Assistant and other subscribers |
-| **pgAdmin** | 5050 | PostgreSQL/TimescaleDB web management UI |
+| **pgAdmin** | 5050 | PostgreSQL/Timescale DB web management UI |
 | **Chronograf** | 8888 | InfluxDB web dashboard |
 | **Grafana** | 3000 | Unified visualization for all data sources |
 

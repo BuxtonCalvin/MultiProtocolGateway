@@ -121,6 +121,15 @@ class Data_Type(Enum):
 
     @classmethod
     def fromString(cls, name: str) -> "Data_Type | None":
+        """Return the ``Data_Type`` member matching ``name``, or ``None`` if unrecognized.
+
+        Strips whitespace and uppercases before lookup.  Names that start with a
+        digit are prefixed with ``_`` to match the enum member naming convention
+        (e.g. ``"16bit"`` → ``_16BIT``).  A built-in alias table maps common
+        alternative spellings (``uint16``, ``s16``, ``float``, etc.) to their
+        canonical member names before the final lookup.  Logs a warning and
+        returns ``None`` rather than raising for unknown names.
+        """
         name = name.strip().upper()
         if not name:
             return None
@@ -159,6 +168,14 @@ class Data_Type(Enum):
 
     @classmethod
     def getSize(cls, data_type: "Data_Type") -> int:
+        """Return the bit-width of ``data_type``.
+
+        Fixed-width types (``USHORT``, ``UINT``, ``FLOAT32``, etc.) are looked
+        up in an explicit table.  Variable-width bit-field types derive their
+        width from the enum value: unsigned bits subtract 200, signed bits
+        subtract 300, signed-magnitude bits subtract 400.  Returns ``-1`` only
+        when none of the above applies, which should never occur for valid members.
+        """
         sizes: dict[Data_Type, int] = {
             Data_Type.BYTE: 8,
             Data_Type.USHORT: 16,
@@ -203,6 +220,13 @@ class WriteMode(Enum):
 
     @classmethod
     def fromString(cls, name: str) -> "WriteMode":
+        """Return the ``WriteMode`` member matching ``name``, defaulting to ``READ``.
+
+        Strips whitespace and uppercases before consulting an alias table that
+        maps common shorthands (``rw``, ``r/w``, ``disabled``, ``wo``, etc.)
+        to canonical member names.  Any unrecognized string maps silently to
+        ``READ``.
+        """
         name = name.strip().upper()
 
         alias: dict[str, str] = {
@@ -226,7 +250,7 @@ class WriteMode(Enum):
 
 
 class Registry_Type(Enum):
-    ''' for protocols that don't have a command / registry type '''
+    # for protocols that don't have a command / registry type
     ZERO = 0x00
 
     COIL = 0x01
@@ -284,9 +308,18 @@ class registry_map_entry:
     ''' variable_name of the source metric when this is a synthetic _desc entry '''
 
     def __str__(self) -> str:
+        """Return the entry's ``variable_name`` as its string representation."""
         return self.variable_name
 
     def __eq__(self, other) -> bool:
+        """Return ``True`` when both entries address the same physical register location.
+
+        Equality is based solely on ``register``, ``register_bit``,
+        ``register_bit_end``, ``registry_type``, and ``register_byte`` — not on
+        variable or documented names.  Two entries mapping different variable
+        names to the same register position compare equal, which is intentional
+        for deduplication and range-calculation purposes.
+        """
         return (
             isinstance(other, registry_map_entry)
             and self.register == other.register
@@ -297,6 +330,7 @@ class registry_map_entry:
         )
 
     def __hash__(self) -> int:
+        """Hash based on ``variable_name``, ``register_bit``, ``register_byte``, and ``registry_type``."""
         return hash((self.variable_name, self.register_bit, self.register_byte, self.registry_type))
 
 
@@ -318,7 +352,15 @@ class DataAdjustments:
     or Clamp) should require changes only within this class.
     """
 
-    def __init__(self, log: logging.Logger, default_byteorder: Literal["little", "big"] = _DEFAULT_BYTEORDER,) -> None:
+    def __init__(self, log: logging.Logger, default_byteorder: Literal["little", "big"] = _DEFAULT_BYTEORDER) -> None:
+        """Initialise with a shared logger and the protocol-level default byte order.
+
+        ``default_byteorder`` is captured from ``protocol_settings.byteorder``
+        after it has been resolved from the JSON settings file, so it always
+        reflects the correct protocol default (almost always ``"big"`` for
+        Modbus).  Individual entries may override it via ``Register_Endian`` in
+        their adjustments column.
+        """
         self._log: logging.Logger = log
         self.default_byteorder: Literal["little", "big"] = default_byteorder
 
@@ -421,9 +463,9 @@ class DataAdjustments:
             (e.g. direction-aware sign flipping).
         """
 
-        # ------------------------------------------------------------------ #
-        # byteorder stage                                                      #
-        # ------------------------------------------------------------------ #
+        # ------------------------------------------------------------------
+        # byteorder stage
+        # ------------------------------------------------------------------
         if stage == "byteorder":
             if not entry.adjustments:
                 return value
@@ -466,9 +508,7 @@ class DataAdjustments:
                         try:
                             adjusted = adjusted + float(offset)
                         except (TypeError, ValueError):
-                            self._log.warning(
-                                f"Unsupported Offset adjustment '{offset}' for {entry.variable_name}"
-                            )
+                            self._log.warning(f"Unsupported Offset adjustment '{offset}' for {entry.variable_name}")
 
             if isinstance(adjusted, float) and adjusted.is_integer():
                 return int(adjusted)
@@ -514,9 +554,7 @@ class DataAdjustments:
                 else:
                     return adjusted_context
             except Exception as e:
-                self._log.warning(
-                    f"Failed context adjustment '{formula}' for {entry.variable_name}: {e}"
-                )
+                self._log.warning(f"Failed context adjustment '{formula}' for {entry.variable_name}: {e}")
                 return value
 
         return value  # unreachable but satisfies type checker
@@ -565,6 +603,7 @@ class DataAdjustments:
         """
 
         def _safe_eval(node: ast.AST) -> int | float:
+            """Recursively evaluate a whitelisted AST node, raising ``TypeError`` on anything unsafe."""
             if isinstance(node, ast.Expression):
                 return _safe_eval(node.body)
 
@@ -596,7 +635,6 @@ class DataAdjustments:
 
             if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
                 return -_safe_eval(node.operand)
-
             msg = f"Unsupported AST node: {type(node).__name__}"
             raise TypeError(msg)
 
@@ -610,9 +648,22 @@ class DataAdjustments:
 
 
 class protocol_settings:
+    """Load and expose a protocol's register map, code tables, and settings from JSON and CSV files.
+
+    One instance per transport section.  Owns the ``DataAdjustments`` instance
+    used to decode and scale all register values for the protocol.
+    """
 
     @classmethod
     def get_transport_type(cls, protocol_version: str, settings_dir: str = "protocols") -> str:
+        """Return the transport class name for ``protocol_version`` by reading its JSON file.
+
+        Looks up ``protocol_version + ".json"`` in ``settings_dir`` via
+        ``find_protocol_file``.  Returns the value of the ``transport`` key if
+        present, then ``reader`` as a fallback, then ``"modbus_rtu"`` as the
+        ultimate default.  Raises ``ValueError`` if the file is not found or
+        cannot be parsed.
+        """
         path: str | None = cls.find_protocol_file(protocol_version + ".json", settings_dir)
         if path is None:
             msg1: str = f"Protocol '{protocol_version}' not found in '{settings_dir}'"
@@ -632,7 +683,16 @@ class protocol_settings:
         return "modbus_rtu"
 
     def __init__(self, protocol: str, transport_settings: Optional[TransportSettings] = None, settings_dir: str = "protocols") -> None:
+        """Load the protocol JSON and all CSV registry maps, applying transport-level settings.
 
+        Resolves ``byteorder`` from the JSON after loading, then constructs
+        ``_adjustments`` so it captures the correct protocol-level default.
+        Derives variable-mask and variable-screen filenames from the transport
+        section name (``transport.<device>``) unless overridden by
+        ``variable_mask`` / ``variable_screen`` keys in ``transport_settings``.
+        Iterates all ``Registry_Type`` values and loads each corresponding CSV
+        registry map file if one exists.
+        """
         # Default byteorder for interpreting multi-byte values.
         # Separate from transport-level endianness: the transport always delivers
         # 16-bit registers in big-endian byte order per the Modbus spec.
@@ -699,10 +759,12 @@ class protocol_settings:
             self.load_registry_map(registry_type)
 
     def _load_filter_file(self, filename: str) -> list[str]:
-        """
-        Loads a line-delimited filter file (mask or screen) and returns
-        a list of cleaned, lowercased metric names.
-        Returns an empty list if the file is not found or cannot be read.
+        """Load a line-delimited filter file and return a list of cleaned, lowercased metric names.
+
+        Searches for ``filename`` under the ``config`` directory via
+        ``find_protocol_file``.  Lines beginning with ``#`` and blank lines are
+        skipped.  Returns an empty list if the file is not found or an I/O
+        error occurs, so missing filter files are always treated as a no-op.
         """
         file_path: str | None = self.find_protocol_file(filename, "config")
 
@@ -725,15 +787,21 @@ class protocol_settings:
         return entries
 
     def get_registry_map(self, registry_type: Registry_Type = Registry_Type.ZERO) -> list[registry_map_entry]:
-        """Return the registry map for the given type, or an empty list if not loaded."""
+        """Return the loaded registry map for ``registry_type``, or an empty list if not yet loaded."""
         return self.registry_map.get(registry_type, [])
 
     def get_registry_ranges(self, registry_type: Registry_Type) -> list[tuple[int, int]]:
-        """Return the pre-calculated register ranges for the given type, or an empty list if not loaded."""
+        """Return the pre-calculated ``(start, count)`` read ranges for ``registry_type``, or an empty list."""
         return self.registry_map_ranges.get(registry_type, [])
 
     def get_registry_entry(self, name: str, registry_type: Optional[Registry_Type] = None) -> Optional[registry_map_entry]:
-        """Retrieve a registry entry, optionally filtering by type."""
+        """Return the first entry whose ``documented_name`` matches ``name``, or ``None``.
+
+        ``name`` is normalized (stripped, lowercased, spaces replaced with
+        underscores) before comparison.  When ``registry_type`` is supplied only
+        that type's map is searched; otherwise all registry types are searched in
+        iteration order.
+        """
         cleaned_name: str = name.strip().lower().replace(" ", "_")
 
         if registry_type is not None:
@@ -750,6 +818,12 @@ class protocol_settings:
         return None
 
     def get_code_by_value(self, entry: registry_map_entry, value: str, fallback: str) -> str:
+        """Return the code key whose description matches ``value`` for ``entry``, or ``fallback``.
+
+        Performs a case-insensitive reverse lookup in the entry's code dict —
+        the inverse of ``_code_description_for_value``.  Returns ``fallback``
+        when ``entry`` or ``value`` is ``None``, or when no description matches.
+        """
         if value is None or entry is None:
             return fallback
 
@@ -760,9 +834,12 @@ class protocol_settings:
         return fallback
 
     def get_code_dict(self, key: str) -> dict[str, str]:
-        """
-        Returns the code mapping for a given key, or an empty dict if
-        the key doesn't exist or is not a dict.
+        """Return the code mapping dict stored under ``key``, or an empty dict if absent or not a dict.
+
+        ``self.codes`` holds both plain string values (protocol settings) and
+        dict values (enum/flag code tables keyed by ``<name>_codes``).  This
+        method safely returns only dict values so callers always receive a
+        iterable mapping.
         """
         value: str | dict[str, str] | None = self.codes.get(key)
         if isinstance(value, dict):
@@ -770,9 +847,11 @@ class protocol_settings:
         return {}
 
     def get_entry_code_dict(self, entry: registry_map_entry) -> dict[str, str]:
-        """
-        Return the code mapping for an entry, accepting both documented-name
-        and variable-name conventions.
+        """Return the code mapping for ``entry``, trying ``documented_name`` then ``variable_name`` conventions.
+
+        Looks up ``<name>_codes`` in ``self.codes`` for each name form in turn
+        and returns the first non-empty dict found.  Returns an empty dict when
+        the entry has no code mapping under either convention.
         """
         for key_base in (entry.documented_name, entry.variable_name):
             code_dict: dict[str, str] = self.get_code_dict(key_base + "_codes")
@@ -781,6 +860,13 @@ class protocol_settings:
         return {}
 
     def _code_description_for_value(self, entry: registry_map_entry, value: int | float | str) -> str | None:
+        """Return the human-readable description for ``value`` from ``entry``'s code dict, or ``None``.
+
+        Tries an integer-normalized key first (``str(int(float(value)))``), then
+        the raw string form, so both ``"1"`` and ``1`` resolve to the same
+        description.  Returns ``None`` when the entry has no code dict or the
+        value is not present in it.
+        """
         code_dict: dict[str, str] = self.get_entry_code_dict(entry)
         if not code_dict:
             return None
@@ -797,10 +883,14 @@ class protocol_settings:
         return None
 
     def load__json(self, file: str = "", settings_dir: str = "") -> None:
-        """
-        JSON file serves as both protocol config and code mapping file,
-        separated by key naming convention. Settings keys go to self.settings;
-        _codes-suffixed keys stay in self.codes only.
+        """Load the protocol JSON file into ``self.codes`` and extract plain-string keys into ``self.settings``.
+
+        The JSON file serves dual purpose: keys ending in ``_codes`` are enum or
+        flag tables kept only in ``self.codes``; all other string-valued keys are
+        also copied to ``self.settings`` for use as protocol configuration
+        (``byteorder``, ``transport``, ``batch_size``, etc.).  Defaults ``file``
+        to ``<protocol>.json`` and ``settings_dir`` to ``self.settings_dir``
+        when not supplied.
         """
         if not settings_dir:
             settings_dir = self.settings_dir
@@ -824,7 +914,14 @@ class protocol_settings:
                 self.settings[key] = value
 
     def load_registry_overrides(self, override_path: str, keys: list[str]) -> dict[str, dict[str, Any]]:
-        """Load overrides into a multidimensional dictionary keyed by each specified key."""
+        """Parse a CSV override file and return a nested dict keyed by each column in ``keys``.
+
+        For each row, normalizes the value of every ``keys`` column (strip,
+        lowercase, spaces to underscores) and indexes the full row under that
+        value.  The result allows O(1) lookup of override rows by either
+        ``documented name`` or ``register``, so the caller can match and apply
+        overrides without a linear scan.
+        """
         overrides = {key: {} for key in keys}
 
         with open(override_path, newline="", encoding="latin-1") as csvfile:
@@ -839,6 +936,20 @@ class protocol_settings:
         return overrides
 
     def load__registry(self, path: str, registry_type: Registry_Type = Registry_Type.INPUT) -> list[registry_map_entry]:
+        """Parse the registry-map CSV at ``path`` and return a list of ``registry_map_entry`` objects.
+
+        Handles delimiter auto-detection (comma vs semicolon), optional
+        ``.override.csv`` sidecar files, read-interval parsing (``ms``, ``s``,
+        and ``x`` multiplier), unit-symbol/multiplier splitting, data-type
+        resolution, value-range and enum parsing, register address parsing
+        (decimal, hex, bit-offset ``N.bX``, byte-offset ``N.Y``, range
+        ``A-B``), and dynamic register expressions (deferred into
+        ``dynamic_registry_rows``).  After all rows are processed, adjacent
+        ``_l``/``_h`` pairs are merged into single 32-bit entries, the variable
+        mask (allowlist) and variable screen (denylist) are applied, and
+        ``_add_code_description_entries`` appends synthetic ``_desc`` entries for
+        any entry that has a code mapping.
+        """
         registry_map: list[registry_map_entry] = []
 
         register_regex: re.Pattern[str] = re.compile(
@@ -871,16 +982,25 @@ class protocol_settings:
             overrides = self.load_registry_overrides(override_path, override_keys)
 
         def determine_delimiter(first_row) -> str:
+            """Detect whether the CSV uses semicolons or commas as its column delimiter."""
             if first_row.count(";") > first_row.count(","):
                 return ";"
             else:
                 return ","
 
         def process_row(row) -> None:
+            """Parse one CSV row and append the resulting ``registry_map_entry`` objects to ``registry_map``.
+
+            Skips commented rows (leading ``#``), entirely empty rows, and rows
+            whose register field contains an unresolved dynamic expression
+            (deferred to ``dynamic_registry_rows`` instead).  Applies any
+            matching override row before constructing the entry.  A range
+            register (``A-B``) produces one entry per address in the range.
+            """
             unit_multiplier: float = 1
             unit_symbol: str = ""
             read_interval: int = 0
-            adjustments: dict[str, Any] = self.parse_adjustments(row.get("adjustments", ""))
+            adjustments: dict[str, Any] = self._adjustments.parse_adjustments(row.get("adjustments", ""))
 
             if row["variable name"].startswith("#") or row["register"].startswith("#"):
                 return
@@ -1213,13 +1333,11 @@ class protocol_settings:
             # The _l row already carries Register_Endian:little — no propagation needed.
 
             # DEBUG-MERGE: log every _l entry to show what the merge loop will examine
-
-            # _l_candidates: list[tuple[str, str]] = [
+            # _l_candidates = [
             #     (registry_map[i].documented_name, registry_map[i+1].documented_name)
             #     for i in range(len(registry_map) - 1)
             #     if registry_map[i].documented_name.endswith('_l')
-            # ]
-
+            #]
             # self._log.warning(
             #     f"[DEBUG-MERGE] path={path} "
             #     f"_l_candidates (index, index+1)={_l_candidates}"
@@ -1288,11 +1406,14 @@ class protocol_settings:
             return registry_map
 
     def _add_code_description_entries(self, registry_map: list[registry_map_entry]) -> None:
-        """
-        Add synthetic _desc entries for any entry that has a code mapping but
-        doesn't already have a description entry. This allows code descriptions
-        to be automatically included in the output without needing to be manually
-        added to the registry map CSV.
+        """Append synthetic ``<name>_desc`` entries for entries that have a code mapping but no existing description entry.
+
+        For each entry that has a code dict and no ``description_source``,
+        creates a companion ``STRING``/``READDISABLED`` entry whose
+        ``description_source`` points back at the source entry's
+        ``variable_name``.  Skips entries whose ``_desc`` name already exists
+        or appears in ``variable_screen``.  Additions are batched and appended
+        after iteration completes to avoid modifying the list mid-loop.
         """
         existing_names: set[str] = {entry.variable_name for entry in registry_map}
         additions: list[registry_map_entry] = []
@@ -1342,10 +1463,18 @@ class protocol_settings:
         registry_map.extend(additions)
 
     def calculate_registry_ranges(self, registry_map: list[registry_map_entry], max_register: int, init: bool = False, timestamp: float = 0.0) -> list[tuple[int, int]]:
-        """
-        Read optimization: calculate which register ranges to read so the Modbus
-        driver can combine multiple registers into a single request (function
-        0x03/0x04), reducing round-trips.
+        """Return the minimal set of ``(start, count)`` register ranges needed for one poll cycle.
+
+        Divides the address space into windows of ``max_batch_size`` (default
+        40, overridable via ``batch_size`` in the JSON settings) and finds the
+        tightest span covering all due entries in each window.  An entry is
+        considered due when ``init=True`` (first load) or its
+        ``next_read_timestamp`` is in the past relative to ``timestamp``.  When
+        not initializing, ``next_read_timestamp`` is advanced by
+        ``read_interval`` for each included entry.  ``READDISABLED`` and
+        ``WRITEONLY`` entries are always excluded.  Returns a list of
+        ``(start_register, count)`` tuples suitable for direct use in a Modbus
+        read call.
         """
         max_batch_size = 40
         if "batch_size" in self.settings:
@@ -1388,9 +1517,13 @@ class protocol_settings:
 
     @staticmethod
     def find_protocol_file(file: str, base_dir: str = "") -> Optional[str]:
-        """
-        Searches for a protocol file by name across known locations.
-        Static so it can be called from get_transport_type without a full instance.
+        """Search for ``file`` under ``base_dir`` relative to the project root and return its absolute path, or ``None``.
+
+        Tries two candidate paths first: ``<root>/<base_dir>/<file>`` and
+        ``<root>/<base_dir>/<prefix>/<file>`` where prefix is the part of the
+        filename before the first ``_``.  Falls back to a recursive ``rglob``
+        under the base directory.  Static so it can be called from
+        ``get_transport_type`` before any instance is constructed.
         """
         base_path: Path = Path(__file__).resolve().parent.parent / base_dir
 
@@ -1407,6 +1540,16 @@ class protocol_settings:
             return None
 
     def load_registry_map(self, registry_type: Registry_Type, file: str = "", settings_dir: str = "") -> None:
+        """Load the CSV registry map for ``registry_type`` and populate ``registry_map``, ``registry_map_size``, and ``registry_map_ranges``.
+
+        Derives the filename from the protocol name and registry type when
+        ``file`` is not supplied (``<protocol>.registry_map.csv`` for
+        ``ZERO``, ``<protocol>.<type>_registry_map.csv`` for all others).
+        After loading, walks the entries to determine the highest register
+        address for ``registry_map_size``, then pre-computes and caches the
+        initial read ranges in ``registry_map_ranges``.  Silently returns when
+        the file cannot be located.
+        """
         if not settings_dir:
             settings_dir = self.settings_dir
 
@@ -1455,7 +1598,7 @@ class protocol_settings:
         # word_order controls multi-register word assembly only.
         # Single-register reads always use big-endian byte interpretation
         # because the transport delivers Modbus wire bytes unchanged.
-        word_order: Literal['little', 'big'] = self.get_entry_byteorder(entry)
+        word_order: Literal['little', 'big'] = self._adjustments.get_entry_byteorder(entry)
 
         if entry.register_byte > 0:
             register = register[entry.register_byte:]
@@ -1521,21 +1664,21 @@ class protocol_settings:
             # For Register_Endian:little the hardware sends bytes swapped,
             # so reverse them before sign-extending.
             raw_bytes = register[:2]
-            _WATCH3 = {'tinner','tradiator1','tradiator2','tbat',
-                       'maxcelltemp_bms','mincelltemp_bms','batcurrent_bms'}
-            if entry.variable_name in _WATCH3:
-                self._log.warning(
-                    f"[DEBUG-BYTES-SHORT] {entry.variable_name} "
-                    f"wire={raw_bytes.hex()} word_order={word_order}"
-                )
+            # _WATCH3 = {'tinner','tradiator1','tradiator2','tbat',
+            #            'maxcelltemp_bms','mincelltemp_bms','batcurrent_bms'}
+            # if entry.variable_name in _WATCH3:
+            #     self._log.warning(
+            #         f"[DEBUG-BYTES-SHORT] {entry.variable_name} "
+            #         f"wire={raw_bytes.hex()} word_order={word_order}"
+            #     )
             if word_order == "little":
                 raw_bytes = bytes([raw_bytes[1], raw_bytes[0]])
             value = int.from_bytes(raw_bytes, byteorder="big", signed=True)
-            if entry.variable_name in _WATCH3:
-                self._log.warning(
-                    f"[DEBUG-BYTES-SHORT] {entry.variable_name} "
-                    f"after_swap={raw_bytes.hex()} value={value}"
-                )
+            # if entry.variable_name in _WATCH3:
+            #     self._log.warning(
+            #         f"[DEBUG-BYTES-SHORT] {entry.variable_name} "
+            #         f"after_swap={raw_bytes.hex()} value={value}"
+            #     )
         elif entry.data_type in (Data_Type._16BIT_FLAGS, Data_Type._8BIT_FLAGS, Data_Type._32BIT_FLAGS):
             # Single or double-register flags. Always big-endian wire bytes per Modbus spec.
             val: int = int.from_bytes(register, byteorder="big", signed=False)
@@ -1555,9 +1698,7 @@ class protocol_settings:
 
                 if code_dict:
                     # use the integer value decoded with the correct byte_order
-                    # rather than indexing raw bytes directly. The previous approach
-                    # used register_bytes[byte] which assumes big-endian physical
-                    # byte layout, giving wrong results for little-endian entries.
+                    # rather than indexing raw bytes directly.
                     for i in range(start_bit, end_bit):
                         if (val >> i) & 1:
                             flag_index: str = "b" + str(i)
@@ -1627,14 +1768,18 @@ class protocol_settings:
         elif entry.data_type in (Data_Type.STRING, Data_Type.STRING16, Data_Type.STRING32):
             value = self._decode_text_bytes(bytes(register))
 
-        value = self.apply_adjustments(value, entry, "post_decode")
+        value = self._adjustments.apply_adjustments(value, entry, "post_decode")
 
         return value
 
     def _extract_bits(self, raw_value: int, entry: registry_map_entry) -> int:
-        """
-        Extract bits from raw_value using entry.register_bit and register_bit_end.
-        Supports single bit (b7) and multi-bit range (b4-7).
+        """Extract a contiguous bit field from ``raw_value`` using the entry's bit-offset metadata.
+
+        Uses ``entry.register_bit`` as the LSB index and
+        ``entry.register_bit_end`` as the MSB index (both inclusive).  Returns
+        ``raw_value`` unchanged when ``register_bit < 0`` (no bit offset
+        specified).  Supports single-bit extraction (``b7``) and multi-bit
+        ranges (``b4-b7``).
         """
         start: int = entry.register_bit
         end: int = entry.register_bit_end
@@ -1648,10 +1793,13 @@ class protocol_settings:
         return (raw_value >> start) & mask
 
     def _decoded_value_already_honors_bit_offset(self, entry: registry_map_entry) -> bool:
-        """
-        Returns True for data-type decoders that already consume
-        register_bit/register_bit_end during decoding. Running _extract_bits()
-        again would double-shift the value.
+        """Return ``True`` for decoder paths that consume ``register_bit`` internally during decoding.
+
+        The ``_8BIT``, ``_8BIT_FLAGS``, ``_16BIT_FLAGS``, ``_32BIT_FLAGS``, and
+        all variable-width bit-field types (``data_type.value > 200``) apply the
+        bit offset as part of their decode logic.  Calling ``_extract_bits``
+        again on their output would double-shift the value, so
+        ``process_registery`` skips that step for these types.
         """
         if entry.data_type in (
             Data_Type._8BIT,
@@ -1664,6 +1812,15 @@ class protocol_settings:
         return entry.data_type.value > 200
 
     def entry_word_count(self, entry: registry_map_entry) -> int:
+        """Return the number of 16-bit Modbus registers occupied by ``entry``.
+
+        For concatenated entries the count is the length of
+        ``concatenate_registers``.  Variable-length ``STRING`` entries derive
+        the count from ``data_type_size`` (rounding up to whole words).  All
+        other types use a fixed lookup table (``UINT``/``INT``/``FLOAT32``/
+        ``ACC32`` → 2, ``UINT64``/``FLOAT64`` → 4, ``STRING16`` → 8,
+        ``STRING32`` → 16); any type not in the table defaults to 1.
+        """
         if entry.concatenate and entry.concatenate_registers:
             return len(entry.concatenate_registers)
 
@@ -1691,24 +1848,24 @@ class protocol_settings:
         word_count: int,
         byte_order: Literal['little', 'big'],
     ) -> bytes | None:
-        """
-        Assemble multiple 16-bit Modbus registers into a contiguous byte string.
+        """Assemble ``word_count`` consecutive 16-bit registers into a contiguous byte string.
 
-        Endian contract (per EG4 hardware spec):
-          big (default): high word at lower register address, bytes within each
-                         word in big-endian order — standard Modbus.
-          little:        low word at lower register address AND bytes within each
-                         word are also reversed (LE-LE).  Used only for registers
-                         explicitly annotated with Register_Endian:little in the
-                         CSV adjustments column.
+        Returns ``None`` if any register in the range is absent from
+        ``registry``.  Endian contract (per EG4 hardware spec):
 
-        NOTE: the Modbus transport always delivers each 16-bit register as a
-        correctly oriented integer — byte swapping within a word is therefore a
-        register-map-level concern, not a transport concern.
+        - ``big`` (default): high word at the lower register address, bytes
+          within each word in big-endian order — standard Modbus.
+        - ``little``: low word at the lower register address **and** bytes
+          within each word also reversed (LE-LE).  Used only for registers
+          annotated with ``Register_Endian:little`` in the CSV.
+
+        The Modbus transport always delivers each 16-bit register as a correctly
+        oriented integer, so byte-swapping within a word is a register-map-level
+        concern, not a transport concern.
         """
         words: list[int] = []
         for offset in range(word_count):
-            register_num = start_register + offset
+            register_num: int = start_register + offset
             if register_num not in registry:
                 return None
             words.append(registry[register_num] & 0xFFFF)
@@ -1731,34 +1888,13 @@ class protocol_settings:
         return ((val & 0xFF) << 8) | ((val >> 8) & 0xFF)
 
     def _decode_text_bytes(self, raw_bytes: bytes) -> str:
+        """Decode ``raw_bytes`` as UTF-8, replace invalid sequences, strip null characters and surrounding whitespace."""
         return raw_bytes.decode("utf-8", errors="replace").replace("\x00", "").strip()
-
-    def parse_adjustments(self, raw_adjustments: str | None) -> dict[str, Any]:
-        """Delegate to DataAdjustments.parse_adjustments."""
-        return self._adjustments.parse_adjustments(raw_adjustments)
-
-    def get_adjustment(self, entry: registry_map_entry, name: str) -> Any | None:
-        """Delegate to DataAdjustments.get_adjustment."""
-        return self._adjustments.get_adjustment(entry, name)
-
-    def get_entry_byteorder(self, entry: registry_map_entry) -> Literal['little', 'big']:
-        """Delegate to DataAdjustments.get_entry_byteorder."""
-        return self._adjustments.get_entry_byteorder(entry)
-
-    def apply_adjustments(
-        self,
-        value: int | float | str,
-        entry: registry_map_entry,
-        stage: Literal["byteorder", "post_decode", "context"],
-        context: Mapping[str, int | float | str] | None = None,
-    ) -> int | float | str:
-        """Delegate to DataAdjustments.apply_adjustments."""
-        return self._adjustments.apply_adjustments(value, entry, stage, context)
 
     def process_register_ushort(self, registry: Mapping[int, int], entry: registry_map_entry) -> int | float | str | None:
         """Process a ushort (integer-per-register) registry entry into a typed value."""
 
-        byte_order: Literal['little', 'big'] = self.get_entry_byteorder(entry)
+        byte_order: Literal['little', 'big'] = self._adjustments.get_entry_byteorder(entry)
 
         if entry.data_type == Data_Type.UINT:
             register_bytes: bytes | None = self._register_words_to_bytes(registry, entry.register, 2, byte_order)
@@ -1938,7 +2074,7 @@ class protocol_settings:
                 raw = self._swap_bytes_16(raw)
             value = raw
 
-        value = self.apply_adjustments(value, entry, "post_decode")
+        value: int | float | str = self._adjustments.apply_adjustments(value, entry, "post_decode")
 
         # Collapse whole floats to int (e.g. 52.0 → 52) after scaling
         if isinstance(value, float) and value.is_integer():
@@ -1951,8 +2087,19 @@ class protocol_settings:
         registry: Mapping[int, int | bytes | tuple[bytes, float]],
         registry_map: list[registry_map_entry],
     ) -> dict[str, int | float | str]:
-        """Process registry into appropriately typed and named values."""
+        """Decode a raw register snapshot into a dict of typed, named values.
 
+        Dispatches each entry to ``process_register_bytes`` (for ``bytes`` or
+        ``tuple`` values) or ``process_register_ushort`` (for plain ``int``
+        values).  Skips entries with a ``description_source`` (handled in a
+        second pass) and entries whose register is absent from ``registry``.
+        After all values are decoded, applies any ``context``-stage adjustments
+        that depend on sibling values.  In a final pass, resolves
+        ``description_source`` entries by looking up the decoded source value
+        in the entry's code dict and populating a human-readable description
+        string.  Concatenated registers are accumulated until all component
+        registers have been decoded before their combined value is emitted.
+        """
         concatenate_registry: dict[int, int | float | str] = {}
         info: dict[str, int | float | str] = {}
 
@@ -2016,7 +2163,7 @@ class protocol_settings:
 
         for entry in registry_map:
             if entry.variable_name in info:
-                info[entry.variable_name] = self.apply_adjustments(info[entry.variable_name], entry, "context", info)
+                info[entry.variable_name] = self._adjustments.apply_adjustments(info[entry.variable_name], entry, "context", info)
 
         entries_by_name: dict[str, registry_map_entry] = {entry.variable_name: entry for entry in registry_map}
         for entry in registry_map:
@@ -2035,9 +2182,16 @@ class protocol_settings:
         return info
 
     def validate_registry_entry(self, entry: registry_map_entry, val: str | int | float) -> int:
-        """
-        Validate one registry value against the entry's configured constraints.
-        Returns 1 when valid, 0 otherwise.
+        """Validate ``val`` against the entry's configured constraints and return 1 if valid, 0 otherwise.
+
+        Validation priority: (1) if the entry has a code dict, ``val`` must
+        appear as a key (accepts both raw string and integer-normalized forms);
+        (2) for ASCII/string types, ``val`` must be a non-empty alphanumeric
+        string and, if ``value_regex`` is set, must match it (concatenated
+        entries return the register count on success); (3) for all other types,
+        ``val`` is coerced to ``int`` and checked against ``[value_min,
+        value_max]``.  Logs a warning for non-convertible values and an error
+        for out-of-range integers; never raises.
         """
         code_dict: dict[str, str] = self.get_entry_code_dict(entry)
         if code_dict:
@@ -2084,21 +2238,24 @@ class protocol_settings:
 
         return 0
 
-    def safe_eval_expression(self, expression: str) -> int | float:
-        """Delegate to DataAdjustments.safe_eval_expression."""
-        return self._adjustments.safe_eval_expression(expression)
-
     def evaluate_expressions(self, expression: str, variables: dict[str, str | float | int]) -> list[str]:
-        """
-        Resolve dynamic register expressions and return a list of evaluated strings.
-        Supports variable substitution ([name]), range expansion ([x~y]), and
-        arithmetic evaluation ([expr]).
+        """Resolve a dynamic register expression and return the list of concrete register name strings it expands to.
+
+        Three transform passes are applied in order: (1) variable substitution —
+        ``[name]`` tokens are replaced with the matching value from ``variables``;
+        (2) range expansion — ``[x~y]`` tokens are expanded into one copy of the
+        expression per integer in ``[x, y]``, recursively; (3) arithmetic
+        evaluation — ``[expr]`` tokens containing only digits and operators are
+        replaced with their computed result via ``safe_eval_expression``.
+        Unresolvable tokens are left unchanged.
         """
 
         def evaluate_variables(expr: str) -> str:
+            """Replace ``[name]`` tokens with their values from ``variables``; leave unmatched tokens unchanged."""
             var_pattern: re.Pattern[str] = re.compile(r"\[([^\[\]]+)\]")
 
             def replace_vars(match: re.Match[str]) -> str:
+                """Return the variable's value as a string, or the original token if the name is not in ``variables``."""
                 var_name = match.group(1)
                 if var_name in variables:
                     return str(variables[var_name])
@@ -2107,6 +2264,7 @@ class protocol_settings:
             return var_pattern.sub(replace_vars, expr)
 
         def evaluate_ranges(expr: str) -> list[str]:
+            """Expand the first ``[x~y]`` range token in ``expr`` recursively, returning one string per integer in the range."""
             range_pattern: re.Pattern[str] = re.compile(r"\[.*?(?P<start>\d+)\s*~\s*(?P<end>\d+).*?\]")
             match: re.Match[str] | None = range_pattern.search(expr)
 
@@ -2127,12 +2285,14 @@ class protocol_settings:
             return results
 
         def evaluate_math(expr: str) -> str:
+            """Replace all ``[arithmetic_expr]`` tokens in ``expr`` with their computed numeric values."""
             math_pattern: re.Pattern[str] = re.compile(r"\[(?P<maths>[0-9\+\-\*\/%\(\)\.\s]+)\]")
 
             def replace_maths(match: re.Match[str]) -> str:
+                """Evaluate one arithmetic token; return the original token unchanged on any error."""
                 try:
                     maths: str | Any = match.group("maths")
-                    result: int | float = self.safe_eval_expression(maths)
+                    result: int | float = self._adjustments.safe_eval_expression(maths)
                     return str(result)
                 except Exception:
                     return match.group(0)
@@ -2143,15 +2303,21 @@ class protocol_settings:
         expanded: list[str] = evaluate_ranges(substituted)
         return [evaluate_math(r) for r in expanded]
 
-    def apply_range_formula(self, raw_value: float, logic: str) -> float:
-        """Delegate to DataAdjustments.apply_range_formula."""
-        return self._adjustments.apply_range_formula(raw_value, logic)
-
     def resolve_dynamic_registry_entries(self, live_values: dict[str, int | float | str]) -> None:
-        """
-        Resolve deferred dynamic register expressions using already-discovered
-        live register values. Only resolves entries whose dependency variables
-        are present in live_values.
+        """Attempt to resolve deferred dynamic register expressions using ``live_values``.
+        NOTE not implemented yet TODO as a full dependency resolution since the expected use case
+        is simple one-level variable substitution (e.g. register names like ``[prefix][1~3]`` where
+        ``prefix`` is defined in a static registry row and the range expands to concrete register names).
+        More complex cases with interdependent variables or multi-level nesting may require multiple calls to this
+        method as values become resolvable in stages, but should still resolve correctly as long as there are
+        no circular dependencies.
+
+        Iterates ``dynamic_registry_rows`` — rows whose register field contained
+        a ``[variable]`` expression that could not be resolved at load time.  For
+        each row, calls ``evaluate_expressions`` with the current ``live_values``
+        dict.  Rows that resolve successfully are removed from the deferred list;
+        rows that fail (missing variables or evaluation error) remain for the next
+        call.  Logs the count of newly resolved entries when any succeed.
         """
         if not self.dynamic_registry_rows:
             return
@@ -2177,7 +2343,13 @@ class protocol_settings:
             self._log.info(f"Resolved {resolved_count} dynamic registry entries")
 
     def reset_register_timestamps(self) -> None:
-        """Reset the next_read_timestamp values for all registry entries."""
+        """Reset ``next_read_timestamp`` to ``0.0`` for every entry in all loaded registry maps.
+
+        Forces all entries to be treated as immediately due on the next
+        ``calculate_registry_ranges`` call.  Used after a reconnect to ensure a
+        full re-read of all registers rather than waiting out the normal polling
+        intervals.
+        """
         for registry_type in Registry_Type:
             if registry_type in self.registry_map:
                 for entry in self.registry_map[registry_type]:

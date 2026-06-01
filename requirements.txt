@@ -17,4 +17,5 @@ watchdog>=4.0.0            # file watcher
 aiofiles>=23.2.1           # static file serving
 Pygments>=2.15.1           # for syntax highlighting in FastAPI docs
 influxdb3-python
-python-telegram-bot>=20.0   # for Telegram messaging support
+python-telegram-bot>=20.0  # for Telegram messaging support
+

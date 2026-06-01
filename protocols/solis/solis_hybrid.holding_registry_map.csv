@@ -1,0 +1,40 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note
+33000,model_no,Model number,,USHORT,,,R,,Hybrid inverter model number
+33001,dsp_version,DSP version,,USHORT,,,R,,DSP firmware version
+33002,hmi_version,HMI version,,USHORT,,,R,,HMI firmware version
+33003,protocol_version,Protocol version,,USHORT,,,R,,Solis protocol version
+33004~33019,serial_number,Serial number,,STRING,,,R,,Serial number
+33029,pv_total_energy_generation,PV total energy generation,kWh,UINT,,,R,,Lifetime PV energy generation
+33031,pv_current_month_energy_generation,PV current month energy generation,kWh,UINT,,,R,,Current month PV energy
+33033,pv_last_month_energy_generation,PV last month energy generation,kWh,UINT,,,R,,Previous month PV energy
+33035,pv_today_energy_generation,PV today energy generation,kWh,USHORT,,,R,,Daily PV energy
+33036,pv_yesterday_energy_generation,PV yesterday energy generation,kWh,USHORT,,,R,,Yesterday PV energy
+33037,pv_this_year_energy_generation,PV this year energy generation,kWh,UINT,,,R,,Current year PV energy
+33039,pv_last_year_energy_generation,PV last year energy generation,kWh,UINT,,,R,,Previous year PV energy
+33049,pv1_voltage,PV voltage 1,V,USHORT,,,R,,PV string 1 voltage
+33050,pv1_current,PV current 1,A,USHORT,,,R,,PV string 1 current
+33051,pv2_voltage,PV voltage 2,V,USHORT,,,R,,PV string 2 voltage
+33052,pv2_current,PV current 2,A,USHORT,,,R,,PV string 2 current
+33071,total_dc_power,Total DC power,W,UINT,,,R,,Total PV input power
+33121,battery_voltage,Battery voltage,V,USHORT,,,R,,Battery voltage
+33122,battery_current,Battery current,A,SHORT,,,R,,Battery current; sign convention is firmware-specific
+33123,battery_power,Battery power,W,INT,,,R,,Battery power
+33124,battery_soc,Battery SOC,%,USHORT,0-100,,R,,Battery state of charge
+33125,battery_soh,Battery SOH,%,USHORT,0-100,,R,,Battery state of health
+33126,battery_temperature,Battery temperature,C,SHORT,,,R,,Battery temperature
+33135,grid_voltage,Grid voltage,V,USHORT,,,R,,Grid voltage
+33136,grid_current,Grid current,A,SHORT,,,R,,Grid current
+33137,grid_power,Grid power,W,INT,,,R,,Import/export power; sign convention is firmware-specific
+33140,grid_frequency,Grid frequency,Hz,USHORT,,,R,,Grid frequency
+33149,backup_voltage,Backup voltage,V,USHORT,,,R,,Backup/EPS voltage
+33150,backup_current,Backup current,A,SHORT,,,R,,Backup/EPS current
+33151,backup_power,Backup power,W,INT,,,R,,Backup/EPS power
+43010,overcharge_soc,Overcharge SOC,%,USHORT,0-100,,R,,Control/status register; read-only in this map
+43011,overdischarge_soc,Overdischarge SOC,%,USHORT,0-100,,R,,Control/status register; read-only in this map
+43018,force_charge_soc,Force charge SOC,%,USHORT,0-100,,R,,Control/status register; read-only in this map
+43024,backup_soc,Backup SOC,%,USHORT,0-100,,R,,Backup reserve SOC
+43027,battery_force_charge_power_limitation,Battery force-charge power limitation,W,USHORT,,,R,,Read-only here; confirm before enabling writes
+43110,mode_switches,Mode switches,,16BIT_FLAGS,,,R,,Self-use/time-of-use/off-grid/reserve switch bitfield
+43141,time_charging_charge_current,Time-charging charge current,A,USHORT,,,R,,Read-only here; confirm before enabling writes
+43142,time_charging_discharge_current,Time-charging discharge current,A,USHORT,,,R,,Read-only here; confirm before enabling writes
+# Source: Solis Modbus documentation sensor tables. Hybrid inverters use 33xxx/34xxx/35xxx/43xxx ranges; write-capable controls are intentionally marked read-only until tested with MPG.,,,,,,,,,

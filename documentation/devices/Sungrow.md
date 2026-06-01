@@ -3,7 +3,7 @@
 > **Supported Models:** SG Series string inverters, SH5.0/6.0/8.0/10RT hybrids, SG350HX and related Sungrow families
 > **Protocol:** Modbus RTU over RS485 or Modbus TCP over Ethernet, model dependent
 > **Interface:** COM/RS485 port or Ethernet
-> **Status:** Device documentation added; MPG protocol folder exists but no Sungrow protocol JSON is currently committed
+> **Status:** Initial read-only MPG protocols available
 
 ---
 
@@ -24,7 +24,10 @@
 
 Sungrow inverters commonly support third-party monitoring through Modbus RTU over RS485 and, on many models, Modbus TCP over Ethernet. This guide documents the physical connection and MPG setup pattern for Sungrow equipment.
 
-Important MPG status: the repository contains a `protocols/sungrow/` folder, but it is currently empty. A Sungrow register map must be added before a `protocol_version` can be selected in MPG.
+MPG currently includes two read-only Sungrow input-register maps:
+
+- `sungrow_sg` for common SG-style string inverter telemetry
+- `sungrow_hybrid` for SH/RS/RT residential hybrid telemetry, including battery and grid-flow registers
 
 ---
 
@@ -32,14 +35,12 @@ Important MPG status: the repository contains a `protocols/sungrow/` folder, but
 
 | Model Family | Modbus RTU RS485 | Modbus TCP Ethernet | MPG Protocol |
 | --- | --- | --- | --- |
-| SGxxRT | Supported by Sungrow third-party compatibility docs | Supported | Not yet committed |
-| SGxxRS | Supported | Supported | Not yet committed |
-| SHxxRS | Supported | Supported | Not yet committed |
-| SHxxRT | Supported | Supported | Not yet committed |
-| SGxxCX / SGxxCX-P2 | Supported | Supported | Not yet committed |
-| SG350HX / related utility string inverters | RS485 available per product documentation | Model/accessory dependent | Not yet committed |
-
-Once a Sungrow JSON protocol is added under `protocols/sungrow/`, this guide should be updated with the exact `protocol_version`.
+| SGxxRT | Supported by Sungrow third-party compatibility docs | Supported | `sungrow_sg` |
+| SGxxRS | Supported | Supported | `sungrow_sg` |
+| SHxxRS | Supported | Supported | `sungrow_hybrid` |
+| SHxxRT | Supported | Supported | `sungrow_hybrid` |
+| SGxxCX / SGxxCX-P2 | Supported | Supported | Try `sungrow_sg`; verify live registers |
+| SG350HX / related utility string inverters | RS485 available per product documentation | Model/accessory dependent | Try `sungrow_sg`; utility models may need an extended map |
 
 ---
 
@@ -102,29 +103,37 @@ Network monitoring should be kept on the local LAN. Do not expose Modbus TCP dir
 
 ## 6. MPG Configuration
 
-This section is intentionally marked as pending because no Sungrow protocol JSON is currently present in the repository.
-
-Expected Modbus TCP shape after a protocol is added:
+### Modbus TCP - SG String Inverter
 
 ``` ini
 transport = modbus_tcp
 host = 192.168.1.50
 port = 502
 unit_id = 1
-protocol_version = sungrow_<map_name>
+protocol_version = sungrow_sg
 ```
 
-Expected RS485 shape after a protocol is added:
+### Modbus TCP - SH Hybrid Inverter
+
+``` ini
+transport = modbus_tcp
+host = 192.168.1.50
+port = 502
+unit_id = 1
+protocol_version = sungrow_hybrid
+```
+
+### Modbus RTU - RS485
 
 ``` ini
 transport = modbus_rtu
 port = /dev/ttyUSB0
 baud = 9600
 unit_id = 1
-protocol_version = sungrow_<map_name>
+protocol_version = sungrow_hybrid
 ```
 
-Replace `sungrow_<map_name>` with the actual protocol file name once it exists under `protocols/sungrow/`.
+Use `sungrow_sg` instead for SG string inverters. Both current protocol maps read input registers only, so MPG sends Modbus function code `0x04`.
 
 ---
 
@@ -132,11 +141,12 @@ Replace `sungrow_<map_name>` with the actual protocol file name once it exists u
 
 | Symptom | Likely Cause | Resolution |
 | --- | --- | --- |
-| MPG cannot load protocol | No Sungrow protocol JSON exists yet | Add a Sungrow register map under `protocols/sungrow/` |
+| MPG cannot load protocol | Wrong `protocol_version` | Use `sungrow_sg` or `sungrow_hybrid` |
 | Modbus TCP connection refused | Modbus TCP disabled or wrong port | Enable Modbus TCP and verify port `502` or configured port |
 | RS485 timeouts | A/B reversed or wrong COM pins | Confirm Sungrow pinout and swap A/B if needed |
 | Reads work from another tool but not MPG | Unit ID mismatch | Match MPG `unit_id` to inverter communication address |
 | Values differ by model | Different Sungrow register map | Use the register map for the exact inverter family |
+| Register reads are shifted by one | Vendor document uses one-based addressing | Try a live scan or adjust the map by one address for that firmware |
 
 ---
 
@@ -145,4 +155,8 @@ Replace `sungrow_<map_name>` with the actual protocol file name once it exists u
 - Sungrow third-party compatibility overview: <https://ger.sungrowpower.com/upload/file/20250212/EN_Third-party_Compatibility_Overview.pdf>
 - Sungrow SG350HX product documentation: <https://en.sungrowpower.com/productDetail/2305/string-inverter-sg350hx>
 - SmartgridOne Sungrow connection notes: <https://docs.eniris.io/en/Controller/Devices/PV-hybrid-and-battery-inverters/Sungrow/Sungrow%20Inverters>
-- `protocols/sungrow/` (currently empty)
+- OpenHAB Sungrow binding documentation: <https://www.openhab.org/addons/bindings/modbus.sungrow/>
+- Public Sungrow SH10RT Modbus register list: <https://gist.github.com/janispritzkau/277f94f28421e60308c9f99a736621fa>
+- Public Sungrow inverter mapping notes: <https://studylib.net/doc/28009104/sg3125hv-20---inverter-mapping-details>
+- `protocols/sungrow/sungrow_sg.json`
+- `protocols/sungrow/sungrow_hybrid.json`

@@ -1,0 +1,32 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note
+30000,model,Device model,,STRING32,,,R,,SUN2000 model string on supported firmware
+30015,serial_number,Serial number,,STRING32,,,R,,Device serial number on supported firmware
+30070,rated_power,Rated power,W,UINT,,,R,,Rated active power
+32000,state_1,State 1,,16BIT_FLAGS,,,R,,Huawei inverter state bitmask
+32002,operating_status,Operating status,,16BIT_FLAGS,,,R,,Operating status bitmask
+32008,alarm_1,Alarm 1,,16BIT_FLAGS,,,R,,Alarm word 1
+32009,alarm_2,Alarm 2,,16BIT_FLAGS,,,R,,Alarm word 2
+32010,alarm_3,Alarm 3,,16BIT_FLAGS,,,R,,Alarm word 3
+32016,pv1_voltage,PV1 voltage,0.1V,SHORT,,,R,,PV string 1 voltage
+32017,pv1_current,PV1 current,0.01A,SHORT,,,R,,PV string 1 current
+32018,pv2_voltage,PV2 voltage,0.1V,SHORT,,,R,,PV string 2 voltage
+32019,pv2_current,PV2 current,0.01A,SHORT,,,R,,PV string 2 current
+32020,pv3_voltage,PV3 voltage,0.1V,SHORT,,,R,,PV string 3 voltage
+32021,pv3_current,PV3 current,0.01A,SHORT,,,R,,PV string 3 current
+32022,pv4_voltage,PV4 voltage,0.1V,SHORT,,,R,,PV string 4 voltage
+32023,pv4_current,PV4 current,0.01A,SHORT,,,R,,PV string 4 current
+32064,input_power,Input power,0.001kW,INT,,,R,,Total PV input power
+32066,grid_voltage,Grid voltage,0.1V,USHORT,,,R,,Grid voltage
+32069,phase_a_voltage,Phase A voltage,0.1V,USHORT,,,R,,Phase A voltage on three-phase models
+32070,phase_b_voltage,Phase B voltage,0.1V,USHORT,,,R,,Phase B voltage on three-phase models
+32071,phase_c_voltage,Phase C voltage,0.1V,USHORT,,,R,,Phase C voltage on three-phase models
+32072,grid_current,Grid current,0.001A,INT,,,R,,Total grid current
+32078,active_power,Active power,0.001kW,INT,,,R,,AC active power
+32080,reactive_power,Reactive power,0.001kvar,INT,,,R,,AC reactive power
+32082,power_factor,Power factor,0.001,SHORT,-1000-1000,,R,,Power factor
+32085,grid_frequency,Grid frequency,0.01Hz,USHORT,,,R,,Grid frequency
+32086,efficiency,Efficiency,0.01%,USHORT,0-10000,,R,,Inverter efficiency
+32087,internal_temperature,Internal temperature,0.1C,SHORT,,,R,,Internal inverter temperature
+32106,daily_yield,Daily yield,0.01kWh,UINT,,,R,,Daily energy yield
+32114,total_yield,Total yield,0.01kWh,UINT,,,R,,Lifetime energy yield
+# Source: Huawei SUN2000 Modbus Interface Definitions public excerpts and Photomate SUN2000 Modbus definition list. Huawei firmware families vary; validate addresses against the exact SUN2000MA/MB/MC/ME document for the target model.,,,,,,,,,

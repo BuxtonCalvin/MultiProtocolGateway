@@ -1,0 +1,22 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note
+3,pv1_voltage,PV1 voltage,0.1V,USHORT,,,R,,PV string 1 voltage
+4,pv2_voltage,PV2 voltage,0.1V,USHORT,,,R,,PV string 2 voltage
+5,pv1_current,PV1 current,0.1A,USHORT,,,R,,PV string 1 current
+6,pv2_current,PV2 current,0.1A,USHORT,,,R,,PV string 2 current
+10,pv1_power,PV1 power,W,UINT,,,R,,PV string 1 active power
+12,pv2_power,PV2 power,W,UINT,,,R,,PV string 2 active power
+14,grid_voltage,Grid voltage,0.1V,USHORT,,,R,,Grid voltage
+15,grid_current,Grid current,0.1A,SHORT,,,R,,Grid current
+16,grid_power,Grid power,W,INT,,,R,,Grid port power; sign convention is firmware-specific
+17,grid_frequency,Grid frequency,0.01Hz,USHORT,,,R,,Grid frequency
+22,battery_power,Battery power,W,INT,,,R,,Battery active power
+24,battery_voltage,Battery voltage,0.1V,USHORT,,,R,,Battery voltage
+25,battery_current,Battery current,0.1A,SHORT,,,R,,Battery current
+28,battery_soc,Battery SOC,%,USHORT,0-100,,R,,Battery state of charge
+29,battery_temperature,Battery temperature,C,SHORT,,,R,,Battery temperature
+32,inverter_temperature,Inverter temperature,C,SHORT,,,R,,Inverter temperature
+40,daily_yield,Daily yield,0.1kWh,USHORT,,,R,,Daily energy yield
+42,total_yield,Total yield,0.1kWh,UINT,,,R,,Lifetime energy yield
+46,feed_in_power,Feed-in power,W,INT,,,R,,Meter/CT feed-in power
+48,consume_energy,Consume energy,Wh,UINT,,,R,,Consumption energy counter on supported firmware
+# Source: SolaX Modbus TCP/RTU protocol references and published SolaX X1/X3 Hybrid G4 Modbus profiles. SolaX generations vary; verify addresses against the V3.21 protocol for the target inverter.,,,,,,,,,

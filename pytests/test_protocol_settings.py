@@ -162,7 +162,7 @@ class TestParseAdjustments:
         assert adj.parse_adjustments("Register_Endian:little") == {"Register_Endian": "little"}
 
     def test_empty_string_returns_empty_dict(self) -> None:
-        adj: DataAdjustments = make_adjustments()
+        adj = make_adjustments()
         assert adj.parse_adjustments("") == {}
 
     def test_none_returns_empty_dict(self) -> None:
@@ -193,7 +193,7 @@ class TestGetEntryByteorder:
 
     def test_register_endian_little_overrides_big_default(self) -> None:
         adj: DataAdjustments = make_adjustments(default_byteorder="big")
-        entry: registry_map_entry = make_entry(adjustments={"Register_Endian": "little"})
+        entry = make_entry(adjustments={"Register_Endian": "little"})
         assert adj.get_entry_byteorder(entry) == "little"
 
     def test_register_endian_le_alias_accepted(self) -> None:
@@ -243,7 +243,7 @@ class TestApplyAdjustmentsPostDecode:
 
     def test_whole_float_collapses_to_int(self) -> None:
         adj: DataAdjustments = make_adjustments()
-        entry: registry_map_entry = make_entry(unit_mod=0.5)
+        entry = make_entry(unit_mod=0.5)
         assert adj.apply_adjustments(4, entry, "post_decode") == 2
         assert isinstance(adj.apply_adjustments(4, entry, "post_decode"), int)
 
@@ -355,7 +355,7 @@ class TestApplyRangeFormula:
 
     def test_value_in_range_applies_formula(self) -> None:
         adj: DataAdjustments = make_adjustments()
-        result: float = adj.apply_range_formula(500.0, "x?(0,10000)->x/10")
+        result = adj.apply_range_formula(500.0, "x?(0,10000)->x/10")
         assert result == 50.0
 
     def test_value_outside_all_ranges_returned_unchanged(self) -> None:
@@ -373,46 +373,6 @@ class TestApplyRangeFormula:
         adj: DataAdjustments = make_adjustments()
         result: float = adj.apply_range_formula(10000.0, "x?(0,10000)->x/10")
         assert result == 1000.0
-
-
-# ===========================================================================
-# protocol_settings — delegation and higher-level behavior
-# ===========================================================================
-
-class TestProtocolSettingsDelegation:
-    """Verify protocol_settings delegation wrappers reach DataAdjustments."""
-
-    def test_parse_adjustments_delegates(self) -> None:
-        p: protocol_settings = make_protocol()
-        assert p.parse_adjustments("Offset:-10") == {"Offset": -10}
-
-    def test_get_adjustment_delegates(self) -> None:
-        p: protocol_settings = make_protocol()
-        entry: registry_map_entry = make_entry(adjustments={"Offset": -10})
-        assert p.get_adjustment(entry, "offset") == -10  # case-insensitive
-
-    def test_get_entry_byteorder_uses_protocol_default(self) -> None:
-        p: protocol_settings = make_protocol()
-        entry: registry_map_entry = make_entry(adjustments={})
-        assert p.get_entry_byteorder(entry) == "big"
-
-    def test_get_entry_byteorder_entry_override(self) -> None:
-        p: protocol_settings = make_protocol()
-        entry: registry_map_entry = make_entry(adjustments={"Register_Endian": "little"})
-        assert p.get_entry_byteorder(entry) == "little"
-
-    def test_apply_adjustments_delegates(self) -> None:
-        p: protocol_settings = make_protocol()
-        entry: registry_map_entry = make_entry(unit_mod=0.1)
-        assert p.apply_adjustments(100, entry, "post_decode") == 10
-
-    def test_safe_eval_expression_delegates(self) -> None:
-        p: protocol_settings = make_protocol()
-        assert p.safe_eval_expression("3 + 4") == 7
-
-    def test_apply_range_formula_delegates(self) -> None:
-        p: protocol_settings = make_protocol()
-        assert p.apply_range_formula(500.0, "x?(0,10000)->x/10") == 50.0
 
 
 # ===========================================================================

@@ -138,12 +138,11 @@ Common alternative names are also accepted: `INT16` → `SHORT`, `UINT16` → `U
 
 ### Byte Order
 
-Most Modbus devices transmit multi-byte values in big-endian order, which is the default. When a register uses non-standard byte order, append a suffix to the data type:
+Most Modbus devices transmit multi-byte values in big-endian order, which is the default. When a register uses non-standard byte order, place a json command in the adjustments column :
 
-| Suffix | Meaning | Example |
-| --- | --- | --- |
-| `_BE` | Big-endian | `ASCII_BE` |
-| `_LE` | Little-endian | `UINT_LE` |
+```ini
+{"Register_Endian":"little"}
+```
 
 The JSON descriptor's `byteorder` field sets the default for all registers in the protocol. An individual register's suffix overrides the protocol default.
 
@@ -294,7 +293,7 @@ To create a fully custom protocol — or a fork of an existing one that won't be
 
 ```bash
 # Fork an existing protocol
-cp protocols/eg4/eg4_v58.json               protocols/eg4/eg4_v58.custom.json
+cp protocols/eg4/eg4_v58.json                      protocols/eg4/eg4_v58.custom.json
 cp protocols/eg4/eg4_v58.input_registry_map.csv    protocols/eg4/eg4_v58.input_registry_map.custom.csv
 cp protocols/eg4/eg4_v58.holding_registry_map.csv  protocols/eg4/eg4_v58.holding_registry_map.custom.csv
 ```
@@ -481,30 +480,60 @@ Mask and screen are mutually exclusive per register — enabling one automatical
 
 MPG ships with pre-built protocols for the following devices. All protocols are in the `protocols/` directory.
 
-| Protocol Name | Device |
-| --- | --- |
-| `eg4_v58` | EG4 inverters |
-| `eg4_3000ehv_v1` | EG4 3000EHV inverters |
-| `eg4_18kpv` | EG4 18KPV inverters (Modbus TCP) |
-| `eg4_ll_s_rs485` | EG4 LL-S battery (RS-485) |
-| `growatt_v0.14` | Growatt inverters (2020+) |
-| `growatt_bms_canbus_v1.04` | Growatt BMS (CAN bus) |
-| `growatt_bms_rs485_1xsxxp_ess_v2.01` | Growatt BMS (RS-485) |
-| `sigineer_v0.11` | Sigineer solar inverters |
-| `solark_v1.1` | Sol-Ark 8K/12K inverters |
-| `srne_v1.7` | SRNE inverters (v1.7) |
-| `srne_v1.96` | SRNE inverters (v1.96) |
-| `srne_v3.9` | SRNE inverters (v3.9) |
-| `pace_bms_v1.3` | PACE BMS (RS-485) |
-| `pylon_can` | Pylon/Pylontech (CAN bus) |
-| `pylon_rs485_v3.3` | Pylon/Pylontech (RS-485 v3.3) |
-| `victron_gx_3.3` | Victron GX devices |
-| `victron_gx_generic_canbus` | Victron GX (CAN bus) |
-| `voltronic_bms_v1.1` | Voltronic BMS |
-| `voltronic_bms_2020_03_25` | Voltronic BMS (2020 variant) |
-| `sma_sunny_island_v1` | SMA Sunny Island |
-| `next_power_victor_nm_re` | Next Power Victor NM RE |
-| `hdhk_16ch_ac_module` | HDHK 16-channel AC power monitor |
+| Protocol Name | Device | Transport |
+| --- | --- | --- |
+| `apsystems_ecu_sunspec` | APsystems ECU SunSpec gateway | Modbus TCP |
+| `deye_sunsynk` | Deye / Sunsynk hybrid inverters | Modbus |
+| `deye_sunsynk_hybrid` | Deye / Sunsynk hybrid inverter extended map | Modbus |
+| `eg4_18kpv` | EG4 18KPV inverter | Modbus |
+| `eg4_3000ehv_v1` | EG4 3000EHV inverter | Modbus RTU |
+| `eg4_gridboss_re` | EG4 GridBOSS / related equipment | Modbus RTU |
+| `eg4_ll_s` | EG4 LL-S battery | Modbus RTU |
+| `eg4_v58` | EG4 6000XP / 12000XP / 18KPV family | Modbus |
+| `enphase_iq_gateway_sunspec` | Enphase IQ Gateway SunSpec | Modbus |
+| `foxess_h1_lan` | FoxESS H1 LAN / KH / H3-style holding-register map | Modbus TCP |
+| `fronius_sunspec` | Fronius SunSpec inverters | Modbus |
+| `growatt_2020_v1.24` | Growatt inverter protocol v1.24 | Modbus RTU |
+| `growatt_bms_canbus_v1.04` | Growatt BMS CAN bus v1.04 | CAN bus |
+| `growatt_bms_rs485_1xsxxp_ess_v2.01` | Growatt BMS RS-485 1xSxxP ESS v2.01 | Modbus RTU |
+| `growatt_v0.14` | Growatt SPF / off-grid inverter protocol v0.14 | Modbus RTU |
+| `hdhk_16ch_ac_module` | HDHK 16-channel AC power monitor | Modbus RTU |
+| `huawei_sun2000` | Huawei SUN2000 inverters | Modbus TCP |
+| `next_power_victor_nm_re` | Next Power Victor NM RE | Modbus RTU |
+| `pace_bms_v1.3` | PACE BMS RS-485 v1.3 | Modbus RTU |
+| `pylon_can` | Pylon / Pylontech low-voltage CAN bus | CAN bus |
+| `pylon_rs485_v3.3` | Pylon / Pylontech low-voltage RS-485 v3.3 | Pylon serial |
+| `sigineer_v0.11` | Sigineer solar inverter / charger v0.11 | Modbus RTU |
+| `sma_energy_meter_speedwire` | SMA Energy Meter Speedwire | Modbus RTU |
+| `sma_modbus_rtu` | SMA CAN / Modbus RTU map | CAN bus |
+| `sma_sunny_home_manager` | SMA Sunny Home Manager | Modbus RTU |
+| `sma_sunny_island` | SMA Sunny Island | Modbus RTU |
+| `sma_sunny_island_v1` | SMA Sunny Island v1 | Modbus RTU |
+| `sma_sunnyboy_tripower` | SMA Sunny Boy / Tripower | Modbus RTU |
+| `sma_tripower_storage_hybrid` | SMA Tripower Storage Hybrid | Modbus RTU |
+| `sok_sk48v100_pace_bms` | SOK SK48V100 / PACE BMS | Modbus RTU |
+| `solaredge_sunspec` | SolarEdge SunSpec inverters | Modbus |
+| `solax_hybrid_g4` | SolaX X1/X3 Hybrid G4-style inverters | Modbus TCP |
+| `solark_hybrid` | Sol-Ark hybrid inverter | Modbus RTU |
+| `solark_v1.1` | Sol-Ark Modbus v1.1 | Modbus RTU |
+| `solis_hybrid` | Solis / Ginlong hybrid inverters | Modbus TCP |
+| `solis_string` | Solis / Ginlong string inverters | Modbus TCP |
+| `srne_2021_v1.96` | SRNE energy-storage inverter v1.96 | Modbus RTU |
+| `srne_v1.7` | SRNE energy-storage inverter v1.7 | Modbus RTU |
+| `srne_v3.9` | SRNE controller / inverter v3.9 | Modbus RTU |
+| `sungrow_hybrid` | Sungrow SH / RS / RT hybrid inverters | Modbus TCP |
+| `sungrow_sg` | Sungrow SG-series string inverters | Modbus TCP |
+| `victron_bmv_battery_monitor` | Victron BMV battery monitor | Modbus RTU |
+| `victron_gx_generic_canbus` | Victron GX generic CAN bus | CAN bus |
+| `victron_gx_v3.3` | Victron GX v3.3 | Modbus RTU |
+| `victron_mk3usb_vebus` | Victron MK3-USB VE.Bus | Modbus RTU |
+| `victron_multiplus_quattro` | Victron MultiPlus / Quattro | Modbus RTU |
+| `victron_phoenix_inverter` | Victron Phoenix inverter | Modbus RTU |
+| `victron_smartsolar_mppt` | Victron SmartSolar MPPT | Modbus RTU |
+| `victron_vedirect_serial` | Victron VE.Direct serial devices | VE.Direct serial |
+| `victron_venus_gx_system` | Victron Venus GX system | Modbus RTU |
+| `voltronic_bms_2020_03_25` | Voltronic BMS 2020-03-25 | Modbus RTU |
+| `voltronic_bms_v1.1` | Voltronic BMS v1.1 | Modbus RTU |
 
 For a community-maintained list of tested devices and firmware versions, see [`documentation/usage/devices_and_protocols.csv`](devices_and_protocols.csv).
 

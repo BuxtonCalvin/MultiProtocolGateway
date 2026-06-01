@@ -1,0 +1,26 @@
+{
+  "transport": "modbus_tcp",
+  "baud": "9600",
+  "batch_size": "40",
+  "send_holding_register": "false",
+  "send_input_register": "true",
+  "send_coil_register": "false",
+  "send_discrete_register": "false",
+
+  "output_type_codes": {
+    "0": "single-phase",
+    "1": "three-phase four-wire",
+    "2": "three-phase three-wire"
+  },
+
+  "work_state_codes": {
+    "0": "standby",
+    "1": "startup",
+    "2": "running",
+    "3": "fault",
+    "4": "stop",
+    "5": "maintenance",
+    "8": "standby",
+    "64": "running"
+  }
+}

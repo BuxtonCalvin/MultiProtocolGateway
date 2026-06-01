@@ -1,0 +1,32 @@
+{
+  "transport": "modbus_tcp",
+  "baud": "9600",
+  "batch_size": "40",
+  "send_holding_register": "true",
+  "send_input_register": "false",
+  "send_coil_register": "false",
+  "send_discrete_register": "false",
+
+  "model_id_codes": {
+    "0": "unknown / model-specific"
+  },
+
+  "state_1_codes": {
+    "b0": "standby",
+    "b1": "grid-connected",
+    "b2": "grid-connected normally",
+    "b3": "grid-connected with derating due to power rationing",
+    "b4": "grid-connected with derating due to internal causes",
+    "b5": "normal stop",
+    "b6": "stop due to fault",
+    "b7": "stop due to power rationing",
+    "b8": "shutdown",
+    "b9": "spot check"
+  },
+
+  "operating_status_codes": {
+    "b0": "unlocked",
+    "b1": "PV connected",
+    "b2": "DSP data collection active"
+  }
+}

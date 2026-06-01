@@ -1,0 +1,81 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note
+4950,protocol_number,Protocol number,,UINT,,,R,,Residential hybrid protocol identifier
+4952,protocol_version,Protocol version,,UINT,,,R,,Residential hybrid protocol version
+4954~4968,arm_software_version,ARM software version,,STRING,,,R,,15-register firmware string on supported models
+4969~4983,dsp_software_version,DSP software version,,STRING,,,R,,15-register firmware string on supported models
+4990~4999,serial_number,Serial number,,STRING,,,R,,10-register serial number string
+5000,device_type_code,Device type code,,USHORT,,,R,,Sungrow model/device type code
+5001,nominal_output_power,Nominal output power,100W,USHORT,,,R,,Nameplate active power
+5002,output_type,Output type,,USHORT,"{""0"": ""single-phase"", ""1"": ""three-phase four-wire"", ""2"": ""three-phase three-wire""}",,R,,See output_type_codes in JSON
+5003,daily_output_energy,Daily output energy,0.1kWh,USHORT,,,R,,Daily AC output energy
+5004,total_output_energy,Total output energy,0.1kWh,UINT,,,R,,Lifetime AC output energy
+5008,inside_temperature,Inside temperature,0.1C,SHORT,,,R,,Internal inverter temperature
+5009,total_apparent_power,Total apparent power,VA,UINT,,,R,,Total AC apparent power
+5011,mppt_1_voltage,MPPT 1 voltage,0.1V,USHORT,,,R,,PV MPPT 1 voltage
+5012,mppt_1_current,MPPT 1 current,0.1A,USHORT,,,R,,PV MPPT 1 current
+5013,mppt_2_voltage,MPPT 2 voltage,0.1V,USHORT,,,R,,PV MPPT 2 voltage
+5014,mppt_2_current,MPPT 2 current,0.1A,USHORT,,,R,,PV MPPT 2 current
+5017,total_dc_power,Total DC power,W,UINT,,,R,,Total PV/DC power
+5019,phase_a_voltage,Phase A voltage,0.1V,USHORT,,,R,,Grid phase A voltage
+5020,phase_b_voltage,Phase B voltage,0.1V,USHORT,,,R,,Grid phase B voltage
+5021,phase_c_voltage,Phase C voltage,0.1V,USHORT,,,R,,Grid phase C voltage
+5031,total_active_power_inverter,Total active power,W,UINT,,,R,,Inverter AC active power
+5033,reactive_power,Reactive power,var,INT,,,R,,Signed reactive power
+5035,power_factor,Power factor,0.001,SHORT,-1000-1000,,R,,Power factor
+5036,grid_frequency,Grid frequency,0.1Hz,USHORT,,,R,,Grid frequency
+5622,export_limit_min,Export limit minimum,10W,USHORT,,,R,,Minimum export limit supported by inverter
+5623,export_limit_max,Export limit maximum,10W,USHORT,,,R,,Maximum export limit supported by inverter
+5628,bdc_rated_power,BDC rated power,100W,USHORT,,,R,,Battery DC converter rated power
+5635,max_charging_current_bms,Max charging current BMS,A,USHORT,,,R,,BMS charge-current limit
+5636,max_discharging_current_bms,Max discharging current BMS,A,USHORT,,,R,,BMS discharge-current limit
+13000,system_state,System state,,USHORT,"{""2"": ""stop"", ""8"": ""standby"", ""16"": ""initial standby"", ""32"": ""startup"", ""64"": ""running"", ""256"": ""fault"", ""1024"": ""running in maintain mode"", ""2048"": ""running in forced mode"", ""4096"": ""running in off-grid mode"", ""9473"": ""restarting"", ""16384"": ""running in external EMS mode""}",,R,,Main inverter system state
+13001,running_state,Running state,,16BIT_FLAGS,"{""b0"": ""PV generating power"", ""b1"": ""battery charging"", ""b2"": ""battery discharging"", ""b3"": ""positive load"", ""b4"": ""feed-in to grid"", ""b5"": ""importing from grid"", ""b7"": ""negative load""}",,R,,Running-state bitmask
+13002,daily_pv_generation,Daily PV generation,0.1kWh,USHORT,,,R,,PV generation today
+13003,total_pv_generation,Total PV generation,0.1kWh,UINT,,,R,,Lifetime PV generation
+13005,daily_export_energy_from_pv,Daily export energy from PV,0.1kWh,USHORT,,,R,,PV export energy today
+13006,total_export_energy_from_pv,Total export energy from PV,0.1kWh,UINT,,,R,,Lifetime PV export energy
+13008,load_power,Load power,W,INT,,,R,,Signed load power
+13010,export_power,Export power,W,INT,,,R,,Signed grid export/import power; sign convention is firmware-dependent
+13012,daily_charge_energy_from_pv,Daily charge energy from PV,0.1kWh,USHORT,,,R,,PV-to-battery charge energy today
+13013,total_charge_energy_from_pv,Total charge energy from PV,0.1kWh,UINT,,,R,,Lifetime PV-to-battery charge energy
+13015,co2_reduction,CO2 reduction,0.1kg,UINT,,,R,,Estimated CO2 reduction
+13017,daily_direct_energy_consumption,Daily direct energy consumption,0.1kWh,USHORT,,,R,,Direct PV consumption today
+13018,total_direct_energy_consumption,Total direct energy consumption,0.1kWh,UINT,,,R,,Lifetime direct PV consumption
+13020,battery_voltage,Battery voltage,0.1V,USHORT,,,R,,Battery pack voltage
+13021,battery_current,Battery current,0.1A,USHORT,,,R,,Battery current; sign convention is firmware-dependent
+13022,battery_power,Battery power,W,USHORT,,,R,,Battery power; sign convention is firmware-dependent
+13023,battery_level,Battery level,0.1%,USHORT,0-1000,,R,,Battery state of charge
+13024,battery_state_of_health,Battery state of health,0.1%,USHORT,0-1000,,R,,Battery SOH
+13025,battery_temperature,Battery temperature,0.1C,SHORT,,,R,,Battery temperature
+13026,daily_battery_discharge_energy,Daily battery discharge energy,0.1kWh,USHORT,,,R,,Battery discharge energy today
+13027,total_battery_discharge_energy,Total battery discharge energy,0.1kWh,UINT,,,R,,Lifetime battery discharge energy
+13029,self_consumption_of_today,Self-consumption today,0.1%,USHORT,0-1000,,R,,Daily self-consumption percentage
+13030,grid_state,Grid state,,USHORT,"{""85"": ""on-grid"", ""170"": ""off-grid""}",,R,,Grid connection state
+13031,phase_a_current,Phase A current,0.1A,SHORT,,,R,,Grid phase A current
+13032,phase_b_current,Phase B current,0.1A,SHORT,,,R,,Grid phase B current
+13033,phase_c_current,Phase C current,0.1A,SHORT,,,R,,Grid phase C current
+13034,total_active_power,Total active power,W,INT,,,R,,Signed total active power
+13036,daily_import_energy,Daily import energy,0.1kWh,USHORT,,,R,,Grid import energy today
+13037,total_import_energy,Total import energy,0.1kWh,UINT,,,R,,Lifetime grid import energy
+13039,battery_capacity,Battery capacity,,USHORT,,,R,,Unit varies by battery type: 0.1 kWh or Ah
+13040,daily_charge_energy,Daily charge energy,0.1kWh,USHORT,,,R,,Battery charge energy today
+13041,total_charge_energy,Total charge energy,0.1kWh,UINT,,,R,,Lifetime battery charge energy
+13043,drm_state,DRM state,,USHORT,,,R,,Demand response mode state
+13045,daily_export_energy,Daily export energy,0.1kWh,USHORT,,,R,,Grid export energy today
+13046,total_export_energy,Total export energy,0.1kWh,UINT,,,R,,Lifetime grid export energy
+13050,inverter_alarm,Inverter alarm,,32BIT_FLAGS,,,R,,Inverter alarm bitmask
+13052,grid_side_fault,Grid-side fault,,32BIT_FLAGS,,,R,,Grid-side fault bitmask
+13054,system_fault_1,System fault 1,,32BIT_FLAGS,,,R,,System fault bitmask 1
+13056,system_fault_2,System fault 2,,32BIT_FLAGS,,,R,,System fault bitmask 2
+13058,dc_side_fault,DC-side fault,,32BIT_FLAGS,,,R,,DC-side fault bitmask
+13060,permanent_fault,Permanent fault,,32BIT_FLAGS,,,R,,Permanent fault bitmask
+13062,bdc_side_fault,BDC-side fault,,32BIT_FLAGS,,,R,,Battery DC converter fault bitmask
+13064,bdc_side_permanent_fault,BDC-side permanent fault,,32BIT_FLAGS,,,R,,Battery DC converter permanent fault bitmask
+13066,battery_fault,Battery fault,,32BIT_FLAGS,,,R,,Battery fault bitmask
+13068,battery_alarm,Battery alarm,,32BIT_FLAGS,,,R,,Battery alarm bitmask
+13070,bms_alarm,BMS alarm,,32BIT_FLAGS,,,R,,BMS alarm bitmask
+13072,bms_protection,BMS protection,,32BIT_FLAGS,,,R,,BMS protection bitmask
+13074,bms_fault_1,BMS fault 1,,32BIT_FLAGS,,,R,,BMS fault bitmask 1
+13076,bms_fault_2,BMS fault 2,,32BIT_FLAGS,,,R,,BMS fault bitmask 2
+13078,bms_alarm_2,BMS alarm 2,,32BIT_FLAGS,,,R,,BMS alarm bitmask 2
+# Source notes: residential hybrid map based on public Sungrow SH10RT/SH-series register lists and OpenHAB's binding notes for the Sungrow residential hybrid protocol. Holding/control registers are intentionally omitted until write behavior is tested in MPG.,,,,,,,,,

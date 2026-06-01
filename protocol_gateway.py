@@ -87,6 +87,15 @@ class CustomConfigParser(ConfigParser):
 
     """
     def get(self, section, option, *args, **kwargs) -> str:
+        """Read a string value from the config, with alias support and comment stripping.
+
+        ``option`` may be a single key name or a list of candidate names; when a
+        list is given, each name is tried in order and the first match wins.
+        ``fallback`` is extracted and applied manually so that a missing key
+        without a fallback raises ``NoOptionError`` naming the first candidate
+        rather than silently returning ``None``.  Inline ``#`` comments are
+        stripped from the returned value before it is returned.
+        """
         fallback = None
         value = None
 
@@ -97,6 +106,7 @@ class CustomConfigParser(ConfigParser):
 
         # Helper to safely call the parent get method
         def safe_get(sect, opt) -> str | None:
+            """Call the parent ``ConfigParser.get`` and return ``None`` on any missing-key error."""
             try:
                 return super(CustomConfigParser, self).get(sect, opt, *args, **kwargs)
             except (NoOptionError, NoSectionError):
@@ -133,14 +143,31 @@ class CustomConfigParser(ConfigParser):
         return value
     # because using get, None is not reachable, so removed and type checker is happy.
     def getint(self, section: str, option: str | list[str], *args: Any, **kwargs: Any ) -> int:
+        """Read a config value and return it as an ``int``.
+
+        Delegates to ``get``, inheriting alias-list and fallback support.
+        Raises ``ValueError`` if the resolved string cannot be converted to an integer.
+        """
         value: str = self.get(section, option, *args, **kwargs)
         return int(value)
 
     def getfloat(self, section: str, option: str | list[str], *args: Any, **kwargs: Any ) -> float:
+        """Read a config value and return it as a ``float``.
+
+        Delegates to ``get``, inheriting alias-list and fallback support.
+        Raises ``ValueError`` if the resolved string cannot be converted to a float.
+        """
         value: str = self.get(section, option, *args, **kwargs)
         return float(value)
 
     def getboolean(self, section: str, option: str | list[str], *args: Any, **kwargs: Any) -> bool:
+        """Read a config value and return it as a ``bool``.
+
+        Delegates to ``get``, inheriting alias-list and fallback support.
+        Accepts ``true/yes/on/1/enable/enabled`` as ``True`` and
+        ``false/no/off/0/disable/disabled`` as ``False`` (case-insensitive).
+        Raises ``ValueError`` for any other string.
+        """
         value: str = self.get(section, option, *args, **kwargs)
         value_str: str = value.lower().strip()
 
@@ -174,6 +201,12 @@ class ScrapeGroup:
     """
 
     def __init__(self, primary: transport_base) -> None:
+        """Initialise a single-member group with ``primary`` as the initial sole member.
+
+        ``primary`` will be promoted or replaced by a faster member if
+        ``add_member`` is subsequently called with a transport whose
+        ``read_interval`` is shorter.
+        """
         self.primary: transport_base = primary
         self.members: list[transport_base] = [primary]
         # When each member last had its data forwarded to its bridges
@@ -182,6 +215,13 @@ class ScrapeGroup:
         }
 
     def add_member(self, transport: transport_base) -> None:
+        """Add ``transport`` to this group and promote it to primary if it has the shortest read interval.
+
+        A transport with a shorter ``read_interval`` drives more frequent scrapes,
+        so it becomes the primary to ensure no member is starved.  Transports with
+        ``read_interval <= 0`` (bridges / write-only) are appended but never
+        promoted to primary.
+        """
         self.members.append(transport)
         self._member_last_forward[transport.transport_name] = 0.0
         # Primary is always the member with the shortest read_interval (most frequent).
@@ -206,6 +246,11 @@ class ScrapeGroup:
         ]
 
     def mark_forwarded(self, transport: transport_base, now: float) -> None:
+        """Record ``now`` as the last time ``transport``'s data was forwarded to its bridges.
+
+        Used by ``members_due`` to determine when a member's ``read_interval``
+        has elapsed and it is eligible to receive the next scrape result.
+        """
         self._member_last_forward[transport.transport_name] = now
 
 @dataclass
@@ -243,12 +288,16 @@ class Protocol_Gateway:
 
     @classmethod
     def _setup_logging(cls, cfg: ConfigParser) -> None:
-        """
-        created to eliminate multi gig log file sizes in docker as logging.StreamHandler(sys.stdout) results in a
-        json file that can quickly grow quiet large.  This gives some control over logging params
+        """Configure the root logger from the ``[logging]`` section of ``cfg``. Class-level no-op after first call.
 
-        Args:
-            cfg : passed the config.cfg file for settings.
+        Reads ``level``, ``log_dir``, ``log_file``, ``rotation``, ``backup_count``,
+        ``when``, ``interval``, and ``max_bytes`` from ``[logging]``, falling back
+        to ``[general].log_level`` and sensible defaults where keys are absent.
+        Supports three rotation strategies: ``weekly`` (``TimedRotatingFileHandler``
+        on a configurable weekday), ``daily`` (every 24 hours), and ``size``
+        (``RotatingFileHandler`` with a byte cap).  Any other value falls back to
+        a plain ``StreamHandler``.  Optionally adds a second console handler when
+        ``[logging].console = true``.
         """
         if cls._logging_initialized:
             return
@@ -344,8 +393,10 @@ class Protocol_Gateway:
 
     @staticmethod
     def _compact_thread_label(label: str, max_length: int = 80) -> str:
-        """
-        Keep debug thread labels readable and bounded for debuggers/OS views.
+        """Truncate ``label`` to ``max_length`` characters, appending ``...`` if truncated.
+
+        Keeps thread names visible in debugger thread lists and OS views within
+        a predictable width.  Labels at or below ``max_length`` are returned unchanged.
         """
         if len(label) <= max_length:
             return label
@@ -353,21 +404,32 @@ class Protocol_Gateway:
 
     @staticmethod
     def _base_thread_name(thread_name: str) -> str:
-        """
-        Strip any temporary bracketed task suffix from a worker thread name.
+        """Return the stable base name of a worker thread by stripping any trailing ``[task]`` suffix.
+
+        Worker threads are temporarily renamed to ``BaseName [task_label]`` by
+        ``_run_with_thread_task_name``.  This method reverses that so the
+        original pool name can be restored after the task completes.
         """
         return thread_name.split(" [", 1)[0]
 
     @staticmethod
     def _display_transport_name(transport_name: str) -> str:
-        """
-        Shorten transport section names for debugger readability.
+        """Strip the ``transport.`` config-section prefix from ``transport_name`` for compact display.
+
+        Config section names follow the pattern ``transport.<name>``.  Removing
+        the prefix keeps thread labels and log messages short while still
+        uniquely identifying the transport.
         """
         return transport_name.removeprefix("transport.")
 
     def _thread_task_label(self, read_mode: str, transport_names: list[str]) -> str:
-        """
-        Build a human-readable task label for pooled worker threads.
+        """Build a compact, human-readable task label from a list of transport names.
+
+        Strips the ``transport.`` prefix from each name for brevity, joins them
+        with commas, and truncates the result to the ``_compact_thread_label``
+        limit.  Used as the bracketed suffix in worker thread names so debugger
+        views show which transports a pooled thread is currently serving.
+        ``read_mode`` is accepted for interface symmetry but not used.
         """
         del read_mode
         joined_names = ", ".join(
@@ -376,9 +438,13 @@ class Protocol_Gateway:
         return self._compact_thread_label(joined_names)
 
     def _run_with_thread_task_name(self, task_label: str, fn, *args, **kwargs):
-        """
-        Temporarily rename a pooled worker thread so debugger views show the
-        transport currently occupying it, then restore the base worker name.
+        """Execute ``fn(*args, **kwargs)`` on the current thread with a temporary task-specific name.
+
+        Appends ``[task_label]`` to the current worker thread's base name before
+        calling ``fn``, then restores the original base name in a ``finally``
+        block regardless of whether ``fn`` raises.  This makes it possible to
+        identify which transport a pooled thread is serving in debugger and
+        OS-level thread views without permanently renaming the worker.
         """
         thread = threading.current_thread()
         base_name = self._base_thread_name(thread.name)
@@ -392,7 +458,19 @@ class Protocol_Gateway:
     config_file : Path
 
     def __init__(self, config_file : str) -> None:
+        """Initialise the gateway: load config, set up logging and messaging, instantiate and connect all transports.
 
+        Resolves ``config_file`` relative to ``config/`` inside the project
+        root, falling back to ``config/config.cfg`` if the requested file does
+        not exist.  Reads the ``[general]`` section for ``read_mode``
+        (``sequential`` | ``concurrent`` | ``interleaved``) and
+        ``sequential_delay``, then iterates every ``[transport.*]`` section to
+        dynamically import and instantiate the correct transport class.  After
+        all transports are constructed and connected, bridge links are wired
+        bidirectionally, reconnect hooks are attached, and scrape groups are
+        built.  Thread-pool executors are created for ``concurrent`` and
+        ``interleaved`` modes; ``sequential`` mode uses no executor.
+        """
         self.__log: logging.Logger = logging.getLogger(__name__)
 
         # Establish the parent root folder where the gateway script is located.
@@ -542,8 +620,15 @@ class Protocol_Gateway:
                     f"scrape_interval={group.scrape_interval}s"
                 )
 
-    # scalar value from process_register_ushort/bytes
     def on_message( self, from_transport: transport_base, entry: registry_map_entry, data: int | float | str) -> None:
+        """Handle a single decoded register value and write it immediately to the paired bridge.
+
+        Called by a scraper transport as each register is decoded, before a full
+        cycle is complete.  Walks ``__transports`` to find the first transport
+        that is bridged to ``from_transport`` (in either direction) and calls
+        its ``write_data`` with a single-key dict ``{entry.variable_name: data}``.
+        Skips ``from_transport`` itself and stops after the first matching bridge.
+        """
         for to_transport in self.__transports:
             if to_transport is from_transport:
                 continue
@@ -668,16 +753,25 @@ class Protocol_Gateway:
             self.__concurrent_futures[group_key] = future
 
     def _are_bridged(self, a: transport_base, b: transport_base) -> bool:
+        """Return ``True`` if transport ``a`` and ``b`` are linked as a bridge pair in either direction.
+
+        A bridge relationship exists when ``b``'s transport name appears in
+        ``a.bridges``, or ``a``'s transport name appears in ``b.bridges``.
+        """
         return (
             b.transport_name in a.bridges
             or a.transport_name in b.bridges
         )
 
     def reconnect_upstream_bridge(self, transport_id: str) -> None:
-        """
-        Reconnect the specific upstream transport identified by transport_id.
-        transport_id is the transport_name of the stale scraper, as passed
-        by a bridge's stale detection via request_upstream_reconnect.
+        """Force a reconnect of the scraper transport identified by ``transport_id``.
+
+        Called by a bridge transport when its stale-data detection fires, passing
+        the ``transport_name`` of the upstream scraper that has stopped producing
+        fresh data.  Resets ``connected`` to ``False`` and ``last_read_time`` to
+        ``0.0`` so the main loop treats the transport as disconnected and
+        reconnects it at the next tick.  Logs a warning if ``transport_id`` does
+        not match any known transport.
         """
         target: transport_base | None = next(
             (t for t in self.__transports if t.transport_name == transport_id), None )
@@ -692,6 +786,15 @@ class Protocol_Gateway:
 
     # init the variable request_upstream_reconnect in the bridge __init__.  If it goes true during stale detection, reconnect routine triggers.
     def _wire_reconnect_hooks(self) -> None:
+        """Attach the gateway's ``reconnect_upstream_bridge`` callback to every bridge transport.
+
+        Iterates all transports and identifies those acting as bridges — i.e.
+        other transports list them by name in their ``bridges`` attribute.  For
+        each such transport that exposes a ``request_upstream_reconnect``
+        attribute (set to a placeholder in the bridge ``__init__``), replaces
+        that placeholder with the gateway's ``reconnect_upstream_bridge`` method
+        so the bridge can trigger a scraper reconnect when it detects stale data.
+        """
         for transport in self.__transports:
             # Only wire on transports that declare themselves as bridges
             # i.e. they have no read_interval and other transports point at them
@@ -843,6 +946,12 @@ class Protocol_Gateway:
             transport._bus_lock = bus_locks[wire_key]
 
         def run_transport(state: TransportState) -> TransportState:
+            """Drain ``state.transport.read_data_iter()`` to completion and update ``state`` with the outcome.
+
+            On success sets ``state.completed_cleanly = True``.  On exception,
+            records the error, marks the cycle incomplete on the transport, and
+            clears ``_bus_lock`` so the lock is not held after failure.
+            """
             try:
                 for _ in state.transport.read_data_iter():
                     pass
@@ -894,9 +1003,22 @@ class Protocol_Gateway:
             )
 
     def _route_interleaved_state(self, state: TransportState, now: float, ready_groups: list["ScrapeGroup"],) -> None:
-        """
-        Routes one completed transport's data to its bridges immediately.
-        Called as each thread finishes - does not wait for other transports.
+        """Forward a completed interleaved transport's data to its bridges without waiting for sibling transports.
+
+        Called by ``_poll_interleaved_cycles`` as each worker future resolves.
+        Retrieves the decoded metrics via ``get_partial_data`` and routes them
+        as follows:
+
+        - If the transport is the primary of a ``ScrapeGroup`` in ``ready_groups``,
+          iterates the group's due members, filters the full data set to each
+          member's variable mask via ``_filter_for_member``, and calls
+          ``write_data`` on each member's configured bridges.  Bridges that
+          require a complete cycle (``write_requires_complete_cycle``) are skipped
+          when the cycle is only partial.  Each forwarded member is stamped via
+          ``mark_forwarded``.
+        - If the transport belongs to no group (standalone scraper), its data is
+          written directly to its own bridges subject to the same cycle-completeness
+          check.
         """
         transport: transport_base = state.transport
         data: dict[str, int | float | str] = transport.get_partial_data()
@@ -968,10 +1090,25 @@ class Protocol_Gateway:
                 bridge.write_data(data, transport)
 
     def run(self) -> None:
-        """
-        run method, starts ModBus connection and bridge connection
-        """
+        """Start the main polling loop and block until the gateway is stopped.
 
+        On each tick, calls ``_poll_interleaved_cycles`` to service any
+        in-flight interleaved futures, then identifies scrape groups whose
+        ``scrape_interval`` has elapsed and dispatches them according to
+        ``__read_mode``:
+
+        - ``concurrent``   — submits each group to the persistent thread pool
+          via ``_submit_concurrent_group_read``.
+        - ``interleaved``  — runs due group members directly on the interleaved
+          executor via ``_process_transports_interleaved``.
+        - ``sequential``   — reads each group in order via ``_process_group_read``
+          with a configurable ``__sequential_delay`` between groups.
+
+        Exceptions inside the inner loop are caught and logged so a single
+        failing transport does not kill the process.  On exit (normal or
+        exception), both thread-pool executors are shut down without waiting for
+        pending futures.
+        """
         self.__running = True
 
         if False:
@@ -1027,10 +1164,16 @@ class Protocol_Gateway:
 
 
 def main(args=None) -> None:
-    """
-    main method
-    """
+    """Entry point: parse CLI arguments, resolve the config path, and start the gateway and web server.
 
+    Accepts ``--config``/``-c <file>`` or a bare positional argument to name the
+    config file; defaults to ``config.cfg``.  Resolves the path by walking up
+    from ``__file__`` to find the project root (the directory containing
+    ``protocol_gateway.py``), then reads ``[logging].log_file`` and
+    ``[logging].log_dir`` to pass to ``start_webserver``.  The web server is
+    started before ``mpg.run()`` so the HTTP interface is available immediately,
+    even during the initial transport connection phase.
+    """
     # Create ArgumentParser object
     parser = argparse.ArgumentParser(description="Multi Protocol Gateway")
 

@@ -1,0 +1,24 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note
+2999,model_no,Model number,,USHORT,,,R,,String inverter basic information block
+3000,dsp_version,DSP version,,USHORT,,,R,,Firmware field
+3001,hmi_version,HMI version,,USHORT,,,R,,Firmware field
+3002,protocol_version,Protocol version,,USHORT,,,R,,Protocol version
+3003,serial_number,Serial number,,STRING32,,,R,,Serial number where exposed by firmware
+3004,total_energy,Total energy,kWh,UINT,,,R,,Lifetime PV energy
+3006,this_month_energy,This month energy,kWh,UINT,,,R,,Monthly PV energy
+3008,last_month_energy,Last month energy,kWh,UINT,,,R,,Previous month PV energy
+3010,today_energy,Today energy,kWh,USHORT,,,R,,Daily PV energy
+3021,pv1_voltage,PV1 voltage,0.1V,USHORT,,,R,,PV string 1 voltage
+3022,pv1_current,PV1 current,0.1A,USHORT,,,R,,PV string 1 current
+3023,pv2_voltage,PV2 voltage,0.1V,USHORT,,,R,,PV string 2 voltage
+3024,pv2_current,PV2 current,0.1A,USHORT,,,R,,PV string 2 current
+3035,ac_voltage,AC voltage,0.1V,USHORT,,,R,,Single-phase grid voltage
+3036,ac_current,AC current,0.1A,USHORT,,,R,,Single-phase grid current
+3038,ac_power,AC active power,W,INT,,,R,,AC active power
+3042,grid_frequency,Grid frequency,0.01Hz,USHORT,,,R,,Grid frequency
+3043,inverter_temperature,Inverter temperature,0.1C,SHORT,,,R,,Inverter temperature
+3044,inverter_status,Inverter status,,USHORT,,,R,,Model-specific status code
+3045,fault_code,Fault code,,USHORT,,,R,,Model-specific fault code
+36022,total_dc_power,Total DC power,W,UINT,,,R,,Additional measurement range used by newer Solis integrations
+36024,total_ac_power,Total AC power,W,INT,,,R,,Additional measurement range used by newer Solis integrations
+# Source: Solis Modbus documentation and public Solis integration register ranges. String inverters use 2xxx/3xxx/36xxx ranges; validate offsets with the exact Ginlong/Solis protocol document for the target generation.,,,,,,,,,

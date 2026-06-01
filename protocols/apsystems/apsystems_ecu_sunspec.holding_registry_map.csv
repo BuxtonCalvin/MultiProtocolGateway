@@ -1,0 +1,17 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note
+40001,sunspec_id,SunSpec ID,,UINT,,,R,,"Fixed value 0x53756E53 (SunS)"
+40003,sunspec_common_did,SunSpec common model ID,,USHORT,,,R,,Common model ID
+40004,manufacturer,Manufacturer,,STRING16,,,R,,APsystems manufacturer string appears here in APsystems example frames
+40021,model_string,Model string,,STRING32,,,R,,ECU model string
+40053,version,Version,,STRING16,,,R,,Firmware version
+40061,serial_number,Serial number,,STRING32,,,R,,ECU serial number
+40069,device_address,Modbus device address,,USHORT,1-247,,R,,Configured Modbus address
+40072,ac_current_total,AC total current,A,FLOAT32,,,R,,SunSpec single-phase float example
+40074,ac_current_a,AC phase A current,A,FLOAT32,,,R,,Phase A current
+40086,ac_voltage_an,AC voltage A-N,V,FLOAT32,,,R,,Phase A to neutral voltage
+40092,ac_power,AC active power,W,FLOAT32,,,R,,Total AC active power
+40094,ac_frequency,AC frequency,Hz,FLOAT32,,,R,,AC frequency
+40102,ac_energy_total,AC lifetime energy,Wh,FLOAT32,,,R,,Lifetime AC energy
+40112,operating_state,Operating state,,USHORT,,,R,,SunSpec operating state
+40114,event_1,Event flags 1,,32BIT_FLAGS,,,R,,SunSpec event flags
+# Source: APsystems SunSpec Modbus Rev 3.0. APsystems ECU-R/ECU-C support Modbus RTU and TCP and use SunSpec holding-register reads.,,,,,,,,,
