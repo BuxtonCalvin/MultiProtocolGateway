@@ -19,8 +19,6 @@
 # Wraps python-telegram-bot in a fire-and-forget helper so it can be used from
 # synchronous or threaded contexts (matching the Pushover client interface).
 #
-# Install:  pip install "python-telegram-bot>=20.0"
-#
 # Only the bot token and a chat_id are required.  The chat_id can be a single
 # user, a group, or a channel (prefix with @).  Multiple chat IDs can be
 # supplied as a comma-separated string and every message will be fanned out to

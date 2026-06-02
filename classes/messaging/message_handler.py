@@ -212,7 +212,7 @@ class MessageHandler:
             return
 
         try:
-            client = PushoverClient(user_key=user_key, api_token=api_token)
+            client: PushoverClient = PushoverClient(user_key=user_key, api_token=api_token)
             self._clients.append(
                 {"name": "pushover", "client": client, "Message": PushoverMessage}
             )
