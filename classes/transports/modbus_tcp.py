@@ -76,9 +76,15 @@ class modbus_tcp(modbus_base):
 
         kwargs = self._get_correct_device_arg(kwargs)
         result: Any = None
-        # no need for a lock here since the client handles its own internal locking and
-        # we don't have any shared state to protect in this method.  If we were to add retries or other
-        # logic that re-enters this method, we would need to add a lock to prevent concurrent access to the client.
+
+        # Proactively verify socket health before making the call
+        if hasattr(self.client, 'connected') and not self.client.connected:
+            self._log.warning(f"Socket closed before read for {self.transport_name}. Triggering reconnect.")
+            self.connected = False
+            self._needs_reconnection = True
+            return None
+
+
         try:
             if registry_type == Registry_Type.INPUT:
                 result = self.client.read_input_registers(start, count=count, **kwargs)
@@ -92,13 +98,28 @@ class modbus_tcp(modbus_base):
                 self._log.warning(f"read_registers: unsupported registry_type '{registry_type.name}' for TCP transport — returning None")
                 return None
 
-            if isinstance(result, ModbusIOException): # pymodbus 3.0+ returns ModbusIOException objects instead of raising them
+            if isinstance(result, ModbusIOException):
                 print(f"Modbus IO Exception returned as object: {result}")
                 return None
 
         except ConnectionException:
             self._log.error(f"Connection lost to {self.transport_name} at {self.host}:{self.port}")
-            self._log.error(f"❌ [COMMUNICATION LOST] --- Name: {self.transport_name} ---")
+            self._log.error(f"❌ [Communication Lost] --- Name: {self.transport_name} ---")
+            self.connected = False
+            self._needs_reconnection = True
+            return None
+        except (BrokenPipeError, ConnectionResetError, ConnectionError) as e:
+            # Explicitly catch the OS-level socket disconnection errors
+            self._log.error(f"Socket pipe broken for {self.transport_name}: {e}")
+            self._log.error(f"❌ [Communication Lost] --- Name: {self.transport_name} ---")
+
+            # Safely tear down the dead client state internally
+            try:
+                self.client.close()
+            except Exception:
+                self._log.error(f"❌ [Could not close client] --- Name: {self.transport_name} ---")
+                pass
+
             self.connected = False
             self._needs_reconnection = True
             return None
@@ -112,12 +133,12 @@ class modbus_tcp(modbus_base):
             self._log.error(f"Unexpected error during read: {e}")
             return None
 
-        # This only runs if the try block succeeded without exceptions
         if result is None or result.isError():
             self._log.error(f"Modbus Error: {result}")
             return None
 
         return result
+
 
     def connect(self) -> bool:
         if self.client is None:
@@ -126,6 +147,13 @@ class modbus_tcp(modbus_base):
             return False
 
         try:
+            # Ensure old socket hooks are entirely wiped out before reconnecting
+            try:
+                self.client.close()
+            except Exception:
+                self._log.error(f"Failed to close TCP connection to {self.host}:{self.port}")
+                pass
+
             # pymodbus connect() usually returns True/False
             self.connected = bool(self.client.connect())
 
@@ -135,8 +163,11 @@ class modbus_tcp(modbus_base):
             else:
                 self._log.error(f"Failed to establish TCP connection to {self.host}:{self.port}")
 
-            return self.connected  # noqa: TRY300
         except Exception as e:
             self._log.error(f"Exception during connection: {e}")
             self.connected = False
             return False
+        else:
+
+            return self.connected
+

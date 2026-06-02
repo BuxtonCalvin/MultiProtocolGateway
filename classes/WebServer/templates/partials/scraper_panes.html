@@ -98,27 +98,72 @@
       <div>
         <p class="label mb-1">Bridge</p>
         {% if ns.bridge_setting %}
-        <select class="w-full bg-mpg-900 border border-mpg-600 rounded px-2 py-1
-                      text-mpg-100 font-mono text-xs
-                      focus:outline-none focus:ring-1 focus:ring-accent"
-                aria-label="Bridge selection for {{ device.name }}"
-                hx-post="/api/devices/{{ device.name }}/reconcile-settings"
-                hx-ext="json-enc"
-                hx-on:htmx:config-request="event.detail.parameters = {new_bridge: this.value}"
-                hx-target="#settings-rows"
-                hx-swap="innerHTML"
-                hx-trigger="change">
-          <option value="">None</option>
-          {% for item in transport_library if item.classification == 'bridge' %}
-          {% set bridge_val = "transport." + item.name %}
-          <option value="{{ bridge_val }}" 
-            {% if (ns.bridge_setting.value_staged or ns.bridge_setting.value_disk) == bridge_val %}
-            selected
-            {% endif %}>
-            {{ item.name }}
-          </option>
-          {% endfor %}
-        </select>
+        {%- set _current_bridge = (ns.bridge_setting.value_staged or ns.bridge_setting.value_disk or "") -%}
+        <div class="bridge-multiselect relative"
+             data-setting-id="{{ ns.bridge_setting.id }}"
+             data-device="{{ device.name }}">
+
+          <!-- Trigger button -->
+          <button type="button"
+                  class="bridge-ms-trigger w-full bg-mpg-900 border border-mpg-600 rounded px-2 py-1
+                         text-mpg-100 font-mono text-xs text-left flex items-center justify-between gap-1
+                         focus:outline-none focus:ring-1 focus:ring-accent">
+            <span class="bridge-ms-label truncate">
+              {%- if _current_bridge -%}
+                {%- set _display = [] -%}
+                {%- for part in _current_bridge.split(',') -%}
+                  {%- set _part = part.strip() -%}
+                  {%- set ns_lbl = namespace(found=false) -%}
+                  {%- for b in nav.bridges if ("transport." + b.name) == _part -%}
+                    {%- for item in transport_library if item.name == b.transport_class -%}
+                      {%- if _display.append(item.name) %}{% endif -%}
+                      {%- set ns_lbl.found = true -%}
+                    {%- endfor -%}
+                  {%- endfor -%}
+                  {%- if not ns_lbl.found -%}
+                    {%- if _display.append(_part.replace('transport.', '')) %}{% endif -%}
+                  {%- endif -%}
+                {%- endfor -%}
+                {{ _display | join(', ') }}
+              {%- else -%}
+                None
+              {%- endif -%}
+            </span>
+            <svg class="flex-shrink-0 w-3 h-3 text-mpg-400" viewBox="0 0 20 20" fill="currentColor">
+              <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.17l3.71-3.94a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"/>
+            </svg>
+          </button>
+
+          <!-- Dropdown panel -->
+          <div class="bridge-ms-panel hidden absolute z-50 mt-1 w-full
+                      bg-mpg-900 border border-mpg-600 rounded shadow-lg py-1">
+
+            <label class="bridge-ms-option flex items-center gap-2 px-2 py-1 cursor-pointer hover:bg-mpg-700/60 text-xs font-mono text-mpg-100">
+              <input type="checkbox" class="accent-accent w-3 h-3" value="" data-none
+                     {% if not _current_bridge %}checked{% endif %}>
+              <span>None</span>
+            </label>
+
+            {%- set _selected = [] -%}
+            {%- for part in _current_bridge.split(',') -%}
+              {%- if _selected.append(part.strip()) %}{% endif -%}
+            {%- endfor -%}
+
+            {% for item in transport_library if item.classification == 'bridge' %}
+            {%- set bv = "transport." + item.name -%}
+            {%- set ns_chk = namespace(checked=false) -%}
+            {%- if bv in _selected %}{% set ns_chk.checked = true %}{% endif -%}
+            {%- for b in nav.bridges if b.transport_class == item.name -%}
+              {%- if ("transport." + b.name) in _selected %}{% set ns_chk.checked = true %}{% endif -%}
+            {%- endfor -%}
+            <label class="bridge-ms-option flex items-center gap-2 px-2 py-1 cursor-pointer hover:bg-mpg-700/60 text-xs font-mono text-mpg-100">
+              <input type="checkbox" class="accent-accent w-3 h-3" value="{{ bv }}"
+                     {% if ns_chk.checked %}checked{% endif %}>
+              <span>{{ item.name }}</span>
+            </label>
+            {% endfor %}
+          </div>
+        </div>
         {% endif %}
       </div>
 
@@ -354,6 +399,65 @@
       window.location.href = '/pages/analyze/{{ device.name }}';
     });
   }
+
+  // ── Bridge multi-select widget ──────────────────────────────────────────────
+  document.querySelectorAll('.bridge-multiselect').forEach(function(widget) {
+    const trigger  = widget.querySelector('.bridge-ms-trigger');
+    const panel    = widget.querySelector('.bridge-ms-panel');
+    const label    = widget.querySelector('.bridge-ms-label');
+    const deviceName  = widget.dataset.device;
+    const settingId   = widget.dataset.settingId;
+
+    // Toggle panel open/close
+    trigger.addEventListener('click', function(e) {
+      e.stopPropagation();
+      panel.classList.toggle('hidden');
+    });
+
+    // Close when clicking outside
+    document.addEventListener('click', function(e) {
+      if (!widget.contains(e.target)) panel.classList.add('hidden');
+    });
+
+    function getSelected() {
+      return Array.from(widget.querySelectorAll('.bridge-ms-option input:checked'))
+        .filter(cb => !cb.hasAttribute('data-none') && cb.value !== '');
+    }
+
+    function updateLabel(checkboxes) {
+      const names = checkboxes.map(cb => cb.closest('label').querySelector('span').textContent.trim());
+      label.textContent = names.length ? names.join(', ') : 'None';
+    }
+
+    function save(checkboxes) {
+      const joined = checkboxes.map(cb => cb.value).join(', ');
+      fetch(`/api/devices/${encodeURIComponent(deviceName)}/settings/${encodeURIComponent(settingId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value_staged: joined })
+      }).catch(() => {});
+    }
+
+    widget.querySelectorAll('.bridge-ms-option input').forEach(function(cb) {
+      cb.addEventListener('change', function() {
+        if (cb.hasAttribute('data-none')) {
+          // None selected — uncheck everything else
+          if (cb.checked) {
+            widget.querySelectorAll('.bridge-ms-option input:not([data-none])').forEach(o => o.checked = false);
+          }
+        } else {
+          // A real bridge selected — uncheck None
+          if (cb.checked) {
+            const noneCb = widget.querySelector('.bridge-ms-option input[data-none]');
+            if (noneCb) noneCb.checked = false;
+          }
+        }
+        const selected = getSelected();
+        updateLabel(selected);
+        save(selected);
+      });
+    });
+  });
 
   // After any settings PATCH in this pane, update the row DOM without a full re-render.
   document.addEventListener('htmx:afterRequest', function(evt) {

@@ -57,12 +57,26 @@
     </div>
 
     <div id="bridge-row" class="grid grid-cols-[12rem_minmax(0,1fr)_2.5rem] gap-3 items-center">
-      <label for="bridge-select" class="label mb-0">Bridge</label>
-      <select id="bridge-select"
-              class="theme-input w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
-              disabled>
-        <option value="">Select bridge</option>
-      </select>
+      <label class="label mb-0">Bridge</label>
+      <div id="bridge-multiselect" class="relative">
+        <button type="button"
+                id="bridge-ms-trigger"
+                class="theme-input w-full border rounded px-3 py-2 text-sm text-left
+                       flex items-center justify-between gap-1
+                       focus:outline-none focus:ring-2 focus:ring-accent
+                       opacity-60 cursor-not-allowed"
+                disabled>
+          <span id="bridge-ms-label">None</span>
+          <svg class="flex-shrink-0 w-4 h-4 opacity-50" viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.17l3.71-3.94a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"/>
+          </svg>
+        </button>
+        <div id="bridge-ms-panel"
+             class="hidden absolute z-50 mt-1 w-full border rounded shadow-lg py-1
+                    bg-mpg-900 border-mpg-600">
+          <!-- options injected by JS -->
+        </div>
+      </div>
       <button id="confirm-bridge-btn" type="button" class="btn-secondary px-0 text-sm h-9 w-9 create-add-btn" disabled>+</button>
     </div>
 
@@ -130,7 +144,9 @@ const protoGroups = JSON.parse('{{ proto_groups | tojson | safe }}');
   const nameInput = document.getElementById('device-name-input');
   const preview = document.getElementById('device-section-preview');
   const scraperSelect = document.getElementById('scraper-select');
-  const bridgeSelect = document.getElementById('bridge-select');
+  const bridgeTrigger = document.getElementById('bridge-ms-trigger');
+  const bridgePanel   = document.getElementById('bridge-ms-panel');
+  const bridgeMsLabel = document.getElementById('bridge-ms-label');
   const protocolSelect = document.getElementById('protocol-select');
   const logLevelSelect = document.getElementById('log-level-select');
   const saveBtn = document.getElementById('save-device-btn');
@@ -143,9 +159,9 @@ const protoGroups = JSON.parse('{{ proto_groups | tojson | safe }}');
   const bridgeOptions = createData.bridges || [];
   const sharedKeySet = new Set(createData.shared_keys || []);
   const stepControls = [
-    { input: nameInput, button: document.getElementById('confirm-name-btn') },
-    { input: scraperSelect, button: document.getElementById('confirm-scraper-btn') },
-    { input: bridgeSelect, button: document.getElementById('confirm-bridge-btn') },
+    { input: nameInput,      button: document.getElementById('confirm-name-btn') },
+    { input: scraperSelect,  button: document.getElementById('confirm-scraper-btn') },
+    { input: bridgeTrigger,  button: document.getElementById('confirm-bridge-btn') },
     { input: protocolSelect, button: document.getElementById('confirm-protocol-btn') },
     { input: logLevelSelect, button: document.getElementById('confirm-log-btn') }
   ];
@@ -160,7 +176,66 @@ const protoGroups = JSON.parse('{{ proto_groups | tojson | safe }}');
   }
 
   fillSelect(scraperSelect, createData.scrapers || [], item => item.name, item => item.name);
-  fillSelect(bridgeSelect, bridgeOptions, item => item.section, item => item.section);
+
+  // Build bridge multi-select options
+  (function buildBridgeOptions() {
+    const noneLabel = document.createElement('label');
+    noneLabel.className = 'bridge-ms-option flex items-center gap-2 px-3 py-1.5 cursor-pointer hover:bg-mpg-700/60 text-sm font-mono text-mpg-100';
+    noneLabel.innerHTML = '<input type="checkbox" class="accent-accent" value="" data-none checked> <span>None</span>';
+    bridgePanel.appendChild(noneLabel);
+
+    (createData.bridges || []).forEach(item => {
+      const lbl = document.createElement('label');
+      lbl.className = 'bridge-ms-option flex items-center gap-2 px-3 py-1.5 cursor-pointer hover:bg-mpg-700/60 text-sm font-mono text-mpg-100';
+      lbl.innerHTML = `<input type="checkbox" class="accent-accent" value="${item.section}"> <span>${item.name}</span>`;
+      bridgePanel.appendChild(lbl);
+    });
+
+    bridgePanel.querySelectorAll('.bridge-ms-option input').forEach(function(cb) {
+      cb.addEventListener('change', function() {
+        if (cb.hasAttribute('data-none')) {
+          if (cb.checked) {
+            bridgePanel.querySelectorAll('input:not([data-none])').forEach(o => o.checked = false);
+          }
+        } else {
+          if (cb.checked) {
+            const noneCb = bridgePanel.querySelector('input[data-none]');
+            if (noneCb) noneCb.checked = false;
+          }
+        }
+        const vals = Array.from(bridgePanel.querySelectorAll('input:checked'))
+          .filter(o => o.value !== '')
+          .map(o => o.closest('label').querySelector('span').textContent.trim());
+        bridgeMsLabel.textContent = vals.length ? vals.join(', ') : 'None';
+      });
+    });
+  })();
+
+  function getBridgeValue() {
+    const vals = Array.from(bridgePanel.querySelectorAll('input:checked'))
+      .map(o => o.value).filter(v => v !== '');
+    return vals.join(', ');
+  }
+
+  function resetBridgePanel() {
+    bridgePanel.querySelectorAll('input').forEach(cb => { cb.checked = false; });
+    const noneCb = bridgePanel.querySelector('input[data-none]');
+    if (noneCb) noneCb.checked = true;
+    bridgeMsLabel.textContent = 'None';
+    bridgePanel.classList.add('hidden');
+  }
+
+  // Toggle panel
+  bridgeTrigger.addEventListener('click', function(e) {
+    if (bridgeTrigger.disabled) return;
+    e.stopPropagation();
+    bridgePanel.classList.toggle('hidden');
+  });
+  document.addEventListener('click', function(e) {
+    if (!document.getElementById('bridge-multiselect').contains(e.target)) {
+      bridgePanel.classList.add('hidden');
+    }
+  });
 
   protoGroups.forEach(group => {
     if ((group.group || '').startsWith('_')) return;
@@ -235,7 +310,7 @@ const protoGroups = JSON.parse('{{ proto_groups | tojson | safe }}');
     state.protocolVersion = '';
     state.logLevel = 'INFO';
     scraperSelect.value = '';
-    bridgeSelect.value = '';
+    resetBridgePanel();
     protocolSelect.value = '';
     logLevelSelect.value = 'INFO';
     preview.textContent = `[${sectionName()}]`;
@@ -254,7 +329,7 @@ const protoGroups = JSON.parse('{{ proto_groups | tojson | safe }}');
     state.bridge = '';
     state.protocolVersion = '';
     state.logLevel = 'INFO';
-    bridgeSelect.value = '';
+    resetBridgePanel();
     protocolSelect.value = '';
     logLevelSelect.value = 'INFO';
     enableStepsThrough(2);
@@ -263,12 +338,9 @@ const protoGroups = JSON.parse('{{ proto_groups | tojson | safe }}');
   }
 
   function confirmBridge() {
-    if (!bridgeSelect.value) {
-      showMessage('error', 'Choose a bridge.');
-      return;
-    }
     clearMessage();
-    state.bridge = bridgeSelect.value;
+    state.bridge = getBridgeValue();  // empty string = None, which is valid
+    bridgePanel.classList.add('hidden');
     state.protocolVersion = '';
     state.logLevel = 'INFO';
     protocolSelect.value = '';
@@ -432,7 +504,7 @@ const protoGroups = JSON.parse('{{ proto_groups | tojson | safe }}');
 
     nameInput.value = '';
     scraperSelect.value = '';
-    bridgeSelect.value = '';
+    resetBridgePanel();
     protocolSelect.value = '';
     logLevelSelect.value = 'INFO';
     preview.textContent = '';
@@ -446,8 +518,8 @@ const protoGroups = JSON.parse('{{ proto_groups | tojson | safe }}');
   }
 
   async function saveDevice() {
-    if (!state.deviceName || !state.scraperTransport || !state.bridge || !state.protocolVersion || !state.logLevel) {
-      showMessage('error', 'Finish the five setup fields before saving.');
+    if (!state.deviceName || !state.scraperTransport || !state.protocolVersion || !state.logLevel) {
+      showMessage('error', 'Finish the setup fields before saving.');
       return;
     }
 

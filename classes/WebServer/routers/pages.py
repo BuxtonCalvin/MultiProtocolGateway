@@ -494,8 +494,12 @@ class CreateDeviceRequest(BaseModel):
     @field_validator("bridge")
     @classmethod
     def validate_bridge(cls, value: str) -> str:
-        if not value.startswith("transport."):
-            raise ValueError("Bridge must be saved as a transport section reference.")
+        if not value:
+            return value  # empty = None, valid
+        for part in value.split(","):
+            part = part.strip()
+            if part and not part.startswith("transport."):
+                raise ValueError("Each bridge must be a transport section reference (e.g. transport.mqtt).")
         return value
 
     @field_validator("log_level")
@@ -546,10 +550,16 @@ def create_device(
     if not scraper_info or scraper_info.get("classification") != "scraper":
         raise HTTPException(status_code=400, detail="Selected scraper transport is not valid.")
 
-    bridge_name = payload.bridge.removeprefix("transport.")
-    bridge_info = library.get(bridge_name)
-    if not bridge_info or bridge_info.get("classification") != "bridge":
-        raise HTTPException(status_code=400, detail="Selected bridge is not valid.")
+    # Validate each bridge section reference against the library
+    if payload.bridge:
+        for bridge_part in payload.bridge.split(","):
+            bridge_part = bridge_part.strip()
+            if not bridge_part:
+                continue
+            bridge_name = bridge_part.removeprefix("transport.")
+            bridge_info = library.get(bridge_name)
+            if not bridge_info or bridge_info.get("classification") != "bridge":
+                raise HTTPException(status_code=400, detail=f"Selected bridge '{bridge_part}' is not valid.")
 
     allowed_keys = {
         key for key in scraper_info.get("keys", {}).keys()
