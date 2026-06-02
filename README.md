@@ -236,7 +236,7 @@ Each transport is independently configurable with its own scan interval, log lev
 
 ### Recommendation
 
-- It is much easier and far less error prone to install MPG with its associated bridges via docker compose.  A full docker stack is available see [`docker-compose.yml`](documentation/docker/docker-compose.yml).  Remove those applications that you do not want to use from the compose file. Make sure to also install the accompanying configuration files .env, mosquitto.conf and MPG.yaml (Grafana provisioning).  However, if you want to install without Docker, please read the following:
+- It is much easier and far less error prone to install MPG with its associated bridges via docker compose. A full docker stack is available see [`docker-compose.yml`](documentation/docker/docker-compose.yml). Remove those applications that you do not want to use from the compose file. Make sure to also install the accompanying configuration files .env, mosquitto.conf and MPG.yaml (Grafana provisioning). On first run, the docker script will copy a basic config.cfg file into your config folder. From there, use the web server to customize the configuration. However, if you want to install without Docker, please read the following:
 
 ### Prerequisites
 

@@ -19,8 +19,13 @@ for sub in "${CONFIG_SUBS[@]}"; do
     fi
 done
 
-# Copy any top-level .cfg or .csv or .txt masks, but -n (no-clobber) ensures 
-# we don't overwrite any files the user has customized.
+# If the user doesn't have a config file at all, seed it from the examples folder
+if [ ! -f "/app/config/config.cfg" ] && [ -f "/defaults/config/examples/config.cfg" ]; then
+    echo "First run detected: Seeding default config.cfg from examples..."
+    cp "/defaults/config/examples/config.cfg" "/app/config/config.cfg"
+fi
+
+# Copy any other top-level files if they exist in the root defaults folder
 cp -n /defaults/config/*.cfg /app/config/ 2>/dev/null
 cp -n /defaults/config/*.csv /app/config/ 2>/dev/null
 cp -n /defaults/config/*.txt /app/config/ 2>/dev/null
