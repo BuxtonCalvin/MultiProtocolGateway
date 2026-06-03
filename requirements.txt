@@ -13,6 +13,9 @@ pydantic>=2.6.4
 uvicorn[standard]>=0.29.0  # for running FastAPI applications
 jinja2>=3.1.4              # for HTML templating in FastAPI
 python-multipart>=0.0.9    # required for form parsing in FastAPI
+markdown                   # for rendering Markdown in FastAPI docs
+pygments                   # for rendering Markdown in FastAPI docs
+pymdown-extensions         # for rendering Markdown in FastAPI docs
 watchdog>=4.0.0            # file watcher
 aiofiles>=23.2.1           # static file serving
 Pygments>=2.15.1           # for syntax highlighting in FastAPI docs

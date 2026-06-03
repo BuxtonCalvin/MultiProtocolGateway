@@ -34,6 +34,10 @@ from watchdog.observers import Observer
 
 _log: logging.Logger = logging.getLogger(__name__)
 
+# Mute the watchdog buffer and observer debug logs
+logging.getLogger("watchdog.observers.inotify_buffer").setLevel(logging.WARNING)
+logging.getLogger("watchdog").setLevel(logging.WARNING)
+
 
 class _MPGEventHandler:
     """Handles file system events from watchdog."""
