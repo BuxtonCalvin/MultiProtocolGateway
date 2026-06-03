@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote, unquote
 
+import markdown as markdown_lib
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field
@@ -65,7 +66,7 @@ def _base_context(request: Request) -> dict[str, Any]:
 
 
 def _safe_child(base: Path, requested: str) -> Path:
-    target = (base / requested).resolve()
+    target: Path = (base / requested).resolve()
     try:
         target.relative_to(base.resolve())
     except ValueError as exc:
@@ -98,18 +99,18 @@ def _doc_tree() -> list[dict[str, Any]]:
     }
     docs: list[dict[str, Any]] = []
     for path in sorted(DOCUMENTATION_DIR.rglob("*")):
-        parts = path.relative_to(DOCUMENTATION_DIR).parts
-        if not path.is_file() or any(part.startswith(".") for part in parts[:-1]):
+        path_parts: tuple[str, ...] = path.relative_to(DOCUMENTATION_DIR).parts
+        if not path.is_file() or any(part.startswith(".") for part in path_parts[:-1]):
             continue
         if path.suffix.lower() not in allowed and ".example" not in path.name:
             continue
         rel: str = path.relative_to(DOCUMENTATION_DIR).as_posix()
-        parts = rel.split("/")
+        rel_parts: list[str] = rel.split("/")
         docs.append({
             "title": path.stem.replace("_", " ").replace("-", " ").title(),
             "name": path.name,
             "path": rel,
-            "folder": " / ".join(parts[:-1]) or "Top Level",
+            "folder": " / ".join(rel_parts[:-1]) or "Top Level",
             "url": _doc_url(rel),
             "is_pdf": path.suffix.lower() == ".pdf",
         })
@@ -126,7 +127,7 @@ def _screenshot_list() -> list[dict[str, str]]:
         return []
     shots: list[dict[str, str]] = []
     for path in sorted(SCREENSHOT_DIR.glob("*.png")):
-        image_id = path.stem
+        image_id: str = path.stem
         shots.append({
             "id": image_id,
             "title": image_id.replace("__", " / ").replace("-", " ").title(),
@@ -177,7 +178,6 @@ def _rewrite_markdown_links(markdown: str, doc_path: str) -> str:
 def _markdown_to_html(markdown: str, doc_path: str) -> str:
     markdown = _rewrite_markdown_links(markdown, doc_path)
     try:
-        import markdown as markdown_lib
         lib_rendered: str = markdown_lib.markdown(
             markdown,
             extensions=["fenced_code", "tables", "toc", "sane_lists", "codehilite"],
@@ -195,52 +195,135 @@ def _markdown_to_html(markdown: str, doc_path: str) -> str:
     except ImportError:
         pass
 
-    lines = markdown.splitlines()
-    rendered: list[str] = []  # This is safe now!
-    in_code = False
-    in_list = False
+    lines: list[str] = markdown.splitlines()
+    rendered: list[str] = []
+    in_fenced_code = False
+    in_ul = False
+    in_ol = False
+    in_blockquote = False
 
-    def close_list() -> None:
-        nonlocal in_list
-        if in_list:
+
+    def close_ul() -> None:
+        nonlocal in_ul
+        if in_ul:
             rendered.append("</ul>")
-        in_list = False
+        in_ul = False
+
+    def close_ol() -> None:
+        nonlocal in_ol
+        if in_ol:
+            rendered.append("</ol>")
+        in_ol = False
+
+    def close_lists() -> None:
+        close_ul()
+        close_ol()
+
+    def close_blockquote() -> None:
+        nonlocal in_blockquote
+        if in_blockquote:
+            rendered.append("</blockquote>")
+        in_blockquote = False
 
     def resolve_link(target: str) -> str:
         return _resolve_doc_target(target, doc_path)
 
+    # Strip YAML/TOML frontmatter (--- ... --- or +++ ... +++)
+    if lines and lines[0].strip() in ("---", "+++"):
+        fence_char = lines[0].strip()
+        j = 1
+        while j < len(lines) and lines[j].strip() != fence_char:
+            j += 1
+        lines = lines[j + 1:]
+
     for line in lines:
+        # Fenced code blocks
         if line.strip().startswith("```"):
-            close_list()
-            rendered.append("</code></pre>" if in_code else "<pre><code>")
-            in_code: bool = not in_code
+            close_lists()
+            close_blockquote()
+            if in_fenced_code:
+                rendered.append("</code></pre>")
+                in_fenced_code = False
+            else:
+                lang: str = line.strip()[3:].strip()
+                lang_attr: str = f' class="language-{html.escape(lang)}"' if lang else ""
+                rendered.append(f"<pre><code{lang_attr}>")
+                in_fenced_code = True
             continue
-        if in_code:
+
+        if in_fenced_code:
             rendered.append(html.escape(line))
             continue
-        stripped = line.strip()
+
+        stripped: str = line.strip()
+
+        # Horizontal rules
+        if re.match(r"^(-{3,}|\*{3,}|_{3,})$", stripped):
+            close_lists()
+            close_blockquote()
+            rendered.append("<hr>")
+            continue
+
+        # Blank line
         if not stripped:
-            close_list()
+            close_lists()
+            close_blockquote()
             rendered.append("")
             continue
-        heading: re.Match[str] | None = re.match(r"^(#{1,4})\s+(.*)$", stripped)
+
+        # Blockquote
+        if stripped.startswith(">"):
+            close_lists()
+            if not in_blockquote:
+                rendered.append("<blockquote>")
+                in_blockquote = True
+            content: str = re.sub(r"^>\s?", "", stripped)
+            rendered.append(f"<p>{_render_inline(content, resolve_link)}</p>")
+            continue
+        else:
+            close_blockquote()
+
+        # Headings
+        heading: re.Match[str] | None = re.match(r"^(#{1,6})\s+(.*)$", stripped)
         if heading:
-            close_list()
+            close_lists()
             level: int = len(heading.group(1))
-            rendered.append(f"<h{level}>{html.escape(heading.group(2))}</h{level}>")
+            text = heading.group(2).rstrip("#").strip()
+            # Generate an anchor id for TOC compatibility
+            anchor: str = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+            rendered.append(f'<h{level} id="{anchor}">{_render_inline(text, resolve_link)}</h{level}>')
             continue
-        item: re.Match[str] | None = re.match(r"^[-*]\s+(.*)$", stripped)
-        if item:
-            if not in_list:
+
+        # Setext-style headings (underline with === or ---)
+        # (handled by checking next line — skip for simplicity; --- already handled as <hr>)
+
+        # Unordered list items
+        ul_item: re.Match[str] | None = re.match(r"^[-*+]\s+(.*)$", stripped)
+        if ul_item:
+            close_ol()
+            if not in_ul:
                 rendered.append("<ul>")
-                in_list = True
-            rendered.append(f"<li>{_render_inline(item.group(1), resolve_link)}</li>")
+                in_ul = True
+            rendered.append(f"<li>{_render_inline(ul_item.group(1), resolve_link)}</li>")
             continue
-        close_list()
+
+        # Ordered list items
+        ol_item: re.Match[str] | None = re.match(r"^\d+[.)]\s+(.*)$", stripped)
+        if ol_item:
+            close_ul()
+            if not in_ol:
+                rendered.append("<ol>")
+                in_ol = True
+            content = re.sub(r"^\d+[.)]\s+", "", stripped)
+            rendered.append(f"<li>{_render_inline(content, resolve_link)}</li>")
+            continue
+
+        close_lists()
         rendered.append(f"<p>{_render_inline(stripped, resolve_link)}</p>")
 
-    close_list()
-    if in_code:
+    close_lists()
+    close_blockquote()
+    if in_fenced_code:
         rendered.append("</code></pre>")
 
     final_html: str = "\n".join(rendered)
@@ -266,6 +349,15 @@ def _render_inline(text: str, link_resolver) -> str:
         escaped,
     )
     escaped = re.sub(r"`([^`]+)`", r"<code>\1</code>", escaped)
+    # Bold+italic: ***text*** or ___text___
+    escaped = re.sub(r"\*{3}(.+?)\*{3}", r"<strong><em>\1</em></strong>", escaped)
+    escaped = re.sub(r"_{3}(.+?)_{3}", r"<strong><em>\1</em></strong>", escaped)
+    # Bold: **text** or __text__
+    escaped = re.sub(r"\*{2}(.+?)\*{2}", r"<strong>\1</strong>", escaped)
+    escaped = re.sub(r"_{2}(.+?)_{2}", r"<strong>\1</strong>", escaped)
+    # Italic: *text* or _text_
+    escaped = re.sub(r"\*(.+?)\*", r"<em>\1</em>", escaped)
+    escaped = re.sub(r"_(.+?)_", r"<em>\1</em>", escaped)
     return escaped
 
 
