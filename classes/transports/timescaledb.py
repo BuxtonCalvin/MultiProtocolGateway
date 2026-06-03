@@ -751,7 +751,7 @@ class timescaledb(transport_base):
                 )
                 raise
         # full path to backlog file
-        self.backlog_file_path: Path = self.backlog_storage_path / f"{self.backlog_file_name}.jsonl"
+        self.backlog_file_path: Path = self.backlog_storage_path / f"{self.backlog_file_name}.db"
 
         self.backlog = BacklogManager(
             backlog_file_path=self.backlog_file_path,
