@@ -364,6 +364,12 @@ class influxdb_out(transport_base):
 
                 if self.enable_persistent_storage:
                     self._flush_backlog()
+                    self._log.info("Flushed backlog after successful reconnection")
+                    self.send_message(
+                        message="Successfully reconnected to InfluxDB and flushed backlog.",
+                        title="MPG InfluxDB Reconnect Success",
+                        priority=1
+                    )
 
                 return True  # noqa: TRY300
 

@@ -776,13 +776,7 @@ class timescaledb(transport_base):
             self.connect_tsdb()
         except Exception as e:
             self._log.error(f"Initial connect failed: {e}")
-            self._set_tsdb_connected(conn_value = False, conn_reason = "Initial connect was not successful")
-            self.send_message(
-                message="Error: Unable to connect to TimescaleDB at startup. Check logs for details. Will keep retrying in the background.",
-                title="MPG TimescaleDB Connection Error",
-                priority=1
-            )
-
+            self._set_tsdb_connected(conn_value = False, conn_reason = "Initial TSDB connect was not successful")
         """
             Attribute:
             request_upstream_reconnect (Callable[[], None] | None):
@@ -847,13 +841,8 @@ class timescaledb(transport_base):
                 self._log.error(f"thread start failed: {e}")
 
         except Exception as e:
-            self._set_tsdb_connected(conn_value = False, conn_reason ="Connect unsuccessful")
+            self._set_tsdb_connected(conn_value = False, conn_reason ="Connect unsuccessful at startup")
             self._log.error(f"connect() failed: {e}")
-            self.send_message(
-                message="Error: Unable to connect to TimescaleDB at startup. Check logs for details. Will keep retrying in the background.",
-                title="MPG TimescaleDB Connection Error",
-                priority=1
-            )
             raise
 
     # Centralize state transitions for tsdb_connected helper
@@ -864,6 +853,11 @@ class timescaledb(transport_base):
                 self.connected = self.tsdb_connected  # set the MPG connected flag here to mimic central connection state.
                 self.rollup_policy["tsdb_connected"] = conn_value  # set the connect status in the rollup class.
                 self._log.info(f"TimescaleDB is connected -> {conn_value} ({conn_reason})")
+                self.send_message(
+                    message=f"TimescaleDB connection status changed: {conn_value} ({conn_reason})",
+                    title="MPG TimescaleDB Connection Status",
+                    priority=1 if not conn_value else 5
+                )
 
 
     # -------------------------
@@ -907,16 +901,12 @@ class timescaledb(transport_base):
                     # Attempt to re-establish DB connection.
                     with self.engine.connect() as conn:
                         conn.execute(text("SELECT 1"))
-                    self._set_tsdb_connected(conn_value = True, conn_reason = "reconnect successful")
+                    self._set_tsdb_connected(conn_value = True, conn_reason = f"Reconnect attempt {attempt_no} successful")
+                    self._log.info(f"Reconnect attempt {attempt_no} successful.")
                 except Exception as e:
-                    self._set_tsdb_connected(conn_value = False, conn_reason = "reconnect unsuccessful")
+                    self._set_tsdb_connected(conn_value = False, conn_reason = f"Reconnect attempt {attempt_no} unsuccessful")
                     self._log.warning(f"Reconnect attempt {attempt_no} failed during connect(): {e}")
                     self._log.warning(f"❌ [COMMUNICATION LOST] --- Name: {self.transport_name} ---")
-                    self.send_message(
-                        message=f"Reconnect attempt {attempt_no} failed: Unable to connect to TimescaleDB. Will keep retrying in the background. Check logs for details.",
-                        title="MPG TimescaleDB Reconnect Failed",
-                        priority=1
-                    )
 
                 with self._reconnect_lock:
                     tsdb_connected: bool = self.tsdb_connected
@@ -2024,12 +2014,6 @@ class timescaledb(transport_base):
                         self._set_tsdb_connected(conn_value = False, conn_reason = "Connection failure")
                         msg = ("Connection failure detected during flush worker write. Data has been "
                         "enqueued to backlog and will be retried when connection is restored.")
-
-                        self.send_message(
-                            message=msg,
-                            title="MPG TimescaleDBConnection Error",
-                            priority=1
-                        )
                         self._trigger_reconnect()
 
                 finally:
@@ -2607,6 +2591,12 @@ class BacklogManager:
             self.backlog_points.clear()
             self._backlog_rowids.clear()
             self._clear_disk()
+            self.send_message(
+                message=f"Replayed {count} backlog points to flush queue.",
+                title="MPG Backlog Sent to Queue",
+                priority=1
+            )
+            self._log.info(f"Backlog replay complete: {count} points sent to flush queue.")
         return count
 
     # -------------------------

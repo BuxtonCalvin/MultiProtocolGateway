@@ -150,9 +150,9 @@ SEED_DESCRIPTIONS: dict[str, str] = {
     "variable_mask": "Path to a variable mask file listing registers to include or exclude from reads.",
     "variable_screen": "Path to a variable screen file for filtering which registers are forwarded to the bridge.",
     "when": "Time-based log rotation schedule code (e.g. W0 = Monday, D = daily, H = hourly).",
-    "write": "Enable UNSAFE or RELAXED write mode for this transport",
     "write_enabled": "Enable register write operations for this transport.",
-    "write_requires_complete_cycle": "write_requires_complete_cycle is used to prevent writing incomplete batches of data to the database, which can cause issues with rollup continuous aggregates and data integrity. When True, the transport will only write data to the database once it has received a complete cycle of metrics for a given protocol, as determined by the registry map."
+    "write_requires_complete_cycle": "write_requires_complete_cycle is used to prevent writing incomplete batches of data to the database, which can cause issues with rollup continuous aggregates and data integrity. When True, the transport will only write data to the database once it has received a complete cycle of metrics for a given protocol, as determined by the registry map.",
+    "write_type": "Enable UNSAFE or RELAXED write mode for this transport"
 }
 
 
