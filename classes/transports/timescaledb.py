@@ -60,6 +60,7 @@ import logging
 import math
 import queue
 import re
+import sqlite3
 import threading
 import time
 import warnings
@@ -2021,6 +2022,14 @@ class timescaledb(transport_base):
                     # Handle recovery
                     if isinstance(e1, SQLAlchemyError):
                         self._set_tsdb_connected(conn_value = False, conn_reason = "Connection failure")
+                        msg = ("Connection failure detected during flush worker write. Data has been "
+                        "enqueued to backlog and will be retried when connection is restored.")
+
+                        self.send_message(
+                            message=msg,
+                            title="MPG TimescaleDBConnection Error",
+                            priority=1
+                        )
                         self._trigger_reconnect()
 
                 finally:
@@ -2403,7 +2412,7 @@ class BacklogManager:
 
     Owns:
     - in-memory backlog list
-    - disk persistence (jsonl)
+    - disk persistence (sqlite)
     - backlog synchronization
     - replay into the flush queue
 
@@ -2411,6 +2420,27 @@ class BacklogManager:
     - talk to the database
     - manage sessions
     - manage reconnect logic
+
+    Design: dual in-memory / SQLite storage.
+    ----------------------------------------
+    The in-memory list (backlog_points) is the fast working set. enqueue() and replay_to_queue()
+    operate on it directly; SQLite is updated as a side effect and acts purely as a crash-recovery
+    journal. If the process dies mid-outage, the points survive on disk and are reloaded on startup
+    via load_from_disk(). The dual strategy is retained because many inverters may be connected
+    through a single timescaledb instance, making the in-memory working set important for throughput
+    during an outage when enqueue() may be called at high frequency.
+
+    Atomicity contract:
+    - enqueue():         SQLite write first -> memory update only if disk succeeds.
+    - overflow eviction: SQLite DELETE first -> memory pop only if disk succeeds.
+    - replay_to_queue(): memory cleared, then SQLite wiped via _clear_disk().
+    This ordering ensures SQLite is always the authoritative record on crash. At worst a point
+    exists on disk but not in memory (recovered on next load_from_disk()), never the reverse.
+
+    rowid tracking:
+    A parallel list (_backlog_rowids) stores the SQLite rowid for each entry in backlog_points
+    at the same index. This enables O(1) single-row deletes on overflow, avoiding a full table
+    rewrite (_sync_to_disk) on every eviction — important at scale with many connected inverters.
     """
 
     def __init__(
@@ -2425,7 +2455,7 @@ class BacklogManager:
         log: logging.Logger
     ) -> None:
 
-        self.backlog_file_path: Path  = backlog_file_path
+        self.backlog_file_path: Path = backlog_file_path
         self.max_backlog_age: int = max_backlog_age
         self.max_backlog_size: int = max_backlog_size
         self.send_message: SendMessageProtocol = send_message
@@ -2435,42 +2465,77 @@ class BacklogManager:
         self._log: logging.Logger = log
 
         self.backlog_points: list[dict] = []
+        self._backlog_rowids: list[int] = []    # parallel to backlog_points: rowid[i] belongs to backlog_points[i]
 
     # -------------------------
     # Load Persistent backlog
     # -------------------------
 
+    def _db_connect(self) -> sqlite3.Connection:
+        """Open (and initialise if needed) the SQLite backlog database."""
+        self.backlog_file_path.parent.mkdir(parents=True, exist_ok=True)
+        con: sqlite3.Connection = sqlite3.connect(str(self.backlog_file_path))
+        con.execute(
+            """CREATE TABLE IF NOT EXISTS backlog (
+                id      INTEGER PRIMARY KEY AUTOINCREMENT,
+                m_time  TEXT    NOT NULL,
+                payload TEXT    NOT NULL
+            )"""
+        )
+        con.commit()
+        return con
+
     def load_from_disk(self) -> None:
-        if not self.backlog_file_path or not self.backlog_file_path.exists():
+        """
+        Load backlog points from SQLite into memory, applying age-based expiration and removing
+        corrupted entries. Valid points populate backlog_points and _backlog_rowids together so
+        subsequent enqueue/eviction operations can address rows directly by rowid.
+        """
+        if not self.backlog_file_path:
             return
 
-        now: datetime = _now_tz()
-        loaded: list[dict] = []
+        cutoff: datetime = _now_tz() - timedelta(seconds=int(self.max_backlog_age))
+        loaded_points: list[dict] = []
+        loaded_rowids: list[int] = []
+        expired_ids: list[int] = []
 
         try:
-            with self._backlog_lock: # Protect memory/disk during load
-                with open(self.backlog_file_path, "r") as f:
-                    for line in f:
-                        clean: str = line.strip()
-                        if not clean:
-                            continue
-                        try:
-                            point: dict[str, Any] = json.loads(clean)
-                            ts: Any | None = point.get("m_time")
-                            if not ts:
-                                continue
-                            m_time: datetime = datetime.fromisoformat(ts)
-                            if now - m_time < timedelta(seconds=int(self.max_backlog_age)):
-                                loaded.append(point)
-                        except (json.JSONDecodeError, ValueError) as e:
-                            self._log.info("Skipping corrupted backlog line: %s", e)
-                self.backlog_points = loaded
-                self._sync_to_disk()
+            with self._backlog_lock:
+                con: sqlite3.Connection = self._db_connect()
+                try:
+                    rows: List[Any] = con.execute(
+                        "SELECT id, m_time, payload FROM backlog ORDER BY id"
+                    ).fetchall()
 
-            self._log.info("Loaded %d points from disk", len(loaded))
+                    for row_id, m_time_str, payload_str in rows:
+                        try:
+                            m_time: datetime = datetime.fromisoformat(m_time_str)
+                            if m_time < cutoff:
+                                expired_ids.append(row_id)
+                                continue
+                            point: dict[str, Any] = json.loads(payload_str)
+                            loaded_points.append(point)
+                            loaded_rowids.append(row_id)
+                        except (json.JSONDecodeError, ValueError) as e:
+                            self._log.info("Skipping corrupted backlog row %s: %s", row_id, e)
+                            expired_ids.append(row_id)
+
+                    if expired_ids:
+                        con.execute(
+                            f"DELETE FROM backlog WHERE id IN ({','.join('?' * len(expired_ids))})",  # noqa: S608
+                            expired_ids
+                        )
+                        con.commit()
+                finally:
+                    con.close()
+
+                self.backlog_points = loaded_points
+                self._backlog_rowids = loaded_rowids
+
+            self._log.info("Loaded %d points from disk", len(loaded_points))
 
         except Exception as e:
-            self._log.exception (f"Failed to process backlog file: {e}")
+            self._log.exception(f"Failed to process backlog file: {e}")
             self.send_message(
                 message="Failed to load backlog from disk. Check logs for details.",
                 title="MPG Backlog Load Error",
@@ -2478,48 +2543,99 @@ class BacklogManager:
             )
 
     def enqueue(self, point: dict) -> None:
+        """
+        Add a point to the backlog. SQLite is always written before memory is updated so that
+        a crash mid-call leaves SQLite as the authoritative record.
+
+        On overflow, the oldest row is deleted from SQLite first, then removed from memory.
+        The new point is then inserted into SQLite first, then appended to memory. If either
+        disk operation fails the in-memory state is not modified and the exception propagates.
+
+            example point dict:
+            {
+                "device_info_id": 3,                          # int — FK into device_info table
+                "m_time": datetime(2026, 6, 2, 14, 23, 11,    # datetime (or ISO string after SQLite round-trip)
+                                tzinfo=tzlocal()),
+                "transport_name": "eg4_18kpv_inverter_1",     # str — identifies the source inverter
+                "protocol":       "eg4_18kpv",                # str — used to route to the right wide table
+                "wide_table_name": "wide__eg4_18kpv",         # str | None — None means narrow-only protocol
+
+                "metrics": {                                  # dict — the raw readings from that poll cycle
+                    "battery_voltage":   52.4,
+                    "battery_soc":       87,
+                    "pv_power":          3120,
+                    "grid_frequency":    60.01,
+                    "output_power":      2800,
+                    "inverter_temp":     42.5,
+                    # ... one key/value per register in the protocol registry
+                }
+}
+        """
         if isinstance(point, list):
             raise TypeError("enqueue() does not accept lists, only single dict or None.")
 
         with self._backlog_lock:
-            # 1. Check if we are at or over the limit
             if len(self.backlog_points) >= self.max_backlog_size:
-                # Drop the oldest point (Index 0) to make room
+                self._log.warning(f"Max backlog size ({self.max_backlog_size}) reached. Dropping oldest point.")
+                # Delete oldest from SQLite first — memory is unchanged until disk succeeds.
+                oldest_rowid: int = self._backlog_rowids[0]
+                self._delete_row_from_disk(oldest_rowid)
+                # Disk succeeded — safe to evict from memory.
                 self.backlog_points.pop(0)
-                self._log.warning(f"Max backlog size ({self.max_backlog_size}) reached. Dropped oldest point.")
-                # 2. Since we dropped a point, we must rewrite the file
-                # otherwise the disk file will contain more points than the list.
-                self.backlog_points.append(point)
-                self._sync_to_disk()
-            else:
-                # 3. Normal path: append to list and disk
-                self.backlog_points.append(point)
-                self._append_to_disk(point)
+                self._backlog_rowids.pop(0)
+
+            # Insert new point into SQLite first — memory is unchanged until disk succeeds.
+            new_rowid: int = self._append_to_disk(point)
+            # Disk succeeded — safe to append to memory.
+            self.backlog_points.append(point)
+            self._backlog_rowids.append(new_rowid)
 
     def replay_to_queue(self) -> int:
-        """Transfers backlog to queue. Returns count replayed."""
-        count = 0
+        """
+        Transfer all backlog points to the flush queue, then clear both memory and disk.
+        Returns the number of points replayed.
+        """
         with self._backlog_lock:
             if not self.backlog_points:
                 return 0
             count: int = len(self.backlog_points)
-            if count > 0:
-                self._log.debug(f"Replaying {count} points to flush queue.")
-                for payload in self.backlog_points:
-                    self._flush_queue.put(payload)
-                self.backlog_points.clear()
-                self._sync_to_disk()
+            self._log.debug(f"Replaying {count} points to flush queue.")
+            for payload in self.backlog_points:
+                self._flush_queue.put(payload)
+            # Clear memory first — the flush queue holds the authoritative copy during the
+            # brief window before _clear_disk() completes.
+            self.backlog_points.clear()
+            self._backlog_rowids.clear()
+            self._clear_disk()
         return count
 
-    def _append_to_disk(self, point: dict) -> None:
+    # -------------------------
+    # Disk helpers
+    # -------------------------
+
+    def _append_to_disk(self, point: dict) -> int:
+        """
+        Insert a single point into SQLite. Returns the new rowid.
+        Raises on failure — caller must not update memory if this raises.
+        """
         if not self.backlog_file_path:
-            return
-        json_string: str = json.dumps(point, default=str)
+            return -1
+        m_time_str: str = str(point.get("m_time", _now_tz().isoformat()))
+        payload_str: str = json.dumps(point, default=str)
 
         try:
-            self.backlog_file_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.backlog_file_path, "a") as f:
-                f.write(json_string + "\n")
+            con: sqlite3.Connection = self._db_connect()
+            try:
+                cur: sqlite3.Cursor = con.execute(
+                    "INSERT INTO backlog (m_time, payload) VALUES (?, ?)",
+                    (m_time_str, payload_str)
+                )
+                con.commit()
+                if cur.lastrowid is None:
+                    raise RuntimeError("Failed to retrieve rowid after insert.")
+                return cur.lastrowid
+            finally:
+                con.close()
         except Exception as e:
             self._log.error(f"Failed to append point to backlog disk: {e}")
             self.send_message(
@@ -2529,23 +2645,51 @@ class BacklogManager:
             )
             raise
 
-    def _sync_to_disk(self) -> None:
+    def _delete_row_from_disk(self, rowid: int) -> None:
+        """
+        Delete a single row from SQLite by its rowid.
+        Raises on failure — caller must not update memory if this raises.
+        """
         if not self.backlog_file_path:
             return
-        with self._backlog_lock:
+        try:
+            con: sqlite3.Connection = self._db_connect()
             try:
-                self.backlog_file_path.parent.mkdir(parents=True, exist_ok=True)
-                with open(self.backlog_file_path, "w") as f:
-                    for p in self.backlog_points:
-                        f.write(json.dumps(p, default=str) + "\n")
-            except Exception as e:
-                self._log.error(f"Failed to sync backlog to disk: {e}")
-                self.send_message(
-                    message="Failed to sync backlog to disk. Check logs for details.",
-                    title="MPG Backlog Sync Error",
-                    priority=1
-                )
-                raise
+                con.execute("DELETE FROM backlog WHERE id = ?", (rowid,))
+                con.commit()
+            finally:
+                con.close()
+        except Exception as e:
+            self._log.error(f"Failed to delete row {rowid} from backlog disk: {e}")
+            self.send_message(
+                message="Failed to delete oldest point from backlog on disk. Check logs for details.",
+                title="MPG Backlog Delete Error",
+                priority=1
+            )
+            raise
+
+    def _clear_disk(self) -> None:
+        """
+        Delete all rows from the SQLite backlog table. Called after replay_to_queue()
+        once memory has already been cleared.
+        """
+        if not self.backlog_file_path:
+            return
+        try:
+            con: sqlite3.Connection = self._db_connect()
+            try:
+                con.execute("DELETE FROM backlog")
+                con.commit()
+            finally:
+                con.close()
+        except Exception as e:
+            self._log.error(f"Failed to clear backlog from disk: {e}")
+            self.send_message(
+                message="Failed to clear backlog on disk. Check logs for details.",
+                title="MPG Backlog Clear Error",
+                priority=1
+            )
+            raise
 class RollupManager:
     """ summary logic
         The RollupManger class creates the structures that enable TimescaleDB rollup views.

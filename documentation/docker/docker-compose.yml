@@ -14,6 +14,7 @@
 #   pgadmin        - pgAdmin 4 web UI (:5050)
 #   chronograf     - InfluxDB web dashboard (:8888)
 #   grafana        - Grafana visualization (:3000)
+#   portainer       - Portainer Docker management (:9000)
 #
 # Usage:
 #   1. Copy this file and the companion configs to your docker compose deployment directory:
@@ -84,7 +85,7 @@ services:
       - mpg/mpg_config:/app/config
       - mpg/mpg_protocols:/app/protocols
       # Mount your config.cfg directly if you manage it outside the UI:
-      # - ./config/config.cfg:/app/config.cfg
+      # - mpg/config/config.cfg:/app/config.cfg
     environment:
       TZ: ${TZ:-UTC}
     # Uncomment and set the correct device path for Modbus RTU / serial:
@@ -109,15 +110,16 @@ services:
       start_period: 20s
 
   # ---------------------------------------------------------------------------
-  # TimescaleDB  (PostgreSQL with time-series hypertable extension)
+  # TimescaleDB  (PostgreSQL ***with time-series hypertable extension and HA (High Availability) version***)
   # ---------------------------------------------------------------------------
   timescaledb:
-    image: timescale/timescaledb:latest-pg16
-    container_name: mpg_timescaledb
+    image: timescale/timescaledb-ha:pg18
+    container_name: timescaledb
     <<: [*restart-policy, *default-logging]
     ports:
       - "${TIMESCALE_PORT:-5432}:5432"
     volumes:
+     # note the ha version of timescaledb uses a different data storage path compared to the standard postgres database
       - mpg/timescaledb/timescaledb_data:/var/lib/postgresql/data
 
     environment:
@@ -140,7 +142,7 @@ services:
   # ---------------------------------------------------------------------------
   influxdb:
     image: influxdb:1.8.0
-    container_name: mpg_influxdb1_8
+    container_name: influxdb1_8
     <<: [*restart-policy, *default-logging]
     ports:
       - "${INFLUXDB_PORT:-8086}:8086"
@@ -185,7 +187,7 @@ services:
       - --object-store=file
       - --data-dir=/var/lib/influxdb3/data
   
-  # If using influxdb3 -- influxdb3 configuration ui tool
+  # Only if using influxdb3 -- influxdb3 configuration ui tool
   explorer:
     # explicit consistent stable version is 1.8.0
     image: influxdata/influxdb3-ui:1.8.0
@@ -212,7 +214,7 @@ services:
   # ---------------------------------------------------------------------------
   mosquitto:
     image: eclipse-mosquitto:2
-    container_name: mpg_mosquitto
+    container_name: mosquitto
     <<: [*restart-policy, *default-logging]
     ports:
       - "${MQTT_PORT:-1883}:1883"
@@ -237,7 +239,7 @@ services:
   # ---------------------------------------------------------------------------
   pgadmin:
     image: dpage/pgadmin4:latest
-    container_name: mpg_pgadmin
+    container_name: pgadmin
     <<: [*restart-policy, *default-logging]
     ports:
       - "${PGADMIN_PORT:-5050}:80"
@@ -259,8 +261,8 @@ services:
   # Chronograf  (InfluxDB 1.x web dashboard)  
   # ---------------------------------------------------------------------------
   chronograf:
-    image: chronograf:1.10
-    container_name: mpg_chronograf
+    image: chronograf:latest
+    container_name: chronograf
     <<: [*restart-policy, *default-logging]
     ports:
       - "${CHRONOGRAF_PORT:-8888}:8888"
@@ -314,3 +316,16 @@ services:
         condition: service_healthy
       influxdb:
         condition: service_healthy
+
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: portainer
+    <<: [*restart-policy, *default-logging]
+    ports:
+      - "9000:9000"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - mpg/portainer_data:/data
+    networks:
+      - mpg_internal

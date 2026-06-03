@@ -241,7 +241,7 @@ Each transport is independently configurable with its own scan interval, log lev
 ### Prerequisites
 
 - Python 3.10 or later
-- A device connected via USB serial adapter, RS-485 adapter, or network
+- A hardware device connected via USB serial adapter, RS-485 adapter, or network
 
 ### Install
 
@@ -302,10 +302,13 @@ The stack provides:
 | **MPG** | 1717 | Gateway web UI and core service |
 | **Timescale DB** | 5432 | Time-series PostgreSQL for long-term storage |
 | **InfluxDB** | 8086 | Alternative time-series database |
+| **InfluxDB3** | 8181 | Alternative time-series database |
+| **influxdb3-explorer** | 8888 | Influx3 administration |
 | **Mosquitto MQTT** | 1883 / 9001 | MQTT broker for Home Assistant and other subscribers |
 | **pgAdmin** | 5050 | PostgreSQL/Timescale DB web management UI |
 | **Chronograf** | 8888 | InfluxDB web dashboard |
 | **Grafana** | 3000 | Unified visualization for all data sources |
+| **Portainer** | 9000 | Portainer Docker management |
 
 Start the full stack:
 
