@@ -113,6 +113,10 @@ class transport_base:
         self.device_model: str = ""
         self.device_identifier: str = ""
         self.device_location: str = ""
+        # Populated by the gateway after scrape groups are built.
+        # Bridges can use this to size resources (e.g. connection pools) that
+        # scale with the number of concurrent data sources.
+        self.scraper_count: int = 1
 
         # so any early log calls before transport_name is set don't crash
         self._log: logging.Logger = logging.getLogger(__name__)

@@ -222,13 +222,12 @@ class MessageHandler:
             _log.error("Failed to initialise Pushover client: %s", exc)
 
     def _init_telegram(self, cfg: ConfigParser) -> None:
-        """Initialise the Telegram client if telegram_enabled = true."""
         enabled: bool = _cfg_bool(cfg, "messages", "telegram_enabled", False)  # noqa: FBT003
         if not enabled:
             return
 
-        bot_token: str  = cfg.get("messages", "telegram_bot_token", fallback="").strip()
-        chat_ids_raw: str = cfg.get("messages", "telegram_chat_ids",  fallback="").strip()
+        bot_token: str = cfg.get("messages", "telegram_bot_token", fallback="").strip()
+        chat_ids_raw: str = cfg.get("messages", "telegram_chat_ids", fallback="").strip()
 
         if not bot_token or not chat_ids_raw:
             _log.warning(
@@ -237,8 +236,9 @@ class MessageHandler:
             )
             return
 
+        # Construct the client immediately — it's now just storing config strings,
+        # no network activity occurs here.
         try:
-
             client = TelegramClient(bot_token=bot_token, chat_ids=chat_ids_raw)
             self._clients.append(
                 {"name": "telegram", "client": client, "Message": TelegramMessage}

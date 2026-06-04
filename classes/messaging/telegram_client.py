@@ -17,7 +17,7 @@
 
 # Telegram messaging client.
 # Wraps python-telegram-bot in a fire-and-forget helper so it can be used from
-# synchronous or threaded contexts (matching the Pushover client interface).
+# synchronous contexts (matching the Pushover client interface).
 #
 # Only the bot token and a chat_id are required.  The chat_id can be a single
 # user, a group, or a channel (prefix with @).  Multiple chat IDs can be
@@ -34,7 +34,6 @@ from telegram import Bot as _TelegramBot
 from telegram.error import TelegramError
 
 _log: logging.Logger = logging.getLogger(__name__)
-
 
 class TelegramMessage:
     """
@@ -59,6 +58,7 @@ class TelegramMessage:
         parse_mode: str | None = "HTML",
         disable_notification: bool = False,
     ) -> None:
+
         if not text:
             raise ValueError("'text' cannot be empty!")
 
@@ -79,79 +79,34 @@ class TelegramMessage:
 
 
 class TelegramClient:
-    """
-    Fire-and-forget Telegram bot client.
-
-    Works from any thread — internally runs the async PTB call on a dedicated
-    event loop so the caller never has to worry about async/await.
-
-    Parameters
-    ----------
-    bot_token:
-        The BotFather token for your bot (required).
-    chat_ids:
-        One or more recipient chat IDs (user IDs, group IDs, or @channels).
-        Accepts a list[str | int] or a single comma-separated string.
-    """
-
     def __init__(self, bot_token: str, chat_ids: list[str | int] | str) -> None:
         if not bot_token:
             raise ValueError("'bot_token' cannot be empty!")
-
         self.bot_token: str = bot_token
-
-        # Normalize chat_ids — accept "id1, id2" or [id1, id2]
         if isinstance(chat_ids, str):
-            self.chat_ids: list[str | int] = [
-                c.strip() for c in chat_ids.split(",") if c.strip()
-            ]
+            self.chat_ids = [c.strip() for c in chat_ids.split(",") if c.strip()]
         else:
-            self.chat_ids = list(chat_ids)
-
+            self.chat_ids: list[str | int] = list(chat_ids)
         if not self.chat_ids:
             raise ValueError("At least one chat_id is required!")
+        # No Bot construction here — fully deferred to send time.
 
-        # Dedicated event loop running on a daemon thread so async PTB calls
-        # don't interfere with the application's main loop or FastAPI's loop.
-        self._loop: asyncio.AbstractEventLoop = asyncio.new_event_loop()
-        self._thread = threading.Thread(
-            target=self._loop.run_forever, daemon=True, name="TelegramClientLoop"
-        )
-        self._thread.start()
-        self._bot = _TelegramBot(token=self.bot_token)
+    def send(self, message_obj: "TelegramMessage") -> bool:
+        def _run() -> None:
+            try:
+                asyncio.run(self._send_all(message_obj))
+            except Exception as exc:
+                _log.error("Telegram send failed: %s", exc)
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
+        threading.Thread(target=_run, daemon=True, name="TelegramSend").start()
+        return True
 
-    def send(self, message_obj: TelegramMessage) -> bool:
-        """
-        Send *message_obj* to all configured chat IDs.
+    async def _send_all(self, message_obj: "TelegramMessage") -> None:
 
-        Blocks the calling thread only long enough to submit the coroutine;
-        the actual network calls run on the dedicated loop thread.
-
-        Returns True when all sends were submitted, False on error.
-        """
-        future = asyncio.run_coroutine_threadsafe(
-            self._send_all(message_obj), self._loop
-        )
-        try:
-            future.result(timeout=15)
-            return True  # noqa: TRY300
-        except Exception as exc:
-            _log.error("Telegram send failed: %s", exc)
-            return False
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
-
-    async def _send_all(self, message_obj: TelegramMessage) -> None:
-        async with self._bot:
+        async with _TelegramBot(token=self.bot_token) as bot:
             for chat_id in self.chat_ids:
                 try:
-                    await self._bot.send_message(
+                    await bot.send_message(
                         chat_id=chat_id,
                         text=message_obj.full_text,
                         parse_mode=message_obj.parse_mode,
@@ -160,7 +115,5 @@ class TelegramClient:
                     message_obj.response_data = {"status": "ok", "chat_id": chat_id}
                     _log.debug("Telegram message sent to chat_id=%s", chat_id)
                 except TelegramError as exc:
-                    _log.error(
-                        "Telegram send error for chat_id=%s: %s", chat_id, exc
-                    )
+                    _log.error("Telegram send error for chat_id=%s: %s", chat_id, exc)
                     message_obj.response_data = {"status": "error", "detail": str(exc)}

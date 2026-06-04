@@ -589,6 +589,14 @@ class Protocol_Gateway:
         # Build scrape groups — transports sharing the same physical endpoint
         # are consolidated so the device is only scraped once per cycle.
         self.__scrape_groups: list[ScrapeGroup] = self._build_scrape_groups()
+        # Inform all transports how many scrapers are active. Bridges use this
+        # to size any resources that scale with concurrent data sources.
+        _scraper_count: int = sum(
+            1 for t in self.__transports if t.read_interval > 0
+        )
+        for _t in self.__transports:
+            _t.scraper_count = _scraper_count
+
         self.__concurrent_executor: ThreadPoolExecutor | None = None
         self.__concurrent_futures: dict[str, Future[None]] = {}
         self.__concurrent_futures_lock: threading.Lock = threading.Lock()

@@ -483,8 +483,6 @@ class timescaledb(transport_base):
     INT_TYPES: set[str] = {"SMALLINT", "INTEGER", "BIGINT"}
     FLOAT_TYPES: set[str] = {"REAL", "DOUBLE PRECISION", "NUMERIC"}
 
-    flush_timeout: int = 15
-
     # persistent storage/backlog settings. Default folder name and file name are the same but can be user configured.
     enable_persistent_storage: bool = True
     backlog_storage_path: Path = Path(__file__).resolve().parent.parent.parent / "timescaledb_backlog"
@@ -549,7 +547,6 @@ class timescaledb(transport_base):
             - enable_auto_refresh (bool): Enable periodic rollup refresh (default: True)
             - enable_compression (bool): Enable compression on hypertables at startup (default: True)
             - enable_persistent_storage (bool): Enable disk backlog (default: True)
-            - flush_timeout (int): Seconds between batch flushes (default: 15). Note: this is set from the "read_interval" setting, not "flush_timeout".
             - force_float (bool): Force metric values to float (default: True)
             - host (str): Database host (default: "localhost")
             - hypertable_defaults: Dicts for hypertable narrow and wide creation and policies
@@ -559,7 +556,7 @@ class timescaledb(transport_base):
             - migrate_data: whether to attempt to migrate existing data when creating hypertables and rollups. Set to False to skip migration and start fresh with new schema.
             - password (str): Database password
             - port (int): Database port (default: 5432)
-            - reconnect_attempts (int): Max reconnect attempts (default: 5)
+            - reconnect_attempts (int): Max reconnect attempts (default: 5)  if set to 0, no limit.
             - reconnect_delay (int): Initial reconnect delay (default: 5)
             - rollup_defaults: dict for rollup settings
             - stale_data_timeout (int): Seconds before considering data stale for incomplete batch cleanup (default: 300)
@@ -607,12 +604,6 @@ class timescaledb(transport_base):
         self.max_reconnect_delay = settings.getint("max_reconnect_delay", fallback=self.max_reconnect_delay)
         self.reconnect_attempts: int = settings.getint("reconnect_attempts", fallback=self.reconnect_attempts)
         self.reconnect_delay: int = settings.getint("reconnect_delay", fallback=self.reconnect_delay)
-
-        # flush points settings.  We use the read interval setting from the base transport as the flush interval,
-        # since it is a natural fit for how often to flush batches to the database, and it keeps the user from having to configure
-        # an additional setting that is essentially doing the same thing.  The flush_timeout setting is still available as a fallback
-        # if read_interval is not set by the user.
-        self.flush_timeout = settings.getint("read_interval", fallback=self.flush_timeout)
         self.force_float = settings.getboolean("force_float", fallback=self.force_float)
 
         # stale data cleanup settings
@@ -686,9 +677,16 @@ class timescaledb(transport_base):
         # SQLAlchemy init runtime
         # If a shared manager is provided, use it.
         # Otherwise create an instance-scoped one.
+        # number of extra connections to add to the pool size beyond the number of scrapers,
+        # to ensure there are enough connections for background threads and other operations.
+
+        #  multiple scrapers registering via init_bridge can each trigger schema work +
+        # # rollup refresh thread + schema/init_bridge thread + reconnect thread -- pool overhead.
+        POOL_OVERHEAD = 3
+        pool_size: int = max(2, self.scraper_count + POOL_OVERHEAD)
+
         if connection_manager is not None:
             self._connection_manager: TimescaleDBConnectionManager = connection_manager
-            self._owns_connection_manager = False
         else:
             self._connection_manager = TimescaleDBConnectionManager(
                 host=self.host,
@@ -696,10 +694,10 @@ class timescaledb(transport_base):
                 database=self.database,
                 username=self.username,
                 password=self.password,
+                pool_size=pool_size,
                 log=self._log
             )
             self._connection_manager.connect()
-            self._owns_connection_manager = True
 
         self._connection_manager.register()
 
@@ -798,27 +796,16 @@ class timescaledb(transport_base):
         try:
         # create database if missing.  Connect to standard default "postgres" database first to then check/create target database structure.
             self._log.info(f"Starting Timescaledb {self.__version__} and attempting connection:")
-
-            # Database creation and engine setup are owned by TimescaleDBConnectionManager.
-            if self._owns_connection_manager:
-                self._create_database_if_missing()
-                try:
-                    self._create_engine()   # sets tsdb_connected internally
-                except Exception as e:
-                    self._log.error(f"Engine creation error: {e}")
-            else:
-                # Engine and session factory already live via the shared manager.
-                # Verify the connection is healthy and mark ourselves as connected.
-                try:
-                    with self.engine.connect() as conn:
-                        conn.execute(text("SELECT 1"))
-                        conn.execute(text("CREATE EXTENSION IF NOT EXISTS timescaledb_toolkit"))
-                    self._set_tsdb_connected(conn_value = True, conn_reason ="Shared manager connection verified")
-                except OperationalError as e:
-                    self._set_tsdb_connected(conn_value = False, conn_reason = "Shared manager connection failed")
-                    self._log.error(f"Connection verification failed: {e}")
-                    self._log.error(f"❌ [COMMUNICATION LOST] --- Name: {self.transport_name} ---")
-                    raise
+            try:
+                with self.engine.connect() as conn:
+                    conn.execute(text("SELECT 1"))
+                    conn.execute(text("CREATE EXTENSION IF NOT EXISTS timescaledb_toolkit"))
+                self._set_tsdb_connected(conn_value=True, conn_reason="Connection verified")
+            except OperationalError as e:
+                self._set_tsdb_connected(conn_value=False, conn_reason="Connection failed")
+                self._log.error(f"Connection verification failed: {e}")
+                self._log.error(f"❌ [COMMUNICATION LOST] --- Name: {self.transport_name} ---")
+                raise
 
             # Clean up any orphaned locks from a previous crashed session
             # before attempting schema work that could deadlock against them.
@@ -906,7 +893,7 @@ class timescaledb(transport_base):
                 except Exception as e:
                     self._set_tsdb_connected(conn_value = False, conn_reason = f"Reconnect attempt {attempt_no} unsuccessful")
                     self._log.warning(f"Reconnect attempt {attempt_no} failed during connect(): {e}")
-                    self._log.warning(f"❌ [COMMUNICATION LOST] --- Name: {self.transport_name} ---")
+                    self._log.warning(f"❌ [COMMUNICATION LOST] {e} --- to TimescaleDB --- Attempt {attempt_no}{'' if attempts <= 0 else f'/{attempts}'} --- Will retry in {delay}s.")
 
                 with self._reconnect_lock:
                     tsdb_connected: bool = self.tsdb_connected
@@ -954,7 +941,9 @@ class timescaledb(transport_base):
                 # Final log if exhausted
                 if attempts > 0 and attempt_no >= attempts:
                     self._log.error("Auto-reconnect: exhausted reconnect attempts. Will continue buffering to backlog.")
-                    self._log.error(f"❌ [COMMUNICATION LOST] --- Name: {self.transport_name} ---")
+                    msg: str = (f"❌ [COMMUNICATION LOST] --- to TimescaleDB --- Attempt "
+                                f"{attempt_no}{'' if attempts <= 0 else f'/{attempts}'} --- Will retry in {delay}s.")
+                    self._log.error(msg)
                 else:
                     self._log.info("Auto-reconnect: stopped without establishing connection.")
 
@@ -995,64 +984,6 @@ class timescaledb(transport_base):
         if hasattr(self, "_stop_reconnect_event"):
             self._stop_reconnect_event.set()
             self._log.info("reconnect thread stopped.")
-
-    # -------------------------
-    # 1. Ensure the database exists
-    # -------------------------
-    def _create_database_if_missing(self):
-        """ checks to see if the target default postgres database exists. Then creates the solar database
-        (or whatever the user names the metrics database) if missing.  Datname = Database name in postgres.
-        """
-        try:
-            self._log.debug(f"Checking database '{self.database}' existence")
-            default_url: str = f"postgresql+psycopg2://{self.username}:{self.password}@{self.host}:{self.port}/postgres"
-            try:
-                self._log.debug(f"Connecting to default 'postgres' database at {self.host}:{self.port} as user '{self.username}'")
-                default_engine: Engine = create_engine(default_url, isolation_level="AUTOCOMMIT", pool_pre_ping=True)
-
-            except OperationalError as e:
-                self._set_tsdb_connected(conn_value = False, conn_reason ="Connect unsuccessful")
-                self._log.error(f"OperationalError during engine/session creation during database creation: {e}")
-                raise
-
-            with default_engine.connect() as conn:
-                row: Row[Any] | None = conn.execute(text("SELECT 1 FROM pg_database WHERE datname = :d"), {"d": self.database}).fetchone()
-                if not row:
-                    self._log.info(f"Database '{self.database}' not found — creating")
-                    conn.execute(text(f'CREATE DATABASE "{self.database}"'))
-                    self._log.info(f"Database '{self.database}' created")
-                else:
-                    self._log.debug(f"Database '{self.database}' already exists")
-            # get rid of default engine after use to avoid connection pool issues with multiple engines in the same process.
-            # We only needed it to check/create the database, and all subsequent work is done through the main engine from the connection manager.
-            default_engine.dispose()
-        except Exception as e:
-            self._log.error(f"Failed to verify/create database '{self.database}': {e}")
-            raise
-
-    def _create_engine(self) -> None:
-        pool_size = 3 if self.flush_timeout <= 10 else 1
-
-        url: str = f"postgresql+psycopg2://{self.username}:{self.password}@{self.host}:{self.port}/{self.database}"
-        try:
-            self._log.debug(f"Connecting to database '{self.database}' at {self.host}:{self.port} as user '{self.username}'")
-            self.engine: Engine = create_engine(url, pool_pre_ping=True, future=True, pool_recycle=3600, pool_size=pool_size, max_overflow=2)
-
-            # Each protocol instance gets its own factory
-            self.SessionFactory: sessionmaker[Session] = sessionmaker(
-                bind=self.engine,
-                autocommit=False,
-                expire_on_commit=False,
-                autoflush=False
-            )
-            with self.engine.connect() as conn:
-                conn.execute(text("SELECT 1"))
-                conn.execute(text('CREATE EXTENSION IF NOT EXISTS timescaledb_toolkit'))
-            self._set_tsdb_connected(conn_value = True, conn_reason = "Connect successful")
-        except OperationalError as e:
-            self._set_tsdb_connected(conn_value = False, conn_reason = "Connect unsuccessful")
-            self._log.error(f"OperationalError during engine creation: {e}")
-            raise
 
 
     def _ensure_wide_table_exists(self, table_name: str) -> None:
@@ -1878,157 +1809,160 @@ class timescaledb(transport_base):
             narrow_data  -> dict of appended new_data with deviceid and timestamp.  Needed because narrow table
             applies timestamp to individual metrics.
         """
+        # open a session for the lifetime of the flush worker thread to reuse across flushes and improve performance.
+        # We can do this because the flush worker is the only thread writing to the database,
+        # so we don't have to worry about session concurrency.
+        session: Session = self.SessionFactory()
+        try:
+            while True:
 
-        while True:
+                # 24hr cleanup interval in seconds for stale registry entries based on transport timestamp vs last known timestamp
+                # in the registry map for that transport. This is to prevent the registry map from growing indefinitely
+                # with old transports that are no longer sending data.
+                if time.time() - self._last_cleanup_time > 86400:
+                    self._cleanup_stale_registry()
+                    self._last_cleanup_time = time.time()
 
-            # 24hr cleanup interval in seconds for stale registry entries based on transport timestamp vs last known timestamp
-            # in the registry map for that transport. This is to prevent the registry map from growing indefinitely
-            # with old transports that are no longer sending data.
-            if time.time() - self._last_cleanup_time > 86400:
-                self._cleanup_stale_registry()
-                self._last_cleanup_time = time.time()
-
-            session: Session = self.SessionFactory()
-            try:
-                self._flush_event.wait(timeout=0)
-                #************** Drain the queue with a 1s timeout to stay responsive************
-                data_in: dict[str, Any] | None = self._flush_queue.get(block=True)
-
-                if data_in is None or data_in is True:
-                    self._log.info("Shutdown sentinel received. Exiting flush worker.")
-                    self._flush_queue.task_done()
-                    break # Exit the loop cleanly and immediately
-
-                # Now that we have data, wait here if a migration is running
-                while self.migration_in_progress.is_set():
-                    if self._stop_event.is_set():
-                        break
-                    time.sleep(0.25)
-
-                # 2. Extract the metadata from data_in
-                device_info_id: int = data_in["device_info_id"]
-                timestamp: datetime = data_in["m_time"]
-                # Backlog replay deserializes datetime as ISO string — convert back.
-                if isinstance(timestamp, str):
-                    timestamp = datetime.fromisoformat(timestamp)
-                metrics_only: dict = data_in["metrics"]
-                transport_name: str = data_in["transport_name"]
-                protocol: str = data_in["protocol"]
-                wide_table_name: str = data_in["wide_table_name"]
-
-                # Check for stale data before attempting to process/write to the database. This is based on the timestamp from the transport
-                # and the previous saved timestamp.
-
-                is_stale: bool = self._check_is_stale(transport_name, metrics_only, timestamp)
-
-                if is_stale:
-                    self._commit_transport_state(transport_name, metrics_only, timestamp, is_stale=True)
-                    self._log.debug("Stale data detected, skipping DB write.")
-                    self._flush_queue.task_done()
-                    continue
-
-                # pre-process data to coerce floating point, integer as values (from metric_catalog definitions) for safe insertion to the wide table.
-                # Also applies SQL-safe column renaming. Only process metric values for the wide table path.
-                # The narrow table stores raw key/values as default double precision and is not subject to the same schema
-                # constraints, so we can skip processing for narrow table entries with only metric names safe SQL cleaned for
-                # consistency.
-
-                wide_data, narrow_data = self._process_raw_metrics(metrics_only, protocol)
-
-                if not wide_data and not narrow_data:
-                    self._log.debug("No data detected, skipping DB write.")
-                    self._flush_queue.task_done()
-                    continue
-                else:
-                    # Add device_info_id and timestamp to wide_data for wide table insertion.  This is needed because the narrow table
-                    # applies timestamp and device_info_id to individual rows, whereas the wide table has one row per
-                    # timestamp/device with multiple metric columns.
-
-                    valid_row: bool = False
-                    msg = None
-                    if wide_data and wide_table_name is not None:
-                        valid_row, msg = self._validate_wide_row(wide_data, wide_table_name)
-                        wide_data = wide_data | {
-                            "device_info_id": device_info_id,
-                            "m_time": timestamp,
-                        }
-
-                if self._stop_event.is_set():
-                    break
-
-                while self.migration_in_progress.is_set():
-                    if self._stop_event.is_set():
-                        break
-                    time.sleep(0.5)
                 try:
-                    with self._schema_lock:
-                        with session.begin():
-                            # Further process the narrow data with the timestamp and device_info_id for insertion
-                            # to the narrow table, by applying the timestamp and device_info_id to each metric/value pair.
-                            self._flush_batch_narrow(narrow_data, device_info_id, timestamp, session, transport_name)
+                    self._flush_event.wait(timeout=0)
+                    #************** Drain the queue with a 1s timeout to stay responsive************
+                    data_in: dict[str, Any] | None = self._flush_queue.get(block=True)
 
-                            # Only attempt to write to the wide table if the row is valid and the table name is known.
-                            # If the row fails validation, it may indicate a schema mismatch between the incoming data
-                            # and the existing wide table columns — in this case we skip the wide table write to prevent data loss,
-                            # but still write to the narrow table which is schema-flexible and can accept all incoming data.
-                            if wide_table_name is not None:
-                                target_table: Table = Base.metadata.tables[wide_table_name]
-                                stmt: Insert = pg_insert(target_table).values(**wide_data)
-                                session.execute(stmt)
-                                if valid_row:
-                                    self._log.debug(f"data write complete from [{transport_name}] to timescaledb wide table for {len(metrics_only)} metrics.")
-                                else:
-                                    self._log.debug(f"Not a complete valid row for the wide table because {msg}, but wrote metrics anyway.")
+                    if data_in is None or data_in is True:
+                        self._log.info("Shutdown sentinel received. Exiting flush worker.")
+                        self._flush_queue.task_done()
+                        break # Exit the loop cleanly and immediately
 
-                        self._commit_transport_state(transport_name, metrics_only, timestamp, is_stale=False)
+                    # Now that we have data, wait here if a migration is running
+                    while self.migration_in_progress.is_set():
+                        if self._stop_event.is_set():
+                            break
+                        time.sleep(0.25)
 
-                except (SQLAlchemyError, ValueError) as e1:
-                    session.rollback()
-                    self._log.error(f"metrics data write failed.{e1}")
+                    # 2. Extract the metadata from data_in
+                    device_info_id: int = data_in["device_info_id"]
+                    timestamp: datetime = data_in["m_time"]
+                    # Backlog replay deserializes datetime as ISO string — convert back.
+                    if isinstance(timestamp, str):
+                        timestamp = datetime.fromisoformat(timestamp)
+                    metrics_only: dict = data_in["metrics"]
+                    transport_name: str = data_in["transport_name"]
+                    protocol: str = data_in["protocol"]
+                    wide_table_name: str = data_in["wide_table_name"]
 
-                    # Only backlog if setting enabled and DB is down
-                    with self._reconnect_lock:
-                        tsdb_connected: bool = self.tsdb_connected
+                    # Check for stale data before attempting to process/write to the database. This is based on the timestamp from the transport
+                    # and the previous saved timestamp.
 
-                    if self.enable_persistent_storage and not tsdb_connected:
-                        # Check if we can get the lock
-                        acquired: bool = self._backlog_lock.acquire(blocking=False)
-                        try:
-                            if acquired:
-                                payload: dict[str, Any] = {
-                                    "metrics": metrics_only,
-                                    "device_info_id": device_info_id,
-                                    "m_time": timestamp,
-                                    "transport_name": transport_name,
-                                    "protocol": protocol,
-                                    "wide_table_name": wide_table_name,
-                                }
-                                self.backlog.enqueue(payload)
+                    is_stale: bool = self._check_is_stale(transport_name, metrics_only, timestamp)
 
-                        finally:
-                            if acquired:
-                                self._backlog_lock.release()
+                    if is_stale:
+                        self._commit_transport_state(transport_name, metrics_only, timestamp, is_stale=True)
+                        self._log.debug("Stale data detected, skipping DB write.")
+                        self._flush_queue.task_done()
+                        continue
 
-                    # Handle recovery
-                    if isinstance(e1, SQLAlchemyError):
-                        self._set_tsdb_connected(conn_value = False, conn_reason = "Connection failure")
-                        msg = ("Connection failure detected during flush worker write. Data has been "
-                        "enqueued to backlog and will be retried when connection is restored.")
-                        self._trigger_reconnect()
+                    # pre-process data to coerce floating point, integer as values (from metric_catalog definitions) for safe insertion to the wide table.
+                    # Also applies SQL-safe column renaming. Only process metric values for the wide table path.
+                    # The narrow table stores raw key/values as default double precision and is not subject to the same schema
+                    # constraints, so we can skip processing for narrow table entries with only metric names safe SQL cleaned for
+                    # consistency.
 
-                finally:
+                    wide_data, narrow_data = self._process_raw_metrics(metrics_only, protocol)
 
+                    if not wide_data and not narrow_data:
+                        self._log.debug("No data detected, skipping DB write.")
+                        self._flush_queue.task_done()
+                        continue
+                    else:
+                        # Add device_info_id and timestamp to wide_data for wide table insertion.  This is needed because the narrow table
+                        # applies timestamp and device_info_id to individual rows, whereas the wide table has one row per
+                        # timestamp/device with multiple metric columns.
+
+                        valid_row: bool = False
+                        msg = None
+                        if wide_data and wide_table_name is not None:
+                            valid_row, msg = self._validate_wide_row(wide_data, wide_table_name)
+                            wide_data = wide_data | {
+                                "device_info_id": device_info_id,
+                                "m_time": timestamp,
+                            }
+
+                    if self._stop_event.is_set():
+                        break
+
+                    while self.migration_in_progress.is_set():
+                        if self._stop_event.is_set():
+                            break
+                        time.sleep(0.5)
+                    try:
+                        with self._schema_lock:
+                            with session.begin():
+                                # Further process the narrow data with the timestamp and device_info_id for insertion
+                                # to the narrow table, by applying the timestamp and device_info_id to each metric/value pair.
+                                self._flush_batch_narrow(narrow_data, device_info_id, timestamp, session, transport_name)
+
+                                # Only attempt to write to the wide table if the row is valid and the table name is known.
+                                # If the row fails validation, it may indicate a schema mismatch between the incoming data
+                                # and the existing wide table columns — in this case we skip the wide table write to prevent data loss,
+                                # but still write to the narrow table which is schema-flexible and can accept all incoming data.
+                                if wide_table_name is not None:
+                                    target_table: Table = Base.metadata.tables[wide_table_name]
+                                    stmt: Insert = pg_insert(target_table).values(**wide_data)
+                                    session.execute(stmt)
+                                    if valid_row:
+                                        self._log.debug(f"data write complete from [{transport_name}] to timescaledb wide table for {len(metrics_only)} metrics.")
+                                    else:
+                                        self._log.debug(f"Not a complete valid row for the wide table because {msg}, but wrote metrics anyway.")
+
+                            self._commit_transport_state(transport_name, metrics_only, timestamp, is_stale=False)
+
+                    except (SQLAlchemyError, ValueError) as e1:
+                        session.rollback()
+                        self._log.error(f"metrics data write failed.{e1}")
+
+                        # Only backlog if setting enabled and DB is down
+                        with self._reconnect_lock:
+                            tsdb_connected: bool = self.tsdb_connected
+
+                        if self.enable_persistent_storage and not tsdb_connected:
+                            # Check if we can get the lock
+                            acquired: bool = self._backlog_lock.acquire(blocking=False)
+                            try:
+                                if acquired:
+                                    payload: dict[str, Any] = {
+                                        "metrics": metrics_only,
+                                        "device_info_id": device_info_id,
+                                        "m_time": timestamp,
+                                        "transport_name": transport_name,
+                                        "protocol": protocol,
+                                        "wide_table_name": wide_table_name,
+                                    }
+                                    self.backlog.enqueue(payload)
+
+                            finally:
+                                if acquired:
+                                    self._backlog_lock.release()
+
+                        # Handle recovery
+                        if isinstance(e1, SQLAlchemyError):
+                            self._set_tsdb_connected(conn_value = False, conn_reason = "Connection failure")
+                            msg = ("Connection failure detected during flush worker write. Data has been "
+                            "enqueued to backlog and will be retried when connection is restored.")
+                            self._trigger_reconnect()
+
+                    finally:
+
+                        self._flush_queue.task_done()
+
+                        # Clear flush event if queue is empty
+                        if self._flush_queue.empty():
+                            self._flush_event.clear()
+                except Exception as e:
+                    self._log.critical(f" Fatal Flush Worker Crash: {e}")
                     self._flush_queue.task_done()
 
-                    # Clear flush event if queue is empty
-                    if self._flush_queue.empty():
-                        self._flush_event.clear()
-            except Exception as e:
-                self._log.critical(f" Fatal Flush Worker Crash: {e}")
-                self._flush_queue.task_done()
-
-            finally:
-                session.close()
+        finally:
+            session.close()
 
     def _process_raw_metrics(self, datacopy: dict, protocol: str) -> tuple[dict, dict]:
         try:
@@ -2363,10 +2297,7 @@ class timescaledb(transport_base):
             self._log.error(f"Error stopping flush thread: {e}")
 
         try:
-            if self._owns_connection_manager:
-                self._connection_manager.dispose()
-            else:
-                self._connection_manager.unregister()
+            self._connection_manager.unregister()
         except Exception as e:
             self._log.error(f"Error disposing engine: {e}")
 
