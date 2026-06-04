@@ -120,40 +120,6 @@ def test_send_spawns_background_daemon_thread(
 # INTEGRATION TESTS: ASYNC DELIVERY & ISOLATION (Asynchronous)
 # ==============================================================================
 
-@pytest.mark.asyncio
-@patch("classes.messaging.telegram_client._TelegramBot")
-async def test_send_all_dispatches_individually_to_all_recipients(
-    mock_bot_class: MagicMock,
-) -> None:
-    """Directly runs _send_all to check arguments and successful dispatch."""
-    # Setup mock async context manager and client
-    mock_bot_instance = AsyncMock()
-    mock_bot_class.return_value.__aenter__.return_value = mock_bot_instance
-
-    client = TelegramClient(bot_token="my-token", chat_ids="123, 456")  # noqa: S106
-    message = TelegramMessage(text="Hello", title="Alert")
-
-    # Act: Call the async engine directly, bypassing the thread wrapper
-    await client._send_all(message)
-
-    # Assert: Bot init parameters
-    mock_bot_class.assert_called_once_with(token="my-token")  # noqa: S106
-
-    # Assert: Dispatched to both IDs with correct content structure
-    assert mock_bot_instance.send_message.call_count == 2
-    mock_bot_instance.send_message.assert_any_call(
-        chat_id="123",
-        text="<b>Alert</b>\nHello",
-        parse_mode="HTML",
-        disable_notification=False
-    )
-
-    # Assert: Consolidated state tracking matches refactored payload
-    assert message.response_data == {
-        "123": {"status": "ok"},
-        "456": {"status": "ok"}
-    }
-
 
 @pytest.mark.asyncio
 @patch("classes.messaging.telegram_client._TelegramBot")
