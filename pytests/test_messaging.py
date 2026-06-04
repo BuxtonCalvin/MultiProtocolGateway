@@ -20,14 +20,18 @@
 from __future__ import annotations
 
 from configparser import ConfigParser
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, patch
 
 import pytest
 
 from classes.messaging import message_handler
 from classes.messaging.message_handler import MessageHandler
 from classes.messaging.pushover import Client, Glance, Message
-from classes.messaging.telegram_client import TelegramClient, TelegramMessage
+from classes.messaging.telegram_client import (
+    TelegramClient,
+    TelegramError,
+    TelegramMessage,
+)
 
 
 def test_pushover_message_truncates_long_fields_and_rejects_none() -> None:
@@ -73,22 +77,111 @@ def test_telegram_message_formats_html_title_and_rejects_empty_text() -> None:
         TelegramMessage("")
 
 
+
+# ==============================================================================
+# UNIT TESTS: VALIDATION & THREADING (Synchronous)
+# ==============================================================================
+
 @patch("classes.messaging.telegram_client._TelegramBot")
 @patch("classes.messaging.telegram_client.threading.Thread")
-@patch("classes.messaging.telegram_client.asyncio.new_event_loop")
-def test_telegram_client_normalizes_chat_ids_without_real_bot(
-    mock_loop_factory: MagicMock,
+def test_telegram_client_normalizes_chat_ids(
     mock_thread: MagicMock,
     mock_bot: MagicMock,
 ) -> None:
-    """Mocks external API/threading: TelegramClient parses chat IDs and wires a bot object."""
-    mock_loop = MagicMock()
-    mock_loop_factory.return_value = mock_loop
-    client = TelegramClient(bot_token="token", chat_ids="123, @channel,")  # noqa: S106
-
+    """Verifies string splitting, trailing commas, and whitespace trimming."""
+    client = TelegramClient(bot_token="token", chat_ids="123, @channel,  ")  # noqa: S106
     assert client.chat_ids == ["123", "@channel"]
+
+
+@patch("classes.messaging.telegram_client.asyncio.run")
+@patch("classes.messaging.telegram_client.threading.Thread")
+def test_send_spawns_background_daemon_thread(
+    mock_thread: MagicMock,
+    mock_asyncio_run: MagicMock,
+) -> None:
+    """Verifies that .send() starts an immediate fire-and-forget daemon thread."""
+    client = TelegramClient(bot_token="token", chat_ids="123")  # noqa: S106
+    message = TelegramMessage(text="Test thread spawning")
+
+    result = client.send(message)
+
+    assert result is True
+
+    # Use ANY to bypass matching the dynamic internal function reference
+    mock_thread.assert_called_once_with(
+        target=ANY,
+        daemon=True,
+        name="TelegramSend"
+    )
     mock_thread.return_value.start.assert_called_once()
-    mock_bot.assert_called_once_with(token="token")  # noqa: S106
+
+
+# ==============================================================================
+# INTEGRATION TESTS: ASYNC DELIVERY & ISOLATION (Asynchronous)
+# ==============================================================================
+
+@pytest.mark.asyncio
+@patch("classes.messaging.telegram_client._TelegramBot")
+async def test_send_all_dispatches_individually_to_all_recipients(
+    mock_bot_class: MagicMock,
+) -> None:
+    """Directly runs _send_all to check arguments and successful dispatch."""
+    # Setup mock async context manager and client
+    mock_bot_instance = AsyncMock()
+    mock_bot_class.return_value.__aenter__.return_value = mock_bot_instance
+
+    client = TelegramClient(bot_token="my-token", chat_ids="123, 456")  # noqa: S106
+    message = TelegramMessage(text="Hello", title="Alert")
+
+    # Act: Call the async engine directly, bypassing the thread wrapper
+    await client._send_all(message)
+
+    # Assert: Bot init parameters
+    mock_bot_class.assert_called_once_with(token="my-token")  # noqa: S106
+
+    # Assert: Dispatched to both IDs with correct content structure
+    assert mock_bot_instance.send_message.call_count == 2
+    mock_bot_instance.send_message.assert_any_call(
+        chat_id="123",
+        text="<b>Alert</b>\nHello",
+        parse_mode="HTML",
+        disable_notification=False
+    )
+
+    # Assert: Consolidated state tracking matches refactored payload
+    assert message.response_data == {
+        "123": {"status": "ok"},
+        "456": {"status": "ok"}
+    }
+
+
+@pytest.mark.asyncio
+@patch("classes.messaging.telegram_client._TelegramBot")
+async def test_send_all_isolates_failures_per_recipient(
+    mock_bot_class: MagicMock,
+) -> None:
+    """Verifies that a failure on one recipient doesn't stall delivery to others."""
+    mock_bot_instance = AsyncMock()
+    mock_bot_class.return_value.__aenter__.return_value = mock_bot_instance
+
+    # Simulate a partial network failure: 123 crashes, 456 succeeds
+    mock_bot_instance.send_message.side_effect = [
+        TelegramError("Chat not found"),
+        None
+    ]
+
+    client = TelegramClient(bot_token="token", chat_ids="123, 456")  # noqa: S106
+    message = TelegramMessage(text="Resilience test")
+
+    await client._send_all(message)
+
+    # Assert: The second message was still processed despite the first crash
+    assert mock_bot_instance.send_message.call_count == 2
+
+    # Assert: State tracks both distinct results cleanly
+    assert message.response_data["123"] == {"status": "error", "detail": "Chat not found"}
+    assert message.response_data["456"] == {"status": "ok"}
+
 
 
 def test_message_handler_dispatch_filters_services_and_clamps_priority() -> None:
