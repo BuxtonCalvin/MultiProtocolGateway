@@ -23,6 +23,7 @@ of every transport setting key, which transports use it, and a user-editable des
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, List
 
 from sqlalchemy.orm import Session
 
@@ -168,7 +169,7 @@ def seed_setting_descriptions(
     If purge_removed=True, rows for keys no longer found in any transport are deleted.
     Returns (count of rows inserted/updated, list of purged keys).
     """
-    library = scan_transport_library(transports_dir)
+    library: dict[str, dict[str, Any]] = scan_transport_library(transports_dir)
 
     # Build: key → set of transport names that use it
     key_to_transports: dict[str, set[str]] = {}
@@ -179,8 +180,8 @@ def seed_setting_descriptions(
     _log.info("seed_setting_descriptions: scanning %d transports", len(library))
     touched = 0
     for key, transport_set in sorted(key_to_transports.items()):
-        transports_str = ", ".join(sorted(transport_set))
-        existing = db.query(SettingDescription).filter(SettingDescription.key == key).first()
+        transports_str: str = ", ".join(sorted(transport_set))
+        existing: SettingDescription | None = db.query(SettingDescription).filter(SettingDescription.key == key).first()
 
         if existing:
             # Update transports list (may have changed as new transports are added)
@@ -189,13 +190,13 @@ def seed_setting_descriptions(
                 touched += 1
             # Backfill description if empty and we have a seed value
             if not existing.description:
-                seed_desc = SEED_DESCRIPTIONS.get(key, "")
+                seed_desc: str = SEED_DESCRIPTIONS.get(key, "")
                 if seed_desc:
                     existing.description = seed_desc
                     existing.description_disk = seed_desc
                     touched += 1
         else:
-            desc = SEED_DESCRIPTIONS.get(key, "")
+            desc: str = SEED_DESCRIPTIONS.get(key, "")
             row = SettingDescription(
                 key=key,
                 transports=transports_str,
@@ -209,8 +210,8 @@ def seed_setting_descriptions(
     # Purge rows for keys no longer in any transport
     purged_keys: list[str] = []
     if purge_removed:
-        current_keys = set(key_to_transports.keys())
-        stale_rows = db.query(SettingDescription).filter(
+        current_keys: set[str] = set(key_to_transports.keys())
+        stale_rows: List[SettingDescription] = db.query(SettingDescription).filter(
             ~SettingDescription.key.in_(current_keys)
         ).all()
         for row in stale_rows:
@@ -228,7 +229,7 @@ def get_all_setting_descriptions(db: Session) -> list[SettingDescription]:
 
 
 def update_description(db: Session, setting_id: int, description: str) -> SettingDescription | None:
-    row = db.get(SettingDescription, setting_id)
+    row: SettingDescription | None = db.get(SettingDescription, setting_id)
     if not row:
         return None
     row.description = description
@@ -238,7 +239,7 @@ def update_description(db: Session, setting_id: int, description: str) -> Settin
 
 
 def discard_descriptions(db: Session) -> None:
-    dirty = db.query(SettingDescription).filter(SettingDescription.is_dirty == True).all()  # noqa: E712
+    dirty: List[SettingDescription] = db.query(SettingDescription).filter(SettingDescription.is_dirty == True).all()  # noqa: E712
     for row in dirty:
         row.description = row.description_disk
         row.is_dirty = False
@@ -246,8 +247,8 @@ def discard_descriptions(db: Session) -> None:
 
 
 def commit_descriptions(db: Session) -> int:
-    dirty = db.query(SettingDescription).filter(SettingDescription.is_dirty == True).all()  # noqa: E712
-    count = len(dirty)
+    dirty: List[SettingDescription] = db.query(SettingDescription).filter(SettingDescription.is_dirty == True).all()  # noqa: E712
+    count: int = len(dirty)
     for row in dirty:
         row.description_disk = row.description
         row.is_dirty = False

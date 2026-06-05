@@ -35,20 +35,25 @@ the same logic used in protocol_gateway.main().
 from __future__ import annotations
 
 import asyncio
+import hashlib as _hashlib
 import logging
 import logging.handlers
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, List
+from typing import Any, List, Tuple
 
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from sqlalchemy import Row
 from sqlalchemy.engine import Engine
+
+from classes.WebServer.diff_engine import DiffResult
+from classes.WebServer.models import AppState, ConfigBackup, SettingDescription
 
 from ..transports.modbus_base import modbus_base
 from .database import ensure_app_state, init_db, run_migrations, session_scope
@@ -116,7 +121,7 @@ def _install_webserver_logging() -> None:
 
     # ── Identify Central Handlers ──────────────────────────────────────────
     # Grab the handlers already established on the root logger by the gateway
-    root_handlers = logging.getLogger().handlers
+    root_handlers: List[logging.Handler] = logging.getLogger().handlers
 
     if not root_handlers:
         # If the gateway hasn't initialized logging yet, we allow
@@ -221,7 +226,6 @@ def create_app(
         engine: Engine = init_db(db_dir / "mpg_staging.db")
 
         def _startup_io() -> Scanner:
-            import hashlib as _hashlib
             run_migrations(db_dir / "mpg_staging.db", _ALEMBIC_INI)
             Base.metadata.create_all(bind=engine)
             with session_scope() as db:
@@ -235,7 +239,7 @@ def create_app(
                 from .models import ConfigBackup
                 cfg_hash: str = _hashlib.md5(config_path.read_bytes()).hexdigest()  # noqa: S324
                 with session_scope() as _db:
-                    latest = _db.query(ConfigBackup).order_by(
+                    latest: ConfigBackup | None = _db.query(ConfigBackup).order_by(
                         ConfigBackup.created_at.desc()
                     ).first()
                     if latest:
@@ -255,12 +259,12 @@ def create_app(
             return s
 
         try:
-            loop = asyncio.get_running_loop()
+            loop: asyncio.AbstractEventLoop = asyncio.get_running_loop()
             with ThreadPoolExecutor(max_workers=1, thread_name_prefix="MPGWebInit") as executor:
                 scanner: Scanner = await loop.run_in_executor(executor, _startup_io)
 
         except Exception as exc:
-            msg = f"Startup I/O failed (server still starting): {exc}"
+            msg: str = f"Startup I/O failed (server still starting): {exc}"
             _log.error(msg)
             scanner = Scanner(config_path, project_root)
 
@@ -338,7 +342,7 @@ def create_app(
         )
         with session_scope() as db:
             nav: NavData            = get_nav_data(db)
-            state                   = get_app_state(db)
+            state: AppState                   = get_app_state(db)
 
         proto_groups: List[dict[str, Any]] = get_protocol_groups(protocols_dir_)
 
@@ -366,9 +370,9 @@ def create_app(
             # This prevents scraper base keys (protocol_version, read_interval,
             # variable_mask, etc.) from appearing in the bridge settings pane.
             if summary and summary.transport_type == "bridge":
-                library = scan_transport_library(request.app.state.transports_dir)
-                bridge_info = library.get(summary.transport_class, {})
-                bridge_keys = set(bridge_info.get("keys", {}).keys())
+                library: dict[str, dict[str, Any]] = scan_transport_library(request.app.state.transports_dir)
+                bridge_info: dict[str, Any] = library.get(summary.transport_class, {})
+                bridge_keys: set[Any] = set(bridge_info.get("keys", {}).keys())
                 # Always keep log_level as it's shown in a dedicated dropdown
                 bridge_keys.add("log_level")
                 settings: List[Setting] = [
@@ -383,7 +387,7 @@ def create_app(
             )
             protocol_match = None
             if summary is None:
-                protocol_match = (
+                protocol_match: Row[Tuple[str, str]] | None = (
                     db.query(ProtocolRegister.protocol_group, ProtocolRegister.protocol_name)
                     .filter(ProtocolRegister.protocol_name == device_name)
                     .first()
@@ -463,7 +467,7 @@ def create_app(
         if registry_type == "json":
             # Look up protocol_group so we can find the .json file
             with session_scope() as db:
-                row = (
+                row: Row[Tuple[str]] | None = (
                     db.query(ProtocolRegister.protocol_group)
                     .filter(ProtocolRegister.protocol_name == protocol_name)
                     .first()
@@ -530,7 +534,7 @@ def create_app(
     async def diff_panel(request: Request):
         """HTMX partial — visual diff of staged vs disk state."""
         with session_scope() as db:
-            diff = build_diff(db)
+            diff: DiffResult = build_diff(db)
 
         return templates.TemplateResponse(
             request=request,
@@ -588,7 +592,7 @@ def create_app(
     async def transport_settings_page(request: Request):
         with session_scope() as db:
             nav: NavData = get_nav_data(db)
-            settings = get_all_setting_descriptions(db)
+            settings: List[SettingDescription] = get_all_setting_descriptions(db)
             # Convert to plain dicts for template (avoids lazy-load issues outside session)
             settings_data = [
                 {
@@ -684,9 +688,9 @@ def start_webserver(config_file_path: Path, log_file: str, log_dir: str, gateway
 
     # config_file is already a fully-resolved absolute Path from the gateway.
     # project_root: walk up until pyproject.toml is found (same logic as gateway).
-    config_path: Path  = config_file_path.resolve()
+    config_path: Path  = config_file_path.resolve()  # with file name.
     config_dir: Path   = config_path.parent          # e.g. <root>/config/
-    project_root: Path = config_dir.parent            # e.g. <root>/  (fallback before pyproject.toml walk)
+    project_root: Path = config_dir.parent           # e.g. <root>/  (fallback before pyproject.toml walk)
 
     _log.info(f"WebServer config_path  : {config_path}")
     _log.info(f"WebServer project_root : {project_root}")

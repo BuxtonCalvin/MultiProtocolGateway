@@ -185,7 +185,7 @@ def _load_config(config_path: Path) -> dict[str, dict[str, str]]:
         parser = ConfigParser()
 
     parser.read(str(config_path))
-    removed_keys = {"analyze_protocol", "analyze_protocol_save_load"}
+    removed_keys: set[str] = {"analyze_protocol", "analyze_protocol_save_load"}
     result: dict[str, dict[str, str]] = {}
     for section in parser.sections():
         result[section] = {}
@@ -193,7 +193,7 @@ def _load_config(config_path: Path) -> dict[str, dict[str, str]]:
             if key in removed_keys:
                 continue
             # Strip inline comments
-            value = value.split("#")[0].strip()
+            value: str = value.split("#")[0].strip()
             result[section][key] = value
     return result
 
@@ -213,7 +213,7 @@ def _classify_transport(section: str, keys: dict[str, str], transports_dir: Path
     transport_type: str = keys.get("transport", "").strip()
     if transport_type:
         py_file: Path = transports_dir / f"{transport_type}.py"
-        classification = _transport_type_from_ast(py_file)
+        classification: str = _transport_type_from_ast(py_file)
         if classification in ("scraper", "bridge"):
             return classification
 
@@ -232,13 +232,13 @@ def _transport_type_from_ast(py_file: Path) -> str:
 
     try:
         source: str = py_file.read_text(encoding="utf-8")
-        tree = ast.parse(source)
+        tree: ast.Module = ast.parse(source)
     except Exception as exc:
         _log.warning(f"AST transport_type parse failed for {py_file.name}: {exc}")
         return "base class"
 
-    valid_types = {"scraper", "bridge", "base class", "general"}
-    module_stem = py_file.stem
+    valid_types: set[str] = {"scraper", "bridge", "base class", "general"}
+    module_stem: str = py_file.stem
     discovered: list[tuple[str, str]] = []
 
     for node in tree.body:
@@ -259,7 +259,7 @@ def _transport_type_from_ast(py_file: Path) -> str:
                     value_node = stmt.value
 
             if target_name and isinstance(value_node, ast.Constant) and isinstance(value_node.value, str):
-                value = value_node.value.strip().lower()
+                value: str = value_node.value.strip().lower()
                 if value in valid_types:
                     discovered.append((node.name, value))
 
@@ -290,7 +290,7 @@ def _extract_settings_keys_from_ast(py_path: Path) -> dict[str, str]:
     found: dict[str, str] = {}
     try:
         source: str = py_path.read_text(encoding="utf-8")
-        tree = ast.parse(source)
+        tree: ast.Module = ast.parse(source)
     except Exception as exc:
         _log.warning(f"AST parse failed for {py_path.name}: {exc}")
         return found
@@ -298,7 +298,7 @@ def _extract_settings_keys_from_ast(py_path: Path) -> dict[str, str]:
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
-        func_node = node.func
+        func_node: ast.expr = node.func
         # Match: settings.get / settings.getint / settings.getfloat / settings.getboolean
         if not (isinstance(func_node, ast.Attribute)
                 and func_node.attr in ("get", "getint", "getfloat", "getboolean")
@@ -309,7 +309,7 @@ def _extract_settings_keys_from_ast(py_path: Path) -> dict[str, str]:
         # First positional arg is the key (may be a string or a list)
         if not node.args:
             continue
-        first_arg = node.args[0]
+        first_arg: ast.expr = node.args[0]
 
         keys_to_add: list[str] = []
         if isinstance(first_arg, ast.Constant) and isinstance(first_arg.value, str):
@@ -353,20 +353,20 @@ def scan_transport_library(transports_dir: Path) -> dict[str, dict[str, Any]]:
             continue
         stem: str = py_file.stem
 
-        classification = _transport_type_from_ast(py_file)
+        classification: str = _transport_type_from_ast(py_file)
 
         # Keys from AST scan of this file
-        ast_keys = _extract_settings_keys_from_ast(py_file)
+        ast_keys: dict[str, str] = _extract_settings_keys_from_ast(py_file)
 
         if classification == "bridge":
             # Bridges: only expose the keys they explicitly read via settings.get(...).
-            # Do NOT inject scraper-oriented base keys (protocol_version, read_interval,
+            # Do not inject scraper-oriented base keys (protocol_version, read_interval,
             # variable_mask, device_location, bridge, analyze_protocol, etc.).
             merged: dict[str, str] = ast_keys
         else:
             # Scrapers and base classes: supplement AST with the known-keys table
             # so common Modbus/TCP keys are always present even if not in every file.
-            known_keys = KNOWN_TRANSPORT_KEYS.get(stem, TRANSPORT_BASE_KEYS)
+            known_keys: dict[str, str] = KNOWN_TRANSPORT_KEYS.get(stem, TRANSPORT_BASE_KEYS)
             merged = {**known_keys, **ast_keys}
 
         result[stem] = {
@@ -448,7 +448,7 @@ def _parse_protocol_csv(csv_path: Path, group_name: str) -> list[dict[str, Any]]
             f.seek(0)
             delimiter = ";" if sample.count(";") > sample.count(",") else ","
 
-            reader = csv.DictReader(
+            reader: csv.DictReader[str] = csv.DictReader(
                 f,
                 delimiter=delimiter,
                 quotechar='"',
@@ -464,7 +464,7 @@ def _parse_protocol_csv(csv_path: Path, group_name: str) -> list[dict[str, Any]]
             def _norm(s: str) -> str:
                 return s.strip().lower().replace(" ", "_").replace("/", "_")
 
-            norm_fields = {k: _norm(k) for k in reader.fieldnames if k is not None}
+            norm_fields: dict[str, str] = {k: _norm(k) for k in reader.fieldnames if k is not None}
 
             # Canonical field aliases — maps normalized header → canonical key
             ALIASES: dict[str, str] = {
@@ -686,7 +686,7 @@ def _upsert_protocol_register(db: Session, reg: dict[str, Any]) -> ProtocolRegis
     # Check-first approach avoids hitting the UNIQUE constraint on INSERT.
     # The constraint can still fire in a concurrent scenario, so we also
     # catch IntegrityError inside a savepoint as a backstop.
-    existing = (
+    existing: ProtocolRegister | None = (
         db.query(ProtocolRegister)
         .filter(
             ProtocolRegister.protocol_name == reg["protocol_name"],
@@ -817,7 +817,7 @@ def _upsert_device_protocol_selection(
     screen_names: set[str],
     write_names: set[str],
 ) -> None:
-    existing = (
+    existing: DeviceProtocolSelection | None = (
         db.query(DeviceProtocolSelection)
         .filter(
             DeviceProtocolSelection.device_name == device_name,
@@ -896,7 +896,7 @@ def _sync_device_protocol_selections(
             for (protocol_name,) in protocol_names:
                 write_names |= _load_override_names(protocols_dir, protocol_name, config_dir=config_dir)
 
-        protocol_rows = (
+        protocol_rows: List[ProtocolRegister] = (
             db.query(ProtocolRegister)
             .filter(ProtocolRegister.protocol_name.like(f"{protocol_version}%"))
             .all()
@@ -961,7 +961,7 @@ class Scanner:
         _log.info(f"Starting scanner scan: {self.config_path}")
 
         # Update AppState scanner status
-        state = db.get(AppState, 1)
+        state: AppState | None = db.get(AppState, 1)
         if state:
             state.scanner_status = "running"
             db.flush()
@@ -976,7 +976,7 @@ class Scanner:
 
         try:
             # ----------------------------------------------------------------
-            # 1. Scan config.cfg
+            # Scan config.cfg
             # ----------------------------------------------------------------
             config_data: dict[str, dict[str, str]] = _load_config(self.config_path)
             transport_library: dict[str, dict[str, Any]] = scan_transport_library(self.transports_dir)
@@ -999,7 +999,7 @@ class Scanner:
                     stats["settings_upserted"] += 1
 
             # ----------------------------------------------------------------
-            # 2. Add known-but-unset keys for each transport section
+            #  Add known-but-unset keys for each transport section
             #    (so the UI can show all possible config options)
             # ----------------------------------------------------------------
             for section, keys in config_data.items():
@@ -1022,17 +1022,17 @@ class Scanner:
                         stats["settings_upserted"] += 1
 
             # ----------------------------------------------------------------
-            # 3. Mark orphans
+            #  Mark orphans
             # ----------------------------------------------------------------
             stats["settings_orphaned"] = _mark_orphaned_settings(db, seen_setting_keys)
 
             # ----------------------------------------------------------------
-            # 4. Scan protocol CSV/JSON files
+            #  Scan protocol CSV/JSON files
             # ----------------------------------------------------------------
             registers = scan_protocols_dir(self.protocols_dir)
             skipped = 0
             for reg in registers:
-                result = _upsert_protocol_register(db, reg)
+                result: ProtocolRegister | None = _upsert_protocol_register(db, reg)
                 if result is not None:
                     stats["registers_upserted"] += 1
                 else:
@@ -1054,7 +1054,7 @@ class Scanner:
             db.flush()
 
             # ----------------------------------------------------------------
-            # 5. Refresh AppState
+            #  Refresh AppState
             # ----------------------------------------------------------------
             state = db.get(AppState, 1)
             if state is None:

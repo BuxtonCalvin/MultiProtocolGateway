@@ -53,18 +53,20 @@ class modbus_tls(modbus_base):
         self.certfile: str = settings.get("certfile", "")
         self.keyfile: str = settings.get("keyfile", "")
         self.hostname: str = settings.get("hostname", self.host)
+        self.timeout: int = settings.getint("timeout", fallback=7)
+        self.retries: int = settings.getint("retries", fallback=3)
 
         cert_path: Path = config_dir / self.certfile
         key_path: Path = config_dir / self.keyfile
 
-        # 1. Thread-safe client caching logic
+        # Thread-safe client caching logic
         client_str: str = f"{self.host}-tls-{self.port}"
         with self._clients_lock:
             if client_str in modbus_base.clients:
                 self.client = modbus_base.clients[client_str]
                 return
 
-        # 2. Version detection
+        # Version detection
         # Falls back to a safe legacy mode if version cannot be parsed
         try:
             self.curr_version: version.Version = version.parse(pymodbus_version)
@@ -78,8 +80,8 @@ class modbus_tls(modbus_base):
         client_args = {
             "host": self.host,
             "port": self.port,
-            "timeout": 7,
-            "retries": 3,
+            "timeout": self.timeout,
+            "retries": self.retries
         }
         if is_modern:
             # Pymodbus 3.7.0+
@@ -89,12 +91,12 @@ class modbus_tls(modbus_base):
                 msg = "SSL cert or key not found. Ensure they are on the host in the config folder."
                 raise FileNotFoundError(msg)
 
-            # 3. generate_ssl usually expects strings, so convert them back with str()
+            # generate_ssl usually expects strings, so convert them back with str()
             client_args["sslctx"] = ModbusTlsClient.generate_ssl(
                 certfile=str(cert_path),
                 keyfile=str(key_path)
             )
-            client_args["server_hostname"] = self.hostname # Renamed from 'hostname'
+            client_args["server_hostname"] = self.hostname
         else:
             # Legacy Pymodbus support
             client_args["certfile"] = self.certfile

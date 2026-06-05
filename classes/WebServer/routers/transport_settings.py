@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
@@ -44,7 +45,7 @@ class DescriptionUpdate(BaseModel):
 
 @router.get("")
 def list_settings(db: Session = Depends(get_session)):
-    rows = get_all_setting_descriptions(db)
+    rows: list[SettingDescription] = get_all_setting_descriptions(db)
     return [
         {
             "id": r.id,
@@ -65,7 +66,7 @@ def scan_for_new_settings(request: Request, db: Session = Depends(get_session)):
     """
     transports_dir = request.app.state.transports_dir
 
-    library = scan_transport_library(transports_dir)
+    library: dict[str, dict[str, Any]] = scan_transport_library(transports_dir)
 
     # Build current key → transports mapping from library
     key_to_transports: dict[str, set[str]] = {}
@@ -74,7 +75,7 @@ def scan_for_new_settings(request: Request, db: Session = Depends(get_session)):
             key_to_transports.setdefault(key, set()).add(transport_name)
 
     # Find genuinely new keys (not yet in DB)
-    existing_keys = {r.key for r in db.query(SettingDescription.key).all()}  # type: ignore[attr-defined]
+    existing_keys = {r.key for r in db.query(SettingDescription.key).all()}
     existing_keys = {r[0] for r in db.query(SettingDescription.key).all()}
 
     new_findings: list[dict] = []
@@ -108,7 +109,7 @@ def patch_description(
     payload: DescriptionUpdate,
     db: Session = Depends(get_session),
 ):
-    row = update_description(db, setting_id, payload.description)
+    row: SettingDescription | None = update_description(db, setting_id, payload.description)
     if not row:
         raise HTTPException(status_code=404, detail="Setting not found")
     refresh_app_state(db)
