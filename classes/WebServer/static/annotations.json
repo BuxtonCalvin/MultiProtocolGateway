@@ -2,256 +2,264 @@
   "dashboard": [
     {
       "id": "dashboard-status",
-      "x_percent": 12,
-      "y_percent": 35,
-      "label_x_percent": 2,
-      "label_y_percent": 58,
+      "x_percent": 15.080568720379144,
+      "y_percent": 15.219514554430095,
+      "label_x_percent": 11.083728278041075,
+      "label_y_percent": 29.29417356069733,
       "label": "Gateway status cards show staged settings sync state, protocol toggle state, and last scan / commit timestamps.",
       "shape_type": "dot"
     },
     {
       "id": "dashboard-devices",
-      "x_percent": 75,
-      "y_percent": 35,
-      "label_x_percent": 55,
-      "label_y_percent": 58,
-      "width_percent": 44,
-      "height_percent": 52,
+      "x_percent": 77.4,
+      "y_percent": 35.5,
+      "label_x_percent": 66.7,
+      "label_y_percent": 39.2,
+      "width_percent": 100,
+      "height_percent": 34.6,
       "label": "Configured scrapers and bridges are listed here. Click Configure to jump directly to a device's setup screen.",
       "shape_type": "rect"
     },
     {
       "id": "dashboard-rescan",
-      "x_percent": 12,
-      "y_percent": 72,
-      "label_x_percent": 2,
-      "label_y_percent": 82,
+      "x_percent": 5.1,
+      "y_percent": 72.7,
+      "label_x_percent": 1.9,
+      "label_y_percent": 78.9,
       "label": "Re-scan Configuration reloads config.cfg and protocol files without restarting. Rollback Configuration reverts to the last committed backup.",
       "shape_type": "dot"
+    }
+  ],
+  "device__scraper_read_generic": [
+    {
+      "id": "scraper-settings",
+      "x_percent": 9.026856240126381,
+      "y_percent": 17.10762331838565,
+      "label_x_percent": 15.191153238546603,
+      "label_y_percent": 22.242152466367713,
+      "label": "Left panel shows the scraper's transport, bridge, protocol version, log level, and all active config key/value pairs. Changed values appear with an orange dirty-state dot.",
+      "shape_type": "dot"
+    },
+    {
+      "id": "scraper-tabs",
+      "x_percent": 48.89415481832543,
+      "y_percent": 9.461883408071749,
+      "label_x_percent": 41.50078988941548,
+      "label_y_percent": 18.860986547085204,
+      "label": "Tabs switch between register maps (Holding, Input) and the JSON config editor. Each tab shows a summary of write (W), mask (M), and screen (S) counts.",
+      "shape_type": "dot"
+    },
+    {
+      "id": "scraper-analyze",
+      "x_percent": 81.95260663507109,
+      "y_percent": 7.130044843049327,
+      "label_x_percent": 83.04265402843602,
+      "label_y_percent": 8.278026905829597,
+      "label": "Analyze button opens the register-map analysis tool to compare live device I/O against known protocols and queue register-map changes.",
+      "shape_type": "dot"
+    },
+    {
+      "id": "scraper-table",
+      "x_percent": 55.3,
+      "y_percent": 58.4,
+      "label_x_percent": 55,
+      "label_y_percent": 68,
+      "width_percent": 71.3,
+      "height_percent": 80.4,
+      "label": "Protocol metrics table. W = write-back enabled, M = metric included in variable_mask (scraped), S = metric added to variable_screen (excluded from output). Address, variable name, unit, type, range, adjustments, and notes are shown for each register.",
+      "shape_type": "rect"
+    }
+  ],
+  "device__scraper_write_generic": [
+    {
+      "id": "write-scraper-settings",
+      "x_percent": 12.8,
+      "y_percent": 15.1,
+      "label_x_percent": 15.9,
+      "label_y_percent": 38.5,
+      "label": "Left panel shows the write scraper's transport, bridge, protocol version, log level, and all active config key/value pairs. Changed values appear with an orange dirty-state dot.",
+      "shape_type": "dot"
+    },
+    {
+      "id": "write-scraper-tabs",
+      "x_percent": 44.48025276461294,
+      "y_percent": 8.76124169705633,
+      "label_x_percent": 60.63096366508688,
+      "label_y_percent": 5.437415801345738,
+      "label": "Tabs switch between register maps (Holding, Input) and the JSON config editor. Each tab shows a summary of write (W), mask (M), and screen (S) counts.",
+      "shape_type": "dot"
+    },
+    {
+      "id": "write-scraper-table",
+      "x_percent": 52.8,
+      "y_percent": 23.2,
+      "label_x_percent": 48.2,
+      "label_y_percent": 36,
+      "width_percent": 67,
+      "height_percent": 22.5,
+      "label": "Protocol metrics table. W = write-back enabled, M = metric included in variable_mask (scraped), S = metric added to variable_screen (excluded from output). Address, variable name, unit, type, range, adjustments and notes are shown for each register.",
+      "shape_type": "rect"
+    }
+  ],
+  "device__bridge_generic": [
+    {
+      "id": "bridge-left-panel",
+      "x_percent": 10.9,
+      "y_percent": 14.6,
+      "label_x_percent": 7.7,
+      "label_y_percent": 72.8,
+      "label": "Left panel lists every config key for this bridge transport. Checked rows are actively set; unchecked rows fall back to the transport default shown in the DEFAULT column.",
+      "shape_type": "dot"
+    },
+    {
+      "id": "bridge-connection-header",
+      "x_percent": 59.8,
+      "y_percent": 15,
+      "label_x_percent": 70.7,
+      "label_y_percent": 16.8,
+      "width_percent": 80.9,
+      "height_percent": 11.5,
+      "label": "Connection summary shows transport type, endpoint (host:port), and live connection status (green = Connected).",
+      "shape_type": "rect",
+      "stroke_color": "rgb(209,214,33)",
+      "fill_color": "rgba(211,216,31,0.18)"
+    },
+    {
+      "id": "bridge-config-summary",
+      "x_percent": 43.7519747235387,
+      "y_percent": 54.42667855331982,
+      "label_x_percent": 66.80252764612955,
+      "label_y_percent": 53.284749535208604,
+      "width_percent": 49.786729857819886,
+      "height_percent": 63.43992868008107,
+      "label": "Configuration summary lists all resolved key/value pairs that will be written to config.cfg on the next Commit.",
+      "shape_type": "rect"
     }
   ],
   "create_device": [
     {
       "id": "create-transport-name",
-      "x_percent": 40,
-      "y_percent": 19,
-      "label_x_percent": 52,
-      "label_y_percent": 5,
+      "x_percent": 47.9,
+      "y_percent": 32.5,
+      "label_x_percent": 64.3,
+      "label_y_percent": 21.8,
       "label": "Enter a unique name for this scraper section — written as the section header in config.cfg.",
       "shape_type": "dot"
     },
     {
       "id": "create-scraper-transport",
-      "x_percent": 60,
-      "y_percent": 31,
-      "label_x_percent": 52,
-      "label_y_percent": 42,
+      "x_percent": 48.108614232209746,
+      "y_percent": 45.64970633035966,
+      "label_x_percent": 54.572284644194774,
+      "label_y_percent": 38.937144140264564,
       "label": "Choose the transport class (e.g. modbus_tcp, modbus_rtu). This determines which connection keys appear.",
       "shape_type": "dot"
     },
     {
       "id": "create-bridge",
-      "x_percent": 60,
-      "y_percent": 47,
-      "label_x_percent": 2,
-      "label_y_percent": 42,
-      "label": "Optionally link this scraper to a bridge (MQTT, TimescaleDB, etc.) so collected data is forwarded automatically.",
+      "x_percent": 37.5,
+      "y_percent": 59.1,
+      "label_x_percent": 5.3,
+      "label_y_percent": 49.8,
+      "label": "Link this scraper to a bridge or bridges (MQTT, TimescaleDB, etc.) so collected data is forwarded.",
       "shape_type": "dot"
     },
     {
       "id": "create-protocol",
-      "x_percent": 60,
-      "y_percent": 62,
-      "label_x_percent": 52,
-      "label_y_percent": 72,
+      "x_percent": 43.6,
+      "y_percent": 71,
+      "label_x_percent": 53.5,
+      "label_y_percent": 62.1,
       "label": "Select the protocol version whose register map this scraper will use (e.g. eg4_18kpv).",
       "shape_type": "dot"
-    }
-  ],
-  "device__inverter_read": [
-    {
-      "id": "inv-read-settings",
-      "x_percent": 8,
-      "y_percent": 25,
-      "label_x_percent": 2,
-      "label_y_percent": 40,
-      "label": "Left panel shows the scraper's transport, bridge, protocol version, log level, and all active config key/value pairs. Changed values appear with an orange dirty-state dot.",
-      "shape_type": "dot"
     },
     {
-      "id": "inv-read-tabs",
-      "x_percent": 50,
-      "y_percent": 10,
-      "label_x_percent": 40,
-      "label_y_percent": 2,
-      "label": "Tabs switch between register maps (Holding, Input) and the JSON config editor. Each tab shows a summary of write (W), mask (M), and screen (S) counts.",
-      "shape_type": "dot"
-    },
-    {
-      "id": "inv-read-table",
-      "x_percent": 75,
-      "y_percent": 55,
-      "label_x_percent": 55,
-      "label_y_percent": 68,
-      "width_percent": 44,
-      "height_percent": 60,
-      "label": "Protocol metrics table. W = write-back enabled, M = metric included in variable_mask (scraped), S = metric added to variable_screen (excluded from output). Address, variable name, unit, type, range, and notes are shown for each register.",
-      "shape_type": "rect"
-    },
-    {
-      "id": "inv-read-analyze",
-      "x_percent": 22,
-      "y_percent": 10,
-      "label_x_percent": 2,
-      "label_y_percent": 2,
-      "label": "Analyze button opens the register-map analysis tool to compare live device I/O against known protocols and queue register-map changes.",
-      "shape_type": "dot"
-    }
-  ],
-  "device__inverter_write": [
-    {
-      "id": "inv-write-settings",
-      "x_percent": 8,
-      "y_percent": 30,
-      "label_x_percent": 2,
-      "label_y_percent": 45,
-      "label": "Write scraper settings — note write_enabled: True and write_type: write. The bridge is set to mqtt so write commands arrive via MQTT.",
-      "shape_type": "dot"
-    },
-    {
-      "id": "inv-write-holding-tab",
-      "x_percent": 38,
-      "y_percent": 7,
-      "label_x_percent": 28,
-      "label_y_percent": 2,
-      "label": "Holding register map is active. The tab summary (W:3 M:4 S:0) shows how many registers have write-back, mask, and screen flags set.",
-      "shape_type": "dot"
-    },
-    {
-      "id": "inv-write-table",
-      "x_percent": 75,
-      "y_percent": 50,
-      "label_x_percent": 55,
-      "label_y_percent": 65,
-      "width_percent": 44,
-      "height_percent": 55,
-      "label": "Holding register metrics. Checked W rows are write-enabled — the UI can push values to the hardware. Unchecked rows are read-only reference entries.",
-      "shape_type": "rect"
-    }
-  ],
-  "bridge__timescaledb": [
-    {
-      "id": "ts-left-panel",
-      "x_percent": 8,
-      "y_percent": 40,
-      "label_x_percent": 2,
-      "label_y_percent": 55,
-      "label": "Left panel lists every config key for this bridge transport. Checked rows are actively set; unchecked rows fall back to the transport default shown in the DEFAULT column.",
-      "shape_type": "dot"
-    },
-    {
-      "id": "ts-connection-header",
-      "x_percent": 65,
-      "y_percent": 14,
-      "label_x_percent": 42,
-      "label_y_percent": 5,
-      "width_percent": 55,
-      "height_percent": 10,
-      "label": "Connection summary shows transport type, endpoint (host:port), and live connection status (green = Connected).",
-      "shape_type": "rect"
-    },
-    {
-      "id": "ts-config-summary",
-      "x_percent": 65,
-      "y_percent": 55,
-      "label_x_percent": 42,
-      "label_y_percent": 68,
-      "width_percent": 55,
-      "height_percent": 60,
-      "label": "Configuration summary lists all resolved key/value pairs that will be written to config.cfg on the next Commit.",
-      "shape_type": "rect"
-    },
-    {
-      "id": "ts-bridge-note",
-      "x_percent": 65,
-      "y_percent": 93,
-      "label_x_percent": 42,
-      "label_y_percent": 84,
-      "label": "Informational note: bridge transports have no protocol register map — they only sink data forwarded from scrapers.",
+      "id": "create-log-level",
+      "x_percent": 40,
+      "y_percent": 85.3,
+      "label_x_percent": 47.8,
+      "label_y_percent": 80.8,
+      "label": "Select the default log level for this scraper (e.g. INFO, WARNING, ERROR).",
       "shape_type": "dot"
     }
   ],
   "analysis": [
     {
-      "id": "analysis-protocol-list",
-      "x_percent": 18,
-      "y_percent": 45,
-      "label_x_percent": 2,
-      "label_y_percent": 60,
-      "width_percent": 28,
-      "height_percent": 88,
-      "label": "Select one or more protocol versions to compare against the live device scan. Check All selects every protocol at once.",
-      "shape_type": "rect"
+      "id": "analysis-batch-run",
+      "x_percent": 21.6,
+      "y_percent": 6.8,
+      "label_x_percent": 40.2,
+      "label_y_percent": 4,
+      "label": "Batch size controls how many registers are read per Modbus request. Click Run Analysis to start the live scan and score each selected protocol.",
+      "shape_type": "rect",
+      "width_percent": 29.5,
+      "height_percent": 2.5,
+      "stroke_color": "rgb(226,210,20)",
+      "fill_color": "rgba(206,216,31,0.18)"
     },
     {
-      "id": "analysis-batch-run",
-      "x_percent": 18,
-      "y_percent": 8,
-      "label_x_percent": 2,
-      "label_y_percent": 2,
-      "label": "Batch size controls how many registers are read per Modbus request. Click Run Analysis to start the live scan and score each selected protocol.",
-      "shape_type": "dot"
+      "id": "analysis-protocol-list",
+      "x_percent": 19.9,
+      "y_percent": 57.2,
+      "label_x_percent": 2.3,
+      "label_y_percent": 25.5,
+      "width_percent": 25.2,
+      "height_percent": 83.3,
+      "label": "Select one or more protocol versions to compare against the live device scan. Check All selects every protocol at once.",
+      "shape_type": "rect",
+      "stroke_color": "rgb(14,165,233)",
+      "fill_color": "rgba(14,165,233,0.18)"
     },
     {
       "id": "analysis-results",
-      "x_percent": 65,
-      "y_percent": 45,
-      "label_x_percent": 45,
-      "label_y_percent": 60,
-      "width_percent": 46,
-      "height_percent": 55,
+      "x_percent": 62.4,
+      "y_percent": 41.2,
+      "label_x_percent": 47.817810599478705,
+      "label_y_percent": 31.57887925392319,
+      "width_percent": 49.5,
+      "height_percent": 42.7,
       "label": "Results panel shows match scores and queued register-map changes after analysis runs. Click Commit to apply queued changes to the protocol files.",
       "shape_type": "rect"
     }
   ],
   "protocols": [
     {
-      "id": "protocols-table",
-      "x_percent": 55,
-      "y_percent": 50,
-      "label_x_percent": 38,
-      "label_y_percent": 65,
-      "width_percent": 88,
-      "height_percent": 75,
-      "label": "Protocol register map editor. Each row is a register with editable variable name, doc name, unit, type, range, R/W flag, adjustments, and notes. Changes are staged and committed on demand.",
-      "shape_type": "rect"
-    },
-    {
       "id": "protocols-left",
-      "x_percent": 8,
-      "y_percent": 35,
-      "label_x_percent": 2,
-      "label_y_percent": 20,
+      "x_percent": 12.1,
+      "y_percent": 16.9,
+      "label_x_percent": 3,
+      "label_y_percent": 43,
       "label": "Left panel shows the protocol name, group, available register maps (holding, input), and the source CSV file path.",
       "shape_type": "dot"
+    },
+    {
+      "id": "protocols-table",
+      "x_percent": 61.6,
+      "y_percent": 51.3,
+      "label_x_percent": 47,
+      "label_y_percent": 63.6,
+      "width_percent": 72.8,
+      "height_percent": 76.1,
+      "label": "Protocol register map editor. Each row is a register with editable variable name, doc name, unit, type, range, R/W flag, adjustments, and notes. Changes are staged and committed on demand.",
+      "shape_type": "rect"
     }
   ],
   "protocol_json": [
     {
       "id": "json-left",
-      "x_percent": 12,
-      "y_percent": 40,
-      "label_x_percent": 2,
-      "label_y_percent": 55,
+      "x_percent": 12.5,
+      "y_percent": 13.5,
+      "label_x_percent": 3.7,
+      "label_y_percent": 38.9,
       "label": "JSON config sidebar lists available register maps and the current JSON config key/value pairs for this protocol.",
       "shape_type": "dot"
     },
     {
       "id": "json-editor",
-      "x_percent": 62,
+      "x_percent": 62.23696682464455,
       "y_percent": 50,
-      "label_x_percent": 38,
-      "label_y_percent": 65,
+      "label_x_percent": 8.458135860979468,
+      "label_y_percent": 73.89805905136518,
       "width_percent": 72,
       "height_percent": 75,
       "label": "JSON Config Editor — add, edit, or delete key/value pairs (string, number, boolean, or object). Save JSON writes the override file to the config folder; MPG loads it on next start.",
@@ -261,148 +269,208 @@
   "read_mode": [
     {
       "id": "read-mode-setting",
-      "x_percent": 50,
-      "y_percent": 55,
-      "label_x_percent": 20,
-      "label_y_percent": 42,
-      "label": "read_mode controls how MPG cycles through multiple transports: Sequential (one full pass per transport in order), Concurrent (all transports run in parallel threads), or Interleaved (one block per transport in round-robin — best for shared RS485 buses).",
+      "x_percent": 47.8,
+      "y_percent": 23.4,
+      "label_x_percent": 2.7,
+      "label_y_percent": 40.6,
+      "label": "read_mode controls how MPG cycles through multiple transports: Sequential: one full pass per transport in order.  Concurrent: where all transports run in parallel threads. This mode is best for devices that do not share a common bus.  Interleaved: one block per transport in round-robin — best for shared RS485 buses.",
       "shape_type": "dot"
     }
   ],
   "logging-settings": [
     {
+      "id": "logging-backup_count",
+      "x_percent": 37.3,
+      "y_percent": 20,
+      "label": "backup_count sets the number of rotated log files to keep before deleting older log files.",
+      "shape_type": "dot",
+      "label_x_percent": 6.193364928909954,
+      "label_y_percent": 14.2
+    },
+    {
+      "id": "logging-console",
+      "x_percent": 35.9,
+      "y_percent": 29.8,
+      "label": "Enable console/std-out in addition to file logging.",
+      "shape_type": "dot",
+      "label_x_percent": 75.57819905213272,
+      "label_y_percent": 16.223073912063324
+    },
+    {
+      "id": "logging-interval",
+      "x_percent": 36.1,
+      "y_percent": 38.3,
+      "label": "Interval: If using 1, the rotation occurs exactly at every single unit of your chosen time type.  In the screenshot, the chosen time type is weekly.  If 2, then every 2 chosen time type etc.",
+      "shape_type": "dot",
+      "label_x_percent": 6.1723538704581316,
+      "label_y_percent": 27.67546424289546
+    },
+    {
       "id": "logging-level",
-      "x_percent": 55,
-      "y_percent": 38,
-      "label_x_percent": 30,
-      "label_y_percent": 25,
+      "x_percent": 34,
+      "y_percent": 47.1,
+      "label_x_percent": 75.66161137440757,
+      "label_y_percent": 30.000395126540624,
       "label": "level sets the global log verbosity: DEBUG for detailed diagnostics, INFO for normal operation, WARNING/ERROR for quieter logs.",
       "shape_type": "dot"
     },
     {
+      "id": "logging-file",
+      "x_percent": 35.3,
+      "y_percent": 54.5,
+      "label_x_percent": 6.330331753554503,
+      "label_y_percent": 52.87546424289547,
+      "label": "log_dir sets where logs are written which is useful for Docker volume mapping. Default compose file is synced to the \"logs\" default.",
+      "shape_type": "dot"
+    },
+    {
+      "id": "logging-log_file",
+      "x_percent": 37.5,
+      "y_percent": 60.9,
+      "label": "log file filename.  Default is MPG.log",
+      "shape_type": "dot",
+      "label_x_percent": 75.61011058451817,
+      "label_y_percent": 50.650928485790914
+    },
+    {
+      "id": "logging-max_bytes",
+      "x_percent": 36.8,
+      "y_percent": 69.32453575710453,
+      "label": "Maximum log file size in bytes before rotation.  The setting on screen is roughly 100 megabytes.",
+      "shape_type": "dot",
+      "label_x_percent": 6.299842022116877,
+      "label_y_percent": 69.20557091474552
+    },
+    {
       "id": "logging-rotation",
-      "x_percent": 55,
-      "y_percent": 73,
-      "label_x_percent": 30,
-      "label_y_percent": 82,
+      "x_percent": 36.4,
+      "y_percent": 77.8,
+      "label_x_percent": 75.32464454976304,
+      "label_y_percent": 62.27400239785425,
       "label": "rotation and when control log file rotation schedule (e.g. weekly on W0 = Monday). backup_count sets how many rotated archives are retained. max_bytes applies when rotation is set to 'size'.",
       "shape_type": "dot"
     },
     {
-      "id": "logging-file",
-      "x_percent": 55,
-      "y_percent": 55,
-      "label_x_percent": 30,
-      "label_y_percent": 62,
-      "label": "log_dir and log_file set where logs are written. console: true also emits logs to stdout, useful for Docker deployments.",
-      "shape_type": "dot"
+      "id": "logging-when",
+      "x_percent": 35.5,
+      "y_percent": 87.2,
+      "label": "W0 = Monday, W1 = Tuesday, W6 = Sunday",
+      "shape_type": "dot",
+      "label_x_percent": 6.3,
+      "label_y_percent": 82.6
     }
   ],
   "messages": [
     {
       "id": "messages-general",
-      "x_percent": 20,
-      "y_percent": 35,
-      "label_x_percent": 2,
-      "label_y_percent": 20,
+      "x_percent": 22.6,
+      "y_percent": 27.8,
+      "label_x_percent": 10.502956496333608,
+      "label_y_percent": 2.4179867900443615,
       "label": "General section: enabled is the master switch for all notification services. default_title is the fallback heading used when no title is supplied by the caller.",
-      "shape_type": "dot"
+      "shape_type": "rect",
+      "width_percent": 39.3,
+      "height_percent": 17.1
     },
     {
       "id": "messages-test",
-      "x_percent": 20,
-      "y_percent": 60,
-      "label_x_percent": 2,
-      "label_y_percent": 70,
+      "x_percent": 13.6,
+      "y_percent": 42.6,
+      "label_x_percent": 8.4,
+      "label_y_percent": 48.6,
       "label": "Send test message button fires a test notification through all enabled services to verify credentials.",
       "shape_type": "dot"
     },
     {
       "id": "messages-pushover",
-      "x_percent": 67,
-      "y_percent": 35,
-      "label_x_percent": 50,
-      "label_y_percent": 20,
+      "x_percent": 70.5,
+      "y_percent": 31.4,
+      "label_x_percent": 59.48010699605158,
+      "label_y_percent": 10.90323844128882,
       "label": "Pushover service — enter your api_token and user_key from the Pushover dashboard. Values are masked for security.",
-      "shape_type": "dot"
+      "shape_type": "rect",
+      "width_percent": 45.8,
+      "height_percent": 10.2
     },
     {
       "id": "messages-telegram",
-      "x_percent": 67,
-      "y_percent": 65,
-      "label_x_percent": 50,
-      "label_y_percent": 75,
+      "x_percent": 70.4,
+      "y_percent": 56.6,
+      "label_x_percent": 60.919625513819476,
+      "label_y_percent": 66.80647688257763,
       "label": "Telegram service — provide the bot_token from @BotFather and one or more comma-separated chat_ids to receive notifications.",
-      "shape_type": "dot"
+      "shape_type": "rect",
+      "width_percent": 46.2,
+      "height_percent": 14.6
     }
   ],
   "transport_library": [
     {
       "id": "transport-table",
-      "x_percent": 55,
-      "y_percent": 50,
-      "label_x_percent": 35,
-      "label_y_percent": 65,
-      "width_percent": 88,
-      "height_percent": 88,
+      "x_percent": 50.3,
+      "y_percent": 49.7,
+      "label_x_percent": 45,
+      "label_y_percent": 1.1,
+      "width_percent": 81.3,
+      "height_percent": 81.3,
       "label": "All transport classes discovered in classes/transports/. Classification (scraper, bridge, base class) is shown alongside each transport's available config keys.",
       "shape_type": "rect"
     },
     {
-      "id": "transport-scraper-badge",
-      "x_percent": 30,
-      "y_percent": 63,
-      "label_x_percent": 2,
-      "label_y_percent": 72,
-      "label": "Scraper transports (blue badge) actively poll device registers on a schedule. Bridge transports (purple badge) receive and forward data. Base class rows are abstract parents and are not used directly in config.cfg.",
+      "id": "transport-badges",
+      "x_percent": 25.3,
+      "y_percent": 59.3,
+      "label_x_percent": 1,
+      "label_y_percent": 37,
+      "label": "Scraper transports (blue badge) actively poll device registers on a schedule. Bridge transports (purple badge) receive and forward data. Base class rows are abstract parents not used directly in config.cfg.",
       "shape_type": "dot"
     }
   ],
-  "transport_settings": [
-    {
-      "id": "ts-settings-table",
-      "x_percent": 55,
-      "y_percent": 50,
-      "label_x_percent": 35,
-      "label_y_percent": 65,
-      "width_percent": 88,
-      "height_percent": 88,
-      "label": "Consolidated alphabetical registry of every config key across all transport classes, showing which transports use each key and a plain-English description.",
-      "shape_type": "rect"
-    },
+  "transport_settings_trunc": [
     {
       "id": "ts-settings-scan",
-      "x_percent": 88,
-      "y_percent": 4,
+      "x_percent": 80.7,
+      "y_percent": 6.5,
       "label_x_percent": 55,
       "label_y_percent": 2,
       "label": "Scan for New Settings re-reads the transport classes from disk and updates the registry, picking up any keys added after the last scan.",
       "shape_type": "dot"
+    },
+    {
+      "id": "ts-settings-table",
+      "x_percent": 47.5,
+      "y_percent": 55.3,
+      "label_x_percent": 35,
+      "label_y_percent": 65,
+      "width_percent": 89.9,
+      "height_percent": 75.7,
+      "label": "Consolidated alphabetical registry of every config key across all transport classes, showing which transports use each key and a plain-English description.",
+      "shape_type": "rect"
     }
   ],
   "pages__help": [
     {
       "id": "help-screens-list",
-      "x_percent": 12,
-      "y_percent": 28,
-      "label_x_percent": 2,
-      "label_y_percent": 42,
+      "x_percent": 18.6,
+      "y_percent": 20.4,
+      "label_x_percent": 26,
+      "label_y_percent": 14.9,
       "label": "SCREENS section lists every captured screenshot. Click an entry to view it with its annotations overlaid.",
       "shape_type": "dot"
     },
     {
       "id": "help-docs-list",
-      "x_percent": 12,
+      "x_percent": 18.39118903369139,
       "y_percent": 72,
-      "label_x_percent": 2,
-      "label_y_percent": 60,
+      "label_x_percent": 26.358871411427575,
+      "label_y_percent": 67.02421917244416,
       "label": "DOCUMENTATION section lists all files from the documentation/ folder, grouped by subfolder. Click to view markdown files rendered in-page or download other file types.",
       "shape_type": "dot"
     },
     {
       "id": "help-viewer",
-      "x_percent": 65,
-      "y_percent": 50,
+      "x_percent": 56.43821846430022,
+      "y_percent": 55.26816437933313,
       "label_x_percent": 45,
       "label_y_percent": 38,
       "label": "Right panel renders the selected screenshot (with annotation overlays) or the selected documentation file.",
@@ -412,19 +480,19 @@
   "pages__about": [
     {
       "id": "about-description",
-      "x_percent": 50,
-      "y_percent": 32,
-      "label_x_percent": 30,
-      "label_y_percent": 18,
+      "x_percent": 37.5,
+      "y_percent": 15.8,
+      "label_x_percent": 2.7,
+      "label_y_percent": 19.6,
       "label": "Overview of MPG: an open-source data-collection middleware that bridges Modbus TCP/RTU hardware with MQTT, TimescaleDB, and InfluxDB.",
       "shape_type": "dot"
     },
     {
       "id": "about-links",
-      "x_percent": 50,
-      "y_percent": 75,
-      "label_x_percent": 30,
-      "label_y_percent": 85,
+      "x_percent": 53.01974004328425,
+      "y_percent": 52.6146700837662,
+      "label_x_percent": 35.256584519791105,
+      "label_y_percent": 59.68848316661146,
       "label": "Links section provides the GitHub repository URL for source code, issue tracking, and contribution.",
       "shape_type": "dot"
     }
@@ -441,5 +509,37 @@
       "label": "Expandable FAQ entries cover core concepts (scrapers, bridges, dirty state, orphaned settings), common workflows (adding a device, editing protocol CSVs), and operational details (port number, restart requirement, backup location).",
       "shape_type": "rect"
     }
-  ]
+  ],
+  "view_log": [
+    {
+      "id": "view_log",
+      "x_percent": 88.9,
+      "y_percent": 3.5,
+      "label": "Log Output with up to 1,000 lines and a refresh button.",
+      "shape_type": "dot",
+      "label_x_percent": 79.8,
+      "label_y_percent": 10.2
+    }
+  ],
+  "_aliases": {
+    "device__inverter_read": "device__scraper_read_generic",
+    "device__inverter_write": "device__scraper_write_generic",
+    "device__eg4_ll_s_1": "device__scraper_read_generic",
+    "device__eg4_ll_s_2": "device__scraper_read_generic",
+    "device__mqtt": "device__bridge_generic",
+    "device__timescaledb": "device__bridge_generic",
+    "device__influxdb_out": "device__bridge_generic",
+    "device__json_out": "device__bridge_generic",
+    "protocol-editor__*": "protocols",
+    "pages__global-settings": "read_mode",
+    "pages__logging-settings": "logging-settings",
+    "pages__messaging-settings": "messages",
+    "pages__view-log": "view_log",
+    "pages__transport-library": "transport_library",
+    "pages__transport-settings": "transport_settings_trunc",
+    "device__influxdb": "device__bridge_generic",
+    "pages__create-device": "create_device",
+    "pages__analyze*": "analysis",
+    "device__influxdb3": "device__bridge_generic"
+  }
 }

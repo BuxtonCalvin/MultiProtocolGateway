@@ -65,10 +65,19 @@ import threading
 import time
 import warnings
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Lock, RLock
-from typing import Any, Callable, List, Literal, Optional, Protocol, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    List,
+    Literal,
+    Optional,
+    Protocol,
+    Tuple,
+    Union,
+)
 
 from sqlalchemy import (
     Boolean,
@@ -113,11 +122,35 @@ from defs.common import TransportSettings
 
 from .transport_base import transport_base
 
-# machine_timezone: Stores the local timezone name as detected by tzlocal.get_localzone_name(),
-# used for time alignment in rollups and timestamp storage.
-machine_timezone: str = get_localzone_name()
+
+class TimezoneEngine:
+    def __init__(self) -> None:
+        self.use_utc: bool = False
+        self.machine_timezone: str = "UTC"
+
+    def configure(self, use_utc: bool) -> None:
+        """Called once at application startup to lock in the timezone configuration."""
+        self.use_utc = use_utc
+        self.machine_timezone = "UTC" if use_utc else get_localzone_name()
+
+# Instantiate the single, global state engine
+_TZengine = TimezoneEngine()
+
+def configure_application_timezone(use_utc: bool) -> None:
+    """Public function to set up the global timestamp configuration."""
+    _TZengine.configure(use_utc)
+
+def get_machine_timezone() -> str:
+    """Returns the correct timezone string ('UTC' or IANA name) for TimescaleDB."""
+    return _TZengine.machine_timezone
 
 def _now_tz() -> datetime:
+    """
+    The universal timestamp generator.
+    For SQLAlchemy models and all application logic.
+    """
+    if _TZengine.use_utc:
+        return datetime.now(timezone.utc)
     return datetime.now().astimezone()
 
 # base class for all tables.
@@ -561,6 +594,7 @@ class timescaledb(transport_base):
             - rollup_defaults: dict for rollup settings
             - stale_data_timeout (int): Seconds before considering data stale for incomplete batch cleanup (default: 300)
             - use_exponential_backoff (bool): Use exponential backoff (default: True)
+            - use_utc_timestamp (bool): Use UTC timezone for all timestamps instead of local machine timezone (default: False)
             - username (str): Database username
 
         Thread behavior:
@@ -611,6 +645,11 @@ class timescaledb(transport_base):
         # wait for complete data to write to db.
         self.write_requires_complete_cycle = settings.getboolean("write_requires_complete_cycle", fallback=self.write_requires_complete_cycle)
 
+        # UTC timestamp mode setting - set context for this transport instance
+        self.use_utc_timestamp: bool = settings.getboolean("use_utc_timestamp", fallback=False)
+        configure_application_timezone(self.use_utc_timestamp)
+        self.machine_timezone: str = get_machine_timezone()
+
         # persistent backlog settings
         project_root: Path = Path(__file__).resolve().parents[2]
         # Force path to look relative by stripping leading slashes/drives
@@ -633,6 +672,7 @@ class timescaledb(transport_base):
             # Hypertable Settings
             "current_metric_count": self.current_metric_count,
             "tsdb_connected": self.tsdb_connected,
+            "machine_timezone": self.machine_timezone,
             "drop_after": settings.get("drop_after", fallback=self.drop_after),
             "migrate_data": settings.getboolean("migrate_data", fallback=self.migrate_data),
             "enable_compression": settings.getboolean("enable_compression", fallback=self.enable_compression),
@@ -2734,6 +2774,7 @@ class RollupManager:
 
         # Rollup /Hypertable Settings extracted from rollup_policy  (user can override defaults via rollup_policy)
         self.current_metric_count: int = self.rollup_policy.get("current_metric_count", 0)
+        self.machine_timezone: str = self.rollup_policy.get("machine_timezone", "UTC")
         self.auto_refresh_interval: int = self.rollup_policy.get("auto_refresh_interval",21600)
         self.enable_auto_refresh:bool = self.rollup_policy.get("enable_auto_refresh", True)
         self.enable_rollups = bool(self.rollup_policy.get("enable_rollups", True))
@@ -3209,7 +3250,7 @@ class RollupManager:
             )
 
             select_clauses: list[str] = [
-                f"time_bucket(INTERVAL '{bucket_interval}', m_time, '{machine_timezone}') AS m_time",
+                f"time_bucket(INTERVAL '{bucket_interval}', m_time, '{self.machine_timezone}') AS m_time",
                 "device_info_id",
             ]
             group_by_positions: list[str] = ["1", "2"]

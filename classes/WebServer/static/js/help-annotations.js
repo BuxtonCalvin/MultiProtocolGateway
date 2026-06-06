@@ -41,39 +41,84 @@
     const shape = item.shape_type || 'dot';
     const labelX = item.label_x_percent == null ? x : Number(item.label_x_percent);
     const labelY = item.label_y_percent == null ? y : Number(item.label_y_percent);
+    const num = String(index + 1);
 
     if (shape === 'rect') {
-      svgLayer.appendChild(makeSvg('rect', {
-        x: Math.max(0, x - Number(item.width_percent || 8) / 2),
-        y: Math.max(0, y - Number(item.height_percent || 6) / 2),
-        width: Number(item.width_percent || 8),
-        height: Number(item.height_percent || 6),
-        rx: 0.8,
+      const w  = Number(item.width_percent  || 8);
+      const h  = Number(item.height_percent || 6);
+      const rx = Math.max(0, x - w / 2);
+      const ry = Math.max(0, y - h / 2);
+      const strokeColor = item.stroke_color || 'rgb(14, 165, 233)';
+      const fillColor   = item.fill_color   || 'rgba(14, 165, 233, 0.18)';
+
+      const g = makeSvg('g', { class: 'docs-hotspot-rect-group' });
+      const rectEl = makeSvg('rect', {
+        x: rx, y: ry, width: w, height: h, rx: 0.8,
         class: 'docs-hotspot-rect',
-        fill: 'rgba(14, 165, 233, 0.18)',
-        stroke: 'rgb(14, 165, 233)',
         'stroke-width': '0.35',
         'vector-effect': 'non-scaling-stroke',
-      }));
+      });
+      // Use inline style (not presentation attributes) so colours override any CSS rule
+      rectEl.style.fill   = fillColor;
+      rectEl.style.stroke = strokeColor;
+      g.appendChild(rectEl);
+      // Number badge in top-left corner of rect — slightly larger than annotation callout number
+      const badgeR = 0.82;
+      const bx = rx + badgeR + 0.2;
+      const by = ry + badgeR + 0.2;
+      const badgeEl = makeSvg('circle', {
+        cx: bx, cy: by, r: badgeR,
+        'stroke-width': '0.3',
+        'vector-effect': 'non-scaling-stroke',
+      });
+      badgeEl.style.fill   = strokeColor;
+      badgeEl.style.stroke = 'white';
+      g.appendChild(badgeEl);
+      const t = makeSvg('text', {
+        x: bx, y: by,
+        'text-anchor': 'middle', 'dominant-baseline': 'central',
+        'font-size': num.length > 1 ? badgeR * 0.9 : badgeR * 1.05,
+        'font-weight': '700', 'font-family': 'sans-serif',
+        fill: 'white', 'pointer-events': 'none',
+      });
+      t.textContent = num;
+      g.appendChild(t);
+      svgLayer.appendChild(g);
     } else {
-      svgLayer.appendChild(makeSvg('circle', {
-        cx: x,
-        cy: y,
-        r: 1.45,
+      const r = 1.9;
+      const g = makeSvg('g', { class: 'docs-hotspot-dot-group' });
+      g.appendChild(makeSvg('circle', {
+        cx: x, cy: y, r,
         class: 'docs-hotspot-dot',
         fill: 'rgb(14, 165, 233)',
         stroke: 'white',
-        'stroke-width': '0.55',
+        'stroke-width': '0.45',
         'vector-effect': 'non-scaling-stroke',
       }));
+      const t = makeSvg('text', {
+        x, y,
+        'text-anchor': 'middle', 'dominant-baseline': 'central',
+        'font-size': num.length > 1 ? r * 0.95 : r * 1.1,
+        'font-weight': '700', 'font-family': 'sans-serif',
+        fill: 'white', 'pointer-events': 'none',
+      });
+      t.textContent = num;
+      g.appendChild(t);
+      svgLayer.appendChild(g);
     }
 
     const callout = document.createElement('div');
     callout.className = 'docs-callout';
-    callout.style.left = `${labelX}%`;
+    // If label is in the right 25% of the image, flip it left so it doesn't overflow
+    if (labelX > 75) {
+      callout.style.left = `${labelX}%`;
+      callout.dataset.flip = 'right';
+    } else {
+      callout.style.left = `${labelX}%`;
+    }
     callout.style.top = `${labelY}%`;
     callout.dataset.autoOffset = item.label_x_percent == null && item.label_y_percent == null ? 'true' : 'false';
-    callout.innerHTML = `<span>${index + 1}</span><p>${esc(item.label)}</p>`;
+    callout.innerHTML = `<span>${num}</span><p>${esc(item.label)}</p>`;
     calloutLayer.appendChild(callout);
   }
 

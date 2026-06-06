@@ -404,6 +404,255 @@ pushover_user = your_user_key_here
 write_requires_complete_cycle = True
 ```
 
+### 6.5 UTC Timestamp Toggle Feature
+
+#### Overview
+
+This feature allows you to configure the TimescaleDB transport to use UTC timestamps instead of the local machine timezone for all time-series data. This is particularly useful for:
+
+- Multi-site deployments across different timezones
+- Consistency in timestamp comparison and aggregation
+- Simplified rollup boundary calculations
+- Easier data interpretation and querying
+
+#### Configuration
+
+##### Setting the UTC Timestamp Mode
+
+Add the following option to your TimescaleDB transport configuration in `config.cfg`:
+
+```ini
+[timescaledb_section_name]
+host = localhost
+port = 5432
+database = solar
+username = postgres
+password = your_password
+
+# Enable UTC timestamps (default: False)
+use_utc_timestamp = True
+```
+
+##### Default Behavior
+
+- **Default Value**: `False` (uses local machine timezone)
+- **Backward Compatible**: Existing deployments continue to use local timezone unless explicitly configured
+- **Per-Transport**: The setting is configured per TimescaleDB transport instance
+
+#### How It Works
+
+##### Timestamp Generation
+
+When `use_utc_timestamp = True`:
+
+- All new timestamps are generated in UTC timezone using `datetime.now(timezone.utc)`
+- All database timestamp fields use UTC-aware datetime objects
+
+When `use_utc_timestamp = False` (default):
+
+- Timestamps use the local machine timezone via `datetime.now().astimezone()`
+- Behavior matches the original implementation
+
+##### Affected Components
+
+###### Database Tables
+
+The following timestamp columns are affected:
+
+- **ProtocolRegistry**: `created_at`, `updated_at`, `last_refresh_at`
+- **MetricCatalog**: `created_at`
+- **DeviceInfo**: `created_at`, `updated_at`
+- **DeviceMetricsNarrow**: `m_time` (primary key - time-series data)
+- **DeviceMetricsWide**: `m_time` (time-series data)
+
+###### Rollup Calculations
+
+- The rollup system uses `anchor_start_time_utc` (already UTC-based)
+- Time bucket boundaries are calculated correctly with UTC timestamps
+- Hierarchical continuous aggregates (hourly → daily → weekly → monthly) work seamlessly
+
+###### Stale Data Detection
+
+- Timestamp comparisons in stale data detection continue to work correctly
+- The elapsed time calculation uses the same timezone consistently
+
+#### Implementation Details
+
+##### Initialization Flow
+
+1. Configuration is read from `config.cfg`
+2. `use_utc_timestamp` setting is loaded in `TimescaleDB.__init__()`
+3. `configure_application_timezone` is called to set the global flag
+4. All subsequent timestamp generations of _now_tz use the configured timezone
+
+#### Boundary Conditions and Rollup Alignment
+
+##### Time Bucket Boundaries
+
+TimescaleDB's `time_bucket()` function works with timezone-aware timestamps. The system:
+
+- Uses `anchor_start_time_utc = "2000-01-01 00:00:00+00"` for all rollups
+- Aligns hourly buckets to UTC midnight boundaries
+- Hierarchically depends on previous aggregates (hourly → daily → weekly → monthly)
+
+##### Example Rollup Bucket Sizes
+
+```ini
+- Hourly Rollup: 1 hour bucket, starts 3 hours ago
+- Daily Rollup: 1 day bucket, starts 3 days ago
+- Weekly Rollup: 1 week bucket, starts 3 weeks ago
+- Monthly Rollup: 1 month bucket, starts 3 months ago
+```
+
+Whether using UTC or local timezone, these bucket boundaries remain consistent and aligned.
+
+##### Data Consistency
+
+- **No Mixed Timezones**: All timestamps in a transport instance use the same timezone
+- **Timezone-Aware**: All datetime objects include timezone information
+- **No Conversion Loss**: UTC timestamps have full precision without DST ambiguity
+
+#### Migration Considerations
+
+##### Switching from Local to UTC
+
+⚠️ **Important**: Switching the `use_utc_timestamp` setting after data has been collected will result in:
+
+- Existing data retains its original timezone
+- New data uses the new timezone setting
+- A temporal discontinuity at the transition point
+
+**Recommendation**:
+
+- Set the timezone mode before data collection begins, or
+- Create a new database/transport instance if changing timezones mid-operation
+
+##### Data Continuity
+
+If you must transition:
+
+1. Document the switch time
+2. Consider data export/reimport with timezone conversion
+3. Set up separate rollup views if needed to handle the transition period
+
+#### Usage Examples
+
+##### Configuration Example 1: UTC for Cloud Deployment
+
+```ini
+[timescaledb]
+host = cloud-tsdb.example.com
+port = 5432
+database = solar
+username = cloud_user
+password = ${TSDB_PASSWORD}
+use_utc_timestamp = True
+enable_rollups = True
+auto_refresh_interval = 21600
+```
+
+##### Configuration Example 2: Local Timezone (Default)
+
+```ini
+[timescaledb]
+host = localhost
+port = 5432
+database = solar
+username = postgres
+password = postgres
+use_utc_timestamp = False  # Default, can be omitted
+```
+
+##### Programmatic Configuration
+
+```python
+from configparser import ConfigParser
+from MultiProtocolGateway.classes.transports.timescaledb import TimescaleDB
+
+config = ConfigParser()
+config.read('config.cfg')
+
+# Enable UTC timestamps
+config['timescaledb']['use_utc_timestamp'] = 'True'
+
+# Initialize transport
+tsdb_transport = TimescaleDB(config['timescaledb'])
+# Timestamps will now use UTC
+```
+
+#### Query Examples
+
+##### Querying Data with Different Timezones
+
+```sql
+-- When using UTC timestamps, all comparisons are in UTC
+-- Query data from the last 24 UTC hours
+SELECT * FROM device_metrics_narrow
+WHERE m_time >= NOW() - INTERVAL '1 day'
+ORDER BY m_time DESC;
+
+-- Time zone conversion on query (if needed for display)
+SELECT 
+    m_time AT TIME ZONE 'US/Eastern' as local_time,
+    metric_name,
+    metric_value
+FROM device_metrics_narrow
+WHERE m_time >= NOW() - INTERVAL '1 day'
+ORDER BY m_time DESC;
+```
+
+##### Verifying Timestamp Timezone
+
+```sql
+-- Check the timezone of timestamps
+SELECT 
+    m_time,
+    timezone(m_time) as tz,
+    m_time AT TIME ZONE 'UTC' as in_utc
+FROM device_metrics_narrow
+LIMIT 1;
+```
+
+#### Troubleshooting
+
+##### Issue: Timestamps Still in Local Timezone
+
+**Cause**: Configuration not reloaded or transport not restarted
+**Solution**: Restart the transport service after changing the configuration
+
+##### Issue: Rollup Views Not Updating
+
+**Cause**: Timezone boundary misalignment in legacy data
+**Solution**: Verify `anchor_start_time_utc` setting and consider dropping/recreating views
+
+##### Issue: Historical Data Shows Wrong Timezone
+
+**Cause**: Settings changed mid-operation
+**Solution**: This is expected behavior - see "Migration Considerations" section
+
+#### Technical Notes
+
+##### Why UTC for Rollups?
+
+- **Consistency**: UTC eliminates DST (Daylight Saving Time) complications
+- **Simplicity**: Hour boundaries are always at UTC hour marks
+- **Correctness**: No ambiguous times during DST transitions
+- **Interoperability**: Works seamlessly across timezones
+
+##### DateTime Behavior
+
+- **`datetime.now(timezone.utc)`**: Returns current time in UTC with UTC tzinfo
+- **`datetime.now().astimezone()`**: Returns current time in local timezone with local tzinfo
+- **`datetime.now()`**: Returns naive datetime (no timezone info) - NOT USED
+
+All timestamps generated by this system are timezone-aware to prevent ambiguity.
+
+#### References
+
+- [Python datetime.timezone documentation](https://docs.python.org/3/library/datetime.html#datetime.timezone)
+- [TimescaleDB time_bucket function](https://docs.timescaledb.com/latest/api/#time_bucket)
+- [TimescaleDB continuous aggregates](https://docs.timescaledb.com/latest/overview/continuous-aggregates/)
+
 ---
 
 ## Summary

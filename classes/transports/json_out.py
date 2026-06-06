@@ -40,7 +40,7 @@ class json_out(transport_base):
     append_mode: bool = False
     include_timestamp: bool = True
     include_device_info: bool = True
-    use_utc_timestamp: bool = True
+    use_utc_timestamp: bool = False
 
     file_handle: TextIO | None = None
 

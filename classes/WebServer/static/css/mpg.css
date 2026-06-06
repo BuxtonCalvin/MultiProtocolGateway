@@ -347,7 +347,7 @@ tr.dirty td { background-color: rgb(251 146 60 / 0.06); }
   width: fit-content;
   border: 1px solid rgb(185 208 228);
   border-radius: 0.5rem;
-  overflow: hidden;
+  overflow: visible;   /* must be visible so callouts can extend outside image bounds */
   background: white;
   line-height: 0;
 }
@@ -375,10 +375,14 @@ tr.dirty td { background-color: rgb(251 146 60 / 0.06); }
   vector-effect: non-scaling-stroke;
 }
 .docs-hotspot-rect {
-  fill: rgb(14 165 233 / 0.18);
-  stroke: rgb(14 165 233);
+  /* fill and stroke are set inline by help-annotations.js to support per-rect colours */
   stroke-width: 0.35;
   vector-effect: non-scaling-stroke;
+}
+/* Numbered dot/rect group wrappers (set by help-annotations.js) */
+.docs-hotspot-dot-group,
+.docs-hotspot-rect-group {
+  cursor: default;
 }
 .docs-callout {
   position: absolute;

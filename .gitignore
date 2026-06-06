@@ -46,6 +46,5 @@ config/backups/*.*
 classes/WebServer/**/__init__.py
 config/data-db/*.*
 
-documentation/usage/inverter_protocol_research_summary.csv
-documentation/usage/inverter_protocol_research_summary.md
 tools/mapped_columns.csv
+classes/WebServer/static/annotation-editor.html

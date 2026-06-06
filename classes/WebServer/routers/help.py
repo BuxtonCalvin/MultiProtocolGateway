@@ -54,6 +54,8 @@ class Annotation(BaseModel):
     label_y_percent: float | None = Field(default=None, ge=0, le=100)
     width_percent: float | None = Field(default=None, ge=0, le=100)
     height_percent: float | None = Field(default=None, ge=0, le=100)
+    stroke_color: str | None = Field(default=None)
+    fill_color: str | None = Field(default=None)
 
 
 def _base_context(request: Request) -> dict[str, Any]:
@@ -86,8 +88,59 @@ def _load_annotations() -> dict[str, list[Annotation]]:
     return {
         str(image_id): [Annotation.model_validate(item) for item in items]
         for image_id, items in raw.items()
-        if isinstance(items, list)
+        if isinstance(items, list) and image_id != "_aliases"  # _aliases is a dict, not an annotation list
     }
+
+
+def _load_aliases() -> dict[str, str]:
+    """Return the _aliases map: { url-derived image_id -> canonical image_id }.
+
+    Defined as a top-level key in annotations.json:
+        "_aliases": {
+            "device__inverter_read":  "device__scraper_generic",
+            "device__eg4_ll_s_1":     "device__scraper_generic",
+            "device__mqtt":           "device__bridge_generic",
+            "device__timescaledb":    "device__bridge_generic",
+            "protocol-editor__*":     "protocols"
+        }
+
+    Keys are matched against the normalized image_id. A trailing '*' acts as a
+    prefix wildcard — the longest matching prefix wins.
+    """
+    if not ANNOTATIONS_PATH.exists():
+        return {}
+    try:
+        raw = json.loads(ANNOTATIONS_PATH.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+    aliases = raw.get("_aliases", {})
+    return {str(k): str(v) for k, v in aliases.items()} if isinstance(aliases, dict) else {}
+
+
+def _resolve_image_id(image_id: str) -> str:
+    """Apply alias resolution to a normalized image_id.
+
+    1. Exact match in the alias map.
+    2. Prefix-wildcard match (key ending in '*') — longest prefix wins.
+    3. Return the id unchanged if no alias found.
+    """
+    aliases = _load_aliases()
+
+    # 1. Exact match
+    if image_id in aliases:
+        return aliases[image_id]
+
+    # 2. Wildcard prefix — longest match wins
+    best_len, best_target = -1, None
+    for pattern, target in aliases.items():
+        if pattern.endswith("*"):
+            prefix = pattern[:-1]
+            if image_id.startswith(prefix) and len(prefix) > best_len:
+                best_len, best_target = len(prefix), target
+    if best_target is not None:
+        return best_target
+
+    return image_id
 
 
 def _doc_tree() -> list[dict[str, Any]]:
@@ -138,10 +191,17 @@ def _screenshot_list() -> list[dict[str, str]]:
 
 
 def _image_id_from_path(path: str) -> str:
+    """Normalize a URL path to an image_id, then apply alias resolution.
+
+    e.g. /device/Inverter_read           -> device__inverter_read  -> device__scraper_generic
+         /protocol-editor/eg4/eg4_18kpv  -> protocol-editor__eg4__eg4-18kpv -> protocols
+    """
     normalized: str = path.split("?", 1)[0].strip("/")
     if not normalized:
-        return "dashboard"
-    return re.sub(r"[^a-z0-9._-]+", "-", normalized.lower().replace("/", "__")).strip("-")
+        raw_id = "dashboard"
+    else:
+        raw_id = re.sub(r"[^a-z0-9._-]+", "-", normalized.lower().replace("/", "__")).strip("-")
+    return _resolve_image_id(raw_id)
 
 
 def _resolve_doc_target(target: str, doc_path: str) -> str:
@@ -363,7 +423,8 @@ def _render_inline(text: str, link_resolver) -> str:
 
 @router.get("/annotations/{image_id}", response_model=list[Annotation])
 async def get_annotations(image_id: str) -> list[Annotation]:
-    return _load_annotations().get(image_id, [])
+    resolved_id = _resolve_image_id(image_id)
+    return _load_annotations().get(resolved_id, [])
 
 
 @router.get("/pages/help", response_class=HTMLResponse, response_model=None)
@@ -407,7 +468,10 @@ async def help_context(request: Request, path: str = "/"):
 
 @router.get("/pages/help/screen/{image_id}", response_class=HTMLResponse, response_model=None)
 async def help_screen(request: Request, image_id: str):
-    screenshot = SCREENSHOT_DIR / f"{image_id}.png"
+    # Resolve alias so e.g. /pages/help/screen/device__inverter_read
+    # serves the device__scraper_generic screenshot and annotations.
+    resolved_id = _resolve_image_id(image_id)
+    screenshot = SCREENSHOT_DIR / f"{resolved_id}.png"
     return request.app.state.templates.TemplateResponse(
         request=request,
         name="pages/help.html",
@@ -417,10 +481,10 @@ async def help_screen(request: Request, image_id: str):
             "docs": _doc_tree(),
             "mode": "screen",
             "selected_image": {
-                "id": image_id,
+                "id": resolved_id,
                 "src": f"/static/screenshots/{quote(screenshot.name)}",
                 "exists": screenshot.exists(),
-                "title": image_id.replace("__", " / ").replace("-", " ").title(),
+                "title": resolved_id.replace("__", " / ").replace("-", " ").title(),
             },
             "selected_doc": None,
         },

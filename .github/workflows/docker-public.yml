@@ -20,7 +20,7 @@ name: Publish Docker Public Image
 on:
   push:
     branches:
-      - TSDB
+      - master
   workflow_dispatch: 
 
 jobs:
