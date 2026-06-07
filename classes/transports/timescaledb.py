@@ -4244,7 +4244,8 @@ class RollupManager:
                                 f"The refresh for {view_name} has been running for over 30 seconds and is "
                                 f"currently blocked by a lock. Please investigate the database locks to ensure "
                                 f"the refresh can complete successfully."
-    )
+                            )
+
                             self.send_message(message=msg, title="MPG Blocked View Alert", priority=1)
 
 

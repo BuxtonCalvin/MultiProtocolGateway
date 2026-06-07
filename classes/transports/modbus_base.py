@@ -284,9 +284,7 @@ class modbus_base(transport_base):
         if not flag_map.get(registry_type, True):
             return False
         if registry_type not in self._protocol.registry_map:
-            self._log.debug(
-                f"Skipping {registry_type.name} — no registry map loaded for {self.transport_name}"
-            )
+            self._log.debug(f"Skipping {registry_type.name} — no registry map loaded for {self.transport_name}")
             return False
         return True
 
@@ -304,15 +302,16 @@ class modbus_base(transport_base):
         # v3.10+ uses 'device_id', v3.0-3.9 uses 'slave', legacy uses 'unit'
         target_arg: str = next((arg for arg in ['device_id', 'slave', 'unit'] if arg in sig.parameters), 'slave')
 
-        # 2. Extract the unit/slave ID from kwargs (default to 1)
+        # Extract the unit/slave ID from kwargs (default to 1)
         val: int = kwargs.pop("unit", kwargs.pop("slave", kwargs.pop("device_id", 1)))
 
-        # 3. Re-insert it with the correct name
+        # Re-insert it with the correct name
         kwargs[target_arg] = val
         return kwargs
 
     def _entry_byte_order(self, entry: registry_map_entry) -> str:
-        return self._protocol.get_entry_byteorder(entry)
+        return self._protocol._adjustments.get_entry_byteorder(entry)
+
 
     def _register_words_to_bytes(self, register_values: list[int], byte_order: str,) -> bytes:
         words: list[int] = [value & 0xFFFF for value in register_values]
@@ -374,7 +373,7 @@ class modbus_base(transport_base):
             self._log.error("write_registers called before client was initialized")
             return
         kwargs = self._get_correct_device_arg(kwargs)
-        port_lock = self._get_port_lock()
+        port_lock: Lock = self._get_port_lock()
         with port_lock:
             self.client.write_registers(start_register, values, **kwargs)
 
@@ -386,7 +385,7 @@ class modbus_base(transport_base):
             self._log.error("write_coil called before client was initialized")
             return
         kwargs = self._get_correct_device_arg(kwargs)
-        port_lock = self._get_port_lock()
+        port_lock: Lock = self._get_port_lock()
         with port_lock:
             self.client.write_coil(register, value, **kwargs)
 
@@ -427,7 +426,7 @@ class modbus_base(transport_base):
 
     def _get_or_create_failure_tracker(self, register_range: tuple[int, int], registry_type: Registry_Type) -> RegisterFailureTracker:
         """Get or create a failure tracker for a register range"""
-        key = self._get_register_range_key(register_range, registry_type)
+        key: str = self._get_register_range_key(register_range, registry_type)
 
         with self._failure_tracking_lock:
             if key not in self.register_failure_trackers:
@@ -456,7 +455,7 @@ class modbus_base(transport_base):
         if not self.enable_register_failure_tracking:
             return False
 
-        tracker = self._get_or_create_failure_tracker(register_range, registry_type)
+        tracker: RegisterFailureTracker = self._get_or_create_failure_tracker(register_range, registry_type)
         should_disable: bool = tracker.record_failure(self.max_failures_before_disable, self.disable_duration_hours)
 
         if should_disable:
@@ -471,7 +470,7 @@ class modbus_base(transport_base):
         if not self.enable_register_failure_tracking:
             return False
 
-        tracker = self._get_or_create_failure_tracker(register_range, registry_type)
+        tracker: RegisterFailureTracker = self._get_or_create_failure_tracker(register_range, registry_type)
         return tracker.is_disabled()
 
     def _get_disabled_ranges_info(self) -> list[str]:
@@ -481,7 +480,7 @@ class modbus_base(transport_base):
         with self._failure_tracking_lock:
             for tracker in self.register_failure_trackers.values():
                 if tracker.is_disabled():
-                    remaining_hours = tracker.get_remaining_disable_time() / 3600
+                    remaining_hours: float = tracker.get_remaining_disable_time() / 3600
                     disabled_info.append(
                         f"{tracker.registry_type.name} {tracker.register_range[0]}-{tracker.register_range[1]} "
                         f"(disabled for {remaining_hours:.1f}h, {tracker.failure_count} failures)"
@@ -579,7 +578,7 @@ class modbus_base(transport_base):
 
     def enable_register_range(self, register_range: tuple[int, int], registry_type: Registry_Type) -> None:
         """Manually enable a disabled register range"""
-        tracker = self._get_or_create_failure_tracker(register_range, registry_type)
+        tracker: RegisterFailureTracker = self._get_or_create_failure_tracker(register_range, registry_type)
         with self._failure_tracking_lock:
             tracker.disabled_until = 0
             tracker.failure_count = 0
@@ -712,7 +711,7 @@ class modbus_base(transport_base):
     def _read_concatenated_sn(self, r_type) -> str:
         """Helper to build SN from multiple registers (Serial No 1-5)."""
         sn_decoded = ""
-        fields = ["Serial No 1", "Serial No 2", "Serial No 3", "Serial No 4", "Serial No 5"]
+        fields: list[str] = ["Serial No 1", "Serial No 2", "Serial No 3", "Serial No 4", "Serial No 5"]
 
         for snfield in fields:
             # Use appropriate lookup method for the registry type
@@ -731,7 +730,7 @@ class modbus_base(transport_base):
             val: int = data[entry.register]
             try:
                 # Convert register int to bytes then decode utf-8
-                chunk = val.to_bytes((val.bit_length() + 7) // 8, "big").decode("utf-8")
+                chunk: str = val.to_bytes((val.bit_length() + 7) // 8, "big").decode("utf-8")
                 sn_decoded += chunk
             except UnicodeDecodeError:
                 self._log.warning(f"Could not decode {field} in {r_type.name}")
@@ -829,7 +828,7 @@ class modbus_base(transport_base):
                     continue
 
                 #calculate ranges dynamically -- for variable read timing
-                ranges = self._protocol.calculate_registry_ranges(
+                ranges: list[tuple[int, int]] = self._protocol.calculate_registry_ranges(
                     self._protocol.registry_map[registry_type],
                     self._protocol.registry_map_size[registry_type],
                     timestamp=self.last_read_time,
@@ -839,17 +838,17 @@ class modbus_base(transport_base):
                 if len(ranges) == 0:
                     self._log.warning(f"No register ranges calculated for {self.transport_name} {registry_type.name}")
                     # Debug: show protocol settings info
-                    total_entries = len(self._protocol.registry_map.get(registry_type, []))
+                    total_entries: int = len(self._protocol.registry_map.get(registry_type, []))
                     self._log.info(f"Protocol settings for {self.transport_name}: {total_entries} total entries for {registry_type.name}")
 
                     # Count entries that would be read
-                    readable_entries = 0
+                    readable_entries: int = 0
                     for entry in self._protocol.registry_map.get(registry_type, []):
                         if entry.write_mode != WriteMode.READDISABLED and entry.write_mode != WriteMode.WRITEONLY:
                             readable_entries += 1
                     self._log.info(f"Readable entries for {self.transport_name} {registry_type.name}: {readable_entries}")
 
-                registry = self.read_modbus_registers(ranges=ranges, registry_type=registry_type)
+                registry: Dict[int, int] = self.read_modbus_registers(ranges=ranges, registry_type=registry_type)
 
                 if registry:
                     self._log.info(f"Got registry data for {self.transport_name} {registry_type.name}: {len(registry)} registers")
@@ -868,7 +867,7 @@ class modbus_base(transport_base):
 
             # Log disabled ranges status periodically (every 10 minutes)
             if self.enable_register_failure_tracking and time.time() - self._last_disabled_status_log > 600:
-                disabled_ranges = self._get_disabled_ranges_info()
+                disabled_ranges: list[str] = self._get_disabled_ranges_info()
                 if disabled_ranges:
                     self._log.info(f"Currently disabled register ranges: {len(disabled_ranges)}")
                     for range_info in disabled_ranges:
@@ -938,9 +937,7 @@ class modbus_base(transport_base):
                 if registry:
                     info.update(self._protocol.process_registery(registry, union_entries))
                 else:
-                    self._log.warning(
-                        f"No grouped registry data returned for {self.transport_name} {registry_type.name}"
-                    )
+                    self._log.warning(f"No grouped registry data returned for {self.transport_name} {registry_type.name}")
 
             if not info:
                 self._log.info("Grouped register read returned no data; transport busy?")
@@ -1057,7 +1054,7 @@ class modbus_base(transport_base):
 
             for addr in range(start, end + 1, batch_size):
                 range_count: int = min(batch_size, end - addr + 1)
-                register_range = (addr, range_count)
+                register_range: tuple[int, int] = (addr, range_count)
 
                 # NOTE: deliberately bypass the failure tracker here.
                 # capture_analysis_scan is an intentional dense sweep of the
@@ -1167,14 +1164,14 @@ class modbus_base(transport_base):
             except (TypeError, ValueError):
                 return None
 
-        s = (values_str or "").strip()
+        s: str = (values_str or "").strip()
         if not s:
             return None
 
         # Continuous numeric range: handles "-10-10", "0-65535", "0.5-1.5".
         # Pattern: optional leading minus, digits/dot, dash separator,
         # optional minus, digits/dot.
-        range_match = re.fullmatch(
+        range_match: re.Match[str] | None = re.fullmatch(
             r"(-?\d+(?:\.\d+)?)\s*[-\u2013]\s*(-?\d+(?:\.\d+)?)", s
         )
         if range_match:
@@ -1185,7 +1182,7 @@ class modbus_base(transport_base):
             return (lo, hi)
 
         # Comma-separated discrete set: "0,1,2"
-        parts = [p.strip() for p in s.split(",")]
+        parts: list[str] = [p.strip() for p in s.split(",")]
         if len(parts) > 1:
             try:
                 floats: list[float] = [float(p) for p in parts if p]
@@ -1303,7 +1300,7 @@ class modbus_base(transport_base):
                     entry.register for entry in entries
                     if entry.write_mode not in (WriteMode.WRITEONLY, WriteMode.READDISABLED)
                 }
-                readable_entries = [
+                readable_entries: list[registry_map_entry] = [
                     entry for entry in entries
                     if entry.write_mode not in (WriteMode.WRITEONLY, WriteMode.READDISABLED)
                 ]
@@ -1312,7 +1309,7 @@ class modbus_base(transport_base):
                 # Use float accumulator so partial credit (0.5) is preserved.
                 matches: float = 0.0
                 for entry in readable_entries:
-                    value = decoded_values.get(entry.variable_name)
+                    value: int | float | str | None = decoded_values.get(entry.variable_name)
                     if value is None:
                         # Register absent from scan — contributes 0
                         continue
@@ -1322,7 +1319,7 @@ class modbus_base(transport_base):
                     if entry.concatenate and entry.register != entry.concatenate_registers[0]:
                         continue
 
-                    base_valid = bool(proto.validate_registry_entry(entry, value))
+                    base_valid: bool = bool(proto.validate_registry_entry(entry, value))
 
                     # Range-check the raw integer returned by the hardware
                     # against the values/range column declared in the CSV.
@@ -1337,9 +1334,9 @@ class modbus_base(transport_base):
                         getattr(entry, "values_range", None)
                         or getattr(entry, "values", None)
                     )
-                    constraint = self._parse_values_range(values_raw) if values_raw is not None else None
-                    raw_int = raw_map.get(entry.register)
-                    in_range = (
+                    constraint: tuple[float, float] | list[float] | None = self._parse_values_range(values_raw) if values_raw is not None else None
+                    raw_int: int | None = raw_map.get(entry.register)
+                    in_range: bool = (
                         self._value_in_range(raw_int, constraint)
                         if raw_int is not None
                         else True   # register absent — no penalty
@@ -1354,7 +1351,7 @@ class modbus_base(transport_base):
                         matches += 0.5
                     # base_valid False → 0.0 regardless of range
 
-                total = len(readable_entries)
+                total: int = len(readable_entries)
                 missing_in_scan: list[int] = sorted(reg for reg in known_registers if reg not in raw_map)
                 unknown_in_scan: list[int] = sorted(reg for reg in raw_map.keys() if reg not in known_registers)
                 accuracy: float = round((matches / total) * 100, 2) if total else 0.0
@@ -1611,7 +1608,7 @@ class modbus_base(transport_base):
             bit_index: int = entry.register_bit if entry.register_bit >= 0 else 0
             bit_mask: int = ((1 << flag_size) - 1) << bit_index
             clear_mask: int = ~bit_mask & ((1 << total_bits) - 1)
-            updated_value = (raw_value & clear_mask) | ((flag_int << bit_index) & bit_mask)
+            updated_value: int = (raw_value & clear_mask) | ((flag_int << bit_index) & bit_mask)
             register_values = self._bytes_to_register_words(
                 updated_value.to_bytes(len(raw_bytes), byteorder="big", signed=False),
                 byte_order,
@@ -1626,7 +1623,7 @@ class modbus_base(transport_base):
             if 0 > new_val or new_val > base_mask:
                 return self._log.error(f"WRITE_ERROR: Invalid new value '{value}'. Exceeds {base_mask}.")
             clear_mask: int = ~bit_mask & ((1 << total_bits) - 1)
-            updated_value = (raw_value & clear_mask) | ((new_val << bit_index) & bit_mask)
+            updated_value: int = (raw_value & clear_mask) | ((new_val << bit_index) & bit_mask)
             register_values = self._bytes_to_register_words(
                 updated_value.to_bytes(len(raw_bytes), byteorder="big", signed=False),
                 byte_order,
@@ -1649,7 +1646,7 @@ class modbus_base(transport_base):
                     f"'{entry.variable_name}'. Unsafe to write."
                 )
                 return
-            encoded = signed_val & ((1 << bit_size) - 1)
+            encoded: int = signed_val & ((1 << bit_size) - 1)
             bit_mask = ((1 << bit_size) - 1) << bit_index
             clear_mask = ~bit_mask & ((1 << total_bits) - 1)
             updated_value = (raw_value & clear_mask) | ((encoded << bit_index) & bit_mask)
@@ -1661,7 +1658,7 @@ class modbus_base(transport_base):
         elif entry.data_type.value > 400:  # signed magnitude bit types
             bit_size = Data_Type.getSize(entry.data_type)
             bit_index = entry.register_bit if entry.register_bit >= 0 else 0
-            max_magnitude = (1 << (bit_size - 1)) - 1
+            max_magnitude: int = (1 << (bit_size - 1)) - 1
             signed_val = int(value)
             if abs(signed_val) > max_magnitude:
                 self._log.error(
@@ -1669,11 +1666,11 @@ class modbus_base(transport_base):
                     f"'{entry.variable_name}'. Unsafe to write."
                 )
                 return
-            magnitude = abs(signed_val)
-            encoded = magnitude << (bit_index + 1)
+            magnitude: int = abs(signed_val)
+            encoded: int = magnitude << (bit_index + 1)
             if signed_val < 0:
                 encoded |= (1 << bit_index)
-            field_mask = ((1 << bit_size) - 1) << bit_index
+            field_mask: int = ((1 << bit_size) - 1) << bit_index
             clear_mask = ~field_mask & ((1 << total_bits) - 1)
             updated_value = (raw_value & clear_mask) | (encoded & field_mask)
             register_values = self._bytes_to_register_words(
@@ -1736,7 +1733,6 @@ class modbus_base(transport_base):
 
 
     def read_variable(self, variable_name : str, registry_type : Registry_Type, entry : registry_map_entry | None = None) -> int | float | str | None:
-        # clean for convenience
         if variable_name:
             variable_name = variable_name.strip().lower().replace(" ", "_")
 
@@ -1758,8 +1754,8 @@ class modbus_base(transport_base):
                 start = entry.register
                 end = max(entry.concatenate_registers)
 
-            registers = self.read_modbus_registers(start=start, end=end, registry_type=registry_type)
-            results = self._protocol.process_registery(registers, registry_map)
+            registers: Dict[int, int] = self.read_modbus_registers(start=start, end=end, registry_type=registry_type)
+            results: Dict[str, int | float | str] = self._protocol.process_registery(registers, registry_map)
             return results.get(entry.variable_name)  # safer than direct dict access.
 
     def read_modbus_registers(self, ranges: list[tuple[int, int]] | None = None, start : int = 0, end : int | None = None,
@@ -1798,14 +1794,14 @@ class modbus_base(transport_base):
         index = -1
         counted_ranges: set[tuple[int, int]] = set()
         while (index := index + 1) < len(ranges) :
-            register_range = ranges[index]
+            register_range: tuple[int, int] = ranges[index]
             if register_range not in counted_ranges:
                 counted_ranges.add(register_range)
                 self._cycle_expect_unit()
 
             # Check if this register range is currently disabled
             if self._is_register_range_disabled(register_range, registry_type):
-                remaining_hours = self._get_or_create_failure_tracker(register_range, registry_type).get_remaining_disable_time() / 3600
+                remaining_hours: float = self._get_or_create_failure_tracker(register_range, registry_type).get_remaining_disable_time() / 3600
                 self._log.info(f"Skipping disabled register range {registry_type.name} {register_range[0]}-{register_range[0]+register_range[1]-1} (disabled for {remaining_hours:.1f}h)")
                 self._cycle_mark_incomplete()
                 continue
@@ -1864,13 +1860,13 @@ class modbus_base(transport_base):
                     # Check if this is an ExceptionResponse and extract the exception code
                     if hasattr(register, 'function_code') and hasattr(register, 'exception_code'):
                         exception_code = register.function_code | 0x80  # Convert to exception response code
-                        interpreted_error = interpret_modbus_exception_code(exception_code)
+                        interpreted_error: str = interpret_modbus_exception_code(exception_code)
                         self._log.debug(f"{error_msg} - {interpreted_error}")
                     else:
                         self._log.error(error_msg)
 
                 # Record the failure for this register range
-                should_disable = self._record_register_read_failure(register_range, registry_type)
+                should_disable: bool = self._record_register_read_failure(register_range, registry_type)
                 self._log.warning("Disabled is ("+str(should_disable)+" range("+str(index)+")")
 
                 self.modbus_delay += self.modbus_delay_increament #increase delay, error is likely due to modbus being busy
@@ -1883,10 +1879,10 @@ class modbus_base(transport_base):
                     continue
                 else:
                     #undo step in loop and retry read
-                    retry = retry + 1
-                    total_retries = total_retries + 1
+                    retry: int = retry + 1
+                    total_retries: int = total_retries + 1
                     self._log.warning("Retry("+str(retry)+" - ("+str(total_retries)+")) range("+str(index)+")")
-                    index = index - 1
+                    index: int = index - 1
                     continue
             elif self.modbus_delay > self.modbus_delay_setting: #no error, decrease delay
                 self.modbus_delay -= self.modbus_delay_increament
@@ -1902,7 +1898,7 @@ class modbus_base(transport_base):
                 retry = 0
 
             # Extract values — handles both .registers (INPUT/HOLDING) and .bits (COIL/DISCRETE)
-            extracted = self._extract_response_values(register, registry_type, register_range)
+            extracted: Dict[int, int] | None = self._extract_response_values(register, registry_type, register_range)
             if extracted is not None:
                 registry.update(extracted)
 
@@ -1952,7 +1948,7 @@ class modbus_base(transport_base):
             else:
                 self._record_register_read_success(register_range, registry_type)
                 # Extract values — handles .registers (INPUT/HOLDING) and .bits (COIL/DISCRETE)
-                result = self._extract_response_values(register, registry_type, register_range)
+                result: Dict[int, int] | None = self._extract_response_values(register, registry_type, register_range)
                 yield register_range, result if result is not None else {}
 
     def read_data_iter(self) -> Iterator[bool]:
@@ -1986,7 +1982,7 @@ class modbus_base(transport_base):
             counted_indices: set[int] = set()
 
             while idx < len(ranges):
-                register_range = ranges[idx]
+                register_range: tuple[int, int] = ranges[idx]
                 if idx not in counted_indices:
                     counted_indices.add(idx)
                     self._cycle_expect_unit()
@@ -2002,7 +1998,7 @@ class modbus_base(transport_base):
                     idx += 1
                     yield True
                 elif result is None:
-                    retry_count += 1
+                    retry_count: int = retry_count + 1
                     retry_counts[idx] = retry_count
 
                     if retry_count < self.max_retries_per_block:
@@ -2014,10 +2010,7 @@ class modbus_base(transport_base):
                         yield False
                         # Do NOT advance idx — retry the same range next time in.
                     else:
-                        self._log.warning(
-                            f"Block {register_range} exceeded {self.max_retries_per_block} "
-                            f"retries, skipping."
-                        )
+                        self._log.warning(f"Block {register_range} exceeded {self.max_retries_per_block} retries, skipping.")
                         self._cycle_mark_incomplete()
                         idx += 1        # give up on this range, move to next
                         yield True      # still signal coordinator we made progress

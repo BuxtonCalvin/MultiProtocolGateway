@@ -21,9 +21,9 @@
 {% block title %}View Log — MPG Admin{% endblock %}
 
 {% block content %}
-<div class="max-w-5xl mx-auto">
+<div class="max-w-7xl mx-auto">
   <div class="flex items-center justify-between mb-4">
-    <h1 class="text-mpg-100 font-bold text-xl">Gateway Log</h1>
+    <h1 class="surface-title font-bold text-xl">Gateway Log</h1>
     <div class="flex items-center gap-2">
       <label class="text-mpg-400 text-xs" for="log-lines">Lines:</label>
       <select id="log-lines"
@@ -61,4 +61,97 @@
     <span class="text-mpg-500">Loading log…</span>
   </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<style>
+  /* Log level badge colors — only the [LEVEL] token is colored */
+  .log-level-error    { color: #f87171; font-weight: 700; } /* red-400    */
+  .log-level-critical { color: #ef4444; font-weight: 700; } /* red-500    */
+  .log-level-warning  { color: #facc15; font-weight: 600; } /* yellow-400 */
+  .log-level-info     { color: #34d399; }                   /* emerald-400 */
+  .log-level-debug    { color: #94a3b8; }                   /* slate-400  */
+  .log-level-trace    { color: #c084fc; }                   /* purple-400 */
+
+  /* HTTP status code colors */
+  .log-http-2xx { color: #34d399; } /* green  — success       */
+  .log-http-3xx { color: #60a5fa; } /* blue   — redirect      */
+  .log-http-4xx { color: #fb923c; } /* orange — client error  */
+  .log-http-5xx { color: #f87171; } /* red    — server error  */
+
+  /* Timestamp dimming — de-emphasizes the noise */
+  .log-timestamp { color: #64748b; } /* slate-500 */
+
+  /* Logger/module name */
+  .log-logger { color: #7dd3fc; } /* sky-300 */
+</style>
+
+<script>
+(function () {
+  /* ── Colorize a single plain-text log line ── */
+  function colorizeLine(line) {
+    // HTML-escape first so log content cannot inject markup
+    var s = line
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+
+    return s
+      // Timestamp
+      .replace(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}[,.]\d{3})/,
+        '<span class="log-timestamp">$1</span>')
+      // Level badges — severity order matters
+      .replace(/\[(ERROR|CRITICAL)\]/g,  '<span class="log-level-error">[$1]</span>')
+      .replace(/\[(WARNING|WARN)\]/g,    '<span class="log-level-warning">[$1]</span>')
+      .replace(/\[(INFO)\]/g,            '<span class="log-level-info">[$1]</span>')
+      .replace(/\[(DEBUG)\]/g,           '<span class="log-level-debug">[$1]</span>')
+      .replace(/\[(TRACE)\]/g,           '<span class="log-level-trace">[$1]</span>')
+      // Logger / module name (dotted word after the level badge, before the colon)
+      .replace(/(\])\s+([\w.]+):/,       '$1 <span class="log-logger">$2</span>:')
+      // HTTP status codes — match uvicorn access log format: HTTP/x.x" NNN
+      // and httpx/httpcore format: "HTTP/x.x NNN" or HTTP/x.x NNN OK
+      .replace(
+        /\bHTTP\/\d+\.\d+"? (2\d{2}|3\d{2}|4\d{2}|5\d{2})\b/g,
+        function(match, code) {
+          var cls = 'log-http-' + code[0] + 'xx';
+          return match.replace(code, '<span class="' + cls + '">' + code + '</span>');
+        }
+      );
+  }
+
+  /* Convert a block of plain-text log lines to colorized HTML */
+  function colorizeText(raw) {
+    return raw.split('\n').map(colorizeLine).join('\n');
+  }
+
+  /* Rewrite the container's content as colorized HTML.
+     Guards against re-entrance: skip if content is already colorized. */
+  function applyColors(container) {
+    // If the container already has colored spans, skip
+    if (container.querySelector('.log-level-info, .log-level-debug, .log-level-error')) return;
+    var raw = container.textContent || '';
+    if (!raw.trim() || !/\d{4}-\d{2}-\d{2}/.test(raw)) return;
+    container.innerHTML = colorizeText(raw);
+  }
+
+  document.addEventListener('DOMContentLoaded', function () {
+    var container = document.getElementById('log-content');
+    if (!container) return;
+
+    // Watch for any child-list changes (HTMX innerHTML swaps replace all children)
+    var observer = new MutationObserver(function (mutations) {
+      // Disconnect briefly to avoid observing our own innerHTML rewrite
+      observer.disconnect();
+      applyColors(container);
+      // Reconnect to catch future swaps
+      observer.observe(container, { childList: true, subtree: false });
+    });
+
+    observer.observe(container, { childList: true, subtree: false });
+
+    // Also colorize anything already present (e.g. SSR content)
+    applyColors(container);
+  });
+})();
+</script>
 {% endblock %}

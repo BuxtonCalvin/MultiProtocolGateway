@@ -410,14 +410,14 @@ async def read_log(request: Request, lines: int = 250):
     project_root: Path = request.app.state.project_root
 
     # Path discovery (Check parent and current root)
-    log_path = None
+    log_path: Path | None = None
     for base in [project_root.parent, project_root]:
-        candidate = base / log_dir / log_file
+        candidate: Path = base / log_dir / log_file
         if candidate.exists():
             log_path = candidate
             break
 
-    if not log_path:
+    if log_path is None:
         return PlainTextResponse("Log file not found.", status_code=404)
 
     # Efficient Tail
@@ -434,8 +434,8 @@ async def read_log(request: Request, lines: int = 250):
             f.seek(file_size - buffer_size)
 
             # Decode only what we need
-            chunk = f.read(buffer_size).decode("utf-8", errors="replace")
-            log_lines = chunk.splitlines()
+            chunk: str = f.read(buffer_size).decode("utf-8", errors="replace")
+            log_lines: List[str] = chunk.splitlines()
 
             # Handle the case where the first line might be partial
             if len(log_lines) > lines:

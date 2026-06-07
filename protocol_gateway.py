@@ -703,12 +703,33 @@ class Protocol_Gateway:
 
     def _filter_for_member(self, full_data: dict[str, int | float | str], member: transport_base) -> dict[str, int | float | str]:
             """
-            Filters full_data to only the metrics relevant to this member,
-            as determined by its protocol's variable mask.
-            If the member has no mask (reads everything), full_data is returned as-is.
+            Filters full_data to only the metrics relevant to this member.
+
+            Resolution order:
+            1. member.protocolSettings.variable_mask  — the raw allowlist loaded
+               from the mask file; always present when a mask file is configured,
+               even if protocolSettings.registry_map is empty mid-cycle.
+               Synthetic ``<name>_desc`` keys are also passed when their source
+               ``<name>`` is in the mask — they are generated after masking and
+               are never listed in the mask file itself.
+            2. member.registry_map variable_names     — derived from the masked
+               registry map; used when no explicit mask file was loaded.
+            3. Forward everything                     — no mask configured at all.
             """
-            # The member's protocol settings expose which variable names are active
-            # via its registry_map — only keys present there are forwarded.
+            ps = getattr(member, 'protocolSettings', None)
+
+            # Prefer the raw variable_mask list — it is always populated from the
+            # mask file at init and is not affected by mid-cycle registry state.
+            if ps is not None and ps.variable_mask:
+                mask: set[str] = set(ps.variable_mask)  # already lowercased by _load_filter_file
+                return {
+                    k: v for k, v in full_data.items()
+                    if k.lower() in mask
+                    # also pass synthetic _desc keys whose source variable is in the mask
+                    or (k.lower().endswith('_desc') and k.lower()[:-5] in mask)
+                }
+
+            # Fall back to deriving the key set from the registry map entries.
             member_keys: set[str] = set()
             for entries in member.registry_map.values():
                 for entry in entries:
@@ -716,7 +737,7 @@ class Protocol_Gateway:
                         member_keys.add(entry.variable_name)
 
             if not member_keys:
-                return full_data  # no mask, forward everything
+                return full_data  # no mask configured — forward everything
 
             return {k: v for k, v in full_data.items() if k in member_keys}
 
@@ -1052,10 +1073,20 @@ class Protocol_Gateway:
             self.__log.debug(f"Group members due for '{transport.transport_name}': {[m.transport_name for m in due_members]}")
             for member in due_members:
                 member_data: dict[str, int | float | str] = self._filter_for_member(data, member)
+                # Build a readable summary of how filtering was applied
+                _ps = getattr(member, 'protocolSettings', None)
+                if _ps is not None and _ps.variable_mask:
+                    _mask_summary: str = f"{len(_ps.variable_mask)} mask keys (variable_mask file)"
+                else:
+                    _mk: set[str] = set()
+                    for _entries in member.registry_map.values():
+                        for _e in _entries:
+                            if hasattr(_e, 'variable_name') and _e.variable_name:
+                                _mk.add(_e.variable_name)
+                    _mask_summary = f"{len(_mk)} mask keys (registry_map)" if _mk else "no mask — forwarding all"
                 self.__log.debug(
                     f"Filtered data for '{member.transport_name}': "
-                    f"{len(member_data)} keys. "
-                    f"Member keys: {list(member.registry_map.values())[0][:3] if member.registry_map else 'empty'}"
+                    f"{len(member_data)} keys. {_mask_summary}"
                 )
                 if not member_data:
                     continue
@@ -1150,7 +1181,7 @@ class Protocol_Gateway:
                                         if not due_members:
                                             continue
                                         self._process_transports_interleaved(
-                                            due_members, now, []
+                                            due_members, now, ready_groups
                                         )
 
                                 case _:  # sequential
