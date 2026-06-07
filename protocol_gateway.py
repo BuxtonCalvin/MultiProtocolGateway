@@ -665,7 +665,7 @@ class Protocol_Gateway:
                 return
 
             for member in group.members_due(now):
-                member_data = self._filter_for_member(full_data, member)
+                member_data: dict[str, int | float | str] = self._filter_for_member(full_data, member)
                 if not member_data:
                     continue
 
@@ -758,7 +758,7 @@ class Protocol_Gateway:
             [member.transport_name for member in group.members],
         )
         with self.__concurrent_futures_lock:
-            prior = self.__concurrent_futures.get(group_key)
+            prior: Future[None] | None = self.__concurrent_futures.get(group_key)
             if prior is not None:
                 if prior.done():
                     try:
