@@ -201,7 +201,7 @@ services:
 
   18kPV_timescaledb:
     container_name: 18kPV_timescaledb
-    image: buxtoncalvin/mpg:latest
+    image: buxtoncalvin/multiprotocolgateway:latest
     restart: always
     security_opt:
     - apparmor:unconfined

@@ -76,7 +76,7 @@ services:
   # Multi Protocol Gateway
   # ---------------------------------------------------------------------------
   mpg:
-    image: buxtoncalvin/mpg:latest
+    image: buxtoncalvin/multiprotocolgateway:latest
     container_name: mpg
     <<: [*restart-policy, *default-logging]
     ports:
