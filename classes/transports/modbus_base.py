@@ -444,11 +444,15 @@ class modbus_base(transport_base):
 
         tracker = self._get_or_create_failure_tracker(register_range, registry_type)
         # Only log if the last failure was after the last success (i.e., this is the first success after a failure)
-        should_log_recovery = tracker.last_failure_time > tracker.last_success_time
+        should_log_recovery: bool = tracker.last_failure_time > tracker.last_success_time
         tracker.record_success()
 
         if should_log_recovery:
-            self._log.info(f"Register range {registry_type.name} {register_range[0]}-{register_range[1]} is working again after previous failures")
+            msg: str = (
+                f"Register range {registry_type.name} {register_range[0]}-{register_range[1]} "
+                f"read successfully after previous failures"
+            )
+            self._log.info(msg)
 
     def _record_register_read_failure(self, register_range: tuple[int, int], registry_type: Registry_Type) -> bool:
         """Record a failed register read, returns True if range should be disabled"""
@@ -459,9 +463,22 @@ class modbus_base(transport_base):
         should_disable: bool = tracker.record_failure(self.max_failures_before_disable, self.disable_duration_hours)
 
         if should_disable:
-            self._log.warning(f"Register range {registry_type.name} {register_range[0]}-{register_range[1]} disabled for {self.disable_duration_hours} hours after {tracker.failure_count} failures")
+            msg: str = (
+                f"Register range {registry_type.name} "
+                f"{register_range[0]}-{register_range[1]} "
+                f"for {self.transport_name} "
+                f"disabled for {self.disable_duration_hours} hours "
+                f"after {tracker.failure_count} failures"
+            )
+            self._log.warning(msg)
         else:
-            self._log.warning(f"Register range {registry_type.name} {register_range[0]}-{register_range[1]} failed ({tracker.failure_count}/{self.max_failures_before_disable} attempts)")
+            msg: str = (
+                f"Register range {registry_type.name} "
+                f"{register_range[0]}-{register_range[1]} "
+                f"for {self.transport_name} "
+                f"failed ({tracker.failure_count}/{self.max_failures_before_disable} attempts)"
+            )
+            self._log.warning(msg)
 
         return should_disable
 
