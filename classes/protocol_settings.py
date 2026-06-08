@@ -1308,9 +1308,8 @@ class protocol_settings:
                 delimeter = ","
 
             first_row: str = re.sub(r"\s+" + re.escape(delimeter) + "|" + re.escape(delimeter) + r"\s+", delimeter, first_row)
-            csvfile = itertools.chain([first_row], csvfile)
-
-            reader: csv.DictReader[str] = csv.DictReader(csvfile, delimiter=delimeter)
+            csvfile_iter: itertools.chain[str] = itertools.chain([first_row], csvfile)
+            reader: csv.DictReader[str] = csv.DictReader(csvfile_iter, delimiter=delimeter)
 
             for row in reader:
                 process_row(row)
