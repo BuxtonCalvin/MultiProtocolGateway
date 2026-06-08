@@ -912,7 +912,21 @@ class modbus_base(transport_base):
             info: dict[str, int | float | str] = {}
 
             for registry_type in (Registry_Type.INPUT, Registry_Type.HOLDING, Registry_Type.COIL, Registry_Type.DISCRETE):
-                if not self._should_send_registry_type(registry_type):
+                flag_map: dict[Registry_Type, bool] = {
+                    Registry_Type.INPUT:    self.send_input_register,
+                    Registry_Type.HOLDING:  self.send_holding_register,
+                    Registry_Type.COIL:     self.send_coil_register,
+                    Registry_Type.DISCRETE: self.send_discrete_register,
+                }
+                if not flag_map.get(registry_type, True):
+                    continue
+                any_member_has_entries: bool = any(
+                    (ps := getattr(m, 'protocolSettings', None)) is not None
+                    and registry_type in ps.registry_map
+                    and bool(ps.registry_map[registry_type])
+                    for m in members
+                )
+                if not any_member_has_entries:
                     continue
 
                 union_entries: list[registry_map_entry] = []

@@ -1079,11 +1079,15 @@ class Protocol_Gateway:
                 _ps = getattr(member, 'protocolSettings', None)
                 if _ps is not None and _ps.variable_mask:
                     _mask_summary: str = f"{len(_ps.variable_mask)} mask keys in {_ps.mask_file_name} → {len(member_data)} matched"
-                    data_keys_lower = {k.lower() for k in data.keys()}
-                    _unmatched = set(_ps.variable_mask) - data_keys_lower
+                    data_keys_lower: set[str] = {k.lower() for k in data.keys()}
+                    _unmatched: set[str] = set(_ps.variable_mask) - data_keys_lower
                     # Remove pre-merge _l names whose merged form IS present in data
-                    _unmatched = {k for k in _unmatched if not (
+                    _unmatched: set[str] = {k for k in _unmatched if not (
                         k.endswith('_l') and k[:-2] in data_keys_lower
+                    )}
+                    # Also suppress _h entries whose _l sibling is in the mask (merge pair)
+                    _unmatched = {k for k in _unmatched if not (
+                        k.endswith('_h') and (k[:-2] + '_l') in set(_ps.variable_mask)
                     )}
                     # Identify synthetic _desc names present in data but absent from mask
                     _synthetic: set[str] = {k for k in data_keys_lower if k.endswith('_desc')}
