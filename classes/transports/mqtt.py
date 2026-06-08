@@ -249,8 +249,7 @@ class mqtt(transport_base):
             if self.connected:
                 self.connected = self.client.is_connected()
 
-            self._log.info(f"write data from [{from_transport.transport_name}] to mqtt transport")
-            self._log.info(data)
+            self._log.info(f"write data from [{from_transport.transport_name}] to mqtt transport {data} ")
             #have to send this every loop, because mqtt doesn't disconnect when HA restarts. HA bug.
 
             info: MQTTMessageInfo = self.client.publish(f"{self.base_topic}/{from_transport.device_identifier}/availability","online",qos=0,retain=True)
