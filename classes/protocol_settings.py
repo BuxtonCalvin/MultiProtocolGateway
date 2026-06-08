@@ -1303,7 +1303,7 @@ class protocol_settings:
 
         with open(path, newline="", encoding="latin-1") as csvfile:
             delimeter = ";"
-            first_row = next(csvfile).lower().replace("_", " ")
+            first_row = next(csvfile).strip("\r\n").lower().replace("_", " ")
             if first_row.count(";") < first_row.count(","):
                 delimeter = ","
 
@@ -1386,6 +1386,7 @@ class protocol_settings:
                     # )
                     del registry_map[index + 1]
 
+
             # Apply variable mask (allowlist)
             if self.variable_mask:
                 for index in reversed(range(len(registry_map))):
@@ -1393,6 +1394,8 @@ class protocol_settings:
                     if (
                         item.documented_name.strip().lower() not in self.variable_mask
                         and item.variable_name.strip().lower() not in self.variable_mask
+                        and (item.documented_name.strip().lower() + "_l") not in self.variable_mask
+                        and (item.variable_name.strip().lower() + "_l") not in self.variable_mask
                     ):
                         del registry_map[index]
 
@@ -1403,6 +1406,8 @@ class protocol_settings:
                     if (
                         item.documented_name.strip().lower() in self.variable_screen
                         or item.variable_name.strip().lower() in self.variable_screen
+                        or (item.documented_name.strip().lower() + "_l") in self.variable_screen
+                        or (item.variable_name.strip().lower() + "_l") in self.variable_screen
                     ):
                         del registry_map[index]
 
