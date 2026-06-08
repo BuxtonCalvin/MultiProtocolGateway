@@ -197,7 +197,7 @@ class modbus_base(transport_base):
         ''' delay adjustment every error. todo: add a setting for this '''
 
         self.modbus_delay_setting : float = 0.85
-        '''time in between requests, unmodified'''
+        '''time in between requests, unmodified by user setting'''
 
         self.modbus_delay : float = 0.85
         '''time in between requests'''
@@ -232,7 +232,7 @@ class modbus_base(transport_base):
         self.max_failures_before_disable = settings.getint("max_failures_before_disable", fallback=self.max_failures_before_disable)
         self.disable_duration_hours = settings.getint("disable_duration_hours", fallback=self.disable_duration_hours)
 
-        # get defaults from protocol settings
+        # get defaults from protocol settings if present, then override with transport settings if present there
         if "send_input_register" in self._protocol.settings:
             self.send_input_register = strtobool(self._protocol.settings["send_input_register"])
 
@@ -253,7 +253,7 @@ class modbus_base(transport_base):
         self.send_input_register = settings.getboolean("send_input_register", fallback=self.send_input_register)
         self.send_coil_register = settings.getboolean("send_coil_register", fallback=self.send_coil_register)
         self.send_discrete_register = settings.getboolean("send_discrete_register", fallback=self.send_discrete_register)
-        self.modbus_delay = settings.getfloat(["batch_delay", "modbus_delay"], fallback=self.modbus_delay)
+        self.modbus_delay = settings.getfloat("batch_delay", fallback=self.modbus_delay)
         self.modbus_delay_setting = self.modbus_delay
 
     @property

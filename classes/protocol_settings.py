@@ -469,7 +469,7 @@ class DataAdjustments:
         if stage == "byteorder":
             if not entry.adjustments:
                 return value
-            endian = self.get_adjustment(entry, "Register_Endian")
+            endian: Any | None = self.get_adjustment(entry, "Register_Endian")
             if endian is None:
                 return value
             endian_str: str = str(endian).strip().lower()
@@ -495,7 +495,7 @@ class DataAdjustments:
             # High_Low encodes the complete scaling formula (e.g. x/1000),
             # so unit_mod must NOT also be applied — the formula is the
             # complete transform.
-            high_low = self.get_adjustment(entry, "High_Low") if entry.adjustments else None
+            high_low: Any | None = self.get_adjustment(entry, "High_Low") if entry.adjustments else None
             if high_low is not None:
                 adjusted = self.apply_range_formula(float(adjusted), str(high_low))
             else:
@@ -503,7 +503,7 @@ class DataAdjustments:
                     adjusted = adjusted * entry.unit_mod
 
                 if entry.adjustments:
-                    offset = self.get_adjustment(entry, "Offset")
+                    offset: Any | None = self.get_adjustment(entry, "Offset")
                     if offset is not None:
                         try:
                             adjusted = adjusted + float(offset)
@@ -525,7 +525,7 @@ class DataAdjustments:
             if context is None or not isinstance(value, (int, float)):
                 return value
 
-            context_adjustment = self.get_adjustment(entry, "Context")
+            context_adjustment: Any | None = self.get_adjustment(entry, "Context")
             if not isinstance(context_adjustment, dict):
                 return value
 
@@ -713,7 +713,9 @@ class protocol_settings:
         self.codes: dict[str, str | dict[str, str]] = {}
         self.settings: dict[str, str] = {}
         self.variable_mask: list[str] = []
+        self.mask_file_name: str = ""
         self.variable_screen: list[str] = []
+        self.screen_file_name: str = ""
         self.settings_dir: str = settings_dir
         self.transport_settings: Optional[TransportSettings] = transport_settings
 
@@ -730,6 +732,9 @@ class protocol_settings:
         if transport_settings is not None:
             mask_file = transport_settings.get("variable_mask", fallback=mask_file)
             screen_file = transport_settings.get("variable_screen", fallback=screen_file)
+
+        self.mask_file_name = mask_file
+        self.screen_file_name = screen_file
 
         self.variable_mask = self._load_filter_file(mask_file)
         self.variable_screen = self._load_filter_file(screen_file)
@@ -908,10 +913,10 @@ class protocol_settings:
             self.codes = json.loads(f.read())
 
         self.settings = {}
-
+        # Extract non-code settings into self.settings for easy access, while keeping code tables in self.codes.
         for key, value in self.codes.items():
-            if not key.endswith("_codes") and isinstance(value, str):
-                self.settings[key] = value
+            if not key.endswith("_codes") and isinstance(value, (str, bool, int, float)):
+                self.settings[key] = str(value).lower() if isinstance(value, bool) else str(value)
 
     def load_registry_overrides(self, override_path: str, keys: list[str]) -> dict[str, dict[str, Any]]:
         """Parse a CSV override file and return a nested dict keyed by each column in ``keys``.
@@ -1076,7 +1081,7 @@ class protocol_settings:
                 unit_multiplier = 1.0
             # endregion unit
 
-            variable_name = row["variable name"] if row["variable name"] else row["documented name"]
+            variable_name: str = row["variable name"] if row["variable name"] else row["documented name"]
             variable_name = variable_name.strip().lower().replace(" ", "_").replace("__", "_")
 
             if re.search(r"[^a-zA-Z0-9\_]", variable_name):
@@ -1117,9 +1122,9 @@ class protocol_settings:
                 unit_symbol = ""
 
             if "note" in row and row["note"]:
-                note = row["note"]
+                note: str = row["note"]
             else:
-                note = ""
+                note: str = ""
 
             if "values" not in row:
                 row["values"] = ""
@@ -1196,13 +1201,13 @@ class protocol_settings:
 
             if reg_match:
                 try:
-                    register = strtoint_safe(
+                    register: int = strtoint_safe(
                         reg_match.group("register"),
                         context="register address"
                     )
 
-                    bit_start_str = reg_match.group("bit_start")
-                    bit_end_str = reg_match.group("bit_end")
+                    bit_start_str: str = reg_match.group("bit_start")
+                    bit_end_str: str = reg_match.group("bit_end")
 
                     if bit_start_str is not None:
                         register_bit = strtoint_safe(bit_start_str, context="register bit start")

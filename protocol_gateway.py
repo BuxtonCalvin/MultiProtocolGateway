@@ -1076,18 +1076,16 @@ class Protocol_Gateway:
                 # Build a readable summary of how filtering was applied
                 _ps = getattr(member, 'protocolSettings', None)
                 if _ps is not None and _ps.variable_mask:
-                    _mask_summary: str = f"{len(_ps.variable_mask)} mask keys (variable_mask file)"
+                    _mask_summary: str = f"{len(_ps.variable_mask)} mask keys in {_ps.mask_file_name}"
                 else:
                     _mk: set[str] = set()
                     for _entries in member.registry_map.values():
                         for _e in _entries:
                             if hasattr(_e, 'variable_name') and _e.variable_name:
                                 _mk.add(_e.variable_name)
-                    _mask_summary = f"{len(_mk)} mask keys (registry_map)" if _mk else "no mask — forwarding all"
-                self.__log.debug(
-                    f"Filtered data for '{member.transport_name}': "
-                    f"{len(member_data)} keys. {_mask_summary}"
-                )
+                    _mask_summary = f"{len(_mk)} mask keys in registry_map" if _mk else "no mask filter — forwarding all"
+                self.__log.debug(f"Filtered data for '{member.transport_name}': {len(member_data)} keys. {_mask_summary}")
+
                 if not member_data:
                     continue
                 for bridge_name in member.bridges:
@@ -1105,10 +1103,10 @@ class Protocol_Gateway:
                         self.__log.warning(f"Skipping '{bridge_name}' for '{member.transport_name}' - cycle incomplete.")
                         continue
                     self.__log.debug(
-                        f"Writing to bridge '{bridge_name}' for member "
-                        f"'{member.transport_name}' "
-                        f"device_identifier='{member.device_identifier}' "
-                        f"keys={list(member_data.keys())[:3]}"
+                        f"Writing to bridge {bridge_name} for member {member.transport_name} "
+                        f"device_identifier={member.device_identifier} "
+                        f"keys=[{', '.join(repr(k) for k in list(member_data.keys())[:3])}"
+                        f"{', ...' if len(member_data) > 3 else ''}]"
                     )
                     bridge.write_data(member_data, member)
                 group.mark_forwarded(member, now)

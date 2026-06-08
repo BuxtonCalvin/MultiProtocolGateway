@@ -1950,9 +1950,9 @@ class timescaledb(transport_base):
                                     stmt: Insert = pg_insert(target_table).values(**wide_data)
                                     session.execute(stmt)
                                     if valid_row:
-                                        self._log.debug(f"data write complete from [{transport_name}] to timescaledb wide table for {len(metrics_only)} metrics.")
+                                        self._log.info(f"data write complete from [{transport_name}] to timescaledb wide table for {len(metrics_only)} metrics.")
                                     else:
-                                        self._log.debug(f"Not a complete valid row for the wide table because {msg}, but wrote metrics anyway.")
+                                        self._log.info(f"Not a complete valid row for the wide table because {msg}, but wrote metrics anyway.")
 
                             self._commit_transport_state(transport_name, metrics_only, timestamp, is_stale=False)
 
@@ -2102,7 +2102,7 @@ class timescaledb(transport_base):
                 stmt: Insert = pg_insert(DeviceMetricsNarrow).values(narrow_mappings)
                 upsert_stmt: Insert = stmt.on_conflict_do_nothing(index_elements=['m_time', 'device_info_id', 'metric_name'])
                 session.execute(upsert_stmt)
-                self._log.debug(f"data write complete from [{transport_name}] to timescaledb narrow table for {len(narrow_mappings)} metrics.")
+                self._log.info(f"data write complete from [{transport_name}] to timescaledb narrow table for {len(narrow_mappings)} metrics.")
 
         except SQLAlchemyError as e:
             self._log.exception(f"Narrow flush failed: {e}")

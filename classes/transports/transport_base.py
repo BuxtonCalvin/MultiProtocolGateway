@@ -124,9 +124,10 @@ class transport_base:
         self.transport_name: str = settings.name
 
         # Replace with transport-specific logger now that name is known
-        self._log_level = getattr(logging, settings.get("log_level", fallback="INFO"), logging.INFO)
-        self._log = logging.getLogger(self.transport_name)
-        self._log.setLevel(self._log_level)
+        if "log_level" in settings:
+            level = getattr(logging, settings.get("log_level").strip().upper(), logging.INFO)
+            self._log.setLevel(level)
+        # else: leave the named logger's level unset so it inherits from the root
 
         self.on_message: Callable[["transport_base", registry_map_entry, int | float | str], None] | None = None
         ''' callback, on message received '''
@@ -147,11 +148,6 @@ class transport_base:
         # (i.e. the scrape cycle was cut short by a block timeout or too many
         # retries). Default False preserves existing behavior for MQTT etc.
         self.write_requires_complete_cycle: bool = False
-
-        #apply log level to logger
-        self._log_level = getattr(logging, settings.get("log_level", fallback="INFO"), logging.INFO)
-        self._log = logging.getLogger(self.transport_name)
-        self._log.setLevel(self._log_level)
 
         self.type = self.__class__.__name__
 
@@ -179,18 +175,17 @@ class transport_base:
 
             #load a protocol_settings class for every transport; required for adv features. ie, variable timing.
             #must load after settings
-            self.protocol_version = settings.get("protocol_version", fallback='')
+            self.protocol_version: str = settings.get("protocol_version", fallback='')
             if self.protocol_version:
 
                 self.protocolSettings = protocol_settings(self.protocol_version, transport_settings=settings)
+                self.protocolSettings.transport = self.__class__.__name__  # e.g. "modbus_tcp"
 
                 # Update the transport settings reference in the copy
                 self.protocolSettings.transport_settings = settings
 
                 if self.protocolSettings:
                     self.protocol_version = self.protocolSettings.protocol
-
-            #todo, reimplement default settings from protocolsettings
 
         self.update_identifier()
 
@@ -212,7 +207,7 @@ class transport_base:
         return ""
 
 
-    def update_identifier(self):
+    def update_identifier(self) -> None:
         self.device_identifier = str(self.device_serial_number or "").strip().lower()
 
     def init_bridge(self, from_transport : "transport_base") -> None:
@@ -228,7 +223,7 @@ class transport_base:
     def connect(self) -> bool | None:
         pass
 
-    def cleanup(self):
+    def cleanup(self) -> None:
         """Clean up transport resources and close connections"""
         self._log.debug(f"Cleaning up transport {self.transport_name}")
         # Base implementation - subclasses should override if needed
@@ -257,7 +252,7 @@ class transport_base:
         grouped-read optimizations can override this.
         """
         self._start_cycle_tracking()
-        data = self.read_data()
+        data: dict[str, int | float | str] = self.read_data()
         self._finish_cycle_tracking(data)
         return data
 
@@ -306,7 +301,7 @@ class transport_base:
         return self._last_cycle_result
 
     def cycle_is_complete_for_bridge(self) -> bool:
-        result = self.get_cycle_result()
+        result: TransportCycleResult = self.get_cycle_result()
         return result.has_data and result.is_complete
 
     def interleaved_cycle_timeout(self) -> float:
@@ -363,7 +358,7 @@ class transport_base:
         _send_message(message=message, title=title, priority=priority, services=services, **kwargs)
 
     #region - modbus
-    #might limit to modbus_base only. not sure; might also apply to future protocols
+    # keep here as methods might also apply to future protocols
     def read_registers(self, start, count=1, registry_type : Registry_Type = Registry_Type.INPUT, **kwargs) -> Any:
         pass
 
