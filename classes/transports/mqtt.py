@@ -215,6 +215,10 @@ class mqtt(transport_base):
             override_file, "config"
         )
         if not override_path:
+            self._log.warning(
+                "No override write allowlist found for '%s'; MQTT write topics disabled until write selections are made.",
+                protocol_name
+            )
             return set()
 
         allowlist: set[str] = set()
@@ -228,7 +232,7 @@ class mqtt(transport_base):
         except Exception as exc:
             self._log.warning(f"Unable to read override write allowlist '{override_path}': {exc}")
             return set()
-
+        self._log.info(f"Loaded {len(allowlist)} entries from override write allowlist '{override_path}'")
         return allowlist
 
     def write_data(self, data: dict[str, int | float | str ], from_transport : transport_base) -> None:

@@ -721,12 +721,14 @@ class Protocol_Gateway:
             # Prefer the raw variable_mask list — it is always populated from the
             # mask file at init and is not affected by mid-cycle registry state.
             if ps is not None and ps.variable_mask:
-                mask: set[str] = set(ps.variable_mask)  # already lowercased by _load_filter_file
+                mask: set[str] = set(ps.variable_mask)
+                # Also accept post-merge names: mask may contain pre-merge '_l' names
+                # that load_registry_map strips when combining _l/_h pairs.
+                mask_expanded: set[str] = mask | {k[:-2] for k in mask if k.endswith('_l')}
                 return {
                     k: v for k, v in full_data.items()
-                    if k.lower() in mask
-                    # also pass synthetic _desc keys whose source variable is in the mask
-                    or (k.lower().endswith('_desc') and k.lower()[:-5] in mask)
+                    if k.lower() in mask_expanded
+                    or (k.lower().endswith('_desc') and k.lower()[:-5] in mask_expanded)
                 }
 
             # Fall back to deriving the key set from the registry map entries.
