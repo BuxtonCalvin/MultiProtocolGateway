@@ -1079,17 +1079,19 @@ class Protocol_Gateway:
                 _ps = getattr(member, 'protocolSettings', None)
                 if _ps is not None and _ps.variable_mask:
                     _mask_summary: str = f"{len(_ps.variable_mask)} mask keys in {_ps.mask_file_name} → {len(member_data)} matched"
-                    _unmatched: set[str] = set(_ps.variable_mask) - {k.lower() for k in data.keys()}
-                    # strip synthetic _desc keys — never in the mask file
-                    _unmatched = {k for k in _unmatched if not k.endswith('_desc')}
-                    # strip pre-merge _l names whose merged form IS present in data
+                    data_keys_lower = {k.lower() for k in data.keys()}
+                    _unmatched = set(_ps.variable_mask) - data_keys_lower
+                    # Remove pre-merge _l names whose merged form IS present in data
                     _unmatched = {k for k in _unmatched if not (
-                        k.endswith('_l') and k[:-2] in {d.lower() for d in data.keys()}
+                        k.endswith('_l') and k[:-2] in data_keys_lower
                     )}
-                    if _unmatched:
+                    # Identify synthetic _desc names present in data but absent from mask
+                    _synthetic: set[str] = {k for k in data_keys_lower if k.endswith('_desc')}
+                    if _unmatched or _synthetic:
                         self.__log.debug(
                             f"Mask keys with no match in scraped data for '{member.transport_name}' "
                             f"({len(_unmatched)} unmatched): {sorted(_unmatched)}"
+                            + (f" | synthetic _desc fields present: {sorted(_synthetic)}" if _synthetic else "")
                         )
                 else:
                     _mk: set[str] = set()

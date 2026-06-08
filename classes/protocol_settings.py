@@ -1007,6 +1007,9 @@ class protocol_settings:
             read_interval: int = 0
             adjustments: dict[str, Any] = self._adjustments.parse_adjustments(row.get("adjustments", ""))
 
+            # Strip \r from all field values at parse time to handle Windows CRLF CSVs
+            row = {k: v.strip("\r") if isinstance(v, str) else v for k, v in row.items()}
+
             if row["variable name"].startswith("#") or row["register"].startswith("#"):
                 return
 
