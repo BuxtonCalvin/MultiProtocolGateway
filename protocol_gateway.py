@@ -1073,18 +1073,26 @@ class Protocol_Gateway:
             self.__log.debug(f"Group members due for '{transport.transport_name}': {[m.transport_name for m in due_members]}")
             for member in due_members:
                 member_data: dict[str, int | float | str] = self._filter_for_member(data, member)
-                # Build a readable summary of how filtering was applied
+                # Debug: show mask keys that didn't match anything in the scraped data
                 _ps = getattr(member, 'protocolSettings', None)
                 if _ps is not None and _ps.variable_mask:
-                    _mask_summary: str = f"{len(_ps.variable_mask)} mask keys in {_ps.mask_file_name}"
+                    _mask_summary: str = f"{len(_ps.variable_mask)} mask keys in {_ps.mask_file_name} → {len(member_data)} matched"
+                    _unmatched = set(_ps.variable_mask) - {k.lower() for k in data.keys()}
+                    # strip synthetic _desc keys from the unmatched set — they're never in the mask file
+                    _unmatched = {k for k in _unmatched if not k.endswith('_desc')}
+                    if _unmatched:
+                        self.__log.debug(
+                            f"Mask keys with no match in scraped data for '{member.transport_name}' "
+                            f"({len(_unmatched)} unmatched): {sorted(_unmatched)}"
+                        )
                 else:
                     _mk: set[str] = set()
                     for _entries in member.registry_map.values():
                         for _e in _entries:
                             if hasattr(_e, 'variable_name') and _e.variable_name:
                                 _mk.add(_e.variable_name)
-                    _mask_summary = f"{len(_mk)} mask keys in registry_map" if _mk else "no mask filter — forwarding all"
-                self.__log.debug(f"Filtered data for '{member.transport_name}': {len(member_data)} keys. {_mask_summary}")
+                    _mask_summary: str = f"{len(_mk)} mask keys in registry_map" if _mk else "no mask filter — forwarding all"
+                self.__log.debug(f"Filtered data for '{member.transport_name}': {_mask_summary}")
 
                 if not member_data:
                     continue

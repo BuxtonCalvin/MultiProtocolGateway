@@ -29,7 +29,7 @@ from pathlib import Path
 
 import paho.mqtt.packettypes
 import paho.mqtt.properties
-from paho.mqtt.client import MQTT_ERR_NO_CONN, MQTT_ERR_SUCCESS
+from paho.mqtt.client import MQTT_ERR_NO_CONN, MQTT_ERR_SUCCESS, MQTTMessageInfo
 from paho.mqtt.client import Client as MQTTClient
 from paho.mqtt.enums import CallbackAPIVersion
 
@@ -39,7 +39,8 @@ from ..protocol_settings import Registry_Type, WriteMode, registry_map_entry
 from .transport_base import transport_base
 
 
-class mqtt(transport_base):
+class mqtt(transport_base):
+
     transport_type = "bridge"
     ''' for future; this will hold mqtt transport'''
     host : str
@@ -211,7 +212,7 @@ class mqtt(transport_base):
         protocol_name: str = from_transport.protocolSettings.protocol
         override_file: str = f"{protocol_name}.holding_registry_map.override.csv"
         override_path: str | None = from_transport.protocolSettings.find_protocol_file(
-            override_file, from_transport.protocolSettings.settings_dir
+            override_file, "config"
         )
         if not override_path:
             return set()
@@ -219,7 +220,7 @@ class mqtt(transport_base):
         allowlist: set[str] = set()
         try:
             with open(Path(override_path), newline="", encoding="utf-8") as f:
-                reader = csv.DictReader(f)
+                reader: csv.DictReader[str] = csv.DictReader(f)
                 for row in reader:
                     name: str  = (row.get("documented name") or "").strip().lower().replace(" ", "_")
                     if name:
@@ -248,7 +249,7 @@ class mqtt(transport_base):
             self._log.info(data)
             #have to send this every loop, because mqtt doesn't disconnect when HA restarts. HA bug.
 
-            info = self.client.publish(f"{self.base_topic}/{from_transport.device_identifier}/availability","online",qos=0,retain=True)
+            info: MQTTMessageInfo = self.client.publish(f"{self.base_topic}/{from_transport.device_identifier}/availability","online",qos=0,retain=True)
             if info.rc != MQTT_ERR_SUCCESS:
                 self.connected = False
                 if info.rc == MQTT_ERR_NO_CONN:
@@ -281,7 +282,7 @@ class mqtt(transport_base):
         if self.client is not None and from_transport.protocolSettings is not None:
             if from_transport.write_enabled:
                 self.__write_topics = {}
-                write_allowlist = self._load_override_write_allowlist(from_transport)
+                write_allowlist: set[str] = self._load_override_write_allowlist(from_transport)
                 if not write_allowlist:
                     self._log.info(
                         "No holding override allowlist found for '%s'; MQTT write topics disabled until write selections are committed.",
@@ -335,7 +336,7 @@ class mqtt(transport_base):
                     continue
 
 
-                clean_name = item.variable_name.lower().replace(" ", "_").strip()
+                clean_name: str = item.variable_name.lower().replace(" ", "_").strip()
                 if not clean_name: #if name is empty, skip
                     continue
 
