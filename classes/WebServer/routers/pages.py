@@ -33,6 +33,8 @@ Session scope convention:
 """
 from __future__ import annotations
 
+import csv
+import json
 import logging
 import os
 import re
@@ -264,6 +266,57 @@ async def create_device_page(request: Request):
     )
 
 
+def _protocol_create_groups(protocols_dir: Path) -> list[dict[str, Any]]:
+    groups: list[dict[str, Any]] = []
+    if not protocols_dir.exists():
+        return groups
+
+    for group_dir in sorted(protocols_dir.iterdir()):
+        if not group_dir.is_dir() or group_dir.name.startswith("_"):
+            continue
+        protocol_names: set[str] = set()
+        for item in group_dir.iterdir():
+            if item.suffix.lower() not in (".csv", ".json"):
+                continue
+            name = item.stem
+            if name.startswith("_") or name.endswith(".override"):
+                continue
+            protocol_names.add(
+                re.sub(r"\.(coil|discrete|input|holding)_registry_map$", "", name)
+            )
+            protocol_names.add(re.sub(r"\.registry_map$", "", name))
+        groups.append({"manufacturer": group_dir.name, "protocols": sorted(protocol_names)})
+    return groups
+
+
+@router.get("/pages/create-protocol", response_class=HTMLResponse, response_model=None)
+async def create_protocol_page(request: Request):
+    with session_scope() as db:
+        nav: NavData = get_nav_data(db)
+
+    protocol_create_data = {
+        "manufacturers": _protocol_create_groups(request.app.state.protocols_dir),
+        "protocol_types": [
+            {"label": "Coil", "value": "coil"},
+            {"label": "Discrete", "value": "discrete"},
+            {"label": "Input", "value": "input"},
+            {"label": "Holding", "value": "holding"},
+            {"label": "Other", "value": "other"},
+        ],
+        "csv_headers": CREATE_PROTOCOL_CSV_HEADERS,
+    }
+
+    return request.app.state.templates.TemplateResponse(
+        request=request,
+        name="pages/create_protocol.html",
+        context={
+            "nav": nav,
+            "proto_groups": get_protocol_groups(request.app.state.protocols_dir),
+            "protocol_create_data": protocol_create_data,
+        },
+    )
+
+
 @router.get("/pages/analyze/{device_name}", response_class=HTMLResponse, response_model=None)
 async def analyze_device_page(request: Request, device_name: str):
     gateway = getattr(request.app.state, "gateway", None)
@@ -468,6 +521,19 @@ LOG_LEVELS: tuple[str, ...] = (
     "DEBUG",
     "EXCEPTION",
 )
+CREATE_PROTOCOL_CSV_HEADERS: tuple[str, ...] = (
+    "register",
+    "variable_name",
+    "documented_name",
+    "unit",
+    "data_type",
+    "values",
+    "read_interval",
+    "writable",
+    "adjustments",
+    "note",
+)
+PROTOCOL_TYPES: tuple[str, ...] = ("coil", "discrete", "input", "holding", "other")
 
 
 class CreateDeviceSettingInput(BaseModel):
@@ -512,6 +578,43 @@ class CreateDeviceRequest(BaseModel):
         return upper
 
 
+class CreateProtocolRowInput(BaseModel):
+    register: str = ""
+    variable_name: str = ""
+    documented_name: str = ""
+    unit: str = ""
+    data_type: str = ""
+    values: str = ""
+    read_interval: str = ""
+    writable: str = "R"
+    adjustments: str = ""
+    note: str = ""
+
+
+class CreateProtocolRequest(BaseModel):
+    manufacturer: str = Field(..., min_length=1, max_length=128)
+    protocol_name: str = Field(..., min_length=1, max_length=128)
+    protocol_type: str
+    rows: list[CreateProtocolRowInput] = []
+
+    @field_validator("manufacturer", "protocol_name")
+    @classmethod
+    def validate_slug(cls, value: str) -> str:
+        value = value.strip().lower().replace("-", "_").replace(" ", "_")
+        value = re.sub(r"_+", "_", value)
+        if not re.fullmatch(r"[a-z0-9_]+", value):
+            raise ValueError("Use letters, numbers, spaces, hyphens, or underscores only.")
+        return value
+
+    @field_validator("protocol_type")
+    @classmethod
+    def validate_protocol_type(cls, value: str) -> str:
+        value = value.strip().lower()
+        if value not in PROTOCOL_TYPES:
+            raise ValueError("Unknown protocol type.")
+        return value
+
+
 def _append_section_to_config(config_path: Path, section: str, fields: list[tuple[str, str]]) -> None:
     section_text = "\n".join(
         [f"[{section}]", *[f"{key} = {value}" for key, value in fields]]
@@ -527,6 +630,24 @@ def _append_section_to_config(config_path: Path, section: str, fields: list[tupl
         config_path.write_text(existing_text + separator + section_text, encoding="utf-8")
     else:
         config_path.write_text(section_text, encoding="utf-8")
+
+
+def _csv_filename(protocol_name: str, protocol_type: str) -> str:
+    if protocol_type == "other":
+        return f"{protocol_name}.registry_map.csv"
+    return f"{protocol_name}.{protocol_type}_registry_map.csv"
+
+
+def _base_protocol_json(manufacturer: str, protocol_name: str, protocol_type: str) -> dict[str, Any]:
+    return {
+        "manufacturer": manufacturer,
+        "protocol": protocol_name,
+        "batch_size": 40,
+        "send_holding_register": protocol_type in ("holding", "other"),
+        "send_input_register": protocol_type in ("input", "other"),
+        "send_coil_register": protocol_type in ("coil", "other"),
+        "send_discrete_register": protocol_type in ("discrete", "other"),
+    }
 
 
 @router.post("/api/devices/create")
@@ -606,4 +727,95 @@ def create_device(
         "device_name": payload.device_name,
         "section": section,
         "keys_added": len(ordered_fields),
+    }
+
+
+@router.post("/api/protocols/create")
+def create_protocol(
+    request: Request,
+    payload: CreateProtocolRequest,
+    db: Session = Depends(get_session),
+):
+    """
+    Create a protocol JSON file and one register-map CSV under protocols/<manufacturer>.
+    The browser keeps drafts in memory until this endpoint is called, so canceling
+    the wizard leaves disk untouched.
+    """
+    manufacturer = payload.manufacturer
+    protocol_name = payload.protocol_name
+    if not protocol_name.startswith(f"{manufacturer}_"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Protocol name must start with '{manufacturer}_'.",
+        )
+
+    protocols_dir: Path = request.app.state.protocols_dir
+    manufacturer_dir = protocols_dir / manufacturer
+    try:
+        manufacturer_dir.relative_to(protocols_dir)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid manufacturer path.")
+
+    csv_path = manufacturer_dir / _csv_filename(protocol_name, payload.protocol_type)
+    json_path = manufacturer_dir / f"{protocol_name}.json"
+
+    if csv_path.exists():
+        raise HTTPException(status_code=409, detail=f"{csv_path.name} already exists.")
+
+    created_dir = False
+    written_paths: list[Path] = []
+    try:
+        if not manufacturer_dir.exists():
+            manufacturer_dir.mkdir(parents=True)
+            created_dir = True
+
+        with csv_path.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=CREATE_PROTOCOL_CSV_HEADERS)
+            writer.writeheader()
+            for item in payload.rows:
+                row = {
+                    key: str(getattr(item, key, "") or "").strip()
+                    for key in CREATE_PROTOCOL_CSV_HEADERS
+                }
+                if not any(row.values()):
+                    continue
+                writer.writerow(row)
+        written_paths.append(csv_path)
+
+        if not json_path.exists():
+            json_path.write_text(
+                json.dumps(
+                    _base_protocol_json(manufacturer, protocol_name, payload.protocol_type),
+                    indent=2,
+                ) + "\n",
+                encoding="utf-8",
+            )
+            written_paths.append(json_path)
+
+        request.app.state.scanner.run(db)
+        refresh_app_state(db)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        for path in written_paths:
+            try:
+                if path.exists():
+                    path.unlink()
+            except OSError:
+                _log.warning("Failed to roll back created protocol file %s", path)
+        if created_dir:
+            try:
+                manufacturer_dir.rmdir()
+            except OSError:
+                _log.warning("Failed to roll back created manufacturer folder %s", manufacturer_dir)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return {
+        "status": "created",
+        "manufacturer": manufacturer,
+        "protocol_name": protocol_name,
+        "protocol_type": payload.protocol_type,
+        "csv_path": str(csv_path),
+        "json_path": str(json_path),
+        "editor_url": f"/protocol-editor/{manufacturer}/{protocol_name}",
     }

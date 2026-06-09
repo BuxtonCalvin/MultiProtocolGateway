@@ -1,0 +1,400 @@
+<!--
+  Description: Defines the create_protocol web UI template for the MultiProtocolGateway admin interface.
+  File: create_protocol.html
+
+  Copyright 2026 Kevin Burke
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://apache.org
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+
+{% extends "base.html" %}
+{% block title %}Create Protocol - MPG Admin{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-4 py-6">
+  <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
+    <div>
+      <h1 class="surface-text font-bold text-xl">Create Protocol</h1>
+      <p class="surface-muted text-sm mt-1">
+        Draft a new register map and save it under <span class="font-mono">protocols/&lt;manufacturer&gt;</span>.
+      </p>
+    </div>
+    <div class="flex items-center gap-2">
+      <button id="save-protocol-btn" type="button" class="btn-primary text-sm" disabled>Save</button>
+      <button id="cancel-protocol-btn" type="button" class="btn-secondary text-sm">Cancel</button>
+    </div>
+  </div>
+
+  <div class="card space-y-4">
+    <div class="grid grid-cols-[12rem_minmax(0,1fr)_2.5rem_minmax(0,1fr)] gap-3 items-center">
+      <label for="manufacturer-select" class="label mb-0">Manufacturer</label>
+      <select id="manufacturer-select"
+              class="theme-input w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent">
+        <option value="">Select manufacturer</option>
+        <option value="__new__">New manufacturer...</option>
+      </select>
+      <button id="confirm-manufacturer-btn" type="button" class="btn-secondary px-0 text-sm h-9 w-9 create-add-btn">+</button>
+      <input id="manufacturer-new-input"
+             type="text"
+             placeholder="new_manufacturer"
+             class="theme-input hidden w-full border rounded px-3 py-2 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-accent">
+    </div>
+
+    <div id="protocol-row" class="grid grid-cols-[12rem_minmax(0,1fr)_2.5rem_minmax(0,1fr)] gap-3 items-center">
+      <label for="protocol-select" class="label mb-0">Protocol</label>
+      <select id="protocol-select"
+              class="theme-input w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+              disabled>
+        <option value="">Select protocol</option>
+        <option value="__new__">New protocol...</option>
+      </select>
+      <button id="confirm-protocol-btn" type="button" class="btn-secondary px-0 text-sm h-9 w-9 create-add-btn" disabled>+</button>
+      <input id="protocol-new-input"
+             type="text"
+             placeholder="manufacturer_model_v1"
+             class="theme-input hidden w-full border rounded px-3 py-2 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-accent">
+    </div>
+
+    <div id="type-row" class="grid grid-cols-[12rem_minmax(0,1fr)_2.5rem_minmax(0,1fr)] gap-3 items-center">
+      <label for="protocol-type-select" class="label mb-0">Protocol Type</label>
+      <select id="protocol-type-select"
+              class="theme-input w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+              disabled>
+        <option value="">Select type</option>
+      </select>
+      <button id="confirm-type-btn" type="button" class="btn-secondary px-0 text-sm h-9 w-9 create-add-btn" disabled>+</button>
+      <div id="file-preview" class="font-mono text-sm text-mpg-300"></div>
+    </div>
+  </div>
+
+  <div id="csv-shell" class="card mt-5 hidden">
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+      <div>
+        <h2 class="surface-text font-semibold text-sm">Register Map</h2>
+        <p class="surface-muted text-xs mt-1">Rows are not written until Save.</p>
+      </div>
+      <button id="add-row-btn" type="button" class="btn-secondary text-xs">Add Row</button>
+    </div>
+
+    <div class="overflow-x-auto rounded border border-mpg-700">
+      <table class="w-full min-w-[100rem] text-xs border-collapse">
+        <thead class="bg-mpg-800">
+          <tr id="csv-header-row" class="text-mpg-100 uppercase tracking-wide"></tr>
+        </thead>
+        <tbody id="csv-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="create-protocol-result" class="mt-4" aria-live="polite"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const createData = JSON.parse('{{ protocol_create_data | tojson | safe }}');
+  const state = {
+    manufacturer: '',
+    protocolName: '',
+    protocolType: ''
+  };
+
+  const manufacturerSelect = document.getElementById('manufacturer-select');
+  const manufacturerNewInput = document.getElementById('manufacturer-new-input');
+  const protocolSelect = document.getElementById('protocol-select');
+  const protocolNewInput = document.getElementById('protocol-new-input');
+  const typeSelect = document.getElementById('protocol-type-select');
+  const filePreview = document.getElementById('file-preview');
+  const csvShell = document.getElementById('csv-shell');
+  const csvHeaderRow = document.getElementById('csv-header-row');
+  const csvBody = document.getElementById('csv-body');
+  const saveBtn = document.getElementById('save-protocol-btn');
+  const resultBox = document.getElementById('create-protocol-result');
+
+  const headers = createData.csv_headers || [];
+  const manufacturers = createData.manufacturers || [];
+  const manufacturerMap = Object.fromEntries(manufacturers.map(item => [item.manufacturer, item]));
+
+  function slug(value) {
+    return String(value || '').trim().toLowerCase()
+      .replace(/[-\s]+/g, '_')
+      .replace(/_+/g, '_')
+      .replace(/^_+|_+$/g, '');
+  }
+
+  function csvFileName() {
+    if (!state.protocolName || !state.protocolType) return '';
+    if (state.protocolType === 'other') return `${state.protocolName}.registry_map.csv`;
+    return `${state.protocolName}.${state.protocolType}_registry_map.csv`;
+  }
+
+  function showMessage(kind, message, linkHref) {
+    const tone = kind === 'error'
+      ? 'border-danger/40 text-danger'
+      : 'border-success/40 text-success';
+    const link = linkHref ? ` <a href="${linkHref}" class="underline ml-2">Open</a>` : '';
+    resultBox.innerHTML = `<div class="card ${tone} text-sm">${message}${link}</div>`;
+  }
+
+  function clearMessage() {
+    resultBox.innerHTML = '';
+  }
+
+  function setEnabled(el, enabled) {
+    el.disabled = !enabled;
+    el.classList.toggle('opacity-60', !enabled);
+    el.classList.toggle('cursor-not-allowed', !enabled);
+  }
+
+  function fillManufacturers() {
+    manufacturers.forEach(item => {
+      const option = document.createElement('option');
+      option.value = item.manufacturer;
+      option.textContent = item.manufacturer;
+      manufacturerSelect.appendChild(option);
+    });
+  }
+
+  function fillTypes() {
+    (createData.protocol_types || []).forEach(item => {
+      const option = document.createElement('option');
+      option.value = item.value;
+      option.textContent = item.label;
+      typeSelect.appendChild(option);
+    });
+  }
+
+  function fillProtocols() {
+    protocolSelect.innerHTML = '<option value="">Select protocol</option><option value="__new__">New protocol...</option>';
+    const protocols = (manufacturerMap[state.manufacturer] || {}).protocols || [];
+    protocols.forEach(name => {
+      const option = document.createElement('option');
+      option.value = name;
+      option.textContent = name;
+      protocolSelect.appendChild(option);
+    });
+  }
+
+  function renderHeaders() {
+    csvHeaderRow.innerHTML = '';
+    headers.forEach(header => {
+      const th = document.createElement('th');
+      th.className = 'px-2 py-2 text-left border-r border-mpg-700 last:border-r-0';
+      th.textContent = header;
+      csvHeaderRow.appendChild(th);
+    });
+    const removeTh = document.createElement('th');
+    removeTh.className = 'px-2 py-2 text-center w-12';
+    removeTh.textContent = '';
+    csvHeaderRow.appendChild(removeTh);
+  }
+
+  function addRow(values = {}) {
+    const tr = document.createElement('tr');
+    tr.className = 'border-t border-mpg-700/50 hover:bg-mpg-800/60';
+    headers.forEach(header => {
+      const td = document.createElement('td');
+      td.className = 'px-2 py-1.5 border-r border-mpg-700/30';
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.dataset.field = header;
+      input.value = values[header] || (header === 'writable' ? 'R' : '');
+      input.className = 'theme-input w-full border rounded px-2 py-1 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent';
+      td.appendChild(input);
+      tr.appendChild(td);
+    });
+    const action = document.createElement('td');
+    action.className = 'px-2 py-1.5 text-center';
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'btn-secondary text-xs px-2 py-1';
+    remove.textContent = 'X';
+    remove.addEventListener('click', () => tr.remove());
+    action.appendChild(remove);
+    tr.appendChild(action);
+    csvBody.appendChild(tr);
+  }
+
+  function revealEditor() {
+    filePreview.textContent = `protocols/${state.manufacturer}/${csvFileName()}`;
+    csvShell.classList.remove('hidden');
+    saveBtn.disabled = false;
+    if (!csvBody.children.length) {
+      addRow();
+      addRow();
+      addRow();
+    }
+  }
+
+  function confirmManufacturer() {
+    const selected = manufacturerSelect.value;
+    const value = selected === '__new__' ? slug(manufacturerNewInput.value) : slug(selected);
+    if (!/^[a-z0-9_]+$/.test(value)) {
+      showMessage('error', 'Manufacturer must use letters, numbers, spaces, hyphens, or underscores.');
+      return;
+    }
+    clearMessage();
+    state.manufacturer = value;
+    state.protocolName = '';
+    state.protocolType = '';
+    fillProtocols();
+    protocolNewInput.value = `${value}_`;
+    protocolNewInput.placeholder = `${value}_model_v1`;
+    protocolSelect.value = '';
+    typeSelect.value = '';
+    filePreview.textContent = '';
+    csvShell.classList.add('hidden');
+    saveBtn.disabled = true;
+    setEnabled(protocolSelect, true);
+    setEnabled(document.getElementById('confirm-protocol-btn'), true);
+    setEnabled(typeSelect, false);
+    setEnabled(document.getElementById('confirm-type-btn'), false);
+  }
+
+  function confirmProtocol() {
+    const selected = protocolSelect.value;
+    const value = selected === '__new__' ? slug(protocolNewInput.value) : slug(selected);
+    if (!/^[a-z0-9_]+$/.test(value)) {
+      showMessage('error', 'Protocol name must use letters, numbers, spaces, hyphens, or underscores.');
+      return;
+    }
+    if (!value.startsWith(`${state.manufacturer}_`)) {
+      showMessage('error', `Protocol name must start with ${state.manufacturer}_.`);
+      return;
+    }
+    clearMessage();
+    state.protocolName = value;
+    state.protocolType = '';
+    typeSelect.value = '';
+    filePreview.textContent = '';
+    csvShell.classList.add('hidden');
+    saveBtn.disabled = true;
+    setEnabled(typeSelect, true);
+    setEnabled(document.getElementById('confirm-type-btn'), true);
+  }
+
+  function confirmType() {
+    if (!typeSelect.value) {
+      showMessage('error', 'Choose a protocol type.');
+      return;
+    }
+    clearMessage();
+    state.protocolType = typeSelect.value;
+    revealEditor();
+  }
+
+  function readRows() {
+    return Array.from(csvBody.querySelectorAll('tr')).map(row => {
+      const data = {};
+      row.querySelectorAll('[data-field]').forEach(input => {
+        data[input.dataset.field] = input.value;
+      });
+      return data;
+    });
+  }
+
+  function resetForm(options = {}) {
+    const keepMessage = Boolean(options.keepMessage);
+    state.manufacturer = '';
+    state.protocolName = '';
+    state.protocolType = '';
+    manufacturerSelect.value = '';
+    manufacturerNewInput.value = '';
+    manufacturerNewInput.classList.add('hidden');
+    protocolSelect.value = '';
+    protocolNewInput.value = '';
+    protocolNewInput.classList.add('hidden');
+    typeSelect.value = '';
+    filePreview.textContent = '';
+    csvBody.innerHTML = '';
+    csvShell.classList.add('hidden');
+    saveBtn.disabled = true;
+    setEnabled(protocolSelect, false);
+    setEnabled(document.getElementById('confirm-protocol-btn'), false);
+    setEnabled(typeSelect, false);
+    setEnabled(document.getElementById('confirm-type-btn'), false);
+    if (!keepMessage) clearMessage();
+  }
+
+  async function saveProtocol() {
+    if (!state.manufacturer || !state.protocolName || !state.protocolType) {
+      showMessage('error', 'Finish the setup fields before saving.');
+      return;
+    }
+    saveBtn.disabled = true;
+    clearMessage();
+    try {
+      const response = await fetch('/api/protocols/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          manufacturer: state.manufacturer,
+          protocol_name: state.protocolName,
+          protocol_type: state.protocolType,
+          rows: readRows()
+        })
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        showMessage('error', payload.detail || 'Protocol creation failed.');
+        saveBtn.disabled = false;
+        return;
+      }
+      showMessage('success', `Saved ${payload.protocol_name} ${payload.protocol_type} map.`, payload.editor_url);
+      resetForm({ keepMessage: true });
+    } catch (error) {
+      showMessage('error', `Network error: ${error}`);
+      saveBtn.disabled = false;
+    }
+  }
+
+  manufacturerSelect.addEventListener('change', () => {
+    manufacturerNewInput.classList.toggle('hidden', manufacturerSelect.value !== '__new__');
+  });
+  protocolSelect.addEventListener('change', () => {
+    protocolNewInput.classList.toggle('hidden', protocolSelect.value !== '__new__');
+  });
+  document.getElementById('confirm-manufacturer-btn').addEventListener('click', confirmManufacturer);
+  document.getElementById('confirm-protocol-btn').addEventListener('click', confirmProtocol);
+  document.getElementById('confirm-type-btn').addEventListener('click', confirmType);
+  document.getElementById('add-row-btn').addEventListener('click', () => addRow());
+  document.getElementById('cancel-protocol-btn').addEventListener('click', resetForm);
+  saveBtn.addEventListener('click', saveProtocol);
+
+  fillManufacturers();
+  fillTypes();
+  renderHeaders();
+  resetForm();
+})();
+</script>
+<style>
+.create-add-btn {
+  color: rgb(46 61 82);
+  border-color: rgb(140 174 200);
+  background-color: rgb(158, 166, 175);
+  font-weight: 700;
+}
+
+.create-add-btn:hover:not(:disabled) {
+  background-color: rgb(185 208 228);
+  border-color: rgb(100 140 180);
+}
+
+.create-add-btn:disabled {
+  color: rgb(91 122 153);
+  background-color: rgb(226 235 244);
+  border-color: rgb(185 208 228);
+}
+</style>
+{% endblock %}

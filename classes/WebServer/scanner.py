@@ -428,14 +428,20 @@ def _parse_protocol_csv(csv_path: Path, group_name: str) -> list[dict[str, Any]]
     """
     protocol_name: str = csv_path.stem  # e.g. "eg4_18kpv_holding"
 
-    # Detect holding vs input from filename
+    # Detect registry type from filename. Runtime uses
+    # <protocol>.registry_map.csv for Registry_Type.ZERO, which the UI labels
+    # as "other".
     name_lower: str = protocol_name.lower()
     if "holding" in name_lower:
         registry_type = "holding"
     elif "input" in name_lower:
         registry_type = "input"
+    elif "coil" in name_lower:
+        registry_type = "coil"
+    elif "discrete" in name_lower:
+        registry_type = "discrete"
     else:
-        registry_type = "input"  # default
+        registry_type = "other"
 
     # Ordered dict so later rows overwrite earlier ones for the same address.
     # This silently resolves duplicate rows in source CSVs (like the PF_S case).
