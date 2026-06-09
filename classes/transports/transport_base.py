@@ -256,7 +256,114 @@ class transport_base:
         self._finish_cycle_tracking(data)
         return data
 
-    # In transport_base, alongside read_data():
+    def read_group_data_iter(self, members: list["transport_base"]) -> Iterator[bool]:
+        """
+        Interleaved variant of read_group_data. Builds the union registry
+        across all group members, reads one block at a time via the primary
+        transport's _read_registry_type_iter(), then decodes and stores the
+        result per member so get_partial_data() returns the correct payload
+        for each member when _route_interleaved_state processes them.
+
+        Resolution order for each member mirrors _filter_for_member:
+        1. member.protocolSettings.registry_map  — post-mask entries only,
+        respecting each member's send_*_register flags.
+        2. Forward everything                    — no protocolSettings loaded.
+
+        Non-modbus transports fall back to read_data_iter() for the wire
+        read since _read_registry_type_iter is modbus-specific. The
+        _cycle_active guard on _start_cycle_tracking prevents the fallback
+        from resetting state that read_group_data_iter already initialized.
+        """
+        self._start_cycle_tracking()
+
+        for registry_type in (Registry_Type.INPUT, Registry_Type.HOLDING,
+                            Registry_Type.COIL, Registry_Type.DISCRETE):
+
+            # Gate on primary's send flags first — if the primary has
+            # explicitly disabled a registry type, skip it regardless of
+            # what members have loaded.
+            primary_flag_map: dict[Registry_Type, bool] = {
+                Registry_Type.INPUT:    getattr(self, 'send_input_register',    True),
+                Registry_Type.HOLDING:  getattr(self, 'send_holding_register',  True),
+                Registry_Type.COIL:     getattr(self, 'send_coil_register',     True),
+                Registry_Type.DISCRETE: getattr(self, 'send_discrete_register', True),
+            }
+            if not primary_flag_map.get(registry_type, True):
+                continue
+
+            # Build the union of registry entries across all members,
+            # respecting each member's own send_*_register flags and
+            # using their post-mask registry map so masked-out entries
+            # are never included in the physical read.
+            union_entries: list[registry_map_entry] = []
+            seen: set[tuple[int, str]] = set()
+            max_register: int = 0
+
+            for member in members:
+                # Respect each member's send flags independently
+                member_flag_map: dict[Registry_Type, bool] = {
+                    Registry_Type.INPUT:    getattr(member, 'send_input_register',    True),
+                    Registry_Type.HOLDING:  getattr(member, 'send_holding_register',  True),
+                    Registry_Type.COIL:     getattr(member, 'send_coil_register',     True),
+                    Registry_Type.DISCRETE: getattr(member, 'send_discrete_register', True),
+                }
+                if not member_flag_map.get(registry_type, True):
+                    continue
+
+                ps: protocol_settings | None = getattr(member, 'protocolSettings', None)
+                if ps is None:
+                    # Path 3: no protocolSettings — nothing to contribute to union
+                    continue
+                for entry in ps.registry_map.get(registry_type, []):
+                    key: tuple[int, str] = (entry.register, entry.variable_name)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    union_entries.append(entry)
+                    if entry.register > max_register:
+                        max_register = entry.register
+
+            if not union_entries:
+                continue
+
+            # Delegate wire reading to the modbus block iterator if available
+            # (modbus_base provides _read_registry_type_iter), otherwise fall
+            # back to a single atomic read via read_data_iter. The _cycle_active
+            # guard ensures read_data_iter does not reset tracking state.
+            read_iter = getattr(self, '_read_registry_type_iter', None)
+            if read_iter is not None:
+                yield from read_iter(registry_type, union_entries, max_register)
+            else:
+                yield from self.read_data_iter()
+
+            # Decode the raw registers against each member's own protocolSettings
+            # so per-member adjustments and code lookups are applied correctly.
+            # Each member gets its own _partial_info populated so get_partial_data()
+            # returns the right payload per member in _route_interleaved_state.
+            for member in members:
+                ps = getattr(member, 'protocolSettings', None)
+                if ps is None:
+                    # Path 3: no protocolSettings — member contributes nothing to
+                    # the union decode; the primary's _partial_info carries the full
+                    # payload and _route_interleaved_state will forward everything.
+                    continue
+                member_entries: list[registry_map_entry] = ps.registry_map.get(registry_type, [])
+                if not member_entries:
+                    continue
+                new_info: dict[str, int | float | str] = ps.process_registery(
+                    self._partial_registry, member_entries
+                )
+                if not hasattr(member, '_partial_info'):
+                    member._partial_info = {}
+                member._partial_info.update(new_info)
+
+            # Accumulate into primary's _partial_info for get_partial_data()
+            for member in members:
+                self._partial_info.update(getattr(member, '_partial_info', {}))
+
+            self._partial_registry.clear()
+
+        self._finish_cycle_tracking(self._partial_info)
 
     def read_data_iter(self) -> "Iterator[bool]":
         """
@@ -266,11 +373,22 @@ class transport_base:
         Default implementation wraps read_data() as a single-yield generator
         so non-modbus transports work transparently in interleaved mode.
         Modbus transports override this with true block-level yielding.
+
+        When called as a fallback from read_group_data_iter the _cycle_active
+        flag will already be True, so _start_cycle_tracking and
+        _finish_cycle_tracking are skipped — the group iter owns the cycle
+        lifecycle in that case.
         """
-        self._start_cycle_tracking()
+        _owner: bool = not getattr(self, '_cycle_active', False)
+        if _owner:
+            self._start_cycle_tracking()
+
         yield True  # non-modbus: treat the entire read as one atomic block
         self._partial_data: dict[str, int | float | str] = self.read_data()
-        self._finish_cycle_tracking(self._partial_data)
+        self._partial_info.update(self._partial_data)
+
+        if _owner:
+            self._finish_cycle_tracking(self._partial_data)
 
     def get_partial_data(self) -> dict[str, int | float | str]:
         """
@@ -280,9 +398,14 @@ class transport_base:
         return getattr(self, '_partial_data', {})
 
     def _start_cycle_tracking(self) -> None:
+        self._cycle_active: bool = True
         self._last_cycle_result = TransportCycleResult()
         self._partial_info: dict[str, int | float | str] = {}
         self._partial_registry: dict[int, int] = {}
+
+    def _finish_cycle_tracking(self, data: dict[str, int | float | str]) -> None:
+        self._cycle_active = False
+        self._last_cycle_result.has_data = bool(data)
 
     def _cycle_expect_unit(self, count: int = 1) -> None:
         self._last_cycle_result.expected_units += count
@@ -294,8 +417,7 @@ class transport_base:
         self._last_cycle_result.is_complete = False
         self._last_cycle_result.skipped_units += skipped_units
 
-    def _finish_cycle_tracking(self, data: dict[str, int | float | str]) -> None:
-        self._last_cycle_result.has_data = bool(data)
+
 
     def get_cycle_result(self) -> TransportCycleResult:
         return self._last_cycle_result

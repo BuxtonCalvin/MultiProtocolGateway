@@ -256,6 +256,12 @@ class modbus_base(transport_base):
         self.modbus_delay = settings.getfloat("batch_delay", fallback=self.modbus_delay)
         self.modbus_delay_setting = self.modbus_delay
 
+        # Store slave_id for scrape group uniqueness — devices chained on a
+        # shared Modbus bus are differentiated by their slave/unit address.
+        # Stored as a string so scrape_target can use it directly.
+        # The address fallback covers modbus_rtu which uses that config key instead of slave_id.
+        self._slave_id: str = settings.get("slave_id", fallback=settings.get("address", fallback="1"))
+
     @property
     def _protocol(self) -> "protocol_settings":
         """
@@ -899,6 +905,10 @@ class modbus_base(transport_base):
         Read one consolidated payload for all transports sharing this physical
         Modbus endpoint. The gateway stays transport-agnostic; Modbus-specific
         batching lives here.
+
+        Each member's entries are decoded through their own protocolSettings
+        so per-member adjustments, unit modifiers, and code lookups are applied
+        correctly regardless of whether all members share the same protocol.
         """
         with self._transport_lock:
             self._start_cycle_tracking()
@@ -911,36 +921,40 @@ class modbus_base(transport_base):
 
             info: dict[str, int | float | str] = {}
 
-            for registry_type in (Registry_Type.INPUT, Registry_Type.HOLDING, Registry_Type.COIL, Registry_Type.DISCRETE):
-                flag_map: dict[Registry_Type, bool] = {
-                    Registry_Type.INPUT:    self.send_input_register,
-                    Registry_Type.HOLDING:  self.send_holding_register,
-                    Registry_Type.COIL:     self.send_coil_register,
-                    Registry_Type.DISCRETE: self.send_discrete_register,
-                }
-                if not flag_map.get(registry_type, True):
-                    continue
-                any_member_has_entries: bool = any(
-                    (ps := getattr(m, 'protocolSettings', None)) is not None
-                    and registry_type in ps.registry_map
-                    and bool(ps.registry_map[registry_type])
-                    for m in members
-                )
-                if not any_member_has_entries:
-                    continue
+            for registry_type in (Registry_Type.INPUT, Registry_Type.HOLDING,
+                                Registry_Type.COIL, Registry_Type.DISCRETE):
 
+                # Build union respecting each member's own send_*_register flags
                 union_entries: list[registry_map_entry] = []
                 seen: set[tuple[int, str]] = set()
                 max_register: int = 0
 
+                # Track which entries belong to which member's protocol for
+                # per-member decoding after the physical read.
+                member_entry_map: dict[int, tuple[protocol_settings, list[registry_map_entry]]] = {}
+
                 for member in members:
-                    member_protocol = getattr(member, "protocolSettings", None)
-                    if member_protocol is None:
+                    member_flag_map: dict[Registry_Type, bool] = {
+                        Registry_Type.INPUT:    getattr(member, 'send_input_register',    True),
+                        Registry_Type.HOLDING:  getattr(member, 'send_holding_register',  True),
+                        Registry_Type.COIL:     getattr(member, 'send_coil_register',     True),
+                        Registry_Type.DISCRETE: getattr(member, 'send_discrete_register', True),
+                    }
+                    if not member_flag_map.get(registry_type, True):
                         continue
 
-                    member_entries = member_protocol.registry_map.get(registry_type, [])
+                    ps: protocol_settings | None = getattr(member, 'protocolSettings', None)
+                    if ps is None:
+                        continue
+
+                    member_entries: list[registry_map_entry] = ps.registry_map.get(registry_type, [])
+                    if not member_entries:
+                        continue
+
+                    member_entry_map[id(member)] = (ps, member_entries)
+
                     for entry in member_entries:
-                        key = (entry.register, entry.variable_name)
+                        key: tuple[int, str] = (entry.register, entry.variable_name)
                         if key in seen:
                             continue
                         seen.add(key)
@@ -958,17 +972,27 @@ class modbus_base(transport_base):
                     init=True,
                 )
 
-                self._log.info(
+                self._log.debug(
                     f"Reading grouped {registry_type.name} registers for {self.transport_name}: "
                     f"{len(ranges)} ranges across {len(union_entries)} entries"
                 )
 
-                registry: Dict[int, int] = self.read_modbus_registers(ranges=ranges, registry_type=registry_type)
+                registry: dict[int, int] = self.read_modbus_registers(
+                    ranges=ranges, registry_type=registry_type
+                )
 
-                if registry:
-                    info.update(self._protocol.process_registery(registry, union_entries))
-                else:
+                if not registry:
                     self._log.warning(f"No grouped registry data returned for {self.transport_name} {registry_type.name}")
+                    continue
+
+                # Decode each member's entries through their own protocolSettings
+                # so adjustments and code lookups use the correct protocol context.
+                for member in members:
+                    entry_data = member_entry_map.get(id(member))
+                    if entry_data is None:
+                        continue
+                    ps, member_entries = entry_data
+                    info.update(ps.process_registery(registry, member_entries))
 
             if not info:
                 self._log.info("Grouped register read returned no data; transport busy?")
@@ -1989,67 +2013,26 @@ class modbus_base(transport_base):
         caller can interleave reads across transports.
         Accumulates results internally; call get_partial_data() to
         retrieve whatever has been collected so far.
-        """
-        self._start_cycle_tracking()
 
-        for registry_type in (Registry_Type.INPUT, Registry_Type.HOLDING, Registry_Type.COIL, Registry_Type.DISCRETE):
+        When called as a fallback from read_group_data_iter the
+        _cycle_active flag will already be True, so _start_cycle_tracking
+        and _finish_cycle_tracking are skipped — the group iter owns
+        the cycle lifecycle in that case.
+        """
+        _owner: bool = not getattr(self, '_cycle_active', False)
+        if _owner:
+            self._start_cycle_tracking()
+
+        for registry_type in (Registry_Type.INPUT, Registry_Type.HOLDING,
+                            Registry_Type.COIL, Registry_Type.DISCRETE):
             if not self._should_send_registry_type(registry_type):
                 continue
 
-            ranges: list[tuple[int, int]] = self._protocol.calculate_registry_ranges(
+            yield from self._read_registry_type_iter(
+                registry_type,
                 self._protocol.registry_map[registry_type],
                 self._protocol.registry_map_size[registry_type],
-                timestamp=self.last_read_time
             )
-
-            # Walk ranges explicitly so we control which range is attempted next.
-            # A plain `for range, result in read_modbus_registers_iter(ranges)` is
-            # a forward-only iterator — once a range is yielded it is gone.
-            # We drive the index ourselves and re-issue a
-            # single-element call to read_modbus_registers_iter for each retry so
-            # the block goes back on the wire before we advance to the next range.
-            idx: int = 0
-            retry_counts: dict[int, int] = {}
-            counted_indices: set[int] = set()
-
-            while idx < len(ranges):
-                register_range: tuple[int, int] = ranges[idx]
-                if idx not in counted_indices:
-                    counted_indices.add(idx)
-                    self._cycle_expect_unit()
-                retry_count: int = retry_counts.get(idx, 0)
-
-                # Single-range call so the iterator covers exactly this one block.
-                _, result = next(iter(
-                    self.read_modbus_registers_iter([register_range], registry_type)
-                ))
-
-                if result == {}:
-                    self._cycle_mark_incomplete()
-                    idx += 1
-                    yield True
-                elif result is None:
-                    retry_count: int = retry_count + 1
-                    retry_counts[idx] = retry_count
-
-                    if retry_count < self.max_retries_per_block:
-                        # Yield False to let the coordinator interleave a block
-                        # from another transport before we retry this range.
-                        # When the coordinator calls next() we come back here,
-                        # idx is still pointing at the failed range, so the while
-                        # loop head re-attempts it immediately.
-                        yield False
-                        # Do NOT advance idx — retry the same range next time in.
-                    else:
-                        self._log.warning(f"Block {register_range} exceeded {self.max_retries_per_block} retries, skipping.")
-                        self._cycle_mark_incomplete()
-                        idx += 1        # give up on this range, move to next
-                        yield True      # still signal coordinator we made progress
-                else:
-                    self._cycle_mark_unit_complete()
-                    self._partial_registry.update(result)
-                    idx += 1            # success — advance to next range
-                    yield True
 
             # Process whatever was collected for this registry type
             new_info: dict[str, int | float | str] = self._protocol.process_registery(
@@ -2059,17 +2042,89 @@ class modbus_base(transport_base):
             self._partial_info.update(new_info)
             self._partial_registry.clear()
 
-        self._finish_cycle_tracking(self._partial_info)
+        if _owner:
+            self._finish_cycle_tracking(self._partial_info)
+
+    def _read_registry_type_iter(
+        self,
+        registry_type: Registry_Type,
+        union_entries: list[registry_map_entry],
+        max_register: int,
+    ) -> Iterator[bool]:
+        """
+        Reads one registry type block-by-block, yielding after each block.
+        Accumulates raw register values into self._partial_registry.
+        Does NOT call _start_cycle_tracking or _finish_cycle_tracking —
+        those are the caller's responsibility.
+        """
+        ranges: list[tuple[int, int]] = self._protocol.calculate_registry_ranges(
+            union_entries, max_register, timestamp=self.last_read_time, init=True
+        )
+
+        # Walk ranges explicitly so we control which range is attempted next.
+        # A plain `for range, result in read_modbus_registers_iter(ranges)` is
+        # a forward-only iterator — once a range is yielded it is gone.
+        # We drive the index ourselves and re-issue a
+        # single-element call to read_modbus_registers_iter for each retry so
+        # the block goes back on the wire before we advance to the next range.
+        idx: int = 0
+        retry_counts: dict[int, int] = {}
+        counted_indices: set[int] = set()
+
+        while idx < len(ranges):
+            register_range: tuple[int, int] = ranges[idx]
+            if idx not in counted_indices:
+                counted_indices.add(idx)
+                self._cycle_expect_unit()
+            retry_count: int = retry_counts.get(idx, 0)
+
+            # Single-range call so the iterator covers exactly this one block.
+            _, result = next(iter(
+                self.read_modbus_registers_iter([register_range], registry_type)
+            ))
+
+            if result == {}:
+                self._cycle_mark_incomplete()
+                idx += 1
+                yield True
+            elif result is None:
+                retry_count += 1
+                retry_counts[idx] = retry_count
+                if retry_count < self.max_retries_per_block:
+                    # Yield False to let the coordinator interleave a block
+                    # from another transport before we retry this range.
+                    # When the coordinator calls next() we come back here,
+                    # idx is still pointing at the failed range, so the while
+                    # loop head re-attempts it immediately.
+                    yield False
+                    # Do not advance idx — retry the same range next time in.
+                else:
+                    self._log.warning(f"Block {register_range} exceeded {self.max_retries_per_block} retries, skipping.")
+                    self._cycle_mark_incomplete()
+                    idx += 1        # give up on this range, move to next
+                    yield True      # still signal coordinator we made progress
+            else:
+                self._cycle_mark_unit_complete()
+                self._partial_registry.update(result)
+                idx += 1            # success — advance to next range
+                yield True
 
     def get_partial_data(self) -> dict[str, int | float | str]:
         return getattr(self, '_partial_info', {})
 
     @property
     def scrape_target(self) -> str:
+        """
+        Returns a string uniquely identifying the scrape target for this transport,
+        used for logging and scraper tracking.
+        """
         address: str = getattr(self, 'address', '')
-        port: str = getattr(self, 'port', '')
+        port: str | int = getattr(self, 'port', '')
         host: str = getattr(self, 'host', '')
-        return f"{address}:{port}" if address else f"{host}:{port}"
+        protocol: str = getattr(self, 'protocol_version', '')
+        slave_id: str = getattr(self, '_slave_id', '1')
+        base: str = f"{address}:{port}" if address else f"{host}:{port}"
+        return f"{base}:{protocol}:{slave_id}"
 
     def read_registry(self, registry_type: Registry_Type = Registry_Type.INPUT) -> dict[str, int | float | str]:
         """

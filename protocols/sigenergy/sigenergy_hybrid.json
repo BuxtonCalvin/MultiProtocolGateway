@@ -1,0 +1,50 @@
+{
+  "transport": "modbus_tcp",
+  "baud": "9600",
+  "batch_size": "40",
+  "send_holding_register": "true",
+  "send_input_register": "false",
+  "send_coil_register": "false",
+  "send_discrete_register": "false",
+
+  "running_state_codes": {
+    "0": "standby",
+    "1": "running",
+    "2": "fault",
+    "3": "shutdown"
+  },
+
+  "output_type_codes": {
+    "0": "L/N",
+    "1": "L1/L2/L3",
+    "2": "L1/L2/L3/N",
+    "3": "L1/L2/N"
+  },
+
+  "alarm_1_codes": {
+    "b0": "software version mismatch",
+    "b1": "low insulation resistance",
+    "b2": "temperature too high",
+    "b3": "equipment failure",
+    "b4": "system grounding abnormal",
+    "b5": "PV string voltage high",
+    "b6": "PV string reverse connection",
+    "b7": "PV string back-filling",
+    "b8": "AFCI fault",
+    "b9": "grid outage",
+    "b10": "grid overvoltage",
+    "b11": "grid undervoltage",
+    "b12": "grid overfrequency",
+    "b13": "grid underfrequency",
+    "b14": "grid voltage imbalance",
+    "b15": "output current DC component over limit"
+  },
+
+  "alarm_2_codes": {
+    "b0": "leakage current over limit",
+    "b1": "communication abnormal",
+    "b2": "system internal protection",
+    "b3": "AFCI self-test circuit fault",
+    "b4": "off-grid protection"
+  }
+}

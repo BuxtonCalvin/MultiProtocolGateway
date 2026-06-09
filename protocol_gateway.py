@@ -507,7 +507,19 @@ class Protocol_Gateway:
         Sequential mode — read transports one by one with a delay in between, correct when multiple transports share a single bus (e.g. ModBus RTU over RS485)
         Interleaved mode - reads one block at a time from each transport in round-robin order, ideal for shared bus scenarios where some
             devices are significantly slower than others, preventing starvation of faster devices.  Parallel threads for I/O isolation,
-            but a shared bus lock for transports that share the same physical pipe"""
+            but a shared bus lock for transports that share the same physical pipe
+
+        In an RS-485 network, the client sequentially polls servers one by one, waiting for a response before moving on
+        to the next device. Only one device can talk on the RS-485 network at a time. And if slave devices are on the same
+        serial line, they must be accessed sequentially because Modbus does not allow concurrent access — you query slave ID 1 first,
+        then ID 2 and so forth.
+
+        TCP-to-RTU bridge: The gateway maps the TCP Unit Identifier to the RTU slave address. So when MPG sends
+        a Modbus TCP request with Unit ID 2, the Waveshare device translates that into an RTU poll directed specifically
+        at slave 2 on the RS-485 bus — it does not broadcast to all slaves simultaneously. Each slave ID poll is a separate
+        serial transaction. Transports that differ on slave_id are separate physical devices on the RS-485 bus and must be polled
+        independently, even though they share the same Waveshare IP address.
+            """
 
         # Validate and normalize — unknown values fall back to sequential
         if self._read_mode_raw not in ("sequential", "concurrent", "interleaved"):
@@ -815,7 +827,8 @@ class Protocol_Gateway:
         target.connected = False
         target.last_read_time = 0.0
 
-    # init the variable request_upstream_reconnect in the bridge __init__.  If it goes true during stale detection, reconnect routine triggers.
+    # init the variable request_upstream_reconnect in the bridge __init__.  If it goes true during stale
+    # detection, reconnect routine triggers.
     def _wire_reconnect_hooks(self) -> None:
         """Attach the gateway's ``reconnect_upstream_bridge`` callback to every bridge transport.
 
@@ -1076,35 +1089,44 @@ class Protocol_Gateway:
             for member in due_members:
                 member_data: dict[str, int | float | str] = self._filter_for_member(data, member)
                 # Debug: show mask keys that didn't match anything in the scraped data
-                _ps = getattr(member, 'protocolSettings', None)
-                if _ps is not None and _ps.variable_mask:
-                    _mask_summary: str = f"{len(_ps.variable_mask)} mask keys in {_ps.mask_file_name} → {len(member_data)} matched"
+                ps: protocol_settings | None = getattr(member, 'protocolSettings', None)
+
+                if ps is not None and ps.variable_mask:
+                    # Path 1: explicit mask file
+                    _mask_summary: str = f"{len(ps.variable_mask)} mask keys in {ps.mask_file_name} → {len(member_data)} matched"
                     data_keys_lower: set[str] = {k.lower() for k in data.keys()}
-                    _unmatched: set[str] = set(_ps.variable_mask) - data_keys_lower
-                    # Remove pre-merge _l names whose merged form IS present in data
-                    _unmatched: set[str] = {k for k in _unmatched if not (
-                        k.endswith('_l') and k[:-2] in data_keys_lower
-                    )}
-                    # Also suppress _h entries whose _l sibling is in the mask (merge pair)
-                    _unmatched = {k for k in _unmatched if not (
-                        k.endswith('_h') and (k[:-2] + '_l') in set(_ps.variable_mask)
-                    )}
-                    # Identify synthetic _desc names present in data but absent from mask
-                    _synthetic: set[str] = {k for k in data_keys_lower if k.endswith('_desc')}
+                    _unmatched: set[str] = set(ps.variable_mask) - data_keys_lower
+                    _unmatched = {k for k in _unmatched if not (k.endswith('_l') and k[:-2] in data_keys_lower)}
+                    _unmatched = {k for k in _unmatched if not (k.endswith('_h') and (k[:-2] + '_l') in set(ps.variable_mask))}
+                    _synthetic: set[str] = {k for k in data_keys_lower if k.endswith('_desc') and k[:-5] in set(ps.variable_mask)}
+
+                    self.__log.debug(f"Filtered data for '{member.transport_name}': {_mask_summary}")
                     if _unmatched or _synthetic:
                         self.__log.debug(
                             f"Mask keys with no match in scraped data for '{member.transport_name}' "
                             f"({len(_unmatched)} unmatched): {sorted(_unmatched)}"
                             + (f" | synthetic _desc fields present: {sorted(_synthetic)}" if _synthetic else "")
                         )
+
+                elif ps is not None and any(ps.registry_map.values()):
+                    # Path 2: no mask file, filtering by registry map variable names
+                    member_keys: set[str] = {
+                        entry.variable_name
+                        for entries in member.registry_map.values()
+                        for entry in entries
+                        if hasattr(entry, 'variable_name') and entry.variable_name
+                    }
+                    self.__log.debug(
+                        f"Filtered data for '{member.transport_name}': "
+                        f"{len(member_keys)} registry map keys → {len(member_data)} matched"
+                    )
+
                 else:
-                    _mk: set[str] = set()
-                    for _entries in member.registry_map.values():
-                        for _e in _entries:
-                            if hasattr(_e, 'variable_name') and _e.variable_name:
-                                _mk.add(_e.variable_name)
-                    _mask_summary: str = f"{len(_mk)} mask keys in registry_map" if _mk else "no mask filter — forwarding all"
-                self.__log.debug(f"Filtered data for '{member.transport_name}': {_mask_summary}")
+                    # Path 3: no mask, no registry map filter — all metrics forwarded
+                    self.__log.debug(
+                        f"Filtered data for '{member.transport_name}': "
+                        f"no mask configured — forwarding all {len(member_data)} metrics"
+                    )
 
                 if not member_data:
                     continue

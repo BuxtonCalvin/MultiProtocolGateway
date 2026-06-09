@@ -33,6 +33,7 @@
 | [HDHK](HDHK.md) | 16-channel AC current/frequency module | RS485 terminal | Modbus RTU | [HDHK.md](HDHK.md) |
 | [Huawei](Huawei.md) | SUN2000 residential/commercial inverters | Ethernet / RS485 | Modbus TCP / RTU | [Huawei.md](Huawei.md) |
 | [Next Power](Next_Power.md) | Victor NM-ECO-LV 3.6KW/6.2KW Plus | RS485 communication port | Modbus RTU | [Next_Power.md](Next_Power.md) |
+| [Sigenergy](Sigenergy.md) | SigenStor EC, Sigen Hybrid, Sigen PV Max | Ethernet / RS485 | Modbus TCP / RTU | [Sigenergy.md](Sigenergy.md) |
 | [Sigineer](Sigineer.md) | Sigineer inverter/charger series | USB | Modbus RTU | [Sigineer.md](Sigineer.md) |
 | [SMA](SMA.md) | Sunny Boy, Sunny Tripower, Sunny Island | Ethernet / RS485 (add-on) | Modbus TCP | [SMA.md](SMA.md) |
 | [Sol-Ark](SolArk.md) | 5K, 8K, 12K, 15K-2P | RS485 RJ45 / terminal block | Modbus RTU | [SolArk.md](SolArk.md) |

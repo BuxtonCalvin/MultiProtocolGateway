@@ -1,0 +1,76 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note
+30500~30514,model_type,Model type,,STRING,,,R,,Hybrid inverter model type; read individual devices at slave/unit 1-246
+30515~30524,serial_number,Serial number,,STRING,,,R,,Hybrid inverter serial number
+30525~30539,machine_firmware_version,Machine firmware version,,STRING,,,R,,Hybrid inverter firmware version
+30540,rated_active_power,Rated active power,0.001kW,UINT,,,R,,Rated active power
+30542,max_apparent_power,Max apparent power,0.001kVA,UINT,,,R,,Max apparent power
+30544,max_active_power,Max active power,0.001kW,UINT,,,R,,Max active power
+30546,max_absorption_power,Max absorption power,0.001kW,UINT,,,R,,Max absorption power
+30548,rated_battery_capacity,Rated battery capacity,0.01kWh,UINT,,,R,,Rated battery capacity
+30550,ess_rated_charge_power,ESS rated charge power,0.001kW,UINT,,,R,,ESS rated charge power
+30552,ess_rated_discharge_power,ESS rated discharge power,0.001kW,UINT,,,R,,ESS rated discharge power
+30554,daily_export_energy,Daily export energy,0.01kWh,UINT,,,R,,Daily export energy
+30556,accumulated_export_energy,Accumulated export energy,0.01kWh,UINT64,,,R,,Accumulated export energy
+30560,daily_import_energy,Daily import energy,0.01kWh,UINT,,,R,,Daily import energy
+30562,accumulated_import_energy,Accumulated import energy,0.01kWh,UINT64,,,R,,Accumulated import energy
+30566,battery_daily_charge_energy,Battery daily charge energy,0.01kWh,UINT,,,R,,Battery daily charge energy
+30568,battery_accumulated_charge_energy,Battery accumulated charge energy,0.01kWh,UINT64,,,R,,Battery accumulated charge energy
+30572,battery_daily_discharge_energy,Battery daily discharge energy,0.01kWh,UINT,,,R,,Battery daily discharge energy
+30574,battery_accumulated_discharge_energy,Battery accumulated discharge energy,0.01kWh,UINT64,,,R,,Battery accumulated discharge energy
+30578,running_state,Running state,,USHORT,"{""0"": ""standby"", ""1"": ""running"", ""2"": ""fault"", ""3"": ""shutdown""}",,R,,Running state
+30579,max_active_power_adjustment_value,Max active power adjustment value,0.001kW,INT,,,R,,Max active power adjustment value
+30581,min_active_power_adjustment_value,Min active power adjustment value,0.001kW,INT,,,R,,Min active power adjustment value
+30583,max_reactive_power_feed_value,Max reactive power adjustment value fed to AC terminal,0.001kvar,UINT,,,R,,Max reactive power fed to AC terminal
+30585,max_reactive_power_absorb_value,Max reactive power adjustment value absorbed from AC terminal,0.001kvar,UINT,,,R,,Max reactive power absorbed from AC terminal
+30587,active_power,Active power,0.001kW,INT,,,R,,Hybrid inverter active power
+30589,reactive_power,Reactive power,0.001kvar,INT,,,R,,Hybrid inverter reactive power
+30591,ess_max_battery_charge_power,ESS max battery charge power,0.001kW,UINT,,,R,,ESS max battery charge power
+30593,ess_max_battery_discharge_power,ESS max battery discharge power,0.001kW,UINT,,,R,,ESS max battery discharge power
+30595,ess_available_battery_charge_energy,ESS available battery charge energy,0.01kWh,UINT,,,R,,Available battery charge energy
+30597,ess_available_battery_discharge_energy,ESS available battery discharge energy,0.01kWh,UINT,,,R,,Available battery discharge energy
+30599,ess_charge_discharge_power,ESS charge/discharge power,0.001kW,INT,,,R,,ESS charge/discharge power
+30601,ess_battery_soc,ESS battery SOC,0.1%,USHORT,0-1000,,R,,ESS battery state of charge
+30602,ess_battery_soh,ESS battery SOH,0.1%,USHORT,0-1000,,R,,ESS battery state of health
+30603,ess_average_cell_temperature,ESS average cell temperature,0.1C,SHORT,,,R,,Average cell temperature
+30604,ess_average_cell_voltage,ESS average cell voltage,0.001V,USHORT,,,R,,Average cell voltage
+30605,alarm_1,Alarm 1,,16BIT_FLAGS,,,R,,Alarm bitmask; see alarm_1_codes
+30606,alarm_2,Alarm 2,,16BIT_FLAGS,,,R,,Alarm bitmask; see alarm_2_codes
+30607,alarm_3,Alarm 3,,16BIT_FLAGS,,,R,,ESS alarm bitmask
+30608,alarm_4,Alarm 4,,16BIT_FLAGS,,,R,,Gateway/off-grid alarm bitmask
+31000,rated_grid_voltage,Rated grid voltage,0.1V,USHORT,,,R,,Rated grid voltage
+31001,rated_grid_frequency,Rated grid frequency,0.01Hz,USHORT,,,R,,Rated grid frequency
+31002,grid_frequency,Grid frequency,0.01Hz,USHORT,,,R,,Grid frequency
+31003,pcs_internal_temperature,PCS internal temperature,0.1C,SHORT,,,R,,PCS internal temperature
+31004,output_type,Output type,,USHORT,"{""0"": ""L/N"", ""1"": ""L1/L2/L3"", ""2"": ""L1/L2/L3/N"", ""3"": ""L1/L2/N""}",,R,,Output type
+31005,ab_line_voltage,A-B line voltage,0.01V,UINT,,,R,,Invalid for some output types
+31007,bc_line_voltage,B-C line voltage,0.01V,UINT,,,R,,Invalid for some output types
+31009,ca_line_voltage,C-A line voltage,0.01V,UINT,,,R,,Invalid for some output types
+31011,phase_a_voltage,Phase A voltage,0.01V,UINT,,,R,,Phase voltage for L/N output type
+31013,phase_b_voltage,Phase B voltage,0.01V,UINT,,,R,,Invalid for some output types
+31015,phase_c_voltage,Phase C voltage,0.01V,UINT,,,R,,Invalid for some output types
+31017,phase_a_current,Phase A current,0.01A,INT,,,R,,Phase current for L/N output type
+31019,phase_b_current,Phase B current,0.01A,INT,,,R,,Invalid for some output types
+31021,phase_c_current,Phase C current,0.01A,INT,,,R,,Invalid for some output types
+31023,power_factor,Power factor,0.001,USHORT,0-1000,,R,,Power factor
+31024,pack_count,PACK count,,USHORT,,,R,,Battery pack count
+31025,pv_string_count,PV string count,,USHORT,,,R,,PV string count
+31026,mppt_count,MPPT count,,USHORT,,,R,,MPPT count
+31027,pv1_voltage,PV1 voltage,0.1V,SHORT,,,R,,PV1 voltage
+31028,pv1_current,PV1 current,0.01A,SHORT,,,R,,PV1 current
+31029,pv2_voltage,PV2 voltage,0.1V,SHORT,,,R,,PV2 voltage
+31030,pv2_current,PV2 current,0.01A,SHORT,,,R,,PV2 current
+31031,pv3_voltage,PV3 voltage,0.1V,SHORT,,,R,,PV3 voltage
+31032,pv3_current,PV3 current,0.01A,SHORT,,,R,,PV3 current
+31033,pv4_voltage,PV4 voltage,0.1V,SHORT,,,R,,PV4 voltage
+31034,pv4_current,PV4 current,0.01A,SHORT,,,R,,PV4 current
+31035,pv_power,PV power,0.001kW,INT,,,R,,PV power
+31037,insulation_resistance,Insulation resistance,0.001Mohm,USHORT,,,R,,Insulation resistance
+31038,startup_time,Startup time,s,UINT,,,R,,Startup time
+31040,shutdown_time,Shutdown time,s,UINT,,,R,,Shutdown time
+31500,dc_charger_vehicle_battery_voltage,DC charger vehicle battery voltage,0.1V,USHORT,,,R,,DC charger register; available when installed
+31501,dc_charger_charging_current,DC charger charging current,0.1A,USHORT,,,R,,DC charger register; available when installed
+31502,dc_charger_output_power,DC charger output power,0.001kW,INT,,,R,,DC charger register; available when installed
+31504,dc_charger_vehicle_soc,DC charger vehicle SOC,0.1%,USHORT,0-1000,,R,,DC charger register; available when installed
+31505,dc_charger_current_charging_capacity,DC charger current charging capacity,0.01kWh,UINT,,,R,,Single charging session
+31507,dc_charger_current_charging_duration,DC charger current charging duration,s,UINT,,,R,,Single charging session
+# Source: Sigenergy Modbus Protocol V1.7 2024-04-09. Hybrid inverter running information is read from slave/unit 1-246. Control/write registers are intentionally omitted from this read-only map.,,,,,,,,,

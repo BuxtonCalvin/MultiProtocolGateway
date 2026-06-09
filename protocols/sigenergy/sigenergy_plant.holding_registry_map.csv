@@ -1,0 +1,43 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note
+30000,system_time,System time,s,UINT,,,R,,Epoch seconds; plant-level data must be read from slave/unit 247
+30002,system_time_zone,System time zone,min,USHORT,,,R,,Plant time zone offset
+30003,ems_work_mode,EMS work mode,,USHORT,"{""0"": ""maximum self-consumption"", ""1"": ""Sigen AI mode"", ""2"": ""TOU"", ""7"": ""remote EMS mode""}",,R,,Plant EMS work mode
+30004,grid_sensor_status,Grid sensor status,,USHORT,"{""0"": ""not connected"", ""1"": ""connected""}",,R,,Gateway or meter connection status
+30005,grid_sensor_active_power,Grid sensor active power,0.001kW,INT,,,R,,Grid checkpoint power; positive buys from grid; negative sells to grid
+30007,grid_sensor_reactive_power,Grid sensor reactive power,0.001kvar,INT,,,R,,Grid checkpoint reactive power
+30009,on_off_grid_status,On/off-grid status,,USHORT,"{""0"": ""on-grid"", ""1"": ""off-grid automatic"", ""2"": ""off-grid manual""}",,R,,Plant grid connection status
+30010,max_active_power,Max active power,0.001kW,UINT,,,R,,Base value for active power adjustment actions
+30012,max_apparent_power,Max apparent power,0.001kvar,UINT,,,R,,Base value for reactive power adjustment actions
+30014,energy_storage_system_soc,Energy storage system SOC,0.1%,USHORT,0-1000,,R,,Plant-level ESS state of charge
+30015,plant_phase_a_active_power,Plant phase A active power,0.001kW,INT,,,R,,Plant phase A active power
+30017,plant_phase_b_active_power,Plant phase B active power,0.001kW,INT,,,R,,Plant phase B active power
+30019,plant_phase_c_active_power,Plant phase C active power,0.001kW,INT,,,R,,Plant phase C active power
+30021,plant_phase_a_reactive_power,Plant phase A reactive power,0.001kvar,INT,,,R,,Plant phase A reactive power
+30023,plant_phase_b_reactive_power,Plant phase B reactive power,0.001kvar,INT,,,R,,Plant phase B reactive power
+30025,plant_phase_c_reactive_power,Plant phase C reactive power,0.001kvar,INT,,,R,,Plant phase C reactive power
+30027,general_alarm_1,General alarm 1,,16BIT_FLAGS,,,R,,Plant alarm bitmask; see alarm_1_codes
+30028,general_alarm_2,General alarm 2,,16BIT_FLAGS,,,R,,Plant alarm bitmask; see alarm_2_codes
+30029,general_alarm_3,General alarm 3,,16BIT_FLAGS,,,R,,ESS alarm bitmask
+30030,general_alarm_4,General alarm 4,,16BIT_FLAGS,,,R,,Gateway/off-grid alarm bitmask
+30031,plant_active_power,Plant active power,0.001kW,INT,,,R,,Total plant active power
+30033,plant_reactive_power,Plant reactive power,0.001kvar,INT,,,R,,Total plant reactive power
+30035,photovoltaic_power,Photovoltaic power,0.001kW,INT,,,R,,Total plant PV power
+30037,ess_power,ESS power,0.001kW,INT,,,R,,Negative discharging; positive charging
+30039,available_max_active_power,Available max active power,0.001kW,UINT,,,R,,Available active power fed to AC terminal
+30041,available_min_active_power,Available min active power,0.001kW,UINT,,,R,,Available active absorption from AC terminal
+30043,available_max_reactive_power,Available max reactive power,0.001kvar,UINT,,,R,,Available reactive power fed to AC terminal
+30045,available_min_reactive_power,Available min reactive power,0.001kvar,UINT,,,R,,Available reactive absorption from AC terminal
+30047,available_max_charging_power,Available max charging power,0.001kW,UINT,,,R,,Count only running inverters
+30049,available_max_discharging_power,Available max discharging power,0.001kW,UINT,,,R,,Count only running inverters
+30051,plant_running_state,Plant running state,,USHORT,"{""0"": ""standby"", ""1"": ""running"", ""2"": ""fault"", ""3"": ""shutdown""}",,R,,Plant running state
+30052,grid_sensor_phase_a_active_power,Grid sensor phase A active power,0.001kW,INT,,,R,,Positive buys from grid; negative sells to grid
+30054,grid_sensor_phase_b_active_power,Grid sensor phase B active power,0.001kW,INT,,,R,,Positive buys from grid; negative sells to grid
+30056,grid_sensor_phase_c_active_power,Grid sensor phase C active power,0.001kW,INT,,,R,,Positive buys from grid; negative sells to grid
+30058,grid_sensor_phase_a_reactive_power,Grid sensor phase A reactive power,0.001kvar,INT,,,R,,Grid sensor phase A reactive power
+30060,grid_sensor_phase_b_reactive_power,Grid sensor phase B reactive power,0.001kvar,INT,,,R,,Grid sensor phase B reactive power
+30062,grid_sensor_phase_c_reactive_power,Grid sensor phase C reactive power,0.001kvar,INT,,,R,,Grid sensor phase C reactive power
+30064,available_max_charging_capacity,Available max charging capacity,0.01kWh,UINT,,,R,,Count only running inverters
+30066,available_max_discharging_capacity,Available max discharging capacity,0.01kWh,UINT,,,R,,Count only running inverters
+30068,rated_ess_charging_power,Rated ESS charging power,0.001kW,UINT,,,R,,Rated ESS charging power
+30070,rated_ess_discharging_power,Rated ESS discharging power,0.001kW,UINT,,,R,,Rated ESS discharging power
+# Source: Sigenergy Modbus Protocol V1.7 2024-04-09. Plant running information registers are read from slave address 247. Control/write registers are intentionally omitted from this read-only map.,,,,,,,,,

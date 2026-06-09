@@ -20,6 +20,8 @@ Next Power,Victor NM RE,next_power_victor_nm_re,ModBus,https://github.com/Buxton
 PACE,BMS RS-485 v1.3,pace_bms_v1.3,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/PACE.md
 Pylon / Pylontech,Low-voltage CAN bus,pylon_can,CanBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Pylon.md
 Pylon / Pylontech,Low-voltage RS-485 v3.3,pylon_rs485_v3.3,Serial,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Pylon.md
+Sigenergy,Sigen Hybrid / SigenStor EC individual inverter,sigenergy_hybrid,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Sigenergy.md
+Sigenergy,SigenStor plant-level data (unit 247),sigenergy_plant,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Sigenergy.md
 Sigineer,Solar inverter / charger v0.11,sigineer_v0.11,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Sigineer.md
 SMA,Energy Meter Speedwire,sma_energy_meter_speedwire,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/SMA.md
 SMA,CAN / Modbus RTU map,sma_modbus_rtu,CanBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/SMA.md

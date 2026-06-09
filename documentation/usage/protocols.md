@@ -503,6 +503,8 @@ MPG ships with pre-built protocols for the following devices. All protocols are 
 | `pace_bms_v1.3` | PACE BMS RS-485 v1.3 | Modbus RTU |
 | `pylon_can` | Pylon / Pylontech low-voltage CAN bus | CAN bus |
 | `pylon_rs485_v3.3` | Pylon / Pylontech low-voltage RS-485 v3.3 | Pylon serial |
+| `sigenergy_hybrid` | Sigenergy Sigen Hybrid / SigenStor EC individual device data | Modbus TCP |
+| `sigenergy_plant` | Sigenergy SigenStor plant-level data (unit 247) | Modbus TCP |
 | `sigineer_v0.11` | Sigineer solar inverter / charger v0.11 | Modbus RTU |
 | `sma_energy_meter_speedwire` | SMA Energy Meter Speedwire | Modbus RTU |
 | `sma_modbus_rtu` | SMA CAN / Modbus RTU map | CAN bus |
