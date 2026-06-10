@@ -92,10 +92,12 @@ class influxdb_out(transport_base):
     backlog_points: list[InfluxPoint]
 
     def __init__(self, settings: TransportSettings) -> None:
+
         # This explicitly checks: "Does this object actually have the methods I need?"
         if not isinstance(settings, TransportSettings):
             msg: str = f"Provided settings object {type(settings)} is missing required methods!"
             raise TypeError(msg)
+        super().__init__(settings)
 
         self.host = settings.get("host", fallback=self.host)
         self.port = settings.getint("port", fallback=self.port)
@@ -127,7 +129,6 @@ class influxdb_out(transport_base):
         # Periodic reconnection settings
         self.periodic_reconnect_interval = settings.getfloat("periodic_reconnect_interval", fallback=self.periodic_reconnect_interval)
 
-        super().__init__(settings)
 
         # Instance-level mutable state
         self.batch_points: list[InfluxPoint] = []
@@ -248,7 +249,7 @@ class influxdb_out(transport_base):
     # Connection management
     # ------------------------------------------------------------------
 
-    def connect(self) -> None:
+    def connect(self) -> bool:
         """Initialize the InfluxDB client connection."""
         self._log.info("influxdb_out connect")
 
@@ -277,13 +278,16 @@ class influxdb_out(transport_base):
 
             if self.enable_persistent_storage:
                 self._flush_backlog()
+            return True  # noqa: TRY300
 
         except ImportError:
             self._log.error("InfluxDB client not installed. Please install with: pip install influxdb")
             self.connected = False
+            return False
         except Exception as e:
             self._log.error(f"Failed to connect to InfluxDB: {e}")
             self.connected = False
+            return False
 
     def _check_connection(self) -> bool:
         """Check if the connection is still alive and reconnect if necessary."""
@@ -301,11 +305,6 @@ class influxdb_out(transport_base):
                     self.client.ping()
                 except Exception as e:
                     self._log.warning(f"Periodic connection check failed: {e}")
-                    self.send_message(
-                        message="Error: Periodic connection check failed. Check logs for details.",
-                        title="MPG InfluxDB Connection Error",
-                        priority=1
-                    )
                     return self._attempt_reconnect()
             else:
                 return self._attempt_reconnect()
@@ -324,11 +323,6 @@ class influxdb_out(transport_base):
             return True  # noqa: TRY300
         except Exception as e:
             self._log.warning(f"Connection check failed: {e}")
-            self.send_message(
-                message="Error: Connection check failed. Check logs for details.",
-                title="MPG InfluxDB Connection Error",
-                priority=1
-            )
             return self._attempt_reconnect()
 
     def _attempt_reconnect(self) -> bool:
@@ -365,11 +359,6 @@ class influxdb_out(transport_base):
                 if self.enable_persistent_storage:
                     self._flush_backlog()
                     self._log.info("Flushed backlog after successful reconnection")
-                    self.send_message(
-                        message="Successfully reconnected to InfluxDB and flushed backlog.",
-                        title="MPG InfluxDB Reconnect Success",
-                        priority=1
-                    )
 
                 return True  # noqa: TRY300
 
@@ -385,11 +374,6 @@ class influxdb_out(transport_base):
                     time.sleep(delay)
 
         self._log.error(f"Failed to reconnect after {self.reconnect_attempts} attempts")
-        self.send_message(
-            message="Warning: Failed to reconnect InfluxDB client during reconnect attempt. Check logs for details.",
-            title="MPG InfluxDB Reconnect Warning",
-            priority=1
-        )
         self.connected = False
         return False
 

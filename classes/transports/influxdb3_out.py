@@ -93,6 +93,7 @@ class influxdb3_out(transport_base):
         if not isinstance(settings, TransportSettings):
             msg: str = f"Provided settings object {type(settings)} is missing required methods!"
             raise TypeError(msg)
+        super().__init__(settings)
 
         self.host = settings.get("host", fallback=self.host)
         self.database = settings.get("database", fallback=self.database)
@@ -123,7 +124,6 @@ class influxdb3_out(transport_base):
         # Periodic reconnection settings
         self.periodic_reconnect_interval = settings.getfloat("periodic_reconnect_interval", fallback=self.periodic_reconnect_interval)
 
-        super().__init__(settings)
 
         # Instance-level mutable state
         self.batch_points: list[InfluxPoint] = []
@@ -244,7 +244,7 @@ class influxdb3_out(transport_base):
     # Connection management
     # ------------------------------------------------------------------
 
-    def connect(self) -> None:
+    def connect(self) -> bool:
         """Initialize the InfluxDB v3 client connection."""
         self._log.info("influxdb3_out connect")
 
@@ -267,6 +267,7 @@ class influxdb3_out(transport_base):
 
             if self.enable_persistent_storage:
                 self._flush_backlog()
+            return True  # noqa: TRY300
 
         except ImportError:
             self._log.error(
@@ -274,9 +275,11 @@ class influxdb3_out(transport_base):
                 "Please install with: pip install influxdb3-python"
             )
             self.connected = False
+            return False
         except Exception as e:
             self._log.error(f"Failed to connect to InfluxDB v3: {e}")
             self.connected = False
+            return False
 
     def _health_check(self) -> None:
         """Perform a lightweight query to verify connectivity and credentials.
@@ -310,11 +313,6 @@ class influxdb3_out(transport_base):
                     self._health_check()
                 except Exception as e:
                     self._log.warning(f"Periodic connection check failed: {e}")
-                    self.send_message(
-                        message="Error: Periodic connection check failed. Check logs for details.",
-                        title="MPG InfluxDB Connection Error",
-                        priority=1
-                    )
                     return self._attempt_reconnect()
             else:
                 return self._attempt_reconnect()
@@ -333,11 +331,6 @@ class influxdb3_out(transport_base):
             return True  # noqa: TRY300
         except Exception as e:
             self._log.warning(f"Connection check failed: {e}")
-            self.send_message(
-                message="Error: Periodic connection check failed. Check logs for details.",
-                title="MPG InfluxDB Connection Error",
-                priority=1
-            )
             return self._attempt_reconnect()
 
     def _attempt_reconnect(self) -> bool:
@@ -385,11 +378,6 @@ class influxdb3_out(transport_base):
                     time.sleep(delay)
 
         self._log.error(f"Failed to reconnect after {self.reconnect_attempts} attempts")
-        self.send_message(
-            message="Warning: Failed to reconnect InfluxDB client during reconnect attempt. Check logs for details.",
-            title="MPG InfluxDB Reconnect Warning",
-            priority=1
-        )
         self.connected = False
         return False
 
