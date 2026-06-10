@@ -25,7 +25,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from threading import Lock
-from typing import Any, Dict, Iterator, Optional
+from typing import Any, Dict, Iterator, Literal, Optional
 
 from pymodbus.client.base import ModbusBaseClient
 from pymodbus.constants import ExcCodes
@@ -103,9 +103,9 @@ def interpret_modbus_exception_code(code) -> str:
     if code & 0x80:
         # This is an exception response
         exception_code = code & 0x7F  # The exception code is in the lower 7 bits
-        function_name = MODBUS_FUNCTION_CODES.get(function_code, f"Unknown Function ({function_code})")
-        exception_name = MODBUS_EXCEPTION_CODES.get(exception_code, f"Unknown Exception ({exception_code})")
-        description = MODBUS_EXCEPTION_DESCRIPTIONS.get(exception_code, "Unknown exception code")
+        function_name: str = MODBUS_FUNCTION_CODES.get(function_code, f"Unknown Function ({function_code})")
+        exception_name: str = MODBUS_EXCEPTION_CODES.get(exception_code, f"Unknown Exception ({exception_code})")
+        description: str = MODBUS_EXCEPTION_DESCRIPTIONS.get(exception_code, "Unknown exception code")
         return f"Modbus Exception: {function_name} failed with {exception_name} - {description}"
     else:
         # This is not an exception response
@@ -448,7 +448,7 @@ class modbus_base(transport_base):
         if not self.enable_register_failure_tracking:
             return
 
-        tracker = self._get_or_create_failure_tracker(register_range, registry_type)
+        tracker: RegisterFailureTracker = self._get_or_create_failure_tracker(register_range, registry_type)
         # Only log if the last failure was after the last success (i.e., this is the first success after a failure)
         should_log_recovery: bool = tracker.last_failure_time > tracker.last_success_time
         tracker.record_success()
@@ -714,7 +714,7 @@ class modbus_base(transport_base):
             if r_type == Registry_Type.INPUT and not self.send_input_register:
                 continue
 
-            sn_result = self._read_concatenated_sn(r_type)
+            sn_result: str = self._read_concatenated_sn(r_type)
             if sn_result:
                 return sn_result
 
@@ -733,7 +733,7 @@ class modbus_base(transport_base):
 
     def _read_concatenated_sn(self, r_type) -> str:
         """Helper to build SN from multiple registers (Serial No 1-5)."""
-        sn_decoded = ""
+        sn_decoded: str = ""
         fields: list[str] = ["Serial No 1", "Serial No 2", "Serial No 3", "Serial No 4", "Serial No 5"]
 
         for snfield in fields:
@@ -1230,8 +1230,8 @@ class modbus_base(transport_base):
             r"(-?\d+(?:\.\d+)?)\s*[-\u2013]\s*(-?\d+(?:\.\d+)?)", s
         )
         if range_match:
-            lo = float(range_match.group(1))
-            hi = float(range_match.group(2))
+            lo: float = float(range_match.group(1))
+            hi: float = float(range_match.group(2))
             if lo > hi:
                 lo, hi = hi, lo
             return (lo, hi)
@@ -1265,10 +1265,7 @@ class modbus_base(transport_base):
         return None
 
     @staticmethod
-    def _value_in_range(
-        raw_value: int | float,
-        constraint: tuple[float, float] | list[float] | None,
-    ) -> bool:
+    def _value_in_range(raw_value: int | float, constraint: tuple[float, float] | list[float] | None) -> bool:
         """
         Return True when raw_value satisfies the parsed constraint.
         Returns True (no penalty) when constraint is None so that entries
@@ -1690,10 +1687,10 @@ class modbus_base(transport_base):
                 raise ValueError(msg)
 
         elif 300 < entry.data_type.value < 400:  # signed bit types
-            bit_size = Data_Type.getSize(entry.data_type)
-            bit_index = entry.register_bit if entry.register_bit >= 0 else 0
-            min_val = -(1 << (bit_size - 1))
-            max_val = (1 << (bit_size - 1)) - 1
+            bit_size: int = Data_Type.getSize(entry.data_type)
+            bit_index: int = entry.register_bit if entry.register_bit >= 0 else 0
+            min_val: int = -(1 << (bit_size - 1))
+            max_val: int = (1 << (bit_size - 1)) - 1
             signed_val = int(value)
             if signed_val < min_val or signed_val > max_val:
                 self._log.error(
@@ -1760,7 +1757,7 @@ class modbus_base(transport_base):
         if register_values is None:
             raise ValueError("Invalid value - None")
 
-        bit_index_dbg = entry.register_bit if entry.register_bit > 0 else "n/a"
+        bit_index_dbg: int | Literal['n/a'] = entry.register_bit if entry.register_bit > 0 else "n/a"
         self._log.debug(
             "WRITE_DEBUG transport=%s var=%s reg=%s bit=%s old_raw=%s new_raw=%s requested=%s",
             self.transport_name,
@@ -1982,9 +1979,7 @@ class modbus_base(transport_base):
             if bus_lock is not None:
                 bus_lock.acquire()
             try:
-                register = self.read_registers(
-                    register_range[0], register_range[1], registry_type=registry_type
-                )
+                register = self.read_registers(register_range[0], register_range[1], registry_type=registry_type)
             except Exception as e:
                 self._log.error(f"Unexpected error during read: {e}")
                 isError = True
