@@ -671,13 +671,70 @@ class Protocol_Gateway:
 
             self.__log.debug(f"Scraping [{primary.scrape_target}] via '{primary.transport_name}'")
             full_data: dict[str, int | float | str] = primary.read_group_data(group.members)
+            cycle_complete: bool = primary.cycle_is_complete_for_bridge()
 
             if not full_data:
                 self.__log.warning(f"No data from [{primary.scrape_target}] - device may be unresponsive.")
                 return
 
-            for member in group.members_due(now):
+            due_members: list[transport_base] = group.members_due(now)
+            self.__log.debug(
+                f"'{primary.transport_name}' completed "
+                f"({'complete' if cycle_complete else 'partial'}) "
+                f"with {len(full_data)} metrics."
+            )
+            self.__log.debug(
+                f"Group members due for '{primary.transport_name}': "
+                f"{[m.transport_name for m in due_members]}"
+            )
+
+            for member in due_members:
                 member_data: dict[str, int | float | str] = self._filter_for_member(full_data, member)
+
+                # --- Mask/filter diagnostics (mirrors _route_interleaved_state) ---
+                ps: protocol_settings | None = getattr(member, 'protocolSettings', None)
+                if ps is not None and ps.variable_mask:
+                    # Path 1: explicit mask file
+                    _mask_summary: str = f"{len(ps.variable_mask)} mask keys in {ps.mask_file_name} → {len(member_data)} matched"
+                    data_keys_lower: set[str] = {k.lower() for k in full_data.keys()}
+                    _unmatched: set[str] = set(ps.variable_mask) - data_keys_lower
+                    _unmatched = {k for k in _unmatched if not (
+                        k.endswith('_l') and k[:-2] in data_keys_lower
+                    )}
+                    _unmatched = {k for k in _unmatched if not (
+                        k.endswith('_h') and (k[:-2] + '_l') in set(ps.variable_mask)
+                    )}
+                    _synthetic: set[str] = {
+                        k for k in data_keys_lower
+                        if k.endswith('_desc') and k[:-5] in set(ps.variable_mask)
+                    }
+                    self.__log.debug(f"Filtered data for '{member.transport_name}': {_mask_summary}")
+                    if _unmatched or _synthetic:
+                        self.__log.debug(
+                            f"Mask keys with no match in scraped data for '{member.transport_name}' "
+                            f"({len(_unmatched)} unmatched): {sorted(_unmatched)}"
+                            + (f" | synthetic _desc fields present: {sorted(_synthetic)}" if _synthetic else "")
+                        )
+                elif ps is not None and any(ps.registry_map.values()):
+                    # Path 2: no mask file, filtering by registry map variable names
+                    member_keys: set[str] = {
+                        entry.variable_name
+                        for entries in member.registry_map.values()
+                        for entry in entries
+                        if hasattr(entry, 'variable_name') and entry.variable_name
+                    }
+                    self.__log.debug(
+                        f"Filtered data for '{member.transport_name}': "
+                        f"{len(member_keys)} registry map keys → {len(member_data)} matched"
+                    )
+                else:
+                    # Path 3: no mask, no registry map — all metrics forwarded
+                    self.__log.debug(
+                        f"Filtered data for '{member.transport_name}': "
+                        f"no mask configured — forwarding all {len(member_data)} metrics"
+                    )
+                # --- End diagnostics ---
+
                 if not member_data:
                     continue
 
@@ -686,21 +743,26 @@ class Protocol_Gateway:
                         (t for t in self.__transports if t.transport_name == bridge_name),
                         None,
                     )
-                    if bridge is not None:
-                        if (
-                            getattr(bridge, 'write_requires_complete_cycle', False)
-                            and not primary.cycle_is_complete_for_bridge()
-                        ):
-                            self.__log.warning(
-                                f"Skipping '{bridge_name}' for '{member.transport_name}' - cycle incomplete."
-                            )
-                            continue
-                        bridge.write_data(member_data, member)
-                        self.__log.debug(
-                            f"Forwarded {len(member_data)} metrics from "
-                            f"[{primary.scrape_target}] to '{bridge_name}' "
-                            f"via member '{member.transport_name}'"
+                    if bridge is None:
+                        self.__log.warning(
+                            f"Bridge '{bridge_name}' not found for '{member.transport_name}'."
                         )
+                        continue
+                    if (
+                        getattr(bridge, 'write_requires_complete_cycle', False)
+                        and not cycle_complete
+                    ):
+                        self.__log.warning(
+                            f"Skipping '{bridge_name}' for '{member.transport_name}' - cycle incomplete."
+                        )
+                        continue
+                    self.__log.debug(
+                        f"Writing to bridge {bridge_name} for member {member.transport_name} "
+                        f"device_identifier={member.device_identifier} "
+                        f"keys=[{', '.join(repr(k) for k in list(member_data.keys())[:3])}"
+                        f"{', ...' if len(member_data) > 3 else ''}]"
+                    )
+                    bridge.write_data(member_data, member)
 
                 group.mark_forwarded(member, now)
 
@@ -711,6 +773,8 @@ class Protocol_Gateway:
                 case (NetworkError.CONN_RESET.value | NetworkError.BROKEN_PIPE.value |
                     NetworkError.TIMED_OUT.value | NetworkError.CONN_REFUSED.value |
                     NetworkError.NET_UNREACHABLE.value | NetworkError.HOST_UNREACHABLE.value):
+                    # Network-related error — attempt to reconnect the primary transport on the next cycle
+                    self.__log.info(f"Primary '{primary.transport_name}' not connected, trying to connect...")
                     primary.connect()
 
     def _filter_for_member(self, full_data: dict[str, int | float | str], member: transport_base) -> dict[str, int | float | str]:
@@ -807,23 +871,17 @@ class Protocol_Gateway:
         )
 
     def reconnect_upstream_bridge(self, transport_id: str) -> None:
-        """Force a reconnect of the scraper transport identified by ``transport_id``.
-
-        Called by a bridge transport when its stale-data detection fires, passing
-        the ``transport_name`` of the upstream scraper that has stopped producing
-        fresh data.  Resets ``connected`` to ``False`` and ``last_read_time`` to
-        ``0.0`` so the main loop treats the transport as disconnected and
-        reconnects it at the next tick.  Logs a warning if ``transport_id`` does
-        not match any known transport.
+        """
+        Callback for bridge transports to trigger a reconnect of their primary scraper when stale data is detected.
         """
         target: transport_base | None = next(
-            (t for t in self.__transports if t.transport_name == transport_id), None )
-
+            (t for t in self.__transports if t.transport_name == transport_id), None
+        )
         if target is None:
             self.__log.warning(f"Reconnect requested for unknown transport '{transport_id}'")
             return
-
-        self.__log.warning(f"Stale data detected — reconnecting '{transport_id}'")
+        # Setting connected = False flows through the property setter which
+        # handles logging, notification, and _needs_reconnection automatically.
         target.connected = False
         target.last_read_time = 0.0
 

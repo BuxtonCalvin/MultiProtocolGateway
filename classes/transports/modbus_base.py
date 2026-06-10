@@ -649,15 +649,13 @@ class modbus_base(transport_base):
 
         # Reset reconnection flag after successful connection
         if self.connected:
-            self._needs_reconnection = False
-
             # Reset protocol settings timestamps to ensure fresh reading
             for registry_type in [Registry_Type.INPUT, Registry_Type.HOLDING, Registry_Type.COIL, Registry_Type.DISCRETE]:
                 for entry in self._protocol.registry_map.get(registry_type, []):
                     entry.next_read_timestamp = 0.0
 
     def cleanup(self) -> None:
-        """Clean up transport resources and close connections"""
+        """Clean up transport resources and close connections."""
         with self._transport_lock:
             self._log.info(f"Cleaning up transport {self.transport_name}")
 
@@ -665,10 +663,10 @@ class modbus_base(transport_base):
             self._protocol.reset_register_timestamps()
 
             # Close the modbus client connection
-            port_identifier = self._get_port_identifier()
+            port_identifier: str = self._get_port_identifier()
             if port_identifier in self.clients:
                 try:
-                    client: ModbusBaseClient  = self.clients[port_identifier]
+                    client: ModbusBaseClient = self.clients[port_identifier]
                     if hasattr(client, 'close') and callable(client.close):
                         client.close()
                         self._log.info(f"Closed modbus client for {self.transport_name}")
@@ -681,10 +679,12 @@ class modbus_base(transport_base):
                         del self.clients[port_identifier]
                         self._log.info(f"Removed client from shared dict for {self.transport_name}")
 
-            # Mark as disconnected and reset first_connect for reconnection
-            self.connected = False
+            # super().cleanup() sets connected = False which flows through the
+            # property setter — handling _needs_reconnection, logging, and
+            # notification automatically. Must come after the socket is closed
+            # so the state transition reflects reality.
+            super().cleanup()
             self.first_connect = False  # Reset so reconnection works properly
-            self._needs_reconnection = True  # Flag that this transport needs reconnection
             self._log.info(f"Transport {self.transport_name} cleanup completed")
 
     def read_serial_number(self) -> str:

@@ -81,7 +81,6 @@ class modbus_tcp(modbus_base):
         if hasattr(self.client, 'connected') and not self.client.connected:
             self._log.warning(f"Socket closed before read for {self.transport_name}. Triggering reconnect.")
             self.connected = False
-            self._needs_reconnection = True
             return None
 
 
@@ -106,7 +105,6 @@ class modbus_tcp(modbus_base):
             self._log.error(f"Connection lost to {self.transport_name} at {self.host}:{self.port}")
             self._log.error(f"❌ [Communication Lost] --- Name: {self.transport_name} ---")
             self.connected = False
-            self._needs_reconnection = True
             return None
         except (BrokenPipeError, ConnectionResetError, ConnectionError) as e:
             # Explicitly catch the OS-level socket disconnection errors
@@ -121,7 +119,6 @@ class modbus_tcp(modbus_base):
                 pass
 
             self.connected = False
-            self._needs_reconnection = True
             return None
         except ModbusIOException as e:
             print(f"Modbus IO Exception caught: {e}")

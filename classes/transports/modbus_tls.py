@@ -141,7 +141,6 @@ class modbus_tls(modbus_base):
             self._log.error(f"Connection lost to {self.transport_name} at {self.host}:{self.port}")
             self._log.error(f"❌ [COMMUNICATION LOST] --- Name: {self.transport_name} ---")
             self.connected = False
-            self._needs_reconnection = True
             return None
         except ModbusIOException as e:
             print(f"Modbus IO Exception caught: {e}")

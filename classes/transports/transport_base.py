@@ -89,7 +89,67 @@ class TransportWriteMode(Enum):
         return cls[target_member]
 
 class transport_base:
+    @property
+    def connected(self) -> bool:
+        return self._connected
 
+    @connected.setter
+    def connected(self, value: bool) -> None:
+        """
+        Centralized connection state manager. Intercepts every assignment to
+        self.connected anywhere in the transport hierarchy — subclasses set
+        self.connected = True/False exactly as before and this fires automatically.
+
+        Responsibilities:
+        - Detects genuine state transitions (ignores no-op assignments)
+        - Keeps _needs_reconnection in sync so the main loop can act on it
+        - Emits a structured log entry on every transition
+        - Sends a push notification on loss or recovery, but not on the
+        initial startup connect (expected, non-actionable)
+        - Does not call connect() itself — that remains the caller's
+        responsibility to avoid re-entrance on the setter
+        """
+        previous: bool = self._connected
+        self._connected = value
+
+        # Ignore no-op assignments — scattered subclass code sets
+        # self.connected = False in multiple error handlers and that's fine;
+        # we only care about genuine transitions.
+        if value == previous:
+            return
+
+        if value:
+            # False → True: connection established or re-established
+            self._needs_reconnection = False
+            was_previously_connected: bool = self._ever_connected
+            self._ever_connected = True
+
+            self._log.info(f"[CONNECTED] {self.transport_name} connection established.")
+
+            if was_previously_connected:
+                # This is a recovery after a known loss — worth alerting.
+                # Suppressed on first startup connect since that's expected.
+                self.send_message(
+                    f"Connection restored: {self.transport_name} "
+                    f"({getattr(self, 'host', getattr(self, 'port', ''))})",
+                    title="MPG Connection Restored",
+                    priority=1,
+                )
+        else:
+            # True → False: connection lost
+            self._needs_reconnection = True
+
+            if self._ever_connected:
+                # Only alert if we were genuinely connected before.
+                # Guards against subclass __init__ code that sets
+                # self.connected = False before any connection is attempted.
+                self._log.error(f"[DISCONNECTED] {self.transport_name} connection lost.")
+                self.send_message(
+                    f"Connection lost: {self.transport_name} "
+                    f"({getattr(self, 'host', '')}:{getattr(self, 'port', '')})",
+                    title="MPG Connection Alert",
+                    priority=1,
+                )
     _log : logging.Logger
     transport_type: ClassVar[Literal["scraper", "bridge", "base class", "general"]] = "base class"
 
@@ -99,8 +159,11 @@ class transport_base:
         self.protocolSettings: Optional["protocol_settings"] = None
         self.type: str = self.__class__.__name__
         self.transport_name: str = ""
-        self.connected: bool = False
+        self._connected: bool = False
+        self._ever_connected: bool = False
+        # Flag to indicate if the bridge transport needs reconnection; set to True in cleanup() and checked by the gateway to trigger a reconnect.
         self._needs_reconnection: bool = False
+        self._connection_reported: bool = False  # suppresses duplicate messages on first connect
         self.last_read_time: float = 0.0
         self.read_interval: float = 0.0
         self.write_enabled: bool = False
@@ -224,12 +287,16 @@ class transport_base:
         pass
 
     def cleanup(self) -> None:
-        """Clean up transport resources and close connections"""
+        """
+        Clean up transport resources and close connections.
+        Sets connected = False which flows through the property setter,
+        handling _needs_reconnection, logging, and notification automatically.
+        Subclasses should call super().cleanup() after their own resource
+        teardown so the state transition fires after the connection is
+        actually closed, not before.
+        """
         self._log.debug(f"Cleaning up transport {self.transport_name}")
-        # Base implementation - subclasses should override if needed
-        # Mark that this transport needs reconnection
-        self._needs_reconnection = True
-        pass
+        self.connected = False
 
     # write_data receives either the full batch dict
     # or a single-entry dict constructed in on_message, both with same value type
