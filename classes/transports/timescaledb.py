@@ -880,11 +880,11 @@ class timescaledb(transport_base):
                 self.connected = self.tsdb_connected  # set the MPG connected flag here to mimic central connection state.
                 self.rollup_policy["tsdb_connected"] = conn_value  # set the connect status in the rollup class.
                 self._log.info(f"TimescaleDB is connected -> {conn_value} ({conn_reason})")
-                self.send_message(
-                    message=f"TimescaleDB connection status changed: {conn_value} ({conn_reason})",
-                    title="MPG TimescaleDB Connection Status",
-                    priority=1 if not conn_value else 5
-                )
+                # self.send_message(
+                #     message=f"TimescaleDB connection status changed: {conn_value} ({conn_reason})",
+                #     title="MPG TimescaleDB Connection Status",
+                #     priority=1 if not conn_value else 5
+                # )
 
 
     # -------------------------

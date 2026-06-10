@@ -132,7 +132,7 @@ class transport_base:
                 self.send_message(
                     f"Connection restored: {self.transport_name} "
                     f"({getattr(self, 'host', getattr(self, 'port', ''))})",
-                    title="MPG Connection Restored",
+                    title=f"MPG Connection Restored for {self.transport_name}",
                     priority=1,
                 )
         else:
