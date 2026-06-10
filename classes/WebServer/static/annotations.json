@@ -521,6 +521,44 @@
       "label_y_percent": 10.2
     }
   ],
+  "create_protocol": [
+    {
+      "id": "create_protocol-manufacturer",
+      "x_percent": 13.6,
+      "y_percent": 22.7,
+      "label": "The hardware manufacturer.  If new, a new manufacturer folder will be created to store the newly created protocol files.",
+      "shape_type": "dot",
+      "label_x_percent": 3.3,
+      "label_y_percent": 48.6
+    },
+    {
+      "id": "create_protocol-dot-1781069421471",
+      "x_percent": 13.3,
+      "y_percent": 31.4,
+      "label": "The protocol name either existing or new.",
+      "shape_type": "dot",
+      "label_x_percent": 3.3,
+      "label_y_percent": 65.2037567498023
+    },
+    {
+      "id": "create_protocol-dot-1781069634654",
+      "x_percent": 59.7,
+      "y_percent": 23.4,
+      "label": "The new protocol name if a new protocol.",
+      "shape_type": "dot",
+      "label_x_percent": 56.6,
+      "label_y_percent": 49.5
+    },
+    {
+      "id": "create_protocol-dot-1781069499119",
+      "x_percent": 13.9,
+      "y_percent": 40.5,
+      "label": "The protocol type:  Input, Holding, Coil or Discrete.  The type will be appended to the protocol name.",
+      "shape_type": "dot",
+      "label_x_percent": 3.4,
+      "label_y_percent": 75.9
+    }
+  ],
   "_aliases": {
     "device__inverter_read": "device__scraper_read_generic",
     "device__inverter_write": "device__scraper_write_generic",
@@ -540,6 +578,7 @@
     "device__influxdb": "device__bridge_generic",
     "pages__create-device": "create_device",
     "pages__analyze*": "analysis",
-    "device__influxdb3": "device__bridge_generic"
+    "device__influxdb3": "device__bridge_generic",
+    "pages__create-protocol": "create_protocol"
   }
 }

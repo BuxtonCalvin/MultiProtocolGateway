@@ -147,7 +147,7 @@ class transport_base:
                 self.send_message(
                     f"Connection lost: {self.transport_name} "
                     f"({getattr(self, 'host', '')}:{getattr(self, 'port', '')})",
-                    title="MPG Connection Alert",
+                    title=f"MPG Connection Alert for {self.transport_name}",
                     priority=1,
                 )
     _log : logging.Logger
