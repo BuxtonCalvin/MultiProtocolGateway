@@ -8,9 +8,8 @@
 ![Python 3.13](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.13.yml/badge.svg)
 ![Python 3.14](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.14.yml/badge.svg)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://github.com/jBuxtonCalvin/MultiProtocolGateway/blob/main/LICENSE)
+[![Ruff](https://img.shields.io/badge/Linter-Ruff-brightgreen?style=flat-square)](https://github.com/charliermarsh/ruff)
 [![CodeQL Status](https://img.shields.io/github/actions/workflow/status/BuxtonCalvin/MultiProtocolGateway/codeql.yml)](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/codeql.yml)
-
-[![Code style: ruff](https://img.shields.io/badge/Linter-Ruff-brightgreen?style=flat-square)](https://github.com/charliermarsh/ruff)
 
 ## 🙏 Credits
 
