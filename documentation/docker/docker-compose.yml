@@ -84,8 +84,11 @@ services:
     volumes:
       - mpg/mpg_config:/app/config
       - mpg/mpg_protocols:/app/protocols
+      # if you want to persist the backlog and logs, uncomment these lines 
+      #- mpg/timescaledb_backlog:/app/timescaledb_backlog
+      #- mpg/logs:/app/logs      
       # Mount your config.cfg directly if you manage it outside the UI:
-      # - mpg/config/config.cfg:/app/config.cfg
+      # - mpg/config/config.cfg:/app/config/config.cfg
     environment:
       TZ: ${TZ:-UTC}
     # Uncomment and set the correct device path for Modbus RTU / serial:

@@ -290,7 +290,7 @@ docker run --device=/dev/ttyUSB0 -p 1717:1717 protocol_gateway
 # Or pull from Docker Hub
 docker pull buxtoncalvin/multiprotocolgateway
 docker run \
-  -v $(pwd)/config.cfg:/app/config.cfg \
+  -v $(pwd)/config.cfg:/app/config/config.cfg \
   -p 1717:1717 \
   buxtoncalvin/multiprotocolgateway
 ```
