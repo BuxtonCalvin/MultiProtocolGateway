@@ -18,10 +18,17 @@
 """services/setting_description_service.py
 
 Manages the setting_descriptions table — a consolidated, alphabetical registry
-of every transport setting key, which transports use it, and a user-editable description.
+of every transport setting key, which transports use it, and a user-editable
+description.
+
+Descriptions are seeded from setting_descriptions.json (via transport_registry)
+rather than from a hardcoded Python dict.  The JSON file is updated automatically
+on every scan via sync_from_library(), so new keys added to transport modules
+appear in the UI without any manual maintenance.
 """
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any, List
 
@@ -29,132 +36,9 @@ from sqlalchemy.orm import Session
 
 from ..models import SettingDescription
 from ..scanner import scan_transport_library
+from ..transport_registry import get_setting_descriptions, sync_from_library
 
-_log = __import__("logging").getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Seed descriptions — best-effort documentation for known setting keys
-# ---------------------------------------------------------------------------
-SEED_DESCRIPTIONS: dict[str, str] = {
-    "address": "Modbus/serial device address or register offset. For RTU transports, specifies the physical bus address of the target device.",
-    "append_mode": "When true, output is appended to the JSON output file instead of overwriting it on each write cycle.",
-    "async_mode": "Enable asynchronous (non-blocking) I/O for the serial frame transport. Improves throughput on high-latency connections.",
-    "auto_refresh_interval": "Interval in seconds for automatic TimescaleDB continuous aggregate refresh.",
-    "backlog_file_name": "Filename for the local backlog storage file used when the bridge connection is unavailable.",
-    "backlog_storage_path": "Directory path where backlog files are stored when the primary bridge is unreachable.",
-    "backup_count": "Number of rotated log file backups to retain before the oldest is deleted.",
-    "base_topic": "MQTT base topic prefix. All published messages are nested under this topic path.",
-    "batch_delay": "Delay in seconds between batched write operations to avoid overwhelming the device.",
-    "batch_size": "Number of data points to batch together before flushing to InfluxDB. Larger batches improve throughput at the cost of latency.",
-    "batch_timeout": "Maximum time in seconds to wait before flushing a partial batch to InfluxDB, even if batch_size has not been reached.",
-    "baud": "Serial baud rate in bits per second. Alias for baudrate — must match the device s configured serial speed.",
-    "baudrate": "Serial communication baud rate (bits per second). Must match the device s configured baud rate.",
-    "bitrate": "CAN bus bit rate in bits per second. Common values: 250000, 500000, 1000000.",
-    "bridge": "The bridge transport section this scraper forwards data to (e.g. transport.mqtt, transport.timescaledb).",
-    "bustype": "CAN bus interface type/driver. Examples: socketcan, kvaser, pcan, virtual.",
-    "bytesize": "Number of data bits per serial frame (typically 7 or 8). Must match the device s serial configuration.",
-    "cache_timeout": "Alias for cacheTimeout — timeout in seconds for cached values.",
-    "cacheTimeout": "Timeout in seconds for cached CAN bus register values before they are considered stale.",
-    "certfile": "Path to TLS/SSL certificate file for encrypted transport connections.",
-    "channel": "CAN bus channel or interface name (e.g. can0, vcan0).",
-    "connection_timeout": "Timeout in seconds when establishing a new connection to the remote server before raising a connection error.",
-    "console": "Enable logging output to the console (stdout) in addition to log files.",
-    "database": "Database name to connect to on the TimescaleDB/PostgreSQL server.",
-    "device_location": "Physical or logical location of the device (e.g. home, site-A). Used for tagging metrics.",
-    "device_manufacturer": "Manufacturer name of the device (e.g. EG4, Pylontech). Used for tagging metrics.",
-    "device_model": "Model name or number of the device (e.g. 18KPV, ll-s). Used for tagging metrics.",
-    "device_name": "Human-readable display name for the device. Used in dashboards and logging.",
-    "device_serial_number": "Serial number of the device. Used for unique identification and tagging.",
-    "disable_duration_hours": "Number of hours to disable a failing transport before attempting reconnection.",
-    "discovery_enabled": "Enable MQTT Home Assistant auto-discovery publishing.",
-    "discovery_topic": "MQTT topic prefix for Home Assistant discovery messages.",
-    "drop_after": "TimescaleDB retention policy — data older than this interval is automatically dropped.",
-    "enable_auto_refresh": "Enable automatic refresh of TimescaleDB continuous aggregates on a schedule.",
-    "enable_compression": "Enable TimescaleDB native compression on hypertables to reduce storage.",
-    "enable_persistent_storage": "Enable local disk backlog storage for data collected during bridge outages.",
-    "enable_pushover": "Enable Pushover push notification alerts for connection errors and critical events.",
-    "enable_register_failure_tracking": "Track and log individual register read failures for diagnostic purposes.",
-    "enable_rollups": "Enable TimescaleDB continuous aggregate rollup materialization.",
-    "enable_write": "Master switch to enable register write operations on this transport. When false, all write attempts are silently skipped.",
-    "eoi": "End-of-Identity byte sent at the end of each serial frame to signal frame completion to the remote device.",
-    "error_topic": "MQTT topic where error and fault messages are published.",
-    "force_float": "Force all numeric values to be stored as floating-point in TimescaleDB regardless of their native type.",
-    "holding_register_prefix": "MQTT topic sub-prefix used when publishing holding register values. Full topic: base_topic/holding_register_prefix/variable_name.",
-    "host": "Hostname or IP address of the target device or server.",
-    "hostname": "Hostname or IP address for TLS-secured transport connections. Used in certificate validation as the expected server name.",
-    "include_device_info": "When true, device metadata (manufacturer, model, location) is included as tags or fields in each published data point.",
-    "include_timestamp": "When true, the gateway s read timestamp is included in each output record. Useful for InfluxDB and JSON outputs.",
-    "input_register_prefix": "MQTT topic sub-prefix used when publishing input register values. Full topic: base_topic/input_register_prefix/variable_name.",
-    "inter_frame_gap": "Minimum delay in milliseconds between consecutive serial frames. Prevents bus contention on shared RS-485 networks.",
-    "interface": "Network or serial interface name to use for the transport connection.",
-    "interval": "Log rotation interval count (used with the when setting for timed rotation).",
-    "json": "Enable JSON-formatted MQTT payloads instead of raw scalar values.",
-    "keyfile": "Path to TLS/SSL private key file for encrypted transport connections.",
-    "level": "Logging level for the log file handler (DEBUG, INFO, WARNING, ERROR, CRITICAL).",
-    "location": "Alias for device_location — physical or logical location tag applied to all metrics from this transport.",
-    "log_dir": "Directory where log files are written.",
-    "log_file": "Log file name within the log directory.",
-    "log_level": "Transport-level logging verbosity. Overrides the global log level for this transport.",
-    "manufacturer": "Alias for device_manufacturer — manufacturer name tag applied to all metrics from this transport.",
-    "max_backlog_age": "Maximum age in seconds of backlog entries. Older entries are discarded.",
-    "max_backlog_size": "Maximum number of entries to store in the backlog before oldest entries are dropped.",
-    "max_bytes": "Maximum log file size in bytes before rotation occurs (for size-based rotation).",
-    "max_failures_before_disable": "Number of consecutive read failures before the transport is temporarily disabled and an alert is raised.",
-    "max_overflow": "Maximum number of overflow connections allowed in the TimescaleDB connection pool before new requests are queued.",
-    "max_precision": "Maximum decimal places to retain when storing floating-point register values.",
-    "max_reconnect_delay": "Maximum delay in seconds between reconnection attempts when using exponential backoff.",
-    "max_retries_per_block": "Maximum number of retry attempts for a single Modbus register block read before the block is skipped for this cycle.",
-    "measurement": "InfluxDB measurement name used as the table/series identifier for all data points written by this transport.",
-    "migrate_data": "Migrate existing data to the new TimescaleDB schema on startup if schema changes are detected.",
-    "modbus_delay": "Delay in milliseconds inserted between consecutive Modbus requests. Helps prevent bus saturation on slower devices.",
-    "model": "Alias for device_model — model name of the device.",
-    "name": "Alias for device_name — human-readable display name.",
-    "org": "Organization name (required for InfluxDB Cloud)",
-    "output_file": "Path to the output file where JSON-formatted register data is written. Relative paths are resolved from the project root.",
-    "parity": "Serial parity bit setting: N (none), E (even), or O (odd). Must match the target device s serial configuration.",
-    "pass": "Password for authenticating with the bridge server (MQTT, TimescaleDB, etc.).",
-    "password": "Password for authenticating with the bridge server.",
-    "periodic_reconnect_interval": "Interval in seconds between forced reconnection attempts to InfluxDB, even when the connection appears healthy.",
-    "persistent_storage_path": "Directory where InfluxDB backlog data is stored when the server is unreachable. Created automatically if it does not exist.",
-    "pool_recycle": "Maximum lifetime in seconds of a TimescaleDB connection before it is closed and replaced with a fresh connection.",
-    "pool_size": "Number of persistent connections maintained in the TimescaleDB connection pool. Increase for high-throughput deployments.",
-    "port": "TCP/UDP port number of the target device or server.",
-    "precision": "Alias for max_precision — number of decimal places retained when storing floating-point values.",
-    "pretty_print": "When true, JSON output files are formatted with indentation for human readability. When false, compact single-line output is used.",
-    "protocol_version": "Protocol definition to use for register mapping (e.g. eg4_18kpv, eg4_ll_s).",
-    "pushover_token": "Pushover API application token for sending push notifications.",
-    "pushover_user": "Pushover user key identifying the notification recipient.",
-    "read_interval": "Interval in seconds between consecutive register read cycles.",
-    "read_mode": "Register read strategy. interleaved reads one block per transport per cycle to prevent bus starvation.",
-    "reconnect_attempts": "Number of reconnection attempts before giving up and raising an alert.",
-    "reconnect_delay": "Initial delay in seconds between reconnection attempts.",
-    "retries": "Number of retry attempts for failed network or serial operations before the error is propagated.",
-    "rotation": "Log file rotation strategy: size for size-based, weekly / daily for time-based.",
-    "send_coil_register": "When true, coil register values are scraped for data published by this transport.",
-    "send_discrete_register": "When true, discrete register values are scraped for data published by this transport.",
-    "send_holding_register": "When true, holding register values are scraped for data published by this transport.",
-    "send_input_register": "When true, input register values are scraped for data published by this transport.",
-    "serial_number": "Alias for device_serial_number — serial number of the device.",
-    "serial_number_can_id": "Alias for device_serial_number — serial number of the device for canbus.",
-    "settling_delay": "Delay in milliseconds after asserting the RS-485 transmit enable line before sending data, allowing the bus to settle.",
-    "slave_id": "Modbus slave/unit ID of the target device (1-247).",
-    "soi": "Start-of-Identity byte sent at the beginning of each serial frame to signal frame start to the remote device.",
-    "stale_data_timeout": "Seconds after which a register value is considered stale and excluded from writes.",
-    "stopbits": "Number of stop bits per serial frame (1, 1.5, or 2). Must match the target device s serial configuration.",
-    "timeout": "General operation timeout in seconds. Applies to individual read/write operations after a connection has been established.",
-    "token": "v3 uses token-based auth (replaces username/password)",
-    "transport": "Transport class to use for this section (e.g. modbus_tcp, mqtt, timescaledb).",
-    "use_exponential_backoff": "Enable exponential backoff for reconnection delays to avoid overwhelming a recovering server.",
-    "use_utc_timestamp": "Enable a utc timestamp as opposed to a local time timestamp",
-    "user": "Username for authenticating with the bridge server.",
-    "username": "Username for authenticating with the bridge server.",
-    "variable_mask": "Path to a variable mask file listing registers to include or exclude from reads.",
-    "variable_screen": "Path to a variable screen file for filtering which registers are forwarded to the bridge.",
-    "when": "Time-based log rotation schedule code (e.g. W0 = Monday, D = daily, H = hourly).",
-    "write_enabled": "Enable register write operations for this transport.",
-    "write_requires_complete_cycle": "write_requires_complete_cycle is used to prevent writing incomplete batches of data to the database, which can cause issues with rollup continuous aggregates and data integrity. When True, the transport will only write data to the database once it has received a complete cycle of metrics for a given protocol, as determined by the registry map.",
-    "write_type": "Enable UNSAFE or RELAXED write mode for this transport"
-}
+_log: logging.Logger = logging.getLogger(__name__)
 
 
 def seed_setting_descriptions(
@@ -163,13 +47,28 @@ def seed_setting_descriptions(
     purge_removed: bool = False,
 ) -> tuple[int, list[str]]:
     """
-    Scan the transport library and populate setting_descriptions with all discovered keys.
-    Runs on every startup — updates transports list for existing keys, inserts new ones.
+    Scan the transport library and populate setting_descriptions with all
+    discovered keys.  Runs on every startup — updates the transports list for
+    existing keys, inserts new ones.
 
-    If purge_removed=True, rows for keys no longer found in any transport are deleted.
+    The JSON registry files are synced first so any newly discovered transport
+    keys receive a description stub immediately, even before the user fills in
+    the description via the UI.
+
+    If purge_removed=True, rows for keys no longer found in any transport are
+    deleted from the DB.
+
     Returns (count of rows inserted/updated, list of purged keys).
     """
     library: dict[str, dict[str, Any]] = scan_transport_library(transports_dir)
+
+    # Keep transport_defaults.json and setting_descriptions.json current.
+    # New keys get an empty description stub; existing entries are untouched.
+    sync_from_library(library, write_defaults=True, write_descriptions=True)
+
+    # Reload descriptions after the sync so newly added stubs are visible
+    # in the same startup pass.
+    descriptions: dict[str, str] = get_setting_descriptions()
 
     # Build: key → set of transport names that use it
     key_to_transports: dict[str, set[str]] = {}
@@ -179,24 +78,29 @@ def seed_setting_descriptions(
 
     _log.info("seed_setting_descriptions: scanning %d transports", len(library))
     touched = 0
+
     for key, transport_set in sorted(key_to_transports.items()):
         transports_str: str = ", ".join(sorted(transport_set))
-        existing: SettingDescription | None = db.query(SettingDescription).filter(SettingDescription.key == key).first()
+        existing: SettingDescription | None = (
+            db.query(SettingDescription)
+            .filter(SettingDescription.key == key)
+            .first()
+        )
 
         if existing:
             # Update transports list (may have changed as new transports are added)
             if existing.transports != transports_str:
                 existing.transports = transports_str
                 touched += 1
-            # Backfill description if empty and we have a seed value
+            # Backfill description from JSON if the DB row is still empty
             if not existing.description:
-                seed_desc: str = SEED_DESCRIPTIONS.get(key, "")
+                seed_desc: str = descriptions.get(key, "")
                 if seed_desc:
                     existing.description = seed_desc
                     existing.description_disk = seed_desc
                     touched += 1
         else:
-            desc: str = SEED_DESCRIPTIONS.get(key, "")
+            desc: str = descriptions.get(key, "")
             row = SettingDescription(
                 key=key,
                 transports=transports_str,
@@ -211,16 +115,21 @@ def seed_setting_descriptions(
     purged_keys: list[str] = []
     if purge_removed:
         current_keys: set[str] = set(key_to_transports.keys())
-        stale_rows: List[SettingDescription] = db.query(SettingDescription).filter(
-            ~SettingDescription.key.in_(current_keys)
-        ).all()
+        stale_rows: List[SettingDescription] = (
+            db.query(SettingDescription)
+            .filter(~SettingDescription.key.in_(current_keys))
+            .all()
+        )
         for row in stale_rows:
             purged_keys.append(row.key)
             db.delete(row)
             _log.info("seed_setting_descriptions: purged removed key '%s'", row.key)
 
     db.commit()
-    _log.info("seed_setting_descriptions: %d rows inserted/updated, %d purged", touched, len(purged_keys))
+    _log.info(
+        "seed_setting_descriptions: %d rows inserted/updated, %d purged",
+        touched, len(purged_keys),
+    )
     return touched, purged_keys
 
 
@@ -239,7 +148,11 @@ def update_description(db: Session, setting_id: int, description: str) -> Settin
 
 
 def discard_descriptions(db: Session) -> None:
-    dirty: List[SettingDescription] = db.query(SettingDescription).filter(SettingDescription.is_dirty == True).all()  # noqa: E712
+    dirty: List[SettingDescription] = (
+        db.query(SettingDescription)
+        .filter(SettingDescription.is_dirty == True)  # noqa: E712
+        .all()
+    )
     for row in dirty:
         row.description = row.description_disk
         row.is_dirty = False
@@ -247,7 +160,11 @@ def discard_descriptions(db: Session) -> None:
 
 
 def commit_descriptions(db: Session) -> int:
-    dirty: List[SettingDescription] = db.query(SettingDescription).filter(SettingDescription.is_dirty == True).all()  # noqa: E712
+    dirty: List[SettingDescription] = (
+        db.query(SettingDescription)
+        .filter(SettingDescription.is_dirty == True)  # noqa: E712
+        .all()
+    )
     count: int = len(dirty)
     for row in dirty:
         row.description_disk = row.description

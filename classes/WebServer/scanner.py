@@ -44,123 +44,21 @@ from sqlalchemy.orm import Session
 
 from .database import refresh_app_state, session_scope
 from .models import AppState, DeviceProtocolSelection, ProtocolRegister, Setting
+from .transport_registry import (
+    get_known_transport_keys,
+    get_transport_base_keys,
+    sync_from_library,
+)
 
 _log: logging.Logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Known settings per transport base class  (used when AST scan finds nothing)
-# These come from reading transport_base.__init__, modbus_base.__init__, etc.
+# Module-level alias kept for backwards compatibility.
+# pages.py and any other callers that do:
+#   from ..scanner import TRANSPORT_BASE_KEYS
+# will still work without modification.
 # ---------------------------------------------------------------------------
-
-TRANSPORT_BASE_KEYS: dict[str, str] = {
-    "bridge": "",
-    "device_location": "",
-    "device_manufacturer": "",
-    "device_model": "",
-    "device_name": "",
-    "device_serial_number": "",
-    "log_level": "INFO",
-    "max_precision": "2",
-    "protocol_version": "",
-    "read_interval": "15",
-    "variable_mask": "",
-    "variable_screen": "",
-    "write_enabled": "false"
-}
-
-MODBUS_BASE_KEYS: dict[str, str] = {
-    **TRANSPORT_BASE_KEYS,
-    "batch_delay": "0.85",
-    "disable_duration_hours": "12",
-    "enable_register_failure_tracking": "true",
-    "host": "",
-    "max_failures_before_disable": "5",
-    "max_retries_per_block": "3",
-    "modbus_delay": "0.85",
-    "port": "502",
-    "retries": "3",
-    "send_holding_register": "true",
-    "send_input_register": "true",
-    "timeout": "7",
-}
-
-MQTT_KEYS: dict[str, str] = {
-    **TRANSPORT_BASE_KEYS,
-    "base_topic": "home/device",
-    "discovery_enabled": "false",
-    "discovery_topic": "homeassistant",
-    "error_topic": "/error",
-    "holding_register_prefix": "",
-    "host": "",
-    "input_register_prefix": "",
-    "json": "false",
-    "pass": "",
-    "port": "1883",
-    "reconnect_attempts": "21",
-    "reconnect_delay": "7",
-    "user": "",
-}
-
-TIMESCALEDB_KEYS: dict[str, str] = {
-    **TRANSPORT_BASE_KEYS,
-    "auto_refresh_interval": "21600",
-    "backlog_file_name": "no_connect_backlog",
-    "backlog_storage_path": "timescaledb_backlog",
-    "database": "solar1",
-    "drop_after": "1 year",
-    "enable_auto_refresh": "true",
-    "enable_compression": "true",
-    "enable_persistent_storage": "true",
-    "enable_pushover": "false",
-    "enable_rollups": "true",
-    "force_float": "true",
-    "host": "",
-    "max_backlog_age": "86400",
-    "max_backlog_size": "10000",
-    "max_reconnect_delay": "300",
-    "migrate_data": "true",
-    "password": "",
-    "port": "5431",
-    "pushover_token": "",
-    "pushover_user": "",
-    "reconnect_attempts": "5",
-    "reconnect_delay": "5",
-    "stale_data_timeout": "300",
-    "use_exponential_backoff": "true",
-    "username": "",
-}
-
-INFLUXDB_KEYS: dict[str, str] ={
-    "batch_size": "100",
-    "batch_timeout": "10.0",
-    "connection_timeout": "10",
-    "database": "solar",
-    "enable_persistent_storage": "True",
-    "force_float": "True",
-    "host": "localhost",
-    "include_device_info": "True",
-    "include_timestamp": "True",
-    "max_backlog_age": "86400",
-    "max_backlog_size": "10000",
-    "max_reconnect_delay": "300.0",
-    "measurement": "device_data",
-    "password": "",
-    "periodic_reconnect_interval": "14400.0",
-    "persistent_storage_path": "influxdb_backlog",
-    "port": "8086",
-    "reconnect_attempts": "5",
-    "reconnect_delay": "5.0",
-    "use_exponential_backoff": "True",
-    "username": ""
-}
-
-KNOWN_TRANSPORT_KEYS: dict[str, dict[str, str]] = {
-    "modbus_tcp": MODBUS_BASE_KEYS,
-    "modbus_eg4_ll_s_tcp": {**MODBUS_BASE_KEYS, "slave_id": ""},
-    "mqtt": MQTT_KEYS,
-    "timescaledb": TIMESCALEDB_KEYS,
-    "influxdb_out": INFLUXDB_KEYS,
-}
+TRANSPORT_BASE_KEYS: dict[str, str] = get_transport_base_keys()
 
 
 # ---------------------------------------------------------------------------
@@ -342,11 +240,18 @@ def scan_transport_library(transports_dir: Path) -> dict[str, dict[str, Any]]:
     """
     Scan all .py files in the transports directory.
     Returns {filename_stem: {classification, keys: {key: default}}}.
+
+    After scanning, calls sync_from_library() so transport_defaults.json and
+    setting_descriptions.json are automatically updated with any newly
+    discovered transports or keys.
     """
     result: dict[str, dict[str, Any]] = {}
     if not transports_dir.exists():
         _log.warning(f"Transports directory not found: {transports_dir}")
         return result
+
+    known_transport_keys: dict[str, dict[str, str]] = get_known_transport_keys()
+    transport_base_keys: dict[str, str] = get_transport_base_keys()
 
     for py_file in sorted(transports_dir.glob("*.py")):
         if py_file.name.startswith("__"):
@@ -364,9 +269,9 @@ def scan_transport_library(transports_dir: Path) -> dict[str, dict[str, Any]]:
             # variable_mask, device_location, bridge, analyze_protocol, etc.).
             merged: dict[str, str] = ast_keys
         else:
-            # Scrapers and base classes: supplement AST with the known-keys table
+            # Scrapers and base classes: supplement AST with the registry defaults
             # so common Modbus/TCP keys are always present even if not in every file.
-            known_keys: dict[str, str] = KNOWN_TRANSPORT_KEYS.get(stem, TRANSPORT_BASE_KEYS)
+            known_keys: dict[str, str] = known_transport_keys.get(stem, transport_base_keys)
             merged = {**known_keys, **ast_keys}
 
         result[stem] = {
@@ -374,6 +279,11 @@ def scan_transport_library(transports_dir: Path) -> dict[str, dict[str, Any]]:
             "keys": merged,
             "file": str(py_file),
         }
+
+    # Keep the JSON registry files current with whatever the AST found.
+    # New transports and keys are added automatically; existing entries are
+    # never overwritten so hand-edited defaults and descriptions survive.
+    sync_from_library(result)
 
     return result
 
@@ -628,6 +538,10 @@ def _upsert_setting(
     - If row is new: value_staged = value_disk (no staged edit yet).
     - If cfg_is_truth=True (startup scan when config changed, or post-rollback):
       also sync value_staged = value_disk so config is ground truth with no stale edits.
+
+    Bug fix: default_value is updated whenever the caller provides a non-None
+    value, replacing the previous `default_value or existing.default_value`
+    which silently ignored falsy new defaults such as "0", "false", or "".
     """
     existing: Setting | None = (
         db.query(Setting)
@@ -637,7 +551,10 @@ def _upsert_setting(
 
     if existing:
         existing.value_disk = value_disk
-        existing.default_value = default_value or existing.default_value
+        # Update default whenever the caller supplies one, even if it is
+        # a falsy string — this ensures code-level default changes propagate.
+        if default_value is not None:
+            existing.default_value = default_value
         existing.transport_type = transport_type
         existing.is_orphan = False
         existing.is_active = is_active
@@ -1007,16 +924,31 @@ class Scanner:
             # ----------------------------------------------------------------
             #  Add known-but-unset keys for each transport section
             #    (so the UI can show all possible config options)
+            #
+            #  Merges the JSON registry baseline with the live AST-scanned
+            #  keys so that:
+            #    (a) new settings.get() calls in bridge/scraper code appear
+            #        in the UI immediately on next scan (Bug 1 fix), and
+            #    (b) the JSON files are kept current automatically via the
+            #        sync_from_library() call inside scan_transport_library().
             # ----------------------------------------------------------------
+            known_transport_keys: dict[str, dict[str, str]] = get_known_transport_keys()
+
             for section, keys in config_data.items():
                 if not section.startswith("transport."):
                     continue
                 transport_name: str = keys.get("transport", "").strip()
-                known_keys: dict[str, str] = KNOWN_TRANSPORT_KEYS.get(transport_name, {})
                 transport_type = _classify_transport(section, keys, self.transports_dir)
 
-                for k, default_v in known_keys.items():
-                    if k not in keys:  # not already in config
+                # Merge: JSON registry baseline + live AST-scanned keys.
+                # Live AST keys take precedence so a code-level default change
+                # always wins over a stale value in the JSON file.
+                registry_keys: dict[str, str] = dict(known_transport_keys.get(transport_name, {}))
+                lib_entry: dict[str, Any] = transport_library.get(transport_name, {})
+                registry_keys.update(lib_entry.get("keys", {}))
+
+                for k, default_v in registry_keys.items():
+                    if k not in keys:  # not already set in config.cfg
                         _upsert_setting(
                             db, section, k,
                             value_disk="",
@@ -1024,8 +956,8 @@ class Scanner:
                             default_value=default_v,
                             is_active=False,  # not currently in config
                         )
-                        seen_setting_keys.add((section, k))
-                        stats["settings_upserted"] += 1
+                    seen_setting_keys.add((section, k))
+                    stats["settings_upserted"] += 1
 
             # ----------------------------------------------------------------
             #  Mark orphans
@@ -1035,7 +967,7 @@ class Scanner:
             # ----------------------------------------------------------------
             #  Scan protocol CSV/JSON files
             # ----------------------------------------------------------------
-            registers = scan_protocols_dir(self.protocols_dir)
+            registers: List[dict[str, Any]] = scan_protocols_dir(self.protocols_dir)
             skipped = 0
             for reg in registers:
                 result: ProtocolRegister | None = _upsert_protocol_register(db, reg)
@@ -1090,9 +1022,31 @@ class Scanner:
 
         return stats
 
-    def _get_default(self, section: str, key: str, section_keys: dict[str, str], transport_library: dict[str, dict[str, Any]]) -> str:
-        """Look up the default value for a key from the transport's known-keys table."""
+    def _get_default(
+        self,
+        section: str,
+        key: str,
+        section_keys: dict[str, str],
+        transport_library: dict[str, dict[str, Any]],
+    ) -> str:
+        """
+        Look up the default value for a key.
 
+        Priority order:
+          1. Live AST scan result for this transport (most current)
+          2. JSON registry entry for this transport
+          3. JSON registry _base fallback
+          4. Empty string
+        """
         transport_name: str = section_keys.get("transport", "").strip()
-        known: dict[str, str] = KNOWN_TRANSPORT_KEYS.get(transport_name, TRANSPORT_BASE_KEYS)
-        return known.get(key, "")
+
+        # 1. Live AST result
+        lib_entry: dict[str, Any] = transport_library.get(transport_name, {})
+        ast_default: str | None = lib_entry.get("keys", {}).get(key)
+        if ast_default is not None:
+            return ast_default
+
+        # 2. JSON registry for this transport, falling back to _base
+        known: dict[str, dict[str, str]] = get_known_transport_keys()
+        transport_defaults: dict[str, str] = known.get(transport_name, get_transport_base_keys())
+        return transport_defaults.get(key, "")
