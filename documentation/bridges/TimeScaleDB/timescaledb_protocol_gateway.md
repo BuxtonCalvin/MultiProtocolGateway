@@ -210,7 +210,7 @@ services:
     volumes:
     - /home/multiprotocolgateway4/config:/app/config
     - /home/multiprotocolgateway4/protocols:/app/protocols
-    - /home/multiprotocolgateway4/timescaledb_backlog:/app/timescaledb_backlog
+    - /home/multiprotocolgateway4/backlogs:/app/backlogs
     - /home/multiprotocolgateway4/logs:/app/logs
 
     ports:
@@ -365,7 +365,7 @@ force_float = true
 
 # persistent backlog settings
 enable_persistent_storage = true
-backlog_storage_path = timescaledb_backlog
+backlog_storage_path = backlogs
 backlog_file_name = no_connect_backlog
 
 # max data points to store in backlog

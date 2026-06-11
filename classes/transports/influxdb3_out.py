@@ -83,7 +83,7 @@ class influxdb3_out(transport_base):
 
     # Persistent storage settings
     enable_persistent_storage: bool = True
-    persistent_storage_path: str = "influxdb3_backlog"
+    persistent_storage_path: str = "backlogs"
     max_backlog_size: int = 10000  # Maximum number of points to store
     max_backlog_age: int = 86400   # 24 hours in seconds
 

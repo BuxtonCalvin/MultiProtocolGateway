@@ -150,7 +150,7 @@ When InfluxDB is unavailable, data is stored locally in pickle files:
 enable_persistent_storage = true
 
 # Storage directory (relative to gateway directory)
-persistent_storage_path = influxdb_backlog
+persistent_storage_path = backlogs
 
 # Maximum number of points to store
 max_backlog_size = 10000
@@ -162,7 +162,7 @@ max_backlog_age = 86400
 ### Storage Structure
 
 ``` ini
-influxdb_backlog/
+backlogs/
 ├── influxdb_backlog_influxdb_output.pkl
 ├── influxdb3_backlog_influxdb_output.pkl
 └── ...
@@ -279,15 +279,15 @@ batch_timeout = 5.0
 
 ```bash
 # Check backlog file sizes
-ls -lh influxdb_backlog/
+ls -lh backlogs/
 
 # Check backlog contents (Python script)
 python3 -c "
 import pickle
 import os
-for file in os.listdir('influxdb_backlog'):
+for file in os.listdir('backlogs'):
     if file.endswith('.pkl'):
-        with open(f'influxdb_backlog/{file}', 'rb') as f:
+        with open(f'backlogs/{file}', 'rb') as f:
             data = pickle.load(f)
             print(f'{file}: {len(data)} points')
 "
@@ -310,7 +310,7 @@ grep -i "periodic.*reconnect" /var/log/protocol_gateway.log
 
 ```bash
 # Remove backlog files older than 7 days
-find influxdb_backlog/ -name "*.pkl" -mtime +7 -delete
+find backlogs/ -name "*.pkl" -mtime +7 -delete
 ```
 
 ## Performance Considerations

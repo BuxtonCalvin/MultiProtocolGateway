@@ -518,7 +518,7 @@ class timescaledb(transport_base):
 
     # persistent storage/backlog settings. Default folder name and file name are the same but can be user configured.
     enable_persistent_storage: bool = True
-    backlog_storage_path: Path = Path(__file__).resolve().parent.parent.parent / "timescaledb_backlog"
+    backlog_storage_path: Path = Path(__file__).resolve().parent.parent.parent / "backlogs"
     backlog_file_name: str  = "timescaledb_backlog"
     max_backlog_size: int = 10000
     max_backlog_age: int = 86400   # seconds

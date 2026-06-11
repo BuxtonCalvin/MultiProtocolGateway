@@ -275,7 +275,7 @@ Or skip the file — open the web UI at `http://localhost:1717` after starting a
 ```bash
 python3 -u protocol_gateway.py
 # or with a specific config file:
-python3 -u protocol_gateway.py config.cfg
+python3 -u protocol_gateway.py config/config.cfg
 ```
 
 The web management UI will be available at **`http://localhost:1717`**.
