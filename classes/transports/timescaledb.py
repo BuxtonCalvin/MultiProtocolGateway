@@ -640,7 +640,7 @@ class timescaledb(transport_base):
         self.reconnect_delay: int = settings.getint("reconnect_delay", fallback=self.reconnect_delay)
         self.force_float = settings.getboolean("force_float", fallback=self.force_float)
 
-        # stale data cleanup settings
+        # stale data settings
         self.stale_data_timeout: int = settings.getint("stale_data_timeout", fallback=self.stale_data_timeout)
         # wait for complete data to write to db.
         self.write_requires_complete_cycle = settings.getboolean("write_requires_complete_cycle", fallback=self.write_requires_complete_cycle)
@@ -874,18 +874,17 @@ class timescaledb(transport_base):
 
     # Centralize state transitions for tsdb_connected helper
     def _set_tsdb_connected(self, conn_value: bool, conn_reason: str) -> None:
+        """
+        This helper centralizes all updates to the tsdb_connected state variable, ensuring that related state and logging are consistently handled.
+        Connection status messaging is handled separately in the connect base property setter to avoid issues with calling
+        send_message before the transport is fully initialized.  This method focuses on internal state management and logging.
+        """
         with self._reconnect_lock:
             if self.tsdb_connected != conn_value:   # if we change state
                 self.tsdb_connected: bool = conn_value  # new state
                 self.connected = self.tsdb_connected  # set the MPG connected flag here to mimic central connection state.
                 self.rollup_policy["tsdb_connected"] = conn_value  # set the connect status in the rollup class.
                 self._log.info(f"TimescaleDB is connected -> {conn_value} ({conn_reason})")
-                # self.send_message(
-                #     message=f"TimescaleDB connection status changed: {conn_value} ({conn_reason})",
-                #     title="MPG TimescaleDB Connection Status",
-                #     priority=1 if not conn_value else 5
-                # )
-
 
     # -------------------------
     # reconnect/backoff
@@ -2132,7 +2131,7 @@ class timescaledb(transport_base):
             bool: Returns True if the data is considered stale (unchanged for longer than the defined timeout),
                 otherwise False.
         """
-        state = self._stale_registry.get(transport_id)
+        state: dict[str, Any] | None = self._stale_registry.get(transport_id)
         if not state or state["last_row"] is None:
             return False
 

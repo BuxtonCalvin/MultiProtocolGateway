@@ -269,10 +269,10 @@
   "read_mode": [
     {
       "id": "read-mode-setting",
-      "x_percent": 47.8,
-      "y_percent": 23.4,
-      "label_x_percent": 2.7,
-      "label_y_percent": 40.6,
+      "x_percent": 51,
+      "y_percent": 47.4,
+      "label_x_percent": 1.1,
+      "label_y_percent": 35,
       "label": "read_mode controls how MPG cycles through multiple transports: Sequential: one full pass per transport in order.  Concurrent: where all transports run in parallel threads. This mode is best for devices that do not share a common bus.  Interleaved: one block per transport in round-robin — best for shared RS485 buses.",
       "shape_type": "dot"
     }
@@ -365,8 +365,8 @@
       "id": "messages-general",
       "x_percent": 22.6,
       "y_percent": 27.8,
-      "label_x_percent": 10.502956496333608,
-      "label_y_percent": 2.4179867900443615,
+      "label_x_percent": 18.527647854358293,
+      "label_y_percent": 0.6722274806421957,
       "label": "General section: enabled is the master switch for all notification services. default_title is the fallback heading used when no title is supplied by the caller.",
       "shape_type": "rect",
       "width_percent": 39.3,
@@ -374,34 +374,36 @@
     },
     {
       "id": "messages-test",
-      "x_percent": 13.6,
-      "y_percent": 42.6,
-      "label_x_percent": 8.4,
-      "label_y_percent": 48.6,
+      "x_percent": 9.484773662551437,
+      "y_percent": 54.99489109675539,
+      "label_x_percent": 2.6386831275720155,
+      "label_y_percent": 63.613530060858636,
       "label": "Send test message button fires a test notification through all enabled services to verify credentials.",
       "shape_type": "dot"
     },
     {
       "id": "messages-pushover",
-      "x_percent": 70.5,
-      "y_percent": 31.4,
-      "label_x_percent": 59.48010699605158,
-      "label_y_percent": 10.90323844128882,
+      "x_percent": 70.39711934156378,
+      "y_percent": 41.001676201711916,
+      "label_x_percent": 65.96158847753306,
+      "label_y_percent": 15.61678857667467,
       "label": "Pushover service — enter your api_token and user_key from the Pushover dashboard. Values are masked for security.",
       "shape_type": "rect",
-      "width_percent": 45.8,
-      "height_percent": 10.2
+      "width_percent": 46.00576131687241,
+      "height_percent": 11.94575930940216
     },
     {
       "id": "messages-telegram",
-      "x_percent": 70.4,
-      "y_percent": 56.6,
-      "label_x_percent": 60.919625513819476,
-      "label_y_percent": 66.80647688257763,
+      "x_percent": 70.6,
+      "y_percent": 71.6,
+      "label_x_percent": 65.4,
+      "label_y_percent": 82.2,
       "label": "Telegram service — provide the bot_token from @BotFather and one or more comma-separated chat_ids to receive notifications.",
       "shape_type": "rect",
-      "width_percent": 46.2,
-      "height_percent": 14.6
+      "width_percent": 46.4,
+      "height_percent": 16,
+      "stroke_color": "rgb(14,165,233)",
+      "fill_color": "rgba(14,165,233,0.18)"
     }
   ],
   "transport_library": [
@@ -524,39 +526,39 @@
   "create_protocol": [
     {
       "id": "create_protocol-manufacturer",
-      "x_percent": 13.6,
-      "y_percent": 22.7,
+      "x_percent": 13.3,
+      "y_percent": 45.1,
       "label": "The hardware manufacturer.  If new, a new manufacturer folder will be created to store the newly created protocol files.",
       "shape_type": "dot",
-      "label_x_percent": 3.3,
-      "label_y_percent": 48.6
+      "label_x_percent": 34.3,
+      "label_y_percent": 6.2
     },
     {
-      "id": "create_protocol-dot-1781069421471",
-      "x_percent": 13.3,
-      "y_percent": 31.4,
+      "id": "create_protocol-protocol",
+      "x_percent": 12.431121642969984,
+      "y_percent": 61.65808146329668,
       "label": "The protocol name either existing or new.",
       "shape_type": "dot",
-      "label_x_percent": 3.3,
-      "label_y_percent": 65.2037567498023
+      "label_x_percent": 33.1260663507109,
+      "label_y_percent": 50.90646517063733
     },
     {
-      "id": "create_protocol-dot-1781069634654",
-      "x_percent": 59.7,
-      "y_percent": 23.4,
+      "id": "create_protocol-Inverter-name",
+      "x_percent": 58.75213270142181,
+      "y_percent": 49.03037488655718,
       "label": "The new protocol name if a new protocol.",
       "shape_type": "dot",
-      "label_x_percent": 56.6,
-      "label_y_percent": 49.5
+      "label_x_percent": 71.76587677725121,
+      "label_y_percent": 50.84642575059209
     },
     {
-      "id": "create_protocol-dot-1781069499119",
-      "x_percent": 13.9,
-      "y_percent": 40.5,
+      "id": "create_protocol-type",
+      "x_percent": 13.031121642969985,
+      "y_percent": 77.52165261391593,
       "label": "The protocol type:  Input, Holding, Coil or Discrete.  The type will be appended to the protocol name.",
       "shape_type": "dot",
-      "label_x_percent": 3.4,
-      "label_y_percent": 75.9
+      "label_x_percent": 32.39494470774091,
+      "label_y_percent": 73.40969775595602
     }
   ],
   "_aliases": {

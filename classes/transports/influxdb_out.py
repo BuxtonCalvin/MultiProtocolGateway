@@ -20,13 +20,16 @@
 from __future__ import annotations
 
 import logging
+import math
 import pickle
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional, cast
+from typing import Any, Callable, Optional, cast
 
 from influxdb import InfluxDBClient
+from tzlocal import get_localzone_name
 
 from classes.protocol_settings import registry_map_entry
 from defs.common import TransportSettings, strtobool
@@ -61,11 +64,18 @@ class influxdb_out(transport_base):
     batch_size: int = 100
     batch_timeout: float = 10.0
     force_float: bool = True  # Force all numeric fields to floats to avoid type conflicts
+    # Timestamp settings
+    use_utc_timestamp: bool = False
 
     # Connection monitoring settings
     reconnect_attempts: int = 5
     reconnect_delay: float = 5.0
     connection_timeout: int = 10
+
+    # Stale data detection settings
+    stale_data_timeout: int = 300       # seconds before data is considered stale
+    max_stale_attempts: int = 3         # max reconnect attempts per stale period
+    retry_delay_mins: int = 5           # minimum minutes between stale reconnect attempts
 
     # Exponential backoff settings
     use_exponential_backoff: bool = True
@@ -115,6 +125,22 @@ class influxdb_out(transport_base):
         self.reconnect_attempts = settings.getint("reconnect_attempts", fallback=self.reconnect_attempts)
         self.reconnect_delay = settings.getfloat("reconnect_delay", fallback=self.reconnect_delay)
         self.connection_timeout = settings.getint("connection_timeout", fallback=self.connection_timeout)
+
+        # Stale data detection settings
+        self.stale_data_timeout: int = settings.getint("stale_data_timeout", fallback=self.stale_data_timeout)
+        self.max_stale_attempts: int = settings.getint("max_stale_attempts", fallback=self.max_stale_attempts)
+        self.retry_delay_mins: int = settings.getint("retry_delay_mins", fallback=self.retry_delay_mins)
+
+        # Stale data runtime state — keyed by transport_name, tracks last seen data and timestamps for stale detection logic
+        self._stale_registry: dict[str, dict[str, Any]] = {}
+
+        # Timestamp timezone setting — mirrors timescaledb.use_utc_timestamp
+        self.use_utc_timestamp: bool = strtobool(settings.get("use_utc_timestamp", fallback=str(self.use_utc_timestamp)))
+        self.machine_timezone: str = "UTC" if self.use_utc_timestamp else get_localzone_name()
+        self._log.info(f"InfluxDB timestamp timezone: {self.machine_timezone}")
+
+        # Upstream reconnect callback — wired by protocol_gateway via _wire_reconnect_hooks,
+        self.request_upstream_reconnect: Callable[[str], None] | None = None
 
         # Exponential backoff settings
         self.use_exponential_backoff = strtobool(settings.get("use_exponential_backoff", fallback=self.use_exponential_backoff))
@@ -245,6 +271,16 @@ class influxdb_out(transport_base):
             self._log.error(f"Failed to flush backlog to InfluxDB: {e}")
             # Don't clear backlog on failure — will retry later
 
+    def _now_ts(self) -> datetime:
+        """
+        Returns the current timestamp in the configured timezone.
+        UTC if use_utc_timestamp = true, otherwise local machine timezone.
+        _now_tz() module function scoped to this instance since InfluxDB timestamps are set imperatively.
+        """
+        if self.use_utc_timestamp:
+            return datetime.now(timezone.utc)
+        return datetime.now().astimezone()
+
     # ------------------------------------------------------------------
     # Connection management
     # ------------------------------------------------------------------
@@ -262,7 +298,6 @@ class influxdb_out(transport_base):
                 database=self.database,
                 timeout=self.connection_timeout,
             )
-
             self.client.ping()
 
             # Create database if it doesn't exist
@@ -270,15 +305,6 @@ class influxdb_out(transport_base):
             if not any(db["name"] == self.database for db in databases):
                 self._log.info(f"Creating database: {self.database}")
                 self.client.create_database(self.database)
-
-            self.connected = True
-            self.last_connection_check = time.time()
-            self.last_periodic_reconnect_attempt = time.time()
-            self._log.info(f"Connected to InfluxDB at {self.host}:{self.port}")
-
-            if self.enable_persistent_storage:
-                self._flush_backlog()
-            return True  # noqa: TRY300
 
         except ImportError:
             self._log.error("InfluxDB client not installed. Please install with: pip install influxdb")
@@ -288,6 +314,18 @@ class influxdb_out(transport_base):
             self._log.error(f"Failed to connect to InfluxDB: {e}")
             self.connected = False
             return False
+        else:
+            # This runs only if the try block succeeds perfectly
+            self.connected = True
+            self.last_connection_check = time.time()
+            self.last_periodic_reconnect_attempt = time.time()
+            self._log.info(f"Connected to InfluxDB at {self.host}:{self.port}")
+
+            if self.enable_persistent_storage:
+                self._flush_backlog()
+
+            return True
+
 
     def _check_connection(self) -> bool:
         """Check if the connection is still alive and reconnect if necessary."""
@@ -300,13 +338,14 @@ class influxdb_out(transport_base):
             self.last_periodic_reconnect_attempt = current_time
             self._log.info(f"Periodic reconnection check (every {self.periodic_reconnect_interval} seconds)")
 
-            if self.connected and self.client:
-                try:
-                    self.client.ping()
-                except Exception as e:
-                    self._log.warning(f"Periodic connection check failed: {e}")
-                    return self._attempt_reconnect()
-            else:
+            # Check if active connection exists; if not, immediately attempt reconnect
+            if not (self.connected and self.client):
+                return self._attempt_reconnect()
+
+            try:
+                self.client.ping()
+            except Exception as e:
+                self._log.warning(f"Periodic connection check failed: {e}")
                 return self._attempt_reconnect()
 
         # Throttle routine checks to avoid excessive pings
@@ -320,10 +359,12 @@ class influxdb_out(transport_base):
 
         try:
             self.client.ping()
-            return True  # noqa: TRY300
         except Exception as e:
             self._log.warning(f"Connection check failed: {e}")
             return self._attempt_reconnect()
+        else:
+            return True
+
 
     def _attempt_reconnect(self) -> bool:
         """Attempt to reconnect to InfluxDB with exponential backoff."""
@@ -337,10 +378,11 @@ class influxdb_out(transport_base):
                     try:
                         self.client.close()
                     except Exception as e:
-                        self._log.warning(f"Failed to close existing InfluxDB client during reconnect attempt: {e} {attempt + 1}/{self.reconnect_attempts}")
-                        pass
+                        self._log.warning(
+                            f"Failed to close existing InfluxDB client during reconnect attempt: {e} "
+                            f"{attempt + 1}/{self.reconnect_attempts}"
+                        )
 
-                from influxdb import InfluxDBClient
                 self.client = InfluxDBClient(
                     host=self.host,
                     port=self.port,
@@ -349,18 +391,7 @@ class influxdb_out(transport_base):
                     database=self.database,
                     timeout=self.connection_timeout,
                 )
-
                 self.client.ping()
-
-                self.connected = True
-                self.last_periodic_reconnect_attempt = time.time()
-                self._log.info("Successfully reconnected to InfluxDB")
-
-                if self.enable_persistent_storage:
-                    self._flush_backlog()
-                    self._log.info("Flushed backlog after successful reconnection")
-
-                return True  # noqa: TRY300
 
             except Exception as e:
                 self._log.warning(f"Reconnection attempt {attempt + 1} failed: {e}")
@@ -372,10 +403,22 @@ class influxdb_out(transport_base):
                         delay = self.reconnect_delay
                         self._log.info(f"Waiting {delay:.1f} seconds before next attempt")
                     time.sleep(delay)
+            else:
+                # This block runs only if client creation and ping succeed without throwing exceptions
+                self.connected = True
+                self.last_periodic_reconnect_attempt = time.time()
+                self._log.info("Successfully reconnected to InfluxDB")
+
+                if self.enable_persistent_storage:
+                    self._flush_backlog()
+                    self._log.info("Flushed backlog after successful reconnection")
+
+                return True
 
         self._log.error(f"Failed to reconnect after {self.reconnect_attempts} attempts")
         self.connected = False
         return False
+
 
     def trigger_periodic_reconnect(self) -> bool:
         """Manually trigger a periodic reconnection check."""
@@ -388,7 +431,6 @@ class influxdb_out(transport_base):
 
     def write_data(self, data: DataPayload, from_transport: transport_base) -> None:
         """Entry point for incoming inverter data. Routes to online or offline path."""
-        # Promote LCDMachineModelCode to device_model if present and meaningful
         if data.get("LCDMachineModelCode") and data["LCDMachineModelCode"] != "MPG":
             from_transport.device_model = str(data["LCDMachineModelCode"])
 
@@ -397,6 +439,13 @@ class influxdb_out(transport_base):
                 f"Received data from {from_transport.transport_name} "
                 f"(serial: {from_transport.device_serial_number}) with {len(data)} fields"
             )
+
+        # Stale data detection — runs regardless of connection state so that
+        # a stale scraper is detected even while InfluxDB itself is offline.
+        transport_id: str = from_transport.transport_name
+        timestamp: datetime = self._now_ts()
+        is_stale: bool = self._check_is_stale(transport_id, data, timestamp)
+        self._commit_transport_state(transport_id, data, timestamp, is_stale)
 
         if not self._check_connection():
             self._log.warning("Not connected to InfluxDB, storing data in backlog")
@@ -448,7 +497,7 @@ class influxdb_out(transport_base):
                 continue
 
             try:
-                float_val: float = float(value)  # type: ignore[arg-type]
+                float_val: float = float(value)
                 if self.force_float or should_force_float:
                     fields[key] = float_val
                 else:
@@ -471,23 +520,142 @@ class influxdb_out(transport_base):
         }
 
         if self.include_timestamp:
-            point["time"] = int(time.time() * 1e9)  # nanoseconds
+            point["time"] = int(self._now_ts().timestamp() * 1e9)  # nanoseconds
 
         return point
+
+    def _check_is_stale(self, transport_id: str, row: DataPayload, timestamp: datetime) -> bool:
+        """
+        Compares the incoming data payload against the last seen payload for this
+        transport. Returns True if data is identical and has been so for longer
+        than stale_data_timeout seconds. Numeric comparisons use math.isclose
+        to avoid false positives from floating point noise.
+        """
+        state: dict[str, Any] | None = self._stale_registry.get(transport_id)
+        if not state or state["last_row"] is None:
+            return False
+
+        for key, val in row.items():
+            prev = state["last_row"].get(key)
+            if isinstance(val, (int, float)) and isinstance(prev, (int, float)):
+                if not math.isclose(val, prev, rel_tol=1e-4, abs_tol=1e-6):
+                    return False
+            elif val != prev:
+                return False
+
+        elapsed: timedelta = timestamp - state["start_ts"]
+        return elapsed > timedelta(seconds=self.stale_data_timeout)
+
+
+    def _commit_transport_state(self, transport_id: str, row: DataPayload, timestamp: datetime, is_stale: bool) -> None:
+        """
+        Updates the stale registry for this transport after each write_data call.
+        On fresh data resets all counters. On first stale detection triggers
+        _handle_stale_event once per stale period — subsequent calls within the
+        same stale window are no-ops until data changes and resets the state.
+        """
+        if transport_id not in self._stale_registry:
+            self._stale_registry[transport_id] = {
+                "last_row": dict(row), "start_ts": timestamp, "is_stale": False,
+                "last_seen": timestamp, "stale_event_count": 0, "last_event_ts": None,
+            }
+
+        state: dict[str, Any] = self._stale_registry[transport_id]
+        state["last_seen"] = timestamp
+
+        self._log.debug(
+            f"Committing state for transport: {transport_id} | "
+            f"is_stale: {is_stale} | "
+            f"elapsed: {timestamp - state['start_ts']}"
+        )
+
+        if not is_stale:
+            # Fresh data — reset everything including the throttle timer
+            state.update({
+                "last_row": dict(row), "start_ts": timestamp,
+                "is_stale": False, "stale_event_count": 0,
+                "last_event_ts": None,
+            })
+        elif not state["is_stale"]:
+            # First detection of staleness for this period — trigger once only
+            state["is_stale"] = True
+            state["last_event_ts"] = timestamp
+            elapsed: timedelta = timestamp - state["start_ts"]
+            self._handle_stale_event(transport_id, timestamp, elapsed)
+
+
+    def _handle_stale_event(self, transport_id: str, current_time: datetime, total_stale_elapsed: timedelta) -> None:
+        """
+        Fires when a transport's data is detected as stale. Triggers an upstream
+        reconnect via the gateway callback (if wired) up to max_stale_attempts
+        times, with a minimum of retry_delay_mins between attempts.
+        Sends a push notification on each attempt.
+        """
+        state: dict[str, Any] | None = self._stale_registry.get(transport_id)
+        if not state:
+            return
+
+        # Cap reconnect attempts per stale period
+        if state["stale_event_count"] >= self.max_stale_attempts:
+            self._log.debug(
+                f"[{transport_id}] Max stale retry attempts reached. No further reconnects."
+            )
+            return
+
+        # Throttle: enforce minimum gap between attempts
+        if state["last_event_ts"] is not None:
+            time_since_last: timedelta = current_time - state["last_event_ts"]
+            if time_since_last < timedelta(minutes=self.retry_delay_mins):
+                return
+
+        state["stale_event_count"] += 1
+        state["last_event_ts"] = current_time
+
+        # Trigger upstream reconnect via gateway callback
+        if self.request_upstream_reconnect:
+            try:
+                self._log.warning(
+                    f"[{transport_id}] Data stale. Requesting reconnect "
+                    f"(Attempt {state['stale_event_count']}/{self.max_stale_attempts})."
+                )
+                self.request_upstream_reconnect(transport_id)
+            except Exception:
+                self._log.exception(f"[{transport_id}] Failed requesting upstream reconnect.")
+
+        # Push notification
+        try:
+            minutes: float = total_stale_elapsed.total_seconds() / 60
+            self.send_message(
+                message=(
+                    f"Transport [{transport_id}] stale for {minutes:.1f} mins. "
+                    f"Attempt {state['stale_event_count']} of {self.max_stale_attempts}."
+                ),
+                title="MPG Stale Data Alert",
+                priority=1,
+            )
+        except Exception:
+            self._log.exception(f"[{transport_id}] Failed sending stale data notification.")
 
     def _log_batch_debug(self, points: list[InfluxPoint], verb: str) -> None:
         """Emit structured debug lines for a batch of point dicts."""
         sample_field_names: list[str] = [
-            "vacr", "VacR", "soc", "SOC", "fwcode", "FWCode", "vbat", "Vbat", "pinv", "Pinv",
+            "vacr", "VacR", "soc", "SOC", "fwcode", "FWCode",
+            "vbat", "Vbat", "pinv", "Pinv",
         ]
-        serial_numbers: list[str] = []
+        # Allow None in the list type
+        serial_numbers: list[str | None] = []
         sample_values: list[dict[str, object] | str] = []
 
         for point in points:
-            tags: dict[str, str] = point.get("tags", {})  # type: ignore[assignment]
-            fields: dict[str, int | float | str] = point.get("fields", {})  # type: ignore[assignment]
+            raw_tags: object = point.get("tags", {})
+            tags: dict[str, str] = raw_tags if isinstance(raw_tags, dict) else {}
 
-            serial_numbers.append(tags.get("device_serial_number", "None"))
+            serial_numbers.append(tags.get("device_serial_number", None))
+            # Fetch the raw object first
+            raw_fields: object = point.get("fields", {})
+
+            # Check the type and assign it to typed variable
+            fields: dict[str, int | float | str] = raw_fields if isinstance(raw_fields, dict) else {}
 
             sample_data: dict[str, object] = {k: fields[k] for k in sample_field_names if k in fields}
             if sample_data:
@@ -497,16 +665,24 @@ class influxdb_out(transport_base):
             else:
                 sample_values.append("No fields found")
 
-        self._log.info(f"{verb} {len(points)} points to InfluxDB (serial numbers: {', '.join(serial_numbers)})")
+        # Use a fallback for serial numbers when joining strings
+        serial_str: str = ", ".join(s for s in serial_numbers if s is not None)
+        self._log.info(f"{verb} {len(points)} points to InfluxDB (serial numbers: {serial_str})")
 
         for i, (serial, samples) in enumerate(zip(serial_numbers, sample_values)):
-            transport_name: str = points[i].get("tags", {}).get("transport", "unknown")  # type: ignore[union-attr]
-            self._log.debug(f"  Point {i+1} tags: {points[i].get('tags', {})}")
+            # Extract tags safely into a local dictionary variable first
+            raw_point_tags: object = points[i].get("tags", {})
+            point_tags: dict[str, str] = raw_point_tags if isinstance(raw_point_tags, dict) else {}
+            transport_name: str = point_tags.get("transport", "unknown")
+
+            self._log.debug(f"Point {i+1} tags: {point_tags}")
+
             if isinstance(samples, dict):
                 sample_str: str = ", ".join(f"{k}={v}" for k, v in samples.items())
-                self._log.debug(f"  Point {i+1} ({serial}) from {transport_name}: {sample_str}")
+                self._log.debug(f"Point {i+1} ({serial}) from {transport_name}: {sample_str}")
             else:
-                self._log.debug(f"  Point {i+1} ({serial}) from {transport_name}: {samples}")
+                self._log.debug(f"Point {i+1} ({serial}) from {transport_name}: {samples}")
+
 
     def _process_and_store_data(self, data: DataPayload, from_transport: transport_base) -> None:
         """Build a point and place it in the persistent backlog (offline path)."""

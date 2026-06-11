@@ -9,6 +9,7 @@
 ![Python 3.14](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.14.yml/badge.svg)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://github.com/jBuxtonCalvin/MultiProtocolGateway/blob/main/LICENSE)
 [![CodeQL Status](https://img.shields.io/github/actions/workflow/status/BuxtonCalvin/MultiProtocolGateway/codeql.yml)](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/codeql.yml)
+[![Code style: ruff](https://shields.io)](https://github.com/astral-sh/ruff)
 
 ## 🙏 Credits
 
@@ -72,7 +73,7 @@ On the left side of the page, each device gets a dedicated settings pane with a 
 - **Value** — the value that will be written on the next commit; highlighted amber when it differs from the on-disk value
 - **Default** — the fallback value from the transport module, shown for reference
 
-![Devices](classes/WebServer/static/screenshots/device__inverter_read.png)
+![Devices](classes/WebServer/static/screenshots/device__scraper_read_generic.png)
 
 Changes are submitted via HTMX PATCH calls and buffered in a SQLite staging database. Nothing touches `config.cfg` until you explicitly commit.
 
@@ -99,6 +100,12 @@ You can also edit the protocol json file.  This file provides default configurat
 ![Protocol JSON](classes/WebServer/static/screenshots/protocol_json.png)
 
 All edits go through a structured diff engine — the UI shows exactly which rows will be added, modified, or removed before anything is written.
+
+### Create Protocol
+
+The create protocol wizard walks you through creating a hardware protocol from scratch.
+
+![Create Device](classes/WebServer/static/screenshots/create_protocol.png)
 
 ### Live Device Analysis
 
@@ -141,13 +148,13 @@ A reference page listing all available transport classes — scraper types (Modb
 
 A reference page listing all available settings with their definitions.
 
-![Settings](classes/WebServer/static/screenshots/transport_settings.png)
+![Settings](classes/WebServer/static/screenshots/transport_settings_trunc.png)
 
 ### Bridges
 
 Bridges receive data from scrapers and write it somewhere. They are passive — they do not poll.
 
-![Bridges](classes/WebServer/static/screenshots/bridge__timescaledb.png)
+![Bridges](classes/WebServer/static/screenshots/device__bridge_generic.png)
 
 Here are overviews of two database bridges:
 

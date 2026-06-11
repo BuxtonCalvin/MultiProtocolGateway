@@ -164,7 +164,7 @@ max_backlog_age = 86400
 ``` ini
 influxdb_backlog/
 ├── influxdb_backlog_influxdb_output.pkl
-├── influxdb_backlog_another_transport.pkl
+├── influxdb3_backlog_influxdb_output.pkl
 └── ...
 ```
 
@@ -211,6 +211,14 @@ periodic_reconnect_interval = 1800.0  # 30 minutes
 enable_persistent_storage = true
 max_backlog_size = 1000
 max_backlog_age = 3600  # 1 hour
+
+# timestamps metric data with either the local machine time or UTC time.
+use_utc_timestamp = True
+
+# Stale data detection settings
+stale_data_timeout = 300       # seconds before data is considered stale
+max_stale_attempts = 3         # max reconnect attempts per stale period
+retry_delay_mins = 5           # minimum minutes between stale reconnect attempts
 ```
 
 ### For Unstable Networks (Remote InfluxDB)
