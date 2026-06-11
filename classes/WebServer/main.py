@@ -36,8 +36,10 @@ from __future__ import annotations
 
 import asyncio
 import hashlib as _hashlib
+import json as _json
 import logging
 import logging.handlers
+import queue as _queue
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
@@ -46,29 +48,37 @@ from typing import Any, List, Tuple
 
 import uvicorn
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import Row
 from sqlalchemy.engine import Engine
 
 from classes.WebServer.diff_engine import DiffResult
-from classes.WebServer.models import AppState, ConfigBackup, SettingDescription
+from classes.WebServer.models import (
+    AppState,
+    Base,
+    ConfigBackup,
+    ProtocolRegister,
+    Setting,
+    SettingDescription,
+)
 
 from ..transports.modbus_base import modbus_base
 from .database import ensure_app_state, init_db, run_migrations, session_scope
 from .diff_engine import build_diff
 from .file_watcher import FileWatcher
-from .models import Base, ProtocolRegister, Setting
 from .routers.analysis import router as analysis_router
 from .routers.commit import router as commit_router
 from .routers.devices import get_app_state
 from .routers.devices import router as devices_router
+from .routers.help import FileResponse
 from .routers.help import router as help_router
 from .routers.pages import router as pages_router
 from .routers.protocols import router as protocols_router
 from .routers.transport_settings import router as transport_settings_router
 from .scanner import Scanner, scan_transport_library
+from .services.analysis_service import get_transport_connection_status
 from .services.device_service import (
     DeviceSummary,
     NavData,
@@ -111,7 +121,6 @@ def _install_webserver_logging() -> None:
     Uses a QueueListener to prevent Windows file-locking (IO) contention.
     """
     global _queue_listener
-    import queue as _queue
 
     ws_logger: logging.Logger = logging.getLogger("classes.WebServer")
 
@@ -149,7 +158,7 @@ def _install_webserver_logging() -> None:
     ws_logger.addHandler(queue_handler)
     ws_logger.setLevel(logging.DEBUG)
 
-    # IMPORTANT: False prevents double-logging (Queue -> Root -> File)
+    # Important: False prevents double-logging (Queue -> Root -> File)
     ws_logger.propagate = False
 
     # Redirect 3rd party libraries to use the same non-blocking queue
@@ -236,7 +245,7 @@ def create_app(
             # it manually (or it was rolled back externally). Treat cfg as truth
             # so value_staged syncs to value_disk and no stale staged edits remain.
             try:
-                from .models import ConfigBackup
+
                 cfg_hash: str = _hashlib.md5(config_path.read_bytes()).hexdigest()  # noqa: S324
                 with session_scope() as _db:
                     latest: ConfigBackup | None = _db.query(ConfigBackup).order_by(
@@ -421,7 +430,6 @@ def create_app(
         gateway = getattr(request.app.state, "gateway", None)
         analyze_enabled = False
         if gateway is not None:
-            from .services.analysis_service import get_transport_connection_status
             conn_status: dict[str, bool] = get_transport_connection_status(gateway)
             # Gateway uses section name (e.g. "transport.mqtt") as transport_name
             summary.is_connected = conn_status.get(
@@ -454,6 +462,14 @@ def create_app(
                 "analyze_enabled": analyze_enabled,
             },
         )
+
+    BASE_WEB_DIR: Path = Path(__file__).resolve().parent
+    @app.get('/favicon.ico', include_in_schema=False)
+    async def favicon() -> FileResponse:
+
+        favicon_path: Path = BASE_WEB_DIR / "static" / "favicon.ico"
+
+        return FileResponse(favicon_path)
 
     @app.get("/protocol/{protocol_name}/{registry_type}", response_class=HTMLResponse, response_model=None)
     async def protocol_table_partial(
@@ -513,11 +529,10 @@ def create_app(
         protocol_name: str,
     ):
         """Save updated JSON config for a protocol directly to disk."""
-        import json as _json
+
         try:
             body = await request.json()
         except Exception:
-            from fastapi.responses import JSONResponse
             return JSONResponse({"status": "error", "detail": "Invalid JSON body"}, status_code=400)
         config_dir = getattr(request.app.state, "config_dir", request.app.state.protocols_dir / protocol_group)
         config_dir.mkdir(parents=True, exist_ok=True)
@@ -525,9 +540,7 @@ def create_app(
         try:
             json_path.write_text(_json.dumps(body, indent=2, ensure_ascii=False), encoding="utf-8")
         except Exception as exc:
-            from fastapi.responses import JSONResponse
             return JSONResponse({"status": "error", "detail": str(exc)}, status_code=500)
-        from fastapi.responses import JSONResponse
         return JSONResponse({"status": "ok", "path": str(json_path)})
 
     @app.get("/diff-panel", response_class=HTMLResponse, response_model=None)
