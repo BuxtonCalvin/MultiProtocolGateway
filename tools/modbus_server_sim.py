@@ -24,7 +24,7 @@ from modbus_tk import hooks, modbus_tcp
 from modbus_tk.defines import HOLDING_REGISTERS, READ_INPUT_REGISTERS
 
 
-def on_write_request(request):
+def on_write_request(request) -> None:
     print(f"Write request: {request}")
 
 

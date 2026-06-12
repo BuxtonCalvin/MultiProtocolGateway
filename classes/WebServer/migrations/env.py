@@ -31,7 +31,7 @@ from sqlalchemy import Engine, engine_from_config, pool
 # Add WebServer package root to path so relative imports work
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from classes.WebServer.models import Base  # noqa: E402
+from classes.WebServer.models import Base
 
 _log: logging.Logger = logging.getLogger(__name__)
 

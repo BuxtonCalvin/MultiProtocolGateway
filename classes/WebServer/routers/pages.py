@@ -47,6 +47,8 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from classes.messaging.message_handler import _handler, send_message
+
 from ...transports.modbus_base import modbus_base
 from ..config_writer import create_backup
 from ..database import get_session, refresh_app_state, session_scope
@@ -57,6 +59,7 @@ from ..services.device_service import (
     NavData,
     get_device_summary,
     get_nav_data,
+    get_transport_library,
 )
 from ..services.protocol_service import get_protocol_groups, get_protocol_json
 
@@ -160,7 +163,6 @@ async def messaging_test(request: Request) -> dict[str, str]:
     Returns 200 on success, 500 if no handler is initialized or all
     services fail.
     """
-    from classes.messaging.message_handler import _handler  # noqa: PLC0415
 
     if _handler is None:
         raise HTTPException(
@@ -168,8 +170,6 @@ async def messaging_test(request: Request) -> dict[str, str]:
             detail="Messaging subsystem is not initialized. "
                    "Check that [messages] enabled = true in config.cfg and restart.",
         )
-
-    from classes.messaging.message_handler import send_message  # noqa: PLC0415
     send_message(
         message="This is a test notification from MPG Admin.",
         title="MPG Test",
@@ -190,7 +190,7 @@ async def view_log_page(request: Request):
 
 @router.get("/pages/transport-library", response_class=HTMLResponse, response_model=None)
 async def transport_library_page(request: Request):
-    from ..services.device_service import get_transport_library
+
     with session_scope() as db:
         nav: NavData = get_nav_data(db)
     library: List[dict[str, Any]] = get_transport_library(

@@ -17,12 +17,16 @@
 
 from __future__ import annotations
 
+import logging
+
 # based on https://github.com/nythepegasus/pushover-client
 import mimetypes
 from time import time
 from typing import Any, Literal, cast
 
 import requests
+
+_log: logging.Logger = logging.getLogger(__name__)
 
 # Define valid types using Literal for the static type checker
 PriorityType = Literal[-2, -1, 0, 1, 2]
@@ -176,9 +180,8 @@ class Client:
         Send a Message or Glance to the Pushover API.
         Returns the requests.Response, or None if an error occurred before the request.
         """
-        import logging as _logging
         self.last_message = message_obj
-        url = self._api_url + message_obj._api_callback
+        url: str = self._api_url + message_obj._api_callback
 
         payload: dict[str, Any] = {
             "token": self.api_token,
@@ -191,9 +194,9 @@ class Client:
         # or the empty string "" when there is no attachment.
         # requests._Files is a complex union that doesn't cleanly accept our 3-tuple;
         # cast to Any so the type checker is satisfied while runtime behavior is correct.
-        raw_attachment = getattr(message_obj, "attachment", "")
+        raw_attachment: Any | str = getattr(message_obj, "attachment", "")
         has_attachment: bool = isinstance(raw_attachment, dict)
-        files = cast(Any, raw_attachment) if has_attachment else None
+        files: Any | None = cast(Any, raw_attachment) if has_attachment else None
 
         try:
             if has_attachment:
@@ -203,9 +206,10 @@ class Client:
                 r = requests.post(url, json=payload, timeout=10.0)
 
             message_obj.response_data = r.json()
-            return r  # noqa: TRY300
 
         except requests.RequestException as exc:
-            _logging.getLogger(__name__).error("Pushover send failed: %s", exc)  # noqa: TRY400
+            _log.error("Pushover send failed: %s", exc)
             return None
+
+        return r
 
