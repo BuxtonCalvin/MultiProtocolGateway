@@ -625,5 +625,235 @@
 
 {% block scripts %}{% endblock %}
 
+<!-- ===== SETTING HELP OVERLAY ===== -->
+<!-- Triggered by .setting-help-btn clicks anywhere in the page.            -->
+<!-- z-[60] sits above nav (z-40) and existing modals (z-50).               -->
+<div id="setting-help-overlay"
+     class="fixed inset-0 z-[60] hidden items-center justify-center bg-black/70 backdrop-blur-sm"
+     role="dialog"
+     aria-modal="true"
+     aria-labelledby="shelp-title"
+     aria-describedby="shelp-body">
+
+  <div class="relative mx-4 w-full max-w-2xl rounded-xl shadow-2xl
+              bg-mpg-800 border border-mpg-600
+              flex flex-col max-h-[80vh]">
+
+    <!-- Header -->
+    <div class="flex items-start justify-between gap-4 px-6 py-4
+                border-b border-mpg-700 flex-shrink-0">
+      <div class="min-w-0">
+        <p class="text-xs font-semibold uppercase tracking-widest text-mpg-400 mb-0.5">
+          Setting
+        </p>
+        <h2 id="shelp-title"
+            class="font-mono font-bold text-accent text-lg leading-tight break-all">
+        </h2>
+      </div>
+      <button id="shelp-close"
+              class="flex-shrink-0 mt-0.5 text-mpg-400 hover:text-white
+                     focus:outline-none focus:ring-2 focus:ring-accent rounded"
+              aria-label="Close help">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+
+    <!-- Body -->
+    <div id="shelp-body" class="px-6 py-5 overflow-y-auto flex-1 space-y-4">
+
+      <!-- Default value -->
+      <div id="shelp-default-row" class="hidden">
+        <p class="text-xs font-semibold uppercase tracking-widest text-mpg-400 mb-1">
+          Default value
+        </p>
+        <p id="shelp-default"
+           class="font-mono text-sm bg-mpg-700 rounded px-3 py-1.5
+                  text-mpg-100 border border-mpg-600 inline-block">
+        </p>
+      </div>
+
+      <!-- Description -->
+      <div>
+        <p class="text-xs font-semibold uppercase tracking-widest text-mpg-400 mb-1">
+          Description
+        </p>
+        <p id="shelp-description" class="text-sm text-mpg-100 leading-relaxed"></p>
+      </div>
+
+      <!-- Used by -->
+      <div id="shelp-transports-row" class="hidden">
+        <p class="text-xs font-semibold uppercase tracking-widest text-mpg-400 mb-1.5">
+          Used by
+        </p>
+        <div id="shelp-transports" class="flex flex-wrap gap-1.5"></div>
+      </div>
+
+      <!-- Loading indicator -->
+      <p id="shelp-loading"
+         class="hidden text-sm text-mpg-400 italic animate-pulse">
+        Loading…
+      </p>
+
+      <!-- No description state -->
+      <p id="shelp-no-desc" class="hidden text-sm text-mpg-400 italic">
+        No description has been added for this setting yet.
+        You can add one on the
+        <a href="/pages/transport-settings"
+           class="text-accent underline hover:no-underline">Transport Settings</a> page.
+      </p>
+
+    </div>
+
+    <!-- Footer -->
+    <div class="px-6 py-3 border-t border-mpg-700 flex-shrink-0
+                flex items-center justify-between gap-3">
+      <a href="/pages/transport-settings"
+         class="text-xs text-mpg-400 hover:text-accent underline
+                focus:outline-none focus:ring-1 focus:ring-accent rounded">
+        Edit description ↗
+      </a>
+      <button id="shelp-dismiss"
+              class="px-4 py-1.5 text-sm rounded bg-mpg-600 hover:bg-mpg-500
+                     text-mpg-100 hover:text-white border border-mpg-500
+                     focus:outline-none focus:ring-2 focus:ring-accent transition-colors">
+        Dismiss
+      </button>
+    </div>
+
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  const overlay    = document.getElementById('setting-help-overlay');
+  const titleEl    = document.getElementById('shelp-title');
+  const defaultRow = document.getElementById('shelp-default-row');
+  const defaultEl  = document.getElementById('shelp-default');
+  const descEl     = document.getElementById('shelp-description');
+  const transRow   = document.getElementById('shelp-transports-row');
+  const transEl    = document.getElementById('shelp-transports');
+  const loadingEl  = document.getElementById('shelp-loading');
+  const noDescEl   = document.getElementById('shelp-no-desc');
+  const closeBtn   = document.getElementById('shelp-close');
+  const dismissBtn = document.getElementById('shelp-dismiss');
+
+  // ── Open / close ──────────────────────────────────────────────────────────
+
+  function openOverlay() {
+    overlay.classList.remove('hidden');
+    overlay.classList.add('flex');
+    closeBtn.focus();
+  }
+
+  function closeOverlay() {
+    overlay.classList.add('hidden');
+    overlay.classList.remove('flex');
+    if (overlay._returnFocus) {
+      overlay._returnFocus.focus();
+      overlay._returnFocus = null;
+    }
+  }
+
+  closeBtn.addEventListener('click', closeOverlay);
+  dismissBtn.addEventListener('click', closeOverlay);
+  overlay.addEventListener('click', function (e) {
+    if (e.target === overlay) closeOverlay();
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && !overlay.classList.contains('hidden')) closeOverlay();
+  });
+
+  // ── Populate ──────────────────────────────────────────────────────────────
+
+  function populate(key, defaultValue, data) {
+    titleEl.textContent = key;
+    loadingEl.classList.add('hidden');
+
+    // Default value chip
+    if (defaultValue && defaultValue !== '—' && defaultValue.trim() !== '') {
+      defaultEl.textContent = defaultValue;
+      defaultRow.classList.remove('hidden');
+    } else {
+      defaultRow.classList.add('hidden');
+    }
+
+    if (!data) {
+      descEl.textContent = '';
+      noDescEl.classList.remove('hidden');
+      transRow.classList.add('hidden');
+      return;
+    }
+
+    // Description
+    if (data.description && data.description.trim()) {
+      descEl.textContent = data.description;
+      noDescEl.classList.add('hidden');
+    } else {
+      descEl.textContent = '';
+      noDescEl.classList.remove('hidden');
+    }
+
+    // Transport badges
+    const transports = (data.transports || '').split(', ').filter(Boolean).sort();
+    if (transports.length) {
+      transEl.innerHTML = transports.map(function (t) {
+        return '<span class="px-2 py-0.5 rounded text-xs font-mono ' +
+               'bg-mpg-700 text-mpg-100 border border-mpg-600">' + t + '</span>';
+      }).join('');
+      transRow.classList.remove('hidden');
+    } else {
+      transRow.classList.add('hidden');
+    }
+  }
+
+  // ── Public API — called by delegated listener below ───────────────────────
+
+  window.showSettingHelp = function (key, defaultValue, triggerElement) {
+    overlay._returnFocus = triggerElement || null;
+
+    // Reset to loading state immediately
+    titleEl.textContent  = key;
+    descEl.textContent   = '';
+    transEl.innerHTML    = '';
+    noDescEl.classList.add('hidden');
+    transRow.classList.add('hidden');
+    loadingEl.classList.remove('hidden');
+
+    // Show default value straight away — we already have it client-side
+    if (defaultValue && defaultValue !== '—' && defaultValue.trim() !== '') {
+      defaultEl.textContent = defaultValue;
+      defaultRow.classList.remove('hidden');
+    } else {
+      defaultRow.classList.add('hidden');
+    }
+
+    openOverlay();
+
+    // Fetch description from the server
+    fetch('/api/transport-settings/description/' + encodeURIComponent(key))
+      .then(function (r) { return r.json(); })
+      .then(function (data) { populate(key, defaultValue, data); })
+      .catch(function ()   { populate(key, defaultValue, null); });
+  };
+
+  // ── Delegated click — works for HTMX-swapped partials too ────────────────
+
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest('.setting-help-btn');
+    if (!btn) return;
+    var key        = btn.dataset.key     || '';
+    var defaultVal = btn.dataset.default || btn.textContent.trim();
+    if (!key) return;
+    showSettingHelp(key, defaultVal, btn);
+  });
+
+})();
+</script>
+
 </body>
 </html>

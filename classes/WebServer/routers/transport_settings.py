@@ -58,6 +58,39 @@ def list_settings(db: Session = Depends(get_session)):
     ]
 
 
+@router.get("/description/{key}")
+def get_description(key: str, db: Session = Depends(get_session)):
+    """
+    Look up the description and transport list for a single setting key.
+    Used by the device page help overlay — called client-side when the user
+    clicks a default value cell.
+
+    Returns 200 with description (may be empty string) even when the key is
+    known but has no description yet.  Returns 404 only when the key is
+    entirely absent from the setting_descriptions table.
+    """
+    row: SettingDescription | None = (
+        db.query(SettingDescription)
+        .filter(SettingDescription.key == key)
+        .first()
+    )
+    if row is None:
+        # Key not in registry at all — return a minimal response rather than
+        # a hard 404 so the overlay can still show the key name gracefully.
+        return {
+            "key": key,
+            "description": "",
+            "transports": "",
+            "found": False,
+        }
+    return {
+        "key": row.key,
+        "description": row.description or "",
+        "transports": row.transports or "",
+        "found": True,
+    }
+
+
 @router.post("/scan")
 def scan_for_new_settings(request: Request, db: Session = Depends(get_session)):
     """
@@ -75,7 +108,6 @@ def scan_for_new_settings(request: Request, db: Session = Depends(get_session)):
             key_to_transports.setdefault(key, set()).add(transport_name)
 
     # Find genuinely new keys (not yet in DB)
-    existing_keys = {r.key for r in db.query(SettingDescription.key).all()}
     existing_keys = {r[0] for r in db.query(SettingDescription.key).all()}
 
     new_findings: list[dict] = []

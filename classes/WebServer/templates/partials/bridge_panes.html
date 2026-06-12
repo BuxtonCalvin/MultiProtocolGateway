@@ -122,11 +122,21 @@
                  hx-trigger="change delay:400ms">
         </div>
 
-        <div role="cell"
-             class="font-mono text-xs truncate leading-tight self-center
-                    {% if s.default_value %}text-accent{% else %}text-mpg-400{% endif %}"
-             title="{{ s.default_value or '—' }}">
-          {{ s.default_value or '—' }}
+        <div role="cell" class="self-center min-w-0">
+          {% if s.default_value and s.default_value.strip() %}
+          <button type="button"
+                  class="setting-help-btn font-mono text-xs text-accent
+                         hover:underline focus:outline-none focus:ring-1
+                         focus:ring-accent rounded truncate max-w-full block
+                         text-left leading-tight"
+                  data-key="{{ s.key }}"
+                  data-default="{{ s.default_value }}"
+                  aria-label="Help for {{ s.key }} (default: {{ s.default_value }})">
+            {{ s.default_value }}
+          </button>
+          {% else %}
+          <span class="font-mono text-xs text-mpg-600 leading-tight select-none">—</span>
+          {% endif %}
         </div>
 
       </div>

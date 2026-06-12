@@ -19,10 +19,14 @@
 from __future__ import annotations
 
 import logging
+from typing import Any, List
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+
+from classes.WebServer.diff_engine import DiffResult
+from classes.WebServer.models import ConfigBackup
 
 from ..config_writer import commit_all
 from ..database import get_session, refresh_app_state
@@ -39,14 +43,14 @@ router = APIRouter(prefix="/api/commit", tags=["commit"])
 
 
 @router.post("")
-def do_commit(request: Request, db: Session = Depends(get_session)):
+def do_commit(request: Request, db: Session = Depends(get_session))-> dict[str, Any]:
     """
     Full commit: backup → write config.cfg → write masks/screens/overrides →
     reset dirty flags.
     """
     state = request.app.state
     try:
-        result = commit_all(
+        result: dict[str, int | str] = commit_all(
             db=db,
             config_path=state.config_path,
             project_root=state.project_root,
@@ -56,6 +60,11 @@ def do_commit(request: Request, db: Session = Depends(get_session)):
         desc_count = commit_descriptions(db)
         db.commit()
         result["descriptions_committed"] = desc_count
+        # Recompute AppState dirty/orphan counts from the now-cleared flags so
+        # the very next /api/devices/state poll (fired by base.html after the
+        # commit response) sees zero dirty items and disables the commit button
+        # without requiring a second press.
+        refresh_app_state(db)
     except Exception as exc:
         _log.debug("descriptions not committed")
         raise HTTPException(status_code=500, detail=str(exc))
@@ -64,9 +73,9 @@ def do_commit(request: Request, db: Session = Depends(get_session)):
 
 
 @router.get("/diff")
-def diff(db: Session = Depends(get_session)):
+def diff(db: Session = Depends(get_session))-> dict[str, Any]:
     """Return structured diff of staged vs disk state."""
-    result = build_diff(db)
+    result: DiffResult = build_diff(db)
     return {
         "summary": result.summary,
         "settings": [
@@ -95,8 +104,8 @@ def diff(db: Session = Depends(get_session)):
 
 
 @router.get("/backups")
-def get_backups(db: Session = Depends(get_session)):
-    backups = list_backups(db)
+def get_backups(db: Session = Depends(get_session))-> list[dict[str, Any]]:
+    backups: List[ConfigBackup] = list_backups(db)
     return [
         {
             "id": b.id,
@@ -111,25 +120,25 @@ def get_backups(db: Session = Depends(get_session)):
 
 
 @router.post("/discard")
-def discard_changes(db: Session = Depends(get_session)):
+def discard_changes(db: Session = Depends(get_session)) -> dict[str, str]:
     """
     Discard all staged changes: reset value_staged = value_disk and
     clear all is_dirty flags. Does NOT touch the config file on disk.
     """
 
     # Reset Setting rows
-    dirty_settings = db.query(Setting).filter(Setting.is_dirty == True).all()  # noqa: E712
+    dirty_settings: List[Setting] = db.query(Setting).filter(Setting.is_dirty == True).all()  # noqa: E712
     for row in dirty_settings:
         row.value_staged = row.value_disk
         row.is_dirty = False
 
     # Reset ProtocolRegister dirty flags
-    dirty_protocols = db.query(ProtocolRegister).filter(ProtocolRegister.is_dirty == True).all()  # noqa: E712
+    dirty_protocols: List[ProtocolRegister] = db.query(ProtocolRegister).filter(ProtocolRegister.is_dirty == True).all()  # noqa: E712
     for row in dirty_protocols:
         row.is_dirty = False
 
     # Reset DeviceProtocolSelection dirty flags
-    dirty_selections = db.query(DeviceProtocolSelection).filter(DeviceProtocolSelection.is_dirty == True).all()  # noqa: E712
+    dirty_selections: List[DeviceProtocolSelection] = db.query(DeviceProtocolSelection).filter(DeviceProtocolSelection.is_dirty == True).all()  # noqa: E712
     for row in dirty_selections:
         row.is_dirty = False
 
@@ -146,7 +155,7 @@ class RollbackRequest(BaseModel):
 
 
 @router.post("/rollback")
-def do_rollback(payload: RollbackRequest, request: Request, db: Session = Depends(get_session),) :
+def do_rollback(payload: RollbackRequest, request: Request, db: Session = Depends(get_session)) -> dict[str, Any]:
     """
     Restore config.cfg from a backup, then re-scan so the DB matches the
     restored file. The config file is treated as ground truth after rollback:

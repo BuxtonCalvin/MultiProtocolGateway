@@ -561,6 +561,39 @@
       "label_y_percent": 73.40969775595602
     }
   ],
+  "device__device_help": [
+    {
+      "id": "device__device_defaults",
+      "x_percent": 15.9,
+      "y_percent": 59.1,
+      "label": "Press any default value to get its help screen.",
+      "shape_type": "rect",
+      "label_x_percent": 20.6,
+      "label_y_percent": 15.8,
+      "width_percent": 6.8,
+      "height_percent": 81.8,
+      "stroke_color": "rgb(209,167,37)",
+      "fill_color": "rgba(236,180,11,0.18)"
+    },
+    {
+      "id": "device__device_setting",
+      "x_percent": 58.6,
+      "y_percent": 34.3,
+      "label": "Setting corresponding to the default value help.",
+      "shape_type": "dot",
+      "label_x_percent": 20.2,
+      "label_y_percent": 29.7
+    },
+    {
+      "id": "device__device_setting_value",
+      "x_percent": 58.3,
+      "y_percent": 45.9,
+      "label": "The default value for the setting.  Will auto apply if the setting is not checked and a custom value filled in.",
+      "shape_type": "dot",
+      "label_x_percent": 20.2,
+      "label_y_percent": 40
+    }
+  ],
   "_aliases": {
     "device__inverter_read": "device__scraper_read_generic",
     "device__inverter_write": "device__scraper_write_generic",
@@ -581,6 +614,7 @@
     "pages__create-device": "create_device",
     "pages__analyze*": "analysis",
     "device__influxdb3": "device__bridge_generic",
-    "pages__create-protocol": "create_protocol"
+    "pages__create-protocol": "create_protocol",
+    "device__device_help": "device__device_help"
   }
 }

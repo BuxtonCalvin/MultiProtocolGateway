@@ -106,8 +106,6 @@
   "serial_number_can_id": "Alias for device_serial_number — serial number of the device for canbus.",
   "settling_delay": "Delay in milliseconds after asserting the RS-485 transmit enable line before sending data, allowing the bus to settle.",
   "slave_id": "Modbus slave/unit ID of the target device (1-247).",
-  "sn": "Canbus Serial Number.",
-  "sn_can_id": "",
   "soi": "Start-of-Identity byte sent at the beginning of each serial frame to signal frame start to the remote device.",
   "stale_data_timeout": "Seconds after which a register value is considered stale and excluded from writes.",
   "stopbits": "Number of stop bits per serial frame (1, 1.5, or 2). Must match the target device s serial configuration.",

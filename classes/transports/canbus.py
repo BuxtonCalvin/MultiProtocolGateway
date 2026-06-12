@@ -53,7 +53,7 @@ class canbus(transport_base):
     bus: can.BusABC | None = None
     ''' holds canbus interface'''
 
-    #  Do NOT instantiate can.AsyncBufferedReader() at class definition time.
+    # Do not instantiate can.AsyncBufferedReader() at class definition time.
     # Class-level mutable defaults are shared across all instances and can interact badly
     # with the asyncio event loop changes in 3.14 (get_event_loop() now raises if no loop
     # exists). The reader is assigned per-instance in __init__ instead.
@@ -115,9 +115,7 @@ class canbus(transport_base):
             try:
                 self.serial_number_can_id = int(raw_sn_can_id, 0)  # accepts 0x1A2 or decimal
             except ValueError:
-                self._log.warning(
-                    f"serial_number_can_id {raw_sn_can_id!r} in settings is not a valid integer; ignoring"
-                )
+                self._log.warning(f"serial_number_can_id {raw_sn_can_id!r} in settings is not a valid integer; ignoring")
 
         # setup / configure socketcan
         if self.interface == "socketcan":
@@ -152,7 +150,7 @@ class canbus(transport_base):
 
         self._log.info(f"setup_socketcan: configuring {self.port} at {self.baudrate} bps")
 
-        commands = [
+        commands: list[list[str]] = [
             ["ip", "link", "set", self.port, "down"],
             ["ip", "link", "set", self.port, "type", "can", "restart-ms", "100"],
             ["ip", "link", "set", self.port, "up", "type", "can", "bitrate", str(self.baudrate)],
@@ -160,7 +158,7 @@ class canbus(transport_base):
 
         for cmd in commands:
             try:
-                result = subprocess.run(  # noqa: S603
+                result: subprocess.CompletedProcess[str] = subprocess.run(  # noqa: S603
                     cmd,
                     check=True,
                     capture_output=True,
@@ -198,7 +196,7 @@ class canbus(transport_base):
         while True:
             try:
                 if self.bus is not None:
-                    msg = self.bus.recv()  # blocking call
+                    msg: can.Message | None = self.bus.recv()  # blocking call
 
             except can.CanError as e:
                 self._log.error(f"CAN error: {e}")
@@ -221,7 +219,7 @@ class canbus(transport_base):
                             self.cache[msg.arbitration_id] = (bytes(msg.data), time.time())
 
     def clean_cache(self) -> None:
-        current_time = time.time()
+        current_time: float = time.time()
 
         if self.lock is not None:
             with self.lock:
@@ -289,12 +287,12 @@ class canbus(transport_base):
 
         Returns the detected serial number string, or '' if not found.
         '''
-        # --- Step 1: pinned CAN ID (resolved in __init__ from settings) ---
+        # pinned CAN ID (resolved in __init__ from settings) ---
         if self.serial_number_can_id is not None:
             return self._sn_from_can_id(self.serial_number_can_id)
 
-        # --- Step 2: let the cache settle if it is still empty ------------
-        deadline = time.monotonic() + self._SN_SETTLE_SECS
+        # let the cache settle if it is still empty ------------
+        deadline: float = time.monotonic() + self._SN_SETTLE_SECS
         while time.monotonic() < deadline:
             if self._sn_cache_snapshot():
                 break
@@ -303,7 +301,7 @@ class canbus(transport_base):
             self._log.warning("read_serial_number: cache still empty after settling window; giving up")
             return ""
 
-        # --- Step 3: heuristic scan ---------------------------------------
+        # heuristic scan ---------------------------------------
         snapshot: dict[int, bytes] = self._sn_cache_snapshot()
         candidates: list[tuple[float, int, str]] = []
 
@@ -339,8 +337,8 @@ class canbus(transport_base):
         cache.  Used when the operator has already identified the correct
         frame via candump and pinned it in settings.
         '''
-        snapshot = self._sn_cache_snapshot()
-        payload = snapshot.get(can_id)
+        snapshot: dict[int, bytes] = self._sn_cache_snapshot()
+        payload: bytes | None = snapshot.get(can_id)
         if payload is None:
             self._log.warning(
                 f"_sn_from_can_id: pinned CAN ID 0x{can_id:X} not seen in cache yet; "
@@ -382,9 +380,9 @@ class canbus(transport_base):
             return 0.0, ""
 
         # --- ASCII path ---------------------------------------------------
-        printable = sum(0x20 <= b < 0x7F for b in payload)
-        ascii_ratio = printable / len(payload)
-        alnum_count = sum(chr(b).isalnum() for b in payload if 0x20 <= b < 0x7F)
+        printable: int = sum(0x20 <= b < 0x7F for b in payload)
+        ascii_ratio: float = printable / len(payload)
+        alnum_count: int = sum(chr(b).isalnum() for b in payload if 0x20 <= b < 0x7F)
 
         if ascii_ratio >= self._SN_ASCII_RATIO and alnum_count >= self._SN_MIN_ALNUM:
             # Strip null padding and non-printable trailer bytes
@@ -403,7 +401,7 @@ class canbus(transport_base):
                 continue
             parts = []
             for i in range(0, len(payload), word_size):
-                word = int.from_bytes(payload[i:i + word_size], byteorder="big")
+                word: int = int.from_bytes(payload[i:i + word_size], byteorder="big")
                 # Skip all-zero or all-FF padding words
                 if word in (0, (1 << (word_size * 8)) - 1):
                     continue
@@ -413,7 +411,7 @@ class canbus(transport_base):
             candidate = "".join(parts)
             if re.fullmatch(r"\d{6,}", candidate):
                 # Lower confidence than ASCII; score by word count / payload use
-                score = 0.4 + 0.1 * len(parts)
+                score: float = 0.4 + 0.1 * len(parts)
                 return round(score, 3), candidate
 
         return 0.0, ""
@@ -433,14 +431,14 @@ class canbus(transport_base):
         if self.lock is not None:
             with self.lock:
                 if self.cache is not None and self.protocolSettings is not None:
-                    registry = {key: value[0] for key, value in self.cache.items()}
+                    registry: dict[int, bytes] = {key: value[0] for key, value in self.cache.items()}
 
                     new_info: dict[str, int | float | str] = self.protocolSettings.process_registery(
                         registry,
                         self.protocolSettings.get_registry_map(Registry_Type.ZERO)
                     )
                     info.update(new_info)
-                    currentTime = time.time()
+                    currentTime: float = time.time()
 
                     if not info:
                         self._log.info("Register/Cache is Empty; no new information reported.")
@@ -462,7 +460,7 @@ class canbus(transport_base):
             variable_name = variable_name.strip().lower().replace(" ", "_")
 
         if self.cache is not None and self.protocolSettings is not None:
-            registry_map = self.protocolSettings.get_registry_map(registry_type)
+            registry_map: list[registry_map_entry] = self.protocolSettings.get_registry_map(registry_type)
 
             if entry is None:
                 for e in registry_map:
