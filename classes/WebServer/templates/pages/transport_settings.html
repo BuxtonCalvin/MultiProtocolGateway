@@ -2,6 +2,19 @@
   Description: Defines the transport_settings web UI template for the MultiProtocolGateway admin interface.
   File: transport_settings.html
 
+
+Complete lifecycle
+
+| Event | DB | transport_defaults.json | setting_descriptions.json |
+| :--- | :--- | :--- | :--- |
+| Startup scan | Keys upserted | New keys/transports added | New key stubs added |
+| UI "Scan" button | New rows inserted, stale rows deleted | New keys added, removed keys purged | New stubs added, removed keys purged |
+| User edits description | Row marked dirty | — | — |
+| Global Commit | description_disk updated, is_dirty cleared | — | Full map written |
+| Discard | description reset to description_disk | — | — |
+| Delete settings.get() from source + restart | Row marked orphan | Purged on next UI scan | Purged on next UI scan |
+
+
   Copyright 2026 Kevin Burke
 
   Licensed under the Apache License, Version 2.0 (the "License");

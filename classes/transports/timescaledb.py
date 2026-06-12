@@ -547,7 +547,7 @@ class timescaledb(transport_base):
     # and trigger a cleanup of incomplete batches in the database, as well as an optional upstream reconnect if request_upstream_reconnect
     # callback is set by the user.
     stale_data_timeout: int = 300       # seconds before considering data stale for incomplete batch cleanup
-    max_stale_attempts: int = 3
+    max_stale_attempts: int = 3         # Number of times to read the data stream to determine if it's stale.
     retry_delay_mins: int = 5
 
     current_metric_count: int = 0

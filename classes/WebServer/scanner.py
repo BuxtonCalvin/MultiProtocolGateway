@@ -175,7 +175,62 @@ def _transport_type_from_ast(py_file: Path) -> str:
 # AST settings-proxy scanner
 # ---------------------------------------------------------------------------
 
-def _extract_settings_keys_from_ast(py_path: Path) -> dict[str, str]:
+def _extract_class_attr_defaults(tree: ast.Module) -> dict[str, str]:
+    """
+    Scan a parsed module for class-level and __init__ constant assignments
+    so that self.attr references in settings.get(fallback=self.attr) can
+    be resolved without importing the module.
+
+    Handles:
+        class Foo:
+            host: str = "localhost"   # AnnAssign
+            batch_size = 100          # Assign
+
+        def __init__(self, ...):
+            self.reconnect_attempts = 5   # instance assign before settings.get
+    """
+    attrs: dict[str, str] = {}
+
+    for node in tree.body:
+        if not isinstance(node, ast.ClassDef):
+            continue
+
+        # Class-level attribute assignments
+        for stmt in node.body:
+            if isinstance(stmt, ast.Assign):
+                for target in stmt.targets:
+                    if (isinstance(target, ast.Name)
+                            and isinstance(stmt.value, ast.Constant)
+                            and stmt.value.value is not None):
+                        attrs[target.id] = str(stmt.value.value)
+            elif isinstance(stmt, ast.AnnAssign):
+                if (isinstance(stmt.target, ast.Name)
+                        and stmt.value is not None
+                        and isinstance(stmt.value, ast.Constant)
+                        and stmt.value.value is not None):
+                    attrs[stmt.target.id] = str(stmt.value.value)
+
+        # __init__ bare self.attr = <constant> before settings.get() calls
+        for stmt in node.body:
+            if not (isinstance(stmt, ast.FunctionDef) and stmt.name == "__init__"):
+                continue
+            for inner in ast.walk(stmt):
+                if not isinstance(inner, ast.Assign):
+                    continue
+                for target in inner.targets:
+                    if (isinstance(target, ast.Attribute)
+                            and isinstance(target.value, ast.Name)
+                            and target.value.id == "self"
+                            and isinstance(inner.value, ast.Constant)
+                            and inner.value.value is not None):
+                        # Only set if not already present — first assignment wins
+                        if target.attr not in attrs:
+                            attrs[target.attr] = str(inner.value.value)
+
+    return attrs
+
+
+def _extract_settings_keys_from_ast(py_path: Path) -> dict[str, str | None]:
     """
     Walk the AST of a transport .py file and find all patterns like:
         settings.get("key", ...)
@@ -183,15 +238,25 @@ def _extract_settings_keys_from_ast(py_path: Path) -> dict[str, str]:
         settings.getfloat("key", ...)
         settings.getboolean("key", ...)
 
-    Returns {key: default_value_string}.
+    Returns {key: default_value_or_None}.
+
+    Resolution order for the default value:
+      1. Literal constant in the call:  settings.get("key", "default")
+      2. self.attr reference resolved via class body or __init__ assignment:
+             self.batch_size = 100
+             settings.getint("batch_size", fallback=self.batch_size)  → "100"
+      3. None — no default resolvable; callers fall through to JSON registry.
     """
-    found: dict[str, str] = {}
+    found: dict[str, str | None] = {}
     try:
         source: str = py_path.read_text(encoding="utf-8")
         tree: ast.Module = ast.parse(source)
     except Exception as exc:
         _log.warning(f"AST parse failed for {py_path.name}: {exc}")
         return found
+
+    # Build attr-name → default map for resolving self.attr fallbacks
+    class_attrs: dict[str, str] = _extract_class_attr_defaults(tree)
 
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
@@ -217,17 +282,26 @@ def _extract_settings_keys_from_ast(py_path: Path) -> dict[str, str]:
                 if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
                     keys_to_add.append(elt.value)
 
-        # Extract fallback value if present
-        default_val = ""
+        # Extract fallback — literal constant, self.attr lookup, or None
+        default_val: str | None = None
         for kw in node.keywords:
-            if kw.arg == "fallback" and isinstance(kw.value, ast.Constant):
-                default_val = str(kw.value.value)
+            if kw.arg == "fallback":
+                if isinstance(kw.value, ast.Constant):
+                    default_val = str(kw.value.value)
+                elif (isinstance(kw.value, ast.Attribute)
+                        and isinstance(kw.value.value, ast.Name)
+                        and kw.value.value.id == "self"):
+                    default_val = class_attrs.get(kw.value.attr)  # None if unresolvable
                 break
-        # Also check positional arg[1] as a fallback
-        if not default_val and len(node.args) >= 2:
+        # Positional arg[1] fallback
+        if default_val is None and len(node.args) >= 2:
             arg2 = node.args[1]
             if isinstance(arg2, ast.Constant):
                 default_val = str(arg2.value)
+            elif (isinstance(arg2, ast.Attribute)
+                    and isinstance(arg2.value, ast.Name)
+                    and arg2.value.id == "self"):
+                default_val = class_attrs.get(arg2.attr)
 
         for k in keys_to_add:
             if k not in found:
@@ -260,19 +334,28 @@ def scan_transport_library(transports_dir: Path) -> dict[str, dict[str, Any]]:
 
         classification: str = _transport_type_from_ast(py_file)
 
-        # Keys from AST scan of this file
-        ast_keys: dict[str, str] = _extract_settings_keys_from_ast(py_file)
+        # Keys from AST scan of this file.
+        # Values are str | None — None means the settings.get() call had no
+        # default argument in source code.
+        ast_keys: dict[str, str | None] = _extract_settings_keys_from_ast(py_file)
 
         if classification == "bridge":
             # Bridges: only expose the keys they explicitly read via settings.get(...).
             # Do not inject scraper-oriented base keys (protocol_version, read_interval,
             # variable_mask, device_location, bridge, analyze_protocol, etc.).
-            merged: dict[str, str] = ast_keys
+            merged: dict[str, str | None] = ast_keys
         else:
-            # Scrapers and base classes: supplement AST with the registry defaults
-            # so common Modbus/TCP keys are always present even if not in every file.
+            # Scrapers and base classes: start with the JSON registry defaults, then
+            # overlay AST values — but only where the AST found an explicit default.
+            # A None AST value means settings.get("key") had no second argument;
+            # in that case the JSON registry default is the better value to keep.
             known_keys: dict[str, str] = known_transport_keys.get(stem, transport_base_keys)
-            merged = {**known_keys, **ast_keys}
+            merged = dict(known_keys)  # start with full JSON defaults (all str)
+            for k, v in ast_keys.items():
+                if v is not None:
+                    merged[k] = v   # AST has an explicit default — it wins
+                elif k not in merged:
+                    merged[k] = ""  # new key, no default anywhere
 
         result[stem] = {
             "classification": classification,
@@ -528,7 +611,7 @@ def _upsert_setting(
     key: str,
     value_disk: str,
     transport_type: str,
-    default_value: str = "",
+    default_value: str | None = None,
     is_active: bool = True,
     cfg_is_truth: bool = False,
 ) -> Setting:
@@ -539,9 +622,12 @@ def _upsert_setting(
     - If cfg_is_truth=True (startup scan when config changed, or post-rollback):
       also sync value_staged = value_disk so config is ground truth with no stale edits.
 
-    Bug fix: default_value is updated whenever the caller provides a non-None
-    value, replacing the previous `default_value or existing.default_value`
-    which silently ignored falsy new defaults such as "0", "false", or "".
+    default_value uses None as a sentinel meaning "caller has no default to offer;
+    leave whatever is already stored in the DB".  An explicit "" means the transport
+    genuinely has no default for this key and the DB should reflect that.
+    This is important because _get_default() returns None (not "") when the registry
+    has no entry for a key — so existing stored defaults are never overwritten by
+    a missing registry lookup.
     """
     existing: Setting | None = (
         db.query(Setting)
@@ -551,8 +637,9 @@ def _upsert_setting(
 
     if existing:
         existing.value_disk = value_disk
-        # Update default whenever the caller supplies one, even if it is
-        # a falsy string — this ensures code-level default changes propagate.
+        # Only update stored default when the caller explicitly provides one.
+        # None means "no default known" — leave the existing DB value untouched.
+        # "" means the transport genuinely has no default — update accordingly.
         if default_value is not None:
             existing.default_value = default_value
         existing.transport_type = transport_type
@@ -569,7 +656,7 @@ def _upsert_setting(
             key=key,
             value_disk=value_disk,
             value_staged=value_disk,
-            default_value=default_value,
+            default_value=default_value if default_value is not None else "",
             transport_type=transport_type,
             is_active=is_active,
             is_dirty=False,
@@ -940,12 +1027,29 @@ class Scanner:
                 transport_name: str = keys.get("transport", "").strip()
                 transport_type = _classify_transport(section, keys, self.transports_dir)
 
-                # Merge: JSON registry baseline + live AST-scanned keys.
-                # Live AST keys take precedence so a code-level default change
-                # always wins over a stale value in the JSON file.
-                registry_keys: dict[str, str] = dict(known_transport_keys.get(transport_name, {}))
+                # Build the merged key→default map for this transport section.
+                #
+                # Start with the JSON registry (fully resolved, includes $extends
+                # inheritance), then overlay live AST-scanned keys so that any
+                # explicit default in the transport source code takes precedence.
+                #
+                # AST values may be None when settings.get("key") has no second
+                # argument.  For those we keep the JSON registry default so the
+                # UI always has something useful to show.
+                json_defaults: dict[str, str] = dict(known_transport_keys.get(transport_name, {}))
                 lib_entry: dict[str, Any] = transport_library.get(transport_name, {})
-                registry_keys.update(lib_entry.get("keys", {}))
+                ast_keys_raw: dict[str, str | None] = lib_entry.get("keys", {})
+
+                # Merged: JSON baseline, overridden only where AST has a real value
+                registry_keys: dict[str, str] = dict(json_defaults)
+                for k, ast_val in ast_keys_raw.items():
+                    if ast_val is not None:
+                        # AST found an explicit default — it wins
+                        registry_keys[k] = ast_val
+                    elif k not in registry_keys:
+                        # AST found the key exists but has no default;
+                        # JSON has no entry either — add with empty default
+                        registry_keys[k] = ""
 
                 for k, default_v in registry_keys.items():
                     if k not in keys:  # not already set in config.cfg
@@ -967,7 +1071,7 @@ class Scanner:
             # ----------------------------------------------------------------
             #  Scan protocol CSV/JSON files
             # ----------------------------------------------------------------
-            registers: List[dict[str, Any]] = scan_protocols_dir(self.protocols_dir)
+            registers = scan_protocols_dir(self.protocols_dir)
             skipped = 0
             for reg in registers:
                 result: ProtocolRegister | None = _upsert_protocol_register(db, reg)
@@ -1028,25 +1132,42 @@ class Scanner:
         key: str,
         section_keys: dict[str, str],
         transport_library: dict[str, dict[str, Any]],
-    ) -> str:
+    ) -> str | None:
         """
         Look up the default value for a key.
+
+        Returns None (not "") when no default is found anywhere. This is the
+        sentinel that tells _upsert_setting to leave the existing stored default
+        untouched rather than overwriting a good value with an empty string.
 
         Priority order:
           1. Live AST scan result for this transport (most current)
           2. JSON registry entry for this transport
           3. JSON registry _base fallback
-          4. Empty string
+          4. None — no default known; do not overwrite existing DB value
         """
         transport_name: str = section_keys.get("transport", "").strip()
 
-        # 1. Live AST result
+        # 1. Live AST result.
+        # The AST dict value is None when the transport source has no second
+        # argument on settings.get("key") — meaning no default was specified
+        # in code.  We skip those and fall through to the JSON registry so
+        # the hand-curated defaults are used instead.
+        # A key absent from the dict entirely also returns None from .get().
         lib_entry: dict[str, Any] = transport_library.get(transport_name, {})
-        ast_default: str | None = lib_entry.get("keys", {}).get(key)
-        if ast_default is not None:
-            return ast_default
+        ast_keys: dict[str, str | None] = lib_entry.get("keys", {})
+        if key in ast_keys and ast_keys[key] is not None:
+            return ast_keys[key]
 
-        # 2. JSON registry for this transport, falling back to _base
+        # 2 & 3. JSON registry for this transport, falling back to _base.
+        # Use a private sentinel to distinguish found-with-value-""
+        # from not-found-at-all.
+        _MISSING = object()
         known: dict[str, dict[str, str]] = get_known_transport_keys()
         transport_defaults: dict[str, str] = known.get(transport_name, get_transport_base_keys())
-        return transport_defaults.get(key, "")
+        result: str | object = transport_defaults.get(key, _MISSING)
+        if result is not _MISSING:
+            return str(result)
+
+        # 4. Not found anywhere — return None so existing DB default is preserved.
+        return None

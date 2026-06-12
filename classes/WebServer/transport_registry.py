@@ -44,6 +44,15 @@ Both files live alongside this module in the same package directory:
 
 Override the location at startup via:
     transport_registry.configure(registry_dir=Path("/custom/path"))
+
+IMPORTANT — private base/mixin entries
+---------------------------------------
+Entries whose names start with "_" (e.g. "_base", "_modbus_base") are
+internal inheritance templates.  They are kept in the raw dict during
+resolution but are NEVER exposed to callers as real transports.
+
+The literal "_comment" key (written by _save_json for human readability)
+is stripped on load so it does not interfere with resolution.
 """
 
 from __future__ import annotations
@@ -62,9 +71,9 @@ _log: logging.Logger = logging.getLogger(__name__)
 # Default: files sit next to this module.  Call configure() to override.
 _registry_dir: Path = Path(__file__).parent
 
-# In-process caches — populated on first load, cleared by configure().
-_defaults_cache: dict[str, Any] | None = None       # raw JSON (with $extends)
-_resolved_cache: dict[str, dict[str, str]] | None = None  # flat per-transport
+# In-process caches — populated on first load, cleared by configure() or sync.
+_defaults_cache: dict[str, Any] | None = None       # raw JSON (with $extends, with _base etc.)
+_resolved_cache: dict[str, dict[str, str]] | None = None  # flat per-transport (public transports only)
 _descriptions_cache: dict[str, str] | None = None   # key → description string
 
 
@@ -96,10 +105,16 @@ def _descriptions_path() -> Path:
 
 
 def _load_json(path: Path) -> dict[str, Any]:
-    """Read a JSON file and return its contents, stripping _comment keys."""
+    """
+    Read a JSON file and return its contents.
+
+    Only the literal "_comment" key is stripped — private base/mixin entries
+    like "_base" and "_modbus_base" are intentionally kept so that $extends
+    resolution works correctly after a round-trip through _save_json.
+    """
     try:
         data: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
-        return {k: v for k, v in data.items() if not k.startswith("_")}
+        return {k: v for k, v in data.items() if k != "_comment"}
     except FileNotFoundError:
         _log.warning("transport_registry: file not found: %s — returning empty dict", path)
         return {}
@@ -109,7 +124,12 @@ def _load_json(path: Path) -> dict[str, Any]:
 
 
 def _save_json(path: Path, data: dict[str, Any], comment: str = "") -> None:
-    """Write a JSON file, inserting the _comment key first if provided."""
+    """
+    Write a JSON file, inserting the _comment key first if provided.
+
+    Private base entries (keys starting with "_") are written back to the
+    file so $extends chains survive the round-trip.
+    """
     payload: dict[str, Any] = {}
     if comment:
         payload["_comment"] = comment
@@ -131,10 +151,11 @@ def _resolve_transport(
     Rules
     -----
     - A transport dict may contain "$extends": "<parent_name>" pointing at
-      another key in the raw dict (typically "_base" or "_modbus_base").
+      another key in the raw dict (e.g. "_base" or "_modbus_base").
     - The resolved dict is: parent_keys | own_keys (own keys win).
     - "$extends" is stripped from the output.
     - Cycles are detected and broken with a warning.
+    - Keys named "$extends" or starting with "$" are never included in output.
     """
     if visited is None:
         visited = set()
@@ -148,7 +169,7 @@ def _resolve_transport(
 
     own_keys: dict[str, str] = {
         k: str(v) for k, v in entry.items()
-        if k != "$extends" and not k.startswith("_")
+        if not k.startswith("$")
     }
 
     if parent_name:
@@ -161,16 +182,20 @@ def _resolve_transport(
 def _load_defaults() -> tuple[dict[str, Any], dict[str, dict[str, str]]]:
     """
     Load and resolve transport_defaults.json.
-    Returns (raw_dict, resolved_dict).
-    raw_dict   — the unprocessed JSON (minus _comment), used for writes.
-    resolved_dict — flat {transport_name: {key: default}} with inheritance applied.
-                    Internal names starting with "_" are excluded from the resolved dict.
+
+    Returns
+    -------
+    raw_dict     : unprocessed JSON minus _comment, used for writes.
+                   Includes private "_base" / "_modbus_base" entries so that
+                   $extends chains remain intact across save/load cycles.
+    resolved_dict: flat {transport_name: {key: default}} with inheritance
+                   applied.  Only public (non-"_") transport names are included.
     """
     raw = _load_json(_defaults_path())
     resolved: dict[str, dict[str, str]] = {}
     for name in raw:
         if name.startswith("_"):
-            continue  # private base/mixin entries — not a real transport
+            continue  # private base/mixin — not a real transport
         resolved[name] = _resolve_transport(name, raw)
     return raw, resolved
 
@@ -182,8 +207,8 @@ def _load_defaults() -> tuple[dict[str, Any], dict[str, dict[str, str]]]:
 def get_known_transport_keys() -> dict[str, dict[str, str]]:
     """
     Return {transport_name: {key: default_value}} for all transports.
-    Inheritance ($extends) is fully resolved; internal entries are excluded.
-    Result is cached for the process lifetime.
+    Inheritance ($extends) is fully resolved; internal "_" entries are excluded.
+    Result is cached for the process lifetime (invalidated by sync or configure).
     """
     global _defaults_cache, _resolved_cache
     if _resolved_cache is None:
@@ -206,7 +231,7 @@ def get_transport_base_keys() -> dict[str, str]:
 def get_setting_descriptions() -> dict[str, str]:
     """
     Return {key: description_string} for all known setting keys.
-    Result is cached for the process lifetime.
+    Result is cached for the process lifetime (invalidated by sync or configure).
     """
     global _descriptions_cache
     if _descriptions_cache is None:
@@ -232,6 +257,43 @@ def get_description_for(key: str) -> str:
     return get_setting_descriptions().get(key, "")
 
 
+def write_descriptions_to_json(descriptions: dict[str, str]) -> None:
+    """
+    Persist a complete {key: description} mapping to setting_descriptions.json.
+
+    Called by commit_descriptions() so that user-edited descriptions written
+    through the Transport Settings UI are flushed to the JSON file on every
+    commit.  This keeps setting_descriptions.json in sync with the DB without
+    requiring any manual developer action, and ensures the file is always a
+    usable distribution master for the application.
+
+    Merges with the existing file so that keys not present in the caller's
+    dict (e.g. keys the caller didn't touch) are preserved unchanged.
+    The file is written in alphabetical key order for clean diffs.
+    """
+    global _descriptions_cache
+    existing: dict[str, str] = dict(_load_json(_descriptions_path()))
+    # Overlay: caller's values win; unmentioned keys are preserved
+    merged = {**existing, **descriptions}
+    sorted_merged = dict(sorted(merged.items()))
+    _save_json(
+        _descriptions_path(),
+        sorted_merged,
+        comment=(
+            "Human-readable descriptions for every known transport setting key. "
+            "Edit this file to update the descriptions shown in the Transport Settings UI. "
+            "Keys discovered by the AST scanner that have no entry here will show an empty "
+            "description until one is added."
+        ),
+    )
+    # Invalidate cache so next read picks up the freshly written file
+    _descriptions_cache = None
+    _log.info(
+        "transport_registry: wrote %d descriptions to %s",
+        len(sorted_merged), _descriptions_path().name,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Sync — keeps JSON files current after an AST scan
 # ---------------------------------------------------------------------------
@@ -241,9 +303,11 @@ def sync_from_library(
     *,
     write_defaults: bool = True,
     write_descriptions: bool = True,
+    purge_removed: bool = False,
 ) -> dict[str, int]:
     """
-    Merge newly discovered keys from an AST transport scan into the JSON files.
+    Merge newly discovered keys from an AST transport scan into the JSON files
+    and optionally purge keys that are no longer present in any transport.
 
     Parameters
     ----------
@@ -255,45 +319,126 @@ def sync_from_library(
     write_descriptions : bool
         When True, add any key not yet in setting_descriptions.json.
         Existing descriptions are never overwritten.
+    purge_removed : bool
+        When True, remove from both JSON files any key that is no longer
+        present in any transport in the library.  Safe to enable at startup
+        once the codebase is stable — makes deletion of settings.get() calls
+        fully automatic.
+
+        Purge rules:
+        - A key is only removed from transport_defaults.json if it is absent
+          from ALL transports' resolved key sets (including inherited keys).
+          Keys that belong to _base / _modbus_base are never auto-purged from
+          those templates — only from leaf transport entries.
+        - A transport entry is removed from transport_defaults.json if the
+          transport file no longer exists in the library at all.
+        - setting_descriptions.json entries are purged when the key is no
+          longer in any transport.
 
     Returns
     -------
-    dict with counts: new_transports, new_default_keys, new_description_keys
+    dict with counts: new_transports, new_default_keys, new_description_keys,
+                      purged_transport_keys, purged_transports, purged_description_keys
     """
-    stats = {"new_transports": 0, "new_default_keys": 0, "new_description_keys": 0}
+    stats = {
+        "new_transports": 0,
+        "new_default_keys": 0,
+        "new_description_keys": 0,
+        "purged_transport_keys": 0,
+        "purged_transports": 0,
+        "purged_description_keys": 0,
+    }
+
+    # Build the complete set of all keys seen across every transport in the
+    # library scan.  Used for purge decisions.
+    all_live_keys: set[str] = set()
+    for info in library.values():
+        all_live_keys.update(info.get("keys", {}).keys())
 
     # ---- Sync transport_defaults.json ----
-    if write_defaults:
+    if write_defaults or purge_removed:
         global _defaults_cache, _resolved_cache
-        # Always reload from disk so we include any hand-edits made since startup
+        # Always reload from disk so we include any hand-edits made since startup.
+        # _load_json keeps "_base" / "_modbus_base" entries so $extends chains
+        # survive the round-trip intact.
         raw, _ = _load_defaults()
 
         changed = False
-        for transport_name, info in sorted(library.items()):
-            ast_keys: dict[str, str] = info.get("keys", {})
-            if not ast_keys:
-                continue
 
-            if transport_name not in raw:
-                # Entirely new transport — add it with all its AST keys
-                raw[transport_name] = dict(ast_keys.items())
-                stats["new_transports"] += 1
-                stats["new_default_keys"] += len(ast_keys)
+        # -- Add new transports / keys --
+        if write_defaults:
+            for transport_name, info in sorted(library.items()):
+                # ast_keys values may be None when settings.get("key") had no
+                # second argument in source.  We never write None into JSON —
+                # absent entries stay absent so the user can fill them in via the UI.
+                ast_keys_raw: dict[str, str | None] = info.get("keys", {})
+                ast_all_keys: set[str] = set(ast_keys_raw.keys())
+
+                if not ast_all_keys:
+                    continue
+
+                if transport_name not in raw:
+                    # Entirely new transport — add all keys we have real defaults for.
+                    # Keys with no AST default are added as "" so they appear in the UI.
+                    raw[transport_name] = {
+                        k: (ast_keys_raw[k] if ast_keys_raw[k] is not None else "")
+                        for k in ast_all_keys
+                    }
+                    stats["new_transports"] += 1
+                    stats["new_default_keys"] += len(ast_all_keys)
+                    changed = True
+                    _log.info("transport_registry: added new transport '%s' (%d keys)", transport_name, len(ast_all_keys))
+                else:
+                    # Known transport — only add keys not already covered
+                    # (either directly or via $extends inheritance).
+                    entry: dict[str, Any] = raw[transport_name]
+                    resolved_existing = _resolve_transport(transport_name, raw)
+                    for key in sorted(ast_all_keys):
+                        if key not in resolved_existing:
+                            # Use the AST default if available, otherwise ""
+                            entry[key] = ast_keys_raw[key] if ast_keys_raw[key] is not None else ""
+                            stats["new_default_keys"] += 1
+                            changed = True
+                            _log.debug(
+                                "transport_registry: added key '%s' to transport '%s'",
+                                key, transport_name,
+                            )
+
+        # -- Purge removed transports and keys --
+        if purge_removed:
+            live_transport_names: set[str] = set(library.keys())
+
+            # Remove entire transport entries that no longer exist as files.
+            # Never remove private base/mixin entries (names starting with "_").
+            to_remove_transports: list[str] = [
+                name for name in list(raw.keys())
+                if not name.startswith("_") and name not in live_transport_names
+            ]
+            for name in to_remove_transports:
+                del raw[name]
+                stats["purged_transports"] += 1
                 changed = True
-                _log.info("transport_registry: added new transport '%s' (%d keys)", transport_name, len(ast_keys))
+                _log.info("transport_registry: purged removed transport '%s'", name)
 
-            else:
-                # Known transport — only add keys that are absent
-                entry: dict[str, Any] = raw[transport_name]
-                # Resolve to flat to check what's already covered via inheritance
-                resolved_existing = _resolve_transport(transport_name, raw)
-                for key, default_val in sorted(ast_keys.items()):
-                    if key not in resolved_existing:
-                        # Add directly to this transport's own entry (not the parent)
-                        entry[key] = default_val
-                        stats["new_default_keys"] += 1
-                        changed = True
-                        _log.debug("transport_registry: added key '%s' to transport '%s'", key, transport_name)
+            # Remove individual keys from leaf transport entries that are no
+            # longer in any transport's live key set.
+            # Never touch private base/mixin entries directly — they are managed
+            # manually since the AST cannot trace inheritance.
+            for transport_name, entry in raw.items():
+                if transport_name.startswith("_"):
+                    continue  # leave _base / _modbus_base alone
+                keys_to_purge: list[str] = [
+                    k for k in list(entry.keys())
+                    if not k.startswith("$") and k not in all_live_keys
+                ]
+                for k in keys_to_purge:
+                    del entry[k]
+                    stats["purged_transport_keys"] += 1
+                    changed = True
+                    _log.info(
+                        "transport_registry: purged removed key '%s' from transport '%s'",
+                        k, transport_name,
+                    )
 
         if changed:
             _save_json(
@@ -305,26 +450,37 @@ def sync_from_library(
                     "with live AST-scanned keys on every startup so the file stays in sync automatically."
                 ),
             )
-            # Invalidate cache so callers pick up the new data
+            # Invalidate cache so callers pick up the updated data on next access.
             _defaults_cache = None
             _resolved_cache = None
 
     # ---- Sync setting_descriptions.json ----
-    if write_descriptions:
+    if write_descriptions or purge_removed:
         global _descriptions_cache
         descs: dict[str, str] = dict(_load_json(_descriptions_path()))
 
         changed = False
-        for info in library.values():
-            for key in info.get("keys", {}):
-                if key not in descs:
-                    descs[key] = ""   # empty — user fills in via the UI
-                    stats["new_description_keys"] += 1
-                    changed = True
-                    _log.debug("transport_registry: added description stub for key '%s'", key)
+
+        if write_descriptions:
+            for info in library.values():
+                for key in info.get("keys", {}):
+                    if key not in descs:
+                        descs[key] = ""   # empty stub — user fills in via the UI
+                        stats["new_description_keys"] += 1
+                        changed = True
+                        _log.debug("transport_registry: added description stub for key '%s'", key)
+
+        if purge_removed:
+            stale_desc_keys: list[str] = [
+                k for k in list(descs.keys()) if k not in all_live_keys
+            ]
+            for k in stale_desc_keys:
+                del descs[k]
+                stats["purged_description_keys"] += 1
+                changed = True
+                _log.info("transport_registry: purged description for removed key '%s'", k)
 
         if changed:
-            # Write alphabetically for easy human editing
             sorted_descs = dict(sorted(descs.items()))
             _save_json(
                 _descriptions_path(),
@@ -338,10 +494,13 @@ def sync_from_library(
             )
             _descriptions_cache = None
 
-    if stats["new_transports"] or stats["new_default_keys"] or stats["new_description_keys"]:
+    if any(stats.values()):
         _log.info(
-            "transport_registry sync: %d new transports, %d new default keys, %d new description stubs",
+            "transport_registry sync: "
+            "%d new transports, %d new default keys, %d new description stubs | "
+            "purged: %d transports, %d transport keys, %d description keys",
             stats["new_transports"], stats["new_default_keys"], stats["new_description_keys"],
+            stats["purged_transports"], stats["purged_transport_keys"], stats["purged_description_keys"],
         )
 
     return stats

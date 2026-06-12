@@ -287,6 +287,7 @@ def create_app(
         app.state.config_dir = config_dir or config_path.parent
         app.state.log_file = log_file
         app.state.log_dir = log_dir
+        app.state.db_dir = db_dir
 
         # Seed/update the setting_descriptions table on every startup
         with session_scope() as db:
@@ -656,6 +657,14 @@ def create_app(
     @app.get("/api/scan", tags=["admin"])
     async def trigger_scan(request: Request) -> dict[str, Any]:
         """Manually trigger a re-scan of config + protocols."""
+        # from classes.WebServer.debug_defaults import check_stale_db_rows, run_debug
+        # run_debug(project_root=request.app.state.project_root, config_path=request.app.state.config_path)
+        # check_stale_db_rows(
+        #     db_path=request.app.state.db_dir / "mpg_staging.db",
+        #     config_path=request.app.state.config_path,
+        #     transports_dir=request.app.state.transports_dir,
+        # )
+
         try:
             stats: dict[str, int] = request.app.state.scanner.run()
         except Exception as exc:

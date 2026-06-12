@@ -28,7 +28,6 @@ appear in the UI without any manual maintenance.
 """
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 from typing import Any, List
 
@@ -36,9 +35,13 @@ from sqlalchemy.orm import Session
 
 from ..models import SettingDescription
 from ..scanner import scan_transport_library
-from ..transport_registry import get_setting_descriptions, sync_from_library
+from ..transport_registry import (
+    get_setting_descriptions,
+    sync_from_library,
+    write_descriptions_to_json,
+)
 
-_log: logging.Logger = logging.getLogger(__name__)
+_log = __import__("logging").getLogger(__name__)
 
 
 def seed_setting_descriptions(
@@ -64,7 +67,7 @@ def seed_setting_descriptions(
 
     # Keep transport_defaults.json and setting_descriptions.json current.
     # New keys get an empty description stub; existing entries are untouched.
-    sync_from_library(library, write_defaults=True, write_descriptions=True)
+    sync_from_library(library, write_defaults=True, write_descriptions=True, purge_removed=purge_removed)
 
     # Reload descriptions after the sync so newly added stubs are visible
     # in the same startup pass.
@@ -160,6 +163,16 @@ def discard_descriptions(db: Session) -> None:
 
 
 def commit_descriptions(db: Session) -> int:
+    """
+    Commit all staged description edits:
+      1. Flush description → description_disk in the DB and clear is_dirty.
+      2. Write the full current descriptions map to setting_descriptions.json
+         so the JSON file stays in sync with the DB without any manual steps.
+
+    Writing the complete map (not just dirty rows) ensures the JSON always
+    reflects the full authoritative state — it is safe to call on every
+    global commit even if nothing changed.
+    """
     dirty: List[SettingDescription] = (
         db.query(SettingDescription)
         .filter(SettingDescription.is_dirty == True)  # noqa: E712
@@ -170,4 +183,18 @@ def commit_descriptions(db: Session) -> int:
         row.description_disk = row.description
         row.is_dirty = False
     db.flush()
+
+    # Write ALL current descriptions to JSON — not just the dirty rows.
+    # This keeps setting_descriptions.json as a reliable distribution master
+    # that developers can rely on without remembering to manually sync it.
+    all_rows: List[SettingDescription] = db.query(SettingDescription).all()
+    descriptions_map: dict[str, str] = {
+        row.key: (row.description or "") for row in all_rows
+    }
+    try:
+        write_descriptions_to_json(descriptions_map)
+    except Exception as exc:
+        _log.error("commit_descriptions: failed to write JSON file: %s", exc)
+        # Do not re-raise — the DB commit succeeded; JSON is a convenience file.
+
     return count
