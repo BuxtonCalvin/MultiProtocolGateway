@@ -164,7 +164,6 @@ class modbus_tcp(modbus_base):
             self._log.error(f"Exception during connection: {e}")
             self.connected = False
             return False
-        else:
 
-            return self.connected
+        return self.connected
 

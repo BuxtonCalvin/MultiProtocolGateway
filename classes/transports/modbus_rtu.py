@@ -131,12 +131,12 @@ class modbus_rtu(modbus_base):
 
     def connect(self) -> bool:
         if self.client is None:
-            self._log.error(f"Cannot connect '{self.transport_name}' — client not initialized")
+            self._log.error(f"Cannot connect {self.transport_name} — client not initialized")
             self.connected = False
             return False
 
         try:
-            # pymodbus connect() usually returns True/False
+            # pymodbus connect() returns a boolean-like value
             self.connected = bool(self.client.connect())
 
             if self.connected:
@@ -145,11 +145,12 @@ class modbus_rtu(modbus_base):
             else:
                 self._log.error(f"Failed to establish RTU connection to {self.port}")
 
-            return self.connected  # noqa: TRY300
         except Exception as e:
             self._log.error(f"Exception during connection: {e}")
             self.connected = False
-            return False
+
+        return self.connected
+
 
 
 

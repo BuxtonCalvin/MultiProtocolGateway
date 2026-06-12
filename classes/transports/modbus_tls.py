@@ -159,17 +159,22 @@ class modbus_tls(modbus_base):
             return False
 
         try:
+            # Ensure old socket hooks are entirely wiped out before reconnecting
+            try:
+                self.client.close()
+            except Exception:
+                self._log.debug(f"Failed to close TLS connection to {self.host}:{self.port}")
+
             # pymodbus connect() usually returns True/False
             self.connected = bool(self.client.connect())
-
             if self.connected:
                 self._log.info(f"Modbus TLS connected: {self.connected} for {self.transport_name}")
                 super().connect()
             else:
                 self._log.error(f"Failed to establish TLS connection to {self.host}:{self.port}")
-
-            return self.connected  # noqa: TRY300
         except Exception as e:
             self._log.error(f"Exception during connection: {e}")
             self.connected = False
-            return False
+
+        return self.connected
+

@@ -100,11 +100,25 @@ class modbus_udp(modbus_base):
             self._log.error(f"Failed to read {registry_type} after {self.retries} attempts.")
             return None
 
-    def connect(self) -> None:
+    def connect(self) -> bool:
         if self.client is None:
             self._log.error(f"Cannot connect '{self.transport_name}' — client not initialized")
             self.connected = False
-            return
-        self.connected = bool(self.client.connect())
-        self._log.info(f"Modbus udp connected: {self.connected} for {self.transport_name} on port {self.port}")
-        super().connect()
+            return False
+
+        try:
+            # pymodbus connect() registers the UDP endpoint
+            self.connected = bool(self.client.connect())
+
+            if self.connected:
+                self._log.info(f"Modbus UDP configured: {self.connected} for {self.transport_name} on port {self.port}")
+                super().connect()
+            else:
+                self._log.error(f"Failed to configure UDP transport for {self.transport_name} on port {self.port}")
+
+        except Exception as e:
+            self._log.error(f"Exception during UDP configuration: {e}")
+            self.connected = False
+
+        return self.connected
+
