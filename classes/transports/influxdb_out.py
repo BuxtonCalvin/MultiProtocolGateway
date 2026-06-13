@@ -49,7 +49,7 @@ class InfluxDBLogAliaser(logging.Filter):
     def filter(self, record) -> Literal[True]:
         # Check if a log comes from urllib3: not used for anything else in this class.
         # Change the urllib3 name to make log entries legible to users.
-        if record.name == "urllib3.connectionpool" in record.getMessage():
+        if record.name == "urllib3.connectionpool" or "urllib3.connectionpool" in record.getMessage():
             record.name = "influxdb.connectionpool"
         return True  # let the log pass through
 

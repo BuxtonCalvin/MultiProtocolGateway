@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock, mock_open, patch  # noqa: F401
@@ -112,30 +113,249 @@ def test_mqtt_requires_host_and_publishes_values(mock_mqtt_client: MagicMock, du
     client.publish.assert_any_call("home/device/sn1/voltage", "52.57")
 
 
-def test_mqtt_init_bridge_subscribes_only_allowlisted_write_topics(dummy_settings) -> None:
-    """Edge case: MQTT write topics are subscribed only for writable registers present in the override allowlist."""
-    out = mqtt.__new__(mqtt)
+@patch("classes.transports.mqtt.MQTTClient")
+def test_mqtt_write_data_syncs_connected_state_from_client(mock_mqtt_client: MagicMock, dummy_settings) -> None:
+    """write_data unconditionally syncs self.connected from client.is_connected() on every call."""
+    publish_info = SimpleNamespace(rc=0)
+    client = MagicMock()
+    client.publish.return_value = publish_info
+    # Client reports it reconnected in the background
+    client.is_connected.return_value = True
+    mock_mqtt_client.return_value = client
+
+    out = mqtt(dummy_settings(host="broker", username="user", password="pw"))  # noqa: S106
+    # Simulate stale False (e.g. set by a previous publish failure)
+    out._connected = False
+    source = transport_base(dummy_settings(name="transport.src", device_serial_number="SN1"))
+
+    out.write_data({"soc": 99}, source)
+
+    # connected should have been corrected to True before the publish
+    assert out.connected is True
+
+
+@patch("classes.transports.mqtt.MQTTClient")
+def test_mqtt_write_data_aborts_on_publish_failure(mock_mqtt_client: MagicMock, dummy_settings) -> None:
+    """write_data sets connected=False and returns early when the availability publish fails."""
+    from paho.mqtt.client import MQTT_ERR_NO_CONN
+
+    fail_info = SimpleNamespace(rc=MQTT_ERR_NO_CONN)
+    client = MagicMock()
+    client.publish.return_value = fail_info
+    client.is_connected.return_value = False
+    mock_mqtt_client.return_value = client
+
+    out = mqtt(dummy_settings(host="broker", username="user", password="pw"))  # noqa: S106
+    out._connected = True  # bypass property setter side-effects for setup
+    source = transport_base(dummy_settings(name="transport.src", device_serial_number="SN1"))
+
+    out.write_data({"soc": 99}, source)
+
+    assert out.connected is False
+    # Only the availability publish should have been attempted; data publishes must not follow
+    assert client.publish.call_count == 1
+
+
+@patch("classes.transports.mqtt.MQTTClient")
+def test_mqtt_on_connect_resubscribes_write_topics(mock_mqtt_client: MagicMock, dummy_settings) -> None:
+    """on_connect re-subscribes all registered write topics so subscriptions survive a broker reconnect."""
+    client = MagicMock()
+    mock_mqtt_client.return_value = client
+
+    out = mqtt(dummy_settings(host="broker", username="user", password="pw"))  # noqa: S106
+    out._write_topics = {
+        "base/dev/write/charge_limit": MagicMock(),
+        "base/dev/write/discharge_limit": MagicMock(),
+    }
+
+    # Simulate the paho CONNACK callback
+    out.on_connect(client, None, None, "Success", None)
+
+    assert out.connected is True
+    subscribed_topics = {call.args[0] for call in client.subscribe.call_args_list}
+    assert subscribed_topics == {"base/dev/write/charge_limit", "base/dev/write/discharge_limit"}
+
+
+@patch("classes.transports.mqtt.MQTTClient")
+def test_mqtt_on_disconnect_spawns_reconnect_thread(mock_mqtt_client: MagicMock, dummy_settings) -> None:
+    """on_disconnect sets connected=False and starts exactly one background reconnect thread."""
+    client = MagicMock()
+    mock_mqtt_client.return_value = client
+
+    out = mqtt(dummy_settings(host="broker", username="user", password="pw"))  # noqa: S106
+    out._connected = True
+
+    with patch.object(out, "_start_reconnect_thread") as mock_start:
+        out.on_disconnect(client, None, None, 0, None)
+
+    assert out.connected is False
+    mock_start.assert_called_once()
+
+
+@patch("classes.transports.mqtt.MQTTClient")
+def test_mqtt_start_reconnect_thread_no_duplicate(mock_mqtt_client: MagicMock, dummy_settings) -> None:
+    """_start_reconnect_thread does not spawn a second thread when one is already alive."""
+    client = MagicMock()
+    mock_mqtt_client.return_value = client
+
+    out = mqtt(dummy_settings(host="broker", username="user", password="pw"))  # noqa: S106
+    alive_thread = MagicMock(spec=threading.Thread)
+    alive_thread.is_alive.return_value = True
+    out._reconnect_thread = alive_thread
+
+    with patch("threading.Thread") as mock_thread_cls:
+        out._start_reconnect_thread()
+        mock_thread_cls.assert_not_called()
+
+
+@patch("classes.transports.mqtt.MQTTClient")
+def test_mqtt_reconnect_loop_clears_thread_ref_on_success(mock_mqtt_client: MagicMock, dummy_settings) -> None:
+    """_reconnect_loop clears _reconnect_thread in its finally block so future disconnects can spawn a fresh thread."""
+    client = MagicMock()
+    mock_mqtt_client.return_value = client
+
+    out = mqtt(dummy_settings(host="broker", username="user", password="pw"))  # noqa: S106
+    out.reconnect_delay = 0
+    out._connected = False
+
+    def fake_reconnect():
+        # Simulate the paho loop setting connected after one attempt
+        out._connected = True
+
+    client.reconnect.side_effect = fake_reconnect
+
+    with patch("time.sleep"):
+        out._reconnect_loop()
+
+    assert out._reconnect_thread is None
+
+
+@patch("classes.transports.mqtt.MQTTClient")
+def test_mqtt_reconnect_loop_clears_thread_ref_on_exhaustion(mock_mqtt_client: MagicMock, dummy_settings) -> None:
+    """_reconnect_loop clears _reconnect_thread even when all attempts are exhausted without connecting."""
+    client = MagicMock()
+    client.reconnect.side_effect = OSError("refused")
+    mock_mqtt_client.return_value = client
+
+    out = mqtt(dummy_settings(host="broker", username="user", password="pw"))  # noqa: S106
+    out.reconnect_delay = 0
+    out.reconnect_attempts = 2
+    out._connected = False
+
+    with patch("time.sleep"):
+        out._reconnect_loop()
+
+    assert out._reconnect_thread is None
+
+
+def test_mqtt_init_bridge_subscribes_only_allowlisted_holding_write_topics(dummy_settings) -> None:
+    """Edge case: MQTT holding write topics are subscribed only for registers present in the override allowlist."""
+    out: mqtt = mqtt.__new__(mqtt)
     out.client = MagicMock()
     out.base_topic = "base"
     out.discovery_enabled = False
     out._log = MagicMock()
+    out._write_topics = {}
     out._load_override_write_allowlist = MagicMock(return_value={"charge_limit"})
     source = transport_base(dummy_settings(name="transport.src", device_serial_number="SN1"))
     source.write_enabled = True
     writable = registry_map_entry(
         Registry_Type.HOLDING, 10, -1, -1, 0, "charge_limit", "charge_limit", "", "", 1.0, {}, False, [],  # noqa: FBT003
-        [], write_mode=WriteMode.WRITE
+        [], write_mode=WriteMode.WRITE,
     )
     blocked = registry_map_entry(
         Registry_Type.HOLDING, 11, -1, -1, 0, "other", "other", "", "", 1.0, {}, False, [],  # noqa: FBT003
-        [], write_mode=WriteMode.WRITE
+        [], write_mode=WriteMode.WRITE,
     )
     source.protocolSettings = MagicMock()
-    source.protocolSettings.get_registry_map.return_value = [writable, blocked]
+    source.protocolSettings.get_registry_map.side_effect = lambda rt: (
+        [writable, blocked] if rt == Registry_Type.HOLDING else []
+    )
 
     out.init_bridge(source)
 
     out.client.subscribe.assert_called_once_with("base/sn1/write/charge_limit")
+
+
+def test_mqtt_init_bridge_subscribes_allowlisted_coil_write_topics(dummy_settings) -> None:
+    """New behaviour: MQTT coil write topics are subscribed alongside holding topics when allowlisted."""
+    out: mqtt = mqtt.__new__(mqtt)
+    out.client = MagicMock()
+    out.base_topic = "base"
+    out.discovery_enabled = False
+    out._log = MagicMock()
+    out._write_topics = {}
+    out._load_override_write_allowlist = MagicMock(return_value={"grid_charge_enable"})
+    source = transport_base(dummy_settings(name="transport.src", device_serial_number="SN1"))
+    source.write_enabled = True
+    coil_entry = registry_map_entry(
+        Registry_Type.COIL, 1, -1, -1, 0, "grid_charge_enable", "grid_charge_enable", "", "", 1.0, {}, False, [],  # noqa: FBT003
+        [], write_mode=WriteMode.WRITE,
+    )
+    source.protocolSettings = MagicMock()
+    source.protocolSettings.get_registry_map.side_effect = lambda rt: (
+        [coil_entry] if rt == Registry_Type.COIL else []
+    )
+
+    out.init_bridge(source)
+
+    out.client.subscribe.assert_called_once_with("base/sn1/write/grid_charge_enable")
+    assert "base/sn1/write/grid_charge_enable" in out._write_topics
+
+
+def test_mqtt_init_bridge_coil_topic_not_in_allowlist_not_subscribed(dummy_settings) -> None:
+    """Edge case: a writable coil entry absent from the allowlist must not be subscribed."""
+    out: mqtt = mqtt.__new__(mqtt)
+    out.client = MagicMock()
+    out.base_topic = "base"
+    out.discovery_enabled = False
+    out._log = MagicMock()
+    out._write_topics = {}
+    out._load_override_write_allowlist = MagicMock(return_value=set())  # empty allowlist
+    source = transport_base(dummy_settings(name="transport.src", device_serial_number="SN1"))
+    source.write_enabled = True
+    coil_entry = registry_map_entry(
+        Registry_Type.COIL, 1, -1, -1, 0, "grid_charge_enable", "grid_charge_enable", "", "", 1.0, {}, False, [],  # noqa: FBT003
+        [], write_mode=WriteMode.WRITE,
+    )
+    source.protocolSettings = MagicMock()
+    source.protocolSettings.get_registry_map.side_effect = lambda rt: (
+        [coil_entry] if rt == Registry_Type.COIL else []
+    )
+
+    out.init_bridge(source)
+
+    out.client.subscribe.assert_not_called()
+
+
+@patch("classes.transports.mqtt.MQTTClient")
+def test_mqtt_discovery_skips_availability_publish_on_empty_registry(mock_mqtt_client: MagicMock, dummy_settings) -> None:
+    """Edge case: mqtt_discovery does not publish availability when the registry map is empty (guards KeyError)."""
+    client = MagicMock()
+    mock_mqtt_client.return_value = client
+
+    out = mqtt(dummy_settings(host="broker", username="user", password="pw"))  # noqa: S106
+    source = transport_base(dummy_settings(name="transport.src", device_serial_number="SN1"))
+    source.protocolSettings = MagicMock()
+    source.protocolSettings.registry_map = {}  # empty — no entries at all
+
+    out.mqtt_discovery(source)
+
+    client.publish.assert_not_called()
+
+
+@patch("classes.transports.mqtt.MQTTClient")
+def test_mqtt_instance_write_topics_not_shared_between_instances(mock_mqtt_client: MagicMock, dummy_settings) -> None:
+    """Regression: _write_topics is per-instance; populating one instance must not affect another."""
+    client = MagicMock()
+    mock_mqtt_client.return_value = client
+
+    out_a = mqtt(dummy_settings(host="broker-a", username="u", password="p"))  # noqa: S106
+    out_b = mqtt(dummy_settings(host="broker-b", username="u", password="p"))  # noqa: S106
+
+    out_a._write_topics["base/dev/write/charge_limit"] = MagicMock()
+
+    assert "base/dev/write/charge_limit" not in out_b._write_topics
 
 
 def test_register_failure_tracker_disables_then_resets() -> None:
