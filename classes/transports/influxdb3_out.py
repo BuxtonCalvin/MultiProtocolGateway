@@ -500,7 +500,7 @@ class influxdb3_out(transport_base):
 
         if self._log.isEnabledFor(logging.DEBUG):
             self._log.debug(
-                f"Received data from {from_transport.transport_name} "
+                f"InfluxDB3_Out: Received data from {from_transport.transport_name} "
                 f"(serial: {from_transport.device_serial_number}) with {len(data)} fields"
             )
 
@@ -541,7 +541,7 @@ class influxdb3_out(transport_base):
             is_ascii: bool = False
 
             if hasattr(from_transport, "protocolSettings") and from_transport.protocolSettings:
-                for registry_type in [Registry_Type.INPUT, Registry_Type.HOLDING]:
+                for registry_type in [Registry_Type.INPUT, Registry_Type.HOLDING, Registry_Type.COIL, Registry_Type.DISCRETE]:
                     registry_map: list[registry_map_entry] = from_transport.protocolSettings.get_registry_map(registry_type)
                     for e in registry_map:
                         if e.variable_name.lower() == key.lower():
@@ -568,7 +568,7 @@ class influxdb3_out(transport_base):
                     fields[key] = int(float_val) if float_val.is_integer() else float_val
             except (ValueError, TypeError):
                 fields[key] = str(value)
-                self._log.debug(f"Field {key}: {value} -> string (conversion failed)")
+                self._log.debug(f"InfluxDB3_Out: Field {key}: {value} -> string (conversion failed)")
 
         return fields
 
@@ -641,7 +641,7 @@ class influxdb3_out(transport_base):
         state["last_seen"] = timestamp
 
         self._log.debug(
-            f"Committing state for transport: {transport_id} | "
+            f"InfluxDB3_Out: Committing state for transport: {transport_id} | "
             f"is_stale: {is_stale} | "
             f"elapsed: {timestamp - state['start_ts']}"
         )
@@ -674,9 +674,7 @@ class influxdb3_out(transport_base):
 
         # Cap reconnect attempts per stale period
         if state["stale_event_count"] >= self.max_stale_attempts:
-            self._log.debug(
-                f"[{transport_id}] Max stale retry attempts reached. No further reconnects."
-            )
+            self._log.debug(f"[{transport_id}] InfluxDB3_Out: Max stale retry attempts reached. No further reconnects.")
             return
 
         # Throttle: enforce minimum gap between attempts
@@ -692,19 +690,19 @@ class influxdb3_out(transport_base):
         if self.request_upstream_reconnect:
             try:
                 self._log.warning(
-                    f"[{transport_id}] Data stale. Requesting reconnect "
+                    f"[{transport_id}] InfluxDB3_Out: Data stale. Requesting reconnect "
                     f"(Attempt {state['stale_event_count']}/{self.max_stale_attempts})."
                 )
                 self.request_upstream_reconnect(transport_id)
             except Exception:
-                self._log.exception(f"[{transport_id}] Failed requesting upstream reconnect.")
+                self._log.exception(f"[{transport_id}] InfluxDB3_Out: Failed requesting upstream reconnect.")
 
         # Push notification
         try:
             minutes: float = total_stale_elapsed.total_seconds() / 60
             self.send_message(
                 message=(
-                    f"Transport [{transport_id}] stale for {minutes:.1f} mins. "
+                    f"InfluxDB3_Out: Transport [{transport_id}] stale for {minutes:.1f} mins. "
                     f"Attempt {state['stale_event_count']} of {self.max_stale_attempts}."
                 ),
                 title="MPG Stale Data Alert",
