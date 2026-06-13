@@ -1231,15 +1231,16 @@ class timescaledb(transport_base):
 
         Returns:
             Sorted list of (variable_name, data_type, unit_mod, note) tuples,
-            filtered to INPUT and HOLDING registry types only.
+            filtered to INPUT, HOLDING, COIL and DISCRETE registry types only.
             Returns empty list if registry_map is None, empty, or malformed.
+            TODO  adapt for non-modbus registers.
         """
         if not registry_map:
             return []
 
         results: list[tuple[str, str, Any, Any]] = []
 
-        for registry_type in (Registry_Type.INPUT, Registry_Type.HOLDING):
+        for registry_type in (Registry_Type.INPUT, Registry_Type.HOLDING, Registry_Type.COIL, Registry_Type.DISCRETE):
 
             entries: list[registry_map_entry] | None = registry_map.get(registry_type)
 
@@ -2207,7 +2208,7 @@ class timescaledb(transport_base):
                 isolation_level="AUTOCOMMIT"
             ) as conn:
 
-                # 1. Find stale idle connections holding locks on our tables.
+                # Find stale idle connections holding locks on our tables.
                 # Excludes our own pid, TimescaleDB workers, and active queries.
                 stale = conn.execute(text("""
                     SELECT
@@ -2245,10 +2246,7 @@ class timescaledb(transport_base):
                         )
                         # Non-fatal — continue with remaining connections
 
-                self._log.info(
-                    f"Orphaned connection cleanup complete: "
-                    f"{len(stale)} connection(s) terminated."
-                )
+                self._log.info(f"Orphaned connection cleanup complete: {len(stale)} connection(s) terminated.")
 
         except Exception as e:
             self._log.error(f"_cleanup_orphaned_locks failed: {e}")

@@ -23,6 +23,7 @@ import atexit
 import csv
 import json
 import random
+import threading
 import time
 import warnings
 from pathlib import Path
@@ -54,7 +55,6 @@ class mqtt(transport_base):
     """ seconds """
 
     reconnect_attempts : int = 21
-    #max_precision : int = - 1
 
     holding_register_prefix : str = ""
     input_register_prefix : str = ""
@@ -62,11 +62,7 @@ class mqtt(transport_base):
     client : MQTTClient | None = None
     mqtt_properties : paho.mqtt.properties.Properties | None = None
 
-    __first_connection : bool = True
-    __reconnecting : float = 0.0
-    connected : bool = False
-
-    def __init__(self, settings :TransportSettings) -> None:
+    def __init__(self, settings: TransportSettings) -> None:
         self.host = settings.get("host", fallback="")
         if not self.host:
             raise ValueError("Host is not set")
@@ -78,17 +74,21 @@ class mqtt(transport_base):
         self.discovery_enabled = strtobool(settings.get("discovery_enabled", self.discovery_enabled))
         self.json = strtobool(settings.get("json", self.json))
         self.reconnect_delay = settings.getint("reconnect_delay", fallback=7)
-        #self.max_precision = settings.getint('max_precision', fallback=self.max_precision)
 
-        if not isinstance( self.reconnect_delay , int) or self.reconnect_delay < 1: #minimum 1 second
+        if not isinstance(self.reconnect_delay, int) or self.reconnect_delay < 1:  # minimum 1 second
             self.reconnect_delay = 1
 
         self.reconnect_attempts = settings.getint("reconnect_attempts", fallback=21)
-        if not isinstance( self.reconnect_attempts , int) or self.reconnect_attempts < 0: #minimum 0
+        if not isinstance(self.reconnect_attempts, int) or self.reconnect_attempts < 0:  # minimum 0
             self.reconnect_attempts = 0
 
         self.holding_register_prefix = settings.get("holding_register_prefix", fallback="")
         self.input_register_prefix = settings.get("input_register_prefix", fallback="")
+
+        # Instance-level state — never class-level to avoid shared-dict bugs across instances
+        self._first_connection: bool = True
+        self._reconnect_thread: threading.Thread | None = None
+        self._write_topics: dict[str, registry_map_entry] = {}
 
         username: str = settings.get("username", fallback="")
         password: str = settings.get("password", fallback="")
@@ -96,15 +96,10 @@ class mqtt(transport_base):
         if not username:
             warnings.warn("MQTT Username is empty", RuntimeWarning)
 
-
         if not password:
             warnings.warn("MQTT Password is empty", RuntimeWarning)
 
-        try:
-            self.client = MQTTClient(CallbackAPIVersion.VERSION2)
-        except ImportError:
-            # Fallback for paho-mqtt < 2.0.0
-            self.client = MQTTClient()
+        self.client = MQTTClient(CallbackAPIVersion.VERSION2)
 
         if username:
             self.client.username_pw_set(username=username, password=password)
@@ -118,92 +113,130 @@ class mqtt(transport_base):
 
         super().__init__(settings)
 
+    # ------------------------------------------------------------------
+    # Connection management
+    # ------------------------------------------------------------------
 
     def connect(self) -> None:
         self._log.info("mqtt connect")
-        if self.__first_connection:
-            self.__first_connection = False
+        if self._first_connection:
+            self._first_connection = False
             if self.client is not None:
                 self.client.connect(str(self.host), int(self.port), 60)
                 self.client.loop_start()
                 atexit.register(self.exit_handler)
                 self._log.info("MQTT Client initialized and connection loop started.")
         else:
-            self.mqtt_reconnect() #special reconnect function
+            self._start_reconnect_thread()
 
-    def exit_handler(self) -> None:
-        '''on exit handler'''
-        self._log.warning("MQTT Exiting...")
-        if self.client is not None:
-            self.client.publish( self.base_topic + "/" + self.device_identifier + "/availability","offline")
-        return
-
-    def mqtt_reconnect(self) -> None:
-        # This function implements an exponential backoff strategy for reconnecting to the MQTT broker,
-        # with added jitter to prevent thundering herd issues.  Can't quit here because other transports may still be working,
-        # and we want to keep trying to reconnect in the background.
-
-        self._log.info("Disconnected from MQTT Broker!")
-
-        if self.__reconnecting != 0:
+    def _start_reconnect_thread(self) -> None:
+        """Spawn a background reconnect thread if one is not already running."""
+        if self._reconnect_thread is not None and self._reconnect_thread.is_alive():
+            self._log.debug("Reconnect thread already running — skipping duplicate spawn.")
             return
+        self._reconnect_thread = threading.Thread(
+            target=self._reconnect_loop,
+            name=f"mqtt-reconnect-{self.transport_name}",
+            daemon=True,
+        )
+        self._reconnect_thread.start()
 
-        # Configuration for backoff
-        base_delay = self.reconnect_delay      # Start with user configured delay
-        max_delay = 600      # Max wait time (10 minutes)
+    def _reconnect_loop(self) -> None:
+        """Background thread: exponential backoff reconnect until connected or exhausted.
+
+        Uses client.reconnect() exclusively — the correct paho call after a drop.
+        Resets cleanly on both success and exhaustion so future disconnects can
+        spawn a fresh thread.
+        """
+        self._log.info("Disconnected from MQTT Broker — starting background reconnect.")
+
+        base_delay = self.reconnect_delay
+        max_delay = 600  # 10 minutes
         attempt = 0
-        current_wait = 0
 
-        while not self.connected:
-            self.__reconnecting = time.time()
-            attempt += 1
-
-            try:
-                # Calculate exponential backoff: (base * 2^attempt) + random jitter
+        try:
+            while not self.connected:
+                attempt += 1
                 delay: int = min(max_delay, base_delay * (2 ** (attempt - 1)))
                 jitter: float = random.uniform(0, 1)  # noqa: S311
-                current_wait = delay + jitter
+                current_wait: float = delay + jitter
 
-                self._log.warning(f"Attempting to reconnect ({attempt})...")
+                self._log.warning(f"Reconnect attempt {attempt} — waiting {current_wait:.2f}s...")
+                time.sleep(current_wait)
 
-                if self.client is not None:
-                    # Toggle connection methods
-                    if random.randint(0, 1):  # noqa: S311
+                try:
+                    if self.client is not None:
                         self.client.reconnect()
-                    else:
-                        self.client.loop_stop()
-                        self.client.connect(str(self.host), int(self.port), 60)
-                        self.client.loop_start()
 
-                # Brief sleep to let the background loop process the connection
-                time.sleep(2)
+                    # Give the paho background loop time to process the CONNACK
+                    time.sleep(2)
 
-                if self.connected:
-                    self._log.info("Successfully reconnected!")
-                    self.__reconnecting = 0
+                    if self.connected:
+                        self._log.info("Successfully reconnected!")
+                        return
+
+                except Exception as exc:
+                    self._log.error(f"Reconnect attempt {attempt} failed: {exc}")
+                    self._log.error(f"❌ [COMMUNICATION LOST] --- Host: {self.host} ---")
+
+                if self.reconnect_attempts > 0 and attempt >= self.reconnect_attempts:
+                    self._log.error(
+                        f"Exhausted {self.reconnect_attempts} reconnect attempts — giving up. "
+                        "A future disconnect will retry."
+                    )
                     return
+        finally:
+            # Always clear the thread reference so a future on_disconnect can
+            # spawn a fresh one, regardless of whether we succeeded or gave up.
+            self._reconnect_thread = None
 
-            except Exception as e:
-                self._log.error(f"Connection error: {e}")
-                self._log.error(f"❌ [COMMUNICATION LOST] --- Host: {self.host} ---")
+    def exit_handler(self) -> None:
+        """Publish offline availability and cleanly shut down the paho loop on exit."""
+        self._log.warning("MQTT Exiting...")
+        if self.client is not None:
+            self.client.publish(
+                self.base_topic + "/" + self.device_identifier + "/availability",
+                "offline",
+            )
+            # Give the final publish a moment to flush before the loop stops
+            time.sleep(0.5)
+            self.client.loop_stop()
+            self.client.disconnect()
 
-            # If not connected, wait with backoff
-            self._log.warning(f"Waiting {current_wait:.2f}s before next retry...")
-            time.sleep(current_wait)
+    # ------------------------------------------------------------------
+    # Paho callbacks
+    # ------------------------------------------------------------------
 
-    def on_disconnect(self, client, userdata, flags, reason_code, properties) -> None:
+    def on_disconnect(self, client, userdata, disconnect_flags, reason_code, properties) -> None:
         self.connected = False
+        self._start_reconnect_thread()
 
     def on_connect(self, client, userdata, flags, reason_code, properties) -> None:
-        """ The callback for when the client receives a CONNACK response from the server. """
-        self._log.info("Connected with result code %s\n", str(reason_code))
+        """Called when the client receives a CONNACK response from the server."""
+        self._log.info("Connected with result code %s", str(reason_code))
         self.connected = True
+        # Re-subscribe to all write topics so they survive a reconnect
+        self._resubscribe_write_topics()
 
-    __write_topics : dict[str, registry_map_entry] = {}
+    # ------------------------------------------------------------------
+    # Write-topic helpers
+    # ------------------------------------------------------------------
+
+    def _resubscribe_write_topics(self) -> None:
+        """Re-subscribe to all registered write topics after a (re)connect.
+
+        Paho does not automatically re-subscribe on reconnect when clean_session
+        is True (the default), so we do it explicitly here from on_connect.
+        """
+        if not self._write_topics or self.client is None:
+            return
+        for topic in self._write_topics:
+            self.client.subscribe(topic)
+        self._log.info("Re-subscribed to %d write topic(s).", len(self._write_topics))
 
     def _load_override_write_allowlist(self, from_transport: transport_base) -> set[str]:
-        """
-        Load documented-name allowlist from the protocol's holding override CSV.
+        """Load documented-name allowlist from the protocol's holding override CSV.
+
         If the file is missing/empty, return an empty set (no write topics allowed).
         """
         if from_transport.protocolSettings is None:
@@ -217,7 +250,7 @@ class mqtt(transport_base):
         if not override_path:
             self._log.warning(
                 "No override write allowlist found for '%s'; MQTT write topics disabled until write selections are made.",
-                protocol_name
+                protocol_name,
             )
             return set()
 
@@ -226,7 +259,7 @@ class mqtt(transport_base):
             with open(Path(override_path), newline="", encoding="utf-8") as f:
                 reader: csv.DictReader[str] = csv.DictReader(f)
                 for row in reader:
-                    name: str  = (row.get("documented name") or "").strip().lower().replace(" ", "_")
+                    name: str = (row.get("documented name") or "").strip().lower().replace(" ", "_")
                     if name:
                         allowlist.add(name)
         except Exception as exc:
@@ -235,153 +268,209 @@ class mqtt(transport_base):
         self._log.info(f"Loaded {len(allowlist)} entries from override write allowlist '{override_path}'")
         return allowlist
 
-    def write_data(self, data: dict[str, int | float | str ], from_transport : transport_base) -> None:
+    # ------------------------------------------------------------------
+    # Data publishing
+    # ------------------------------------------------------------------
+
+    def write_data(self, data: dict[str, int | float | str], from_transport: transport_base) -> None:
         # Note: write_enabled is intentionally NOT checked here.
-        # For bridge transports like MQTT, write_enabled has no meaning for the write_data method—
+        # For bridge transports like MQTT, write_enabled has no meaning for the write_data method —
         # this method publishes scraper READ data to the broker, not commands to hardware.
         # Hardware write-back gating belongs in modbus_base.write_data and
         # modbus_tcp.write_register, where it guards FC06 Modbus write calls.
-        # so we use the property in init_bridge instead where we use register overloads to describe
-        # which registers are allowed to be written to.  Overloads can be easily created in the webserver UI.
-        # if not self.write_enabled:
-        #     return
-        if self.client is not None:
-            if self.connected:
-                self.connected = self.client.is_connected()
+        # We use the property in init_bridge instead, where register overloads describe
+        # which registers are allowed to be written to.
+        if self.client is None:
+            return
 
-            self._log.info(f"write data from [{from_transport.transport_name}] to mqtt transport {data} ")
-            #have to send this every loop, because mqtt doesn't disconnect when HA restarts. HA bug.
+        # Sync connected state unconditionally so a background reconnect that
+        # succeeded is reflected immediately, and a stale True is corrected.
+        self.connected = self.client.is_connected()
 
-            info: MQTTMessageInfo = self.client.publish(f"{self.base_topic}/{from_transport.device_identifier}/availability","online",qos=0,retain=True)
-            if info.rc != MQTT_ERR_SUCCESS:
-                self.connected = False
-                if info.rc == MQTT_ERR_NO_CONN:
-                    self._log.error("MQTT Publish failed: No connection to broker.")
+        self._log.info(f"write data from [{from_transport.transport_name}] to mqtt transport {data}")
+        # Publish availability every loop — required because HA doesn't disconnect
+        # cleanly on restart (HA bug), so we can't rely on LWT alone.
+        info: MQTTMessageInfo = self.client.publish(
+            f"{self.base_topic}/{from_transport.device_identifier}/availability",
+            "online",
+            qos=0,
+            retain=True,
+        )
+        if info.rc != MQTT_ERR_SUCCESS:
+            self.connected = False
+            if info.rc == MQTT_ERR_NO_CONN:
+                self._log.error("MQTT Publish failed: No connection to broker.")
+            return
 
-            if(self.json):
-                # Serializing json
-                json_object: str = json.dumps(data, indent=4)
-                self.client.publish(self.base_topic+"/"+from_transport.device_identifier, json_object, 0, properties=self.mqtt_properties)
-            else:
-                for entry, val in data.items():
-                    if isinstance(val, float) and self.max_precision >= 0: #apply max_precision on mqtt transport
-                        val = round(val, self.max_precision)
-
-                    self.client.publish(str(self.base_topic+"/"+from_transport.device_identifier+"/"+entry).lower(), str(val))
-
-    def client_on_message(self, client, userdata, msg) -> None:
-        """ The callback for when a PUBLISH message is received from the server. """
-        self._log.info("MQTT MSG: " + msg.topic+" "+str(msg.payload.decode("utf-8")))
-
-        #self.protocolSettings.validate_registry_entry
-        if msg.topic in self.__write_topics:
-            entry: registry_map_entry = self.__write_topics[msg.topic]
-
-            self._emit_message(entry, msg.payload.decode("utf-8"))
-            #self.write_variable(entry, value=str(msg.payload.decode('utf-8')))
-
-    def init_bridge(self, from_transport : transport_base) -> None:
-
-        if self.client is not None and from_transport.protocolSettings is not None:
-            if from_transport.write_enabled:
-                self.__write_topics = {}
-                write_allowlist: set[str] = self._load_override_write_allowlist(from_transport)
-                if not write_allowlist:
-                    self._log.info(
-                        "No holding override allowlist found for '%s'; MQTT write topics disabled until write selections are committed.",
-                        from_transport.transport_name,
-                    )
-                #subscribe to write topics
-                for entry in from_transport.protocolSettings.get_registry_map(Registry_Type.HOLDING):
-                    is_protocol_writable = entry.write_mode == WriteMode.WRITE or entry.write_mode == WriteMode.WRITEONLY
-                    entry_name: str = entry.documented_name.strip().lower().replace(" ", "_")
-                    if is_protocol_writable and entry_name in write_allowlist:
-                        #__write_topics
-                        topic : str = self.base_topic + "/"+ from_transport.device_identifier + "/write/" + entry.variable_name.lower().replace(" ", "_")
-                        self.__write_topics[topic] = entry
-                        self.client.subscribe(topic)
-                self._log.info(
-                    "MQTT write topic allowlist for '%s': %d topic(s)",
-                    from_transport.transport_name,
-                    len(self.__write_topics),
+        if self.json:
+            json_object: str = json.dumps(data, indent=4)
+            self.client.publish(
+                self.base_topic + "/" + from_transport.device_identifier,
+                json_object,
+                0,
+                properties=self.mqtt_properties,
+            )
+        else:
+            for entry, val in data.items():
+                if isinstance(val, float) and self.max_precision >= 0:
+                    val = round(val, self.max_precision)
+                self.client.publish(
+                    str(self.base_topic + "/" + from_transport.device_identifier + "/" + entry).lower(),
+                    str(val),
                 )
 
-            if self.discovery_enabled:
-                self.mqtt_discovery(from_transport)
+    def client_on_message(self, client, userdata, msg) -> None:
+        """Callback for PUBLISH messages received from the broker."""
+        self._log.info("MQTT MSG: " + msg.topic + " " + str(msg.payload.decode("utf-8")))
 
-    def mqtt_discovery(self, from_transport : transport_base) -> None:
+        if msg.topic in self._write_topics:
+            entry: registry_map_entry = self._write_topics[msg.topic]
+            self._emit_message(entry, msg.payload.decode("utf-8"))
+
+    # ------------------------------------------------------------------
+    # Bridge initialization
+    # ------------------------------------------------------------------
+
+    def init_bridge(self, from_transport: transport_base) -> None:
+        if self.client is None or from_transport.protocolSettings is None:
+            return
+
+        if from_transport.write_enabled:
+            # Reset per-transport so a second call (e.g. after reconnect) is clean
+            self._write_topics = {}
+            write_allowlist: set[str] = self._load_override_write_allowlist(from_transport)
+            if not write_allowlist:
+                self._log.info(
+                    "No holding override allowlist found for '%s'; MQTT write topics disabled until write selections are committed.",
+                    from_transport.transport_name,
+                )
+
+            # Subscribe to holding-register write topics
+            for entry in from_transport.protocolSettings.get_registry_map(Registry_Type.HOLDING):
+                is_protocol_writable: bool = (
+                    entry.write_mode == WriteMode.WRITE or entry.write_mode == WriteMode.WRITEONLY
+                )
+                entry_name: str = entry.documented_name.strip().lower().replace(" ", "_")
+                if is_protocol_writable and entry_name in write_allowlist:
+                    topic: str = (
+                        self.base_topic
+                        + "/" + from_transport.device_identifier
+                        + "/write/"
+                        + entry.variable_name.lower().replace(" ", "_")
+                    )
+                    self._write_topics[topic] = entry
+                    self.client.subscribe(topic)
+
+            # Subscribe to coil-register write topics
+            for entry in from_transport.protocolSettings.get_registry_map(Registry_Type.COIL):
+                is_protocol_writable = (
+                    entry.write_mode == WriteMode.WRITE or entry.write_mode == WriteMode.WRITEONLY
+                )
+                entry_name = entry.documented_name.strip().lower().replace(" ", "_")
+                if is_protocol_writable and entry_name in write_allowlist:
+                    topic = (
+                        self.base_topic
+                        + "/" + from_transport.device_identifier
+                        + "/write/"
+                        + entry.variable_name.lower().replace(" ", "_")
+                    )
+                    self._write_topics[topic] = entry
+                    self.client.subscribe(topic)
+
+            self._log.info(
+                "MQTT write topic allowlist for '%s': %d topic(s)",
+                from_transport.transport_name,
+                len(self._write_topics),
+            )
+
+        if self.discovery_enabled:
+            self.mqtt_discovery(from_transport)
+
+    # ------------------------------------------------------------------
+    # Home Assistant discovery
+    # ------------------------------------------------------------------
+
+    def mqtt_discovery(self, from_transport: transport_base) -> None:
         self._log.info("Publishing HA Discovery Topics...")
 
-        disc_payload = {}
-        disc_payload["availability_topic"] = self.base_topic + "/" + from_transport.device_identifier + "/availability"
+        availability_topic: str = (
+            self.base_topic + "/" + from_transport.device_identifier + "/availability"
+        )
 
-        device = {}
-        device["manufacturer"] = from_transport.device_manufacturer
-        device["model"] = from_transport.device_model
-        device["identifiers"] = "MPG_" + from_transport.device_model + "_" + from_transport.device_serial_number
-        device["name"] = from_transport.device_name
+        device: dict = {
+            "manufacturer": from_transport.device_manufacturer,
+            "model": from_transport.device_model,
+            "identifiers": "MPG_" + from_transport.device_model + "_" + from_transport.device_serial_number,
+            "name": from_transport.device_name,
+        }
 
-        registry_map : list[registry_map_entry] = []
+        registry_map: list[registry_map_entry] = []
         if from_transport.protocolSettings is not None:
             for entries in from_transport.protocolSettings.registry_map.values():
                 registry_map.extend(entries)
 
         length: int = len(registry_map)
-        count = 0
-        if self.client is not None:
-            for item in registry_map:
-                count = count + 1
+        count: int = 0
 
-                if item.concatenate and item.register != item.concatenate_registers[0]:
-                    continue #skip all except the first register so no duplicates
+        if self.client is None:
+            return
 
-                if item.write_mode == WriteMode.READDISABLED: #disabled
-                    continue
+        published_availability: bool = False
 
+        for item in registry_map:
+            count += 1
 
-                clean_name: str = item.variable_name.lower().replace(" ", "_").strip()
-                if not clean_name: #if name is empty, skip
-                    continue
+            if item.concatenate and item.register != item.concatenate_registers[0]:
+                continue  # skip all except the first register to avoid duplicates
 
-                if False:
-                    if self.__input_register_prefix and item.registry_type == Registry_Type.INPUT:
-                        clean_name = self.__input_register_prefix + clean_name
+            if item.write_mode == WriteMode.READDISABLED:
+                continue
 
-                    if self.__holding_register_prefix and item.registry_type == Registry_Type.HOLDING:
-                        clean_name = self.__holding_register_prefix + clean_name
+            clean_name: str = item.variable_name.lower().replace(" ", "_").strip()
+            if not clean_name:
+                continue
 
+            self._log.debug(f"#Publishing Topic {count} of {length} \"{clean_name}\"")
 
-                #print(("#Publishing Topic "+str(count)+" of " + str(length) + ' "'+str(clean_name)+'"').ljust(100)+"#", end="\r", flush=True)
-                self._log.debug("#Publishing Topic "+str(count)+" of " + str(length) + ' "'+ str(clean_name)+'"')
+            writePrefix = ""
+            if from_transport.write_enabled and (
+                item.write_mode == WriteMode.WRITE or item.write_mode == WriteMode.WRITEONLY
+            ):
+                writePrefix = ""  # Home Assistant doesn't like write prefix
 
+            disc_payload: dict = {
+                "availability_topic": availability_topic,
+                "device": device,
+                "name": clean_name,
+                "unique_id": "MPG_" + from_transport.device_serial_number + "_" + clean_name,
+                "state_topic": (
+                    self.base_topic + "/" + from_transport.device_identifier + writePrefix + "/" + clean_name
+                ),
+            }
 
-                #device['sw_version'] = bms_version
-                disc_payload = {}
-                disc_payload["availability_topic"] = self.base_topic + "/" + from_transport.device_identifier + "/availability"
-                disc_payload["device"] = device
-                disc_payload["name"] = clean_name
-                disc_payload["unique_id"] = "MPG_" + from_transport.device_serial_number + "_"+clean_name
+            if item.unit:
+                disc_payload["unit_of_measurement"] = item.unit
 
-                writePrefix = ""
-                if from_transport.write_enabled and ( item.write_mode == WriteMode.WRITE or item.write_mode == WriteMode.WRITEONLY ):
-                    writePrefix = "" #home assistant doesn't like write prefix
+            discovery_topic: str = (
+                self.discovery_topic
+                + "/sensor/HN-" + from_transport.device_serial_number
+                + writePrefix + "/"
+                + disc_payload["name"].replace(" ", "_")
+                + "/config"
+            )
 
-                disc_payload["state_topic"] = self.base_topic + "/" +from_transport.device_identifier + writePrefix+ "/"+clean_name
+            self.client.publish(discovery_topic, json.dumps(disc_payload), qos=1, retain=True)
 
-                if item.unit:
-                    disc_payload["unit_of_measurement"] = item.unit
+            # Send WO message to indicate topic is write-only
+            if item.write_mode == WriteMode.WRITEONLY:
+                self.client.publish(disc_payload["state_topic"], "WRITEONLY")
 
-                discovery_topic: str = self.discovery_topic+"/sensor/HN-" + from_transport.device_serial_number  + writePrefix + "/" + disc_payload["name"].replace(" ", "_") + "/config"
+            published_availability = True
+            time.sleep(0.07)  # deliberate throttle for broker reliability on large maps
 
-                self.client.publish(discovery_topic,
-                                        json.dumps(disc_payload),qos=1, retain=True)
+        # Only publish availability if at least one topic was processed,
+        # guarding against KeyError on an empty registry map
+        if published_availability:
+            self.client.publish(availability_topic, "online", qos=0, retain=True)
 
-                #send WO message to indicate topic is write only
-                if item.write_mode == WriteMode.WRITEONLY:
-                    self.client.publish(disc_payload["state_topic"], "WRITEONLY")
-
-                time.sleep(0.07) #slow down for better reliability
-
-            self.client.publish(disc_payload["availability_topic"],"online",qos=0, retain=True)
-            print()
-            self._log.info("Published HA "+str(count)+"x Discovery Topics")
+        self._log.info(f"Published HA {count}x Discovery Topics")
