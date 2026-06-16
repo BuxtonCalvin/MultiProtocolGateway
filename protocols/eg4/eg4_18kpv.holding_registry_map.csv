@@ -378,7 +378,7 @@ register,variable_name,documented_name,unit,data_type,values,read_interval,writa
 233.b13,,register 233.13,,1bit,0~1,,R,,unknown
 233.b14,,register 233.14,,1bit,0~1,,R,,unknown
 233.b15,,register 233.15,,1bit,0~1,,R,,unknown
-234,,quick_charge_duration_minutes,min,,0-1440,,W,,Quick charge duration in minutes. Writable setpoint that also reads as the live remaining-minutes countdown while a quick charge is active (firmware sets it to 60 on enable; raise it to extend the charge
+234,,quick_charge_duration_minutes,min,,0-1440,,W,,Quick charge duration in minutes. Writable setpoint that also reads as the live remaining-minutes countdown while a quick charge is active (firmware sets it to 60 on enable; raise it to extend the charge)
 236,,Register 236,,ushort,0-65535,,R,,Unknown
 237,,Register 237,,ushort,0-65535,,R,,Unknown
 241,,Register 241,,ushort,0-65535,,R,,Unknown

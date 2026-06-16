@@ -124,10 +124,10 @@ register,variable_name,documented_name,unit,data_type,values,read_interval,writa
 63.b29,,WarningCode_W029,,1bit,0-1,,R,,W029 EPS / off-grid over voltage
 63.b30,,WarningCode_W030,,1bit,0-1,,R,,W030 Meter reversed connection
 63.b31,,WarningCode_W031,,1bit,0-1,,R,,W031 DCV / EPS DC voltage high
-64,,Tinner,celsius,SHORT,0-65535,,R,"",Internal temperature
-65,,Tradiator1,celsius,SHORT,0-65535,,R,"",Radiator temperature 1
-66,,Tradiator2,celsius,SHORT,0-65535,,R,"",Radiator temperature 2
-67,,Tbat,,SHORT,0-65535,,R,"",Battery Over-Current Protection (OCP) count.  Will show as 2 for debug.
+64,,Tinner,celsius,SHORT,0-65535,,R,,Internal temperature
+65,,Tradiator1,celsius,SHORT,0-65535,,R,,Radiator temperature 1
+66,,Tradiator2,celsius,SHORT,0-65535,,R,,Radiator temperature 2
+67,,Tbat,,SHORT,0-65535,,R,,Battery Over-Current Protection (OCP) count.  Will show as 2 for debug.
 69,,RunningTime_l,second,,,,R,"{""Register_Endian"":""little""}",Runtime duration
 70,,RunningTime_h,second,,,,R,,Runtime duration
 71.b0,,AutoTestStart,,4bit,,,R,,0 - not started 1-Activated 1 - started
@@ -161,13 +161,13 @@ register,variable_name,documented_name,unit,data_type,values,read_interval,writa
 95,,BatStatus_INV,,,,,R,,The inverter aggregates lithium battery status information
 96,,BatParallelNum,,,,,R,,Number of batteries in parallel
 97,,BatCapacity,Ah,,,,R,,Battery capacity
-98,,BatCurrent_BMS,0.01A,SHORT,,,R,"",Battery current
+98,,BatCurrent_BMS,0.01A,SHORT,,,R,,Battery current
 99,,FaultCode_BMS,,,,,R,,Reports the active error status transmitted from the Battery Management System (BMS) to the inverter
 100,,WarningCode_BMS,,,,,R,,Reports non-critical alerts while the FaultCode indicates a system-stopping error
 101,,MaxCellVolt_BMS,0.001V,,,,R,,Maximum voltage of cell
 102,,MinCellVolt_BMS,0.001V,,,,R,,Minimum voltage of cell
-103,,MaxCellTemp_BMS,0.1C,SHORT,,,R,"",Maximum temperature of cell
-104,,MinCellTemp_BMS,0.1C,SHORT,,,R,"",Minimum temperature of cell
+103,,MaxCellTemp_BMS,0.1C,SHORT,,,R,,Maximum temperature of cell
+104,,MinCellTemp_BMS,0.1C,SHORT,,,R,,Minimum temperature of cell
 105,,BMSFWUpdateState,,,,,R,,1-Upgrade in process 2-Upgrade successful 3- Upgrade failed
 106,,CycleCnt_BMS,,,,,R,,Number of charging/discharging cycles
 107,,BatVoltSample_INV,0.1V,,,,R,,Inverter samples the battery voltage
@@ -240,8 +240,8 @@ register,variable_name,documented_name,unit,data_type,values,read_interval,writa
 169,,AutoTestTripTime _7_,ms,,,,R,,
 170,,Pload,W,,,,R,,Active power (in Watts) currently being utilized by the loads connected to the inverter
 171,,Eload_day,0.1kWh,,,,R,,represents the total energy in kilowatt-hours (kWh) consumed by the loads connected to the inverter for the current day.
-172,,Eload_allL,0.1kWh,,,,R,"{""Register_Endian"":""little""}",low bit  combine with high bit to get historical total
-173,,Eload_allH,0.1kWh,,,,R,,high bit cumulative total energy (in kWh) consumed by the load since the system was first installed
+172,,Eload_all_l,0.1kWh,,,,R,"{""Register_Endian"":""little""}",low bit  combine with high bit to get historical total
+173,,Eload_all_h,0.1kWh,,,,R,,high bit cumulative total energy (in kWh) consumed by the load since the system was first installed
 174,,SwitchState_SafetySw,,4bit,0-31,,R,,The status of the 5-digit safety DIP switch
 180,,Pinv_S,W,,0-65535,,R,,On grid inverter power of three phase: S phase
 181,,Pinv_T,W,,0-65535,,R,,On grid inverter power of three phase: T phase
@@ -255,8 +255,9 @@ register,variable_name,documented_name,unit,data_type,values,read_interval,writa
 189,,GenPower_T,W,,0-65535,,R,,Power of generator for three phase: T phase
 190,,IinvRMS_S,0.01,,0-65535,,R,,Effective value of three phase inverter current: S phase
 191,,IinvRMS_T,0.01,,0-65535,,R,,Effective value of three phase inverter current: T phase
-192,,PF_S,,,0-2000,,R,"{""High_Low"":""x?(0,1000]->x/1000 x?(1000,2000)->(1000-x)/1000""}"," Power factor of three phase: S phase"
-193,,PF_T,,,0-2000,,R,"{""High_Low"":""x?(0,1000]->x/1000 x?(1000,2000)->(1000-x)/1000""}"," Power factor of three phase: T phase"
+192,,PF_S,,,0-2000,,R,"{""High_Low"":""x?(0,1000]->x/1000 x?(1000,2000)->(1000-x)/1000""}","Power factor of three phase: S phase"
+193,,PF_T,,,0-2000,,R,"{""High_Low"":""x?(0,1000]->x/1000 x?(1000,2000)->(1000-x)/1000""}","Power factor of three phase: T phase"
+210,,quick_charge_remaining ,sec,,0-65535,,R,,The remaining time of a quick charge action in seconds
 233,,Register 233,,ushort,0-65535,,R,,Unknown
 236,,Register 236,,ushort,0-65535,,R,,Unknown
 237,,Register 237,,ushort,0-65535,,R,,Unknown
@@ -282,3 +283,91 @@ register,variable_name,documented_name,unit,data_type,values,read_interval,writa
 409,,FaultRecord2_Code,,,,,R,,Fault Records 2_ fault code
 410,,FaultRecord2_Value,,,,,R,,Fault Records 2_Fault value
 411,,FaultRecord2_SetOrClR,,,0~1,,R,,Fault Records 2_Fault occurred or clear (0 - Fault Occurred
+5002,,BatteryStatusHeader_1,,,0-65535,,R,,Battery status header
+5003,,BatteryFullCapacity_1,Ah,,0-65535,,R,,Full rated capacity
+5004,,BatteryChargeVoltageRef_1,0.1V,,0-65535,,R,,BMS charge voltage reference
+5005,,BatteryChargeCurrentLimit_1,0.1A,,0-65535,,R,,BMS charge current limit
+5006,,BatteryDischargeCurrentLimit_1,0.1A,,0-65535,,R,,BMS discharge current limit
+5007,,BatteryDischargeVoltageCutoff_1,0.1V,,0-65535,,R,,BMS discharge voltage cutoff
+5008,,BatteryVoltage_1,0.01V,,0-65535,,R,,Battery module voltage
+5009,,BatteryCurrent_1,0.1A,short,-32768-32767,,R,,Battery module current
+5010.b0,,BatterySOC_1,%,8bit,0-100,,R,,Battery state of charge
+5010.b8,,BatterySOH_1,%,8bit,0-100,,R,,Battery state of health
+5011,,BatteryCycleCount_1,,,0-65535,,R,,Charge/discharge cycle count
+5012,,BatteryMaxCellTemp_1,0.1C,short,-32768-32767,,R,,Maximum cell temperature
+5013,,BatteryMinCellTemp_1,0.1C,short,-32768-32767,,R,,Minimum cell temperature
+5014,,BatteryMaxCellVoltage_1,0.001V,,0-65535,,R,,Maximum cell voltage
+5015,,BatteryMinCellVoltage_1,0.001V,,0-65535,,R,,Minimum cell voltage
+5016.b0,,BatteryMaxCellNumVoltage_1,,8bit,0-255,,R,,Cell number with maximum voltage
+5016.b8,,BatteryMinCellNumVoltage_1,,8bit,0-255,,R,,Cell number with minimum voltage
+5017.b0,,BatteryMaxCellNumTemp_1,,8bit,0-255,,R,,Cell number with maximum temperature
+5017.b8,,BatteryMinCellNumTemp_1,,8bit,0-255,,R,,Cell number with minimum temperature
+5018.b0,,BatteryFirmwareMinor_1,,8bit,0-255,,R,,Firmware minor version
+5018.b8,,BatteryFirmwareMajor_1,,8bit,0-255,,R,,Firmware major version
+5019-5026,,BatterySerialNumber_1,,ASCII,, ,R,"{""Register_Endian"":""little""}","Battery serial number (8 registers)"
+5032,,BatteryStatusHeader_2,,,0-65535,,R,,Battery status header
+5033,,BatteryFullCapacity_2,Ah,,0-65535,,R,,Full rated capacity
+5034,,BatteryChargeVoltageRef_2,0.1V,,0-65535,,R,,BMS charge voltage reference
+5035,,BatteryChargeCurrentLimit_2,0.1A,,0-65535,,R,,BMS charge current limit
+5036,,BatteryDischargeCurrentLimit_2,0.1A,,0-65535,,R,,BMS discharge current limit
+5037,,BatteryDischargeVoltageCutoff_2,0.1V,,0-65535,,R,,BMS discharge voltage cutoff
+5038,,BatteryVoltage_2,0.01V,,0-65535,,R,,Battery module voltage
+5039,,BatteryCurrent_2,0.1A,short,-32768-32767,,R,,Battery module current
+5040.b0,,BatterySOC_2,%,8bit,0-100,,R,,Battery state of charge
+5040.b8,,BatterySOH_2,%,8bit,0-100,,R,,Battery state of health
+5041,,BatteryCycleCount_2,,,0-65535,,R,,Charge/discharge cycle count
+5042,,BatteryMaxCellTemp_2,0.1C,short,-32768-32767,,R,,Maximum cell temperature
+5043,,BatteryMinCellTemp_2,0.1C,short,-32768-32767,,R,,Minimum cell temperature
+5044,,BatteryMaxCellVoltage_2,0.001V,,0-65535,,R,,Maximum cell voltage
+5045,,BatteryMinCellVoltage_2,0.001V,,0-65535,,R,,Minimum cell voltage
+5046.b0,,BatteryMaxCellNumVoltage_2,,8bit,0-255,,R,,Cell number with maximum voltage
+5046.b8,,BatteryMinCellNumVoltage_2,,8bit,0-255,,R,,Cell number with minimum voltage
+5047.b0,,BatteryMaxCellNumTemp_2,,8bit,0-255,,R,,Cell number with maximum temperature
+5047.b8,,BatteryMinCellNumTemp_2,,8bit,0-255,,R,,Cell number with minimum temperature
+5048.b0,,BatteryFirmwareMinor_2,,8bit,0-255,,R,,Firmware minor version
+5048.b8,,BatteryFirmwareMajor_2,,8bit,0-255,,R,,Firmware major version
+5049-5056,,BatterySerialNumber_2,,ASCII,,,R,"{""Register_Endian"":""little""}","Battery serial number (8 registers)"
+5062,,BatteryStatusHeader_3,,,0-65535,,R,,Battery status header
+5063,,BatteryFullCapacity_3,Ah,,0-65535,,R,,Full rated capacity
+5064,,BatteryChargeVoltageRef_3,0.1V,,0-65535,,R,,BMS charge voltage reference
+5065,,BatteryChargeCurrentLimit_3,0.1A,,0-65535,,R,,BMS charge current limit
+5066,,BatteryDischargeCurrentLimit_3,0.1A,,0-65535,,R,,BMS discharge current limit
+5067,,BatteryDischargeVoltageCutoff_3,0.1V,,0-65535,,R,,BMS discharge voltage cutoff
+5068,,BatteryVoltage_3,0.01V,,0-65535,,R,,Battery module voltage
+5069,,BatteryCurrent_3,0.1A,short,-32768-32767,,R,,Battery module current
+5070.b0,,BatterySOC_3,%,8bit,0-100,,R,,Battery state of charge
+5070.b8,,BatterySOH_3,%,8bit,0-100,,R,,Battery state of health
+5071,,BatteryCycleCount_3,,,0-65535,,R,,Charge/discharge cycle count
+5072,,BatteryMaxCellTemp_3,0.1C,short,-32768-32767,,R,,Maximum cell temperature
+5073,,BatteryMinCellTemp_3,0.1C,short,-32768-32767,,R,,Minimum cell temperature
+5074,,BatteryMaxCellVoltage_3,0.001V,,0-65535,,R,,Maximum cell voltage
+5075,,BatteryMinCellVoltage_3,0.001V,,0-65535,,R,,Minimum cell voltage
+5076.b0,,BatteryMaxCellNumVoltage_3,,8bit,0-255,,R,,Cell number with maximum voltage
+5076.b8,,BatteryMinCellNumVoltage_3,,8bit,0-255,,R,,Cell number with minimum voltage
+5077.b0,,BatteryMaxCellNumTemp_3,,8bit,0-255,,R,,Cell number with maximum temperature
+5077.b8,,BatteryMinCellNumTemp_3,,8bit,0-255,,R,,Cell number with minimum temperature
+5078.b0,,BatteryFirmwareMinor_3,,8bit,0-255,,R,,Firmware minor version
+5078.b8,,BatteryFirmwareMajor_3,,8bit,0-255,,R,,Firmware major version
+5079-5086,,BatterySerialNumber_3,,ASCII,,,R,"{""Register_Endian"":""little""}","Battery serial number (8 registers)"
+5092,,BatteryStatusHeader_4,,,0-65535,,R,,Battery status header
+5093,,BatteryFullCapacity_4,Ah,,0-65535,,R,,Full rated capacity
+5094,,BatteryChargeVoltageRef_4,0.1V,,0-65535,,R,,BMS charge voltage reference
+5095,,BatteryChargeCurrentLimit_4,0.1A,,0-65535,,R,,BMS charge current limit
+5096,,BatteryDischargeCurrentLimit_4,0.1A,,0-65535,,R,,BMS discharge current limit
+5097,,BatteryDischargeVoltageCutoff_4,0.1V,,0-65535,,R,,BMS discharge voltage cutoff
+5098,,BatteryVoltage_4,0.01V,,0-65535,,R,,Battery module voltage
+5099,,BatteryCurrent_4,0.1A,short,-32768-32767,,R,,Battery module current
+5100.b0,,BatterySOC_4,%,8bit,0-100,,R,,Battery state of charge
+5100.b8,,BatterySOH_4,%,8bit,0-100,,R,,Battery state of health
+5101,,BatteryCycleCount_4,,,0-65535,,R,,Charge/discharge cycle count
+5102,,BatteryMaxCellTemp_4,0.1C,short,-32768-32767,,R,,Maximum cell temperature
+5103,,BatteryMinCellTemp_4,0.1C,short,-32768-32767,,R,,Minimum cell temperature
+5104,,BatteryMaxCellVoltage_4,0.001V,,0-65535,,R,,Maximum cell voltage
+5105,,BatteryMinCellVoltage_4,0.001V,,0-65535,,R,,Minimum cell voltage
+5106.b0,,BatteryMaxCellNumVoltage_4,,8bit,0-255,,R,,Cell number with maximum voltage
+5106.b8,,BatteryMinCellNumVoltage_4,,8bit,0-255,,R,,Cell number with minimum voltage
+5107.b0,,BatteryMaxCellNumTemp_4,,8bit,0-255,,R,,Cell number with maximum temperature
+5107.b8,,BatteryMinCellNumTemp_4,,8bit,0-255,,R,,Cell number with minimum temperature
+5108.b0,,BatteryFirmwareMinor_4,,8bit,0-255,,R,,Firmware minor version
+5108.b8,,BatteryFirmwareMajor_4,,8bit,0-255,,R,,Firmware major version
+5109-5116,,BatterySerialNumber_4,,ASCII,,,R,"{""Register_Endian"":""little""}","Battery serial number (8 registers)"
