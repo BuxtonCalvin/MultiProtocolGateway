@@ -46,7 +46,7 @@
       "y_percent": 9.461883408071749,
       "label_x_percent": 41.50078988941548,
       "label_y_percent": 18.860986547085204,
-      "label": "Tabs switch between register maps (Holding, Input) and the JSON config editor. Each tab shows a summary of write (W), mask (M), and screen (S) counts.",
+      "label": "Tabs switch between register maps (Holding, Input, Coil, Discrete) and the JSON config editor. Each tab shows a summary of write (W), mask (M), and screen (S) counts.",
       "shape_type": "dot"
     },
     {
@@ -86,7 +86,7 @@
       "y_percent": 8.76124169705633,
       "label_x_percent": 60.63096366508688,
       "label_y_percent": 5.437415801345738,
-      "label": "Tabs switch between register maps (Holding, Input) and the JSON config editor. Each tab shows a summary of write (W), mask (M), and screen (S) counts.",
+      "label": "Tabs switch between register maps (Holding, Input, Coil, Discrete) and the JSON config editor. Each tab shows a summary of write (W), mask (M), and screen (S) counts.",
       "shape_type": "dot"
     },
     {
@@ -186,25 +186,21 @@
   "analysis": [
     {
       "id": "analysis-batch-run",
-      "x_percent": 21.6,
-      "y_percent": 6.8,
-      "label_x_percent": 40.2,
-      "label_y_percent": 4,
+      "x_percent": 77.9,
+      "y_percent": 12.9,
+      "label_x_percent": 51.9,
+      "label_y_percent": 0.5,
       "label": "Batch size controls how many registers are read per Modbus request. Click Run Analysis to start the live scan and score each selected protocol.",
-      "shape_type": "rect",
-      "width_percent": 29.5,
-      "height_percent": 2.5,
-      "stroke_color": "rgb(226,210,20)",
-      "fill_color": "rgba(206,216,31,0.18)"
+      "shape_type": "dot"
     },
     {
       "id": "analysis-protocol-list",
-      "x_percent": 19.9,
-      "y_percent": 57.2,
-      "label_x_percent": 2.3,
-      "label_y_percent": 25.5,
-      "width_percent": 25.2,
-      "height_percent": 83.3,
+      "x_percent": 18.122565687789802,
+      "y_percent": 62.28014386270816,
+      "label_x_percent": 15.43755795981453,
+      "label_y_percent": 63.863845032175384,
+      "width_percent": 27.982071097372486,
+      "height_percent": 72.84191929138699,
       "label": "Select one or more protocol versions to compare against the live device scan. Check All selects every protocol at once.",
       "shape_type": "rect",
       "stroke_color": "rgb(14,165,233)",
@@ -212,14 +208,34 @@
     },
     {
       "id": "analysis-results",
-      "x_percent": 62.4,
-      "y_percent": 41.2,
-      "label_x_percent": 47.817810599478705,
-      "label_y_percent": 31.57887925392319,
-      "width_percent": 49.5,
-      "height_percent": 42.7,
+      "x_percent": 64.02272024729521,
+      "y_percent": 57.97517737457614,
+      "label_x_percent": 34.94204018547141,
+      "label_y_percent": 65.03333660507873,
+      "width_percent": 61.13647604327664,
+      "height_percent": 78.5,
       "label": "Results panel shows match scores and queued register-map changes after analysis runs. Click Commit to apply queued changes to the protocol files.",
-      "shape_type": "rect"
+      "shape_type": "rect",
+      "stroke_color": "rgb(14,165,233)",
+      "fill_color": "rgba(14,165,233,0.18)"
+    },
+    {
+      "id": "analysis-dot-1781575852479",
+      "x_percent": 60.7904173106646,
+      "y_percent": 51.971629883053275,
+      "label": "Each new register capture will display basic information about any register that returned a value. Non zero value returns will show as green.   By selecting the \"Queue Add\" button, you can add multiple registers to the  protocol map you ran the scan against.  Once in the queue, pressing commit will save those registers to the csv file map and create a backup file that you can revert back to if necessary. ",
+      "shape_type": "dot",
+      "label_x_percent": 64.12658423493046,
+      "label_y_percent": 51.674467876271564
+    },
+    {
+      "id": "analysis-dot-1781580095466",
+      "x_percent": 89.8,
+      "y_percent": 47.6,
+      "label": "If there are registers in the analyzed protocol where the hardware does not respond, they will be shown as a removal at the bottom of the list of registers discovered.  You can then revue and decide if you want to keep them or remove them.",
+      "shape_type": "dot",
+      "label_x_percent": 80.8,
+      "label_y_percent": 53.2
     }
   ],
   "protocols": [
@@ -229,7 +245,7 @@
       "y_percent": 16.9,
       "label_x_percent": 3,
       "label_y_percent": 43,
-      "label": "Left panel shows the protocol name, group, available register maps (holding, input), and the source CSV file path.",
+      "label": "Left panel shows the protocol name, group, available register maps (holding, input, coil, discrete), and the source CSV file path.",
       "shape_type": "dot"
     },
     {

@@ -58,6 +58,8 @@ class mqtt(transport_base):
 
     holding_register_prefix : str = ""
     input_register_prefix : str = ""
+    coil_register_prefix : str = ""
+    discrete_register_prefix : str = ""
 
     client : MQTTClient | None = None
     mqtt_properties : paho.mqtt.properties.Properties | None = None
@@ -84,6 +86,8 @@ class mqtt(transport_base):
 
         self.holding_register_prefix = settings.get("holding_register_prefix", fallback="")
         self.input_register_prefix = settings.get("input_register_prefix", fallback="")
+        self.input_register_prefix = settings.get("coil_register_prefix", fallback="")
+        self.input_register_prefix = settings.get("discrete_register_prefix", fallback="")
 
         # Instance-level state — never class-level to avoid shared-dict bugs across instances
         self._first_connection: bool = True
@@ -235,37 +239,69 @@ class mqtt(transport_base):
         self._log.info("Re-subscribed to %d write topic(s).", len(self._write_topics))
 
     def _load_override_write_allowlist(self, from_transport: transport_base) -> set[str]:
-        """Load documented-name allowlist from the protocol's holding override CSV.
+        """
+        Load documented-name allowlist from holding and coil override CSVs.
 
-        If the file is missing/empty, return an empty set (no write topics allowed).
+        If no override files exist, return an empty set
+        (no write topics allowed).
         """
         if from_transport.protocolSettings is None:
             return set()
 
         protocol_name: str = from_transport.protocolSettings.protocol
-        override_file: str = f"{protocol_name}.holding_registry_map.override.csv"
-        override_path: str | None = from_transport.protocolSettings.find_protocol_file(
-            override_file, "config"
-        )
-        if not override_path:
+        allowlist: set[str] = set()
+
+        override_files: list[str] = [
+            f"{protocol_name}.holding_registry_map.override.csv",
+            f"{protocol_name}.coil_registry_map.override.csv",
+        ]
+
+        for override_file in override_files:
+            override_path: str | None = (
+                from_transport.protocolSettings.find_protocol_file(
+                    override_file,
+                    "config",
+                )
+            )
+
+            if not override_path:
+                continue
+
+            try:
+                with open(Path(override_path), newline="", encoding="utf-8") as f:
+                    reader: csv.DictReader[str] = csv.DictReader(f)
+
+                    for row in reader:
+                        name: str = (
+                            (row.get("documented name") or "")
+                            .strip()
+                            .lower()
+                            .replace(" ", "_")
+                        )
+
+                        if name:
+                            allowlist.add(name)
+
+            except Exception as exc:
+                self._log.warning(
+                    "Unable to read override write allowlist '%s': %s",
+                    override_path,
+                    exc,
+                )
+
+        if not allowlist:
             self._log.warning(
-                "No override write allowlist found for '%s'; MQTT write topics disabled until write selections are made.",
+                "No holding or coil override write allowlists found for '%s'; "
+                "MQTT write topics disabled until write selections are made.",
                 protocol_name,
             )
             return set()
 
-        allowlist: set[str] = set()
-        try:
-            with open(Path(override_path), newline="", encoding="utf-8") as f:
-                reader: csv.DictReader[str] = csv.DictReader(f)
-                for row in reader:
-                    name: str = (row.get("documented name") or "").strip().lower().replace(" ", "_")
-                    if name:
-                        allowlist.add(name)
-        except Exception as exc:
-            self._log.warning(f"Unable to read override write allowlist '{override_path}': {exc}")
-            return set()
-        self._log.info(f"Loaded {len(allowlist)} entries from override write allowlist '{override_path}'")
+        self._log.info(
+            "Loaded %d entries from holding/coil override write allowlists",
+            len(allowlist),
+        )
+
         return allowlist
 
     # ------------------------------------------------------------------
@@ -345,37 +381,20 @@ class mqtt(transport_base):
                     from_transport.transport_name,
                 )
 
-            # Subscribe to holding-register write topics
-            for entry in from_transport.protocolSettings.get_registry_map(Registry_Type.HOLDING):
-                is_protocol_writable: bool = (
-                    entry.write_mode == WriteMode.WRITE or entry.write_mode == WriteMode.WRITEONLY
-                )
-                entry_name: str = entry.documented_name.strip().lower().replace(" ", "_")
-                if is_protocol_writable and entry_name in write_allowlist:
-                    topic: str = (
-                        self.base_topic
-                        + "/" + from_transport.device_identifier
-                        + "/write/"
-                        + entry.variable_name.lower().replace(" ", "_")
-                    )
-                    self._write_topics[topic] = entry
-                    self.client.subscribe(topic)
+            # Subscribe to holding and coil register write topics
+            registry_types: list[Registry_Type] = [Registry_Type.HOLDING, Registry_Type.COIL]
 
-            # Subscribe to coil-register write topics
-            for entry in from_transport.protocolSettings.get_registry_map(Registry_Type.COIL):
-                is_protocol_writable = (
-                    entry.write_mode == WriteMode.WRITE or entry.write_mode == WriteMode.WRITEONLY
-                )
-                entry_name = entry.documented_name.strip().lower().replace(" ", "_")
-                if is_protocol_writable and entry_name in write_allowlist:
-                    topic = (
-                        self.base_topic
-                        + "/" + from_transport.device_identifier
-                        + "/write/"
-                        + entry.variable_name.lower().replace(" ", "_")
-                    )
-                    self._write_topics[topic] = entry
-                    self.client.subscribe(topic)
+            for reg_type in registry_types:
+                for entry in from_transport.protocolSettings.get_registry_map(reg_type):
+                    is_protocol_writable: bool = entry.write_mode in (WriteMode.WRITE, WriteMode.WRITEONLY)
+                    entry_name: str = entry.documented_name.strip().lower().replace(" ", "_")
+
+                    if is_protocol_writable and entry_name in write_allowlist:
+                        var_name: str = entry.variable_name.lower().replace(" ", "_")
+                        topic: str = f"{self.base_topic}/{from_transport.device_identifier}/write/{var_name}"
+
+                        self._write_topics[topic] = entry
+                        self.client.subscribe(topic)
 
             self._log.info(
                 "MQTT write topic allowlist for '%s': %d topic(s)",

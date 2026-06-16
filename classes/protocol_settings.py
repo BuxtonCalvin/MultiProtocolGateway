@@ -350,6 +350,15 @@ class DataAdjustments:
     from the supplied ``entry.adjustments`` dict and the value being transformed.
     Adding a new adjustment type (a new stage or a new key such as Scale_Factor
     or Clamp) should require changes only within this class.
+
+    While standard Modbus transmits bytes within a single 16-bit register using Big-Endian format
+    (most significant byte first), the protocol does not define a standard order for multi-register values.
+    This has led manufacturers to adopt four distinct byte-ordering configurations to parse the 4 bytes (A, B, C, D)
+    of a 32-bit value:
+    Big-Endian / Word Swap (ABCD): The most significant word is stored in the first register, and the most significant byte comes first.
+    Little-Endian / No Swap (CDAB): The most significant word is stored in the second register, but the bytes within each word remain big-endian.
+    Big-Endian / No Swap (BADC): The words are ordered normally, but the individual bytes within each 16-bit register are swapped.
+    Little-Endian / Word Swap (DCBA):The least significant word is stored first, and the individual bytes are also reversed (common in Intel-based systems
     """
 
     def __init__(self, log: logging.Logger, default_byteorder: Literal["little", "big"] = _DEFAULT_BYTEORDER) -> None:

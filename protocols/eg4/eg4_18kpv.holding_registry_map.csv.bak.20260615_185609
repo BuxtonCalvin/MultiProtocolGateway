@@ -360,7 +360,7 @@ register,variable_name,documented_name,unit,data_type,values,read_interval,writa
 226.b4,,Function3_NPeRlyEn,,1bit,0~1,,W,,1 default
 227,,system_charge_soc_limit,%,,0-100,,W,,System-level charge SOC limit (stops all charging at this SOC).
 228,,Register 228,,,1,,R,,Unknown
-231,,register_231_l,1kw,,,,R,"{""Register_Endian"":""little""}",Unknown
+231,,register_231_l,1kw,,,,R,"{""Register_Endian"":""little""}","Unknown"
 232,,register_231_h,1kw,,,,R,,
 233.b0,,quick_charge_start_enable,,1bit,0~1,,W,,Quick charge start enable. The Quick Charge switch starts the charge at the firmware default length of 60. Set 234 to over-ride length
 233.b1,,battery_backup_enable,,1bit,0~1,,W,,Battery backup enable

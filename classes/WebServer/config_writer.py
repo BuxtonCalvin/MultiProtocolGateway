@@ -33,7 +33,9 @@ import logging
 import shutil
 from datetime import datetime
 from pathlib import Path
+from typing import Any, List, Tuple
 
+from sqlalchemy.engine.row import Row
 from sqlalchemy.orm import Session
 
 from .database import refresh_app_state
@@ -64,7 +66,7 @@ def create_backup(config_path: Path, db: Session, trigger: str = "manual") -> Co
     backup_path: Path = backup_dir / f"config_{ts}.cfg"
 
     shutil.copy2(config_path, backup_path)
-    size = backup_path.stat().st_size
+    size: int = backup_path.stat().st_size
 
     record = ConfigBackup(
         filepath=str(backup_path),
@@ -88,22 +90,22 @@ def _build_config_text(settings_rows: list[Setting]) -> str:
       [general] → [logging] → [transport.*] alphabetically → [remaining]
     """
     from collections import defaultdict
-    removed_keys = {"analyze_protocol", "analyze_protocol_save_load"}
+    removed_keys: set[str] = {"analyze_protocol", "analyze_protocol_save_load"}
     sections: dict[str, list[Setting]] = defaultdict(list)
     for row in settings_rows:
         if row.is_active and row.key not in removed_keys:
             sections[row.section].append(row)
 
     # Section ordering
-    order = ["general", "logging"]
-    transport_sections = sorted(
+    order: List[str] = ["general", "logging"]
+    transport_sections: List[str] = sorted(
         s for s in sections if s.startswith("transport.")
     )
-    other_sections = sorted(
+    other_sections: List[str] = sorted(
         s for s in sections
         if s not in order and s not in transport_sections
     )
-    final_order = order + transport_sections + other_sections
+    final_order: List[str] = order + transport_sections + other_sections
 
     lines: list[str] = []
     for section in final_order:
@@ -111,7 +113,7 @@ def _build_config_text(settings_rows: list[Setting]) -> str:
             continue
         lines.append(f"[{section}]")
         for row in sections[section]:
-            value = row.value_staged if row.value_staged is not None else (row.value_disk or "")
+            value: str = row.value_staged if row.value_staged is not None else (row.value_disk or "")
             lines.append(f"{row.key} = {value}")
         lines.append("")  # blank line between sections
 
@@ -139,7 +141,7 @@ def _write_mask_screen_files(
     transport_protocols: dict[str, str] = {}
     for row in db.query(Setting).filter(Setting.key == "protocol_version").all():
         # section = "transport.Inverter1" → transport_name = "Inverter1"
-        transport_name = row.section.replace("transport.", "", 1)
+        transport_name: str = row.section.replace("transport.", "", 1)
         transport_protocols[transport_name] = row.value_staged or row.value_disk or ""
 
     for transport_name, protocol_version in transport_protocols.items():
@@ -147,7 +149,7 @@ def _write_mask_screen_files(
             continue
 
         # Find all registers for this protocol
-        registers = (
+        registers: List[Row[Tuple[DeviceProtocolSelection, ProtocolRegister]]] = (
             db.query(DeviceProtocolSelection, ProtocolRegister)
             .join(
                 ProtocolRegister,
@@ -177,7 +179,7 @@ def _write_mask_screen_files(
                 masked_names.add(protocol_row.variable_name)
             else:
                 unmasked_names.add(protocol_row.variable_name)
-        mask_lines = sorted(masked_names - unmasked_names)
+        mask_lines: list[str] = sorted(masked_names - unmasked_names)
         mask_path: Path = config_dir / f"variable_mask_{transport_name}.txt"
         mask_path.write_text("\n".join(mask_lines) + "\n", encoding="utf-8")
         written["mask"] += 1
@@ -191,8 +193,8 @@ def _write_mask_screen_files(
                 screened_names.add(protocol_row.variable_name)
             else:
                 unscreened_names.add(protocol_row.variable_name)
-        screen_lines = sorted(screened_names - unscreened_names)
-        screen_path = config_dir / f"variable_screen_{transport_name}.txt"
+        screen_lines: list[str] = sorted(screened_names - unscreened_names)
+        screen_path: Path = config_dir / f"variable_screen_{transport_name}.txt"
         screen_path.write_text("\n".join(screen_lines) + "\n", encoding="utf-8")
         written["screen"] += 1
         _log.info(f"Wrote screen file: {screen_path} ({len(screen_lines)} entries)")
@@ -200,11 +202,7 @@ def _write_mask_screen_files(
     return written
 
 
-def _write_override_csv(
-    db: Session,
-    protocols_dir: Path,
-    config_dir: Path,
-) -> int:
+def _write_override_csv(db: Session, protocols_dir: Path, config_dir: Path) -> int:
     """
     For each protocol with user_write_enabled changes, write/update the
     <protocol_name>.override.csv in the config_dir.
@@ -219,11 +217,11 @@ def _write_override_csv(
     Returns count of override files written.
     """
     config_dir.mkdir(parents=True, exist_ok=True)
-    protocol_names = [
+    protocol_names: list[Any] = [
         row[0]
         for row in (
             db.query(DeviceProtocolSelection.protocol_name)
-            .filter(DeviceProtocolSelection.registry_type == "holding")
+            .filter(DeviceProtocolSelection.registry_type.in_(["holding", "coil"]))
             .distinct()
             .all()
         )
@@ -232,37 +230,37 @@ def _write_override_csv(
     written = 0
     for protocol_name in protocol_names:
         # Find the CSV file
-        csv_path = _find_protocol_csv(protocols_dir, protocol_name)
+        csv_path: Path | None = _find_protocol_csv(protocols_dir, protocol_name)
         if not csv_path:
             _log.warning(f"Cannot find CSV for protocol '{protocol_name}' — override not written")
             continue
 
-        override_path = config_dir / f"{protocol_name}.override.csv"
+        override_path: Path = config_dir / f"{protocol_name}.override.csv"
 
         # Load existing override entries (so we don't lose unrelated overrides)
         existing_overrides: dict[str, dict[str, str]] = {}
         if override_path.exists():
             try:
                 with open(override_path, newline="", encoding="utf-8") as f:
-                    reader = csv.DictReader(f)
+                    reader: csv.DictReader[str] = csv.DictReader(f)
                     for r in reader:
-                        key = r.get("documented name", r.get("variable_name", ""))
+                        key: str | Any = r.get("documented name", r.get("variable_name", ""))
                         if key:
                             existing_overrides[key] = r
             except Exception as exc:
                 _log.warning(f"Could not read existing override file {override_path}: {exc}")
 
-        selected_rows = (
+        selected_rows: List[ProtocolRegister] = (
             db.query(ProtocolRegister)
             .join(
                 DeviceProtocolSelection,
-                (DeviceProtocolSelection.protocol_name == ProtocolRegister.protocol_name)
-                & (DeviceProtocolSelection.registry_type == ProtocolRegister.registry_type)
-                & (DeviceProtocolSelection.register_address == ProtocolRegister.register_address),
+                (DeviceProtocolSelection.protocol_name == ProtocolRegister.protocol_name) &
+                (DeviceProtocolSelection.registry_type == ProtocolRegister.registry_type) &
+                (DeviceProtocolSelection.register_address == ProtocolRegister.register_address),
             )
             .filter(
                 ProtocolRegister.protocol_name == protocol_name,
-                ProtocolRegister.registry_type == "holding",
+                ProtocolRegister.registry_type.in_(["holding", "coil"]),
                 DeviceProtocolSelection.user_write_enabled == True,  # noqa: E712
             )
             .all()
@@ -280,7 +278,7 @@ def _write_override_csv(
         # Write override file
         if existing_overrides:
             with open(override_path, "w", newline="", encoding="utf-8") as f:
-                writer = csv.DictWriter(
+                writer: csv.DictWriter[str] = csv.DictWriter(
                     f, fieldnames=["documented name", "write"]
                 )
                 writer.writeheader()
@@ -307,7 +305,7 @@ def _find_protocol_csv(protocols_dir: Path, protocol_name: str) -> Path | None:
 
 
 def _write_protocol_csvs(db: Session, protocols_dir: Path) -> int:
-    dirty_protocols = [
+    dirty_protocols: List[Any] = [
         row[0]
         for row in (
             db.query(ProtocolRegister.protocol_name)
@@ -319,11 +317,11 @@ def _write_protocol_csvs(db: Session, protocols_dir: Path) -> int:
 
     written = 0
     for protocol_name in dirty_protocols:
-        csv_path = _find_protocol_csv(protocols_dir, protocol_name)
+        csv_path: Path | None = _find_protocol_csv(protocols_dir, protocol_name)
         if not csv_path:
             continue
 
-        rows = (
+        rows: List[ProtocolRegister] = (
             db.query(ProtocolRegister)
             .filter(ProtocolRegister.protocol_name == protocol_name)
             .order_by(ProtocolRegister.register_address)
@@ -331,7 +329,7 @@ def _write_protocol_csvs(db: Session, protocols_dir: Path) -> int:
         )
 
         with open(csv_path, "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(
+            writer: csv.DictWriter[str] = csv.DictWriter(
                 f,
                 fieldnames=[
                     "register",
@@ -340,6 +338,7 @@ def _write_protocol_csvs(db: Session, protocols_dir: Path) -> int:
                     "unit",
                     "data_type",
                     "values",
+                    "adjustments",
                     "note",
                     "writable",
                     "read_interval",
@@ -355,6 +354,7 @@ def _write_protocol_csvs(db: Session, protocols_dir: Path) -> int:
                     "unit": row.unit or "",
                     "data_type": row.data_type or "",
                     "values": row.values_range or "",
+                    "adjustments": row.adjustments or "",
                     "note": row.note or "",
                     "writable": row.write_mode_protocol or "",
                     "read_interval": row.read_interval or "",
@@ -415,23 +415,23 @@ def commit_all(db: Session, config_path: Path, project_root: Path, protocols_dir
     result: dict[str, int | str] = {}
 
     # 1. Backup
-    backup = create_backup(config_path, db, trigger="manual")
+    backup: ConfigBackup = create_backup(config_path, db, trigger="manual")
     result["backup_path"] = backup.filepath
 
     # 2. Rebuild config.cfg
-    all_settings = db.query(Setting).filter(Setting.is_orphan == False).all()  # noqa: E712
-    config_text = _build_config_text(all_settings)
+    all_settings: List[Setting] = db.query(Setting).filter(Setting.is_orphan == False).all()  # noqa: E712
+    config_text: str = _build_config_text(all_settings)
     config_path.write_text(config_text, encoding="utf-8")
     result["settings_written"] = len([s for s in all_settings if s.is_active])
     _log.info(f"config.cfg written ({result['settings_written']} active settings)")
 
     # 3. Mask and screen files
-    mask_screen = _write_mask_screen_files(db, project_root)
+    mask_screen: dict[str, int] = _write_mask_screen_files(db, project_root)
     result["mask_files_written"] = mask_screen["mask"]
     result["screen_files_written"] = mask_screen["screen"]
 
     # 4. Override CSVs — saved to config_dir so they survive updates and Docker mounts
-    _config_dir = config_dir or config_path.parent
+    _config_dir: Path = config_dir or config_path.parent
     result["override_files_written"] = _write_override_csv(db, protocols_dir, _config_dir)
 
     # 5. Protocol CSVs
@@ -441,7 +441,7 @@ def commit_all(db: Session, config_path: Path, project_root: Path, protocols_dir
     _reset_dirty_flags(db)
 
     # 7. Update AppState
-    state = db.get(AppState, 1)
+    state: AppState | None = db.get(AppState, 1)
     if state:
         state.last_commit_at = datetime.now().astimezone()
     db.commit()

@@ -135,7 +135,7 @@ class ProtocolRegister(Base):
     protocol_group: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     protocol_name: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     registry_type: Mapped[str] = mapped_column(String(16), nullable=False)
-    # "input" | "holding" | "json"
+    # "input" | "holding" | "coil" | "discrete" | "json"
 
     # Register fields (sourced from CSV)
     register_address: Mapped[str] = mapped_column(String(32), nullable=False)

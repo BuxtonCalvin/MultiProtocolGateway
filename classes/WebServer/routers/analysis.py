@@ -86,6 +86,7 @@ class AnalysisChange(BaseModel):
     unit: str = ""
     read_interval: str = ""
     write_mode: str = "R"
+    adjustments: str = ""
     note: str = ""
 
 
@@ -105,7 +106,7 @@ def _clean_device_name(device_name: str) -> str:
 def _find_transport(gateway: Any, device_name: str) -> None | Any:
     if gateway is None:
         return None
-    clean = _clean_device_name(device_name)
+    clean: str = _clean_device_name(device_name)
     transport_names: set[str] = {clean, f"transport.{clean}"}
     return next(
         (
@@ -117,8 +118,8 @@ def _find_transport(gateway: Any, device_name: str) -> None | Any:
 
 
 def _require_modbus_transport(request: Request, device_name: str) -> modbus_base:
-    gateway = getattr(request.app.state, "gateway", None)
-    transport = _find_transport(gateway, device_name)
+    gateway: Any | None = getattr(request.app.state, "gateway", None)
+    transport: None | Any = _find_transport(gateway, device_name)
     if transport is None:
         raise HTTPException(status_code=404, detail=f"Transport '{device_name}' not found")
     if not isinstance(transport, modbus_base):
@@ -142,6 +143,7 @@ def _normalize_header(value: str) -> str:
 
 HEADER_ALIASES: dict[str, str] = {
     "address": "register",
+    "adjustments": "adjustments",
     "data_type": "data_type",
     "datatype": "data_type",
     "desc": "note",
@@ -175,20 +177,20 @@ HEADER_ALIASES: dict[str, str] = {
 
 
 def _detect_delimiter(csv_path: Path) -> str:
-    sample = csv_path.read_text(encoding="latin-1")[:4096]
+    sample: str = csv_path.read_text(encoding="latin-1")[:4096]
     return ";" if sample.count(";") > sample.count(",") else ","
 
 
 def _load_csv_matrix(csv_path: Path) -> tuple[str, list[str], list[list[str]]]:
-    delimiter = _detect_delimiter(csv_path)
+    delimiter: str = _detect_delimiter(csv_path)
     with open(csv_path, newline="", encoding="latin-1") as handle:
         reader = csv.reader(handle, delimiter=delimiter)
-        rows = list(reader)
+        rows: list[list[str]] = list(reader)
     if not rows:
         msg: str = (f"CSV file is empty: {csv_path}")
         raise ValueError(msg)
-    header = list(rows[0])
-    body = [row + [""] * (len(header) - len(row)) for row in rows[1:]]
+    header: list[str] = list(rows[0])
+    body: list[list[str]] = [row + [""] * (len(header) - len(row)) for row in rows[1:]]
     return delimiter, header, body
 
 
@@ -219,7 +221,7 @@ def _set_cell(row: list[str], mapping: dict[str, int], canonical: str, value: st
 
 def _find_protocol_csv(protocols_dir: Path, protocol_name: str, registry_type: str) -> Path:
     registry_type = registry_type.lower()
-    candidates = [
+    candidates: list[Path] = [
         path for path in protocols_dir.rglob("*.csv")
         if path.stem.lower().startswith(protocol_name.lower())
         and "registry_map" in path.name.lower()
@@ -234,15 +236,15 @@ def _find_protocol_csv(protocols_dir: Path, protocol_name: str, registry_type: s
 
 
 def _backup_protocol_csv(csv_path: Path) -> None:
-    timestamp = datetime.now().astimezone().strftime("%Y%m%d_%H%M%S")
-    backup_path = csv_path.with_suffix(f"{csv_path.suffix}.bak.{timestamp}")
+    timestamp: str = datetime.now().astimezone().strftime("%Y%m%d_%H%M%S")
+    backup_path: Path = csv_path.with_suffix(f"{csv_path.suffix}.bak.{timestamp}")
     shutil.copy2(csv_path, backup_path)
 
 
 def _row_matches_change(row: list[str], mapping: dict[str, int], change: AnalysisChange) -> bool:
-    row_variable = _get_cell(row, mapping, "variable_name").lower()
-    row_documented = _get_cell(row, mapping, "documented_name").lower()
-    row_register = _get_cell(row, mapping, "register").lower()
+    row_variable: str = _get_cell(row, mapping, "variable_name").lower()
+    row_documented: str = _get_cell(row, mapping, "documented_name").lower()
+    row_register: str = _get_cell(row, mapping, "register").lower()
     if change.variable_name and row_variable == change.variable_name.lower():
         return True
     if change.documented_name and row_documented == change.documented_name.lower():
@@ -258,7 +260,7 @@ def _row_exists(rows: list[list[str]], mapping: dict[str, int], change: Analysis
 
 
 def _build_added_row(header: list[str], mapping: dict[str, int], change: AnalysisChange) -> list[str]:
-    row = [""] * len(header)
+    row: list[str] = [""] * len(header)
     _set_cell(row, mapping, "variable_name", change.variable_name or f"register_{change.register_address}")
     _set_cell(row, mapping, "data_type", change.data_type or "ushort")
     _set_cell(row, mapping, "register", change.register_address)
@@ -266,6 +268,7 @@ def _build_added_row(header: list[str], mapping: dict[str, int], change: Analysi
     _set_cell(row, mapping, "documented_name", change.documented_name or f"Register_{change.register_address}")
     _set_cell(row, mapping, "values", change.values_range or "0-65535")
     _set_cell(row, mapping, "unit", change.unit or "")
+    _set_cell(row, mapping, "adjustments", change.adjustments or "")
     _set_cell(row, mapping, "note", change.note or "")
     _set_cell(row, mapping, "write_mode", change.write_mode or "R")
     return row
@@ -273,19 +276,19 @@ def _build_added_row(header: list[str], mapping: dict[str, int], change: Analysi
 
 def _apply_protocol_changes(csv_path: Path, changes: list[AnalysisChange]) -> tuple[bool, int]:
     delimiter, header, rows = _load_csv_matrix(csv_path)
-    mapping = _header_index_map(header)
+    mapping: dict[str, int] = _header_index_map(header)
     changed = 0
 
     for change in changes:
-        action = change.action.lower()
+        action: str = change.action.lower()
         if action == "add":
             if _row_exists(rows, mapping, change):
                 continue
             rows.append(_build_added_row(header, mapping, change))
             changed += 1
         elif action == "remove":
-            original_len = len(rows)
-            rows = [row for row in rows if not _row_matches_change(row, mapping, change)]
+            original_len: int = len(rows)
+            rows: list[list[str]] = [row for row in rows if not _row_matches_change(row, mapping, change)]
             changed += original_len - len(rows)
 
     if changed == 0:
@@ -316,7 +319,7 @@ async def analysis_progress(device_name: str, request: Request):
       data: {"type": "error", "detail": "..."}
     """
     _require_modbus_transport(request, device_name)
-    clean = _clean_device_name(device_name)
+    clean: str = _clean_device_name(device_name)
 
     async def event_stream():
         # Wait up to 10 s for the POST to register a queue.  The browser
@@ -360,7 +363,7 @@ async def analysis_progress(device_name: str, request: Request):
             if msg.get("type") == "error":
                 break
 
-    headers = {
+    headers: dict[str, str] = {
         "Cache-Control": "no-cache",
         "X-Accel-Buffering": "no",
         "Connection": "keep-alive",
@@ -371,22 +374,22 @@ async def analysis_progress(device_name: str, request: Request):
 @router.post("/{device_name}")
 async def run_analysis(device_name: str, payload: AnalyzeRequest, request: Request):
     transport = _require_modbus_transport(request, device_name)
-    protocol_names = [name for name in payload.protocol_names if name]
+    protocol_names: list[str] = [name for name in payload.protocol_names if name]
     if not protocol_names:
         raise HTTPException(status_code=400, detail="Select at least one protocol to analyze")
 
-    clean = _clean_device_name(device_name)
+    clean: str = _clean_device_name(device_name)
 
     # Register the progress queue BEFORE entering the thread so the SSE
     # endpoint can find it immediately after the browser issues the POST.
     progress_queue = _register_progress_queue(clean)
 
     def progress_cb(phase: str, done: int, total: int) -> None:
-        pct = round((done / total) * 100) if total else 0
+        pct: int = round((done / total) * 100) if total else 0
         progress_queue.put({"type": "progress", "phase": phase, "done": done, "total": total, "pct": pct})
 
     try:
-        result = await asyncio.to_thread(
+        result: dict[str, Any] = await asyncio.to_thread(
             transport.analyze_protocols,
             protocol_names,
             payload.current_protocol,
@@ -420,7 +423,7 @@ async def commit_analysis(device_name: str, payload: CommitAnalysisRequest, requ
     changes_applied = 0
     touched_files: list[str] = []
     for (protocol_name, registry_type), changes in grouped.items():
-        csv_path = _find_protocol_csv(protocols_dir, protocol_name, registry_type)
+        csv_path: Path = _find_protocol_csv(protocols_dir, protocol_name, registry_type)
         file_changed, file_change_count = _apply_protocol_changes(csv_path, changes)
         if file_changed:
             files_written += 1

@@ -23,6 +23,18 @@
   Left  (cols 1-3):  Settings pane (same structure as scraper)
   Right (cols 4-12): Connection health pane (no protocol table)
 -->
+{%- macro is_bool(s) -%}
+  {%- set v = (s.value_staged or s.default_value or '') | lower | trim -%}
+  {%- set k = s.key | lower -%}
+  {%- if v in ('true', 'false') -%}true
+  {%- elif k.startswith('enable_') or k.startswith('send_')
+        or k.startswith('include_') or k.startswith('use_')
+        or k in ('write_enabled', 'force_float', 'json', 'console',
+                 'discovery_enabled', 'migrate_data', 'pretty_print',
+                 'append_mode', 'async_mode') -%}true
+  {%- else -%}false
+  {%- endif -%}
+{%- endmacro -%}
 <div class="col-span-12 flex gap-4" style="height: calc(100vh - 56px); overflow: hidden;">
 
   <!-- ══ LEFT: SETTINGS PANE ══ -->
@@ -69,7 +81,7 @@
     <!-- Settings table -->
     <div class="space-y-0.5" role="table" aria-label="Device settings for {{ device.name }}">
 
-      <div class="grid grid-cols-[1.5rem_1fr_5rem_5rem] gap-1 text-mpg-400 text-xs
+      <div class="grid grid-cols-[1.5rem_1fr_5rem_5rem] gap-1 text-mpg-200 text-xs
                   uppercase tracking-wide px-1 pb-1 border-b border-mpg-700"
            role="row">
         <span role="columnheader" aria-label="Active">A</span>
@@ -106,20 +118,39 @@
           {% if s.is_dirty %}<span class="text-dirty text-xs ml-1">●</span>{% endif %}
         </div>
 
-        <div role="cell" class="{% if not s.is_active %}opacity-70{% endif %}">
+        <div role="cell">
+          {% if is_bool(s) == 'true' %}
+          <select class="w-full bg-mpg-900 border border-mpg-600 rounded px-1 py-0.5
+                         font-mono text-xs
+                         focus:outline-none focus:ring-1 focus:ring-accent
+                         {% if s.is_active %}text-mpg-100{% else %}text-mpg-200 opacity-70{% endif %}"
+                  {% if not s.is_active %}disabled{% endif %}
+                  aria-label="Value for {{ s.key }}"
+                  hx-patch="/api/devices/{{ device.name }}/settings/{{ s.id }}"
+                  hx-ext="json-enc"
+                  name="value_staged"
+                  hx-swap="none"
+                  hx-trigger="change">
+            {% set cur = (s.value_staged or s.default_value or 'false') | lower | trim %}
+            <option value="true"  {% if cur == 'true'  %}selected{% endif %}>true</option>
+            <option value="false" {% if cur == 'false' %}selected{% endif %}>false</option>
+          </select>
+          {% else %}
           <input type="text"
                  class="w-full bg-mpg-900 border border-mpg-600 rounded px-1 py-0.5
-                        text-mpg-100 font-mono text-xs
+                        font-mono text-xs
                         focus:outline-none focus:ring-1 focus:ring-accent
-                        disabled:opacity-70 disabled:cursor-not-allowed disabled:text-mpg-300"
-                 {% if not s.is_active %}disabled{% endif %}
-                 value="{{ s.value_staged or '' }}"
+                        {% if s.is_active %}text-mpg-100{% else %}text-mpg-200 opacity-70{% endif %}"
+                 {% if not s.is_active %}readonly tabindex="-1"{% endif %}
+                 value="{{ s.value_staged or (s.default_value if not s.is_active else '') }}"
+                 placeholder="{{ s.default_value or '' }}"
                  aria-label="Value for {{ s.key }}"
                  hx-patch="/api/devices/{{ device.name }}/settings/{{ s.id }}"
                  hx-ext="json-enc"
                  name="value_staged"
                  hx-swap="none"
                  hx-trigger="change delay:400ms">
+          {% endif %}
         </div>
 
         <div role="cell" class="self-center min-w-0">
@@ -260,7 +291,7 @@
     setInterval(fetchStatus, 10000);  // re-check every 10 s
   })();
 
-  // After any settings PATCH, update row DOM (dirty highlight, input enabled state)
+  // After any settings PATCH, update row DOM (dirty highlight, input/select enabled state)
   document.addEventListener('htmx:afterRequest', function(evt) {
     const el = evt.detail.elt;
     if (!el) return;
@@ -270,17 +301,49 @@
     let resp;
     try { resp = JSON.parse(evt.detail.xhr.responseText); } catch(e) { return; }
 
-    const textInput = row.querySelector('input[type=text]');
+    const select    = row.querySelector('select[name=value_staged]');
+    const textInput = row.querySelector('input[type=text][name=value_staged]');
+
     if (resp.is_active !== undefined) {
-      const dimCells = Array.from(row.querySelectorAll('[role=cell]')).slice(0, 3);
-      if (resp.is_active) {
-        dimCells.forEach(c => c.classList.remove('opacity-70'));
-        if (textInput) textInput.disabled = false;
-      } else {
-        dimCells.forEach(c => c.classList.add('opacity-70'));
-        if (textInput) { textInput.disabled = true; textInput.value = ''; }
+      const active = resp.is_active;
+
+      // Key cell opacity (second [role=cell])
+      const keyCell = row.querySelector('[role=cell]:nth-child(2)');
+      if (keyCell) {
+        if (active) keyCell.classList.remove('opacity-70');
+        else        keyCell.classList.add('opacity-70');
+      }
+
+      // Boolean select
+      if (select) {
+        select.disabled = !active;
+        if (active) {
+          select.classList.remove('text-mpg-200', 'opacity-70');
+          select.classList.add('text-mpg-100');
+        } else {
+          select.classList.remove('text-mpg-100');
+          select.classList.add('text-mpg-200', 'opacity-70');
+        }
+      }
+
+      // Text input
+      if (textInput) {
+        textInput.readOnly = !active;
+        textInput.tabIndex = active ? 0 : -1;
+        if (active) {
+          textInput.classList.remove('text-mpg-200', 'opacity-70');
+          textInput.classList.add('text-mpg-100');
+        } else {
+          textInput.classList.remove('text-mpg-100');
+          textInput.classList.add('text-mpg-200', 'opacity-70');
+          // Restore default value as visual hint when deactivating
+          const defaultVal = row.querySelector('[role=cell]:nth-child(4) button, [role=cell]:nth-child(4) span');
+          if (defaultVal) textInput.value = defaultVal.textContent.trim() !== '—'
+                                           ? defaultVal.textContent.trim() : '';
+        }
       }
     }
+
     if (resp.is_dirty) {
       row.classList.add('bg-dirty/10', 'border-l-2', 'border-dirty');
     } else {

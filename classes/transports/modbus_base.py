@@ -1070,7 +1070,7 @@ class modbus_base(transport_base):
         self,
         start: int = 0,
         end: int = 65535,
-        batch_size: int = 50,
+        batch_size: int = 40,
         delay: float = 0.05,
         include_holding: bool = True,
         include_coil: bool = False,

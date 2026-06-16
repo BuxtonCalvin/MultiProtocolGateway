@@ -24,10 +24,10 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, List
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Query, Session
 
 from ..database import refresh_app_state
 from ..models import DeviceProtocolSelection, ProtocolRegister
@@ -70,9 +70,9 @@ def get_protocol_registers(
 ) -> dict[str, Any]:
     """
     Returns a paginated list of ProtocolRegister rows for a given
-    protocol_name and registry_type (input | holding | json).
+    protocol_name and registry_type (input | holding | coil | discrete | json).
     """
-    query = (
+    query: Query[ProtocolRegister] = (
         db.query(ProtocolRegister)
         .filter(
             ProtocolRegister.protocol_name == protocol_name,
@@ -81,12 +81,12 @@ def get_protocol_registers(
         .order_by(ProtocolRegister.register_address)
     )
 
-    total = query.count()
+    total: int = query.count()
     _log.debug("get_protocol_registers: %s/%s page=%d total=%d", protocol_name, registry_type, page, total)
-    protocol_rows = query.offset((page - 1) * page_size).limit(page_size).all()
+    protocol_rows: List[ProtocolRegister] = query.offset((page - 1) * page_size).limit(page_size).all()
 
     if device_name:
-        selections = {
+        selections: dict[tuple[str, str, str], DeviceProtocolSelection] = {
             (row.protocol_name, row.registry_type, row.register_address): row
             for row in (
                 db.query(DeviceProtocolSelection)
@@ -170,9 +170,9 @@ def get_protocols_for_device(
                 )
                 .all()
             )
-            write_count  = sum(1 for s in sels if s.user_write_enabled)
-            mask_count   = sum(1 for s in sels if s.mask_enabled)
-            screen_count = sum(1 for s in sels if s.screen_enabled)
+            write_count: int  = sum(1 for s in sels if s.user_write_enabled)
+            mask_count: int   = sum(1 for s in sels if s.mask_enabled)
+            screen_count: int = sum(1 for s in sels if s.screen_enabled)
 
         tabs.append({
             "protocol_name": protocol_name,
@@ -197,11 +197,11 @@ def toggle_register_field(
     if the protocol permits writing.
     Returns the updated row, or None if not found / not allowed.
     """
-    allowed_fields = {"user_write_enabled", "mask_enabled", "screen_enabled"}
+    allowed_fields: set[str] = {"user_write_enabled", "mask_enabled", "screen_enabled"}
     if field not in allowed_fields:
         return None
 
-    row = db.get(ProtocolRegister, register_id)
+    row: ProtocolRegister | None = db.get(ProtocolRegister, register_id)
     if row is None:
         return None
 
@@ -256,7 +256,7 @@ def update_protocol_register_field(
     field: str,
     value: str,
 ) -> ProtocolRegister | None:
-    allowed_fields = {
+    allowed_fields: set[str] = {
         "variable_name",
         "documented_name",
         "unit",
@@ -269,7 +269,7 @@ def update_protocol_register_field(
     if field not in allowed_fields:
         return None
 
-    row = db.get(ProtocolRegister, register_id)
+    row: ProtocolRegister | None = db.get(ProtocolRegister, register_id)
     if row is None:
         return None
 
@@ -301,7 +301,7 @@ def get_protocol_json(
             except Exception:
                 _log.warning("Failed to load protocol json override file %s", override_path)
 
-    json_path = protocols_dir / protocol_group / f"{protocol_name}.json"
+    json_path: Path = protocols_dir / protocol_group / f"{protocol_name}.json"
     if json_path.exists():
         try:
             _log.debug("get_protocol_json: loading default from %s", json_path)
@@ -326,7 +326,7 @@ def get_protocol_groups(protocols_dir: Path) -> list[dict[str, Any]]:
     for group_dir in sorted(protocols_dir.iterdir()):
         if not group_dir.is_dir():
             continue
-        protocols = sorted(
+        protocols: List[str] = sorted(
             f.stem for f in group_dir.iterdir()
             if f.suffix.lower() in (".csv", ".json")
             and not f.name.endswith(".override.csv")
