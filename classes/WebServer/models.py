@@ -18,7 +18,7 @@
 """
 SQLAlchemy ORM models for the MPG Web Management UI staging database.
 
-This database is a LOCAL SQLite file — it is NOT the TimescaleDB instance for the TimescaleDB bridge.
+This database is a LOCAL SQLite file.
 Its sole purpose is to stage user edits before they are committed back to
 config.cfg and the protocol override/mask/screen files.
 

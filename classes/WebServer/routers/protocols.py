@@ -20,10 +20,13 @@
 from __future__ import annotations
 
 import logging
+from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
+
+from classes.WebServer.models import DeviceProtocolSelection, ProtocolRegister
 
 from ..database import get_session
 from ..services.protocol_service import (
@@ -69,7 +72,7 @@ def tab_counts(
     from ..models import DeviceProtocolSelection
     write_count = mask_count = screen_count = 0
     if device_name:
-        sels = (
+        sels: List[DeviceProtocolSelection] = (
             db.query(DeviceProtocolSelection)
             .filter(
                 DeviceProtocolSelection.device_name == device_name,
@@ -137,7 +140,7 @@ def update_register_field(
     payload: FieldUpdateRequest,
     db: Session = Depends(get_session),
 ):
-    result = update_protocol_register_field(db, register_id, payload.field, payload.value)
+    result: ProtocolRegister | None = update_protocol_register_field(db, register_id, payload.field, payload.value)
     if result is None:
         raise HTTPException(status_code=404, detail="Protocol register or field not found")
     db.commit()

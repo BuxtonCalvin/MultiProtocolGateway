@@ -261,8 +261,19 @@
     });
   }
 
-  // Bug fix: buttons now start as "Queue Add" / "Queue Remove" (unselected)
-  // rather than pre-selected.  Users click to opt IN to a change.
+  function _sortRows(rows, actionName) {
+    return [...rows].sort((a, b) => {
+      if (actionName === 'add') {
+        // Primary: value > 0 first
+        const aHasVal = a.raw_value != null && Number(a.raw_value) > 0;
+        const bHasVal = b.raw_value != null && Number(b.raw_value) > 0;
+        if (aHasVal !== bHasVal) return aHasVal ? -1 : 1;
+      }
+      // Secondary: register address numerically
+      return Number(a.register_address) - Number(b.register_address);
+    });
+  }
+
   function renderActionRows(protocolName, registryType, actionName, rows) {
     if (!rows.length) {
       return `
@@ -272,49 +283,49 @@
       `;
     }
 
-    return rows.map((row) => {
+    const sorted = _sortRows(rows, actionName);
+
+    return sorted.map((row) => {
       const change = normalizeActionRow(protocolName, registryType, actionName, row);
       const key = queueKey(change);
       const selected = state.queuedChanges.has(key);
-
-      // Labels now reflect an opt-in model:
-      //   add    — "Queue Add"    when pending,  "Queued ✓"  when selected
-      //   remove — "Queue Remove" when pending,  "Queued ✓"  when selected
-      const buttonLabel = selected
-        ? 'Queued ✓'
-        : actionName === 'add'
-          ? 'Queue Add'
-          : 'Queue Remove';
       const buttonTone = selected ? 'btn-primary' : 'btn-secondary';
 
-      // Range-out-of-bounds indicator for add candidates
-      const outOfRange = row.out_of_range === true;
-      const rangeWarning = outOfRange
-        ? `<div class="text-warning text-xs mt-1">⚠ Raw value ${row.raw_value} is outside the documented range ${row.values_range || '?'}</div>`
-        : '';
-      const extra = actionName === 'add'
-        ? `<div class="surface-subtle text-xs">Raw value: <span class="font-mono">${row.raw_value ?? '--'}</span></div>${rangeWarning}`
-        : '';
-
-      const hasValue = actionName === 'add' && row.raw_value != null && row.raw_value > 0;
-      const rowHighlight = hasValue ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-700' : 'border-mpg-200 dark:border-mpg-700';
-      return `
-        <div class="grid grid-cols-[7rem_minmax(0,1fr)_7rem] gap-3 items-start rounded border ${rowHighlight} px-3 py-3">
-          <div class="font-mono text-xs surface-code">${row.register_address}</div>
-          <div class="min-w-0">
-            <div class="surface-text text-sm font-medium truncate">${row.variable_name || row.documented_name || row.register_address}</div>
-            <div class="surface-subtle text-xs truncate">${row.documented_name || ''}</div>
-            <div class="surface-subtle text-xs mt-1">Type: <span class="font-mono">${row.data_type || '--'}</span></div>
-            ${row.note ? `<div class="surface-subtle text-xs mt-1">${row.note}</div>` : ''}
-            ${extra}
+      if (actionName === 'add') {
+        const hasValue = row.raw_value != null && Number(row.raw_value) > 0;
+        const outOfRange = row.out_of_range === true;
+        const rowHighlight = hasValue
+          ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-700'
+          : 'border-mpg-200 dark:border-mpg-700';
+        const rangeWarning = outOfRange
+          ? `<span class="text-warning ml-1" title="Outside documented range ${row.values_range || '?'}">⚠</span>`
+          : '';
+        return `
+          <div class="flex items-center gap-2 rounded border ${rowHighlight} px-2 py-1.5">
+            <span class="font-mono text-xs surface-code w-10 shrink-0 text-right">${row.register_address}</span>
+            <span class="font-mono text-xs surface-subtle w-16 shrink-0">${row.raw_value ?? '--'}${rangeWarning}</span>
+            <span class="surface-text text-xs truncate flex-1 min-w-0">${row.variable_name || row.documented_name || ''}</span>
+            <button type="button"
+                    class="analysis-action-toggle ${buttonTone} text-xs shrink-0"
+                    data-change='${JSON.stringify(change).replace(/'/g, '&#39;')}'>
+              ${selected ? '✓' : 'Add'}
+            </button>
           </div>
-          <button type="button"
-                  class="analysis-action-toggle ${buttonTone} text-xs"
-                  data-change='${JSON.stringify(change).replace(/'/g, '&#39;')}'>
-            ${buttonLabel}
-          </button>
-        </div>
-      `;
+        `;
+      } else {
+        // Remove rows — light red highlight
+        return `
+          <div class="flex items-center gap-2 rounded border bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-700 px-2 py-1.5">
+            <span class="font-mono text-xs surface-code w-10 shrink-0 text-right">${row.register_address}</span>
+            <span class="surface-text text-xs truncate flex-1 min-w-0">${row.variable_name || row.documented_name || row.register_address}</span>
+            <button type="button"
+                    class="analysis-action-toggle ${buttonTone} text-xs shrink-0"
+                    data-change='${JSON.stringify(change).replace(/'/g, '&#39;')}'>
+              ${selected ? '✓' : 'Remove'}
+            </button>
+          </div>
+        `;
+      }
     }).join('');
   }
 
@@ -328,26 +339,24 @@
         </div>
       `;
     }
-    return rows.map((row) => {
+    const sorted = _sortRows(rows, actionName);
+    return sorted.map((row) => {
       const change = normalizeActionRow(protocolName, registryType, actionName, row);
       const key = queueKey(change);
       const selected = state.queuedChanges.has(key);
-      const buttonLabel = selected ? 'Queued ✓' : actionName === 'add' ? 'Queue Add' : 'Queue Remove';
       const buttonTone = selected ? 'btn-primary' : 'btn-secondary';
       const responding = row.raw_value !== null && row.raw_value !== undefined;
-      const rowHighlight = actionName === 'add' && responding
-        ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-700'
-        : 'border-mpg-200 dark:border-mpg-700';
+      const rowHighlight = actionName === 'add'
+        ? (responding ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-700' : 'border-mpg-200 dark:border-mpg-700')
+        : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-700';
       return `
-        <div class="flex items-center justify-between gap-2 rounded border ${rowHighlight} px-2 py-1.5">
-          <div class="min-w-0 flex-1">
-            <span class="font-mono text-xs surface-code mr-2">${row.register_address}</span>
-            <span class="surface-text text-xs font-medium truncate">${row.variable_name || row.documented_name || row.register_address}</span>
-          </div>
+        <div class="flex items-center gap-2 rounded border ${rowHighlight} px-2 py-1.5">
+          <span class="font-mono text-xs surface-code w-10 shrink-0 text-right">${row.register_address}</span>
+          <span class="surface-text text-xs truncate flex-1 min-w-0">${row.variable_name || row.documented_name || row.register_address}</span>
           <button type="button"
                   class="analysis-action-toggle ${buttonTone} text-xs shrink-0"
                   data-change='${JSON.stringify(change).replace(/'/g, '&#39;')}'>
-            ${buttonLabel}
+            ${selected ? '✓' : (actionName === 'add' ? 'Add' : 'Remove')}
           </button>
         </div>
       `;
@@ -742,11 +751,24 @@
     showMessage('info', 'Writing selected changes to the protocol CSV files and rescanning the web database.');
 
     try {
+      const allChanges = Array.from(state.queuedChanges.values());
+
+      // Group by registry_type so the backend never has to infer routing from
+      // address alone — two registers at the same address in different registries
+      // (e.g. input:41 and holding:41) must not be coalesced.
+      const changesByRegistry = {};
+      for (const change of allChanges) {
+        const rt = change.registry_type;
+        if (!changesByRegistry[rt]) changesByRegistry[rt] = [];
+        changesByRegistry[rt].push(change);
+      }
+
       const response = await fetch(`/api/analyze/${encodeURIComponent(deviceName)}/commit`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          changes: Array.from(state.queuedChanges.values()),
+          changes: allChanges,
+          changes_by_registry: changesByRegistry,
         }),
       });
       const data = await response.json();

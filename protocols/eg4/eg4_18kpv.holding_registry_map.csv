@@ -366,28 +366,30 @@ register,variable_name,documented_name,unit,data_type,values,read_interval,writa
 233.b1,,battery_backup_enable,,1bit,0~1,,W,,Battery backup enable
 233.b2,,maintenance_mode_enable,,1bit,0~1,,W,,Maintenance mode enable
 233.b3,,weekly_schedule_enable,,1bit,0~1,,W,,Weekly schedule enable
-233.b4,,register 233.4,,1bit,0~1,,R,,unknown
-233.b5,,register 233.5,,1bit,0~1,,R,,unknown
-233.b6,,register 233.6,,1bit,0~1,,R,,unknown
-233.b7,,register 233.7,,1bit,0~1,,R,,unknown
-233.b8,,register 233.8,,1bit,0~1,,R,,unknown
-233.b9,,register 233.9,,1bit,0~1,,R,,unknown
+233.b4,,register 233_4,,1bit,0~1,,R,,unknown
+233.b5,,register 233_5,,1bit,0~1,,R,,unknown
+233.b6,,register 233_6,,1bit,0~1,,R,,unknown
+233.b7,,register 233_7,,1bit,0~1,,R,,unknown
+233.b8,,register 233_8,,1bit,0~1,,R,,unknown
+233.b9,,register 233_9,,1bit,0~1,,R,,unknown
 233.b10,,over_freq_fast_stop,,1bit,0~1,,W,,Over-frequency fast stop enable
-233.b11,,register 233.11,,1bit,0~1,,R,,unknown
+233.b11,,register 233_11,,1bit,0~1,,R,,unknown
 233.b12,,sporadic_charge_enable,,1bit,0~1,,W,,Sporadic charge enable
-233.b13,,register 233.13,,1bit,0~1,,R,,unknown
-233.b14,,register 233.14,,1bit,0~1,,R,,unknown
-233.b15,,register 233.15,,1bit,0~1,,R,,unknown
+233.b13,,register 233_13,,1bit,0~1,,R,,unknown
+233.b14,,register 233_14,,1bit,0~1,,R,,unknown
+233.b15,,register 233_15,,1bit,0~1,,R,,unknown
 234,,quick_charge_duration_minutes,min,,0-1440,,W,,Quick charge duration in minutes. Writable setpoint that also reads as the live remaining-minutes countdown while a quick charge is active (firmware sets it to 60 on enable; raise it to extend the charge)
-236,,Register 236,,ushort,0-65535,,R,,Unknown
-237,,Register 237,,ushort,0-65535,,R,,Unknown
-241,,Register 241,,ushort,0-65535,,R,,Unknown
-242,,Register 242,,ushort,0-65535,,R,,Unknown
-244,,Register 244,,ushort,0-65535,,R,,Unknown
-245,,Register 245,,ushort,0-65535,,R,,Unknown
-252,,Register 252,,ushort,0-65535,,R,,Unknown
-253,,Register 253,,ushort,0-65535,,R,,Unknown
-254,,Register 254,,ushort,0-65535,,R,,Unknown
-257,,Register 257,,ushort,0-65535,,R,,Unknown
-260,,Register 260,,ushort,0-65535,,R,,Unknown
-268,,Register 268,,ushort,0-65535,,R,,Unknown
+236,,Register_236,,ushort,0-65535,,R,,Unknown
+237,,Register_237,,ushort,0-65535,,R,,Unknown
+241,,Register_241,,ushort,0-65535,,R,,Unknown
+242,,Register_242,,ushort,0-65535,,R,,Unknown
+244,,Register_244,,ushort,0-65535,,R,,Unknown
+245,,Register_245,,ushort,0-65535,,R,,Unknown
+252,,Register_252,,ushort,0-65535,,R,,Unknown
+253,,Register_253,,ushort,0-65535,,R,,Unknown
+254,,Register_254,,ushort,0-65535,,R,,Unknown
+257,,Register_257,,ushort,0-65535,,R,,Unknown
+260,,Register_260,,ushort,0-65535,,R,,Unknown
+268,,Register_268,,ushort,0-65535,,R,,Unknown
+229,,Register_229,,ushort,0-65535,,R,,Unknown
+270,,Register_270,,ushort,0-65535,,R,,Unknown

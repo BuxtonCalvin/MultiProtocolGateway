@@ -29,6 +29,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from classes.WebServer.models import AppState
+from classes.WebServer.services.device_service import DeviceSummary
 
 from ..database import get_session, refresh_app_state
 from ..models import Setting
@@ -190,8 +191,8 @@ def list_orphans(db: Session = Depends(get_session)) -> list[dict[str, Any]]:
 
 
 @router.delete("/orphans")
-def delete_orphans(payload: OrphanDeleteRequest, db: Session = Depends(get_session)):
-    count = delete_orphans_bulk(db, payload.ids)
+def delete_orphans(payload: OrphanDeleteRequest, db: Session = Depends(get_session)) -> dict[str, int]:
+    count: int = delete_orphans_bulk(db, payload.ids)
     refresh_app_state(db)
     db.commit()
     return {"deleted": count}
@@ -263,7 +264,7 @@ def reconcile_settings(
     # 1. Stage the new transport / bridge value only — no db.commit() here.
     #    This keeps the change reversible via the Cancel button.
     if payload.new_transport is not None:
-        row = db.query(Setting).filter(
+        row: Setting | None = db.query(Setting).filter(
             Setting.section == section, Setting.key == "transport"
         ).first()
         if row:
@@ -283,15 +284,15 @@ def reconcile_settings(
     db.commit()
 
     # 2. Determine expected keys for the newly selected transport
-    transport_row = db.query(Setting).filter(
+    transport_row: Setting | None = db.query(Setting).filter(
         Setting.section == section, Setting.key == "transport"
     ).first()
-    current_transport = transport_row.value_staged if transport_row else ""
+    current_transport: str | None = transport_row.value_staged if transport_row else ""
 
-    library = scan_transport_library(transports_dir)
+    library: dict[str, dict[str, Any]] = scan_transport_library(transports_dir)
     transport_info = {}
     if current_transport is not None:
-        transport_info = library.get(current_transport, {})
+        transport_info: dict[str, Any] = library.get(current_transport, {})
     expected_keys: dict[str, str] = transport_info.get("keys", {})
 
 
@@ -300,7 +301,7 @@ def reconcile_settings(
 
     # 3. Build the display list without touching the DB
     existing_rows: list[Setting] = get_device_settings(db, section)
-    existing_map = {r.key: r for r in existing_rows}
+    existing_map: dict[str, Setting] = {r.key: r for r in existing_rows}
 
     display_rows: list[Any] = []
 
@@ -346,7 +347,7 @@ def reconcile_settings(
     display_rows.sort(key=lambda r: r.key)
 
     # 4. Render the settings rows partial with the computed display list
-    summary = get_device_summary(db, device_name)
+    summary: DeviceSummary | None = get_device_summary(db, device_name)
     templates = request.app.state.templates
     html = templates.get_template("partials/settings_rows.html").render(
         {"device": summary, "settings": display_rows, "request": request}
@@ -366,10 +367,10 @@ def create_and_activate(
     Called when the user checks a virtual row's checkbox.
     """
     from ..models import Setting
-    section = f"transport.{device_name}"
+    section: str = f"transport.{device_name}"
 
     # Check it doesn't already exist (race condition guard)
-    existing = db.query(Setting).filter(
+    existing: Setting | None = db.query(Setting).filter(
         Setting.section == section, Setting.key == payload.key
     ).first()
 
@@ -421,7 +422,7 @@ def refresh_protocol_tabs(
     section = f"transport.{device_name}"
 
     # Stage the new protocol_version value
-    row = db.query(Setting).filter(
+    row: Setting | None = db.query(Setting).filter(
         Setting.section == section, Setting.key == "protocol_version"
     ).first()
     if row:
@@ -432,7 +433,7 @@ def refresh_protocol_tabs(
         db.commit()
 
     proto_tabs = get_protocols_for_device(db, payload.new_protocol, device_name=device_name)
-    summary = get_device_summary(db, device_name)
+    summary: DeviceSummary | None = get_device_summary(db, device_name)
 
     # Rebuild summary with updated protocol_version so the heading shows correctly
     if summary:

@@ -19,7 +19,7 @@ register,variable_name,documented_name,unit,data_type,values,read_interval,writa
 16,,Pinv,W,,0-65535,,R,,On-gird inverter power (For three phase: R phase)
 17,,Prec,W,,0-65535,,R,,AC charging rectification power (For three phase: R phase)
 18,,IinvRMS,0.01A,,0-65535,,R,,Inverter rms current output (For three phase: R phase)
-19,,PF,,,0-2000,,R,"{""High_Low"":""x?(0,1000]->x/1000 x?(1000,2000)->(1000-x)/1000""}"," Power factor for single phase or R phase of three phase"
+19,,PF,,,0-2000,,R,"{""High_Low"":""x?(0,1000]->x/1000 x?(1000,2000)->(1000-x)/1000""}", Power factor for single phase or R phase of three phase
 20,,VepsR,0.1V,,0-65535,,R,,R phase off-grid three phase output voltage
 21,,VepsS,0.1V,,0-65535,,R,,S phase off-grid three phase output voltage
 22,,VepsT,0.1V,,0-65535,,R,,T phase off-grid three phase output voltage
@@ -255,8 +255,8 @@ register,variable_name,documented_name,unit,data_type,values,read_interval,writa
 189,,GenPower_T,W,,0-65535,,R,,Power of generator for three phase: T phase
 190,,IinvRMS_S,0.01,,0-65535,,R,,Effective value of three phase inverter current: S phase
 191,,IinvRMS_T,0.01,,0-65535,,R,,Effective value of three phase inverter current: T phase
-192,,PF_S,,,0-2000,,R,"{""High_Low"":""x?(0,1000]->x/1000 x?(1000,2000)->(1000-x)/1000""}","Power factor of three phase: S phase"
-193,,PF_T,,,0-2000,,R,"{""High_Low"":""x?(0,1000]->x/1000 x?(1000,2000)->(1000-x)/1000""}","Power factor of three phase: T phase"
+192,,PF_S,,,0-2000,,R,"{""High_Low"":""x?(0,1000]->x/1000 x?(1000,2000)->(1000-x)/1000""}",Power factor of three phase: S phase
+193,,PF_T,,,0-2000,,R,"{""High_Low"":""x?(0,1000]->x/1000 x?(1000,2000)->(1000-x)/1000""}",Power factor of three phase: T phase
 210,,quick_charge_remaining ,sec,,0-65535,,R,,The remaining time of a quick charge action in seconds
 233,,Register 233,,ushort,0-65535,,R,,Unknown
 236,,Register 236,,ushort,0-65535,,R,,Unknown
@@ -304,7 +304,7 @@ register,variable_name,documented_name,unit,data_type,values,read_interval,writa
 5017.b8,,BatteryMinCellNumTemp_1,,8bit,0-255,,R,,Cell number with minimum temperature
 5018.b0,,BatteryFirmwareMinor_1,,8bit,0-255,,R,,Firmware minor version
 5018.b8,,BatteryFirmwareMajor_1,,8bit,0-255,,R,,Firmware major version
-5019-5026,,BatterySerialNumber_1,,ASCII,, ,R,"{""Register_Endian"":""little""}","Battery serial number (8 registers)"
+5019-5026,,BatterySerialNumber_1,,ASCII,, ,R,"{""Register_Endian"":""little""}",Battery serial number (8 registers)
 5032,,BatteryStatusHeader_2,,,0-65535,,R,,Battery status header
 5033,,BatteryFullCapacity_2,Ah,,0-65535,,R,,Full rated capacity
 5034,,BatteryChargeVoltageRef_2,0.1V,,0-65535,,R,,BMS charge voltage reference
@@ -326,7 +326,7 @@ register,variable_name,documented_name,unit,data_type,values,read_interval,writa
 5047.b8,,BatteryMinCellNumTemp_2,,8bit,0-255,,R,,Cell number with minimum temperature
 5048.b0,,BatteryFirmwareMinor_2,,8bit,0-255,,R,,Firmware minor version
 5048.b8,,BatteryFirmwareMajor_2,,8bit,0-255,,R,,Firmware major version
-5049-5056,,BatterySerialNumber_2,,ASCII,,,R,"{""Register_Endian"":""little""}","Battery serial number (8 registers)"
+5049-5056,,BatterySerialNumber_2,,ASCII,,,R,"{""Register_Endian"":""little""}",Battery serial number (8 registers)
 5062,,BatteryStatusHeader_3,,,0-65535,,R,,Battery status header
 5063,,BatteryFullCapacity_3,Ah,,0-65535,,R,,Full rated capacity
 5064,,BatteryChargeVoltageRef_3,0.1V,,0-65535,,R,,BMS charge voltage reference
@@ -348,7 +348,7 @@ register,variable_name,documented_name,unit,data_type,values,read_interval,writa
 5077.b8,,BatteryMinCellNumTemp_3,,8bit,0-255,,R,,Cell number with minimum temperature
 5078.b0,,BatteryFirmwareMinor_3,,8bit,0-255,,R,,Firmware minor version
 5078.b8,,BatteryFirmwareMajor_3,,8bit,0-255,,R,,Firmware major version
-5079-5086,,BatterySerialNumber_3,,ASCII,,,R,"{""Register_Endian"":""little""}","Battery serial number (8 registers)"
+5079-5086,,BatterySerialNumber_3,,ASCII,,,R,"{""Register_Endian"":""little""}",Battery serial number (8 registers)
 5092,,BatteryStatusHeader_4,,,0-65535,,R,,Battery status header
 5093,,BatteryFullCapacity_4,Ah,,0-65535,,R,,Full rated capacity
 5094,,BatteryChargeVoltageRef_4,0.1V,,0-65535,,R,,BMS charge voltage reference
@@ -370,4 +370,5 @@ register,variable_name,documented_name,unit,data_type,values,read_interval,writa
 5107.b8,,BatteryMinCellNumTemp_4,,8bit,0-255,,R,,Cell number with minimum temperature
 5108.b0,,BatteryFirmwareMinor_4,,8bit,0-255,,R,,Firmware minor version
 5108.b8,,BatteryFirmwareMajor_4,,8bit,0-255,,R,,Firmware major version
-5109-5116,,BatterySerialNumber_4,,ASCII,,,R,"{""Register_Endian"":""little""}","Battery serial number (8 registers)"
+5109-5116,,BatterySerialNumber_4,,ASCII,,,R,"{""Register_Endian"":""little""}",Battery serial number (8 registers)
+5020,,Register_5020,,ushort,0-65535,,R,,

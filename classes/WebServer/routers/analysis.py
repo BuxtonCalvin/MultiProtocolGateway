@@ -24,6 +24,7 @@ import logging
 import queue
 import shutil
 import threading
+from _thread import lock
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -45,10 +46,10 @@ _log: logging.Logger = logging.getLogger(__name__)
 # The POST endpoint creates a queue here before starting the analysis.
 # The GET/SSE endpoint reads from it.  This lets both share a single scan
 # that runs inside analyze_protocols (under _transport_lock) rather than
-# running two competing scans — which was why the progress bar froze.
+# running two competing scans.
 _SCAN_DONE = object()
 _progress_queues: dict[str, queue.Queue] = {}
-_progress_queues_lock = threading.Lock()
+_progress_queues_lock: lock = threading.Lock()
 
 
 def _register_progress_queue(device_name: str) -> queue.Queue:
@@ -88,6 +89,7 @@ class AnalysisChange(BaseModel):
     write_mode: str = "R"
     adjustments: str = ""
     note: str = ""
+    raw_value: float | None = None
 
 
 class CommitAnalysisRequest(BaseModel):
@@ -220,19 +222,49 @@ def _set_cell(row: list[str], mapping: dict[str, int], canonical: str, value: st
 
 
 def _find_protocol_csv(protocols_dir: Path, protocol_name: str, registry_type: str) -> Path:
+    protocols_dir = Path(protocols_dir)
     registry_type = registry_type.lower()
+    protocol_lower: str = protocol_name.lower()
+
+    # --- Start Dynamic Folder Matching Logic ---
+    # Get all available subdirectories in the protocols root
+    existing_folders: list[Path] = [f for f in protocols_dir.iterdir() if f.is_dir()]
+
+    # Sort folders by name length descending to prevent partial match conflicts
+    existing_folders.sort(key=lambda f: len(f.name), reverse=True)
+
+    # Find if the protocol_name starts with any of the existing folder names
+    target_dir: Path = protocols_dir
+    for folder in existing_folders:
+        if protocol_lower.startswith(folder.name.lower()):
+            target_dir = folder
+            break
+
+    token: str = f"{registry_type}_"
+
+    # Search is optimized to run only within target_dir
     candidates: list[Path] = [
-        path for path in protocols_dir.rglob("*.csv")
-        if path.stem.lower().startswith(protocol_name.lower())
+        path for path in target_dir.rglob("*.csv")
+        if protocol_lower in path.stem.lower()
         and "registry_map" in path.name.lower()
-        and registry_type in path.name.lower()
+        and token in f"{path.stem.lower()}_"
     ]
+
     if not candidates:
+        all_csvs: list[Path] = list(target_dir.rglob("*.csv"))
+        _log.debug(
+            "_find_protocol_csv: no match for protocol=%r registry=%r. "
+            "target_dir=%s contains %d CSV(s): %s",
+            protocol_name, registry_type, target_dir, len(all_csvs),
+            [p.name for p in all_csvs[:20]],
+        )
         msg: str = (f"Unable to locate {registry_type} registry CSV for protocol '{protocol_name}'")
         _log.debug(msg)
         raise FileNotFoundError(msg)
+
     candidates.sort()
     return candidates[0]
+
 
 
 def _backup_protocol_csv(csv_path: Path) -> None:
@@ -271,6 +303,12 @@ def _build_added_row(header: list[str], mapping: dict[str, int], change: Analysi
     _set_cell(row, mapping, "adjustments", change.adjustments or "")
     _set_cell(row, mapping, "note", change.note or "")
     _set_cell(row, mapping, "write_mode", change.write_mode or "R")
+    _log.debug(
+        "Adding register %s (raw_value=%s) to %s registry",
+        change.register_address,
+        change.raw_value,
+        change.registry_type,
+    )
     return row
 
 
@@ -414,7 +452,8 @@ async def commit_analysis(device_name: str, payload: CommitAnalysisRequest, requ
     if not payload.changes:
         return {"status": "ok", "files_written": 0, "changes_applied": 0}
 
-    protocols_dir = request.app.state.protocols_dir
+    protocols_dir = Path(request.app.state.protocols_dir)
+    _log.info("Commit: protocols_dir=%s (exists=%s)", protocols_dir, protocols_dir.exists())
     grouped: dict[tuple[str, str], list[AnalysisChange]] = defaultdict(list)
     for change in payload.changes:
         grouped[(change.protocol_name, change.registry_type.lower())].append(change)
@@ -422,13 +461,35 @@ async def commit_analysis(device_name: str, payload: CommitAnalysisRequest, requ
     files_written = 0
     changes_applied = 0
     touched_files: list[str] = []
+    errors: list[str] = []
     for (protocol_name, registry_type), changes in grouped.items():
-        csv_path: Path = _find_protocol_csv(protocols_dir, protocol_name, registry_type)
+        _log.info(
+            "Commit: protocol=%r registry=%r changes=%d actions=%s",
+            protocol_name,
+            registry_type,
+            len(changes),
+            [f"{c.action}:{c.register_address}" for c in changes],
+        )
+        try:
+            csv_path: Path = _find_protocol_csv(protocols_dir, protocol_name, registry_type)
+        except FileNotFoundError as exc:
+            _log.error("Commit: %s", exc)
+            errors.append(str(exc))
+            continue
+        _log.info("Commit: writing to %s", csv_path)
         file_changed, file_change_count = _apply_protocol_changes(csv_path, changes)
         if file_changed:
             files_written += 1
             changes_applied += file_change_count
             touched_files.append(str(csv_path))
+        else:
+            _log.warning(
+                "Commit: no rows changed in %s (rows may already exist or addresses didn't match)",
+                csv_path,
+            )
+
+    if errors and not files_written:
+        raise HTTPException(status_code=400, detail="; ".join(errors))
 
     if files_written:
         request.app.state.scanner.run()
