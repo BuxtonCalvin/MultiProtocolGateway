@@ -24,7 +24,6 @@ import logging
 import queue
 import shutil
 import threading
-from _thread import lock
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -49,7 +48,7 @@ _log: logging.Logger = logging.getLogger(__name__)
 # running two competing scans.
 _SCAN_DONE = object()
 _progress_queues: dict[str, queue.Queue] = {}
-_progress_queues_lock: lock = threading.Lock()
+_progress_queues_lock= threading.Lock()
 
 
 def _register_progress_queue(device_name: str) -> queue.Queue:
