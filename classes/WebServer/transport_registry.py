@@ -20,10 +20,6 @@
 transport_registry.py — Single source of truth for transport key defaults
 and setting descriptions.
 
-Replaces the inline KNOWN_TRANSPORT_KEYS / SEED_DESCRIPTIONS dicts in
-scanner.py and setting_description_service.py with JSON-backed data that
-can be edited without touching Python code.
-
 Responsibilities
 ----------------
 1.  Load  — read transport_defaults.json and setting_descriptions.json on

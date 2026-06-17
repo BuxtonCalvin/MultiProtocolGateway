@@ -11,12 +11,12 @@ register,variable_name,documented_name,unit,data_type,values,read_interval,writa
 5.2,,SN_7_batch_numbeR,,ASCII,'A'-'Z',,R,"{""Register_Endian"":""little""}",
 6,,SN_8_batch_numbeR,,ASCII,'0'-'9',,R,"{""Register_Endian"":""little""}",SN[9]=0x38(8)
 6.2,,SN_9_batch_numbeR,,ASCII,'A'-'Z',,R,"{""Register_Endian"":""little""}",
-7,,FWCode,,ASCII,[a-zA-Z],,W,"{""Register_Endian"":""little""}",For more information of the model code
+7,,FWCode,,ASCII,[a-zA-Z],,R,"{""Register_Endian"":""little""}",For more information of the model code
 8,,Register 8,,ushort,0-65535,,R,,Unknown
-9.b0,,Slave_Ver,,8bit,0-255,,W,,For more information of the software version number for redundant CPU
-9.b8,,Com_Ver,,8bit,0-255,,W,,For Communication CPU software version number
-10.b0,,Cntl_Ver,,8bit,0-255,,W,,For Control CPU software version number
-10.b8,,FWVeR,,8bit,0-255,,W,,For external software version
+9.b0,,Slave_Ver,,8bit,0-255,,R,,For more information of the software version number for redundant CPU
+9.b8,,Com_Ver,,8bit,0-255,,R,,For Communication CPU software version number
+10.b0,,Cntl_Ver,,8bit,0-255,,R,,For Control CPU software version number
+10.b8,,FWVeR,,8bit,0-255,,R,,For external software version
 11.b0,,ResetSetting_EnergyRecordClr,,1bit,0-1,,W,,Resetting energy and running time
 11.b1,,ResetSetting_AlltoDefault,,1bit,0-1,,W,,Reset all settings
 11.b2,,ResetSetting_AdjRatioClr,,1bit,0-1,,W,,Reset all adjust data
