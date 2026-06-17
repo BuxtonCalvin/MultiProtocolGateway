@@ -114,7 +114,6 @@
     "token": "",
     "use_exponential_backoff": "True",
     "use_utc_timestamp": "",
-    "use_utc_timestamps": "False",
     "username": ""
   },
   "influxdb_out": {
@@ -144,7 +143,6 @@
     "transport": "",
     "use_exponential_backoff": "True",
     "use_utc_timestamp": "False",
-    "use_utc_timestamps": "False",
     "username": ""
   },
   "json_out": {
@@ -320,13 +318,11 @@
     "input_register_prefix": "",
     "json": "False",
     "log_level": "INFO",
-    "pass": "",
     "password": "",
     "port": "1883",
     "reconnect_attempts": "21",
     "reconnect_delay": "7",
     "transport": "",
-    "user": "",
     "username": "",
     "coil_register_prefix": "",
     "discrete_register_prefix": ""
@@ -424,7 +420,6 @@
     "enable_auto_refresh": "true",
     "enable_compression": "true",
     "enable_persistent_storage": "true",
-    "enable_pushover": "false",
     "enable_rollups": "true",
     "force_float": "true",
     "host": "",
@@ -438,8 +433,6 @@
     "pool_recycle": "3600",
     "pool_size": "5",
     "port": "5431",
-    "pushover_token": "",
-    "pushover_user": "",
     "reconnect_attempts": "5",
     "reconnect_delay": "5",
     "stale_data_timeout": "300",
