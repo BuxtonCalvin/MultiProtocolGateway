@@ -301,7 +301,7 @@ def _build_added_row(header: list[str], mapping: dict[str, int], change: Analysi
     _set_cell(row, mapping, "values", change.values_range or "0-65535")
     _set_cell(row, mapping, "unit", change.unit or "")
     _set_cell(row, mapping, "adjustments", change.adjustments or "")
-    _set_cell(row, mapping, "note", change.note or "")
+    _set_cell(row, mapping, "note", change.note or "Unknown")
     _set_cell(row, mapping, "write_mode", change.write_mode or "R")
     _log.debug(
         "Adding register %s (raw_value=%s) to %s registry",

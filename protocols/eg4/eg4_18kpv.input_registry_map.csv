@@ -371,4 +371,20 @@ register,variable_name,documented_name,unit,data_type,values,read_interval,writa
 5108.b0,,BatteryFirmwareMinor_4,,8bit,0-255,,R,,Firmware minor version
 5108.b8,,BatteryFirmwareMajor_4,,8bit,0-255,,R,,Firmware major version
 5109-5116,,BatterySerialNumber_4,,ASCII,,,R,"{""Register_Endian"":""little""}",Battery serial number (8 registers)
-5020,,Register_5020,,ushort,0-65535,,R,,
+5020,,Register_5020,,ushort,0-65535,,R,,Unknown
+270,,Register_270,,ushort,0-65535,,R,,Unknown
+5021,,Register_5021,,ushort,0-65535,,R,,Unknown
+5022,,Register_5022,,ushort,0-65535,,R,,Unknown
+5023,,Register_5023,,ushort,0-65535,,R,,Unknown
+5024,,Register_5024,,ushort,0-65535,,R,,Unknown
+5025,,Register_5025,,ushort,0-65535,,R,,Unknown
+5027,,Register_5027,,ushort,0-65535,,R,,Unknown
+336,,Register_336,,ushort,0-65535,,R,,Unknown
+5057,,Register_5057,,ushort,0-65535,,R,,Unknown
+5056,,Register_5056,,ushort,0-65535,,R,,Unknown
+5055,,Register_5055,,ushort,0-65535,,R,,Unknown
+5054,,Register_5054,,ushort,0-65535,,R,,Unknown
+5053,,Register_5053,,ushort,0-65535,,R,,Unknown
+5052,,Register_5052,,ushort,0-65535,,R,,Unknown
+5051,,Register_5051,,ushort,0-65535,,R,,Unknown
+5050,,Register_5050,,ushort,0-65535,,R,,Unknown

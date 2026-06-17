@@ -393,3 +393,8 @@ register,variable_name,documented_name,unit,data_type,values,read_interval,writa
 268,,Register_268,,ushort,0-65535,,R,,Unknown
 229,,Register_229,,ushort,0-65535,,R,,Unknown
 270,,Register_270,,ushort,0-65535,,R,,Unknown
+336,,Register_336,,ushort,0-65535,,R,,
+500,,Register_500,,ushort,0-65535,,R,,
+501,,Register_501,,ushort,0-65535,,R,,
+502,,Register_502,,ushort,0-65535,,R,,
+503,,Register_503,,ushort,0-65535,,R,,
