@@ -48,7 +48,7 @@
             aria-selected="{{ 'true' if loop.first else 'false' }}"
             hx-get="/protocol/{{ tab.protocol_name }}/{{ tab.registry_type }}?device_name={{ device.name }}"
             hx-target="#protocol-table-container"
-            hx-swap="innerHTML"
+            hx-swap="innerHTML scroll:false"
             hx-headers='{"Cache-Control": "no-cache"}'
             {% if loop.first %}hx-trigger="load, click"{% else %}hx-trigger="click"{% endif %}>
       {{ tab.registry_type | title }}

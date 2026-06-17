@@ -356,7 +356,7 @@
           row.dataset.mask = this.checked ? '1' : '0';
           if (this.checked) {
             row.dataset.screen = '0';
-            // Replace S checkbox with dash
+            // Replace S checkbox with dash — M and S are mutually exclusive
             setDash(getSCell(row), 'Disabled while M is enabled');
           } else {
             // Restore S checkbox
@@ -367,7 +367,7 @@
           row.dataset.screen = this.checked ? '1' : '0';
           if (this.checked) {
             row.dataset.mask = '0';
-            // Replace M checkbox with dash
+            // Replace M checkbox with dash — M and S are mutually exclusive
             setDash(getMCell(row), 'Disabled while S is enabled');
           } else {
             // Restore M checkbox
@@ -375,9 +375,30 @@
             setCellCheckbox(getMCell(row), 'mask-toggle', `Include ${varName} in mask`, false, 'mask_enabled');
           }
         }
-        sortRows(activeSort, activeDirection);
+        // Do NOT call sortRows here — re-sorting on every toggle moves DOM nodes
+        // and causes the browser to jump the scroll position.  Row order is
+        // refreshed only on initial load, column-header clicks, and after a
+        // full commit (which replaces #protocol-table-container entirely).
       });
     }
+
+    // Update the dirty-row highlight when HTMX returns the toggle response.
+    // This keeps visual feedback (row color, dirty star) in sync without a
+    // DOM re-sort or any scroll side-effect.
+    table.addEventListener('htmx:afterRequest', function(evt) {
+      if (evt.detail.xhr.status < 200 || evt.detail.xhr.status >= 300) return;
+      const path = evt.detail?.requestConfig?.path || '';
+      if (!path.includes('/toggle')) return;
+      let resp;
+      try { resp = JSON.parse(evt.detail.xhr.responseText); } catch(e) { return; }
+      const row = document.getElementById('reg-' + resp.id);
+      if (!row) return;
+      if (resp.is_dirty) {
+        row.classList.add('bg-dirty/5');
+      } else {
+        row.classList.remove('bg-dirty/5');
+      }
+    });
 
     tbody.querySelectorAll('.mask-toggle, .screen-toggle').forEach(attachToggleListener);
 
