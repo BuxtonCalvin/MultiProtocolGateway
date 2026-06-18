@@ -24,8 +24,9 @@ from typing import Any, cast
 from packaging import version
 from pymodbus import __version__ as pymodbus_version
 from pymodbus.client import ModbusTlsClient
-from pymodbus.client.base import ModbusBaseClient
+from pymodbus.client.base import ModbusBaseClient, ModbusBaseSyncClient
 from pymodbus.exceptions import ConnectionException, ModbusException, ModbusIOException
+from pymodbus.pdu import ModbusPDU
 
 from classes.protocol_settings import Registry_Type
 from defs.common import TransportSettings
@@ -115,26 +116,26 @@ class modbus_tls(modbus_base):
             self._log.error("read_registers called before client was initialized")
             return None
 
-        kwargs = self._get_correct_device_arg(kwargs)
-        result: Any = None
+        # Cast to ModbusBaseSyncClient (ModbusClientMixin[ModbusPDU]) so the type
+        # checker resolves T -> ModbusPDU and types result as ModbusPDU, not
+        # Awaitable[ModbusPDU] (which is the async specialization).
+        sync_client: ModbusBaseSyncClient = cast(ModbusBaseSyncClient, self.client)
+        call_kwargs: dict[str, Any] = self._get_correct_device_arg(kwargs)
+        result: ModbusPDU | None = None
         # no need for a lock here since the client handles its own internal locking and
         # we don't have any shared state to protect in this method.  If we were to add retries or other
         # logic that re-enters this method, we would need to add a lock to prevent concurrent access to the client.
         try:
             if registry_type == Registry_Type.INPUT:
-                result = self.client.read_input_registers(start, count=count, **kwargs)
+                result = sync_client.read_input_registers(start, count=count, **call_kwargs)
             elif registry_type == Registry_Type.HOLDING:
-                result = self.client.read_holding_registers(start, count=count, **kwargs)
+                result = sync_client.read_holding_registers(start, count=count, **call_kwargs)
             elif registry_type == Registry_Type.COIL:
-                result = self.client.read_coils(start, count=count, **kwargs)
+                result = sync_client.read_coils(start, count=count, **call_kwargs)
             elif registry_type == Registry_Type.DISCRETE:
-                result = self.client.read_discrete_inputs(start, count=count, **kwargs)
+                result = sync_client.read_discrete_inputs(start, count=count, **call_kwargs)
             else:
-                self._log.warning(f"read_registers: unsupported registry_type '{registry_type.name}' for TCP transport — returning None")
-                return None
-
-            if isinstance(result, ModbusIOException): # pymodbus 3.0+ returns ModbusIOException objects instead of raising them
-                print(f"Modbus IO Exception returned as object: {result}")
+                self._log.warning(f"read_registers: unsupported registry_type '{registry_type.name}' for TLS transport — returning None")
                 return None
 
         except ConnectionException:
@@ -151,6 +152,12 @@ class modbus_tls(modbus_base):
         except Exception as e:
             self._log.error(f"Unexpected error during read: {e}")
             return None
+
+        if result is None or result.isError():
+            self._log.error(f"Modbus Error: {result}")
+            return None
+
+        return result
 
     def connect(self) -> bool:
         if self.client is None:
@@ -177,4 +184,3 @@ class modbus_tls(modbus_base):
             self.connected = False
 
         return self.connected
-

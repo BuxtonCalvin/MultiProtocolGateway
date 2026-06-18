@@ -53,7 +53,7 @@
   "log_level": "Transport-level logging verbosity. Overrides the global log level for this transport.",
   "max_backlog_age": "Maximum age in seconds of backlog entries. Older entries are discarded.",
   "max_backlog_size": "Maximum number of entries to store in the backlog before oldest entries are dropped.",
-  "max_failures_before_disable": "Number of consecutive read failures before the transport is temporarily disabled and an alert is raised.",
+  "max_failures_before_disable": "Number of consecutive read failures before a register block is temporarily disabled per the disable_duration_hours.",
   "max_overflow": "Maximum number of overflow connections allowed in the TimescaleDB connection pool before new requests are queued.",
   "max_precision": "Maximum decimal places to retain when storing floating-point register values.",
   "max_reconnect_delay": "Maximum delay in seconds between reconnection attempts when using exponential backoff.",

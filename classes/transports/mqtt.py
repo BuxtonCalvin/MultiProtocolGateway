@@ -27,6 +27,7 @@ import threading
 import time
 import warnings
 from pathlib import Path
+from typing import Literal
 
 import paho.mqtt.packettypes
 import paho.mqtt.properties
@@ -86,8 +87,8 @@ class mqtt(transport_base):
 
         self.holding_register_prefix = settings.get("holding_register_prefix", fallback="")
         self.input_register_prefix = settings.get("input_register_prefix", fallback="")
-        self.input_register_prefix = settings.get("coil_register_prefix", fallback="")
-        self.input_register_prefix = settings.get("discrete_register_prefix", fallback="")
+        self.coil_register_prefix = settings.get("coil_register_prefix", fallback="")
+        self.discrete_register_prefix = settings.get("discrete_register_prefix", fallback="")
 
         # Instance-level state — never class-level to avoid shared-dict bugs across instances
         self._first_connection: bool = True
@@ -391,7 +392,8 @@ class mqtt(transport_base):
 
                     if is_protocol_writable and entry_name in write_allowlist:
                         var_name: str = entry.variable_name.lower().replace(" ", "_")
-                        topic: str = f"{self.base_topic}/{from_transport.device_identifier}/write/{var_name}"
+                        reg_prefix: Literal['coil'] | Literal['holding'] = "coil" if reg_type == Registry_Type.COIL else "holding"
+                        topic: str = f"{self.base_topic}/{from_transport.device_identifier}/write/{reg_prefix}/{var_name}"
 
                         self._write_topics[topic] = entry
                         self.client.subscribe(topic)

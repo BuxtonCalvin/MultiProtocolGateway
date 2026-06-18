@@ -19,10 +19,11 @@ from __future__ import annotations
 
 # scraper for Modbus UDP devices, inheriting from modbus_base and implementing UDP-specific client setup and register access logic.
 from threading import Lock
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
-from pymodbus.client.base import ModbusBaseClient
+from pymodbus.client.base import ModbusBaseClient, ModbusBaseSyncClient
 from pymodbus.client.udp import ModbusUdpClient
+from pymodbus.pdu import ExceptionResponse, ModbusPDU
 
 from classes.protocol_settings import Registry_Type
 from defs.common import TransportSettings
@@ -45,7 +46,7 @@ class modbus_udp(modbus_base):
 
         self.port = settings.getint("port", fallback=502)
 
-        client_str = self.host+"-udp-"+str(self.port)
+        client_str: str = self.host+"-udp-"+str(self.port)
         #check if client is already initialized
         with self._clients_lock:
             if client_str in modbus_base.clients:
@@ -53,19 +54,27 @@ class modbus_udp(modbus_base):
                 return
         self.timeout: int = settings.getint("timeout", fallback=7)
         self.retries: int = settings.getint("retries", fallback=3)
+
+        # Cast to ModbusBaseClient to satisfy the base class attribute type.
+        # The local cast to ModbusBaseSyncClient in read_registers gives the
+        # type checker the correct Generic[ModbusPDU] binding for response types.
         self.client = cast(ModbusBaseClient, ModbusUdpClient(host=self.host, port=self.port, timeout=self.timeout, retries=self.retries))
 
         #add to clients
         with self._clients_lock:
             modbus_base.clients[client_str] = self.client
 
-    def read_registers(self, start, count=1, registry_type: Registry_Type = Registry_Type.INPUT,  **kwargs):
+    def read_registers(self, start: int, count: int = 1, registry_type: Registry_Type = Registry_Type.INPUT, **kwargs: Any) -> Any:
         # read_registers method to handle retries and prevent "fire and forget" failures
         if self.client is None:
             self._log.error("read_registers called before client was initialized")
             return None
 
-        kwargs = self._get_correct_device_arg(kwargs)
+        # Cast to ModbusBaseSyncClient (ModbusClientMixin[ModbusPDU]) so the type
+        # checker resolves T -> ModbusPDU and types response as ModbusPDU, not
+        # Awaitable[ModbusPDU] (which is the async specialization).
+        sync_client: ModbusBaseSyncClient = cast(ModbusBaseSyncClient, self.client)
+        call_kwargs: dict[str, Any] = self._get_correct_device_arg(kwargs)
         port_lock: Lock = self._get_port_lock()
 
         with port_lock:
@@ -73,22 +82,22 @@ class modbus_udp(modbus_base):
             for attempt in range(self.retries):
                 try:
                     if registry_type == Registry_Type.INPUT:
-                        response = self.client.read_input_registers(start, count=count, **kwargs)
+                        response: ModbusPDU = sync_client.read_input_registers(start, count=count, **call_kwargs)
                     elif registry_type == Registry_Type.HOLDING:
-                        response = self.client.read_holding_registers(start, count=count, **kwargs)
+                        response = sync_client.read_holding_registers(start, count=count, **call_kwargs)
                     elif registry_type == Registry_Type.COIL:
-                        response = self.client.read_coils(start, count=count, **kwargs)
+                        response = sync_client.read_coils(start, count=count, **call_kwargs)
                     elif registry_type == Registry_Type.DISCRETE:
-                        response = self.client.read_discrete_inputs(start, count=count, **kwargs)
+                        response = sync_client.read_discrete_inputs(start, count=count, **call_kwargs)
                     else:
                         self._log.warning(
                             f"read_registers: unsupported registry_type '{registry_type.name}' for UDP transport — returning None"
                         )
                         return None
 
-                    # Check if we actually received a valid response packet back
-                    # Pymodbus returns an Exception object (not raises it) on failure
-                    if response is not None and not response.isError():
+                    # pymodbus v3+: sync clients return ModbusPDU directly.
+                    # Error responses are ExceptionResponse instances, not flagged via isError().
+                    if not isinstance(response, ExceptionResponse):
                         return response
 
                     self._log.warning(f"Modbus UDP Attempt {attempt + 1} failed: {response}")
@@ -121,4 +130,3 @@ class modbus_udp(modbus_base):
             self.connected = False
 
         return self.connected
-

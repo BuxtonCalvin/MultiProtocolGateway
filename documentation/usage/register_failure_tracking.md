@@ -102,7 +102,7 @@ transport.reset_register_failure_tracking(Registry_Type.INPUT, (994, 6))
 The `get_register_failure_status()` method returns a dictionary with:
 
 - `enabled`: Whether failure tracking is enabled
-- `max_failures_before_disable`: Configured failure threshold
+- `max_failures_before_disable`: Configured failure threshold for a given register block
 - `disable_duration_hours`: Configured disable duration
 - `total_tracked_ranges`: Total number of ranges being tracked
 - `disabled_ranges`: List of currently disabled ranges

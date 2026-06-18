@@ -465,6 +465,14 @@ class modbus_base(transport_base):
         if not self.enable_register_failure_tracking:
             return False
 
+        # Do not penalize register ranges for failures caused by a lost connection.
+        # Offline failures are a transport problem, not a register problem — accruing
+        # them would disable registers for hours after reconnection and silently stop
+        # data collection.  Failure tracking is only meaningful when the transport is
+        # confirmed connected so that failures reflect actual device/register issues.
+        if not self.connected:
+            return False
+
         tracker: RegisterFailureTracker = self._get_or_create_failure_tracker(register_range, registry_type)
         should_disable: bool = tracker.record_failure(self.max_failures_before_disable, self.disable_duration_hours)
 
@@ -653,6 +661,20 @@ class modbus_base(transport_base):
             for registry_type in [Registry_Type.INPUT, Registry_Type.HOLDING, Registry_Type.COIL, Registry_Type.DISCRETE]:
                 for entry in self._protocol.registry_map.get(registry_type, []):
                     entry.next_read_timestamp = 0.0
+
+            # Clear any failure counts and disable timers accumulated while the
+            # transport was offline.  Stale strikes from a connection outage must
+            # not carry over into the new session — they would unfairly disable
+            # register ranges that were never actually broken.
+            if self.register_failure_trackers:
+                with self._failure_tracking_lock:
+                    for tracker in self.register_failure_trackers.values():
+                        tracker.failure_count = 0
+                        tracker.disabled_until = 0.0
+                        tracker.last_failure_time = 0.0
+                self._log.debug(
+                    f"[{self.transport_name}] Register failure counts cleared on reconnection."
+                )
 
     def cleanup(self) -> None:
         """Clean up transport resources and close connections."""

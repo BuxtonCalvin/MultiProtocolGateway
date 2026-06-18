@@ -446,8 +446,8 @@ class Protocol_Gateway:
         identify which transport a pooled thread is serving in debugger and
         OS-level thread views without permanently renaming the worker.
         """
-        thread = threading.current_thread()
-        base_name = self._base_thread_name(thread.name)
+        thread: threading.Thread = threading.current_thread()
+        base_name: str = self._base_thread_name(thread.name)
         thread.name = self._compact_thread_label(f"{base_name} [{task_label}]")
         try:
             return fn(*args, **kwargs)
@@ -484,10 +484,6 @@ class Protocol_Gateway:
         else:
             self.__log.warning(f"Config file not found {alternate_cfg}, using default: {default_cfg}")
             self.config_file = default_cfg
-
-        #pymodbus_log = logging.getLogger('pymodbus')
-        #pymodbus_log.setLevel(logging.DEBUG)
-        #pymodbus_log.addHandler(handler)
 
         self.__settings = CustomConfigParser()
         self.__settings.read(self.config_file.as_posix())
@@ -1055,6 +1051,27 @@ class Protocol_Gateway:
             clears ``_bus_lock`` so the lock is not held after failure.
             """
             try:
+                # Mirror the connection guard from _process_group_read so that
+                # disconnected transports attempt reconnect before reading rather
+                # than grinding through a full cycle of dead reads.  Without this
+                # guard interleaved mode would spin through every register range
+                # on a dead connection — wasting the cycle and relying entirely on
+                # modbus_base to suppress the resulting register failure counts.
+                if not state.transport.connected:
+                    self.__log.info(
+                        f"'{state.transport.transport_name}' not connected "
+                        f"— attempting reconnect before interleaved read."
+                    )
+                    state.transport.connect()
+                    if not state.transport.connected:
+                        # Still not connected — skip this cycle entirely.
+                        # The main loop will retry on the next scrape_interval tick.
+                        self.__log.warning(
+                            f"'{state.transport.transport_name}' reconnect failed "
+                            f"— skipping read cycle."
+                        )
+                        return state
+
                 for _ in state.transport.read_data_iter():
                     pass
                 state.completed_cleanly = True
