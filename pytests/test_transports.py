@@ -274,11 +274,11 @@ def test_mqtt_init_bridge_subscribes_only_allowlisted_holding_write_topics(dummy
 
     out.init_bridge(source)
 
-    out.client.subscribe.assert_called_once_with("base/sn1/write/charge_limit")
+    out.client.subscribe.assert_called_once_with("base/sn1/write/holding/charge_limit")
 
 
 def test_mqtt_init_bridge_subscribes_allowlisted_coil_write_topics(dummy_settings) -> None:
-    """New behaviour: MQTT coil write topics are subscribed alongside holding topics when allowlisted."""
+    """New behavior: MQTT coil write topics are subscribed alongside holding topics when allowlisted."""
     out: mqtt = mqtt.__new__(mqtt)
     out.client = MagicMock()
     out.base_topic = "base"
@@ -299,7 +299,7 @@ def test_mqtt_init_bridge_subscribes_allowlisted_coil_write_topics(dummy_setting
 
     out.init_bridge(source)
 
-    out.client.subscribe.assert_called_once_with("base/sn1/write/grid_charge_enable")
+    out.client.subscribe.assert_called_once_with("base/sn1/write/coil/grid_charge_enable")
     assert "base/sn1/write/grid_charge_enable" in out._write_topics
 
 
