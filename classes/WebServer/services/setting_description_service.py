@@ -28,6 +28,7 @@ appear in the UI without any manual maintenance.
 """
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any, List
 
@@ -41,7 +42,7 @@ from ..transport_registry import (
     write_descriptions_to_json,
 )
 
-_log = __import__("logging").getLogger(__name__)
+_log: logging.Logger = logging.getLogger(__name__)
 
 
 def seed_setting_descriptions(

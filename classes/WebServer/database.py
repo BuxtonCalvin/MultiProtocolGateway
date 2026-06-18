@@ -207,23 +207,23 @@ def refresh_app_state(db: Session) -> AppState:
     """
 
 
-    dirty_settings = db.scalar(
+    dirty_settings: int = db.scalar(
         select(func.count()).where(Setting.is_dirty == True)  # noqa: E712
     ) or 0
 
-    dirty_descriptions = db.scalar(
+    dirty_descriptions: int = db.scalar(
         select(func.count()).where(SettingDescription.is_dirty == True)  # noqa: E712
     ) or 0
-    orphan_count = db.scalar(
+    orphan_count: int = db.scalar(
         select(func.count()).where(
             Setting.is_orphan == True,  # noqa: E712
             Setting.is_active == True,  # noqa: E712
         )
     ) or 0
-    dirty_protocols = db.scalar(
+    dirty_protocols: int = db.scalar(
         select(func.count()).where(ProtocolRegister.is_dirty == True)  # noqa: E712
     ) or 0
-    dirty_device_protocols = db.scalar(
+    dirty_device_protocols: int = db.scalar(
         select(func.count()).where(DeviceProtocolSelection.is_dirty == True)  # noqa: E712
     ) or 0
 

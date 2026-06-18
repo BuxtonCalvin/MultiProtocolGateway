@@ -29,7 +29,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from classes.WebServer.models import AppState
-from classes.WebServer.services.device_service import DeviceSummary
+from classes.WebServer.services.device_service import DeviceSummary, NavData
 
 from ..database import get_session, refresh_app_state
 from ..models import Setting
@@ -119,7 +119,7 @@ def diagnostics(db: Session = Depends(get_session)) -> dict[str, Any]:
 
     # 3. App state row
     try:
-        state = get_app_state(db)
+        state: AppState = get_app_state(db)
         result["app_state"] = {
             "has_dirty_settings": state.has_dirty_settings,
             "has_dirty_protocols": state.has_dirty_protocols,
@@ -144,7 +144,7 @@ def diagnostics(db: Session = Depends(get_session)) -> dict[str, Any]:
 def nav_data(db: Session = Depends(get_session)) -> dict[str, Any]:
     """Returns scraper/bridge lists and protocol groups for nav rendering."""
     from ..services.device_service import get_nav_data as _nav
-    nav = _nav(db)
+    nav: NavData = _nav(db)
     return {
         "scrapers": [
             {"name": s.name, "transport_class": s.transport_class,
@@ -319,7 +319,7 @@ def reconcile_settings(
                 display_rows.append(row)
             else:
                 # Virtual row — not yet in DB, shown as inactive placeholder
-                default_val = expected_keys[key] or ""
+                default_val: str = expected_keys[key] or ""
                 display_rows.append(types.SimpleNamespace(
                     id=None,
                     key=key,
@@ -377,7 +377,7 @@ def create_and_activate(
     if existing:
         existing.is_active = True
         existing.is_dirty = True
-        row = existing
+        row: Setting = existing
     else:
         row = Setting(
             section=section,
@@ -419,7 +419,7 @@ def refresh_protocol_tabs(
     """
     from ..services.protocol_service import get_protocols_for_device
 
-    section = f"transport.{device_name}"
+    section: str = f"transport.{device_name}"
 
     # Stage the new protocol_version value
     row: Setting | None = db.query(Setting).filter(

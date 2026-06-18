@@ -33,6 +33,7 @@ AppState         — single-row global flags (dirty, orphan counts, last commit)
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Protocol, runtime_checkable
 
 from sqlalchemy import (
     Boolean,
@@ -54,6 +55,35 @@ from sqlalchemy.orm import (
 
 class Base(DeclarativeBase):
     pass
+
+
+# ---------------------------------------------------------------------------
+# RegisterToggleTarget
+# ---------------------------------------------------------------------------
+
+@runtime_checkable
+class RegisterToggleTarget(Protocol):
+    """
+    Structural protocol satisfied by both ProtocolRegister and
+    DeviceProtocolSelection.  Allows toggle_register_field in
+    protocol_service.py to type ``target`` as a single non-union type,
+    giving checkers full attribute visibility without a cast.
+
+    Attributes are declared as Mapped[bool] — not plain bool — because
+    pyright resolves protocol conformance against class-level annotations,
+    where SQLAlchemy's descriptor appears as Mapped[bool].  At runtime the
+    descriptor transparently returns a plain bool on instances, but the
+    structural check happens at the annotation level, so the protocol must
+    mirror that exact type to satisfy invariant mutable-attribute matching.
+    """
+
+    user_write_enabled: Mapped[bool]
+    mask_enabled: Mapped[bool]
+    screen_enabled: Mapped[bool]
+    is_dirty: Mapped[bool]
+
+    def mark_dirty(self) -> None: ...
+
 
 # ---------------------------------------------------------------------------
 # Setting
@@ -240,11 +270,9 @@ class DeviceProtocolSelection(Base):
         """
         Determines writability by looking up the base protocol's rules.
         """
-        # We look up the parent register to see if the protocol allows writing
-
         db: Session | None = object_session(self)
         if db:
-            parent = db.query(ProtocolRegister).filter(
+            parent: ProtocolRegister | None = db.query(ProtocolRegister).filter(
                 ProtocolRegister.protocol_name == self.protocol_name,
                 ProtocolRegister.registry_type == self.registry_type,
                 ProtocolRegister.register_address == self.register_address
@@ -329,4 +357,3 @@ class SettingDescription(Base):
 
     def mark_dirty(self) -> None:
         self.is_dirty = (self.description or "") != (self.description_disk or "")
-

@@ -169,7 +169,7 @@ def _resolve_transport(
     }
 
     if parent_name:
-        parent_keys = _resolve_transport(parent_name, raw, visited)
+        parent_keys: dict[str, str] = _resolve_transport(parent_name, raw, visited)
         return {**parent_keys, **own_keys}
 
     return own_keys
@@ -187,7 +187,7 @@ def _load_defaults() -> tuple[dict[str, Any], dict[str, dict[str, str]]]:
     resolved_dict: flat {transport_name: {key: default}} with inheritance
                    applied.  Only public (non-"_") transport names are included.
     """
-    raw = _load_json(_defaults_path())
+    raw: dict[str, Any] = _load_json(_defaults_path())
     resolved: dict[str, dict[str, str]] = {}
     for name in raw:
         if name.startswith("_"):
@@ -243,8 +243,8 @@ def get_default_for(transport_name: str, key: str) -> str:
     Falls back to the _base defaults if the transport is not registered.
     Returns "" if the key is not found anywhere.
     """
-    known = get_known_transport_keys()
-    transport_defaults = known.get(transport_name, get_transport_base_keys())
+    known: dict[str, dict[str, str]] = get_known_transport_keys()
+    transport_defaults: dict[str, str] = known.get(transport_name, get_transport_base_keys())
     return transport_defaults.get(key, "")
 
 
@@ -270,8 +270,8 @@ def write_descriptions_to_json(descriptions: dict[str, str]) -> None:
     global _descriptions_cache
     existing: dict[str, str] = dict(_load_json(_descriptions_path()))
     # Overlay: caller's values win; unmentioned keys are preserved
-    merged = {**existing, **descriptions}
-    sorted_merged = dict(sorted(merged.items()))
+    merged: dict[str, str] = {**existing, **descriptions}
+    sorted_merged: dict[str, str] = dict(sorted(merged.items()))
     _save_json(
         _descriptions_path(),
         sorted_merged,
@@ -336,7 +336,7 @@ def sync_from_library(
     dict with counts: new_transports, new_default_keys, new_description_keys,
                       purged_transport_keys, purged_transports, purged_description_keys
     """
-    stats = {
+    stats: dict[str, int] = {
         "new_transports": 0,
         "new_default_keys": 0,
         "new_description_keys": 0,
@@ -388,17 +388,14 @@ def sync_from_library(
                     # Known transport — only add keys not already covered
                     # (either directly or via $extends inheritance).
                     entry: dict[str, Any] = raw[transport_name]
-                    resolved_existing = _resolve_transport(transport_name, raw)
+                    resolved_existing: dict[str, str] = _resolve_transport(transport_name, raw)
                     for key in sorted(ast_all_keys):
                         if key not in resolved_existing:
                             # Use the AST default if available, otherwise ""
                             entry[key] = ast_keys_raw[key] if ast_keys_raw[key] is not None else ""
                             stats["new_default_keys"] += 1
                             changed = True
-                            _log.debug(
-                                "transport_registry: added key '%s' to transport '%s'",
-                                key, transport_name,
-                            )
+                            _log.debug("transport_registry: added key '%s' to transport '%s'",key, transport_name)
 
         # -- Purge removed transports and keys --
         if purge_removed:
@@ -477,7 +474,7 @@ def sync_from_library(
                 _log.info("transport_registry: purged description for removed key '%s'", k)
 
         if changed:
-            sorted_descs = dict(sorted(descs.items()))
+            sorted_descs: dict[str, str] = dict(sorted(descs.items()))
             _save_json(
                 _descriptions_path(),
                 sorted_descs,

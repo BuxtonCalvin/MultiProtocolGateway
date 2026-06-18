@@ -111,8 +111,8 @@ def build_diff(db: Session) -> DiffResult:
         if not row.is_dirty:
             continue
 
-        disk = row.value_disk or ""
-        staged = row.value_staged or ""
+        disk: str = row.value_disk or ""
+        staged: str = row.value_staged or ""
 
         if not disk and staged:
             change_type: ChangeType = "added"

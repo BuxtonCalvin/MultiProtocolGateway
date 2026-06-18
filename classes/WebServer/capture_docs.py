@@ -32,13 +32,13 @@ import os
 import re
 from collections import deque
 from pathlib import Path
-from urllib.parse import urldefrag, urljoin, urlparse
+from urllib.parse import ParseResult, urldefrag, urljoin, urlparse
 
 from playwright.sync_api import Page, sync_playwright
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
-WEB_DIR = Path(__file__).resolve().parent
-DEFAULT_OUTPUT_DIR = WEB_DIR / "static" / "screenshots"
+WEB_DIR: Path = Path(__file__).resolve().parent
+DEFAULT_OUTPUT_DIR: Path = WEB_DIR / "static" / "screenshots"
 
 CLEAN_UI_CSS = """
 header[role="banner"],
@@ -62,7 +62,7 @@ def route_to_filename(path: str) -> str:
     """Convert a URL path to a stable screenshot filename."""
     if path in {"", "/"}:
         return "dashboard.png"
-    slug = path.strip("/").lower()
+    slug: str = path.strip("/").lower()
     slug = slug.replace("/", "__")
     slug = re.sub(r"[^a-z0-9._-]+", "-", slug)
     slug = re.sub(r"-{2,}", "-", slug).strip("-")
@@ -78,8 +78,8 @@ def remove_file(path: Path) -> None:
 
 
 def same_site(base_url: str, candidate_url: str) -> bool:
-    base = urlparse(base_url)
-    candidate = urlparse(candidate_url)
+    base: ParseResult = urlparse(base_url)
+    candidate: ParseResult = urlparse(candidate_url)
     return (
         candidate.scheme in {"http", "https"}
         and candidate.scheme == base.scheme
@@ -118,7 +118,7 @@ def collect_internal_links(page: Page, base_url: str) -> set[str]:
     links: set[str] = set()
     for href in hrefs:
         absolute, _fragment = urldefrag(urljoin(base_url, href))
-        parsed = urlparse(absolute)
+        parsed: ParseResult = urlparse(absolute)
         if same_site(base_url, absolute) and is_crawlable_path(parsed.path):
             links.add(absolute)
     return links
@@ -140,12 +140,12 @@ def capture_site(base_url: str, output_dir: Path, clean_ui: bool, fresh: bool) -
         page = context.new_page()
 
         while pending:
-            url = pending.popleft()
+            url: str = pending.popleft()
             if url in visited:
                 continue
             visited.add(url)
 
-            parsed = urlparse(url)
+            parsed: ParseResult = urlparse(url)
             if not is_crawlable_path(parsed.path):
                 continue
 
@@ -154,7 +154,7 @@ def capture_site(base_url: str, output_dir: Path, clean_ui: bool, fresh: bool) -
                 wait_until_ready(page, url)
                 if clean_ui:
                     page.add_style_tag(content=CLEAN_UI_CSS)
-                screenshot_path = output_dir / route_to_filename(parsed.path)
+                screenshot_path: Path = output_dir / route_to_filename(parsed.path)
                 page.screenshot(path=str(screenshot_path), full_page=True)
                 captured.append(screenshot_path)
 
@@ -197,8 +197,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
-    args = parse_args()
-    captured = capture_site(
+    args: argparse.Namespace = parse_args()
+    captured: list[Path] = capture_site(
         base_url=args.base_url,
         output_dir=args.output_dir,
         clean_ui=not args.no_clean_ui,

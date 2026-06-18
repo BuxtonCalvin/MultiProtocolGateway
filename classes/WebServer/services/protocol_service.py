@@ -22,17 +22,19 @@ services/protocol_service.py — Protocol register queries and toggle mutations.
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, List
+from typing import Any, List, Sequence, Tuple
 
 from sqlalchemy import select
+from sqlalchemy.engine.row import Row
 from sqlalchemy.orm import Query, Session
 
 from ..database import refresh_app_state
-from ..models import DeviceProtocolSelection, ProtocolRegister
+from ..models import DeviceProtocolSelection, ProtocolRegister, RegisterToggleTarget
 
-_log = __import__("logging").getLogger(__name__)
+_log: logging.Logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -85,6 +87,8 @@ def get_protocol_registers(
     _log.debug("get_protocol_registers: %s/%s page=%d total=%d", protocol_name, registry_type, page, total)
     protocol_rows: List[ProtocolRegister] = query.offset((page - 1) * page_size).limit(page_size).all()
 
+    rows: list[DeviceRegisterView] | list[ProtocolRegister]
+
     if device_name:
         selections: dict[tuple[str, str, str], DeviceProtocolSelection] = {
             (row.protocol_name, row.registry_type, row.register_address): row
@@ -98,28 +102,32 @@ def get_protocol_registers(
                 .all()
             )
         }
-        rows = [
-            DeviceRegisterView(
-                id=row.id,
-                protocol_name=row.protocol_name,
-                registry_type=row.registry_type,
-                register_address=row.register_address,
-                variable_name=row.variable_name,
-                documented_name=row.documented_name,
-                unit=row.unit,
-                data_type=row.data_type,
-                values_range=row.values_range,
-                adjustments=row.adjustments,
-                note=row.note,
-                read_interval=row.read_interval,
-                write_mode_protocol=row.write_mode_protocol,
-                user_write_enabled=s.user_write_enabled if (s := selections.get((row.protocol_name, row.registry_type, row.register_address))) else False,
-                mask_enabled=s.mask_enabled if s else False,
-                screen_enabled=s.screen_enabled if s else False,
-                is_dirty=s.is_dirty if s else False,
+
+        view_rows: list[DeviceRegisterView] = []
+        for row in protocol_rows:
+            s: DeviceProtocolSelection | None = selections.get((row.protocol_name, row.registry_type, row.register_address))
+            view_rows.append(
+                DeviceRegisterView(
+                    id=row.id,
+                    protocol_name=row.protocol_name,
+                    registry_type=row.registry_type,
+                    register_address=row.register_address,
+                    variable_name=row.variable_name,
+                    documented_name=row.documented_name,
+                    unit=row.unit,
+                    data_type=row.data_type,
+                    values_range=row.values_range,
+                    adjustments=row.adjustments,
+                    note=row.note,
+                    read_interval=row.read_interval,
+                    write_mode_protocol=row.write_mode_protocol,
+                    user_write_enabled=s.user_write_enabled if s else False,
+                    mask_enabled=s.mask_enabled if s else False,
+                    screen_enabled=s.screen_enabled if s else False,
+                    is_dirty=s.is_dirty if s else False,
+                )
             )
-            for row in protocol_rows
-        ]
+        rows = view_rows
     else:
         rows = protocol_rows
 
@@ -142,7 +150,7 @@ def get_protocols_for_device(
     returns the available registry_types (tabs) for that device,
     including W/M/S selection counts when device_name is provided.
     """
-    rows = (
+    rows: Sequence[Row[Tuple[str, str]]] = (
         db.execute(
             select(
                 ProtocolRegister.protocol_name,
@@ -158,10 +166,11 @@ def get_protocols_for_device(
     tabs = []
     for r in rows:
         protocol_name, registry_type = r[0], r[1]
+
         write_count = mask_count = screen_count = 0
 
         if device_name:
-            sels = (
+            sels: List[DeviceProtocolSelection] = (
                 db.query(DeviceProtocolSelection)
                 .filter(
                     DeviceProtocolSelection.device_name == device_name,
@@ -205,9 +214,10 @@ def toggle_register_field(
     if row is None:
         return None
 
-    target = row
+    target: RegisterToggleTarget = row
+
     if device_name:
-        target = (
+        existing: DeviceProtocolSelection | None = (
             db.query(DeviceProtocolSelection)
             .filter(
                 DeviceProtocolSelection.device_name == device_name,
@@ -217,8 +227,8 @@ def toggle_register_field(
             )
             .first()
         )
-        if target is None:
-            target = DeviceProtocolSelection(
+        if existing is None:
+            existing = DeviceProtocolSelection(
                 device_name=device_name,
                 protocol_name=row.protocol_name,
                 registry_type=row.registry_type,
@@ -231,8 +241,9 @@ def toggle_register_field(
                 screen_enabled_disk=False,
                 is_dirty=False,
             )
-            db.add(target)
+            db.add(existing)
             db.flush()
+        target = existing
 
     if field == "user_write_enabled" and value and not row.is_writable_by_protocol:
         return None
@@ -247,7 +258,7 @@ def toggle_register_field(
     db.flush()
     refresh_app_state(db)
     _log.debug("toggle_register_field: register=%d field=%s value=%s device=%s", register_id, field, value, device_name)
-    return target
+    return target  # type: ignore[return-value]  # concrete type is ProtocolRegister | DeviceProtocolSelection
 
 
 def update_protocol_register_field(
@@ -300,6 +311,9 @@ def get_protocol_json(
                 return json.loads(override_path.read_text(encoding="utf-8")), True
             except Exception:
                 _log.warning("Failed to load protocol json override file %s", override_path)
+                # Fix 5: add the missing return so the checker sees a complete
+                # set of return paths and --warn-return-type is satisfied.
+                return None, False
 
     json_path: Path = protocols_dir / protocol_group / f"{protocol_name}.json"
     if json_path.exists():

@@ -124,7 +124,7 @@ def _resolve_image_id(image_id: str) -> str:
     2. Prefix-wildcard match (key ending in '*') — longest prefix wins.
     3. Return the id unchanged if no alias found.
     """
-    aliases = _load_aliases()
+    aliases: dict[str, str] = _load_aliases()
 
     # 1. Exact match
     if image_id in aliases:
@@ -134,7 +134,7 @@ def _resolve_image_id(image_id: str) -> str:
     best_len, best_target = -1, None
     for pattern, target in aliases.items():
         if pattern.endswith("*"):
-            prefix = pattern[:-1]
+            prefix: str = pattern[:-1]
             if image_id.startswith(prefix) and len(prefix) > best_len:
                 best_len, best_target = len(prefix), target
     if best_target is not None:
@@ -200,7 +200,7 @@ def _image_id_from_path(path: str) -> str:
     if not normalized:
         raw_id = "dashboard"
     else:
-        raw_id = re.sub(r"[^a-z0-9._-]+", "-", normalized.lower().replace("/", "__")).strip("-")
+        raw_id: str = re.sub(r"[^a-z0-9._-]+", "-", normalized.lower().replace("/", "__")).strip("-")
     return _resolve_image_id(raw_id)
 
 
@@ -290,7 +290,7 @@ def _markdown_to_html(markdown: str, doc_path: str) -> str:
 
     # Strip YAML/TOML frontmatter (--- ... --- or +++ ... +++)
     if lines and lines[0].strip() in ("---", "+++"):
-        fence_char = lines[0].strip()
+        fence_char: str = lines[0].strip()
         j = 1
         while j < len(lines) and lines[j].strip() != fence_char:
             j += 1
@@ -348,7 +348,7 @@ def _markdown_to_html(markdown: str, doc_path: str) -> str:
         if heading:
             close_lists()
             level: int = len(heading.group(1))
-            text = heading.group(2).rstrip("#").strip()
+            text: str = heading.group(2).rstrip("#").strip()
             # Generate an anchor id for TOC compatibility
             anchor: str = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
             rendered.append(f'<h{level} id="{anchor}">{_render_inline(text, resolve_link)}</h{level}>')
@@ -423,7 +423,7 @@ def _render_inline(text: str, link_resolver) -> str:
 
 @router.get("/annotations/{image_id}", response_model=list[Annotation])
 async def get_annotations(image_id: str) -> list[Annotation]:
-    resolved_id = _resolve_image_id(image_id)
+    resolved_id: str = _resolve_image_id(image_id)
     return _load_annotations().get(resolved_id, [])
 
 
@@ -470,8 +470,8 @@ async def help_context(request: Request, path: str = "/"):
 async def help_screen(request: Request, image_id: str):
     # Resolve alias so e.g. /pages/help/screen/device__inverter_read
     # serves the device__scraper_generic screenshot and annotations.
-    resolved_id = _resolve_image_id(image_id)
-    screenshot = SCREENSHOT_DIR / f"{resolved_id}.png"
+    resolved_id: str = _resolve_image_id(image_id)
+    screenshot: Path = SCREENSHOT_DIR / f"{resolved_id}.png"
     return request.app.state.templates.TemplateResponse(
         request=request,
         name="pages/help.html",
@@ -494,7 +494,7 @@ async def help_screen(request: Request, image_id: str):
 @router.get("/pages/help/files/{doc_path:path}")
 async def help_file(doc_path: str):
     doc_path = unquote(doc_path)
-    doc_file = _safe_child(DOCUMENTATION_DIR, doc_path)
+    doc_file: Path = _safe_child(DOCUMENTATION_DIR, doc_path)
     if not doc_file.exists() or not doc_file.is_file():
         raise HTTPException(status_code=404, detail="File not found")
     return FileResponse(doc_file)

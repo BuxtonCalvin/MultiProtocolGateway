@@ -443,7 +443,7 @@ def _parse_protocol_csv(csv_path: Path, group_name: str) -> list[dict[str, Any]]
     try:
         with open(csv_path, newline="", encoding="latin-1") as f:
             # ── Detect delimiter ──────────────────────────────────────────
-            sample = f.read(4096)
+            sample: str = f.read(4096)
             f.seek(0)
             delimiter = ";" if sample.count(";") > sample.count(",") else ","
 
@@ -792,7 +792,7 @@ def _load_override_names(
     # Check config_dir first (where commit writes overrides)
     override_path: Path | None = None
     if config_dir is not None:
-        candidate = config_dir / f"{protocol_name}.override.csv"
+        candidate: Path = config_dir / f"{protocol_name}.override.csv"
         if candidate.exists():
             override_path = candidate
             _log.debug(f"Loading override from config_dir: {override_path}")
@@ -811,7 +811,7 @@ def _load_override_names(
         with open(override_path, newline="", encoding="utf-8", errors="replace") as f:
             reader: csv.DictReader[str] = csv.DictReader(f)
             for row in reader:
-                value = (row.get("documented name") or row.get("variable_name") or "").strip()
+                value: str = (row.get("documented name") or row.get("variable_name") or "").strip()
                 if value:
                     names.add(value.lower().replace(" ", "_"))
     except Exception as exc:
@@ -1071,7 +1071,7 @@ class Scanner:
             # ----------------------------------------------------------------
             #  Scan protocol CSV/JSON files
             # ----------------------------------------------------------------
-            registers = scan_protocols_dir(self.protocols_dir)
+            registers: List[dict[str, Any]] = scan_protocols_dir(self.protocols_dir)
             skipped = 0
             for reg in registers:
                 result: ProtocolRegister | None = _upsert_protocol_register(db, reg)
