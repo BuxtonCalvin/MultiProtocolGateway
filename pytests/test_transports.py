@@ -300,7 +300,7 @@ def test_mqtt_init_bridge_subscribes_allowlisted_coil_write_topics(dummy_setting
     out.init_bridge(source)
 
     out.client.subscribe.assert_called_once_with("base/sn1/write/coil/grid_charge_enable")
-    assert "base/sn1/write/grid_charge_enable" in out._write_topics
+    assert "base/sn1/write/coil/grid_charge_enable" in out._write_topics
 
 
 def test_mqtt_init_bridge_coil_topic_not_in_allowlist_not_subscribed(dummy_settings) -> None:
