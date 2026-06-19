@@ -27,7 +27,15 @@ from unittest.mock import MagicMock, mock_open, patch  # noqa: F401
 
 import pytest
 
-from classes.protocol_settings import Registry_Type, WriteMode, registry_map_entry
+from classes.protocol_settings import (
+    WORD_ORDER_ABCD,
+    WORD_ORDER_BADC,
+    WORD_ORDER_CDAB,
+    WORD_ORDER_DCBA,
+    Registry_Type,
+    WriteMode,
+    registry_map_entry,
+)
 from classes.transports import modbus_base as modbus_base_module
 from classes.transports.canbus import canbus
 from classes.transports.influxdb_out import influxdb_out
@@ -379,14 +387,37 @@ def test_modbus_helpers_interpret_exceptions_and_validate_client_presence(dummy_
         base._get_correct_device_arg({"unit": 1})
 
 
-def test_modbus_base_register_word_helpers_handle_little_endian() -> None:
-    """Edge case: register/byte helper methods preserve expected word order for little endian writes."""
+def test_modbus_base_register_word_helpers_all_four_encodings() -> None:
+    """_register_words_to_bytes and _bytes_to_register_words handle all four
+    ABCD/BADC/CDAB/DCBA word-order encodings correctly and round-trip cleanly.
+
+    Test value 0xAABBCCDD stored as two 16-bit Modbus registers:
+      ABCD: high word first, bytes big-endian   → regs [0xAABB, 0xCCDD]
+      BADC: high word first, bytes swapped      → regs [0xBBAA, 0xDDCC]
+      CDAB: low word first,  bytes big-endian   → regs [0xCCDD, 0xAABB]  (EG4/most inverters)
+      DCBA: low word first,  bytes swapped      → regs [0xDDCC, 0xBBAA]
+    """
     base = modbus_base_module.modbus_base.__new__(modbus_base_module.modbus_base)
-    assert base._register_words_to_bytes([0x1122, 0x3344], "big") == b"\x11\x22\x33\x44"
-    assert base._register_words_to_bytes([0x1122, 0x3344], "little") == b"\x33\x44\x11\x22"
-    assert base._bytes_to_register_words(b"\x11\x22\x33\x44", "little") == [0x3344, 0x1122]
+
+    # ── Read path: register words → byte string ──────────────────────────────
+    # ABCD: words stay, bytes big-endian within each word
+    assert base._register_words_to_bytes([0xAABB, 0xCCDD], WORD_ORDER_ABCD) == b"\xAA\xBB\xCC\xDD"
+    # BADC: words stay, bytes little-endian within each word
+    assert base._register_words_to_bytes([0xBBAA, 0xDDCC], WORD_ORDER_BADC) == b"\xAA\xBB\xCC\xDD"
+    # CDAB: words reversed, bytes big-endian within each word
+    assert base._register_words_to_bytes([0xCCDD, 0xAABB], WORD_ORDER_CDAB) == b"\xAA\xBB\xCC\xDD"
+    # DCBA: words reversed, bytes little-endian within each word
+    assert base._register_words_to_bytes([0xDDCC, 0xBBAA], WORD_ORDER_DCBA) == b"\xAA\xBB\xCC\xDD"
+
+    # ── Write path: byte string → register words (inverse of read) ───────────
+    assert base._bytes_to_register_words(b"\xAA\xBB\xCC\xDD", WORD_ORDER_ABCD) == [0xAABB, 0xCCDD]
+    assert base._bytes_to_register_words(b"\xAA\xBB\xCC\xDD", WORD_ORDER_BADC) == [0xBBAA, 0xDDCC]
+    assert base._bytes_to_register_words(b"\xAA\xBB\xCC\xDD", WORD_ORDER_CDAB) == [0xCCDD, 0xAABB]
+    assert base._bytes_to_register_words(b"\xAA\xBB\xCC\xDD", WORD_ORDER_DCBA) == [0xDDCC, 0xBBAA]
+
+    # ── Odd byte count must always raise regardless of word order ─────────────
     with pytest.raises(ValueError, match="even byte"):
-        base._bytes_to_register_words(b"\x01", "big")
+        base._bytes_to_register_words(b"\x01", WORD_ORDER_ABCD)
 
 
 @patch("classes.transports.influxdb_out.InfluxDBClient")
