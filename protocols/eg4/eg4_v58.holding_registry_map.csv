@@ -1,202 +1,205 @@
 register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note
-0,,Register 0,,ushort,0-65535,,R,,Unknown
-1,,Register 1,,ushort,0-65535,,R,,Unknown
-2,,SN_0_YeaR,,ASCII,'0'-'9',,R,"{""Register_Endian"":""little""}",The Serial number consists of the
-2.2,,SN_1_week,,ASCII,'A'-'Z',,R,"{""Register_Endian"":""little""}",bytes ASCII code
-3,,SN_2_week,,ASCII,'0'-'9',,R,"{""Register_Endian"":""little""}",AB12345678
-3.2,,SN_3_factory,,ASCII,'A'-'Z',,R,"{""Register_Endian"":""little""}",SN[0]=0x41(A)
-4,,SN_4_Product_code,,ASCII,'0'-'9',,R,"{""Register_Endian"":""little""}",
-4.2,,SN_5_Product_code,,ASCII,'A'-'Z',,R,"{""Register_Endian"":""little""}",
-5,,SN_6_Product_code,,ASCII,'0'-'9',,R,"{""Register_Endian"":""little""}",
-5.2,,SN_7_batch_numbeR,,ASCII,'A'-'Z',,R,"{""Register_Endian"":""little""}",
-6,,SN_8_batch_numbeR,,ASCII,'0'-'9',,R,"{""Register_Endian"":""little""}",SN[9]=0x38(8)
-6.2,,SN_9_batch_numbeR,,ASCII,'A'-'Z',,R,"{""Register_Endian"":""little""}",
-7,,FWCode,,ASCII,[a-zA-Z],,W,"{""Register_Endian"":""little""}",For more information of the model code
-8,,Register 8,,ushort,0-65535,,R,,Unknown
-9.b0,,Slave_VeR,,8bit,0-255,,W,,For more information of the software version number for redundant CPU
-9.b8,,Com_VeR,,8bit,0-255,,W,,For Communication CPU software version number
-10.b0,,Cntl_VeR,,8bit,0-255,,W,,For Control CPU software version number
-10.b8,,FWVeR,,8bit,0-255,,W,,For external software version
-11.b0,,ResetSetting_EnergyRecordClr,0,1bit,0-1,,W,,Resetting energy and running time
-11.b1,,ResetSetting_AlltoDefault,1,1bit,0-1,,W,,Reset all settings
-11.b2,,ResetSetting_AdjRatioClr,2,1bit,0-1,,W,,Reset all adjust data
-11.b3,,ResetSetting_FaultRecordClr,3,1bit,0-1,,W,,Clear the failure record
-11.b4,,ResetSetting_MonitorData,4,1bit,,,R,,
-11.b5,,ResetSetting_BMSChgSWOn,5,1bit,,,R,,
-11.b6,,ResetSetting_BMSDischgSWOn,6,1bit,,,R,,
-11.b7,,ResetSetting_InvReboot,7,1bit,0-1,,W,,0-null 1- restart inverter
-12.b0,,Time_YeaR,,8bit,17-255,,W,,inverter time-year
-12.b8,,Time_Month,,8bit,46034,,W,,inverter time-month
-13.b0,,Time_Date,,8bit,46053,,W,,inverter time-day
-13.b8,,Time_HouR,,8bit,0-23,,W,,inverter time-hour
-14.b0,,Time_Minute,,8bit,0-59,,W,,inverter time-minute
-14.b8,,Time_Second,,8bit,0-59,,W,,inverter time-second
-15,,Com AddR,,,0-150,,W,,MODBUS address
-16,,Language,,,0-1,,W,,0-English 1-German Language 0-English 1-German
-19,,Register 19,,ushort,0-65535,,R,,Unknown
-20,,PVInputModel,,,0-4,,W,,0: No PV plug in 1: PV1 plug in 2: PV2 plug in 3: two PVs in parallel 4: two separate PVs
-21.b0,,FuncEn_EPSEn,0,1bit,0-1,,W,,Off-grid mode enable
-21.b1,,FuncEn_OVFLoadDerateEn,1,1bit,0-1,,W,,Overfrequency load reduction enable
-21.b2,,FuncEn_DRMSEn,2,1bit,0-1,,W,,DRMS enable
-21.b3,,FuncEn_LVRTEn,3,1bit,0-1,,W,,Low voltage ride-through enable
-21.b4,,FuncEn_AntiIslandEn,4,1bit,0-1,,W,,Anti-islanding enablement
-21.b5,,FuncEn_NeutralDetectEn,5,1bit,0-1,,W,,Ground neutral detection enable
-21.b6,,FuncEn_GridOnPowerSSEn,6,1bit,0-1,,W,,On-grid power soft start enable
-21.b7,,FuncEn_ACChargeEn,7,1bit,0-1,,W,,AC charging enable
-21.b8,,FuncEn_SWSeamlesslyEn,8,1bit,0-1,,W,,seamless off-grid mode switching enable
-21.b9,,FuncEn_SetToStandby,9,1bit,0-1,,W,,0: Standby 1: Power on
-21.b10,,FuncEn_ForcedDischgEn,10,1bit,0-1,,W,,Forced discharge enable
-21.b11,,FuncEn_ForcedChgEn,11,1bit,0-1,,W,,Force charge enable
-21.b12,,FuncEn_ISOEn,12,1bit,0-1,,W,,ISO enable
-21.b13,,FuncEn_GFCIEn,13,1bit,0-1,,W,,GFCI enable
-21.b14,,FuncEn_DCIEn,14,1bit,0-1,,W,,DCI enable
-21.b15,,FuncEn_FeedInGridEn,15,1bit,0-1,,W,,0-disable 1-enable
-22,,StartPVVolt,0.1V,,900-5000,,W,,PV start-up voltage
-23,,ConnectTime,s,,30-600,,W,,Waiting time of on-grid
-24,,ReconnectTime,s,,0-900,,W,,Waiting time of Reconnect on- gird
-25,,GridVoltConnLow,0.1V,,According to specific regulatory requirements,,WD,,The lower limit of the allowed on-grid voltage.
-26,,GridVoltConnHigh,0.1V,,According to specific regulatory requirements,,WD,,The upper limit of the the allowed on-grid voltage.
-27,,GridFreqConnLow,0.01Hz,,According to specific regulatory requirements,,WD,,The lower limit of the allowable on-grid frequency
-28,,GridFreqConnHigh,0.01Hz,,According to specific regulatory requirements,,WD,,The upper limit of the the allowed on-grid frequency.
-29,,GridVoltLimit1Low,0.1V,,According to specific regulatory requirements,,WD,,Grid voltage level 1 under-voltage protection point
-30,,GridVoltLimit1High,0.1V,,According to specific regulatory requirements,,WD,,Grid voltage level 1 over-voltage protection point
-31,,GridVoltLimit1LowTime,cycles,,According to specific regulatory requirements,,WD,,Grid voltage level 1 under-voltage protection time
-32,,GridVoltLimit1HighTime,cycles,,According to specific regulatory requirements,,WD,,Grid voltage level 1 over-voltage protection time
-33,,GridVoltLimit2Low,0.1V,,According to specific regulatory requirements,,WD,,Grid voltage level 2 under-voltage protection point
-34,,GridVoltLimit2High,0.1V,,According to specific regulatory requirements,,WD,,Grid voltage level 2 over-voltage protection point
-35,,GridVoltLimit2LowTime,cycles,,According to specific regulatory requirements,,WD,,Grid voltage level 2 under-voltage protection time
-36,,GridVoltLimit2HighTime,cycles,,According to specific regulatory requirements,,WD,,Grid voltage level 2 over-voltage protection time
-37,,GridVoltLimit3Low,0.1V,,According to specific regulatory requirements,,WD,,Grid voltage level 3 under-voltage protection point
-38,,GridVoltLimit3High,0.1V,,According to specific regulatory requirements,,WD,,Grid voltage level 3 over-voltage protection point
-39,,GridVoltLimit3LowTime,cycles,,According to specific regulatory requirements,,WD,,Grid voltage level 3 under-voltage protection time
-40,,GridVoltLimit3HighTime,cycles,,According to specific regulatory requirements,,WD,,Grid voltage level 3 over-voltage protection time
-41,,GridVoltMovAvgHigh,0.1V,,According to specific regulatory,,WD,,Grid voltage sliding average over-voltage protection point
-42,,GridFreqLimit1Low,0.01Hz,,According to specific regulatory requirements,,WD,,Grid frequency level 1 under-frequency protection point
-43,,GridFreqLimit1High,0.01Hz,,According to specific regulatory requirements,,WD,,Grid frequency level 1 over-frequency protection point
-44,,GridFreqLimit1LowTime,cycles,,According to specific regulatory requirements,,WD,,Grid frequency level 1 under-frequency protection time
-45,,GridFreqLimit1HighTime,cycles,,According to specific regulatory requirements,,WD,,Grid frequency level 1 over-frequency protection time
-46,,GridFreqLimit2Low,0.01Hz,,According to specific regulatory requirements,,WD,,Grid frequency level 2 under-frequency protection point
-47,,GridFreqLimit2High,0.01Hz,,According to specific regulatory requirements,,WD,,Power grid frequency level 2 over-frequency protection point
-48,,GridFreqLimit2LowTime,cycles,,According to specific regulatory requirements,,WD,,Grid frequency level 2 under-frequency protection time
-49,,GridFreqLimit2HighTime,cycles,,According to specific regulatory requirements,,WD,,Grid frequency level 2 over-frequency protection time
-50,,GridFreqLimit3Low,0.01Hz,,According to specific regulatory requirements,,WD,,Grid frequency level 3 under-frequency protection point
-51,,GridFreqLimit3High,0.01Hz,,According to specific regulatory requirements,,WD,,Grid frequency level 3 over-frequency protection point
-52,,GridFreqLimit3LowTime,cycles,,According to specific regulatory requirements,,WD,,Grid frequency level 3 under-frequency protection time
-53,,GridFreqLimit3HighTime,cycles,,According to specific regulatory requirements,,WD,,Grid frequency level 3 over-frequency protection time
-54,,MaxQPercentForQV,%,,According to specific regulatory requirements,,WD,,The maximum percentage of reactive power for the Q(V) curve
-55,,V1L,0.1V,,According to specific regulatory requirements,,WD,,Q(V) curve under-voltage 1
-56,,V2L,0.1V,,According to specific regulatory requirements,,WD,,Q(V) curve under-voltage 2
-57,,V1H,0.1V,,According to specific regulatory requirements,,WD,,Q(V) curve over-voltage 1
-58,,V2H,0.1V,,According to specific regulatory requirements,,WD,,Q(V) curve over-voltage 2
-59,,ReactivePowerCMDType,0-7,,,,W,,Reactive power command type 0 - unit power factor 1 - fixed PF 2 - default PF curve (American machine: Q(P)) 3 - custom PF curve 4 - capacitive reactive power percentage 5- inductive reactive power percentage 6-QV curve 7-QV_Dynamic
-60,,ActivePowerPercentCMD,%,,0-100,,W,,Active power percentage set value
-61,,ReactivePowerPercentCMD,%,,0-60,,W,,Reactive power percentage set value
-62,,PFCMD,0.001,,750-1000,,W,,1750- 2000
-63,,PowerSoftStartSlope,0.1%/min,,36526,,W,,Loading rate
-64,,ChargePowerPercentCMD,%,,0-100,,W,,Charging power percentage setting in integers
-65,,DischgPowerPercentCMD,%,,0-100,,W,,Discharging power percentage setting
+168,,ACCharge Bat Current,A,,0-140,,W,,Charge Current from AC
+69.b0,,ACChgEndHour,hour,8bit,0-23,,W,,AC charging end time_hour setting
+71.b0,,ACChgEndHour1,hour,8bit,0-23,,W,,AC charging end time_hour setting
+73.b0,,ACChgEndHour2,hour,8bit,0-23,,W,,AC charging end time_hour setting
+69.b8,,ACChgEndMinute,min,8bit,0-59,,W,,AC charging end time_minute setting
+71.b8,,ACChgEndMinute1,min,8bit,0-59,,W,,AC charging end time_minute setting
+73.b8,,ACChgEndMinute2,min,8bit,0-59,,W,,AC charging end time_minute setting
+161,,ACChgEndSOC,%,,20-100,,W,,AC charging stops SOC; valid after selecting ACChg according to SOC
+159,,ACChgEndVolt,0.1V,,480-590,,W,,Battery voltage of AC charging cut-off
 66,,ACChgPowerCMD,%,,0-100,,W,,AC charge percentage setting
+140,,ACChgPowerCMD,0.10%,,0-1000,,W,,AC charge percentage setting
 67,,ACChgSOCLimit,%,,0-100,,W,,SOC limit setting for AC charging
 68.b0,,ACChgStartHour,hour,8bit,0-23,,W,,AC charging start time - hour setting.
-68.b8,,ACChgStartMinute,min,8bit,0-59,,W,,AC charging start time_minute setting
-69.b0,,ACChgEndHour,hour,8bit,0-23,,W,,AC charging end time_hour setting
-69.b8,,ACChgEndMinute,min,8bit,0-59,,W,,AC charging end time_minute setting
 70.b0,,ACChgStartHour1,hour,8bit,0-23,,W,,AC charging start time_hour setting
-70.b8,,ACChgStartMinute1,min,8bit,0-59,,W,,AC charging start time_minute setting
-71.b0,,ACChgEndHour1,hour,8bit,0-23,,W,,AC charging end time_hour setting
-71.b8,,ACChgEndMinute1,min,8bit,0-59,,W,,AC charging end time_minute setting
 72.b0,,ACChgStartHour2,hour,8bit,0-23,,W,,AC charging start time_hour setting
+68.b8,,ACChgStartMinute,min,8bit,0-59,,W,,AC charging start time_minute setting
+70.b8,,ACChgStartMinute1,min,8bit,0-59,,W,,AC charging start time_minute setting
 72.b8,,ACChgStartMinute2,min,8bit,0-59,,W,,AC charging start time_minute setting
-73.b0,,ACChgEndHour2,hour,8bit,0-23,,W,,AC charging end time_hour setting
-73.b8,,ACChgEndMinute2,min,8bit,0-59,,W,,AC charging end time_minute setting
+160,,ACChgStartSOC,%,,0-90,,W,,SOC of AC charging start
+158,,ACChgStartVolt,0.1V,,385-520,,W,,Battery voltage of AC charging start
+221,,ACCoupleEndSOC,%,,0-100,,W,,ACCouple SOC stop charging limit
+223,,ACCoupleEndVolt,0.1V,,400-560,,W,,ACCouple voltage stop charging point
+220,,ACCoupleStartSOC,%,,0-80,,W,,ACCouple SOC start charging point
+222,,ACCoupleStartVolt,0.1V,,400-520,,W,,ACCouple voltage start charging point
+153.b0,,ACFirstEndHour,hour,8bit,0-23,,W,,AC load end time _hours setting
+155.b0,,ACFirstEndHour1,hour,8bit,0-23,,W,,AC load end time_hours setting
+157.b0,,ACFirstEndHour2,hour,8bit,0-23,,W,,AC load end time_hours setting
+153.b8,,ACFirstEndMinute,min,8bit,0-59,,W,,AC load end ime_minutes setting
+155.b8,,ACFirstEndMinute1,min,8bit,0-59,,W,,AC load end time_minutes setting
+157.b8,,ACFirstEndMinute2,min,8bit,0-59,,W,,AC load end time_minutes setting
+152.b0,,ACFirstStartHour,hour,8bit,0-23,,W,,AC load start time_hours setting
+154.b0,,ACFirstStartHour1,hour,8bit,0-23,,W,,AC load start time_hours setting
+156.b0,,ACFirstStartHour2,hour,8bit,0-23,,W,,AC load start time_Hours setting
+152.b8,,ACFirstStartMinute,min,8bit,0-59,,W,,AC load start time _minutes setting
+154.b8,,ACFirstStartMinute1,min,8bit,0-59,,W,,AC load start time_minutes setting
+156.b8,,ACFirstStartMinute2,min,8bit,0-59,,W,,AC load start time_minutes setting
+60,,ActivePowerPercentCMD,%,,0-100,,W,,Active power percentage set value
+143,,ActivePowerPercentCMD,0.10%,,0-1000,,W,,Inverse active percentage setting
+180,,AFCIArcThreshold,,,,,W,,
+98,,AutoTestStart,,,0-1,,R,,0-Stop 1-Start
+133.b8,,BatCellParaNum,1,8bit,0-200,,W,,Number of battery cells in parallel
+133.b0,,BatCellSerialNum,1,8bit,0-200,,W,,Number of battery cells in series
+132.b8,,BatCellVoltHigh,0.1V,8bit,0-200,,W,,Battery cell voltage upper limit
+132.b0,,BatCellVoltLow,0.1V,8bit,0-200,,W,,Battery cell voltage lower limit.
+165,,BatLowBackSOC,%,,20-100,,W,,Battery under-voltage alarm recovery point
+163,,BatLowBackVoltage,0.1V,,420-520,,W,,Battery under-voltage alarm recovery point
+164,,BatLowSOC,%,,0-90,,W,,Battery under-voltage alarm point
+167,,BatLowtoUtilitySOC,%,,0-100,,W,,SOC for battery under-voltage to grid transfer
+166,,BatLowtoUtilityVoltage,0.1V,,444-514,,W,,Voltage point for battery under-voltage to grid transfer
+162,,BatLowVoltage,0.1V,,400-500,,W,,Battery under-voltage alarm point
+147,,Battery capacity,Ah,,0-10000,,W,,Battery capacity
+148,,Battery nominal Voltage,0.1V,,400-590,,W,,Battery rating voltage
+233.b1,,battery_backup_enable,,1bit,0~1,,W,,Battery backup enable
+101,,ChargeCurr,%A,,0-140,,W,,Charging current
+64,,ChargePowerPercentCMD,%,,0-100,,W,,Charging power percentage setting in integers
+138,,ChargePowerPercentCMD,0.10%,,0-1000,,W,,Charging power percentage setting in decimals
+99,,ChargeVoltRef,0.1V,,500-590,,W,,Lead-acid battery charging specified voltage
+77.b0,,ChgFirstEndHour,hour,8bit,0-23,,W,,Charging priority end time_hour setting
+79.b0,,ChgFirstEndHour1,hour,8bit,0-23,,W,,Charging priority end time_hour setting
+81.b0,,ChgFirstEndHour2,hour,8bit,0-23,,W,,Charging priority end time_hour setting
+77.b8,,ChgFirstEndMinute,min,8bit,0-59,,W,,Charging priority end time_minute setting
+79.b8,,ChgFirstEndMinute1,min,8bit,0-59,,W,,Charging priority end time_minute setting
+81.b8,,ChgFirstEndMinute2,min,8bit,0-59,,W,,Charging priority end time_minute setting
+201,,ChgFirstEndVolt,0.1V,,480-590,,W,,Charging priority voltage limit
 74,,ChgFirstPowerCMD,%,,0-100,,W,,Charging priority percentage setting
+141,,ChgFirstPowerCMD,0.10%,,0-1000,,W,,Charging priority percentage setting
 75,,ChgFirstSOCLimit,%,,0-100,,W,,Charging priority SOC limit setting
 76.b0,,ChgFirstStartHour,hour,8bit,0-23,,W,,Charging priority start time_hour setting
-76.b8,,ChgFirstStartMinute,min,8bit,0-59,,W,,Charge priority start time_min setting
-77.b0,,ChgFirstEndHour,hour,8bit,0-23,,W,,Charging priority end time_hour setting
-77.b8,,ChgFirstEndMinute,min,8bit,0-59,,W,,Charging priority end time_minute setting
 78.b0,,ChgFirstStartHour1,hour,8bit,0-23,,W,,Charging priority start time_hour setting
-78.b8,,ChgFirstStartMinute1,min,8bit,0-59,,W,,Charging priority start time_min setting
-79.b0,,ChgFirstEndHour1,hour,8bit,0-23,,W,,Charging priority end time_hour setting
-79.b8,,ChgFirstEndMinute1,min,8bit,0-59,,W,,Charging priority end time_minute setting
 80.b0,,ChgFirstStartHour2,hour,8bit,0-23,,W,,Charging priority start time_hour setting
+76.b8,,ChgFirstStartMinute,min,8bit,0-59,,W,,Charge priority start time_min setting
+78.b8,,ChgFirstStartMinute1,min,8bit,0-59,,W,,Charging priority start time_min setting
 80.b8,,ChgFirstStartMinute2,min,8bit,0-59,,W,,Charging priority start time_minute setting
-81.b0,,ChgFirstEndHour2,hour,8bit,0-23,,W,,Charging priority end time_hour setting
-81.b8,,ChgFirstEndMinute2,min,8bit,0-59,,W,,Charging priority end time_minute setting
+114,,ClearFunction,,,1,,WD,,Parallel Alarm clear1- clear
+10.b0,,Cntl_Ver,,8bit,0-255,,R,,For Control CPU software version number
+15,,Com AddR,,,0-150,,W,,MODBUS address
+9.b8,,Com_Ver,,8bit,0-255,,R,,For Communication CPU software version number
+23,,ConnectTime,s,,30-600,,W,,Waiting time of on-grid
+100,,CutVoltForDischg,0.1V,,400-520,,W,,Lead-acid battery discharge cut- off voltage
+97,,DelayTimeForOverFDerate,cycles,,0-1000,,W,,Overfrequency load reduction delay
+96,,DelayTimeForQVCurve,cycles,,0-2000,,W,,Q(V) delay
+104,,DischgChgSWCMD,,,0-2,,R,,0-No action 1-Discharge to charge 2-charge to discharge
+102,,DischgCurr,%A,,0-140,,W,,Discharging current
+65,,DischgPowerPercentCMD,%,,0-100,,W,,Discharging power percentage setting
+139,,DischgPowerPercentCMD,0.10%,,0-1000,,W,,Discharging power percentage setting
+105,,EOD,%,,10~90,,W,,Cut SOC for discharging
+91,,EPSFreqSet,1Hz,,50~60,,W,,60 default
+90,,EPSVoltageSet,1V,,208~277,,W,,240-Off-grid output voltage level setting
+150,,EqualizationInterval,Day,,0-365,,W,,Balancing interval
+151,,EqualizationTime,hour,,0-24,,W,,Balancing duration
+149,,EqualizationVolt,,,500-590,,W,,Battery equalization voltage
+144,,FloatChargeVolt,0.1V,,500-560,,W,,Float charge voltage
+85.b0,,ForcedDischgEndHour,hour,8bit,0-23,,W,,Forced discharge end time_hour setting
+87.b0,,ForcedDischgEndHour1,hour,8bit,0-23,,W,,Forced discharge end time_hour setting
+89.b0,,ForcedDischgEndHour2,hour,8bit,0-23,,W,,Forced discharge end time_hour setting
+85.b8,,ForcedDischgEndMinute,min,8bit,0-59,,W,,Forced discharge end time_minute setting
+87.b8,,ForcedDischgEndMinute1,min,8bit,0-59,,W,,Forced discharge end time_minute setting
+89.b8,,ForcedDischgEndMinute2,min,8bit,0-59,,W,,Forced discharge end time_minute setting
 82,,ForcedDischgPowerCMD,%,,0-100,,W,,Forced discharge percentage setting
+142,,ForcedDischgPowerCMD,0.10%,,0-1000,,W,,Forced discharge percentage setting
 83,,ForcedDischgSOCLimit,%,,0-100,,W,,Forced discharge SOC limit setting
 84.b0,,ForcedDischgStartHour,hour,8bit,0-23,,W,,Forced discharge start time_hour setting
-84.b8,,ForcedDischgStartMinute,min,8bit,0-59,,W,,Forced discharge start time_minute setting
-85.b0,,ForcedDischgEndHour,hour,8bit,0-23,,W,,Forced discharge end time_hour setting
-85.b8,,ForcedDischgEndMinute,min,8bit,0-59,,W,,Forced discharge end time_minute setting
 86.b0,,ForcedDischgStartHour1,hour,8bit,0-23,,W,,Forced discharge start time_hour setting
-86.b8,,ForcedDischgStartMinute1,min,8bit,0-59,,W,,Forced discharge start time_minute setting
-87.b0,,ForcedDischgEndHour1,hour,8bit,0-23,,W,,Forced discharge end time_hour setting
-87.b8,,ForcedDischgEndMinute1,min,8bit,0-59,,W,,Forced discharge end time_minute setting
 88.b0,,ForcedDischgStartHour2,hour,8bit,0-23,,W,,Forced discharge start time_hour setting
+84.b8,,ForcedDischgStartMinute,min,8bit,0-59,,W,,Forced discharge start time_minute setting
+86.b8,,ForcedDischgStartMinute1,min,8bit,0-59,,W,,Forced discharge start time_minute setting
 88.b8,,ForcedDischgStartMinute2,min,8bit,0-59,,W,,Forced discharge start time_minute setting
-89.b0,,ForcedDischgEndHour2,hour,8bit,0-23,,W,,Forced discharge end time_hour setting
-89.b8,,ForcedDischgEndMinute2,min,8bit,0-59,,W,,Forced discharge end time_minute setting
-90,,EPSVoltageSet,1V,,208~277,,W,,240-Off-grid output voltage level setting
-91,,EPSFreqSet,1Hz,,50~60,,W,,60 default
-92,,LockInGridVForPFCurve,0.1V,,2300-3000,,W,,cosphi(P)lock in voltage
-93,,LockOutGridVForPFCurve,0.1V,,1500-3000,,W,,cosphi(P)lock out voltage
-94,,LockInPowerForQVCurve,%,,0-100,,W,,Q(V) lock in power
-95,,LockOutPowerForQVCurve,%,,0-100,,W,,Q(V) lock out power
-96,,DelayTimeForQVCurve,cycles,,0-2000,,W,,Q(V) delay
-97,,DelayTimeForOverFDerate,cycles,,0-1000,,W,,Overfrequency load reduction delay
-98,,AutoTestStart,,,0-1,,R,,0-Stop 1-Start
-99,,ChargeVoltRef,0.1V,,500-590,,W,,Lead-acid battery charging specified voltage
-100,,CutVoltForDischg,0.1V,,400-520,,W,,Lead-acid battery discharge cut- off voltage
-101,,ChargeCurr,%A,,0-140,,W,,Charging current
-102,,DischgCurr,%A,,0-140,,W,,Discharging current
-103,,MaxBackFlow,%,,0-100,,W,,Feed-in grid power setting
-104,,DischgChgSWCMD,,,0-2,,R,,0-No action 1-Discharge to charge 2-charge to discharge
-105,,EOD,%,,10~90,,W,,Cut SOC for discharging
-106,,TemprLowerLimitDischg,0.1C,,0-65536,,W,,Lead-acid Temperature low limit for discharging
-107,,TemprUpperLimitDischg,0.1C,,0-65536,,W,,Lead-acid Temperature high limit for discharging
-108,,TemprLowerLimitChg,0.1C,,0-65536,,W,,Lead-acid Temperature low limit for charging
-109,,TemprUpperLimitChg,0.1C,,0-65536,,W,,Lead-acid Temperature high limit for charging
-110.b0,,FunctionEn1_ubPVGridOffEn,,1bit,0~1,,W,,1
-110.b1,,FunctionEn1_ubFastZero Export,,1bit,0-1,,W,,0 - disable 1 - enable
-110.b2,,FunctionEn1_ubMicroGridEn,,1bit,0-1,,W,,0 - disable 1 - enable
-110.b3,,FunctionEn1_ubBatShared,,1bit,0-1,,W,,0 - disable 1 - enable
-110.b4,,FunctionEn1_ubChgLastEn,,1bit,0-1,,W,,0 - disable 1 - enable
-110.b5,,FunctionEn1_CTSampleRatio,,2bit,0-1,,W,,0 : 1/1000 1- 1/3000
+202,,ForceDichgEndVolt,0.1V,,400-560,,W,,Forced discharge voltage limit
+21.b7,,FuncEn_ACChargeEn,,1bit,0-1,,W,,AC charging enable
+21.b4,,FuncEn_AntiIslandEn,,1bit,0-1,,W,,Anti-islanding enablement
+21.b14,,FuncEn_DCIEn,,1bit,0-1,,W,,DCI enable
+21.b2,,FuncEn_DRMSEn,,1bit,0-1,,W,,DRMS enable
+21.b0,,FuncEn_EPSEn,,1bit,0-1,,W,,Off-grid mode enable
+21.b15,,FuncEn_FeedInGridEn,,1bit,0-1,,W,,0-disable 1-enable
+21.b11,,FuncEn_ForcedChgEn,,1bit,0-1,,W,,Force charge enable
+21.b10,,FuncEn_ForcedDischgEn,,1bit,0-1,,W,,Forced discharge enable
+21.b13,,FuncEn_GFCIEn,,1bit,0-1,,W,,GFCI enable
+21.b6,,FuncEn_GridOnPowerSSEn,,1bit,0-1,,W,,On-grid power soft start enable
+21.b12,,FuncEn_ISOEn,,1bit,0-1,,W,,ISO enable
+21.b3,,FuncEn_LVRTEn,,1bit,0-1,,W,,Low voltage ride-through enable
+21.b5,,FuncEn_NeutralDetectEn,,1bit,0-1,,W,,Ground neutral detection enable
+21.b1,,FuncEn_OVFLoadDerateEn,,1bit,0-1,,W,,Overfrequency load reduction enable
+21.b9,,FuncEn_SetToStandby,,1bit,0-1,,W,,0: Standby 1: Power on
+21.b8,,FuncEn_SWSeamlesslyEn,,1bit,0-1,,W,,seamless off-grid mode switching enable
+226.b2,,Function3_ExCtEn,,1bit,0~1,,W,,1 default
+226.b4,,Function3_NPeRlyEn,,1bit,0~1,,W,,1 default
+226.b3,,Function3_RunwithoutGrid,,1bit,0~1,,W,,1 default
 110.b7,,FunctionEn1_BuzzerEn,,1bit,0-1,,W,,0-disable 1-enable
-110.b8,,FunctionEn1_PVCTSampleType,,2bit,0-1,,W,,0-PV power 1-SpecLoad
-110.b10,,FunctionEn1_TakeLoadTogetheR,,1bit,0-1,,W,,For off-grid: 0-disable 1- enable
+110.b5,,FunctionEn1_CTSampleRatio,,2bit,0-1,,W,,0 : 1/1000 1- 1/3000
+110.b15,,FunctionEn1_EcoModeEn,,1bit,0-1,,W,,0-disable 1- enable
+110.b14,,FunctionEn1_GreenModeEn,,1bit,0-1,,W,,0-disable 1- enable
 110.b11,,FunctionEn1_OnGridWorkingMode,,1bit,0-1,,W,,For 12K: consistant chk mask 0- disable 1-enable 0-self consumption 1-Charge First
 110.b12,,FunctionEn1_PVCTSampleRatio,,2bit,0-1,,W,,0 : 1/1000 1- 1/3000
-110.b14,,FunctionEn1_GreenModeEn,,1bit,0-1,,W,,0-disable 1- enable
-110.b15,,FunctionEn1_EcoModeEn,,1bit,0-1,,W,,0-disable 1- enable
-112,,SetSystemType,,,0-1,,W,,"{""0"":""no parallel (single one)"",""1"":""Single-phase parallel operation forms a single-phase system. (Primary, which will not show on off-grid mode)"",""2"":""Secondary (will not show on off-grid mode)"",""3"":""Single phase parallel operation forms a three phase system (Primary, which will not show on off-grid mode)""}"
-113,,SetComposedPhase,,,46025,,W,,Parallel phase setting 1-R 2-S 3-T
-114,,ClearFunction,,,1,,WD,,Parallel Alarm clear1- clear
-115,,OVFDerateStartPoint,0.01Hz,,5000-5200,,W,,Overfrequency load reduction start frequency point
-116,,PtoUserStartdischg,1W,,50W-,,W,,Ptouser: value of discharging initiate
-117,,PtoUserStartchg,1W,,- -50W,,W,,Ptouser: starts AC charging less than this value
-118,,VbatStartDerating,0.1V,,,,W,,For lead-acid battery >CutVoltForDisc hg+2V
-119,,wCT_PowerOffset,1W,short,-1000~1000,,W,"{""Register_Endian"":""little""}","signed short int; CT Power compensation, PtoUser direction is positive."
-120.b0,,stSysEnable_bit_HalfHourACChrStartEn,Bit0,1bit,0-1,,W,,1
-120.b1,,stSysEnable_bit_ACChargeType,,3bit,0-3,,W,,0-disable 1-according to time 2-according to voltage 3-according to SOC For 12K: 0 - according to time4-according to VoltageandTime5-according to SOC andTime
-120.b4,,stSysEnable_bit_DischgCtrlType,,2bit,0-2,,W,,0-according to voltage 1- according to SOC 2- according to both
-120.b6,,stSysEnable_bit_OnGridEODType,,1bit,0-1,,W,,0-according to voltage 1- according to SOC
-120.b7,,stSysEnable_bit_GenChargeType,,1bit,0-1,,W,,0-According to Battery voltage 1-According to Battery SOC
-121,,Q2_QV,,,,,R,,Unknown
-122,,Q2_PV,,,,,R,,Unknown
-124,,OVFDerateEndPoint,0.01Hz,,5000-5200,,W,,Overfrequency load reduction ends at the frequency point
-125,,SOCLowLimitForEPSDischg,%,,0-EOD,,W,,SOC low limit for EPS discharge
+110.b8,,FunctionEn1_PVCTSampleType,,2bit,0-1,,W,,0-PV power 1-SpecLoad
+110.b10,,FunctionEn1_TakeLoadTogetheR,,1bit,0-1,,W,,For off-grid: 0-disable 1- enable
+110.b3,,FunctionEn1_ubBatShared,,1bit,0-1,,W,,0 - disable 1 - enable
+110.b4,,FunctionEn1_ubChgLastEn,,1bit,0-1,,W,,0 - disable 1 - enable
+110.b1,,FunctionEn1_ubFastZero Export,,1bit,0-1,,W,,0 - disable 1 - enable
+110.b2,,FunctionEn1_ubMicroGridEn,,1bit,0-1,,W,,0 - disable 1 - enable
+110.b0,,FunctionEn1_ubPVGridOffEn,,1bit,0~1,,W,,1
+7,,FWCode,,ASCII,[a-zA-Z],,R,"",For more information of the model code
+10.b8,,FWVeR,,8bit,0-255,,R,,For external software version
+197,,GenChgEndSOC,%,,20-100,,W,,SOC at the end of generator charging  which will be valid after selecting GenChg according to SOC
+195,,GenChgEndVolt,0.1V,,480-590,,W,,Battery voltage at the end of generator charging  which will be valid after selecting GenChg according to voltage.
+196,,GenChgStartSOC,%,,0-90,,W,,SOC for generator charging the battery  which will be valid after selecting GenChg according to SOC
+194,,GenChgStartVolt,0.1V,,384-520,,W,,Initial voltage for generator charging the battery  which will be valid after selecting GenChg according to voltage.
+177,,GenRatePower,,,0-65535,,W,,
+28,,GridFreqConnHigh,0.01Hz,,According to specific regulatory requirements,,WD,,The upper limit of the the allowed on-grid frequency.
+27,,GridFreqConnLow,0.01Hz,,According to specific regulatory requirements,,WD,,The lower limit of the allowable on-grid frequency
+43,,GridFreqLimit1High,0.01Hz,,According to specific regulatory requirements,,WD,,Grid frequency level 1 over-frequency protection point
+45,,GridFreqLimit1HighTime,cycles,,According to specific regulatory requirements,,WD,,Grid frequency level 1 over-frequency protection time
+42,,GridFreqLimit1Low,0.01Hz,,According to specific regulatory requirements,,WD,,Grid frequency level 1 under-frequency protection point
+44,,GridFreqLimit1LowTime,cycles,,According to specific regulatory requirements,,WD,,Grid frequency level 1 under-frequency protection time
+47,,GridFreqLimit2High,0.01Hz,,According to specific regulatory requirements,,WD,,Power grid frequency level 2 over-frequency protection point
+49,,GridFreqLimit2HighTime,cycles,,According to specific regulatory requirements,,WD,,Grid frequency level 2 over-frequency protection time
+46,,GridFreqLimit2Low,0.01Hz,,According to specific regulatory requirements,,WD,,Grid frequency level 2 under-frequency protection point
+48,,GridFreqLimit2LowTime,cycles,,According to specific regulatory requirements,,WD,,Grid frequency level 2 under-frequency protection time
+51,,GridFreqLimit3High,0.01Hz,,According to specific regulatory requirements,,WD,,Grid frequency level 3 over-frequency protection point
+53,,GridFreqLimit3HighTime,cycles,,According to specific regulatory requirements,,WD,,Grid frequency level 3 over-frequency protection time
+50,,GridFreqLimit3Low,0.01Hz,,According to specific regulatory requirements,,WD,,Grid frequency level 3 under-frequency protection point
+52,,GridFreqLimit3LowTime,cycles,,According to specific regulatory requirements,,WD,,Grid frequency level 3 under-frequency protection time
+206,,GridPeakShavingPower,0.1kW,,0-255,,W,,
+207,,GridPeakShavingSOC,%,,0-100,,W,,
+218,,GridPeakShavingSOC1,%,,0-100,,W,,
+208,,GridPeakShavingVolt,0.1V,,480-590,,W,,
+219,,GridPeakShavingVolt1,0.1V,,480-590,,W,,
+203,,GridRegulation,,,,,W,,"Grid regulation settings - documentation unclear, this might be bitflags"
+205,,GridType,,,0-4,,W,,0-Split240V 1-Split208V 2-Single240V 3-Single230V 4-Split200V
+26,,GridVoltConnHigh,0.1V,,According to specific regulatory requirements,,WD,,The upper limit of the the allowed on-grid voltage.
+25,,GridVoltConnLow,0.1V,,According to specific regulatory requirements,,WD,,The lower limit of the allowed on-grid voltage.
+30,,GridVoltLimit1High,0.1V,,According to specific regulatory requirements,,WD,,Grid voltage level 1 over-voltage protection point
+32,,GridVoltLimit1HighTime,cycles,,According to specific regulatory requirements,,WD,,Grid voltage level 1 over-voltage protection time
+29,,GridVoltLimit1Low,0.1V,,According to specific regulatory requirements,,WD,,Grid voltage level 1 under-voltage protection point
+31,,GridVoltLimit1LowTime,cycles,,According to specific regulatory requirements,,WD,,Grid voltage level 1 under-voltage protection time
+34,,GridVoltLimit2High,0.1V,,According to specific regulatory requirements,,WD,,Grid voltage level 2 over-voltage protection point
+36,,GridVoltLimit2HighTime,cycles,,According to specific regulatory requirements,,WD,,Grid voltage level 2 over-voltage protection time
+33,,GridVoltLimit2Low,0.1V,,According to specific regulatory requirements,,WD,,Grid voltage level 2 under-voltage protection point
+35,,GridVoltLimit2LowTime,cycles,,According to specific regulatory requirements,,WD,,Grid voltage level 2 under-voltage protection time
+38,,GridVoltLimit3High,0.1V,,According to specific regulatory requirements,,WD,,Grid voltage level 3 over-voltage protection point
+40,,GridVoltLimit3HighTime,cycles,,According to specific regulatory requirements,,WD,,Grid voltage level 3 over-voltage protection time
+37,,GridVoltLimit3Low,0.1V,,According to specific regulatory requirements,,WD,,Grid voltage level 3 under-voltage protection point
+39,,GridVoltLimit3LowTime,cycles,,According to specific regulatory requirements,,WD,,Grid voltage level 3 under-voltage protection time
+41,,GridVoltMovAvgHigh,0.1V,,According to specific regulatory,,WD,,Grid voltage sliding average over-voltage protection point
+16,,Language,,,0-1,,W,,0-English 1-German Language 0-English 1-German
+224.b10,,LCDMachineModelCode,,6bit,0-31,,W,,"0~31 00:12K 01: All-in-one 02: Three phase inverter ""{""""0"""": """"12K"""" """"01"""": """"All-in-one"""" """"02"""": """"Three phase inverter""""}"""
+224.b8,,LCDScreenType,,2bit,0-7,,W,,"0~7, 0 - big screen 1 - small screen""{""0"": ""big screen"", ""1"": ""small screen"", ""2"": ""unknown"", ""3"": ""unknown"", ""4"": ""unknown"", ""5"": ""unknown"", ""6"": ""unknown"", ""7"": ""unknown""}"
+224.b0,,LCDVersion,,8bit,0-255,,W,,
+204,,LeadCapacity,Ah,,50-850,,W,,
+146,,LineMode,,,,0-2,W,,"0-APL(90-280V 20ms) 1-UPS (170-280V 10ms)2-GEN (90- 280V 20ms) ""{""""0"""": """"APL(90-280V 20ms)"""""""
+92,,LockInGridVForPFCurve,0.1V,,2300-3000,,W,,cosphi(P)lock in voltage
+94,,LockInPowerForQVCurve,%,,0-100,,W,,Q(V) lock in power
+93,,LockOutGridVForPFCurve,0.1V,,1500-3000,,W,,cosphi(P)lock out voltage
+95,,LockOutPowerForQVCurve,%,,0-100,,W,,Q(V) lock out power
+233.b2,,maintenance_mode_enable,,1bit,0~1,,W,,Maintenance mode enable
+103,,MaxBackFlow,%,,0-100,,W,,Feed-in grid power setting
+198,,MaxGenChgBatCurr,A,,0-60,,W,,Charge current from generator
+176,,MaxGridInputPower,,,0-65535,,W,,
+54,,MaxQPercentForQV,%,,According to specific regulatory requirements,,WD,,The maximum percentage of reactive power for the Q(V) curve
+169,,OngridEOD_Voltage,0.1V,,400-560,,W,,On-grid end of discharge voltage
 126.b0,,OptimalChg_DisChg_Time0,,2bit,0~2,,W,,"0:00~0:30 Mark of time period charging and discharging. Default: 0; 0 - does not operate, 1-AC charge, 2-PV charge, 3 - discharge"
 126.b2,,OptimalChg_DisChg_Time1,,2bit,0~2,,W,,0:30~1:00 Mark of time period charging and discharging.
-126.b4,,OptimalChg_DisChg_Time2,,2bit,0~2,,W,,1:00~1:30 Mark of time period charging and discharging.
-126.b6,,OptimalChg_DisChg_Time3,,2bit,0~2,,W,,
-126.b8,,OptimalChg_DisChg_Time4,,2bit,0~2,,W,,
-126.b10,,OptimalChg_DisChg_Time5,,2bit,0~2,,W,,
-126.b12,,OptimalChg_DisChg_Time6,,2bit,0~2,,W,,
-126.b14,,OptimalChg_DisChg_Time7,,2bit,0~2,,W,,3:30~4:00 Mark of time period charging and discharging.
-127.b0,,OptimalChg_DisChg_Time8,,2bit,0~2,,W,,"4:00~4:30 Mark of time period charging and discharging. Default: 0; 0 - does not operate, 1-AC charge, 2-PV charge, 3 - discharge"
-127.b2,,OptimalChg_DisChg_Time9,,2bit,0~2,,W,,4:30~5:00 Mark of time period charging and discharging.
 127.b4,,OptimalChg_DisChg_Time10,,2bit,0~2,,W,,5:00~5:30 Mark of time period charging and discharging.
 127.b6,,OptimalChg_DisChg_Time11,,2bit,0~2,,W,,
 127.b8,,OptimalChg_DisChg_Time12,,2bit,0~2,,W,,
@@ -207,6 +210,7 @@ register,variable_name,documented_name,unit,data_type,values,read_interval,writa
 128.b2,,OptimalChg_DisChg_Time17,,2bit,0~2,,W,,8:30~9:00 Mark of time period charging and discharging.
 128.b4,,OptimalChg_DisChg_Time18,,2bit,0~2,,W,,9:00~9:30 Mark of time period charging and discharging.
 128.b6,,OptimalChg_DisChg_Time19,,2bit,0~2,,W,,
+126.b4,,OptimalChg_DisChg_Time2,,2bit,0~2,,W,,1:00~1:30 Mark of time period charging and discharging.
 128.b8,,OptimalChg_DisChg_Time20,,2bit,0~2,,W,,
 128.b10,,OptimalChg_DisChg_Time21,,2bit,0~2,,W,,
 128.b12,,OptimalChg_DisChg_Time22,,2bit,0~2,,W,,
@@ -217,6 +221,7 @@ register,variable_name,documented_name,unit,data_type,values,read_interval,writa
 129.b6,,OptimalChg_DisChg_Time27,,2bit,0~2,,W,,
 129.b8,,OptimalChg_DisChg_Time28,,2bit,0~2,,W,,
 129.b10,,OptimalChg_DisChg_Time29,,2bit,0~2,,W,,
+126.b6,,OptimalChg_DisChg_Time3,,2bit,0~2,,W,,
 129.b12,,OptimalChg_DisChg_Time30,,2bit,0~2,,W,,
 129.b14,,OptimalChg_DisChg_Time31,,2bit,0~2,,W,,17:00~17:30 Mark of time period charging and discharging.
 130.b0,,OptimalChg_DisChg_Time32,,2bit,0~2,,W,,"16:00~16:30 Mark of time period charging and discharging. 0 - does not operate, 1-AC charge, 2-PV charge, 3 - discharge;"
@@ -227,6 +232,7 @@ register,variable_name,documented_name,unit,data_type,values,read_interval,writa
 130.b10,,OptimalChg_DisChg_Time37,,2bit,0~2,,W,,
 130.b12,,OptimalChg_DisChg_Time38,,2bit,0~2,,W,,
 130.b14,,OptimalChg_DisChg_Time39,,2bit,0~2,,W,,19:30~20:00 Mark of time period charging and discharging.
+126.b8,,OptimalChg_DisChg_Time4,,2bit,0~2,,W,,
 131.b0,,OptimalChg_DisChg_Time40,,2bit,0~2,,W,,20:00~20:30 Mark of time period charging and discharging. 0-does not operate
 131.b2,,OptimalChg_DisChg_Time41,,2bit,0~2,,W,,20:30~21:00 Mark of time period charging and discharging.
 131.b4,,OptimalChg_DisChg_Time42,,2bit,0~2,,W,,21:00~21:30 Mark of time period charging and discharging.
@@ -235,141 +241,160 @@ register,variable_name,documented_name,unit,data_type,values,read_interval,writa
 131.b10,,OptimalChg_DisChg_Time45,,2bit,0~2,,W,,
 131.b12,,OptimalChg_DisChg_Time46,,2bit,0~2,,W,,
 131.b14,,OptimalChg_DisChg_Time47,,2bit,0~2,,W,,23:30~0:00 Mark of time period charging and discharging.
-132.b0,,BatCellVoltLow,0.1V,8bit,0-200,,W,,Battery cell voltage lower limit.
-132.b8,,BatCellVoltHigh,0.1V,8bit,0-200,,W,,Battery cell voltage upper limit
-133.b0,,BatCellSerialNum,1,8bit,0-200,,W,,Number of battery cells in series
-133.b8,,BatCellParaNum,1,8bit,0-200,,W,,Number of battery cells in parallel
-134,,UVFDerateStartPoint,0.01Hz,,4500-5000,,W,,Under-frequency load reduction starting point
-135,,UVFDerateEndPoint,0.01Hz,,4500-5000,,W,,The end point of under-frequency load reduction
-136,,OVFDerateRatio,%Pm/Hz,,1-100,,W,,Under-frequency load ramp rate
-137,,SpecLoadCompensate,W,,0-65535,,W,,The maximum amount of compensation for a specific load
-138,,ChargePowerPercentCMD,0.10%,,0-1000,,W,,Charging power percentage setting in decimals
-139,,DischgPowerPercentCMD,0.10%,,0-1000,,W,,Discharging power percentage setting
-140,,ACChgPowerCMD,0.10%,,0-1000,,W,,AC charge percentage setting
-141,,ChgFirstPowerCMD,0.10%,,0-1000,,W,,Charging priority percentage setting
-142,,ForcedDischgPowerCMD,0.10%,,0-1000,,W,,Forced discharge percentage setting
-143,,ActivePowerPercentCMD,0.10%,,0-1000,,W,,Inverse active percentage setting
-144,,FloatChargeVolt,0.1V,,500-560,,W,,Float charge voltage
+126.b10,,OptimalChg_DisChg_Time5,,2bit,0~2,,W,,
+126.b12,,OptimalChg_DisChg_Time6,,2bit,0~2,,W,,
+126.b14,,OptimalChg_DisChg_Time7,,2bit,0~2,,W,,3:30~4:00 Mark of time period charging and discharging.
+127.b0,,OptimalChg_DisChg_Time8,,2bit,0~2,,W,,"4:00~4:30 Mark of time period charging and discharging. Default: 0; 0 - does not operate, 1-AC charge, 2-PV charge, 3 - discharge"
+127.b2,,OptimalChg_DisChg_Time9,,2bit,0~2,,W,,4:30~5:00 Mark of time period charging and discharging.
 145,,OutputPrioConfig,,,0-3,,W,,"0~3, 0-bat first 1-PV first 2-AC first"
-146,,LineMode,,,,0-2,W,,"0-APL(90-280V 20ms) 1-UPS (170-280V 10ms)2-GEN (90- 280V 20ms) ""{""""0"""": """"APL(90-280V 20ms)"""""""
-147,,Battery capacity,Ah,,0-10000,,W,,Battery capacity
-148,,Battery nominal Voltage,0.1V,,400-590,,W,,Battery rating voltage
-149,,EqualizationVolt,,,500-590,,W,,Battery equalization voltage
-150,,EqualizationInterval,Day,,0-365,,W,,Balancing interval
-151,,EqualizationTime,hour,,0-24,,W,,Balancing duration
-152.b0,,ACFirstStartHour,hour,8bit,0-23,,W,,AC load start time_hours setting
-152.b8,,ACFirstStartMinute,min,8bit,0-59,,W,,AC load start time _minutes setting
-153.b0,,ACFirstEndHour,hour,8bit,0-23,,W,,AC load end time _hours setting
-153.b8,,ACFirstEndMinute,min,8bit,0-59,,W,,AC load end ime_minutes setting
-154.b0,,ACFirstStartHour1,hour,8bit,0-23,,W,,AC load start time_hours setting
-154.b8,,ACFirstStartMinute1,min,8bit,0-59,,W,,AC load start time_minutes setting
-155.b0,,ACFirstEndHour1,hour,8bit,0-23,,W,,AC load end time_hours setting
-155.b8,,ACFirstEndMinute1,min,8bit,0-59,,W,,AC load end time_minutes setting
-156.b0,,ACFirstStartHour2,hour,8bit,0-23,,W,,AC load start time_Hours setting
-156.b8,,ACFirstStartMinute2,min,8bit,0-59,,W,,AC load start time_minutes setting
-157.b0,,ACFirstEndHour2,hour,8bit,0-23,,W,,AC load end time_hours setting
-157.b8,,ACFirstEndMinute2,min,8bit,0-59,,W,,AC load end time_minutes setting
-158,,ACChgStartVolt,0.1V,,385-520,,W,,Battery voltage of AC charging start
-159,,ACChgEndVolt,0.1V,,480-590,,W,,Battery voltage of AC charging cut-off
-160,,ACChgStartSOC,%,,0-90,,W,,SOC of AC charging start
-161,,ACChgEndSOC,%,,20-100,,W,,AC charging stops SOC; valid after selecting ACChg according to SOC
-162,,BatLowVoltage,0.1V,,400-500,,W,,Battery under-voltage alarm point
-163,,BatLowBackVoltage,0.1V,,420-520,,W,,Battery under-voltage alarm recovery point
-164,,BatLowSOC,%,,0-90,,W,,Battery under-voltage alarm point
-165,,BatLowBackSOC,%,,20-100,,W,,Battery under-voltage alarm recovery point
-166,,BatLowtoUtilityVoltage,0.1V,,444-514,,W,,Voltage point for battery under-voltage to grid transfer
-167,,BatLowtoUtilitySOC,%,,0-100,,W,,SOC for battery under-voltage to grid transfer
-168,,ACCharge Bat Current,A,,0-140,,W,,Charge Current from AC
-169,,OngridEOD_Voltage,0.1V,,400-560,,W,,On-grid end of discharge voltage
-171,,SOCCurve_BatVolt1,0.1V,,400-600,,W,,SOC(V)
-172,,SOCCurve_BatVolt 2,0.1V,,400-600,,W,,
-173,,SOCCurve_SOC1,1%,,0-100,,W,,
-174,,SOCCurve_SOC2,1%,,0-100,,W,,
-175,,SOCCurve_InnerResistance,mOhm,,0-100,,W,,
-176,,MaxGridInputPower,,,0-65535,,W,,
-177,,GenRatePower,,,0-65535,,W,,
-179.b0,,uFunctionEn2_ACCTDirection,,1bit,0~1,,W,,1
-179.b1,,uFunctionEn2_PVCTDirection,,1bit,0~1,,W,,1
-179.b2,,uFunctionEn2_AFCIAlarmClR,,1bit,0~1,,W,,1
-179.b3,,uFunctionEn2_BatWakeupEn PVSellFirst,,1bit,0~1,,W,,1
-179.b4,,uFunctionEn2_VoltWattEn,,1bit,0~1,,W,,1
-179.b5,,uFunctionEn2_TriptimeUnit,,1bit,0~1,,W,,1
-179.b6,,uFunctionEn2_ActPowerCMDEn,,1bit,0~1,,W,,1
-179.b7,,uFunctionEn2_ubGridPeakShaving,,1bit,0~1,,W,,1
-179.b8,,uFunctionEn2_ubGenPeakShaving,,1bit,0~1,,W,,1
-179.b9,,uFunctionEn2_ubBatChgcontrol,,1bit,0~1,,W,,1
-179.b10,,uFunctionEn2_ubBatDischgControl,,1bit,0~1,,W,,1
-179.b11,,uFunctionEn2_ubACcou pling,,1bit,0~1,,W,,1
-179.b12,,uFunctionEn2_ubPVArcEn,,1bit,0~1,,W,,1
-179.b13,,uFunctionEn2_ ubSmartLoadEn,,1bit,0~1,,W,,1
-179.b14,,uFunctionEn2_ubRSDDisable,,1bit,0~1,,W,,1
-179.b15,,uFunctionEn2_OnGridAlwaysOn,,1bit,0~1,,W,,1
-180,,AFCIArcThreshold,,,,,W,,
-181,,VoltWatt_V1,0.1V,,,,W,,1.05Vn-1.09Vn
-182,,VoltWatt_V2,0.1V,,,,W,,(V1+0.01Vn)-1.10Vn
-183,,VoltWatt_DelayTime,ms,,500-60000,,W,,Default 10000ms
-184,,VoltWatt_P2,%,,0-200,,W,,
-185,,Vref_QV,0.1V,,,,W,,
-186,,Vref_filtertime,s,,300-5000,,W,,
-187,,Q3_QV,%,,,,W,,
-188,,Q4_QV,%,,,,W,,
+233.b10,,over_freq_fast_stop,,1bit,0~1,,W,,Over-frequency fast stop enable
+199,,OverTempDeratePoint,0.1C,,600-900,,W,,Over-temperature load reduction point
+124,,OVFDerateEndPoint,0.01Hz,,5000-5200,,W,,Overfrequency load reduction ends at the frequency point
+136,,OVFDerateRatio,%Pm/Hz,,1-100,,W,,Under-frequency load ramp rate
+115,,OVFDerateStartPoint,0.01Hz,,5000-5200,,W,,Overfrequency load reduction start frequency point
 189,,P1_QP,%,,,,W,,
 190,,P2_QP,%,,,,W,,
 191,,P3_QP,%,,,,W,,
 192,,P4_QP,%,,,,W,,
-193,,UVFIncreaseRatio,%Pm/Hz,,1-100,,W,,Under-frequency load ramp rate
-194,,GenChgStartVolt,0.1V,,384-520,,W,,Initial voltage for generator charging the battery  which will be valid after selecting GenChg according to voltage.
-195,,GenChgEndVolt,0.1V,,480-590,,W,,Battery voltage at the end of generator charging  which will be valid after selecting GenChg according to voltage.
-196,,GenChgStartSOC,%,,0-90,,W,,SOC for generator charging the battery  which will be valid after selecting GenChg according to SOC
-197,,GenChgEndSOC,%,,20-100,,W,,SOC at the end of generator charging  which will be valid after selecting GenChg according to SOC
-198,,MaxGenChgBatCurr,A,,0-60,,W,,Charge current from generator
-199,,OverTempDeratePoint,0.1C,,600-900,,W,,Over-temperature load reduction point
-201,,ChgFirstEndVolt,0.1V,,480-590,,W,,Charging priority voltage limit
-202,,ForceDichgEndVolt,0.1V,,400-560,,W,,Forced discharge voltage limit
-203,,GridRegulation,,,,,W,,"Grid regulation settings - documentation unclear, this might be bitflags"
-204,,LeadCapacity,Ah,,50-850,,W,,
-205,,GridType,,,0-4,,W,,0-Split240V 1-Split208V 2-Single240V 3-Single230V 4-Split200V
-206,,GridPeakShavingPower,0.1kW,,0-255,,W,,
-207,,GridPeakShavingSOC,%,,0-100,,W,,
-208,,GridPeakShavingVolt,0.1V,,480-590,,W,,
-209.b0,,PeakShavingStartHour,hour,8bit,0-23,,W,,PeakShaving start time_Hour setting
-209.b8,,PeakShavingStartMinute,min,8bit,0-59,,W,,PeakShaving start time_minutes setting
 210.b0,,PeakShavingEndHour,hour,8bit,0-23,,W,,PeakShaving end time_hours setting
-210.b8,,PeakShavingEndMinute,min,8bit,0-59,,W,,PeakShaving end time_minutes setting
-211.b0,,PeakShavingStartHour1,hour,8bit,0-23,,W,,PeakShaving start time_hours setting
-211.b8,,PeakShavingStartMinute1,min,8bit,0-59,,W,,PeakShaving start time_minutes setting
 212.b0,,PeakShavingEndHour1,hour,8bit,0-23,,W,,PeakShaving end time_ hours setting
+210.b8,,PeakShavingEndMinute,min,8bit,0-59,,W,,PeakShaving end time_minutes setting
 212.b8,,PeakShavingEndMinute1,min,8bit,0-59,,W,,PeakShaving end time_minutes setting
-213,,SmartLoadOnVolt,0.1V,,480-590,,W,,
+209.b0,,PeakShavingStartHour,hour,8bit,0-23,,W,,PeakShaving start time_Hour setting
+211.b0,,PeakShavingStartHour1,hour,8bit,0-23,,W,,PeakShaving start time_hours setting
+209.b8,,PeakShavingStartMinute,min,8bit,0-59,,W,,PeakShaving start time_minutes setting
+211.b8,,PeakShavingStartMinute1,min,8bit,0-59,,W,,PeakShaving start time_minutes setting
+62,,PFCMD,0.001,,750-1000,,W,,1750- 2000
+63,,PowerSoftStartSlope,0.1%/min,,36526,,W,,Loading rate
+117,,PtoUserStartchg,1W,,- -50W,,W,,Ptouser: starts AC charging less than this value
+116,,PtoUserStartdischg,1W,,50W-,,W,,Ptouser: value of discharging initiate
+20,,PVInputModel,,,0-4,,W,,0: No PV plug in 1: PV1 plug in 2: PV2 plug in 3: two PVs in parallel 4: two separate PVs
+122,,Q2_PV,,,,,R,,Unknown
+121,,Q2_QV,,,,,R,,Unknown
+187,,Q3_QV,%,,,,W,,
+188,,Q4_QV,%,,,,W,,
+234,,quick_charge_duration_minutes,min,,0-1440,,W,,Quick charge duration in minutes. Writable setpoint that also reads as the live remaining-minutes countdown while a quick charge is active (firmware sets it to 60 on enable; raise it to extend the charge)
+233.b0,,quick_charge_start_enable,,1bit,0~1,,W,,Quick charge start enable. The Quick Charge switch starts the charge at the firmware default length of 60. Set 234 to over-ride length
+59,,ReactivePowerCMDType,0-7,,,,W,,Reactive power command type 0 - unit power factor 1 - fixed PF 2 - default PF curve (American machine: Q(P)) 3 - custom PF curve 4 - capacitive reactive power percentage 5- inductive reactive power percentage 6-QV curve 7-QV_Dynamic
+61,,ReactivePowerPercentCMD,%,,0-60,,W,,Reactive power percentage set value
+24,,ReconnectTime,s,,0-900,,W,,Waiting time of Reconnect on- gird
+0,,Register 0,,ushort,0-65535,,R,,Unknown
+1,,Register 1,,ushort,0-65535,,R,,Unknown
+19,,Register 19,,ushort,0-65535,,R,,Unknown
+228,,Register 228,,,1,,R,,Unknown
+233.b11,,register 233_11,,1bit,0~1,,R,,unknown
+233.b13,,register 233_13,,1bit,0~1,,R,,unknown
+233.b14,,register 233_14,,1bit,0~1,,R,,unknown
+233.b15,,register 233_15,,1bit,0~1,,R,,unknown
+233.b4,,register 233_4,,1bit,0~1,,R,,unknown
+233.b5,,register 233_5,,1bit,0~1,,R,,unknown
+233.b6,,register 233_6,,1bit,0~1,,R,,unknown
+233.b7,,register 233_7,,1bit,0~1,,R,,unknown
+233.b8,,register 233_8,,1bit,0~1,,R,,unknown
+233.b9,,register 233_9,,1bit,0~1,,R,,unknown
+8,,Register 8,,ushort,0-65535,,R,,Unknown
+229,,Register_229,,ushort,0-65535,,R,,Unknown
+232,,register_231_h,1kw,,,,R,,
+231,,register_231_l,1kw,,,,R,"{""Register_Endian"": ""little_endian-CDAB""}",Unknown
+236,,Register_236,,ushort,0-65535,,R,,Unknown
+237,,Register_237,,ushort,0-65535,,R,,Unknown
+241,,Register_241,,ushort,0-65535,,R,,Unknown
+242,,Register_242,,ushort,0-65535,,R,,Unknown
+244,,Register_244,,ushort,0-65535,,R,,Unknown
+245,,Register_245,,ushort,0-65535,,R,,Unknown
+252,,Register_252,,ushort,0-65535,,R,,Unknown
+253,,Register_253,,ushort,0-65535,,R,,Unknown
+254,,Register_254,,ushort,0-65535,,R,,Unknown
+257,,Register_257,,ushort,0-65535,,R,,Unknown
+260,,Register_260,,ushort,0-65535,,R,,Unknown
+268,,Register_268,,ushort,0-65535,,R,,Unknown
+270,,Register_270,,ushort,0-65535,,R,,Unknown
+336,,Register_336,,ushort,0-65535,,R,,
+500,,Register_500,,ushort,0-65535,,R,,
+501,,Register_501,,ushort,0-65535,,R,,
+502,,Register_502,,ushort,0-65535,,R,,
+503,,Register_503,,ushort,0-65535,,R,,
+11.b2,,ResetSetting_AdjRatioClr,,1bit,0-1,,W,,Reset all adjust data
+11.b1,,ResetSetting_AlltoDefault,,1bit,0-1,,W,,Reset all settings
+11.b5,,ResetSetting_BMSChgSWOn,,1bit,,,R,,
+11.b6,,ResetSetting_BMSDischgSWOn,,1bit,,,R,,
+11.b0,,ResetSetting_EnergyRecordClr,,1bit,0-1,,W,,Resetting energy and running time
+11.b3,,ResetSetting_FaultRecordClr,,1bit,0-1,,W,,Clear the failure record
+11.b7,,ResetSetting_InvReboot,,1bit,0-1,,W,,0-null 1- restart inverter
+11.b4,,ResetSetting_MonitorData,,1bit,,,R,,
+226.b0,,Resvd,,2bit,0,,WD,,
+113,,SetComposedPhase,,,46025,,W,,Parallel phase setting 1-R 2-S 3-T
+112,,SetSystemType,,,0-1,,W,,"{""0"":""no parallel (single one)"",""1"":""Single-phase parallel operation forms a single-phase system. (Primary, which will not show on off-grid mode)"",""2"":""Secondary (will not show on off-grid mode)"",""3"":""Single phase parallel operation forms a three phase system (Primary, which will not show on off-grid mode)""}"
+9.b0,,Slave_Ver,,8bit,0-255,,R,,For more information of the software version number for redundant CPU
+216,,SmartLoadOffSOC,%,,0-100,,W,,
 214,,SmartLoadOffVolt,0.1V,,400-520,,W,,
 215,,SmartLoadOnSOC,%,,0-100,,W,,
-216,,SmartLoadOffSOC,%,,0-100,,W,,
+213,,SmartLoadOnVolt,0.1V,,480-590,,W,,
+2,,SN_0_Year,,ASCII,'0'-'9',,R,"",The Serial number consists of the
+2.2,,SN_1_week,,ASCII,'A'-'Z',,R,"",bytes ASCII code
+3,,SN_2_week,,ASCII,'0'-'9',,R,"",AB12345678
+3.2,,SN_3_factory,,ASCII,'A'-'Z',,R,"",SN[0]=0x41(A)
+4,,SN_4_Product_code,,ASCII,'0'-'9',,R,"",
+4.2,,SN_5_Product_code,,ASCII,'A'-'Z',,R,"",
+5,,SN_6_Product_code,,ASCII,'0'-'9',,R,"",
+5.2,,SN_7_batch_numbeR,,ASCII,'A'-'Z',,R,"",
+6,,SN_8_batch_numbeR,,ASCII,'0'-'9',,R,"",SN[9]=0x38(8)
+6.2,,SN_9_batch_numbeR,,ASCII,'A'-'Z',,R,"",
+172,,SOCCurve_BatVolt 2,0.1V,,400-600,,W,,
+171,,SOCCurve_BatVolt1,0.1V,,400-600,,W,,SOC(V)
+175,,SOCCurve_InnerResistance,mOhm,,0-100,,W,,
+173,,SOCCurve_SOC1,1%,,0-100,,W,,
+174,,SOCCurve_SOC2,1%,,0-100,,W,,
+125,,SOCLowLimitForEPSDischg,%,,0-EOD,,W,,SOC low limit for EPS discharge
+137,,SpecLoadCompensate,W,,0-65535,,W,,The maximum amount of compensation for a specific load
+233.b12,,sporadic_charge_enable,,1bit,0~1,,W,,Sporadic charge enable
 217,,StartPVpower,0.1kW,,0-120,,W,,
-218,,GridPeakShavingSOC1,%,,0-100,,W,,
-219,,GridPeakShavingVolt1,0.1V,,480-590,,W,,
-220,,ACCoupleStartSOC,%,,0-80,,W,,ACCouple SOC start charging point
-221,,ACCoupleEndSOC,%,,0-100,,W,,ACCouple SOC stop charging limit
-222,,ACCoupleStartVolt,0.1V,,400-520,,W,,ACCouple voltage start charging point
-223,,ACCoupleEndVolt,0.1V,,400-560,,W,,ACCouple voltage stop charging point
-224.b0,,LCDVersion,,8bit,0-255,,W,,
-224.b8,,LCDScreenType,,2bit,0-7,,W,,"0~7, 0 - big screen 1 - small screen""{""0"": ""big screen"", ""1"": ""small screen"", ""2"": ""unknown"", ""3"": ""unknown"", ""4"": ""unknown"", ""5"": ""unknown"", ""6"": ""unknown"", ""7"": ""unknown""}"
-224.b10,,LCDMachineModelCode,,6bit,0-31,,W,,"0~31 00:12K 01: All-in-one 02: Three phase inverter ""{""""0"""": """"12K"""" """"01"""": """"All-in-one"""" """"02"""": """"Three phase inverter""""}"""
-226.b0,,Resvd,,2bit,0,,WD,,
-226.b2,,Function3_ExCtEn,,1bit,0~1,,W,,1 default
-226.b3,,Function3_RunwithoutGrid,,1bit,0~1,,W,,1 default
-226.b4,,Function3_NPeRlyEn,,1bit,0~1,,W,,1 default
-227,,Register 227,,ushort,0-65535,,R,,Unknown
-228,,Register 228,,ushort,0-65535,,R,,Unknown
-233,,Register 233,,ushort,0-65535,,R,,Unknown
-236,,Register 236,,ushort,0-65535,,R,,Unknown
-237,,Register 237,,ushort,0-65535,,R,,Unknown
-241,,Register 241,,ushort,0-65535,,R,,Unknown
-242,,Register 242,,ushort,0-65535,,R,,Unknown
-244,,Register 244,,ushort,0-65535,,R,,Unknown
-245,,Register 245,,ushort,0-65535,,R,,Unknown
-252,,Register 252,,ushort,0-65535,,R,,Unknown
-253,,Register 253,,ushort,0-65535,,R,,Unknown
-254,,Register 254,,ushort,0-65535,,R,,Unknown
-257,,Register 257,,ushort,0-65535,,R,,Unknown
-260,,Register 260,,ushort,0-65535,,R,,Unknown
-268,,Register 268,,ushort,0-65535,,R,,Unknown
+22,,StartPVVolt,0.1V,,900-5000,,W,,PV start-up voltage
+120.b1,,stSysEnable_bit_ACChargeType,,3bit,0-3,,W,,0-disable 1-according to time 2-according to voltage 3-according to SOC For 12K: 0 - according to time4-according to VoltageandTime5-according to SOC andTime
+120.b4,,stSysEnable_bit_DischgCtrlType,,2bit,0-2,,W,,0-according to voltage 1- according to SOC 2- according to both
+120.b7,,stSysEnable_bit_GenChargeType,,1bit,0-1,,W,,0-According to Battery voltage 1-According to Battery SOC
+120.b0,,stSysEnable_bit_HalfHourACChrStartEn,Bit0,1bit,0-1,,W,,1
+120.b6,,stSysEnable_bit_OnGridEODType,,1bit,0-1,,W,,0-according to voltage 1- according to SOC
+227,,system_charge_soc_limit,%,,0-100,,W,,System-level charge SOC limit (stops all charging at this SOC).
+108,,TemprLowerLimitChg,0.1C,,0-65536,,W,,Lead-acid Temperature low limit for charging
+106,,TemprLowerLimitDischg,0.1C,,0-65536,,W,,Lead-acid Temperature low limit for discharging
+109,,TemprUpperLimitChg,0.1C,,0-65536,,W,,Lead-acid Temperature high limit for charging
+107,,TemprUpperLimitDischg,0.1C,,0-65536,,W,,Lead-acid Temperature high limit for discharging
+13.b0,,Time_Date,,8bit,46053,,W,,inverter time-day
+13.b8,,Time_HouR,,8bit,0-23,,W,,inverter time-hour
+14.b0,,Time_Minute,,8bit,0-59,,W,,inverter time-minute
+12.b8,,Time_Month,,8bit,46034,,W,,inverter time-month
+14.b8,,Time_Second,,8bit,0-59,,W,,inverter time-second
+12.b0,,Time_YeaR,,8bit,17-255,,W,,inverter time-year
+179.b13,,uFunctionEn2_ ubSmartLoadEn,,1bit,0~1,,W,,"Smart load enable (0=Generator, 1=Smart Load)"
+179.b0,,uFunctionEn2_ACCTDirection,,1bit,0~1,,W,,"AC CT direction (0=Normal, 1=Reversed)."
+179.b6,,uFunctionEn2_ActPowerCMDEn,,1bit,0~1,,W,,Active power command enable
+179.b2,,uFunctionEn2_AFCIAlarmClR,,1bit,0~1,,W,,AFCI alarm clear
+179.b15,,uFunctionEn2_OnGridAlwaysOn,,1bit,0~1,,W,,On-grid always on
+179.b1,,uFunctionEn2_PVCTDirection,,1bit,0~1,,W,,"PV CT direction (0=Normal, 1=Reversed)."
+179.b3,,uFunctionEn2_PVSellFirst,,1bit,0~1,,W,,PV sell first enable
+179.b5,,uFunctionEn2_TriptimeUnit,,1bit,0~1,,W,,Trip time unit selection
+179.b11,,uFunctionEn2_ubACcou pling,,1bit,0~1,,W,,AC coupling enable
+179.b9,,uFunctionEn2_ubBatChgcontrol,,1bit,0~1,,W,,"Battery charge control mode (0=SOC, 1=Voltage)"
+179.b10,,uFunctionEn2_ubBatDischgControl,,1bit,0~1,,W,,"Battery discharge control mode (0=SOC, 1=Voltage)"
+179.b8,,uFunctionEn2_ubGenPeakShaving,,1bit,0~1,,W,,Generator peak shaving enable
+179.b7,,uFunctionEn2_ubGridPeakShaving,,1bit,0~1,,W,,Grid peak shaving enable
+179.b12,,uFunctionEn2_ubPVArcEn,,1bit,0~1,,W,,PV arc detection enable
+179.b14,,uFunctionEn2_ubRSDDisable,,1bit,0~1,,W,,"Rapid shutdown disable (0=RSD enabled, 1=RSD disabled)"
+179.b4,,uFunctionEn2_VoltWattEn,,1bit,0~1,,W,,Volt-Watt response mode enable
+135,,UVFDerateEndPoint,0.01Hz,,4500-5000,,W,,The end point of under-frequency load reduction
+134,,UVFDerateStartPoint,0.01Hz,,4500-5000,,W,,Under-frequency load reduction starting point
+193,,UVFIncreaseRatio,%Pm/Hz,,1-100,,W,,Under-frequency load ramp rate
+57,,V1H,0.1V,,According to specific regulatory requirements,,WD,,Q(V) curve over-voltage 1
+55,,V1L,0.1V,,According to specific regulatory requirements,,WD,,Q(V) curve under-voltage 1
+58,,V2H,0.1V,,According to specific regulatory requirements,,WD,,Q(V) curve over-voltage 2
+56,,V2L,0.1V,,According to specific regulatory requirements,,WD,,Q(V) curve under-voltage 2
+118,,VbatStartDerating,0.1V,,,,W,,For lead-acid battery >CutVoltForDisc hg+2V
+183,,VoltWatt_DelayTime,ms,,500-60000,,W,,Default 10000ms
+184,,VoltWatt_P2,%,,0-200,,W,,
+181,,VoltWatt_V1,0.1V,,,,W,,1.05Vn-1.09Vn
+182,,VoltWatt_V2,0.1V,,,,W,,(V1+0.01Vn)-1.10Vn
+186,,Vref_filtertime,s,,300-5000,,W,,
+185,,Vref_QV,0.1V,,,,W,,
+119,,wCT_PowerOffset,1W,short,-1000~1000,,W,"{""Register_Endian"": ""little_endian-CDAB""}","signed short int; CT Power compensation, PtoUser direction is positive."
+233.b3,,weekly_schedule_enable,,1bit,0~1,,W,,Weekly schedule enable

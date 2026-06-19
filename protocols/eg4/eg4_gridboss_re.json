@@ -1,5 +1,4 @@
 {
-    "transport" : "modbus_rtu",
     "baud" : 19200,
     "batch_size" : 40,
     "send_holding_register": true,

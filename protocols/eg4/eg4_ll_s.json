@@ -1,5 +1,4 @@
 {
-  "byteorder":     "big",
   "batch_size":    "40",
   "read_interval": "5000",
   "send_holding_register": true,

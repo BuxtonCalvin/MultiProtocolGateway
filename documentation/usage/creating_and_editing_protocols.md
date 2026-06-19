@@ -145,8 +145,40 @@ This formula will return a computed dynamic value based on whether the read valu
 
 #### endian order
 
-To ensure the entry is read with a little endian byte order, add to the adjustment field {"Register_Endian":"little"}
+To ensure the entry is read with a little endian byte order, add to the adjustment field {"Register_Endian": "little_endian-CDAB"}
 Registers default to big endian.
+
+Two independent axes that fully describe how a manufacturer encodes a
+multi-register (32- or 64-bit) value over Modbus.
+
+Modbus transmits each 16-bit register in big-endian byte order on the wire.
+For values that span more than one register, manufacturers have adopted four
+distinct encoding conventions, corresponding to all combinations of these
+two boolean axes:
+
++---------------------------------+--------------+----------------+------------------+
+| Canonical CSV name              | word_reversed| bytes_reversed | Byte sequence    |
++=================================+==============+================+==================+
+| big_endian-ABCD                 | False        | False          | ABCD (default)   |
+| big_endian_byte_swap-BADC       | False        | True           | BADC             |
+| little_endian-CDAB              | True         | False          | CDAB             |
+| little_endian_byte_swap-DCBA    | True         | True           | DCBA             |
++---------------------------------+--------------+----------------+------------------+
+
+``word_reversed``
+    True  → the low-significance word is stored at the *lower* register
+            address (CDAB / DCBA).
+    False → the high-significance word is stored at the *lower* register
+            address (ABCD / BADC) — standard Modbus convention.
+
+``bytes_reversed``
+    True  → the two bytes *within* each 16-bit register are stored in
+            little-endian order (BADC / DCBA).
+    False → bytes within each register are in big-endian order (ABCD /
+            CDAB) — standard Modbus wire format.
+
+These two axes are completely independent; controlling them separately
+makes it impossible to accidentally produce a fifth, invalid combination.
 
 #### Bit Flag Example
 

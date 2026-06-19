@@ -2163,7 +2163,7 @@ class protocol_settings:
             for i in range(start_bit, end_bit):
                 if (val >> i) & 1:
                     if code_dict:
-                        flag_index = "b" + str(i)
+                        flag_index: str = "b" + str(i)
                         if flag_index in code_dict:
                             flags.append(code_dict[flag_index])
                     else:
