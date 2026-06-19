@@ -19,6 +19,8 @@
 
 ## Supported Devices
 
+> **Eniris / SmartgridOne cross-reference:** [Eniris_RS485_Devices.md](Eniris_RS485_Devices.md) lists all 138 RS485-capable devices from [docs.eniris.io](https://docs.eniris.io/en/Controller/Devices) and maps them to MPG `protocols/` folders. Pending register research: [Pending_Inverter_Register_Sources.md](Pending_Inverter_Register_Sources.md).
+
 ### Inverters
 
 | Manufacturer | Key Models | Interface | Protocol | Guide |
@@ -29,7 +31,10 @@
 | [Enphase](Enphase.md) | IQ7/IQ8 Microinverters, IQ Battery, IQ Gateway | Ethernet (LAN REST API) | HTTP JSON API | [Enphase.md](Enphase.md) |
 | [FoxESS](FoxESS.md) | H1, KH, H3-style inverters | LAN / RS485 | Modbus TCP / RTU | [FoxESS.md](FoxESS.md) |
 | [Fronius](Fronius.md) | Primo GEN24, Symo GEN24, Symo, Primo | Ethernet / RS485 (GEN24) | Modbus TCP / JSON API | [Fronius.md](Fronius.md) |
+| [GoodWe](GoodWe.md) | Energy storage / hybrid (Eniris RS485) | RS485 EMS | Modbus RTU | [GoodWe.md](GoodWe.md) |
 | [Growatt](Growatt.md) | SPF 5000, 6000, 12000T DVM-US MPV | USB / RS485 | Modbus RTU | [Growatt.md](Growatt.md) |
+| [Kostal](Kostal.md) | Pico / PIKO series | RS485 COM1 / TCP | Modbus RTU | [Kostal.md](Kostal.md) |
+| [KSTAR](KSTAR.md) | BluePulse, BluE-S, BlueSpark, KSG | RS485 / TCP | Modbus RTU (stub) | [KSTAR.md](KSTAR.md) |
 | [HDHK](HDHK.md) | 16-channel AC current/frequency module | RS485 terminal | Modbus RTU | [HDHK.md](HDHK.md) |
 | [Huawei](Huawei.md) | SUN2000 residential/commercial inverters | Ethernet / RS485 | Modbus TCP / RTU | [Huawei.md](Huawei.md) |
 | [Next Power](Next_Power.md) | Victor NM-ECO-LV 3.6KW/6.2KW Plus | RS485 communication port | Modbus RTU | [Next_Power.md](Next_Power.md) |
@@ -38,7 +43,9 @@
 | [SMA](SMA.md) | Sunny Boy, Sunny Tripower, Sunny Island | Ethernet / RS485 (add-on) | Modbus TCP | [SMA.md](SMA.md) |
 | [Sol-Ark](SolArk.md) | 5K, 8K, 12K, 15K-2P | RS485 RJ45 / terminal block | Modbus RTU | [SolArk.md](SolArk.md) |
 | [SolarEdge](SolarEdge.md) | HD-Wave SE series, StorEdge, Home Hub | Ethernet / RS485 terminal block | Modbus TCP / RTU (SunSpec) | [SolarEdge.md](SolarEdge.md) |
+| [Sofar](Sofar.md) | G3, HYD 3000–6000-ES | RS485 | Modbus RTU (stub) | [Sofar.md](Sofar.md) |
 | [SolaX](SolaX.md) | X1/X3 Hybrid G4-style inverters | Ethernet / RS485 | Modbus TCP / RTU | [SolaX.md](SolaX.md) |
+| [Solinteg](Solinteg.md) | INTEG MHT-(4–50)K | RS485 / Ethernet | Modbus RTU / TCP | [Solinteg.md](Solinteg.md) |
 | [Solis / Ginlong](Solis.md) | String and hybrid inverters | Ethernet logger / RS485 | Modbus TCP / RTU | [Solis.md](Solis.md) |
 | [SRNE](SRNE.md) | ASF/ASP, HYP, HESP, HF/HFP | RS485 | Modbus RTU | [SRNE.md](SRNE.md) |
 | [Sungrow](Sungrow.md) | SG Series, SHxxRT, SG350HX | RS485 / Ethernet | Modbus RTU / TCP | [Sungrow.md](Sungrow.md) |

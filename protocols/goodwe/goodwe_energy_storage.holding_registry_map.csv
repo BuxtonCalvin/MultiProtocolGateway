@@ -1,0 +1,19 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note
+35000,modbus_protocol_version,Modbus protocol version,,USHORT,,,R,,GoodWe hybrid/ESS map April 2024
+35001,rated_power,Rated power,W,USHORT,,,R,,Inverter rated power
+35137~35138,total_inverter_power,Total inverter power,W,INT,,,R,{"Register_Endian":"big"},200ms average; S32 across pair
+35139~35140,ac_active_power,AC active power,W,INT,,,R,{"Register_Endian":"big"},Grid-side active power
+35141~35142,ac_reactive_power,AC reactive power,var,INT,,,R,{"Register_Endian":"big"},
+35169~35170,total_backup_load_power,Total backup load power,W,INT,,,R,{"Register_Endian":"big"},
+35174,air_temperature,Air temperature,0.1C,SHORT,,,R,,Internal temperature
+35180,battery1_voltage,Battery voltage,0.1V,USHORT,,,R,,
+35181,battery1_current,Battery current,0.1A,SHORT,,,R,,
+35182~35183,battery1_power,Battery power,W,INT,,,R,{"Register_Endian":"big"},
+35184,battery1_mode,Battery mode,,USHORT,,,R,,Charge/discharge state; see GoodWe Table 8-9
+35187,work_mode,Work mode,,USHORT,,,R,,See GoodWe Table 8-1
+35189~35190,error_message,Error message,,UINT,,,R,,Fault bitmask; see GoodWe Table 8-12
+35191~35192,pv_energy_total,PV energy total,0.1kWh,UINT,,,R,{"Register_Endian":"big"},
+36025~36026,meter_total_active_power,Meter total active power,W,INT,,,R,{"Register_Endian":"big"},
+45127,modbus_address,Modbus address,,USHORT,,,RW,,Configurable 0-247; factory default 247
+45132~45133,modbus_baud_rate,Modbus baud rate,,UINT,,,RW,,9600/19200/38400/57600/115200
+47908,bms_battery_soc,BMS battery SOC,0.1%,USHORT,,,R,,When BMS communication active

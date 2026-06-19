@@ -358,7 +358,7 @@ class DataAdjustments:
     Big-Endian / Word Swap (ABCD): The most significant word is stored in the first register, and the most significant byte comes first.
     Little-Endian / No Swap (CDAB): The most significant word is stored in the second register, but the bytes within each word remain big-endian.
     Big-Endian / No Swap (BADC): The words are ordered normally, but the individual bytes within each 16-bit register are swapped.
-    Little-Endian / Word Swap (DCBA):The least significant word is stored first, and the individual bytes are also reversed (common in Intel-based systems
+    Little-Endian / Word Swap (DCBA):The least significant word is stored first, and the individual bytes are also reversed (common in Intel-based systems)
     """
 
     def __init__(self, log: logging.Logger, default_byteorder: Literal["little", "big"] = _DEFAULT_BYTEORDER) -> None:

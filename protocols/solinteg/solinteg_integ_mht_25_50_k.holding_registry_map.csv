@@ -1,0 +1,18 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note
+10000~10007,device_sn,Device serial number,,ASCII,,,R,,8-byte string from STR field
+10008,inverter_model,Inverter model,,USHORT,,,R,,Model code; see Solinteg Table 3.2
+10011~10012,firmware_version,Firmware version,,UINT,,,R,{"Register_Endian":"big"},
+10105,inverter_working_status,Inverter working status,,USHORT,,,R,,0 wait;1 self-check;2 on-grid;3 fault;4 upgrade;5 off-grid
+10112~10113,fault_flag1,Fault flag 1,,UINT,,,R,{"Register_Endian":"big"},
+11006~11007,phase_a_voltage,Phase A voltage,0.1V,USHORT,,,R,,
+11010~11011,phase_a_current,Phase A current,0.1A,USHORT,,,R,,
+11015,grid_frequency,Grid frequency,0.01Hz,USHORT,,,R,,
+11016~11017,ac_active_power,AC active power,0.001kW,INT,,,R,{"Register_Endian":"big"},
+11018~11019,energy_today,Energy today,0.1kWh,UINT,,,R,{"Register_Endian":"big"},
+11020~11021,energy_total,Energy total,0.1kWh,UINT,,,R,{"Register_Endian":"big"},
+11028~11029,total_pv_input_power,Total PV input power,0.001kW,UINT,,,R,{"Register_Endian":"big"},
+11038,pv1_voltage,PV1 voltage,0.1V,USHORT,,,R,,
+11039,pv1_current,PV1 current,0.1A,USHORT,,,R,,
+11062~11063,pv1_input_power,PV1 input power,0.001kW,UINT,,,R,{"Register_Endian":"big"},
+30230~30231,total_backup_power,Total backup power,0.001kW,INT,,,R,{"Register_Endian":"big"},
+25000,safety_code,Safety code,,USHORT,,,RW,,Grid code / safety profile selector

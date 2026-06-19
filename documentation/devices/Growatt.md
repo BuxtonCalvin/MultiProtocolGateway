@@ -47,6 +47,20 @@ Growatt SPF-series inverters expose a Modbus RTU interface via USB (and RS485 on
 | SPF 12000T DVM-US MPV | `v0.14` | USB-B | Confirmed |
 | DB9 port models | `v0.14` | RS232 (DB9) | PIN1 and PIN2 must be OFF before use |
 
+### Eniris / grid-tied RS485 series (stub protocols)
+
+[SmartgridOne / Eniris](https://docs.eniris.io/en/Controller/Devices/PV-hybrid-and-battery-inverters/Growatt) also documents RS485 for these Growatt lines. MPG has transport-only stubs pending full register maps:
+
+| Eniris series | Example model | Stub `protocol_version` |
+| --- | --- | --- |
+| MID | MID 11-30K-TL3-XH | `growatt_mid_series` |
+| MIN | MIN 2500-6000TL-X | `growatt_min_series` |
+| MOD | MOD 3-10K-TL3-XH | `growatt_mod_series` |
+| SPA | SPA 1000-3000TL BL | `growatt_spa_series` |
+| SPH | SPH 3000-6000TL BL-UP | `growatt_sph_series` |
+| UE | 4000-6000 UE | `growatt_ue_series` |
+| WIT | WIT 100K-TL3-H | `growatt_wit_series` |
+
 > Other SPF-series models likely respond to `v0.14`. Try it before assuming incompatibility.
 
 ---

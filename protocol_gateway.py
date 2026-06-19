@@ -841,9 +841,7 @@ class Protocol_Gateway:
                         self.__log.error(f"Concurrent read future for '{group_key}' ended with error: {exc}")
                     self.__concurrent_futures.pop(group_key, None)
                 else:
-                    self.__log.debug(
-                        f"Concurrent read already in progress for '{group_key}' - skipping duplicate submit."
-                    )
+                    self.__log.debug(f"Concurrent read already in progress for '{group_key}' - skipping duplicate submit.")
                     return
 
             future: Future[None] = self.__concurrent_executor.submit(
