@@ -25,9 +25,14 @@ from typing import Any
 import pytest
 
 from classes.protocol_settings import (
+    WORD_ORDER_ABCD,
+    WORD_ORDER_BADC,
+    WORD_ORDER_CDAB,
+    WORD_ORDER_DCBA,
     Data_Type,
     DataAdjustments,
     Registry_Type,
+    WordOrder,
     WriteMode,
     protocol_settings,
     registry_map_entry,
@@ -38,12 +43,17 @@ from classes.protocol_settings import (
 # ---------------------------------------------------------------------------
 
 def make_adjustments(
-    default_byteorder: str = "big",
+    default_word_order: WordOrder = WORD_ORDER_ABCD,
 ) -> DataAdjustments:
-    """Create a DataAdjustments instance for focused unit tests."""
+    """Create a DataAdjustments instance for focused unit tests.
+
+    Accepts a ``WordOrder`` singleton; callers that previously passed
+    ``"big"`` or ``"little"`` strings should use ``WORD_ORDER_ABCD`` or
+    ``WORD_ORDER_CDAB`` respectively.
+    """
     return DataAdjustments(
         log=logging.getLogger("test.data_adjustments"),
-        default_byteorder=default_byteorder,  # type: ignore[arg-type]
+        default_word_order=default_word_order,
     )
 
 
@@ -54,11 +64,11 @@ def make_protocol() -> protocol_settings:
     up manually to reflect what ``__init__`` would normally do.
     """
     instance: protocol_settings = protocol_settings.__new__(protocol_settings)
-    instance.byteorder = "big"
+    instance.word_order = WORD_ORDER_ABCD
     instance.settings = {}
     instance.codes = {}
     instance._log = logging.getLogger("test.protocol_settings")
-    instance._adjustments = DataAdjustments(instance._log, instance.byteorder)
+    instance._adjustments = DataAdjustments(instance._log, instance.word_order)
     return instance
 
 
@@ -134,15 +144,33 @@ def test_registry_entry_identity_uses_register_position_not_names() -> None:
 class TestDataAdjustmentsInit:
     """DataAdjustments construction and defaults."""
 
-    def test_defaults_to_big_endian(self) -> None:
-        """The Modbus default byte order is 'big' when none is specified."""
+    def test_defaults_to_abcd_word_order(self) -> None:
+        """The Modbus default word order is ABCD (big-endian, no swap) when none is specified."""
         adj = DataAdjustments(log=logging.getLogger("test"))
-        assert adj.default_byteorder == "big"
+        assert adj.default_word_order == WORD_ORDER_ABCD
+        assert adj.default_word_order.word_reversed is False
+        assert adj.default_word_order.bytes_reversed is False
 
-    def test_accepts_little_endian_default(self) -> None:
-        """A protocol-level 'little' byte order is stored correctly."""
-        adj = DataAdjustments(log=logging.getLogger("test"), default_byteorder="little")
-        assert adj.default_byteorder == "little"
+    def test_accepts_cdab_word_order_default(self) -> None:
+        """A protocol-level CDAB (little-endian) word order is stored correctly."""
+        adj = DataAdjustments(log=logging.getLogger("test"), default_word_order=WORD_ORDER_CDAB)
+        assert adj.default_word_order == WORD_ORDER_CDAB
+        assert adj.default_word_order.word_reversed is True
+        assert adj.default_word_order.bytes_reversed is False
+
+    def test_accepts_badc_word_order_default(self) -> None:
+        """A protocol-level BADC word order is stored correctly."""
+        adj = DataAdjustments(log=logging.getLogger("test"), default_word_order=WORD_ORDER_BADC)
+        assert adj.default_word_order == WORD_ORDER_BADC
+        assert adj.default_word_order.word_reversed is False
+        assert adj.default_word_order.bytes_reversed is True
+
+    def test_accepts_dcba_word_order_default(self) -> None:
+        """A protocol-level DCBA word order is stored correctly."""
+        adj = DataAdjustments(log=logging.getLogger("test"), default_word_order=WORD_ORDER_DCBA)
+        assert adj.default_word_order == WORD_ORDER_DCBA
+        assert adj.default_word_order.word_reversed is True
+        assert adj.default_word_order.bytes_reversed is True
 
 
 class TestParseAdjustments:
@@ -179,47 +207,126 @@ class TestParseAdjustments:
 
 
 class TestGetEntryByteorder:
-    """DataAdjustments.get_entry_byteorder — per-entry override logic."""
+    """DataAdjustments.get_entry_byteorder — per-entry override logic.
+
+    All assertions compare against ``WordOrder`` singletons.  The legacy
+    string aliases (``"big"``, ``"little"``, ``"be"``, ``"le"``) are still
+    accepted by the CSV parser and must resolve to the correct ``WordOrder``.
+    """
 
     def test_returns_protocol_default_when_no_adjustments(self) -> None:
-        adj: DataAdjustments = make_adjustments(default_byteorder="big")
+        adj: DataAdjustments = make_adjustments(default_word_order=WORD_ORDER_ABCD)
         entry: registry_map_entry = make_entry(adjustments={})
-        assert adj.get_entry_byteorder(entry) == "big"
+        assert adj.get_entry_byteorder(entry) == WORD_ORDER_ABCD
 
-    def test_little_endian_protocol_default_propagates(self) -> None:
-        adj: DataAdjustments = make_adjustments(default_byteorder="little")
+    def test_cdab_protocol_default_propagates(self) -> None:
+        adj: DataAdjustments = make_adjustments(default_word_order=WORD_ORDER_CDAB)
         entry: registry_map_entry = make_entry(adjustments={})
-        assert adj.get_entry_byteorder(entry) == "little"
+        assert adj.get_entry_byteorder(entry) == WORD_ORDER_CDAB
 
-    def test_register_endian_little_overrides_big_default(self) -> None:
-        adj: DataAdjustments = make_adjustments(default_byteorder="big")
+    def test_legacy_little_alias_overrides_abcd_default(self) -> None:
+        """Legacy CSV value "little" must resolve to CDAB (low word at lower address,
+        bytes within each word big-endian) — the most common little-endian Modbus convention."""
+        adj: DataAdjustments = make_adjustments(default_word_order=WORD_ORDER_ABCD)
         entry = make_entry(adjustments={"Register_Endian": "little"})
-        assert adj.get_entry_byteorder(entry) == "little"
+        assert adj.get_entry_byteorder(entry) == WORD_ORDER_CDAB
 
-    def test_register_endian_le_alias_accepted(self) -> None:
-        adj: DataAdjustments = make_adjustments(default_byteorder="big")
+    def test_legacy_le_alias_accepted(self) -> None:
+        adj: DataAdjustments = make_adjustments(default_word_order=WORD_ORDER_ABCD)
         entry: registry_map_entry = make_entry(adjustments={"Register_Endian": "le"})
-        assert adj.get_entry_byteorder(entry) == "little"
+        assert adj.get_entry_byteorder(entry) == WORD_ORDER_CDAB
 
-    def test_register_endian_big_overrides_little_default(self) -> None:
-        adj: DataAdjustments = make_adjustments(default_byteorder="little")
+    def test_legacy_big_alias_overrides_cdab_default(self) -> None:
+        adj: DataAdjustments = make_adjustments(default_word_order=WORD_ORDER_CDAB)
         entry: registry_map_entry = make_entry(adjustments={"Register_Endian": "big"})
-        assert adj.get_entry_byteorder(entry) == "big"
+        assert adj.get_entry_byteorder(entry) == WORD_ORDER_ABCD
 
-    def test_register_endian_be_alias_accepted(self) -> None:
-        adj: DataAdjustments = make_adjustments(default_byteorder="little")
+    def test_legacy_be_alias_accepted(self) -> None:
+        adj: DataAdjustments = make_adjustments(default_word_order=WORD_ORDER_CDAB)
         entry: registry_map_entry = make_entry(adjustments={"Register_Endian": "be"})
-        assert adj.get_entry_byteorder(entry) == "big"
+        assert adj.get_entry_byteorder(entry) == WORD_ORDER_ABCD
 
     def test_key_lookup_is_case_insensitive(self) -> None:
-        adj: DataAdjustments = make_adjustments(default_byteorder="big")
+        adj: DataAdjustments = make_adjustments(default_word_order=WORD_ORDER_ABCD)
         entry: registry_map_entry = make_entry(adjustments={"register_endian": "little"})
-        assert adj.get_entry_byteorder(entry) == "little"
+        assert adj.get_entry_byteorder(entry) == WORD_ORDER_CDAB
 
     def test_unsupported_endian_value_falls_back_to_default(self) -> None:
-        adj: DataAdjustments = make_adjustments(default_byteorder="big")
+        adj: DataAdjustments = make_adjustments(default_word_order=WORD_ORDER_ABCD)
         entry: registry_map_entry = make_entry(adjustments={"Register_Endian": "middle"})
-        assert adj.get_entry_byteorder(entry) == "big"
+        assert adj.get_entry_byteorder(entry) == WORD_ORDER_ABCD
+
+
+class TestGetEntryByteorderCanonicalNames:
+    """get_entry_byteorder — canonical four-part CSV names and byte-sequence aliases."""
+
+    def test_canonical_big_endian_abcd(self) -> None:
+        adj: DataAdjustments = make_adjustments()
+        entry = make_entry(adjustments={"Register_Endian": "big_endian-ABCD"})
+        result: WordOrder = adj.get_entry_byteorder(entry)
+        assert result == WORD_ORDER_ABCD
+        assert result.word_reversed is False
+        assert result.bytes_reversed is False
+
+    def test_canonical_big_endian_byte_swap_badc(self) -> None:
+        adj: DataAdjustments = make_adjustments()
+        entry = make_entry(adjustments={"Register_Endian": "big_endian_byte_swap-BADC"})
+        result: WordOrder = adj.get_entry_byteorder(entry)
+        assert result == WORD_ORDER_BADC
+        assert result.word_reversed is False
+        assert result.bytes_reversed is True
+
+    def test_canonical_little_endian_cdab(self) -> None:
+        adj: DataAdjustments = make_adjustments()
+        entry = make_entry(adjustments={"Register_Endian": "little_endian-CDAB"})
+        result: WordOrder = adj.get_entry_byteorder(entry)
+        assert result == WORD_ORDER_CDAB
+        assert result.word_reversed is True
+        assert result.bytes_reversed is False
+
+    def test_canonical_little_endian_byte_swap_dcba(self) -> None:
+        adj: DataAdjustments = make_adjustments()
+        entry = make_entry(adjustments={"Register_Endian": "little_endian_byte_swap-DCBA"})
+        result: WordOrder = adj.get_entry_byteorder(entry)
+        assert result == WORD_ORDER_DCBA
+        assert result.word_reversed is True
+        assert result.bytes_reversed is True
+
+    def test_byte_sequence_alias_abcd(self) -> None:
+        adj: DataAdjustments = make_adjustments()
+        entry = make_entry(adjustments={"Register_Endian": "abcd"})
+        assert adj.get_entry_byteorder(entry) == WORD_ORDER_ABCD
+
+    def test_byte_sequence_alias_badc(self) -> None:
+        adj: DataAdjustments = make_adjustments()
+        entry = make_entry(adjustments={"Register_Endian": "badc"})
+        assert adj.get_entry_byteorder(entry) == WORD_ORDER_BADC
+
+    def test_byte_sequence_alias_cdab(self) -> None:
+        adj: DataAdjustments = make_adjustments()
+        entry = make_entry(adjustments={"Register_Endian": "cdab"})
+        assert adj.get_entry_byteorder(entry) == WORD_ORDER_CDAB
+
+    def test_byte_sequence_alias_dcba(self) -> None:
+        adj: DataAdjustments = make_adjustments()
+        entry = make_entry(adjustments={"Register_Endian": "dcba"})
+        assert adj.get_entry_byteorder(entry) == WORD_ORDER_DCBA
+
+    def test_canonical_name_lookup_is_case_insensitive(self) -> None:
+        """The alias table key is always lowercased before lookup."""
+        adj: DataAdjustments = make_adjustments()
+        entry = make_entry(adjustments={"Register_Endian": "LITTLE_ENDIAN-CDAB"})
+        assert adj.get_entry_byteorder(entry) == WORD_ORDER_CDAB
+
+    def test_short_mnemonic_big_endian_without_suffix(self) -> None:
+        adj: DataAdjustments = make_adjustments()
+        entry = make_entry(adjustments={"Register_Endian": "big_endian"})
+        assert adj.get_entry_byteorder(entry) == WORD_ORDER_ABCD
+
+    def test_short_mnemonic_little_endian_without_suffix(self) -> None:
+        adj: DataAdjustments = make_adjustments()
+        entry = make_entry(adjustments={"Register_Endian": "little_endian"})
+        assert adj.get_entry_byteorder(entry) == WORD_ORDER_CDAB
 
 
 class TestApplyAdjustmentsPostDecode:
@@ -305,17 +412,33 @@ class TestApplyAdjustmentsContext:
 
 
 class TestApplyAdjustmentsByteorder:
-    """DataAdjustments.apply_adjustments — byteorder stage."""
+    """DataAdjustments.apply_adjustments — byteorder stage.
 
-    def test_little_endian_adjustment_returns_little(self) -> None:
+    The byteorder stage is now a no-op in apply_adjustments; word-order
+    resolution is handled entirely by get_entry_byteorder(), which is called
+    directly by the decode methods.  apply_adjustments always returns the
+    supplied value unchanged when stage="byteorder", regardless of the entry's
+    Register_Endian adjustment.  These tests document that contract so that any
+    future regression is caught immediately.
+    """
+
+    def test_byteorder_stage_returns_value_unchanged_with_endian_adjustment(self) -> None:
+        """apply_adjustments no longer interprets Register_Endian — it returns value as-is."""
         adj: DataAdjustments = make_adjustments()
-        entry: registry_map_entry = make_entry(adjustments={"Register_Endian": "little"})
-        assert adj.apply_adjustments(0, entry, "byteorder") == "little"
+        entry: registry_map_entry = make_entry(adjustments={"Register_Endian": "little_endian-CDAB"})
+        assert adj.apply_adjustments(0, entry, "byteorder") == 0
 
-    def test_no_adjustments_returns_value_unchanged(self) -> None:
+    def test_byteorder_stage_returns_value_unchanged_without_adjustments(self) -> None:
         adj: DataAdjustments = make_adjustments()
         entry: registry_map_entry = make_entry(adjustments={})
-        assert adj.apply_adjustments(0, entry, "byteorder") == 0
+        assert adj.apply_adjustments(42, entry, "byteorder") == 42
+
+    def test_byteorder_stage_does_not_return_word_order_object(self) -> None:
+        """Callers needing a WordOrder must use get_entry_byteorder(), not apply_adjustments."""
+        adj: DataAdjustments = make_adjustments()
+        entry: registry_map_entry = make_entry(adjustments={"Register_Endian": "little_endian-CDAB"})
+        result = adj.apply_adjustments(0, entry, "byteorder")
+        assert not isinstance(result, WordOrder)
 
 
 class TestSafeEvalExpression:

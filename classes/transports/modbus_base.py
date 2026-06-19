@@ -36,6 +36,7 @@ from defs.common import TransportSettings, strtobool
 from ..protocol_settings import (
     Data_Type,
     Registry_Type,
+    WordOrder,
     WriteMode,
     protocol_settings,
     registry_map_entry,
@@ -315,22 +316,58 @@ class modbus_base(transport_base):
         kwargs[target_arg] = val
         return kwargs
 
-    def _entry_byte_order(self, entry: registry_map_entry) -> str:
+    def _entry_byte_order(self, entry: registry_map_entry) -> WordOrder:
+        """Return the ``WordOrder`` for *entry* by delegating to ``DataAdjustments``."""
         return self._protocol._adjustments.get_entry_byteorder(entry)
 
+    def _register_words_to_bytes(self, register_values: list[int], word_order: WordOrder) -> bytes:
+        """Convert a list of 16-bit register words to a contiguous byte string.
 
-    def _register_words_to_bytes(self, register_values: list[int], byte_order: str,) -> bytes:
+        Applied on the **read** side of a write-verify cycle: the current
+        register values are assembled into bytes so the existing decoded value
+        can be extracted before the new value is merged in.
+
+        ``word_order.word_reversed``
+            If True the word list is reversed so the high-significance word
+            is first in the output, matching big-endian integer unpacking by
+            callers (CDAB / DCBA encodings).
+
+        ``word_order.bytes_reversed``
+            If True each 16-bit word is serialized in little-endian byte order
+            (BADC / DCBA encodings).
+        """
         words: list[int] = [value & 0xFFFF for value in register_values]
-        if byte_order == "little":
+        if word_order.word_reversed:
             words.reverse()
-        return b"".join(word.to_bytes(2, byteorder="big", signed=False) for word in words)
+        per_word_byteorder: str = "little" if word_order.bytes_reversed else "big"
+        return b"".join(word.to_bytes(2, byteorder=per_word_byteorder, signed=False) for word in words)
 
-    def _bytes_to_register_words(self, data: bytes, byte_order: str) -> list[int]:
+    def _bytes_to_register_words(self, data: bytes, word_order: WordOrder) -> list[int]:
+        """Convert a byte string back to a list of 16-bit Modbus register values.
+
+        This is the exact inverse of ``_register_words_to_bytes`` and is used
+        on the **write** side: after the new value has been merged into *data*,
+        this method re-encodes it into register words ready to be sent to the
+        device.
+
+        ``word_order.bytes_reversed``
+            If True each 2-byte slice is interpreted as little-endian before
+            being stored as a register word (inverting the BADC/DCBA byte swap).
+
+        ``word_order.word_reversed``
+            If True the final word list is reversed so the low-significance
+            word is placed back at the lower register address (inverting the
+            CDAB/DCBA word reversal).
+        """
         if len(data) % 2 != 0:
             msg: str = f"Expected even byte count for register write, got {len(data)}"
             raise ValueError(msg)
-        words: list[int] = [int.from_bytes(data[i:i + 2], byteorder="big", signed=False) for i in range(0, len(data), 2)]
-        if byte_order == "little":
+        per_word_byteorder: str = "little" if word_order.bytes_reversed else "big"
+        words: list[int] = [
+            int.from_bytes(data[i:i + 2], byteorder=per_word_byteorder, signed=False)
+            for i in range(0, len(data), 2)
+        ]
+        if word_order.word_reversed:
             words.reverse()
         return words
 
@@ -1548,8 +1585,8 @@ class modbus_base(transport_base):
                 return
             raw_registers.append(raw_word)
 
-        byte_order: str = self._entry_byte_order(entry)
-        raw_bytes: bytes = self._register_words_to_bytes(raw_registers, byte_order)
+        word_order: WordOrder = self._entry_byte_order(entry)
+        raw_bytes: bytes = self._register_words_to_bytes(raw_registers, word_order)
         raw_value: int = int.from_bytes(raw_bytes, byteorder="big", signed=False)
         total_bits: int = len(raw_bytes) * 8
 
@@ -1615,7 +1652,7 @@ class modbus_base(transport_base):
                 return
             register_values = self._bytes_to_register_words(
                 int_val.to_bytes(4, byteorder="big", signed=False),
-                byte_order,
+                word_order,
             )
 
         elif entry.data_type == Data_Type.ACC32:
@@ -1628,7 +1665,7 @@ class modbus_base(transport_base):
                 return
             register_values = self._bytes_to_register_words(
                 int_val.to_bytes(4, byteorder="big", signed=False),
-                byte_order,
+                word_order,
             )
 
         elif entry.data_type == Data_Type.UINT64:
@@ -1641,7 +1678,7 @@ class modbus_base(transport_base):
                 return
             register_values = self._bytes_to_register_words(
                 int_val.to_bytes(8, byteorder="big", signed=False),
-                byte_order,
+                word_order,
             )
 
         elif entry.data_type == Data_Type.INT:
@@ -1654,19 +1691,19 @@ class modbus_base(transport_base):
                 return
             register_values = self._bytes_to_register_words(
                 int_val.to_bytes(4, byteorder="big", signed=True),
-                byte_order,
+                word_order,
             )
 
         elif entry.data_type == Data_Type.FLOAT32:
             register_values = self._bytes_to_register_words(
                 struct.pack(">f", float(value)),
-                byte_order,
+                word_order,
             )
 
         elif entry.data_type == Data_Type.FLOAT64:
             register_values = self._bytes_to_register_words(
                 struct.pack(">d", float(value)),
-                byte_order,
+                word_order,
             )
 
         elif entry.data_type in (Data_Type._16BIT_FLAGS, Data_Type._8BIT_FLAGS, Data_Type._32BIT_FLAGS):
@@ -1685,7 +1722,7 @@ class modbus_base(transport_base):
             updated_value: int = (raw_value & clear_mask) | ((flag_int << bit_index) & bit_mask)
             register_values = self._bytes_to_register_words(
                 updated_value.to_bytes(len(raw_bytes), byteorder="big", signed=False),
-                byte_order,
+                word_order,
             )
 
         elif entry.data_type == Data_Type.BYTE or (200 < entry.data_type.value < 300): # unsigned sub-register field
@@ -1700,7 +1737,7 @@ class modbus_base(transport_base):
             updated_value: int = (raw_value & clear_mask) | ((new_val << bit_index) & bit_mask)
             register_values = self._bytes_to_register_words(
                 updated_value.to_bytes(len(raw_bytes), byteorder="big", signed=False),
-                byte_order,
+                word_order,
             )
 
             check_value: int = (updated_value >> bit_index) & base_mask
@@ -1726,7 +1763,7 @@ class modbus_base(transport_base):
             updated_value = (raw_value & clear_mask) | ((encoded << bit_index) & bit_mask)
             register_values = self._bytes_to_register_words(
                 updated_value.to_bytes(len(raw_bytes), byteorder="big", signed=False),
-                byte_order,
+                word_order,
             )
 
         elif entry.data_type.value > 400:  # signed magnitude bit types
@@ -1749,7 +1786,7 @@ class modbus_base(transport_base):
             updated_value = (raw_value & clear_mask) | (encoded & field_mask)
             register_values = self._bytes_to_register_words(
                 updated_value.to_bytes(len(raw_bytes), byteorder="big", signed=False),
-                byte_order,
+                word_order,
             )
 
         elif entry.data_type == Data_Type.ASCII:

@@ -334,44 +334,143 @@ class registry_map_entry:
         return hash((self.variable_name, self.register_bit, self.register_byte, self.registry_type))
 
 
-_DEFAULT_BYTEORDER: Literal["little", "big"] = "big"
-"""Modbus almost always defaults to big-endian word order."""
+@dataclass(frozen=True)
+class WordOrder:
+    """Two independent axes that fully describe how a manufacturer encodes a
+    multi-register (32- or 64-bit) value over Modbus.
+
+    Modbus transmits each 16-bit register in big-endian byte order on the wire.
+    For values that span more than one register, manufacturers have adopted four
+    distinct encoding conventions, corresponding to all combinations of these
+    two boolean axes:
+
+    +---------------------------------+--------------+----------------+------------------+
+    | Canonical CSV name              | word_reversed| bytes_reversed | Byte sequence    |
+    +=================================+==============+================+==================+
+    | big_endian-ABCD                 | False        | False          | ABCD (default)   |
+    | big_endian_byte_swap-BADC       | False        | True           | BADC             |
+    | little_endian-CDAB              | True         | False          | CDAB             |
+    | little_endian_byte_swap-DCBA    | True         | True           | DCBA             |
+    +---------------------------------+--------------+----------------+------------------+
+
+    ``word_reversed``
+        True  → the low-significance word is stored at the *lower* register
+                address (CDAB / DCBA).
+        False → the high-significance word is stored at the *lower* register
+                address (ABCD / BADC) — standard Modbus convention.
+
+    ``bytes_reversed``
+        True  → the two bytes *within* each 16-bit register are stored in
+                little-endian order (BADC / DCBA).
+        False → bytes within each register are in big-endian order (ABCD /
+                CDAB) — standard Modbus wire format.
+
+    These two axes are completely independent; controlling them separately
+    makes it impossible to accidentally produce a fifth, invalid combination.
+    """
+    word_reversed: bool
+    bytes_reversed: bool
+
+
+# ---------------------------------------------------------------------------
+# Pre-built WordOrder singletons — imported or referenced throughout this
+# module so callers never construct raw WordOrder(False, False) inline.
+# ---------------------------------------------------------------------------
+WORD_ORDER_ABCD = WordOrder(word_reversed=False, bytes_reversed=False)
+"""Big-endian, no byte swap — standard Modbus, SunSpec default."""
+
+WORD_ORDER_BADC = WordOrder(word_reversed=False, bytes_reversed=True)
+"""High word first, bytes within each word reversed."""
+
+WORD_ORDER_CDAB = WordOrder(word_reversed=True, bytes_reversed=False)
+"""Low word at lower address, bytes within each word big-endian.
+Most common 'little-endian' Modbus convention (EG4, many inverters)."""
+
+WORD_ORDER_DCBA = WordOrder(word_reversed=True, bytes_reversed=True)
+"""Fully reversed — least-significant byte first (Intel/x86 convention)."""
+
+_DEFAULT_WORD_ORDER: WordOrder = WORD_ORDER_ABCD
+"""Protocol-level default when no ``Register_Endian`` adjustment is present."""
+
+# ---------------------------------------------------------------------------
+# Alias table — maps every accepted CSV string to a WordOrder singleton.
+# Keys must be lowercase; the lookup always calls .strip().lower() first.
+# ---------------------------------------------------------------------------
+_WORD_ORDER_ALIASES: dict[str, WordOrder] = {
+    # Canonical four-part names (CSV canonical form)
+    "big_endian-abcd":              WORD_ORDER_ABCD,
+    "big_endian_byte_swap-badc":    WORD_ORDER_BADC,
+    "little_endian-cdab":           WORD_ORDER_CDAB,
+    "little_endian_byte_swap-dcba": WORD_ORDER_DCBA,
+    # Short mnemonic aliases
+    "big_endian":                   WORD_ORDER_ABCD,
+    "big_endian_byte_swap":         WORD_ORDER_BADC,
+    "little_endian":                WORD_ORDER_CDAB,
+    "little_endian_byte_swap":      WORD_ORDER_DCBA,
+    # Byte-sequence mnemonics (accepted as values in their own right)
+    "abcd":                         WORD_ORDER_ABCD,
+    "badc":                         WORD_ORDER_BADC,
+    "cdab":                         WORD_ORDER_CDAB,
+    "dcba":                         WORD_ORDER_DCBA,
+    # Legacy two-value shorthands — kept for backward compatibility
+    "big":                          WORD_ORDER_ABCD,
+    "be":                           WORD_ORDER_ABCD,
+    "little":                       WORD_ORDER_CDAB,
+    "le":                           WORD_ORDER_CDAB,
+}
 
 
 class DataAdjustments:
     """Parses, queries, and applies CSV-driven adjustments for registry entries.
 
     Construct once per ``protocol_settings`` instance, passing the protocol's
-    default byte order and the shared logger.  The byte order stored here is the
-    protocol-level default; individual entries may override it via the
-    ``Register_Endian`` adjustment key.
+    default ``WordOrder`` and the shared logger.  The word order stored here is
+    the protocol-level default; individual entries may override it via the
+    ``Register_Endian`` adjustment key in the CSV.
 
     All public methods are pure with respect to external state — they read only
     from the supplied ``entry.adjustments`` dict and the value being transformed.
     Adding a new adjustment type (a new stage or a new key such as Scale_Factor
     or Clamp) should require changes only within this class.
 
-    While standard Modbus transmits bytes within a single 16-bit register using Big-Endian format
-    (most significant byte first), the protocol does not define a standard order for multi-register values.
-    This has led manufacturers to adopt four distinct byte-ordering configurations to parse the 4 bytes (A, B, C, D)
-    of a 32-bit value:
-    Big-Endian / Word Swap (ABCD): The most significant word is stored in the first register, and the most significant byte comes first.
-    Little-Endian / No Swap (CDAB): The most significant word is stored in the second register, but the bytes within each word remain big-endian.
-    Big-Endian / No Swap (BADC): The words are ordered normally, but the individual bytes within each 16-bit register are swapped.
-    Little-Endian / Word Swap (DCBA):The least significant word is stored first, and the individual bytes are also reversed (common in Intel-based systems)
+    Multi-register word ordering
+    ----------------------------
+    Modbus transmits each 16-bit register in big-endian byte order on the wire.
+    For values that span two or more registers (32- or 64-bit types), the
+    protocol does not define a standard word order, so manufacturers have adopted
+    four conventions described by two independent boolean axes (see ``WordOrder``).
+
+    The CSV ``adjustments`` column accepts the following ``Register_Endian``
+    values (case-insensitive):
+
+    +---------------------------------+------------------+
+    | CSV value                       | Encoding         |
+    +=================================+==================+
+    | ``big_endian-ABCD``             | ABCD — default   |
+    | ``big_endian_byte_swap-BADC``   | BADC             |
+    | ``little_endian-CDAB``          | CDAB             |
+    | ``little_endian_byte_swap-DCBA``| DCBA             |
+    +---------------------------------+------------------+
+
+    Short aliases ``big``, ``little``, ``be``, ``le``, ``abcd``, ``badc``,
+    ``cdab``, ``dcba``, and the canonical names without the byte-sequence
+    suffix are also accepted.  ``"little"`` maps to CDAB (low word at lower
+    address, bytes within each word big-endian) which is the most common
+    little-endian Modbus convention used by EG4 and many other inverter
+    manufacturers.
     """
 
-    def __init__(self, log: logging.Logger, default_byteorder: Literal["little", "big"] = _DEFAULT_BYTEORDER) -> None:
-        """Initialise with a shared logger and the protocol-level default byte order.
+    def __init__(self, log: logging.Logger, default_word_order: WordOrder = _DEFAULT_WORD_ORDER) -> None:
+        """Initialise with a shared logger and the protocol-level default ``WordOrder``.
 
-        ``default_byteorder`` is captured from ``protocol_settings.byteorder``
-        after it has been resolved from the JSON settings file, so it always
-        reflects the correct protocol default (almost always ``"big"`` for
-        Modbus).  Individual entries may override it via ``Register_Endian`` in
-        their adjustments column.
+        ``default_word_order`` is resolved from the JSON settings file's
+        ``byteorder`` key (via ``_WORD_ORDER_ALIASES``) so it always reflects
+        the correct protocol default (almost always ``WORD_ORDER_ABCD`` for
+        standard Modbus).  Individual entries may override it via
+        ``Register_Endian`` in their adjustments column.
         """
         self._log: logging.Logger = log
-        self.default_byteorder: Literal["little", "big"] = default_byteorder
+        self.default_word_order: WordOrder = default_word_order
 
     # ------------------------------------------------------------------
     # Parsing
@@ -423,25 +522,36 @@ class DataAdjustments:
                 return value
         return None
 
-    def get_entry_byteorder(self, entry: "registry_map_entry") -> Literal["little", "big"]:
-        """Return the effective byte order for *entry*.
+    def get_entry_byteorder(self, entry: "registry_map_entry") -> WordOrder:
+        """Return the effective ``WordOrder`` for *entry*.
 
-        Defaults to ``self.default_byteorder`` (set at construction time from
+        Defaults to ``self.default_word_order`` (set at construction time from
         the protocol-level ``byteorder`` setting).  Can be overridden per-entry
         via ``Register_Endian`` in the CSV adjustments column.
+
+        Accepted values (case-insensitive) — see ``_WORD_ORDER_ALIASES`` for
+        the complete mapping:
+
+        * ``big_endian-ABCD``              → ABCD (default, standard Modbus)
+        * ``big_endian_byte_swap-BADC``    → BADC
+        * ``little_endian-CDAB``           → CDAB (EG4 / most inverters)
+        * ``little_endian_byte_swap-DCBA`` → DCBA
+        * Short aliases: ``big``/``be`` → ABCD, ``little``/``le`` → CDAB,
+          ``abcd``, ``badc``, ``cdab``, ``dcba``
         """
         if entry.adjustments:
             endian = self.get_adjustment(entry, "Register_Endian")
             if endian is not None:
                 endian_str: str = str(endian).strip().lower()
-                if endian_str in ("little", "le"):
-                    return "little"
-                if endian_str in ("big", "be"):
-                    return "big"
+                word_order: WordOrder | None = _WORD_ORDER_ALIASES.get(endian_str)
+                if word_order is not None:
+                    return word_order
                 self._log.warning(
-                    f"Unsupported Register_Endian '{endian}' for {entry.variable_name}"
+                    f"Unsupported Register_Endian '{endian}' for "
+                    f"{entry.variable_name} — using protocol default. "
+                    f"Valid values: {list(_WORD_ORDER_ALIASES.keys())}"
                 )
-        return self.default_byteorder
+        return self.default_word_order
 
     # ------------------------------------------------------------------
     # Application
@@ -476,19 +586,14 @@ class DataAdjustments:
         # byteorder stage
         # ------------------------------------------------------------------
         if stage == "byteorder":
-            if not entry.adjustments:
-                return value
-            endian: Any | None = self.get_adjustment(entry, "Register_Endian")
-            if endian is None:
-                return value
-            endian_str: str = str(endian).strip().lower()
-            if endian_str in ("little", "le"):
-                return "little"
-            if endian_str in ("big", "be"):
-                return "big"
-            self._log.warning(
-                f"Unsupported Register_Endian adjustment '{endian}' for {entry.variable_name}"
-            )
+            # The byteorder stage is handled directly by get_entry_byteorder();
+            # callers that need a WordOrder should call that method instead.
+            # This branch is retained for any legacy callers that go through
+            # apply_adjustments; it simply delegates and returns the WordOrder
+            # cast to str so the method signature (int|float|str) is satisfied.
+            # In practice no code path calls apply_adjustments with stage="byteorder"
+            # any longer — word-order resolution happens entirely in
+            # get_entry_byteorder() which is called directly by the decode methods.
             return value
 
         # ------------------------------------------------------------------
@@ -702,12 +807,13 @@ class protocol_settings:
         Iterates all ``Registry_Type`` values and loads each corresponding CSV
         registry map file if one exists.
         """
-        # Default byteorder for interpreting multi-byte values.
+        # Default word order for assembling multi-register (32/64-bit) values.
         # Separate from transport-level endianness: the transport always delivers
         # 16-bit registers in big-endian byte order per the Modbus spec.
-        # This setting controls how multi-register (32/64-bit) values are assembled,
-        # and can be overridden per-entry via Register_Endian in the adjustments column.
-        self.byteorder: Literal['little', 'big'] = "big"
+        # This controls word ordering and per-word byte ordering; both axes are
+        # captured in a WordOrder instance and can be overridden per-entry via
+        # Register_Endian in the adjustments column.
+        self.word_order: WordOrder = _DEFAULT_WORD_ORDER
 
         self._log_level = getattr(logging, logging.getLevelName(logging.getLogger().getEffectiveLevel()), logging.INFO)
         self._log: logging.Logger = logging.getLogger(__name__)
@@ -759,15 +865,19 @@ class protocol_settings:
 
         if "byteorder" in self.settings:
             raw_byteorder: str = self.settings["byteorder"].strip().lower()
-            if raw_byteorder in ('little', 'big'):
-                self.byteorder = cast(Literal['little', 'big'], raw_byteorder)
+            resolved: WordOrder | None = _WORD_ORDER_ALIASES.get(raw_byteorder)
+            if resolved is not None:
+                self.word_order = resolved
             else:
-                self._log.warning(f"Invalid byteorder '{raw_byteorder}' in protocol settings — using default 'big'")
+                self._log.warning(
+                    f"Invalid byteorder '{raw_byteorder}' in protocol settings — "
+                    f"using default ABCD. Valid values: {list(_WORD_ORDER_ALIASES.keys())}"
+                )
 
         # DataAdjustments owns all adjustment parsing/application logic.
-        # Constructed here, after byteorder is resolved, so it captures the
-        # correct protocol-level default (nearly always 'big' for Modbus).
-        self._adjustments: DataAdjustments = DataAdjustments(self._log, self.byteorder)
+        # Constructed here, after word_order is resolved, so it captures the
+        # correct protocol-level default (nearly always WORD_ORDER_ABCD for Modbus).
+        self._adjustments: DataAdjustments = DataAdjustments(self._log, self.word_order)
 
         for registry_type in Registry_Type:
             self.load_registry_map(registry_type)
@@ -1600,13 +1710,22 @@ class protocol_settings:
     def process_register_bytes(self, registry: Mapping[int, bytes | tuple[bytes, float]], entry: registry_map_entry) -> int | float | str | None:
         """Process a bytes-oriented registry entry into a typed value.
 
-        Endian contract for the bytes transport path:
-          The transport delivers raw wire bytes. For single-register (16-bit) types
-          the Modbus spec defines big-endian byte order on the wire, so the bytes
-          buffer is always interpreted as big-endian regardless of Register_Endian.
-          Register_Endian:little only affects multi-register (32/64-bit) types where
-          it controls word ordering: the low word arrives at the lower register address
-          so the words must be reversed before big-endian interpretation.
+        Endian contract for the bytes transport path
+        --------------------------------------------
+        The transport delivers raw wire bytes in Modbus big-endian order within
+        each 16-bit word.  ``WordOrder`` controls two independent axes:
+
+        ``word_reversed``
+            For multi-register types: when True the word sequence is reversed
+            before integer unpacking (low word was at the lower register address).
+            Has no effect on single-register types.
+
+        ``bytes_reversed``
+            When True the two bytes within each 16-bit word are swapped.
+            Applies to both single- and multi-register types (BADC / DCBA).
+
+        All four ABCD / BADC / CDAB / DCBA encodings are handled correctly by
+        combining these two axes independently.
         """
 
         raw: bytes | tuple[bytes, float] = registry[entry.register]
@@ -1616,10 +1735,7 @@ class protocol_settings:
         else:
             register = raw
 
-        # word_order controls multi-register word assembly only.
-        # Single-register reads always use big-endian byte interpretation
-        # because the transport delivers Modbus wire bytes unchanged.
-        word_order: Literal['little', 'big'] = self._adjustments.get_entry_byteorder(entry)
+        word_order: WordOrder = self._adjustments.get_entry_byteorder(entry)
 
         if entry.register_byte > 0:
             register = register[entry.register_byte:]
@@ -1627,90 +1743,110 @@ class protocol_settings:
         if entry.data_type_size > 0:
             register = register[:entry.data_type_size]
 
-        # Ensure register is plain bytes so that slice concatenation
-        # (used for word-order reversal below) is always valid.
-        # memoryview slices do not support + concatenation.
+        # Ensure register is plain bytes so that slice concatenation is always
+        # valid (memoryview slices do not support the + operator).
         register = bytes(register)
 
-        # Default fallback: single 16-bit read.
-        # Swap bytes for little-endian single-register entries.
+        # ------------------------------------------------------------------
+        # Helper: swap bytes within every 16-bit word of a byte string.
+        # Used for BADC / DCBA encodings (bytes_reversed=True).
+        # ------------------------------------------------------------------
+        def _swap_words(data: bytes) -> bytes:
+            """Return *data* with the two bytes of every 16-bit word swapped."""
+            out = bytearray(data)
+            for i in range(0, len(out) - 1, 2):
+                out[i], out[i + 1] = out[i + 1], out[i]
+            return bytes(out)
+
+        # ------------------------------------------------------------------
+        # Helper: reverse the word order of a byte string whose words are
+        # each 2 bytes wide.  Used for CDAB / DCBA encodings (word_reversed=True).
+        # ------------------------------------------------------------------
+        def _reverse_words(data: bytes, word_count: int) -> bytes:
+            """Return *data* with its ``word_count`` 16-bit words in reversed order."""
+            words = [data[i*2:(i+1)*2] for i in range(word_count)]
+            return b"".join(reversed(words))
+
+        # Default fallback: single 16-bit unsigned read.
         _fb: bytes = register[:2]
-        if word_order == "little" and len(_fb) == 2:
+        if word_order.bytes_reversed and len(_fb) == 2:
             _fb = bytes([_fb[1], _fb[0]])
         value: int | float | str = int.from_bytes(_fb, byteorder="big", signed=False)
 
         if entry.data_type == Data_Type.UINT:
-            # Multi-word: word_order controls whether low or high word came first.
-            # Reverse the byte buffer when little-endian (low word at lower address).
-            raw_bytes = register[:4]
-            if word_order == "little":
-                # Swap word order: bytes [W0_hi, W0_lo, W1_hi, W1_lo]
-                # become [W1_hi, W1_lo, W0_hi, W0_lo]
-                raw_bytes = register[2:4] + register[0:2]
+            raw_bytes: bytes = register[:4]
+            if word_order.word_reversed:
+                raw_bytes = _reverse_words(raw_bytes, 2)
+            if word_order.bytes_reversed:
+                raw_bytes = _swap_words(raw_bytes)
             value = int.from_bytes(raw_bytes, byteorder="big", signed=False)
+
         elif entry.data_type == Data_Type.INT:
             raw_bytes = register[:4]
-            if word_order == "little":
-                raw_bytes = register[2:4] + register[0:2]
+            if word_order.word_reversed:
+                raw_bytes = _reverse_words(raw_bytes, 2)
+            if word_order.bytes_reversed:
+                raw_bytes = _swap_words(raw_bytes)
             value = int.from_bytes(raw_bytes, byteorder="big", signed=True)
+
         elif entry.data_type == Data_Type.UINT64:
             raw_bytes = register[:8]
-            if word_order == "little":
-                # Reverse 4 words of 2 bytes each
-                raw_bytes = register[6:8] + register[4:6] + register[2:4] + register[0:2]
+            if word_order.word_reversed:
+                raw_bytes = _reverse_words(raw_bytes, 4)
+            if word_order.bytes_reversed:
+                raw_bytes = _swap_words(raw_bytes)
             value = int.from_bytes(raw_bytes, byteorder="big", signed=False)
+
         elif entry.data_type == Data_Type.ACC32:
-            raw_bytes: bytes = register[:4]
-            if word_order == "little":
-                raw_bytes = register[2:4] + register[0:2]
+            raw_bytes = register[:4]
+            if word_order.word_reversed:
+                raw_bytes = _reverse_words(raw_bytes, 2)
+            if word_order.bytes_reversed:
+                raw_bytes = _swap_words(raw_bytes)
             value = int.from_bytes(raw_bytes, byteorder="big", signed=False)
+
         elif entry.data_type == Data_Type.FLOAT32:
             raw_bytes = register[:4]
-            if word_order == "little":
-                raw_bytes = register[2:4] + register[0:2]
+            if word_order.word_reversed:
+                raw_bytes = _reverse_words(raw_bytes, 2)
+            if word_order.bytes_reversed:
+                raw_bytes = _swap_words(raw_bytes)
             value = struct.unpack(">f", raw_bytes)[0]
+
         elif entry.data_type == Data_Type.FLOAT64:
             raw_bytes = register[:8]
-            if word_order == "little":
-                raw_bytes = register[6:8] + register[4:6] + register[2:4] + register[0:2]
+            if word_order.word_reversed:
+                raw_bytes = _reverse_words(raw_bytes, 4)
+            if word_order.bytes_reversed:
+                raw_bytes = _swap_words(raw_bytes)
             value = struct.unpack(">d", raw_bytes)[0]
+
         elif entry.data_type == Data_Type.USHORT:
-            # Single register. Swap bytes for little-endian entries.
+            # Single register — only bytes_reversed is meaningful.
             raw_bytes = register[:2]
-            if word_order == "little":
+            if word_order.bytes_reversed:
                 raw_bytes = bytes([raw_bytes[1], raw_bytes[0]])
             value = int.from_bytes(raw_bytes, byteorder="big", signed=False)
+
         elif entry.data_type == Data_Type.SHORT:
-            # Single register. Wire bytes are Modbus big-endian.
-            # For Register_Endian:little the hardware sends bytes swapped,
-            # so reverse them before sign-extending.
+            # Single register — only bytes_reversed is meaningful.
             raw_bytes = register[:2]
-            # _WATCH3 = {'tinner','tradiator1','tradiator2','tbat',
-            #            'maxcelltemp_bms','mincelltemp_bms','batcurrent_bms'}
-            # if entry.variable_name in _WATCH3:
-            #     self._log.warning(
-            #         f"[DEBUG-BYTES-SHORT] {entry.variable_name} "
-            #         f"wire={raw_bytes.hex()} word_order={word_order}"
-            #     )
-            if word_order == "little":
+            if word_order.bytes_reversed:
                 raw_bytes = bytes([raw_bytes[1], raw_bytes[0]])
             value = int.from_bytes(raw_bytes, byteorder="big", signed=True)
-            # if entry.variable_name in _WATCH3:
-            #     self._log.warning(
-            #         f"[DEBUG-BYTES-SHORT] {entry.variable_name} "
-            #         f"after_swap={raw_bytes.hex()} value={value}"
-            #     )
+
         elif entry.data_type in (Data_Type._16BIT_FLAGS, Data_Type._8BIT_FLAGS, Data_Type._32BIT_FLAGS):
-            # Single or double-register flags. Always big-endian wire bytes per Modbus spec.
-            val: int = int.from_bytes(register, byteorder="big", signed=False)
-            start_bit: int = 0
-            end_bit: int = 16
             flag_size: int = Data_Type.getSize(entry.data_type)
+            flag_word_count: int = max(1, flag_size // 16)
+            flag_bytes: bytes = register[:flag_word_count * 2]
+            if flag_word_count > 1 and word_order.word_reversed:
+                flag_bytes = _reverse_words(flag_bytes, flag_word_count)
+            if word_order.bytes_reversed:
+                flag_bytes = _swap_words(flag_bytes)
+            val: int = int.from_bytes(flag_bytes, byteorder="big", signed=False)
 
-            if isinstance(value, (int, float)) and entry.register_bit >= 0:
-                start_bit = entry.register_bit
-
-            end_bit = flag_size + start_bit
+            start_bit: int = entry.register_bit if entry.register_bit >= 0 else 0
+            end_bit: int = start_bit + flag_size
 
             if entry.documented_name + "_codes" in self.codes:
                 code_dict: dict[str, str] = self.get_code_dict(entry.documented_name + "_codes")
@@ -1718,8 +1854,6 @@ class protocol_settings:
                 flag_indexes: list[str] = []
 
                 if code_dict:
-                    # use the integer value decoded with the correct byte_order
-                    # rather than indexing raw bytes directly.
                     for i in range(start_bit, end_bit):
                         if (val >> i) & 1:
                             flag_index: str = "b" + str(i)
@@ -1738,19 +1872,19 @@ class protocol_settings:
 
                 value = ",".join(flags)
             else:
-                flags: list[str] = []
+                flags = []
                 for i in range(start_bit, end_bit):
-                    if (val >> i) & 1:
-                        flags.append("1")
-                    else:
-                        flags.append("0")
+                    flags.append("1" if (val >> i) & 1 else "0")
                 value = "".join(flags)
 
         elif entry.data_type.value > 400:  # signed-magnitude bit types
             bit_size = Data_Type.getSize(entry.data_type)
             bit_mask = (1 << bit_size) - 1
             bit_index = entry.register_bit
-            register_int: int = int.from_bytes(register, byteorder="big")
+            reg_bytes: bytes = register[:2]
+            if word_order.bytes_reversed:
+                reg_bytes = bytes([reg_bytes[1], reg_bytes[0]])
+            register_int: int = int.from_bytes(reg_bytes, byteorder="big")
             if (register_int >> bit_index) & 1:
                 sign_extension: int = 0xFFFFFFFFFFFFFFFF << bit_size
                 value = (register_int >> (bit_index + 1)) | sign_extension
@@ -1761,7 +1895,10 @@ class protocol_settings:
             bit_size = Data_Type.getSize(entry.data_type)
             bit_mask = (1 << bit_size) - 1
             bit_index = entry.register_bit
-            register_int: int = int.from_bytes(register, byteorder="big")
+            reg_bytes = register[:2]
+            if word_order.bytes_reversed:
+                reg_bytes = bytes([reg_bytes[1], reg_bytes[0]])
+            register_int = int.from_bytes(reg_bytes, byteorder="big")
             if (register_int >> (bit_index + bit_size - 1)) & 1:
                 sign_extension = 0xFFFFFFFFFFFFFFFF << bit_size
                 value = (register_int >> bit_index) | sign_extension
@@ -1769,23 +1906,28 @@ class protocol_settings:
                 value = (register_int >> bit_index) & bit_mask
 
         elif entry.data_type == Data_Type.BYTE:
-            # Single register — always big-endian wire bytes.
-            value = int.from_bytes(register[:1], byteorder="big", signed=False)
+            # Single register — bytes_reversed only.
+            reg_bytes = register[:2]
+            if word_order.bytes_reversed:
+                reg_bytes = bytes([reg_bytes[1], reg_bytes[0]])
+            value = reg_bytes[0]
 
         elif entry.data_type.value > 200:  # unsigned bit types
-            bit_size: int = Data_Type.getSize(entry.data_type)
-            bit_mask: int = (1 << bit_size) - 1
-            bit_index: int = entry.register_bit
-            if isinstance(register, bytes):
-                register_int = int.from_bytes(register, byteorder="big")
-                value = (register_int >> bit_index) & bit_mask
+            bit_size = Data_Type.getSize(entry.data_type)
+            bit_mask = (1 << bit_size) - 1
+            bit_index = entry.register_bit
+            reg_bytes = register[:2]
+            if word_order.bytes_reversed:
+                reg_bytes = bytes([reg_bytes[1], reg_bytes[0]])
+            register_int = int.from_bytes(reg_bytes, byteorder="big")
+            value = (register_int >> bit_index) & bit_mask
 
         elif entry.data_type == Data_Type.HEX:
-            register_bytes: bytes = bytes(register)
-            value = register_bytes.hex()
+            value = bytes(register).hex()
 
         elif entry.data_type == Data_Type.ASCII:
             value = self._decode_text_bytes(bytes(register))
+
         elif entry.data_type in (Data_Type.STRING, Data_Type.STRING16, Data_Type.STRING32):
             value = self._decode_text_bytes(bytes(register))
 
@@ -1867,22 +2009,37 @@ class protocol_settings:
         registry: Mapping[int, int],
         start_register: int,
         word_count: int,
-        byte_order: Literal['little', 'big'],
+        word_order: WordOrder,
     ) -> bytes | None:
         """Assemble ``word_count`` consecutive 16-bit registers into a contiguous byte string.
 
         Returns ``None`` if any register in the range is absent from
-        ``registry``.  Endian contract (per EG4 hardware spec):
+        ``registry``.
 
-        - ``big`` (default): high word at the lower register address, bytes
-          within each word in big-endian order — standard Modbus.
-        - ``little``: low word at the lower register address **and** bytes
-          within each word also reversed (LE-LE).  Used only for registers
-          annotated with ``Register_Endian:little`` in the CSV.
+        The two axes of ``word_order`` are applied independently:
+
+        ``word_order.word_reversed``
+            If True, the list of 16-bit words is reversed before serialization
+            so that the low-significance word (stored at the lower register
+            address by the hardware) ends up at the high end of the resulting
+            byte string, as required for big-endian integer unpacking by callers.
+            This covers CDAB and DCBA encodings.
+
+        ``word_order.bytes_reversed``
+            If True, each 16-bit word is serialized in little-endian byte order.
+            Modbus always transmits registers in big-endian byte order on the
+            wire, so this flag is only set for the unusual BADC/DCBA encodings
+            where the hardware byte-swaps within each register.
 
         The Modbus transport always delivers each 16-bit register as a correctly
-        oriented integer, so byte-swapping within a word is a register-map-level
-        concern, not a transport concern.
+        oriented integer (per the Modbus spec); byte-swapping within a word is
+        therefore a register-map-level concern handled here, not a transport concern.
+
+        Encoding matrix:
+            ABCD: word_reversed=False, bytes_reversed=False (standard Modbus)
+            BADC: word_reversed=False, bytes_reversed=True
+            CDAB: word_reversed=True,  bytes_reversed=False (EG4, most inverters)
+            DCBA: word_reversed=True,  bytes_reversed=True  (Intel/x86 convention)
         """
         words: list[int] = []
         for offset in range(word_count):
@@ -1891,17 +2048,16 @@ class protocol_settings:
                 return None
             words.append(registry[register_num] & 0xFFFF)
 
-        if byte_order == "little":
-            # Reverse word order: low word was at the lower register address,
-            # so after reversal the high word is first in the byte string,
-            # matching big-endian struct unpacking used by callers.
+        if word_order.word_reversed:
+            # Low-significance word is at the lower register address.
+            # Reverse so the high word is first — callers always unpack big-endian.
             words.reverse()
 
-        # Bytes within each word follow the same byte_order.
-        # For big (default): standard network order — no swap needed.
-        # For little: bytes within each word are also reversed per hardware spec.
+        # Bytes within each word: Modbus wire format is big-endian (bytes_reversed=False).
+        # bytes_reversed=True only for BADC/DCBA where the hardware byte-swaps each word.
+        per_word_byteorder: str = "little" if word_order.bytes_reversed else "big"
         return b"".join(
-            word.to_bytes(2, byteorder=byte_order, signed=False) for word in words
+            word.to_bytes(2, byteorder=per_word_byteorder, signed=False) for word in words
         )
 
     def _swap_bytes_16(self, val: int) -> int:
@@ -1913,76 +2069,72 @@ class protocol_settings:
         return raw_bytes.decode("utf-8", errors="replace").replace("\x00", "").strip()
 
     def process_register_ushort(self, registry: Mapping[int, int], entry: registry_map_entry) -> int | float | str | None:
-        """Process a ushort (integer-per-register) registry entry into a typed value."""
+        """Process a ushort (integer-per-register) registry entry into a typed value.
 
-        byte_order: Literal['little', 'big'] = self._adjustments.get_entry_byteorder(entry)
+        All multi-register types delegate to ``_register_words_to_bytes`` which
+        handles both word-order reversal (``WordOrder.word_reversed``) and
+        per-word byte swapping (``WordOrder.bytes_reversed``) independently,
+        covering all four ABCD/BADC/CDAB/DCBA encoding conventions.
+
+        For single-register types only ``bytes_reversed`` is relevant: when True
+        the two bytes within the 16-bit register are swapped before the value is
+        extracted.  ``word_reversed`` has no meaning for a single word.
+        """
+        word_order: WordOrder = self._adjustments.get_entry_byteorder(entry)
 
         if entry.data_type == Data_Type.UINT:
-            register_bytes: bytes | None = self._register_words_to_bytes(registry, entry.register, 2, byte_order)
+            register_bytes: bytes | None = self._register_words_to_bytes(registry, entry.register, 2, word_order)
             if register_bytes is None:
                 return None
             value = int.from_bytes(register_bytes, byteorder="big", signed=False)
 
         elif entry.data_type == Data_Type.UINT64:
-            register_bytes = self._register_words_to_bytes(registry, entry.register, 4, byte_order)
+            register_bytes = self._register_words_to_bytes(registry, entry.register, 4, word_order)
             if register_bytes is None:
                 return None
             value = int.from_bytes(register_bytes, byteorder="big", signed=False)
 
         elif entry.data_type == Data_Type.ACC32:
-            register_bytes = self._register_words_to_bytes(registry, entry.register, 2, byte_order)
+            register_bytes = self._register_words_to_bytes(registry, entry.register, 2, word_order)
             if register_bytes is None:
                 return None
             value = int.from_bytes(register_bytes, byteorder="big", signed=False)
 
         elif entry.data_type == Data_Type.FLOAT32:
-            register_bytes = self._register_words_to_bytes(registry, entry.register, 2, byte_order)
+            register_bytes = self._register_words_to_bytes(registry, entry.register, 2, word_order)
             if register_bytes is None:
                 return None
             value = struct.unpack(">f", register_bytes)[0]
 
         elif entry.data_type == Data_Type.FLOAT64:
-            register_bytes = self._register_words_to_bytes(registry, entry.register, 4, byte_order)
+            register_bytes = self._register_words_to_bytes(registry, entry.register, 4, word_order)
             if register_bytes is None:
                 return None
             value = struct.unpack(">d", register_bytes)[0]
 
         elif entry.data_type == Data_Type.SHORT:
-            # For Register_Endian:little entries (e.g. batcurrent_bms,
-            # maxcelltemp_bms, mincelltemp_bms) the two bytes within the
-            # 16-bit register must be swapped before sign-extending.
+            # Single-register signed int.  Only bytes_reversed matters here
+            # (there is no second word to re-order).  Swap the two bytes within
+            # the register when the hardware uses BADC/DCBA byte ordering.
             raw = registry[entry.register] & 0xFFFF
-            # _WATCH4 = {'tinner','tradiator1','tradiator2','tbat',
-            #            'maxcelltemp_bms','mincelltemp_bms','batcurrent_bms'}
-            # if entry.variable_name in _WATCH4:
-            #     self._log.warning(
-            #         f"[DEBUG-USHORT-SHORT] {entry.variable_name} "
-            #         f"raw=0x{raw:04X} byte_order={byte_order}"
-            #     )
-            if byte_order == "little":
+            if word_order.bytes_reversed:
                 raw = self._swap_bytes_16(raw)
             if raw & (1 << 15):
                 value = raw - (1 << 16)
             else:
                 value = raw
-            # if entry.variable_name in _WATCH4:
-            #     self._log.warning(
-            #         f"[DEBUG-USHORT-SHORT] {entry.variable_name} "
-            #         f"after_swap=0x{raw:04X} value={value}"
-            #     )
 
         elif entry.data_type == Data_Type.INT:
-            register_bytes = self._register_words_to_bytes(registry, entry.register, 2, byte_order)
+            register_bytes = self._register_words_to_bytes(registry, entry.register, 2, word_order)
             if register_bytes is None:
                 return None
             value = int.from_bytes(register_bytes, byteorder="big", signed=True)
 
         elif entry.data_type == Data_Type._8BIT:
-            # byte_order ignored previously. Swap bytes before extracting
-            # the target byte so high/low byte selection is correct for
-            # little-endian entries.
+            # Single-register sub-byte field.  Swap bytes first when the
+            # hardware delivers them in reversed order (bytes_reversed=True).
             raw = registry[entry.register] & 0xFFFF
-            if byte_order == "little":
+            if word_order.bytes_reversed:
                 raw = self._swap_bytes_16(raw)
             start_bit = entry.register_bit if entry.register_bit >= 0 else 0
             value = (raw >> start_bit) & 0xFF
@@ -1991,17 +2143,15 @@ class protocol_settings:
             bit_size: int = Data_Type.getSize(entry.data_type)
             total_registers = max(1, bit_size // 16)
             if total_registers > 1:
-                # use _register_words_to_bytes so word order and byte order
-                # within each word are both handled correctly for little-endian
-                # entries (e.g. _32BIT_FLAGS with Register_Endian:little).
-                flag_bytes = self._register_words_to_bytes(registry, entry.register, total_registers, byte_order)
+                # Multi-register flags: both word_reversed and bytes_reversed apply.
+                flag_bytes = self._register_words_to_bytes(registry, entry.register, total_registers, word_order)
                 if flag_bytes is None:
                     return None
                 val = int.from_bytes(flag_bytes, byteorder="big", signed=False)
             else:
-                # Single register: apply byte swap for little-endian if needed
+                # Single register: only bytes_reversed applies.
                 val = registry[entry.register] & 0xFFFF
-                if byte_order == "little":
+                if word_order.bytes_reversed:
                     val = self._swap_bytes_16(val)
 
             start_bit: int = entry.register_bit if entry.register_bit >= 0 else 0
@@ -2026,9 +2176,8 @@ class protocol_settings:
         elif entry.data_type.value > 400:  # signed-magnitude bit types
             bit_size = Data_Type.getSize(entry.data_type)
             bit_index: int = entry.register_bit if entry.register_bit >= 0 else 0
-            # swap bytes before bit extraction for little-endian entries
             register_int = registry[entry.register] & 0xFFFF
-            if byte_order == "little":
+            if word_order.bytes_reversed:
                 register_int: int = self._swap_bytes_16(register_int)
             sign_bit: int = (register_int >> bit_index) & 1
             magnitude: int = (register_int >> (bit_index + 1)) & ((1 << (bit_size - 1)) - 1)
@@ -2037,9 +2186,8 @@ class protocol_settings:
         elif entry.data_type.value > 300:  # signed bit types
             bit_size = Data_Type.getSize(entry.data_type)
             bit_index = entry.register_bit if entry.register_bit >= 0 else 0
-            # swap bytes before bit extraction for little-endian entries
             register_int = registry[entry.register] & 0xFFFF
-            if byte_order == "little":
+            if word_order.bytes_reversed:
                 register_int = self._swap_bytes_16(register_int)
             raw_bits: int = (register_int >> bit_index) & ((1 << bit_size) - 1)
             sign_mask: int = 1 << (bit_size - 1)
@@ -2051,36 +2199,34 @@ class protocol_settings:
         elif entry.data_type.value > 200:  # unsigned bit types
             bit_size = Data_Type.getSize(entry.data_type)
             bit_index = entry.register_bit if entry.register_bit >= 0 else 0
-            # swap bytes before bit extraction for little-endian entries
             register_int = registry[entry.register] & 0xFFFF
-            if byte_order == "little":
+            if word_order.bytes_reversed:
                 register_int = self._swap_bytes_16(register_int)
             value = (register_int >> bit_index) & ((1 << bit_size) - 1)
 
         elif entry.data_type == Data_Type.BYTE:
-            # Extract the low byte of the register.
-            # For little-endian entries swap first so "low byte" is the correct
-            # physical byte per the hardware spec.
+            # Extract the low byte of the register.  Swap first when the
+            # hardware delivers bytes in reversed order (BADC/DCBA).
             raw: int = registry[entry.register] & 0xFFFF
-            if byte_order == "little":
+            if word_order.bytes_reversed:
                 raw = self._swap_bytes_16(raw)
             value = raw & 0xFF
 
         elif entry.data_type == Data_Type.HEX:
             raw = registry[entry.register] & 0xFFFF
-            if byte_order == "little":
+            if word_order.bytes_reversed:
                 raw = self._swap_bytes_16(raw)
             value = raw.to_bytes(2, byteorder="big").hex()
 
         elif entry.data_type == Data_Type.ASCII:
-            raw_bytes: bytes | None = self._register_words_to_bytes(registry, entry.register, 1, byte_order)
+            raw_bytes: bytes | None = self._register_words_to_bytes(registry, entry.register, 1, word_order)
             if raw_bytes is None:
                 return None
             value = self._decode_text_bytes(raw_bytes)
 
         elif entry.data_type in (Data_Type.STRING, Data_Type.STRING16, Data_Type.STRING32):
             word_count: int = self.entry_word_count(entry)
-            raw_bytes = self._register_words_to_bytes(registry, entry.register, word_count, byte_order)
+            raw_bytes = self._register_words_to_bytes(registry, entry.register, word_count, word_order)
             if raw_bytes is None:
                 return None
             if entry.data_type_size > 0:
@@ -2088,10 +2234,9 @@ class protocol_settings:
             value = self._decode_text_bytes(raw_bytes)
 
         else:
-            # USHORT fallback
-            # Swap bytes for little-endian entries before returning.
+            # USHORT fallback — single register.  Swap bytes if bytes_reversed.
             raw = registry[entry.register] & 0xFFFF
-            if byte_order == "little":
+            if word_order.bytes_reversed:
                 raw = self._swap_bytes_16(raw)
             value = raw
 
