@@ -379,6 +379,9 @@ Data produced by any of the MPG bridges can be visualized in Grafana.  This exam
 
 ![Grafana Dashboard](documentation/assets/GrafanaSolar.png)
 
+The code for this dashboard can be found here:
+![Grafana JSON](documentation/dashboards/GrafanaInfluxDBDashboard.json)
+
 ## Protocol Maps & Register Configuration
 
 Each supported device has a protocol directory under `protocols/` containing:
