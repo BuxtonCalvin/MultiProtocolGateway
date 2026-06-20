@@ -79,6 +79,7 @@
   "reconnect_delay": "Initial delay in seconds between reconnection attempts.",
   "retries": "Number of retry attempts for failed network or serial operations before the error is propagated.",
   "retry_delay_mins": "When a transport's data is detected as stale, an upstream reconnect is triggered via the gateway callback up to max_stale_attempts times, with a minimum of retry_delay_mins between attempts.",
+  "save_file": "For the JSON_Out transport, specifies whether to export the JSON to a file (true) or use stdout to screen only (false)",
   "send_coil_register": "When true, coil register values are scraped for data published by this transport.",
   "send_discrete_register": "When true, discrete register values are scraped for data published by this transport.",
   "send_holding_register": "When true, holding register values are included in the data published by this transport.",

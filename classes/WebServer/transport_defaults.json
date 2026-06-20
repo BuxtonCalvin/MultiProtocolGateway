@@ -151,7 +151,8 @@
     "include_timestamp": "True",
     "output_file": "stdout",
     "pretty_print": "True",
-    "use_utc_timestamp": "False"
+    "use_utc_timestamp": "False",
+    "save_file": "True"
   },
   "modbus_base": {
     "address": "1",
