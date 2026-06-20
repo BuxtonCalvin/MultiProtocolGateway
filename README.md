@@ -33,6 +33,7 @@ MPG is purpose-built for solar inverters, battery management systems (BMS), ener
 - [Full Docker Compose Stack](#full-docker-compose-stack)
 - [Installation as a System Service](#installation-as-a-system-service)
 - [Home Assistant Integration](#home-assistant-integration)
+- [Grafana Sample](#grafana-sample)
 - [Protocol Maps & Register Configuration](#protocol-maps--register-configuration)
 - [Variable Filtering](#variable-filtering)
 - [Configuration Reference](#configuration-reference)
@@ -371,6 +372,12 @@ For connecting an external MQTT broker to Home Assistant, see [this guide](https
 If all MQTT values appear as "Unknown" immediately after setup, this is a known Home Assistant discovery timing issue. Restart the MPG service and the values will populate correctly.
 
 ---
+
+## Grafana Sample
+
+Data produced by any of the MPG bridges can be visualized in Grafana.  This example is using the influxdb bridge.
+
+![Grafana Dashboard](documentation/assets/GrafanaSolar.png)
 
 ## Protocol Maps & Register Configuration
 
