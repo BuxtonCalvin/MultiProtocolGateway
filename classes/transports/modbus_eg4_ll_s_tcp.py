@@ -76,7 +76,7 @@ in eg4_ll_pdf_holding_registry_map.csv exactly:
 Waveshare device setup (via its web interface)
 ----------------------------------------------
   Work Mode  : TCP Server
-  Baud Rate  : 19200 (match battery DIP baud setting)
+  Baud Rate  : 9600 (match battery DIP baud setting)
   Data Bits  : 8
   Stop Bits  : 1
   Parity     : None
@@ -91,7 +91,7 @@ the master battery — full BMS register data is unavailable at that address.
 Set batteries to DIP addresses 2-64 for full data access.  If using CAN for
 inverter comms, all RS485 ports are free and all addresses 2-64 are usable.
 
-Sequential read mode is mandatory. All batteries share one physical RS485 bus
+Sequential or interleaved read mode is mandatory. All batteries share one physical RS485 bus
 through the Waveshare. Set read_mode = "sequential" or "interleaved" (not
 "concurrent") in the gateway config to prevent request collisions on the wire.
 
@@ -100,7 +100,7 @@ Config keys (in addition to modbus_tcp / transport_base keys)
   host             Waveshare IP address
   port             Waveshare TCP port, default 502
   slave_id         Battery DIP switch address (2-64 for full BMS data)
-  protocol_version must be set to eg4_ll_pdf
+  protocol_version must be set to eg4_ll_s
 
 Manual verification commands (send to RS485 bus to confirm addressing):
   Battery 1 (DIP=01): 01 03 00 00 00 01 84 0A
