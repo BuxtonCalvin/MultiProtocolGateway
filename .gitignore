@@ -50,4 +50,3 @@ tools/mapped_columns.csv
 classes/WebServer/static/annotation-editor.html
 scripts/*.*
 
-classes/WebServer/migrations/**
