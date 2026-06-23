@@ -247,7 +247,6 @@ class DeviceProtocolSelection(Base):
     mask_enabled_disk: Mapped[bool] = mapped_column(Boolean, default=False)
     screen_enabled_disk: Mapped[bool] = mapped_column(Boolean, default=False)
 
-    paired_high_address: Mapped[str | None] = mapped_column(String, nullable=True, default=None)
     is_dirty: Mapped[bool] = mapped_column(Boolean, default=False)
 
     created_at: Mapped[datetime] = mapped_column(
