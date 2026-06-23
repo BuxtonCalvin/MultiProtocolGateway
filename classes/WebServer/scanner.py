@@ -571,8 +571,85 @@ def _parse_protocol_csv(csv_path: Path, group_name: str) -> list[dict[str, Any]]
     except Exception as exc:
         _log.error(f"Error parsing protocol CSV {csv_path}: {exc}", exc_info=True)
 
+    # ── Merge consecutive _l / _h register pairs ─────────────────────────
+    # Mirrors the same merge logic in protocol_settings.load__registry so
+    # the DB stores logical stem names rather than raw half-register names.
+    #
+    # Detection rule (identical to runtime):
+    #   row N  variable_name ends with "_l"
+    #   row N+1 variable_name == row N's stem + "_h"
+    #   and both rows have consecutive integer addresses
+    #
+    # The _l row is promoted to the combined entry (stem name, lower addr).
+    # The _h row is removed — it will not be upserted into ProtocolRegister.
+    # The combined row gains a "paired_high_address" key so the UI can render
+    # the address range (e.g. "40–41") and show the expand/collapse detail.
+
     result = list(rows_by_address.values())
-    _log.debug(f"Parsed {len(result)} unique registers from {csv_path.name}")
+
+    merged_count: int = 0
+    i: int = 0
+    while i < len(result) - 1:
+        low  = result[i]
+        high = result[i + 1]
+        low_var:  str = low["variable_name"]
+        high_var: str = high["variable_name"]
+
+        # Both addresses must be parseable integers and consecutive
+        try:
+            low_addr:  int = int(low["register_address"])
+            high_addr: int = int(high["register_address"])
+        except (ValueError, TypeError):
+            i += 1
+            continue
+
+        if (
+            low_var.endswith("_l")
+            and high_var == low_var[:-2] + "_h"
+            and high_addr == low_addr + 1
+        ):
+            stem: str = low_var[:-2]  # strip "_l"
+
+            # Promote _l row to the combined stem entry
+            low["variable_name"]        = stem
+            low["documented_name"]      = (low["documented_name"][:-2].strip()
+                                           if low["documented_name"].endswith("_l")
+                                           else low["documented_name"])
+            low["paired_high_address"]  = str(high_addr)
+
+            # Inherit missing metadata from the _h row
+            if not low.get("unit") and high.get("unit"):
+                low["unit"]        = high["unit"]
+            if not low.get("data_type") or low.get("data_type") in ("", "USHORT"):
+                if high.get("data_type") and high["data_type"] != "USHORT":
+                    low["data_type"] = high["data_type"]
+                else:
+                    low["data_type"] = "UINT"
+            if not low.get("adjustments") and high.get("adjustments"):
+                low["adjustments"] = high["adjustments"]
+            if not low.get("note") and high.get("note"):
+                low["note"] = high["note"]
+
+            # Remove the _h row — it has no independent DB existence
+            del result[i + 1]
+            merged_count += 1
+            # Don't advance i — the next row is now at i+1 and might itself
+            # be the _l half of another pair (unlikely but safe)
+        else:
+            i += 1
+
+    if merged_count:
+        _log.debug(
+            f"Merged {merged_count} _l/_h register pair(s) into combined "
+            f"stem entries in {csv_path.name}"
+        )
+
+    # Ensure every row has the paired_high_address key (None for non-paired rows)
+    for row in result:
+        row.setdefault("paired_high_address", None)
+
+    _log.debug(f"Parsed {len(result)} logical registers from {csv_path.name} "
+               f"({merged_count} merged pairs)")
     return result
 
 
@@ -710,17 +787,19 @@ def _upsert_protocol_register(db: Session, reg: dict[str, Any]) -> ProtocolRegis
         # Row found — update protocol-sourced fields only, preserve user toggles
         existing.protocol_group    = reg["protocol_group"]
         if not existing.is_dirty:
-            existing.variable_name     = reg["variable_name"]
-            existing.documented_name   = reg["documented_name"]
-            existing.unit              = reg.get("unit", "")
-            existing.data_type         = reg.get("data_type", "")
-            existing.values_range      = reg.get("values_range", "")
-            existing.adjustments       = reg.get("adjustments", "")
-            existing.note              = reg.get("note", "")
-            existing.read_interval     = reg.get("read_interval", "")
+            existing.variable_name       = reg["variable_name"]
+            existing.documented_name     = reg["documented_name"]
+            existing.unit                = reg.get("unit", "")
+            existing.data_type           = reg.get("data_type", "")
+            existing.values_range        = reg.get("values_range", "")
+            existing.adjustments         = reg.get("adjustments", "")
+            existing.note                = reg.get("note", "")
+            existing.read_interval       = reg.get("read_interval", "")
             existing.write_mode_protocol = reg["write_mode_protocol"]
         # Note: user_write_enabled / mask_enabled / screen_enabled intentionally
         # not touched here — they are user-controlled toggles.
+        # paired_high_address is structural metadata — always keep current from CSV.
+        existing.paired_high_address = reg.get("paired_high_address")
         return existing
 
     # Row not found — attempt INSERT inside a savepoint so a race-condition
@@ -728,19 +807,20 @@ def _upsert_protocol_register(db: Session, reg: dict[str, Any]) -> ProtocolRegis
     try:
         with db.begin_nested():   # SQLAlchemy SAVEPOINT
             new_row = ProtocolRegister(
-                protocol_group       = reg["protocol_group"],
-                protocol_name        = reg["protocol_name"],
-                registry_type        = reg["registry_type"],
-                register_address     = reg["register_address"],
-                variable_name        = reg["variable_name"],
-                documented_name      = reg["documented_name"],
-                unit                 = reg.get("unit", ""),
-                data_type            = reg.get("data_type", ""),
-                values_range         = reg.get("values_range", ""),
-                adjustments          = reg.get("adjustments", ""),
-                note                 = reg.get("note", ""),
-                read_interval        = reg.get("read_interval", ""),
-                write_mode_protocol  = reg["write_mode_protocol"],
+                protocol_group         = reg["protocol_group"],
+                protocol_name          = reg["protocol_name"],
+                registry_type          = reg["registry_type"],
+                register_address       = reg["register_address"],
+                variable_name          = reg["variable_name"],
+                documented_name        = reg["documented_name"],
+                unit                   = reg.get("unit", ""),
+                data_type              = reg.get("data_type", ""),
+                values_range           = reg.get("values_range", ""),
+                adjustments            = reg.get("adjustments", ""),
+                note                   = reg.get("note", ""),
+                read_interval          = reg.get("read_interval", ""),
+                write_mode_protocol    = reg["write_mode_protocol"],
+                paired_high_address    = reg.get("paired_high_address"),
                 # User-controlled toggle defaults
                 user_write_enabled       = False,
                 mask_enabled             = True,
@@ -766,17 +846,32 @@ def _upsert_protocol_register(db: Session, reg: dict[str, Any]) -> ProtocolRegis
 
 
 def _load_filter_names(path: Path) -> set[str]:
+    """Load a line-delimited filter file and return a normalised set of metric names.
+
+    Half-register suffix normalisation
+    ------------------------------------
+    Since _parse_protocol_csv now merges _l/_h pairs into a single stem entry,
+    the variable_name stored in ProtocolRegister is the stem (e.g. "echg_all"),
+    not "echg_all_l".  Filter files written before this change — or by users who
+    selected the _l register name in the UI — will contain the old suffix form.
+    Stripping _l/_h here ensures the set still matches the stem names in the DB.
+    """
     if not path.exists():
         return set()
+    names: set[str] = set()
     try:
-        return {
-            line.strip().lower().replace(" ", "_")
-            for line in path.read_text(encoding="utf-8", errors="replace").splitlines()
-            if line.strip()
-        }
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            name: str = line.strip().lower().replace(" ", "_")
+            if not name:
+                continue
+            # Normalise half-register names to their stem so they match the
+            # merged ProtocolRegister.variable_name (e.g. "echg_all_l" → "echg_all")
+            if name.endswith("_l") or name.endswith("_h"):
+                name = name[:-2]
+            names.add(name)
     except Exception as exc:
         _log.warning(f"Could not read filter file {path}: {exc}")
-        return set()
+    return names
 
 
 def _load_override_names(

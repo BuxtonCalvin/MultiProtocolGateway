@@ -114,7 +114,7 @@ Manual verification commands (send to RS485 bus to confirm addressing):
 
 from __future__ import annotations
 
-from classes.protocol_settings import Registry_Type, registry_map_entry
+from classes.protocol_settings import Registry_Type
 from classes.transports.modbus_rtu import modbus_rtu
 from defs.common import TransportSettings
 
@@ -154,21 +154,6 @@ class modbus_eg4_ll_s_rtu(modbus_rtu):
         super().__init__(settings)
         self._slave_id: str = settings.get("slave_id", fallback="")
 
-    # ------------------------------------------------------------------
-    # scrape_target override
-    # ------------------------------------------------------------------
-
-    @property
-    def scrape_target(self) -> str:
-        """
-        Append slave_id to the base scrape target so each battery on the
-        shared RS485 bus gets its own scrape group and independent read
-        thread, rather than being consolidated with other batteries behind
-        the same Waveshare bridge.
-        """
-        base: str = super().scrape_target  # e.g. "10.17.2.66:502"
-        slave_id  = getattr(self, "_slave_id", None)
-        return f"{base}:{slave_id}" if slave_id else base
 
     # ------------------------------------------------------------------
     # transport_base interface
@@ -235,50 +220,14 @@ class modbus_eg4_ll_s_rtu(modbus_rtu):
             self._holding_loaded = True
             return
 
-        holding_map: list[registry_map_entry] = (
-            self.protocolSettings.registry_map.get(Registry_Type.HOLDING, [])
-        )
-
-        if not holding_map:
-            self._log.warning(
-                "No HOLDING registry map defined for %s — "
-                "protection thresholds and balance config unavailable.",
-                self.transport_name,
-            )
-            self._holding_loaded = True
-            return
-
-        self._log.info(
-            "Reading EG4 BMS holding registers for %s (%d entries)...",
-            self.transport_name,
-            len(holding_map),
-        )
-
-        raw: dict[int, int] = self.read_modbus_registers(
-            ranges=self.protocolSettings.get_registry_ranges(Registry_Type.HOLDING),
-            registry_type=Registry_Type.HOLDING,
-        )
-
-        if not raw:
-            self._log.warning(
-                "Could not read HOLDING registers for %s — "
-                "balancing inference will use built-in defaults.",
-                self.transport_name,
-            )
-            self._holding_loaded = True
-            return
-
         try:
-            self._holding_cache = self.protocolSettings.process_registery(raw, holding_map)
+            self._log.info("Reading EG4 BMS holding registers for %s (%d entries)...", self.transport_name)
+            self._holding_cache = self.read_registry(Registry_Type.HOLDING)
         except Exception:
             self._log.exception("process_registery failed for HOLDING registers on %s", self.transport_name)
 
         self._holding_loaded = True
-        self._log.info(
-            "EG4 BMS holding registers loaded for %s: %d values cached.",
-            self.transport_name,
-            len(self._holding_cache),
-        )
+        self._log.info("EG4 BMS holding registers loaded for %s: %d values cached.", self.transport_name,len(self._holding_cache))
 
     # ------------------------------------------------------------------
     # Derived field computations

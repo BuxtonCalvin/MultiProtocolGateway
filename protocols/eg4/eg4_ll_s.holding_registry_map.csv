@@ -1,22 +1,22 @@
 register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note
 0,pack_voltage,pack_voltage,0.01V,USHORT,0-65535,,R,,Pack voltage. PDF: 10 mV/LSB = 0.01 V. Verified: u16(offset 3)/100.
 1,pack_current,pack_current,0.01A,SHORT,-65535,,R,,Pack current. PDF: 10 mA/LSB = 0.01 A. Positive=charging Negative=discharging. Verified: s16(offset 5)/100.
-2,cell_01_voltage,cell_01_voltage,1mV,USHORT,0-65535,,R,,Cell 1 voltage.  u16(offset 7)/1000 V; raw is mV.
-3,cell_02_voltage,cell_02_voltage,1mV,USHORT,0-65535,,R,,Cell 2 voltage.
-4,cell_03_voltage,cell_03_voltage,1mV,USHORT,0-65535,,R,,Cell 3 voltage.
-5,cell_04_voltage,cell_04_voltage,1mV,USHORT,0-65535,,R,,Cell 4 voltage.
-6,cell_05_voltage,cell_05_voltage,1mV,USHORT,0-65535,,R,,Cell 5 voltage.
-7,cell_06_voltage,cell_06_voltage,1mV,USHORT,0-65535,,R,,Cell 6 voltage.
-8,cell_07_voltage,cell_07_voltage,1mV,USHORT,0-65535,,R,,Cell 7 voltage.
-9,cell_08_voltage,cell_08_voltage,1mV,USHORT,0-65535,,R,,Cell 8 voltage.
-10,cell_09_voltage,cell_09_voltage,1mV,USHORT,0-65535,,R,,Cell 9 voltage.
-11,cell_10_voltage,cell_10_voltage,1mV,USHORT,0-65535,,R,,Cell 10 voltage.
-12,cell_11_voltage,cell_11_voltage,1mV,USHORT,0-65535,,R,,Cell 11 voltage.
-13,cell_12_voltage,cell_12_voltage,1mV,USHORT,0-65535,,R,,Cell 12 voltage.
-14,cell_13_voltage,cell_13_voltage,1mV,USHORT,0-65535,,R,,Cell 13 voltage.
-15,cell_14_voltage,cell_14_voltage,1mV,USHORT,0-65535,,R,,Cell 14 voltage.
-16,cell_15_voltage,cell_15_voltage,1mV,USHORT,0-65535,,R,,Cell 15 voltage.
-17,cell_16_voltage,cell_16_voltage,1mV,USHORT,0-65535,,R,,Cell 16 voltage.
+2,cell_01_voltage,cell_01_voltage,0.001V,USHORT,0-65535,,R,,Cell 1 voltage.  u16(offset 7)/1000 V; raw is mV.
+3,cell_02_voltage,cell_02_voltage,0.001V,USHORT,0-65535,,R,,Cell 2 voltage.
+4,cell_03_voltage,cell_03_voltage,0.001V,USHORT,0-65535,,R,,Cell 3 voltage.
+5,cell_04_voltage,cell_04_voltage,0.001V,USHORT,0-65535,,R,,Cell 4 voltage.
+6,cell_05_voltage,cell_05_voltage,0.001V,USHORT,0-65535,,R,,Cell 5 voltage.
+7,cell_06_voltage,cell_06_voltage,0.001V,USHORT,0-65535,,R,,Cell 6 voltage.
+8,cell_07_voltage,cell_07_voltage,0.001V,USHORT,0-65535,,R,,Cell 7 voltage.
+9,cell_08_voltage,cell_08_voltage,0.001V,USHORT,0-65535,,R,,Cell 8 voltage.
+10,cell_09_voltage,cell_09_voltage,0.001V,USHORT,0-65535,,R,,Cell 9 voltage.
+11,cell_10_voltage,cell_10_voltage,0.001V,USHORT,0-65535,,R,,Cell 10 voltage.
+12,cell_11_voltage,cell_11_voltage,0.001V,USHORT,0-65535,,R,,Cell 11 voltage.
+13,cell_12_voltage,cell_12_voltage,0.001V,USHORT,0-65535,,R,,Cell 12 voltage.
+14,cell_13_voltage,cell_13_voltage,0.001V,USHORT,0-65535,,R,,Cell 13 voltage.
+15,cell_14_voltage,cell_14_voltage,0.001V,USHORT,0-65535,,R,,Cell 14 voltage.
+16,cell_15_voltage,cell_15_voltage,0.001V,USHORT,0-65535,,R,,Cell 15 voltage.
+17,cell_16_voltage,cell_16_voltage,0.001V,USHORT,0-65535,,R,,Cell 16 voltage.
 18,temp_pcb,temp_pcb,1C,SHORT,-140,,R,,PCB/MOSFET temperature. PDF: Temp of PCB SHORT degC. Verified:  s16(offset 39) -> reg 18.
 19,temp_avg,temp_avg,1C,SHORT,-140,,R,,Average cell temperature. PDF: Temp Avg SHORT degC. Present in read window; not decoded separately by .
 20,temp_max,temp_max,1C,SHORT,-140,,R,,Maximum cell temperature. PDF: Temp Max SHORT degC. Present in read window; not decoded separately by .

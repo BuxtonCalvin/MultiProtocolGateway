@@ -889,6 +889,21 @@ class protocol_settings:
         ``find_protocol_file``.  Lines beginning with ``#`` and blank lines are
         skipped.  Returns an empty list if the file is not found or an I/O
         error occurs, so missing filter files are always treated as a no-op.
+
+        Legacy half-register normalization
+        -----------------------------------
+        32-bit Modbus values are split across two 16-bit registers in the CSV
+        (e.g. ``echg_all_l`` at register N, ``echg_all_h`` at N+1).
+        ``load__registry`` merges these pairs into a single combined entry whose
+        name has neither suffix (``echg_all``).  If a mask file was written
+        against the old register-pair names — a common mistake when a user
+        selects only the ``_l`` register in the UI — the mask entries would
+        never match the post-merge names.
+
+        To keep old mask files working without manual edits this method strips
+        the ``_l`` or ``_h`` suffix from any entry that ends with one, emitting
+        the logical (combined) name instead.  A DEBUG line is logged for every
+        entry that is normalized so the change is visible without being noisy.
         """
         file_path: str | None = self.find_protocol_file(filename, "config")
 
@@ -897,15 +912,39 @@ class protocol_settings:
             return []
 
         entries: list[str] = []
+        normalized_count: int = 0
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
                 for line in f:
                     clean_line: str = line.strip().lower()
                     if not clean_line or clean_line.startswith('#'):
                         continue
+
+                    # Normalize half-register names to their logical (combined) form.
+                    # e.g. "echg_all_l" → "echg_all",  "echg_all_h" → "echg_all"
+                    # The merge step in load__registry has already collapsed the
+                    # _l/_h pair into a single entry under the stem name, so the
+                    # mask must reference the stem to match.
+                    if clean_line.endswith("_l") or clean_line.endswith("_h"):
+                        stem: str = clean_line[:-2]
+                        self._log.debug(
+                            f"Filter file '{filename}': normalized half-register "
+                            f"'{clean_line}' → '{stem}' (paired registers are merged "
+                            f"into a single combined metric before masking)"
+                        )
+                        clean_line = stem
+                        normalized_count += 1
+
                     entries.append(clean_line)
         except Exception as e:
             self._log.error(f"Error reading filter file '{filename}': {e}")
+
+        if normalized_count:
+            self._log.info(
+                f"Filter file '{filename}': normalized {normalized_count} half-register "
+                f"name(s) to their combined logical names. Update the mask file to use "
+                f"the combined names (without _l/_h) to suppress this message."
+            )
 
         self._log.debug(f"Loaded {len(entries)} entries from filter file '{filename}'")
         return entries
@@ -1508,27 +1547,33 @@ class protocol_settings:
                     del registry_map[index + 1]
 
 
-            # Apply variable mask (allowlist)
+            # Apply variable mask (allowlist).
+            # Both variable_mask and the registry item names are now stem-only:
+            # _load_filter_file strips _l/_h suffixes at load time, and
+            # load__registry has already merged _l/_h register pairs into
+            # combined entries whose variable_name has no suffix.
+            # A plain two-way name check is therefore sufficient — no _l compat
+            # expansion is needed or correct here.
             if self.variable_mask:
+                mask_set: set[str] = set(self.variable_mask)
                 for index in reversed(range(len(registry_map))):
                     item = registry_map[index]
                     if (
-                        item.documented_name.strip().lower() not in self.variable_mask
-                        and item.variable_name.strip().lower() not in self.variable_mask
-                        and (item.documented_name.strip().lower() + "_l") not in self.variable_mask
-                        and (item.variable_name.strip().lower() + "_l") not in self.variable_mask
+                        item.documented_name.strip().lower() not in mask_set
+                        and item.variable_name.strip().lower() not in mask_set
                     ):
                         del registry_map[index]
 
-            # Apply variable screen (denylist)
+            # Apply variable screen (denylist).
+            # Same rationale as above — variable_screen entries are stem-only
+            # after _load_filter_file normalization; no _l compat check needed.
             if self.variable_screen:
+                screen_set: set[str] = set(self.variable_screen)
                 for index in reversed(range(len(registry_map))):
                     item = registry_map[index]
                     if (
-                        item.documented_name.strip().lower() in self.variable_screen
-                        or item.variable_name.strip().lower() in self.variable_screen
-                        or (item.documented_name.strip().lower() + "_l") in self.variable_screen
-                        or (item.variable_name.strip().lower() + "_l") in self.variable_screen
+                        item.documented_name.strip().lower() in screen_set
+                        or item.variable_name.strip().lower() in screen_set
                     ):
                         del registry_map[index]
 

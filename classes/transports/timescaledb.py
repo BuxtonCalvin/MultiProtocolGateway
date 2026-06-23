@@ -1527,35 +1527,52 @@ class timescaledb(transport_base):
 
     # wide table row validation
     def _validate_wide_row(self, row: dict, table_name: str) -> tuple[bool, str | None]:
-        # Use the same lock to ensure we aren't validating against a table being swapped
+        METADATA_KEYS: set[str] = {"m_time", "device_info_id"}
+        row_keys: set[str] = set(row) - METADATA_KEYS
+
         with self._schema_lock:
-            # metadata keys like m_time and device_info_id are excluded in _cache_wide_table_columns
             wide_columns: set[str] = self._wide_columns_cache.get(table_name, set())
             if not wide_columns:
-                self._log.debug(f"_validate_wide_row: no cache entry for '{table_name}'. Cache keys: {list(self._wide_columns_cache.keys())}")
-            extra_keys: set[str] = set(row) - wide_columns
-            fewer_keys: set[str] = wide_columns - set(row)
+                self._log.debug(
+                    f"_validate_wide_row: no cache entry for '{table_name}'. "
+                    f"Cache keys: {list(self._wide_columns_cache.keys())}"
+                )
+
+            extra_keys: set[str] = row_keys - wide_columns
+            fewer_keys: set[str] = wide_columns - row_keys
+            fewer_keys_count: int = len(fewer_keys)
 
             if extra_keys:
                 self._log.info(f"New metrics detected: {extra_keys}. Triggering resync...")
-
-                # 1. Trigger the sync logic to update the table schema and internal column cache.
                 self._sync_single_table_schema(table_name)
-
-                # Re-read the now-updated cache — the local `wide_columns` is stale
                 refreshed_cols: set[str] = self._wide_columns_cache.get(table_name, set())
-                still_extra = set(row) - refreshed_cols - {"m_time", "device_info_id"}
+                still_extra: set[str] = row_keys - refreshed_cols
                 if still_extra:
                     msg = f"Database schema is still missing columns after resync: {sorted(still_extra)}"
                     self._log.error(msg)
                     raise ValueError(msg)
-                else:
-                    return True, None  # Validation passes after successful resync
+                return True, None
 
             elif fewer_keys:
-                self._log.warning(f"Wide-table schema mismatch; missing keys in scrape data: {sorted(fewer_keys)}")
-                msg: str = f"Missing {len(sorted(fewer_keys))} columns: {sorted(fewer_keys)}"
-                return False, msg
+                # Schema has more columns than the current scrape provided.
+                # This is expected when a variable_mask limits which registers
+                # are read — the omitted columns will simply be NULL for this row.
+                # Log at DEBUG so it doesn't flood logs every cycle; only escalate
+                # if the count is suspiciously large (possible genuine schema drift).
+                threshold: int = max(10, len(wide_columns) // 4)  # >25% missing → warn
+                if fewer_keys_count > threshold:
+                    self._log.warning(
+                        f"Wide-table schema mismatch; {fewer_keys_count} columns "
+                        f"absent from scrape data (>{threshold} threshold): {sorted(fewer_keys)}"
+                    )
+                else:
+                    self._log.debug(
+                        f"Wide-table partial row: {fewer_keys_count} schema columns "
+                        f"not in this scrape (variable_mask in effect): {sorted(fewer_keys)}"
+                    )
+                msg: str = f"Missing {fewer_keys_count} columns: {sorted(fewer_keys)}"
+                return True, msg   # ← return True, not False; partial rows are valid
+
             else:
                 return True, None
 
@@ -1564,7 +1581,7 @@ class timescaledb(transport_base):
         with self._schema_lock:
             self._log.info(f"Resyncing schema for {table_name}...")
 
-            old_table = Base.metadata.tables.get(table_name)
+            old_table: Table | None = Base.metadata.tables.get(table_name)
             if old_table is not None:
                 Base.metadata.remove(old_table)
 

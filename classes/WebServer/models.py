@@ -177,7 +177,6 @@ class ProtocolRegister(Base):
     adjustments: Mapped[str | None] = mapped_column(Text, nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     read_interval: Mapped[str | None] = mapped_column(String(32), nullable=True)
-
     # Write mode from protocol (immutable from CSV — never changed by user)
     write_mode_protocol: Mapped[str] = mapped_column(String(8), default="R")
     # "R" | "RW" | "RD" | "WO"
@@ -192,14 +191,13 @@ class ProtocolRegister(Base):
     mask_enabled_disk: Mapped[bool] = mapped_column(Boolean, default=True)
     screen_enabled_disk: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    # 32 bit register joins
+    paired_high_address: Mapped[str | None] = mapped_column(String, nullable=True, default=None)
+
     is_dirty: Mapped[bool] = mapped_column(Boolean, default=False)
 
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), nullable=False
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), onupdate=func.now(), nullable=False
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
 
     def __repr__(self) -> str:
         return (
@@ -249,6 +247,7 @@ class DeviceProtocolSelection(Base):
     mask_enabled_disk: Mapped[bool] = mapped_column(Boolean, default=False)
     screen_enabled_disk: Mapped[bool] = mapped_column(Boolean, default=False)
 
+    paired_high_address: Mapped[str | None] = mapped_column(String, nullable=True, default=None)
     is_dirty: Mapped[bool] = mapped_column(Boolean, default=False)
 
     created_at: Mapped[datetime] = mapped_column(

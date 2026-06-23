@@ -51,6 +51,150 @@
 
       <tbody id="register-rows">
         {% for row in rows %}
+        {# ── Paired-register parent row (the merged stem entry) ── #}
+        {% if row.is_paired | default(false) %}
+        <tr class="border-t border-mpg-700/50 {% if row.is_dirty %}bg-dirty/5{% endif %} hover:bg-mpg-800/60 transition-colors paired-parent"
+            role="row"
+            id="reg-{{ row.id }}"
+            data-sort-address="{{ row.register_address }}"
+            data-sort-variable="{{ row.variable_name | lower }}"
+            data-sort-documented="{{ (row.documented_name or '') | lower }}"
+            data-sort-unit="{{ (row.unit or '') | lower }}"
+            data-sort-type="{{ (row.data_type or '') | lower }}"
+            data-sort-range="{{ (row.values_range or '') | lower }}"
+            data-sort-adjustments="{{ (row.adjustments or '') | lower }}"
+            data-sort-note="{{ (row.note or '') | lower }}"
+            data-sort-protocol_write="{{ row.write_mode_protocol }}"
+            data-mask="{{ 1 if row.mask_enabled else 0 }}"
+            data-screen="{{ 1 if row.screen_enabled else 0 }}"
+            data-paired-id="pair-{{ row.id }}">
+
+          {% if device_name %}
+          <td class="px-2 py-1.5 text-center border-r border-mpg-700/30" role="cell">
+            {% if row.is_writable_by_protocol %}
+            <input type="checkbox"
+                   class="accent-accent w-3 h-3 cursor-pointer protocol-toggle write-toggle"
+                   {% if row.user_write_enabled %}checked{% endif %}
+                   aria-label="Enable write-back for {{ row.variable_name }}"
+                   hx-patch="/api/protocols/{{ row.id }}/toggle?device_name={{ device_name }}"
+                   hx-on:htmx:config-request="event.detail.parameters = {field: 'user_write_enabled', value: this.checked}"
+                   hx-swap="none"
+                   hx-trigger="change">
+            {% else %}
+            <span class="text-mpg-500 select-none" title="Read-only per protocol">-</span>
+            {% endif %}
+          </td>
+          <td class="px-2 py-1.5 text-center border-r border-mpg-700/30" role="cell">
+            {% if row.screen_enabled %}
+            <span class="text-mpg-500 select-none" title="Disabled while S is enabled">-</span>
+            {% else %}
+            <input type="checkbox"
+                   class="accent-accent w-3 h-3 cursor-pointer protocol-toggle mask-toggle"
+                   {% if row.mask_enabled %}checked{% endif %}
+                   aria-label="Include {{ row.variable_name }} in mask"
+                   hx-patch="/api/protocols/{{ row.id }}/toggle?device_name={{ device_name }}"
+                   hx-on:htmx:config-request="event.detail.parameters = {field: 'mask_enabled', value: this.checked}"
+                   hx-swap="none"
+                   hx-trigger="change">
+            {% endif %}
+          </td>
+          <td class="px-2 py-1.5 text-center border-r border-mpg-700/30" role="cell">
+            {% if row.mask_enabled %}
+            <span class="text-mpg-500 select-none" title="Disabled while M is enabled">-</span>
+            {% else %}
+            <input type="checkbox"
+                   class="accent-accent w-3 h-3 cursor-pointer protocol-toggle screen-toggle"
+                   {% if row.screen_enabled %}checked{% endif %}
+                   aria-label="Include {{ row.variable_name }} in screen"
+                   hx-patch="/api/protocols/{{ row.id }}/toggle?device_name={{ device_name }}"
+                   hx-on:htmx:config-request="event.detail.parameters = {field: 'screen_enabled', value: this.checked}"
+                   hx-swap="none"
+                   hx-trigger="change">
+            {% endif %}
+          </td>
+          {% endif %}
+
+          {# Address range cell #}
+          <td class="px-2 py-1.5 font-mono text-mpg-400 dark:text-mpg-200 whitespace-nowrap" role="cell">
+            {{ row.register_address }}–{{ row.paired_high_address }}
+          </td>
+
+          {# Variable name with expand toggle #}
+          <td class="px-2 py-1.5 font-mono text-mpg-500 dark:text-mpg-100" title="{{ row.variable_name }}" role="cell">
+            <span class="inline-flex items-center gap-1">
+              <button type="button"
+                      class="pair-expand-btn w-4 h-4 flex items-center justify-center rounded
+                             text-mpg-300 hover:text-mpg-50 hover:bg-mpg-600 transition-colors text-xs
+                             leading-none font-bold select-none"
+                      aria-label="Expand raw registers for {{ row.variable_name }}"
+                      aria-expanded="false"
+                      data-target="pair-{{ row.id }}">+</button>
+              <span>{{ row.variable_name }}</span>
+              <span class="badge badge-ok text-xs px-1 py-0" title="32-bit merged register pair">32</span>
+            </span>
+            {% if row.is_dirty %}<span class="text-dirty ml-0.5" title="Unsaved change">*</span>{% endif %}
+          </td>
+
+          <td class="px-2 py-1.5 text-mpg-500 dark:text-mpg-100" title="{{ row.documented_name }}" role="cell">{{ row.documented_name }}</td>
+          <td class="px-2 py-1.5 text-mpg-500 dark:text-mpg-100" role="cell">{{ row.unit or '' }}</td>
+          <td class="px-2 py-1.5 text-mpg-500 dark:text-mpg-100 font-mono" role="cell">{{ row.data_type or 'UINT' }}</td>
+          <td class="px-2 py-1.5 text-mpg-500 dark:text-mpg-100" title="{{ row.values_range or '' }}" role="cell">{{ row.values_range or '' }}</td>
+          <td class="px-2 py-1.5 text-center" role="cell">
+            {% if row.write_mode_protocol in ('RW', 'W', 'WO', 'WRITE', 'R/W') %}
+            <span class="badge badge-ok text-xs">RW</span>
+            {% elif row.write_mode_protocol in ('RD', 'READDISABLED') %}
+            <span class="badge badge-disabled text-xs">RD</span>
+            {% else %}
+            <span class="text-mpg-500 dark:text-mpg-100 text-xs">R</span>
+            {% endif %}
+          </td>
+          <td class="px-2 py-1.5 text-mpg-500 dark:text-mpg-100 font-mono text-xs break-all"
+              title="{{ row.adjustments | string if row.adjustments else '' }}" role="cell">
+            {{ row.adjustments | string if row.adjustments else '' }}
+          </td>
+          <td class="px-2 py-1.5 text-mpg-500 dark:text-mpg-100" title="{{ row.note or '' }}" role="cell">{{ row.note or '' }}</td>
+        </tr>
+
+        {# ── Expand detail rows — two physical half-registers (hidden by default) ── #}
+        <tr id="pair-{{ row.id }}-low"
+            class="pair-detail hidden bg-mpg-900/40 border-t border-dashed border-mpg-700/30"
+            data-pair-group="pair-{{ row.id }}"
+            aria-hidden="true">
+          {% if device_name %}
+          <td class="px-2 py-1 text-center border-r border-mpg-700/30" colspan="3">
+            <span class="text-mpg-600 text-xs italic select-none">toggle on parent</span>
+          </td>
+          {% endif %}
+          <td class="px-2 py-1 font-mono text-mpg-600 text-xs pl-6" role="cell">{{ row.register_address }}</td>
+          <td class="px-2 py-1 font-mono text-mpg-600 text-xs" role="cell">
+            <span class="inline-flex items-center gap-1">
+              <span class="w-4 text-center text-mpg-700">↳</span>
+              {{ row.variable_name }}_l
+              <span class="text-mpg-700 text-xs">(low word)</span>
+            </span>
+          </td>
+          <td class="px-2 py-1 text-mpg-600 text-xs" colspan="7">bits 0–15 · USHORT</td>
+        </tr>
+        <tr id="pair-{{ row.id }}-high"
+            class="pair-detail hidden bg-mpg-900/40 border-t border-dashed border-mpg-700/30"
+            data-pair-group="pair-{{ row.id }}"
+            aria-hidden="true">
+          {% if device_name %}
+          <td class="px-2 py-1 text-center border-r border-mpg-700/30" colspan="3"></td>
+          {% endif %}
+          <td class="px-2 py-1 font-mono text-mpg-600 text-xs pl-6" role="cell">{{ row.paired_high_address }}</td>
+          <td class="px-2 py-1 font-mono text-mpg-600 text-xs" role="cell">
+            <span class="inline-flex items-center gap-1">
+              <span class="w-4 text-center text-mpg-700">↳</span>
+              {{ row.variable_name }}_h
+              <span class="text-mpg-700 text-xs">(high word)</span>
+            </span>
+          </td>
+          <td class="px-2 py-1 text-mpg-600 text-xs" colspan="7">bits 16–31 · USHORT</td>
+        </tr>
+
+        {% else %}
+        {# ── Normal (non-paired) row ── #}
         <tr class="border-t border-mpg-700/50 {% if row.is_dirty %}bg-dirty/5{% endif %} hover:bg-mpg-800/60 transition-colors"
             role="row"
             id="reg-{{ row.id }}"
@@ -81,7 +225,6 @@
             <span class="text-mpg-500 select-none" title="Read-only per protocol">-</span>
             {% endif %}
           </td>
-
           <td class="px-2 py-1.5 text-center border-r border-mpg-700/30" role="cell">
             {% if row.screen_enabled %}
             <span class="text-mpg-500 select-none" title="Disabled while S is enabled">-</span>
@@ -96,7 +239,6 @@
                    hx-trigger="change">
             {% endif %}
           </td>
-
           <td class="px-2 py-1.5 text-center border-r border-mpg-700/30" role="cell">
             {% if row.mask_enabled %}
             <span class="text-mpg-500 select-none" title="Disabled while M is enabled">-</span>
@@ -226,6 +368,7 @@
           </td>          
 
         </tr>
+        {% endif %}{# end paired/normal branch #}
         {% endfor %}
 
         {% if not rows %}
@@ -305,12 +448,54 @@
     }
 
     function sortRows(key, direction) {
-      const rows = Array.from(tbody.querySelectorAll('tr[id^="reg-"]'));
-      rows.sort((a, b) => compareRows(a, b, key, direction));
-      rows.forEach(row => tbody.appendChild(row));
+      // Sort only the parent rows (id^="reg-"); pair-detail rows are re-anchored below.
+      const allRows     = Array.from(tbody.querySelectorAll('tr'));
+      const parentRows  = allRows.filter(r => r.id && r.id.startsWith('reg-'));
+      parentRows.sort((a, b) => compareRows(a, b, key, direction));
+
+      // Rebuild tbody: for each sorted parent, append it then immediately append
+      // any pair-detail rows that belong to it (preserving hidden state).
+      parentRows.forEach(parent => {
+        tbody.appendChild(parent);
+        const pairGroup = parent.dataset.pairedId;   // e.g. "pair-42"
+        if (pairGroup) {
+          tbody.querySelectorAll(`tr[data-pair-group="${pairGroup}"]`).forEach(detail => {
+            tbody.appendChild(detail);
+          });
+        }
+      });
+
       activeSort = key;
       activeDirection = direction;
     }
+
+    // ── Paired-register expand / collapse ────────────────────────────────
+    // Clicking the + button on a parent row shows/hides the two physical
+    // half-register detail rows immediately below it.
+    function bindPairExpandButtons() {
+      tbody.querySelectorAll('.pair-expand-btn').forEach(btn => {
+        btn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          const groupId   = this.dataset.target;           // e.g. "pair-42"
+          const expanded  = this.getAttribute('aria-expanded') === 'true';
+          const details   = tbody.querySelectorAll(`tr[data-pair-group="${groupId}"]`);
+
+          details.forEach(row => {
+            row.classList.toggle('hidden', expanded);
+            row.setAttribute('aria-hidden', String(expanded));
+          });
+
+          this.textContent = expanded ? '+' : '−';
+          this.setAttribute('aria-expanded', String(!expanded));
+          this.setAttribute('aria-label',
+            (expanded ? 'Expand' : 'Collapse') +
+            ' raw registers for ' + (this.closest('tr')?.dataset?.sortVariable || '')
+          );
+        });
+      });
+    }
+
+    bindPairExpandButtons();
 
     headers.forEach(header => {
       header.addEventListener('click', function() {
@@ -443,7 +628,7 @@
     }
 
     // Update the dirty-row highlight when HTMX returns the toggle response.
-    // This keeps visual feedback (row colour, dirty star) in sync without a
+    // This keeps visual feedback (row color, dirty star) in sync without a
     // DOM re-sort or any scroll side-effect.
     table.addEventListener('htmx:afterRequest', function(evt) {
       if (evt.detail.xhr.status < 200 || evt.detail.xhr.status >= 300) return;
