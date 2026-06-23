@@ -297,7 +297,8 @@ class modbus_base(transport_base):
 
     def _get_correct_device_arg(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         if self.client is None:
-            raise RuntimeError(...)
+            raise RuntimeError("Cannot resolve device arguments: Modbus client is not initialized.")
+
 
         sig: inspect.Signature = inspect.signature(self.client.read_input_registers)
 
