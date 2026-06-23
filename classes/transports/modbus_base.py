@@ -321,7 +321,8 @@ class modbus_base(transport_base):
 
         kwargs[target_arg] = val
 
-        self._log.debug("_get_correct_device_arg -> %s=%s", self.transport_name, target_arg, val)
+        self._log.debug("[%s] _get_correct_device_arg -> %s=%s", self.transport_name, target_arg, val)
+
 
         return kwargs
 
