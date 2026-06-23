@@ -646,7 +646,7 @@ def _parse_protocol_csv(csv_path: Path, group_name: str) -> list[dict[str, Any]]
 
     # Ensure every row has the paired_high_address key (None for non-paired rows)
     for row in result:
-        row.setdefault("paired_high_address", None)
+        row.setdefault("paired_high_address", "")
 
     _log.debug(f"Parsed {len(result)} logical registers from {csv_path.name} "
                f"({merged_count} merged pairs)")
@@ -846,9 +846,9 @@ def _upsert_protocol_register(db: Session, reg: dict[str, Any]) -> ProtocolRegis
 
 
 def _load_filter_names(path: Path) -> set[str]:
-    """Load a line-delimited filter file and return a normalised set of metric names.
+    """Load a line-delimited filter file and return a normalized set of metric names.
 
-    Half-register suffix normalisation
+    Half-register suffix normalization
     ------------------------------------
     Since _parse_protocol_csv now merges _l/_h pairs into a single stem entry,
     the variable_name stored in ProtocolRegister is the stem (e.g. "echg_all"),
@@ -864,7 +864,7 @@ def _load_filter_names(path: Path) -> set[str]:
             name: str = line.strip().lower().replace(" ", "_")
             if not name:
                 continue
-            # Normalise half-register names to their stem so they match the
+            # Normalize half-register names to their stem so they match the
             # merged ProtocolRegister.variable_name (e.g. "echg_all_l" → "echg_all")
             if name.endswith("_l") or name.endswith("_h"):
                 name = name[:-2]

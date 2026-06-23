@@ -129,16 +129,78 @@
                       aria-label="Expand raw registers for {{ row.variable_name }}"
                       aria-expanded="false"
                       data-target="pair-{{ row.id }}">+</button>
+              {% if device_name %}
               <span>{{ row.variable_name }}</span>
-              <span class="badge badge-ok text-xs px-1 py-0" title="32-bit merged register pair">32</span>
+              {% else %}
+              <input type="text"
+                     class="w-full bg-mpg-200 border border-mpg-400 rounded px-1 py-0.5 surface-title font-mono dark:bg-mpg-700/75 dark:border-mpg-500 dark:text-mpg-50"
+                     value="{{ row.variable_name }}"
+                     hx-patch="/api/protocols/{{ row.id }}/field"
+                     hx-on:htmx:config-request="event.detail.parameters = {field: 'variable_name', value: this.value}"
+                     hx-swap="none"
+                     hx-trigger="change delay:300ms">
+              {% endif %}
+              <span class="badge badge-ok text-xs px-1 py-0 shrink-0" title="32-bit merged register pair">32</span>
             </span>
             {% if row.is_dirty %}<span class="text-dirty ml-0.5" title="Unsaved change">*</span>{% endif %}
           </td>
 
-          <td class="px-2 py-1.5 text-mpg-500 dark:text-mpg-100" title="{{ row.documented_name }}" role="cell">{{ row.documented_name }}</td>
-          <td class="px-2 py-1.5 text-mpg-500 dark:text-mpg-100" role="cell">{{ row.unit or '' }}</td>
-          <td class="px-2 py-1.5 text-mpg-500 dark:text-mpg-100 font-mono" role="cell">{{ row.data_type or 'UINT' }}</td>
-          <td class="px-2 py-1.5 text-mpg-500 dark:text-mpg-100" title="{{ row.values_range or '' }}" role="cell">{{ row.values_range or '' }}</td>
+          <td class="px-2 py-1.5 text-mpg-500 dark:text-mpg-100" title="{{ row.documented_name }}" role="cell">
+            {% if device_name %}
+            {{ row.documented_name }}
+            {% else %}
+            <input type="text"
+                   class="w-full bg-mpg-200 border border-mpg-400 rounded px-1 py-0.5 surface-title dark:bg-mpg-700/75 dark:border-mpg-500 dark:text-mpg-50"
+                   value="{{ row.documented_name }}"
+                   hx-patch="/api/protocols/{{ row.id }}/field"
+                   hx-on:htmx:config-request="event.detail.parameters = {field: 'documented_name', value: this.value}"
+                   hx-swap="none"
+                   hx-trigger="change delay:300ms">
+            {% endif %}
+          </td>
+
+          <td class="px-2 py-1.5 text-mpg-500 dark:text-mpg-100" role="cell">
+            {% if device_name %}
+            {{ row.unit or '' }}
+            {% else %}
+            <input type="text"
+                   class="w-full bg-mpg-200 border border-mpg-400 rounded px-1 py-0.5 surface-title dark:bg-mpg-700/75 dark:border-mpg-500 dark:text-mpg-50"
+                   value="{{ row.unit or '' }}"
+                   hx-patch="/api/protocols/{{ row.id }}/field"
+                   hx-on:htmx:config-request="event.detail.parameters = {field: 'unit', value: this.value}"
+                   hx-swap="none"
+                   hx-trigger="change delay:300ms">
+            {% endif %}
+          </td>
+
+          <td class="px-2 py-1.5 text-mpg-500 dark:text-mpg-100 font-mono" role="cell">
+            {% if device_name %}
+            {{ row.data_type or 'UINT' }}
+            {% else %}
+            <input type="text"
+                   class="w-full bg-mpg-200 border border-mpg-400 rounded px-1 py-0.5 surface-title font-mono dark:bg-mpg-700/75 dark:border-mpg-500 dark:text-mpg-50"
+                   value="{{ row.data_type or 'UINT' }}"
+                   hx-patch="/api/protocols/{{ row.id }}/field"
+                   hx-on:htmx:config-request="event.detail.parameters = {field: 'data_type', value: this.value}"
+                   hx-swap="none"
+                   hx-trigger="change delay:300ms">
+            {% endif %}
+          </td>
+
+          <td class="px-2 py-1.5 text-mpg-500 dark:text-mpg-100" title="{{ row.values_range or '' }}" role="cell">
+            {% if device_name %}
+            {{ row.values_range or '' }}
+            {% else %}
+            <input type="text"
+                   class="w-full bg-mpg-200 border border-mpg-400 rounded px-1 py-0.5 surface-title dark:bg-mpg-700/75 dark:border-mpg-500 dark:text-mpg-50"
+                   value="{{ row.values_range or '' }}"
+                   hx-patch="/api/protocols/{{ row.id }}/field"
+                   hx-on:htmx:config-request="event.detail.parameters = {field: 'values_range', value: this.value}"
+                   hx-swap="none"
+                   hx-trigger="change delay:300ms">
+            {% endif %}
+          </td>
+
           <td class="px-2 py-1.5 text-center" role="cell">
             {% if row.write_mode_protocol in ('RW', 'W', 'WO', 'WRITE', 'R/W') %}
             <span class="badge badge-ok text-xs">RW</span>
@@ -148,49 +210,126 @@
             <span class="text-mpg-500 dark:text-mpg-100 text-xs">R</span>
             {% endif %}
           </td>
+
+          {# Adjustments — most important for 32-bit pairs (Register_Endian JSON lives here) #}
           <td class="px-2 py-1.5 text-mpg-500 dark:text-mpg-100 font-mono text-xs break-all"
               title="{{ row.adjustments | string if row.adjustments else '' }}" role="cell">
+            {% if device_name %}
             {{ row.adjustments | string if row.adjustments else '' }}
+            {% else %}
+            <input type="text"
+                   class="w-full bg-mpg-200 border border-mpg-400 rounded px-1 py-0.5 surface-title font-mono dark:bg-mpg-700/75 dark:border-mpg-500 dark:text-mpg-50"
+                   value="{{ row.adjustments | string if row.adjustments else '' }}"
+                   placeholder='e.g. {"Register_Endian": "little_endian-CDAB"}'
+                   title="JSON adjustment spec for this 32-bit register pair"
+                   hx-patch="/api/protocols/{{ row.id }}/field"
+                   hx-on:htmx:config-request="event.detail.parameters = {field: 'adjustments', value: this.value}"
+                   hx-swap="none"
+                   hx-trigger="change delay:300ms">
+            {% endif %}
           </td>
-          <td class="px-2 py-1.5 text-mpg-500 dark:text-mpg-100" title="{{ row.note or '' }}" role="cell">{{ row.note or '' }}</td>
+
+          <td class="px-2 py-1.5 text-mpg-500 dark:text-mpg-100" title="{{ row.note or '' }}" role="cell">
+            {% if device_name %}
+            {{ row.note or '' }}
+            {% else %}
+            <input type="text"
+                   class="w-full bg-mpg-200 border border-mpg-400 rounded px-1 py-0.5 surface-title dark:bg-mpg-700/75 dark:border-mpg-500 dark:text-mpg-50"
+                   value="{{ row.note or '' }}"
+                   hx-patch="/api/protocols/{{ row.id }}/field"
+                   hx-on:htmx:config-request="event.detail.parameters = {field: 'note', value: this.value}"
+                   hx-swap="none"
+                   hx-trigger="change delay:300ms">
+            {% endif %}
+          </td>
         </tr>
 
         {# ── Expand detail rows — two physical half-registers (hidden by default) ── #}
+        {# These rows are READ-ONLY reference display — the _l and _h registers     #}
+        {# have no independent DB rows (they were merged at scan time).              #}
+        {# All editable fields live on the parent stem row above.                   #}
         <tr id="pair-{{ row.id }}-low"
-            class="pair-detail hidden bg-mpg-900/40 border-t border-dashed border-mpg-700/30"
+            class="pair-detail hidden bg-mpg-900/30 border-t border-dashed border-mpg-700/20 text-xs"
             data-pair-group="pair-{{ row.id }}"
             aria-hidden="true">
           {% if device_name %}
-          <td class="px-2 py-1 text-center border-r border-mpg-700/30" colspan="3">
-            <span class="text-mpg-600 text-xs italic select-none">toggle on parent</span>
+          <td class="px-2 py-1 text-center border-r border-mpg-700/30 text-mpg-700 italic" colspan="3">
+            <span class="select-none">—</span>
           </td>
           {% endif %}
-          <td class="px-2 py-1 font-mono text-mpg-600 text-xs pl-6" role="cell">{{ row.register_address }}</td>
-          <td class="px-2 py-1 font-mono text-mpg-600 text-xs" role="cell">
+          {# Address #}
+          <td class="px-2 py-1 font-mono text-mpg-600 pl-5 whitespace-nowrap">
+            {{ row.register_address }}
+            <span class="text-mpg-700 ml-1">(_l)</span>
+          </td>
+          {# Variable name #}
+          <td class="px-2 py-1 font-mono text-mpg-600">
             <span class="inline-flex items-center gap-1">
-              <span class="w-4 text-center text-mpg-700">↳</span>
+              <span class="text-mpg-700">↳</span>
               {{ row.variable_name }}_l
-              <span class="text-mpg-700 text-xs">(low word)</span>
             </span>
           </td>
-          <td class="px-2 py-1 text-mpg-600 text-xs" colspan="7">bits 0–15 · USHORT</td>
+          {# Documented name — inherited from parent #}
+          <td class="px-2 py-1 text-mpg-700 italic">{{ row.documented_name }} (low)</td>
+          {# Unit — inherited #}
+          <td class="px-2 py-1 text-mpg-700">{{ row.unit or '' }}</td>
+          {# Data type — always USHORT for the raw half #}
+          <td class="px-2 py-1 font-mono text-mpg-600">USHORT</td>
+          {# Range — bits 0-15 #}
+          <td class="px-2 py-1 text-mpg-700">bits 0–15</td>
+          {# R/W — inherited #}
+          <td class="px-2 py-1 text-center text-mpg-700">R</td>
+          {# Adjustments — pointer to parent #}
+          <td class="px-2 py-1 text-mpg-700 italic" colspan="2"
+              title="Edit adjustments on the parent {{ row.variable_name }} row">
+            {% if row.adjustments %}
+            <span class="font-mono text-mpg-600 text-xs">{{ row.adjustments }}</span>
+            {% else %}
+            <span class="text-mpg-700">↑ edit on parent row</span>
+            {% endif %}
+          </td>
         </tr>
+
         <tr id="pair-{{ row.id }}-high"
-            class="pair-detail hidden bg-mpg-900/40 border-t border-dashed border-mpg-700/30"
+            class="pair-detail hidden bg-mpg-900/30 border-t border-dashed border-mpg-700/20 text-xs"
             data-pair-group="pair-{{ row.id }}"
             aria-hidden="true">
           {% if device_name %}
-          <td class="px-2 py-1 text-center border-r border-mpg-700/30" colspan="3"></td>
+          <td class="px-2 py-1 text-center border-r border-mpg-700/30 text-mpg-700 italic" colspan="3">
+            <span class="select-none">—</span>
+          </td>
           {% endif %}
-          <td class="px-2 py-1 font-mono text-mpg-600 text-xs pl-6" role="cell">{{ row.paired_high_address }}</td>
-          <td class="px-2 py-1 font-mono text-mpg-600 text-xs" role="cell">
+          {# Address #}
+          <td class="px-2 py-1 font-mono text-mpg-600 pl-5 whitespace-nowrap">
+            {{ row.paired_high_address }}
+            <span class="text-mpg-700 ml-1">(_h)</span>
+          </td>
+          {# Variable name #}
+          <td class="px-2 py-1 font-mono text-mpg-600">
             <span class="inline-flex items-center gap-1">
-              <span class="w-4 text-center text-mpg-700">↳</span>
+              <span class="text-mpg-700">↳</span>
               {{ row.variable_name }}_h
-              <span class="text-mpg-700 text-xs">(high word)</span>
             </span>
           </td>
-          <td class="px-2 py-1 text-mpg-600 text-xs" colspan="7">bits 16–31 · USHORT</td>
+          {# Documented name — inherited from parent #}
+          <td class="px-2 py-1 text-mpg-700 italic">{{ row.documented_name }} (high)</td>
+          {# Unit — inherited #}
+          <td class="px-2 py-1 text-mpg-700">{{ row.unit or '' }}</td>
+          {# Data type — always USHORT for the raw half #}
+          <td class="px-2 py-1 font-mono text-mpg-600">USHORT</td>
+          {# Range — bits 16-31 #}
+          <td class="px-2 py-1 text-mpg-700">bits 16–31</td>
+          {# R/W — inherited #}
+          <td class="px-2 py-1 text-center text-mpg-700">R</td>
+          {# Adjustments — pointer to parent #}
+          <td class="px-2 py-1 text-mpg-700 italic" colspan="2"
+              title="Edit adjustments on the parent {{ row.variable_name }} row">
+            {% if row.adjustments %}
+            <span class="font-mono text-mpg-600 text-xs">{{ row.adjustments }}</span>
+            {% else %}
+            <span class="text-mpg-700">↑ edit on parent row</span>
+            {% endif %}
+          </td>
         </tr>
 
         {% else %}
@@ -628,7 +767,7 @@
     }
 
     // Update the dirty-row highlight when HTMX returns the toggle response.
-    // This keeps visual feedback (row color, dirty star) in sync without a
+    // This keeps visual feedback (row colour, dirty star) in sync without a
     // DOM re-sort or any scroll side-effect.
     table.addEventListener('htmx:afterRequest', function(evt) {
       if (evt.detail.xhr.status < 200 || evt.detail.xhr.status >= 300) return;
