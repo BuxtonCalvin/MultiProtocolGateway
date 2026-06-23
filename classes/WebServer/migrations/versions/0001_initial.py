@@ -1,21 +1,4 @@
-# Description: Initial schema — create all four staging tables.
-# File: 0001_initial.py
-#
-# Copyright 2026 Kevin Burke
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://apache.org
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-"""Initial schema — create all four staging tables.
+"""Initial schema — create all four staging tables and device selections.
 
 Revision ID: 0001_initial
 Revises:
@@ -46,8 +29,8 @@ def upgrade() -> None:
         sa.Column("is_active", sa.Boolean, default=True),
         sa.Column("is_dirty", sa.Boolean, default=False),
         sa.Column("is_orphan", sa.Boolean, default=False),
-        sa.Column("created_at", sa.DateTime, server_default=sa.func.now()),
-        sa.Column("updated_at", sa.DateTime, server_default=sa.func.now()),
+        sa.Column("created_at", sa.DateTime, server_default=sa.func.now(), nullable=False),
+        sa.Column("updated_at", sa.DateTime, server_default=sa.func.now(), nullable=False),
         sa.UniqueConstraint("section", "key", name="uq_settings_section_key"),
     )
     op.create_index("ix_settings_section", "settings", ["section"])
@@ -75,9 +58,10 @@ def upgrade() -> None:
         sa.Column("user_write_enabled_disk", sa.Boolean, default=False),
         sa.Column("mask_enabled_disk", sa.Boolean, default=True),
         sa.Column("screen_enabled_disk", sa.Boolean, default=False),
+        sa.Column("paired_high_address", sa.String(), nullable=True, server_default=None),
         sa.Column("is_dirty", sa.Boolean, default=False),
-        sa.Column("created_at", sa.DateTime, server_default=sa.func.now()),
-        sa.Column("updated_at", sa.DateTime, server_default=sa.func.now()),
+        sa.Column("created_at", sa.DateTime, server_default=sa.func.now(), nullable=False),
+        sa.Column("updated_at", sa.DateTime, server_default=sa.func.now(), nullable=False),
         sa.UniqueConstraint(
             "protocol_name", "registry_type", "register_address",
             name="uq_register_protocol_type_addr"
@@ -86,11 +70,37 @@ def upgrade() -> None:
     op.create_index("ix_pr_protocol_name", "protocol_registers", ["protocol_name"])
     op.create_index("ix_pr_protocol_group", "protocol_registers", ["protocol_group"])
 
+    # ── device_protocol_selections ──
+    op.create_table(
+        "device_protocol_selections",
+        sa.Column("id", sa.Integer, primary_key=True, autoincrement=True),
+        sa.Column("device_name", sa.String(128), nullable=False),
+        sa.Column("protocol_name", sa.String(128), nullable=False),
+        sa.Column("registry_type", sa.String(16), nullable=False),
+        sa.Column("register_address", sa.String(32), nullable=False),
+        sa.Column("user_write_enabled", sa.Boolean, default=False),
+        sa.Column("mask_enabled", sa.Boolean, default=False),
+        sa.Column("screen_enabled", sa.Boolean, default=False),
+        sa.Column("user_write_enabled_disk", sa.Boolean, default=False),
+        sa.Column("mask_enabled_disk", sa.Boolean, default=False),
+        sa.Column("screen_enabled_disk", sa.Boolean, default=False),
+        sa.Column("paired_high_address", sa.String(), nullable=True, server_default=None),
+        sa.Column("is_dirty", sa.Boolean, default=False),
+        sa.Column("created_at", sa.DateTime, server_default=sa.func.now(), nullable=False),
+        sa.Column("updated_at", sa.DateTime, server_default=sa.func.now(), nullable=False),
+        sa.UniqueConstraint(
+            "device_name", "protocol_name", "registry_type", "register_address",
+            name="uq_device_protocol_selection"
+        ),
+    )
+    op.create_index("ix_device_protocol_selections_device_name", "device_protocol_selections", ["device_name"])
+    op.create_index("ix_device_protocol_selections_protocol_name", "device_protocol_selections", ["protocol_name"])
+
     # ── config_backups ──
     op.create_table(
         "config_backups",
         sa.Column("id", sa.Integer, primary_key=True, autoincrement=True),
-        sa.Column("created_at", sa.DateTime, server_default=sa.func.now()),
+        sa.Column("created_at", sa.DateTime, server_default=sa.func.now(), nullable=False),
         sa.Column("filepath", sa.Text, nullable=False),
         sa.Column("file_size_bytes", sa.Integer, nullable=True),
         sa.Column("trigger", sa.String(32), default="manual"),
@@ -113,9 +123,24 @@ def upgrade() -> None:
         sa.Column("scanner_last_error", sa.Text, nullable=True),
     )
 
+    # ── setting_descriptions ──
+    op.create_table(
+        "setting_descriptions",
+        sa.Column("id", sa.Integer, primary_key=True, autoincrement=True),
+        sa.Column("key", sa.String(128), nullable=False),
+        sa.Column("transports", sa.Text, nullable=True),
+        sa.Column("description", sa.Text, nullable=True),
+        sa.Column("description_disk", sa.Text, nullable=True),
+        sa.Column("is_dirty", sa.Boolean, default=False),
+        sa.UniqueConstraint("key", name="uq_setting_descriptions_key"),
+    )
+    op.create_index("ix_setting_descriptions_key", "setting_descriptions", ["key"])
+
 
 def downgrade() -> None:
+    op.drop_table("setting_descriptions")
     op.drop_table("app_state")
     op.drop_table("config_backups")
+    op.drop_table("device_protocol_selections")
     op.drop_table("protocol_registers")
     op.drop_table("settings")

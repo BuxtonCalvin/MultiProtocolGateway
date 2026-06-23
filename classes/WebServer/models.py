@@ -248,6 +248,8 @@ class DeviceProtocolSelection(Base):
     screen_enabled_disk: Mapped[bool] = mapped_column(Boolean, default=False)
 
     is_dirty: Mapped[bool] = mapped_column(Boolean, default=False)
+    # 32 bit register joins
+    paired_high_address: Mapped[str | None] = mapped_column(String, nullable=True, default=None)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), nullable=False
