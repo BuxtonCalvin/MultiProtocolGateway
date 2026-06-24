@@ -56,10 +56,42 @@ class DeviceRegisterView:
     mask_enabled: bool
     screen_enabled: bool
     is_dirty: bool
+    # Paired-register fields — populated when this row is the merged stem of
+    # a _l/_h pair.  paired_high_address holds the _h register address so the
+    # UI can render the range "40-41" and show the expand/collapse detail rows.
+    paired_high_address: str | None = None
+
+    @property
+    def is_paired(self) -> bool:
+        """True when this row represents a merged _l/_h register pair."""
+        return bool(self.paired_high_address)
 
     @property
     def is_writable_by_protocol(self) -> bool:
         return self.write_mode_protocol in ("RW", "W", "WO", "WRITE", "R/W")
+
+
+def _safe_paired_address(row: Any) -> str | None:
+    """
+    Safely read paired_high_address from a ProtocolRegister ORM row.
+
+    SQLAlchemy raises InvalidRequestError (not AttributeError) when accessing
+    a mapped attribute that doesn't exist as a column in the current DB schema.
+    Python's getattr(obj, name, default) only catches AttributeError, so it
+    would re-raise here.  We first try the instance __dict__ directly to bypass
+    any descriptor magic, then fall back to attribute access, swallowing all
+    exceptions until the migration adds the column.
+    """
+    # Fast path: check instance dict directly, bypassing SQLAlchemy descriptors
+    instance_state = getattr(row, "__dict__", {})
+    if "paired_high_address" in instance_state:
+        return instance_state["paired_high_address"]
+    # Slow path: attempt instrumented access, catch anything SQLAlchemy raises
+    try:
+        val = row.paired_high_address  # type: ignore[union-attr]
+        return val
+    except Exception:
+        return None
 
 
 def get_protocol_registers(
@@ -87,7 +119,7 @@ def get_protocol_registers(
     _log.debug("get_protocol_registers: %s/%s page=%d total=%d", protocol_name, registry_type, page, total)
     protocol_rows: List[ProtocolRegister] = query.offset((page - 1) * page_size).limit(page_size).all()
 
-    rows: list[DeviceRegisterView] | list[ProtocolRegister]
+    rows: list[DeviceRegisterView]
 
     if device_name:
         selections: dict[tuple[str, str, str], DeviceProtocolSelection] = {
@@ -102,10 +134,15 @@ def get_protocol_registers(
                 .all()
             )
         }
+    else:
+        selections = {}
 
-        view_rows: list[DeviceRegisterView] = []
-        for row in protocol_rows:
-            s: DeviceProtocolSelection | None = selections.get((row.protocol_name, row.registry_type, row.register_address))
+    view_rows: list[DeviceRegisterView] = []
+    for row in protocol_rows:
+        try:
+            s: DeviceProtocolSelection | None = selections.get(
+                (row.protocol_name, row.registry_type, row.register_address)
+            )
             view_rows.append(
                 DeviceRegisterView(
                     id=row.id,
@@ -125,11 +162,17 @@ def get_protocol_registers(
                     mask_enabled=s.mask_enabled if s else False,
                     screen_enabled=s.screen_enabled if s else False,
                     is_dirty=s.is_dirty if s else False,
+                    paired_high_address=_safe_paired_address(row),
                 )
             )
-        rows = view_rows
-    else:
-        rows = protocol_rows
+        except Exception as exc:
+            _log.warning(
+                "Skipping register row id=%s variable=%s in get_protocol_registers: %s",
+                getattr(row, "id", "?"),
+                getattr(row, "variable_name", "?"),
+                exc,
+            )
+    rows = view_rows
 
     return {
         "protocol_name": protocol_name,
@@ -325,6 +368,79 @@ def get_protocol_json(
             return None, False
     _log.debug("get_protocol_json: no json file found for %s/%s", protocol_group, protocol_name)
     return None, False
+
+
+def export_protocol_registers(
+    db: Session,
+    protocol_name: str,
+    registry_type: str,
+    device_name: str | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Return ALL registers for a protocol/registry_type as a flat list of dicts
+    suitable for CSV or JSON export.  Unlike get_protocol_registers this is
+    unpaginated and always returns every row.
+
+    When device_name is supplied the W/M/S selections for that device are
+    merged in, matching the device view in the table.  Paired-register rows
+    include both the logical stem address and the paired high address so the
+    exported file documents the full physical address span.
+    """
+    protocol_rows: list[ProtocolRegister] = (
+        db.query(ProtocolRegister)
+        .filter(
+            ProtocolRegister.protocol_name == protocol_name,
+            ProtocolRegister.registry_type == registry_type,
+        )
+        .order_by(ProtocolRegister.register_address)
+        .all()
+    )
+
+    selections: dict[tuple[str, str, str], DeviceProtocolSelection] = {}
+    if device_name:
+        selections = {
+            (r.protocol_name, r.registry_type, r.register_address): r
+            for r in db.query(DeviceProtocolSelection).filter(
+                DeviceProtocolSelection.device_name == device_name,
+                DeviceProtocolSelection.protocol_name == protocol_name,
+                DeviceProtocolSelection.registry_type == registry_type,
+            ).all()
+        }
+
+    result: list[dict[str, Any]] = []
+    for row in protocol_rows:
+        paired_high: str | None = _safe_paired_address(row)
+        # Address column: show range "40-41" for paired rows, plain address otherwise
+        address_display: str = (
+            f"{row.register_address}-{paired_high}" if paired_high
+            else str(row.register_address)
+        )
+
+        entry: dict[str, Any] = {
+            "register_address":   address_display,
+            "variable_name":      row.variable_name,
+            "documented_name":    row.documented_name,
+            "unit":               row.unit or "",
+            "data_type":          row.data_type or "",
+            "values_range":       row.values_range or "",
+            "write_mode_protocol": row.write_mode_protocol,
+            "adjustments":        row.adjustments or "",
+            "note":               row.note or "",
+            "read_interval":      row.read_interval or "",
+            "is_paired_register": bool(paired_high),
+        }
+
+        if device_name:
+            s: DeviceProtocolSelection | None = selections.get(
+                (row.protocol_name, row.registry_type, row.register_address)
+            )
+            entry["write_enabled"] = s.user_write_enabled if s else False
+            entry["mask_enabled"]  = s.mask_enabled if s else False
+            entry["screen_enabled"] = s.screen_enabled if s else False
+
+        result.append(entry)
+
+    return result
 
 
 def get_protocol_groups(protocols_dir: Path) -> list[dict[str, Any]]:

@@ -687,49 +687,7 @@ class Protocol_Gateway:
             for member in due_members:
                 member_data: dict[str, int | float | str] = self._filter_for_member(full_data, member)
 
-                # --- Mask/filter diagnostics (mirrors _route_interleaved_state) ---
-                ps: protocol_settings | None = getattr(member, 'protocolSettings', None)
-                if ps is not None and ps.variable_mask:
-                    # Path 1: explicit mask file
-                    _mask_summary: str = f"{len(ps.variable_mask)} mask keys in {ps.mask_file_name} → {len(member_data)} matched"
-                    data_keys_lower: set[str] = {k.lower() for k in full_data.keys()}
-                    _unmatched: set[str] = set(ps.variable_mask) - data_keys_lower
-                    _unmatched = {k for k in _unmatched if not (
-                        k.endswith('_l') and k[:-2] in data_keys_lower
-                    )}
-                    _unmatched = {k for k in _unmatched if not (
-                        k.endswith('_h') and (k[:-2] + '_l') in set(ps.variable_mask)
-                    )}
-                    _synthetic: set[str] = {
-                        k for k in data_keys_lower
-                        if k.endswith('_desc') and k[:-5] in set(ps.variable_mask)
-                    }
-                    self.__log.debug(f"Filtered data for '{member.transport_name}': {_mask_summary}")
-                    if _unmatched or _synthetic:
-                        self.__log.debug(
-                            f"Mask keys with no match in scraped data for '{member.transport_name}' "
-                            f"({len(_unmatched)} unmatched): {sorted(_unmatched)}"
-                            + (f" | synthetic _desc fields present: {sorted(_synthetic)}" if _synthetic else "")
-                        )
-                elif ps is not None and any(ps.registry_map.values()):
-                    # Path 2: no mask file, filtering by registry map variable names
-                    member_keys: set[str] = {
-                        entry.variable_name
-                        for entries in member.registry_map.values()
-                        for entry in entries
-                        if hasattr(entry, 'variable_name') and entry.variable_name
-                    }
-                    self.__log.debug(
-                        f"Filtered data for '{member.transport_name}': "
-                        f"{len(member_keys)} registry map keys → {len(member_data)} matched"
-                    )
-                else:
-                    # Path 3: no mask, no registry map — all metrics forwarded
-                    self.__log.debug(
-                        f"Filtered data for '{member.transport_name}': "
-                        f"no mask configured — forwarding all {len(member_data)} metrics"
-                    )
-                # --- End diagnostics ---
+                self._log_mask_diagnostics(member, full_data, member_data)
 
                 if not member_data:
                     continue
@@ -773,47 +731,137 @@ class Protocol_Gateway:
                     self.__log.info(f"Primary '{primary.transport_name}' not connected, trying to connect...")
                     primary.connect()
 
+    def _log_mask_diagnostics(
+        self,
+        member: "transport_base",
+        full_data: dict[str, int | float | str],
+        member_data: dict[str, int | float | str],
+    ) -> None:
+        """Log mask-vs-data diagnostics for one member after filtering.
+
+        Under the new paradigm both the variable mask and ``full_data`` use
+        logical stem names (``_l``/``_h`` pairs have been merged upstream), so
+        the diagnostic simply compares the mask set against the lowercased keys
+        of ``full_data`` with no special suffix handling needed.
+
+        Three paths mirror ``_filter_for_member``:
+
+        * **Path 1** (explicit mask file) — logs a summary line and, when any
+          mask entries have no corresponding key in the scraped data, a DEBUG
+          warning listing the unmatched names.  Synthetic ``_desc`` keys that
+          are present in the data are also noted so the caller can see that enum
+          descriptions were forwarded even though they don't appear in the mask.
+        * **Path 2** (registry-map fallback) — logs a brief count summary only.
+        * **Path 3** (no mask) — logs that everything was forwarded as-is.
+
+        All output is at DEBUG level; this method never warns or errors.
+        """
+        ps: protocol_settings | None = getattr(member, 'protocolSettings', None)
+
+        if ps is not None and ps.variable_mask:
+            # Path 1 — explicit mask file.
+            mask: set[str] = set(ps.variable_mask)
+            data_keys_lower: set[str] = {k.lower() for k in full_data}
+
+            # Keys the mask asked for that don't appear in the scraped data at all.
+            # Under the new paradigm both sides are stem names so no _l/_h
+            # expansion is required — a genuine miss is a genuine miss.
+            unmatched: set[str] = mask - data_keys_lower
+
+            # Synthetic enum-description keys produced by the decoder
+            # (e.g. "state_desc") — present in data but intentionally absent
+            # from the mask; flag them so the operator knows they were forwarded.
+            synthetic_desc: set[str] = {
+                k for k in data_keys_lower
+                if k.endswith('_desc') and k[:-5] in mask
+            }
+
+            self.__log.debug(
+                f"Filtered data for '{member.transport_name}': "
+                f"{len(mask)} mask keys in {ps.mask_file_name} "
+                f"→ {len(member_data)} matched"
+            )
+            if unmatched:
+                self.__log.debug(
+                    f"Mask keys with no match in scraped data for "
+                    f"'{member.transport_name}' "
+                    f"({len(unmatched)} unmatched): {sorted(unmatched)}"
+                )
+            if synthetic_desc:
+                self.__log.debug(
+                    f"Synthetic _desc fields forwarded for "
+                    f"'{member.transport_name}': {sorted(synthetic_desc)}"
+                )
+
+        elif ps is not None and any(ps.registry_map.values()):
+            # Path 2 — registry-map fallback.
+            member_keys: set[str] = {
+                entry.variable_name
+                for entries in member.registry_map.values()
+                for entry in entries
+                if hasattr(entry, 'variable_name') and entry.variable_name
+            }
+            self.__log.debug(
+                f"Filtered data for '{member.transport_name}': "
+                f"{len(member_keys)} registry map keys → {len(member_data)} matched"
+            )
+
+        else:
+            # Path 3 — no mask configured.
+            self.__log.debug(
+                f"Filtered data for '{member.transport_name}': "
+                f"no mask configured — forwarding all {len(member_data)} metrics"
+            )
+
     def _filter_for_member(self, full_data: dict[str, int | float | str], member: transport_base) -> dict[str, int | float | str]:
-            """
-            Filters full_data to only the metrics relevant to this member.
+        """Filter ``full_data`` to only the metrics relevant to ``member``.
 
-            Resolution order:
-            1. member.protocolSettings.variable_mask  — the raw allowlist loaded
-               from the mask file; always present when a mask file is configured,
-               even if protocolSettings.registry_map is empty mid-cycle.
-               Synthetic ``<name>_desc`` keys are also passed when their source
-               ``<name>`` is in the mask — they are generated after masking and
-               are never listed in the mask file itself.
-            2. member.registry_map variable_names     — derived from the masked
-               registry map; used when no explicit mask file was loaded.
-            3. Forward everything                     — no mask configured at all.
-            """
-            ps = getattr(member, 'protocolSettings', None)
+        Resolution order
+        ----------------
+        1. ``member.protocolSettings.variable_mask`` — the normalized allowlist
+           loaded from the mask file.  By the time the mask reaches this method,
+           ``protocol_settings._load_filter_file`` has already stripped any
+           ``_l`` / ``_h`` suffixes so every entry is a logical (combined) stem
+           name (e.g. ``echg_all`` rather than ``echg_all_l``).  Likewise,
+           ``load__registry`` has already merged every ``_l`` / ``_h`` register
+           pair in ``full_data`` into a single combined entry under that same
+           stem name.  The filter is therefore a straightforward stem-to-stem
+           comparison with no special-case expansion needed.
 
-            # Prefer the raw variable_mask list — it is always populated from the
-            # mask file at init and is not affected by mid-cycle registry state.
-            if ps is not None and ps.variable_mask:
-                mask: set[str] = set(ps.variable_mask)
-                # Also accept post-merge names: mask may contain pre-merge '_l' names
-                # that load_registry_map strips when combining _l/_h pairs.
-                mask_expanded: set[str] = mask | {k[:-2] for k in mask if k.endswith('_l')}
-                return {
-                    k: v for k, v in full_data.items()
-                    if k.lower() in mask_expanded
-                    or (k.lower().endswith('_desc') and k.lower()[:-5] in mask_expanded)
-                }
+           Synthetic ``<name>_desc`` keys produced by enum decoders are also
+           forwarded when their base name (``<name>``) is in the mask — these
+           are generated after masking and never appear in the mask file itself.
 
-            # Fall back to deriving the key set from the registry map entries.
-            member_keys: set[str] = set()
-            for entries in member.registry_map.values():
-                for entry in entries:
-                    if hasattr(entry, 'variable_name') and entry.variable_name:
-                        member_keys.add(entry.variable_name)
+        2. ``member.registry_map`` variable names — derived from the masked
+           registry map when no explicit mask file was loaded.
 
-            if not member_keys:
-                return full_data  # no mask configured — forward everything
+        3. Forward everything — no mask configured at all.
+        """
+        ps = getattr(member, 'protocolSettings', None)
 
-            return {k: v for k, v in full_data.items() if k in member_keys}
+        # Path 1 — explicit variable mask.
+        # Both the mask (normalized by _load_filter_file) and full_data (merged
+        # by load__registry) use logical stem names, so a simple set lookup is
+        # all that's required.  No _l/_h expansion is needed here.
+        if ps is not None and ps.variable_mask:
+            mask: set[str] = set(ps.variable_mask)
+            return {
+                k: v for k, v in full_data.items()
+                if k.lower() in mask
+                or (k.lower().endswith('_desc') and k.lower()[:-5] in mask)
+            }
+
+        # Path 2 — fall back to the registry map variable names.
+        member_keys: set[str] = set()
+        for entries in member.registry_map.values():
+            for entry in entries:
+                if hasattr(entry, 'variable_name') and entry.variable_name:
+                    member_keys.add(entry.variable_name)
+
+        if not member_keys:
+            return full_data  # Path 3 — no mask at all, forward everything
+
+        return {k: v for k, v in full_data.items() if k in member_keys}
 
     def _submit_concurrent_group_read(self, group: ScrapeGroup, now: float) -> None:
         """
@@ -1161,45 +1209,7 @@ class Protocol_Gateway:
             self.__log.debug(f"Group members due for '{transport.transport_name}': {[m.transport_name for m in due_members]}")
             for member in due_members:
                 member_data: dict[str, int | float | str] = self._filter_for_member(data, member)
-                # Debug: show mask keys that didn't match anything in the scraped data
-                ps: protocol_settings | None = getattr(member, 'protocolSettings', None)
-
-                if ps is not None and ps.variable_mask:
-                    # Path 1: explicit mask file
-                    _mask_summary: str = f"{len(ps.variable_mask)} mask keys in {ps.mask_file_name} → {len(member_data)} matched"
-                    data_keys_lower: set[str] = {k.lower() for k in data.keys()}
-                    _unmatched: set[str] = set(ps.variable_mask) - data_keys_lower
-                    _unmatched = {k for k in _unmatched if not (k.endswith('_l') and k[:-2] in data_keys_lower)}
-                    _unmatched = {k for k in _unmatched if not (k.endswith('_h') and (k[:-2] + '_l') in set(ps.variable_mask))}
-                    _synthetic: set[str] = {k for k in data_keys_lower if k.endswith('_desc') and k[:-5] in set(ps.variable_mask)}
-
-                    self.__log.debug(f"Filtered data for '{member.transport_name}': {_mask_summary}")
-                    if _unmatched or _synthetic:
-                        self.__log.debug(
-                            f"Mask keys with no match in scraped data for '{member.transport_name}' "
-                            f"({len(_unmatched)} unmatched): {sorted(_unmatched)}"
-                            + (f" | synthetic _desc fields present: {sorted(_synthetic)}" if _synthetic else "")
-                        )
-
-                elif ps is not None and any(ps.registry_map.values()):
-                    # Path 2: no mask file, filtering by registry map variable names
-                    member_keys: set[str] = {
-                        entry.variable_name
-                        for entries in member.registry_map.values()
-                        for entry in entries
-                        if hasattr(entry, 'variable_name') and entry.variable_name
-                    }
-                    self.__log.debug(
-                        f"Filtered data for '{member.transport_name}': "
-                        f"{len(member_keys)} registry map keys → {len(member_data)} matched"
-                    )
-
-                else:
-                    # Path 3: no mask, no registry map filter — all metrics forwarded
-                    self.__log.debug(
-                        f"Filtered data for '{member.transport_name}': "
-                        f"no mask configured — forwarding all {len(member_data)} metrics"
-                    )
+                self._log_mask_diagnostics(member, data, member_data)
 
                 if not member_data:
                     continue
@@ -1262,9 +1272,6 @@ class Protocol_Gateway:
         pending futures.
         """
         self.__running = True
-
-        if False:
-            self.enable_write()
 
         try:
             while self.__running:

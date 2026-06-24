@@ -27,7 +27,7 @@ import re
 import struct
 import time
 from collections.abc import Iterator, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, Literal, Optional, cast
@@ -276,8 +276,15 @@ class registry_map_entry:
     adjustments: dict[str, Any]
     concatenate: bool
     concatenate_registers: list[int]
-
     values: list
+    # For multi-register entries encoded as "low_high[_mid_msb]" in the CSV
+    # address field (e.g. "40_41" for a UINT32 pair where 40 is the low word
+    # and 41 is the high word).  When populated, the decoder reads exactly these
+    # addresses in this order rather than assuming consecutive addresses starting
+    # at entry.register.  For standard consecutive entries this list is empty
+    # and the legacy start_register + offset path is used unchanged.
+    register_list: list[int] = field(default_factory=list)
+
     value_regex: str = ""
 
     value_min: int = 0
@@ -1068,7 +1075,7 @@ class protocol_settings:
         resolution, value-range and enum parsing, register address parsing
         (decimal, hex, bit-offset ``N.bX``, byte-offset ``N.Y``, range
         ``A-B``), and dynamic register expressions (deferred into
-        ``dynamic_registry_rows``).  After all rows are processed, adjacent
+        ``dynamic_registry_rows``).  After all rows are processed,
         ``_l``/``_h`` pairs are merged into single 32-bit entries, the variable
         mask (allowlist) and variable screen (denylist) are applied, and
         ``_add_code_description_entries`` appends synthetic ``_desc`` entries for
@@ -1077,6 +1084,11 @@ class protocol_settings:
         registry_map: list[registry_map_entry] = []
 
         register_regex: re.Pattern[str] = re.compile(
+            # Matches a single register address: plain decimal, hex (0x prefix),
+            # with optional bit-offset (.b#) or byte-offset (.) suffixes.
+            # This regex is only reached when register_list is empty (i.e. the
+            # "low_high" underscore format was not detected above), so it will
+            # never be applied to multi-register addresses like "40_41".
             r"(?P<register>\d{1,5}|0x[0-9A-Fa-f]{1,4})"
             r"(?:\.b(?P<bit_start>\d{1,2})(?:-(?P<bit_end>\d{1,2}))?)?"
             r"(?:\.(?P<byte>\d{1,2}))?"
@@ -1270,7 +1282,7 @@ class protocol_settings:
                 try:
                     codes_json = json.loads(row["values"])
                     value_is_json = True
-                    name = row["documented name"] + "_codes"
+                    name: str = row["documented name"] + "_codes"
                     if name not in self.codes:
                         self.codes[name] = codes_json
                 except ValueError:
@@ -1312,6 +1324,7 @@ class protocol_settings:
             # region register
             concatenate: bool = False
             concatenate_registers: list[int] = []
+            register_list: list[int] = []   # populated for "low_high[_mid_msb]" address format
 
             register: int = -1
             register_bit: int = -1
@@ -1319,59 +1332,91 @@ class protocol_settings:
             register_byte: int = -1
 
             row["register"] = row["register"].lower()
-            reg_match: re.Match[str] | None = register_regex.search(row["register"])
 
-            if reg_match:
-                try:
-                    register: int = strtoint_safe(
-                        reg_match.group("register"),
-                        context="register address"
-                    )
+            # ── "low_high" address format (e.g. "40_41", "41_40", "40_50") ──
+            # The underscore-separated format explicitly lists every register
+            # address in the order they contribute words to the combined value.
+            # Token 0 is the low word, token 1 is the high word (for UINT32),
+            # tokens 0-3 for UINT64 etc.  This differs from the range format
+            # "40-43" which implies consecutive addresses in ascending order.
+            # Detection rule: all tokens are plain non-negative integers and
+            # there is at least one underscore.
+            _reg_str: str = row["register"].strip()
+            if "_" in _reg_str and not _reg_str.startswith("_"):
+                _tokens: list[str] = _reg_str.split("_")
+                _parsed: list[int] = []
+                _all_int: bool = True
+                for _tok in _tokens:
+                    _tok = _tok.strip().lower()
+                    try:
+                        # Accept plain decimal ("40") or hex ("0x28") tokens
+                        _parsed.append(int(_tok, 16) if _tok.startswith("0x") else int(_tok))
+                    except ValueError:
+                        _all_int = False
+                        break
 
-                    bit_start_str: str = reg_match.group("bit_start")
-                    bit_end_str: str = reg_match.group("bit_end")
+                if _all_int and len(_parsed) >= 2:
+                    register_list = _parsed
+                    register = _parsed[0]  # low word address — used as entry.register
 
-                    if bit_start_str is not None:
-                        register_bit = strtoint_safe(bit_start_str, context="register bit start")
-                        if bit_end_str is not None:
-                            register_bit_end = strtoint_safe(bit_end_str, context="register bit end")
+                    # Cross-check token count against data_type word width.
+                    # data_type is parsed below so we defer the check until after
+                    # entry construction — see post-entry cross-check block.
+
+            if not register_list:
+                reg_match: re.Match[str] | None = register_regex.search(row["register"])
+
+                if reg_match:
+                    try:
+                        register: int = strtoint_safe(
+                            reg_match.group("register"),
+                            context="register address"
+                        )
+
+                        bit_start_str: str = reg_match.group("bit_start")
+                        bit_end_str: str = reg_match.group("bit_end")
+
+                        if bit_start_str is not None:
+                            register_bit = strtoint_safe(bit_start_str, context="register bit start")
+                            if bit_end_str is not None:
+                                register_bit_end = strtoint_safe(bit_end_str, context="register bit end")
+                            else:
+                                register_bit_end = register_bit
                         else:
-                            register_bit_end = register_bit
-                    else:
-                        register_bit = -1
-                        register_bit_end = -1
+                            register_bit = -1
+                            register_bit_end = -1
 
-                    byte_str: str | None = reg_match.group("byte")
-                    register_byte = strtoint_safe(byte_str, context="register byte") if byte_str else 0
+                        byte_str: str | None = reg_match.group("byte")
+                        register_byte = strtoint_safe(byte_str, context="register byte") if byte_str else 0
 
-                except ValueError as e:
-                    self._log.warning(f"Skipping malformed register definition '{row['register']}': {e}")
-                    return
-
-            else:
-                range_match: re.Match[str] | None = range_regex.search(row["register"])
-                if not range_match:
-                    if "[" in row["register"]:
-                        self._log.info(f"Deferred dynamic register expression: {row['register']}")
-                        deferred_row = dict(row)
-                        deferred_row["_registry_type"] = registry_type
-                        self.dynamic_registry_rows.append(deferred_row)
+                    except ValueError as e:
+                        self._log.warning(f"Skipping malformed register definition '{row['register']}': {e}")
                         return
-                    else:
-                        register = strtoint_safe(row["register"])
+
                 else:
-                    reverse = range_match.group("reverse")
-                    start = strtoint_safe(range_match.group("start"))
-                    end = strtoint_safe(range_match.group("end"))
-                    register = start
-                    if end > start:
-                        concatenate = True
-                        if reverse:
-                            for i in range(end, start - 1, -1):
-                                concatenate_registers.append(i)
+                    range_match: re.Match[str] | None = range_regex.search(row["register"])
+                    if not range_match:
+                        if "[" in row["register"]:
+                            self._log.info(f"Deferred dynamic register expression: {row['register']}")
+                            deferred_row = dict(row)
+                            deferred_row["_registry_type"] = registry_type
+                            self.dynamic_registry_rows.append(deferred_row)
+                            return
                         else:
-                            for i in range(start, end + 1):
-                                concatenate_registers.append(i)
+                            register = strtoint_safe(row["register"])
+                    else:
+                        reverse = range_match.group("reverse")
+                        start = strtoint_safe(range_match.group("start"))
+                        end = strtoint_safe(range_match.group("end"))
+                        register = start
+                        if end > start:
+                            concatenate = True
+                            if reverse:
+                                for i in range(end, start - 1, -1):
+                                    concatenate_registers.append(i)
+                            else:
+                                for i in range(start, end + 1):
+                                    concatenate_registers.append(i)
 
             if concatenate_registers:
                 r = range(len(concatenate_registers))
@@ -1399,6 +1444,7 @@ class protocol_settings:
                     "register_bit": register_bit,
                     "register_bit_end": register_bit_end,
                     "register_byte": register_byte,
+                    "register_list": register_list,
                     "variable_name": variable_name,
                     "documented_name": row["documented name"],
                     "unit": str(unit_symbol),
@@ -1420,6 +1466,26 @@ class protocol_settings:
                 }
 
                 item = registry_map_entry(**entry_kwargs)
+
+                # Cross-check register_list token count against data_type word width.
+                # Mismatch means the address format and data_type disagree —
+                # log a WARNING and trust the address list (it's more explicit).
+                if item.register_list:
+                    expected_words: dict[Data_Type, int] = {
+                        Data_Type.UINT: 2, Data_Type.INT: 2,
+                        Data_Type.FLOAT32: 2, Data_Type.ACC32: 2,
+                        Data_Type._32BIT_FLAGS: 2,
+                        Data_Type.UINT64: 4, Data_Type.FLOAT64: 4,
+                    }
+                    expected: int | None = expected_words.get(item.data_type)
+                    actual: int = len(item.register_list)
+                    if expected is not None and actual != expected:
+                        self._log.warning(
+                            f"Register address '{row['register']}' has {actual} token(s) "
+                            f"but data_type {item.data_type.name} expects {expected} words "
+                            f"for {item.variable_name!r} — address list takes precedence"
+                        )
+
                 registry_map.append(item)
                 register = register + 1
 
@@ -1634,7 +1700,13 @@ class protocol_settings:
                         if not init:
                             register.next_read_timestamp = timestamp_ms + register.read_interval
 
-                        register_end: int = register.register + self.entry_word_count(register) - 1
+                        # For explicit address-list entries, the window must cover
+                        # ALL addresses in the list — they may be non-contiguous or
+                        # higher than start_register + word_count - 1.
+                        if register.register_list:
+                            register_end = max(register.register_list)
+                        else:
+                            register_end = register.register + self.entry_word_count(register) - 1
 
                         if window_min is None or register.register < window_min:
                             window_min: int | None = register.register
@@ -1699,7 +1771,10 @@ class protocol_settings:
 
         size: int = 0
         for item in self.registry_map[registry_type]:
-            item_end_register: int = item.register + self.entry_word_count(item) - 1
+            if item.register_list:
+                item_end_register: int = max(item.register_list)
+            else:
+                item_end_register = item.register + self.entry_word_count(item) - 1
             if item_end_register > size:
                 size = item_end_register
 
@@ -1913,9 +1988,9 @@ class protocol_settings:
             value = reg_bytes[0]
 
         elif entry.data_type.value > 200:  # unsigned bit types
-            bit_size = Data_Type.getSize(entry.data_type)
-            bit_mask = (1 << bit_size) - 1
-            bit_index = entry.register_bit
+            bit_size: int = Data_Type.getSize(entry.data_type)
+            bit_mask: int = (1 << bit_size) - 1
+            bit_index: int = entry.register_bit
             reg_bytes = register[:2]
             if word_order.bytes_reversed:
                 reg_bytes = bytes([reg_bytes[1], reg_bytes[0]])
@@ -1977,13 +2052,15 @@ class protocol_settings:
     def entry_word_count(self, entry: registry_map_entry) -> int:
         """Return the number of 16-bit Modbus registers occupied by ``entry``.
 
-        For concatenated entries the count is the length of
-        ``concatenate_registers``.  Variable-length ``STRING`` entries derive
-        the count from ``data_type_size`` (rounding up to whole words).  All
-        other types use a fixed lookup table (``UINT``/``INT``/``FLOAT32``/
-        ``ACC32`` → 2, ``UINT64``/``FLOAT64`` → 4, ``STRING16`` → 8,
-        ``STRING32`` → 16); any type not in the table defaults to 1.
+        Priority order:
+        1. ``entry.register_list`` — explicit address list from the "low_high"
+           address format (e.g. "40_41").  Length is the definitive word count.
+        2. ``entry.concatenate_registers`` — concatenated range format.
+        3. ``data_type`` lookup table — legacy consecutive-address path.
         """
+        if entry.register_list:
+            return len(entry.register_list)
+
         if entry.concatenate and entry.concatenate_registers:
             return len(entry.concatenate_registers)
 
@@ -2010,6 +2087,7 @@ class protocol_settings:
         start_register: int,
         word_count: int,
         word_order: WordOrder,
+        register_addresses: list[int] | None = None,
     ) -> bytes | None:
         """Assemble ``word_count`` consecutive 16-bit registers into a contiguous byte string.
 
@@ -2043,7 +2121,14 @@ class protocol_settings:
         """
         words: list[int] = []
         for offset in range(word_count):
-            register_num: int = start_register + offset
+            # When an explicit address list is supplied (the "low_high" format,
+            # e.g. "40_41" or "41_40" or "40_50"), use it directly — no
+            # consecutive or ascending-order assumption is made.
+            # Fall back to start_register + offset for all legacy entries.
+            if register_addresses and offset < len(register_addresses):
+                register_num: int = register_addresses[offset]
+            else:
+                register_num = start_register + offset
             if register_num not in registry:
                 return None
             words.append(registry[register_num] & 0xFFFF)
@@ -2083,31 +2168,31 @@ class protocol_settings:
         word_order: WordOrder = self._adjustments.get_entry_byteorder(entry)
 
         if entry.data_type == Data_Type.UINT:
-            register_bytes: bytes | None = self._register_words_to_bytes(registry, entry.register, 2, word_order)
+            register_bytes: bytes | None = self._register_words_to_bytes(registry, entry.register, 2, word_order, entry.register_list or None)
             if register_bytes is None:
                 return None
             value = int.from_bytes(register_bytes, byteorder="big", signed=False)
 
         elif entry.data_type == Data_Type.UINT64:
-            register_bytes = self._register_words_to_bytes(registry, entry.register, 4, word_order)
+            register_bytes = self._register_words_to_bytes(registry, entry.register, 4, word_order, entry.register_list or None)
             if register_bytes is None:
                 return None
             value = int.from_bytes(register_bytes, byteorder="big", signed=False)
 
         elif entry.data_type == Data_Type.ACC32:
-            register_bytes = self._register_words_to_bytes(registry, entry.register, 2, word_order)
+            register_bytes = self._register_words_to_bytes(registry, entry.register, 2, word_order, entry.register_list or None)
             if register_bytes is None:
                 return None
             value = int.from_bytes(register_bytes, byteorder="big", signed=False)
 
         elif entry.data_type == Data_Type.FLOAT32:
-            register_bytes = self._register_words_to_bytes(registry, entry.register, 2, word_order)
+            register_bytes = self._register_words_to_bytes(registry, entry.register, 2, word_order, entry.register_list or None)
             if register_bytes is None:
                 return None
             value = struct.unpack(">f", register_bytes)[0]
 
         elif entry.data_type == Data_Type.FLOAT64:
-            register_bytes = self._register_words_to_bytes(registry, entry.register, 4, word_order)
+            register_bytes = self._register_words_to_bytes(registry, entry.register, 4, word_order, entry.register_list or None)
             if register_bytes is None:
                 return None
             value = struct.unpack(">d", register_bytes)[0]
@@ -2125,7 +2210,7 @@ class protocol_settings:
                 value = raw
 
         elif entry.data_type == Data_Type.INT:
-            register_bytes = self._register_words_to_bytes(registry, entry.register, 2, word_order)
+            register_bytes = self._register_words_to_bytes(registry, entry.register, 2, word_order, entry.register_list or None)
             if register_bytes is None:
                 return None
             value = int.from_bytes(register_bytes, byteorder="big", signed=True)
@@ -2144,7 +2229,7 @@ class protocol_settings:
             total_registers = max(1, bit_size // 16)
             if total_registers > 1:
                 # Multi-register flags: both word_reversed and bytes_reversed apply.
-                flag_bytes = self._register_words_to_bytes(registry, entry.register, total_registers, word_order)
+                flag_bytes = self._register_words_to_bytes(registry, entry.register, total_registers, word_order, entry.register_list or None)
                 if flag_bytes is None:
                     return None
                 val = int.from_bytes(flag_bytes, byteorder="big", signed=False)
@@ -2219,14 +2304,14 @@ class protocol_settings:
             value = raw.to_bytes(2, byteorder="big").hex()
 
         elif entry.data_type == Data_Type.ASCII:
-            raw_bytes: bytes | None = self._register_words_to_bytes(registry, entry.register, 1, word_order)
+            raw_bytes: bytes | None = self._register_words_to_bytes(registry, entry.register, 1, word_order, entry.register_list or None)
             if raw_bytes is None:
                 return None
             value = self._decode_text_bytes(raw_bytes)
 
         elif entry.data_type in (Data_Type.STRING, Data_Type.STRING16, Data_Type.STRING32):
             word_count: int = self.entry_word_count(entry)
-            raw_bytes = self._register_words_to_bytes(registry, entry.register, word_count, word_order)
+            raw_bytes = self._register_words_to_bytes(registry, entry.register, word_count, word_order, entry.register_list or None)
             if raw_bytes is None:
                 return None
             if entry.data_type_size > 0:

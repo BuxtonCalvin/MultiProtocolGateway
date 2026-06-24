@@ -383,7 +383,7 @@ def test_modbus_helpers_interpret_exceptions_and_validate_client_presence(dummy_
     base = modbus_base_module.modbus_base.__new__(modbus_base_module.modbus_base)
     base.client = None
     base.transport_name = "transport.modbus"
-    with pytest.raises(RuntimeError, match="no client"):
+    with pytest.raises(RuntimeError, match="client is not initialized"):
         base._get_correct_device_arg({"unit": 1})
 
 

@@ -38,6 +38,20 @@
   </div>
 
   {% if proto_tabs %}
+  <!-- Export bar — links update when a tab is clicked -->
+  <div class="flex items-center gap-2 mb-2">
+    <span class="text-mpg-500 text-xs">Export:</span>
+    <a id="export-csv-link"
+       href="#"
+       class="btn-secondary text-xs pointer-events-none opacity-40"
+       download>↓ CSV</a>
+    <a id="export-json-link"
+       href="#"
+       class="btn-secondary text-xs pointer-events-none opacity-40"
+       download>↓ JSON</a>
+    <span class="text-mpg-600 text-xs">(select a tab to enable)</span>
+  </div>
+
   <div class="flex gap-1 mb-3 border-b border-mpg-700" role="tablist">
     {% for tab in proto_tabs %}
     <button class="tab-btn px-4 py-1.5 text-xs font-medium rounded-t
@@ -72,16 +86,43 @@
 
 <script>
   // Re-bind tab click handlers for the newly swapped section
-  document.querySelectorAll('#protocol-section .tab-btn').forEach(btn => {
-    btn.addEventListener('click', function() {
-      document.querySelectorAll('#protocol-section .tab-btn').forEach(b => {
-        b.classList.remove('tab-active');
-        b.classList.add('tab-inactive');
-        b.setAttribute('aria-selected', 'false');
+  (function() {
+    const deviceName = "{{ device.name | e }}";
+
+    function updateExportLinks(protocolName, registryType) {
+      const base  = `/api/protocols/${protocolName}/${registryType}`;
+      const qs    = deviceName ? `?device_name=${encodeURIComponent(deviceName)}` : '';
+      const csv   = document.getElementById('export-csv-link');
+      const json  = document.getElementById('export-json-link');
+      const hint  = csv?.closest('.flex')?.querySelector('span.text-mpg-600');
+      if (!csv || !json) return;
+      csv.href  = `${base}/export.csv${qs}`;
+      json.href = `${base}/export.json${qs}`;
+      csv.classList.remove('pointer-events-none', 'opacity-40');
+      json.classList.remove('pointer-events-none', 'opacity-40');
+      if (hint) hint.classList.add('hidden');
+    }
+
+    document.querySelectorAll('#protocol-section .tab-btn').forEach(btn => {
+      btn.addEventListener('click', function() {
+        // Tab active styling
+        document.querySelectorAll('#protocol-section .tab-btn').forEach(b => {
+          b.classList.remove('tab-active');
+          b.classList.add('tab-inactive');
+          b.setAttribute('aria-selected', 'false');
+        });
+        this.classList.add('tab-active');
+        this.classList.remove('tab-inactive');
+        this.setAttribute('aria-selected', 'true');
+        // Export links
+        updateExportLinks(this.dataset.protocol, this.dataset.registry);
       });
-      this.classList.add('tab-active');
-      this.classList.remove('tab-inactive');
-      this.setAttribute('aria-selected', 'true');
     });
-  });
+
+    // Activate for the auto-loading first tab
+    const firstTab = document.querySelector('#protocol-section .tab-btn[data-protocol]');
+    if (firstTab) {
+      updateExportLinks(firstTab.dataset.protocol, firstTab.dataset.registry);
+    }
+  })();
 </script>

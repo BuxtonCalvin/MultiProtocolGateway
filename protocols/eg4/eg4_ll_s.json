@@ -1,6 +1,6 @@
 {
-  "batch_size":    "40",
-  "read_interval": "5000",
+  "batch_size":    "10",
+  "read_interval": "15",
   "send_holding_register": true,
   "send_input_register": false,
   "send_coil_register": false,

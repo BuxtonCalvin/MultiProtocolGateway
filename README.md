@@ -147,7 +147,7 @@ A reference page listing all available transport classes — scraper types (Modb
 
 ### Settings
 
-A reference page listing all available settings with their definitions.
+A reference page listing all available settings with their definitions.  You can also access these descriptions from the Scraper and Bridge pages by clicking on the default value, located in the panel on the left side of the screen.
 
 ![Settings](classes/WebServer/static/screenshots/transport_settings_trunc.png)
 
@@ -184,7 +184,7 @@ Here are the overviews of the MQTT and JSON bridges
 
 ## Supported Protocols & Hardware Devices
 
-MPG ships with pre-built protocol maps for the following manufacturers. Each protocol map is a pair of CSV files (input and holding register maps) plus a JSON descriptor:
+MPG ships with pre-built protocol maps for the following manufacturers. Each protocol map is a range of CSV files (typically input and holding register maps but can also be coil or discrete register maps) plus a JSON descriptor:
 
 | Manufacturer | Models / Protocols | Link |
 | --- | --- | --- |
@@ -215,7 +215,7 @@ MPG ships with pre-built protocol maps for the following manufacturers. Each pro
 
 For a full list of tested devices and community-reported compatibility, see [`devices_and_protocols.csv`](documentation/usage/devices_and_protocols.csv).
 
-MPG also supports any generic Modbus RTU or TCP device when given a register map — the Live Analysis tool is specifically designed to help build maps for undocumented hardware.
+MPG also supports any generic Modbus RTU or TCP device when given a register map: the Live Analysis tool is specifically designed to help build maps for undocumented hardware.
 
 ---
 

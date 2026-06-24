@@ -42,7 +42,7 @@ from pathlib import Path
 from typing import Any, List
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -61,7 +61,7 @@ from ..services.device_service import (
     get_nav_data,
     get_transport_library,
 )
-from ..services.protocol_service import get_protocol_groups, get_protocol_json
+from ..services.protocol_service import export_protocol_registers, get_protocol_groups, get_protocol_json
 
 router = APIRouter(tags=["pages"])
 _log: logging.Logger = logging.getLogger(__name__)
@@ -444,6 +444,85 @@ async def protocol_editor(
         request=request,
         name=template_name,
         context=context,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Protocol register export
+# ---------------------------------------------------------------------------
+
+@router.get("/api/protocols/{protocol_name}/{registry_type}/export.csv")
+def export_registers_csv(
+    protocol_name: str,
+    registry_type: str,
+    device_name: str | None = None,
+    db: Session = Depends(get_session),
+):
+    """
+    Export all registers for a protocol/registry_type as a CSV download.
+    When device_name is supplied, W/M/S selection columns are included.
+    Paired _l/_h registers show an address range (e.g. 40-41) and a single
+    logical row — mirroring what the table displays.
+    """
+    rows: list[dict[str, Any]] = export_protocol_registers(
+        db, protocol_name, registry_type, device_name
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="No registers found")
+
+    import io
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=list(rows[0].keys()))
+    writer.writeheader()
+    writer.writerows(rows)
+    buf.seek(0)
+
+    filename = (
+        f"{protocol_name}_{registry_type}"
+        + (f"_{device_name}" if device_name else "")
+        + ".csv"
+    )
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/api/protocols/{protocol_name}/{registry_type}/export.json")
+def export_registers_json(
+    protocol_name: str,
+    registry_type: str,
+    device_name: str | None = None,
+    db: Session = Depends(get_session),
+):
+    """
+    Export all registers for a protocol/registry_type as a JSON download.
+    Same contract as the CSV export — address ranges for paired registers,
+    optional W/M/S fields when device_name is provided.
+    """
+    rows: list[dict[str, Any]] = export_protocol_registers(
+        db, protocol_name, registry_type, device_name
+    )
+    if not rows:
+        raise HTTPException(status_code=404, detail="No registers found")
+
+    payload: dict[str, Any] = {
+        "protocol_name":  protocol_name,
+        "registry_type":  registry_type,
+        "device_name":    device_name,
+        "register_count": len(rows),
+        "registers":      rows,
+    }
+    filename = (
+        f"{protocol_name}_{registry_type}"
+        + (f"_{device_name}" if device_name else "")
+        + ".json"
+    )
+    return StreamingResponse(
+        iter([json.dumps(payload, indent=2)]),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

@@ -256,7 +256,7 @@
       "label_y_percent": 63.6,
       "width_percent": 72.8,
       "height_percent": 76.1,
-      "label": "Protocol register map editor. Each row is a register with editable variable name, doc name, unit, type, range, R/W flag, adjustments, and notes. Changes are staged and committed on demand.",
+      "label": "Protocol register map editor. Each row is a register with editable variable name, documented name, unit, type, range, R/W flag, adjustments, and notes. Changes are staged and committed on demand.",
       "shape_type": "rect"
     }
   ],

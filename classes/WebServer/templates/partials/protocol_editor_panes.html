@@ -50,7 +50,21 @@
       {% endfor %}
       {% if not proto_tabs %}
       <p class="text-mpg-500 text-xs italic">No register maps found in database.<br>
-        Run a re-scan from the dashboard.</p>
+        Run a re-scan to populate the protocol register table.</p>
+      <button id="rescan-btn"
+              hx-get="/api/scan"
+              hx-swap="none"
+              hx-on:htmx:before-request="
+                this.disabled = true;
+                this.textContent = 'Scanning…';
+              "
+              hx-on:htmx:after-request="
+                this.textContent = 'Scan complete — reloading…';
+                setTimeout(() => window.location.reload(), 800);
+              "
+              class="btn-secondary text-xs mt-3">
+        Run Re-scan
+      </button>
       {% endif %}
     </div>
 
@@ -61,6 +75,29 @@
       <p class="font-mono text-mpg-400 text-xs break-all">{{ csv_path }}</p>
     </div>
     {% endif %}
+
+    <!-- Export panel — populated by JS once a tab is active -->
+    <div class="card mt-3" id="export-panel">
+      <p class="label mb-2">Export Register Table</p>
+      <p class="text-mpg-500 text-xs mb-2">
+        Exports the currently displayed register map.
+        Select a tab first to enable export.
+      </p>
+      <div class="flex flex-col gap-1.5">
+        <a id="export-csv-link"
+           href="#"
+           class="btn-secondary text-xs text-center pointer-events-none opacity-40"
+           download>
+          ↓ CSV
+        </a>
+        <a id="export-json-link"
+           href="#"
+           class="btn-secondary text-xs text-center pointer-events-none opacity-40"
+           download>
+          ↓ JSON
+        </a>
+      </div>
+    </div>
 
     <!-- JSON config summary -->
     {% if json_data %}
@@ -105,6 +142,8 @@
                      {% if loop.first %}tab-active{% else %}tab-inactive{% endif %}"
               role="tab"
               aria-selected="{{ 'true' if loop.first else 'false' }}"
+              data-protocol="{{ tab.protocol_name }}"
+              data-registry="{{ tab.registry_type }}"
               hx-get="/protocol/{{ tab.protocol_name }}/{{ tab.registry_type }}"
               hx-target="#protocol-table-container"
               hx-swap="innerHTML scroll:false"
@@ -137,16 +176,39 @@
 </div>
 
 <script>
-  document.querySelectorAll('.tab-btn').forEach(btn => {
-    btn.addEventListener('click', function() {
-      document.querySelectorAll('.tab-btn').forEach(b => {
-        b.classList.remove('tab-active');
-        b.classList.add('tab-inactive');
-        b.setAttribute('aria-selected', 'false');
-      });
-      this.classList.add('tab-active');
-      this.classList.remove('tab-inactive');
-      this.setAttribute('aria-selected', 'true');
+  // ── Tab active-state + export link wiring ──────────────────────────────
+  // Runs after the full partial is parsed (script is at the bottom), so all
+  // tab buttons are in the DOM when querySelector runs.
+  // Also re-runs on htmx:afterSettle in case the partial is re-swapped.
+  (function bindProtocolEditorTabs() {
+    function updateExportLinks(protocolName, registryType) {
+      const base = `/api/protocols/${encodeURIComponent(protocolName)}/${encodeURIComponent(registryType)}`;
+      const csv  = document.getElementById('export-csv-link');
+      const json = document.getElementById('export-json-link');
+      if (!csv || !json) return;
+      csv.href  = `${base}/export.csv`;
+      json.href = `${base}/export.json`;
+      csv.classList.remove('pointer-events-none', 'opacity-40');
+      json.classList.remove('pointer-events-none', 'opacity-40');
+      const hint = document.querySelector('#export-panel .text-mpg-500.text-xs');
+      if (hint) hint.classList.add('hidden');
+    }
+
+    // Bind click listeners on all tab buttons
+    document.querySelectorAll('.tab-btn[data-protocol]').forEach(btn => {
+      // Remove any previously bound listener to avoid duplicates on re-swap
+      btn.removeEventListener('click', btn._exportHandler);
+      btn._exportHandler = function() {
+        updateExportLinks(this.dataset.protocol, this.dataset.registry);
+      };
+      btn.addEventListener('click', btn._exportHandler);
     });
-  });
+
+    // Activate immediately for the first tab — it auto-loads via hx-trigger="load"
+    // and its data-protocol / data-registry are already in the static HTML.
+    const firstTab = document.querySelector('.tab-btn[data-protocol]');
+    if (firstTab) {
+      updateExportLinks(firstTab.dataset.protocol, firstTab.dataset.registry);
+    }
+  })();
 </script>
