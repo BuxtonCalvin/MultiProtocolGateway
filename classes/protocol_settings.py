@@ -1084,6 +1084,11 @@ class protocol_settings:
         registry_map: list[registry_map_entry] = []
 
         register_regex: re.Pattern[str] = re.compile(
+            # Matches a single register address: plain decimal, hex (0x prefix),
+            # with optional bit-offset (.b#) or byte-offset (.) suffixes.
+            # This regex is only reached when register_list is empty (i.e. the
+            # "low_high" underscore format was not detected above), so it will
+            # never be applied to multi-register addresses like "40_41".
             r"(?P<register>\d{1,5}|0x[0-9A-Fa-f]{1,4})"
             r"(?:\.b(?P<bit_start>\d{1,2})(?:-(?P<bit_end>\d{1,2}))?)?"
             r"(?:\.(?P<byte>\d{1,2}))?"
@@ -1342,8 +1347,10 @@ class protocol_settings:
                 _parsed: list[int] = []
                 _all_int: bool = True
                 for _tok in _tokens:
+                    _tok = _tok.strip().lower()
                     try:
-                        _parsed.append(int(_tok.strip()))
+                        # Accept plain decimal ("40") or hex ("0x28") tokens
+                        _parsed.append(int(_tok, 16) if _tok.startswith("0x") else int(_tok))
                     except ValueError:
                         _all_int = False
                         break
@@ -1832,7 +1839,7 @@ class protocol_settings:
         # ------------------------------------------------------------------
         def _reverse_words(data: bytes, word_count: int) -> bytes:
             """Return *data* with its ``word_count`` 16-bit words in reversed order."""
-            words: list[bytes] = [data[i*2:(i+1)*2] for i in range(word_count)]
+            words = [data[i*2:(i+1)*2] for i in range(word_count)]
             return b"".join(reversed(words))
 
         # Default fallback: single 16-bit unsigned read.
