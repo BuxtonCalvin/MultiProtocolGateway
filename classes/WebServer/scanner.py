@@ -595,7 +595,7 @@ def _parse_protocol_csv(csv_path: Path, group_name: str) -> list[dict[str, Any]]
         low_var:  str = low["variable_name"]
         high_var: str = high["variable_name"]
 
-        # Both addresses must be parseable integers and consecutive
+        # Both addresses must be parseable integers (not bit-field addresses like "5.b0")
         try:
             low_addr:  int = int(low["register_address"])
             high_addr: int = int(high["register_address"])
@@ -606,16 +606,24 @@ def _parse_protocol_csv(csv_path: Path, group_name: str) -> list[dict[str, Any]]
         if (
             low_var.endswith("_l")
             and high_var == low_var[:-2] + "_h"
-            and high_addr == low_addr + 1
         ):
+            # Addresses need not be consecutive — the new "low_high" format
+            # encodes the actual addresses so non-contiguous pairs are valid.
             stem: str = low_var[:-2]  # strip "_l"
 
-            # Promote _l row to the combined stem entry
-            low["variable_name"]        = stem
-            low["documented_name"]      = (low["documented_name"][:-2].strip()
-                                           if low["documented_name"].endswith("_l")
-                                           else low["documented_name"])
-            low["paired_high_address"]  = str(high_addr)
+            # Promote _l row to the combined stem entry.
+            # register_address becomes "low_high" (e.g. "40_41") — the first
+            # token is the low word address, the second is the high word address.
+            # Non-contiguous pairs ("40_50") and reversed-order pairs ("41_40")
+            # are representable by this same format.  The runtime decoder reads
+            # the address list directly — no consecutive-address assumption.
+            # paired_high_address is kept separately for the UI expand display.
+            low["register_address"]    = f"{low_addr}_{high_addr}"
+            low["paired_high_address"] = str(high_addr)
+            low["variable_name"]       = stem
+            low["documented_name"]     = (low["documented_name"][:-2].strip()
+                                          if low["documented_name"].endswith("_l")
+                                          else low["documented_name"])
 
             # Inherit missing metadata from the _h row
             if not low.get("unit") and high.get("unit"):
