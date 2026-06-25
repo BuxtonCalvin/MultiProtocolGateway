@@ -836,19 +836,26 @@ class Protocol_Gateway:
            registry map when no explicit mask file was loaded.
 
         3. Forward everything — no mask configured at all.
+
+        Synthetic fields
+        ----------------
+        Keys listed in ``member.synthetic_field_names`` are always forwarded
+        on paths 1 and 2, regardless of mask or registry map contents.  These
+        are fields injected by ``post_process_data`` that have no corresponding
+        row in the protocol CSV and therefore cannot appear in any mask file.
+        Path 3 already forwards everything, so no special handling is needed.
         """
         ps = getattr(member, 'protocolSettings', None)
+        synthetic: frozenset[str] = member.synthetic_field_names
 
         # Path 1 — explicit variable mask.
-        # Both the mask (normalized by _load_filter_file) and full_data (merged
-        # by load__registry) use logical stem names, so a simple set lookup is
-        # all that's required.  No _l/_h expansion is needed here.
         if ps is not None and ps.variable_mask:
             mask: set[str] = set(ps.variable_mask)
             return {
                 k: v for k, v in full_data.items()
                 if k.lower() in mask
                 or (k.lower().endswith('_desc') and k.lower()[:-5] in mask)
+                or k.lower() in synthetic
             }
 
         # Path 2 — fall back to the registry map variable names.
@@ -861,7 +868,11 @@ class Protocol_Gateway:
         if not member_keys:
             return full_data  # Path 3 — no mask at all, forward everything
 
-        return {k: v for k, v in full_data.items() if k in member_keys}
+        return {
+            k: v for k, v in full_data.items()
+            if k in member_keys
+            or k.lower() in synthetic
+        }
 
     def _submit_concurrent_group_read(self, group: ScrapeGroup, now: float) -> None:
         """
@@ -1272,6 +1283,9 @@ class Protocol_Gateway:
         pending futures.
         """
         self.__running = True
+
+        if False:
+            self.enable_write()
 
         try:
             while self.__running:

@@ -471,8 +471,98 @@ class transport_base:
         self._partial_registry: dict[int, int] = {}
 
     def _finish_cycle_tracking(self, data: dict[str, int | float | str]) -> None:
+        """Finalize a scrape cycle.
+
+        Calls ``post_process_data`` before marking the cycle complete so
+        synthetic metrics injected by subclasses are present in the data
+        regardless of whether the caller used ``read_data()``,
+        ``read_group_data()``, or ``read_data_iter()``.
+        """
+        processed: dict[str, int | float | str] = self.post_process_data(data)
+        # Reflect any mutations back into the original dict so callers
+        # that hold a reference to it see the enriched version.
+        if processed is not data:
+            data.clear()
+            data.update(processed)
         self._cycle_active = False
         self._last_cycle_result.has_data = bool(data)
+
+    @property
+    def synthetic_field_names(self) -> frozenset[str]:
+        """Names of fields injected by ``post_process_data`` for this transport.
+
+        ``_filter_for_member`` in ``protocol_gateway`` always forwards keys
+        that appear in this set, bypassing the variable mask and registry map
+        filter.  This ensures derived metrics computed in ``post_process_data``
+        reach the bridge layer even though they have no corresponding row in
+        the protocol CSV and therefore no entry in the mask file.
+
+        Override in subclasses and return a ``frozenset`` of every field name
+        that ``post_process_data`` injects.  Use lowercase names — the filter
+        compares against ``k.lower()``.
+
+        The base implementation returns an empty frozenset so the filter
+        behavior is unchanged for all existing transports that do not
+        override ``post_process_data``.
+
+        Example::
+
+            @property
+            def synthetic_field_names(self) -> frozenset[str]:
+                return frozenset({
+                    "cell_voltage_max_v",
+                    "cell_voltage_min_v",
+                    "cell_voltage_diff_mv",
+                    "balancing_state",
+                    "balancing_state_text",
+                })
+        """
+        return frozenset()
+
+    def post_process_data(self, info: dict[str, int | float | str]) -> dict[str, int | float | str]:
+        """Post-processing hook called after every complete scrape cycle.
+
+        Invoked by ``_finish_cycle_tracking`` which is the single convergence
+        point for all three read paths — sequential (``read_data``), group
+        (``read_group_data``), and interleaved (``read_data_iter``).  The hook
+        therefore fires exactly once per cycle regardless of read mode.
+
+        Override in subclasses to inject synthetic / derived metrics, validate
+        mandatory fields, or apply device-specific transformations.
+
+        ``info`` contains all decoded register values for this cycle after
+        mask and screen filtering have been applied.  Subclasses may mutate
+        the dict in place and return it, or return a new dict — both are safe.
+
+        Returning an empty dict suppresses all bridge output for this cycle,
+        which can be useful when a mandatory field is absent and publishing
+        partial data would be misleading.
+
+        The base implementation returns ``info`` unchanged.
+        """
+        return info
+
+    def on_first_connect_read(self) -> None:
+        """Hook called once after the first successful physical connection.
+
+        Override in subclasses to read auxiliary registers that need to be
+        cached for the lifetime of the connection — configuration thresholds,
+        serial numbers, calibration constants, etc.
+
+        The hook is called by ``modbus_base.connect()`` after
+        ``self.connected`` is set to ``True``, so the transport is ready to
+        issue Modbus requests when it runs.
+
+        On reconnect, ``connect()`` clears per-connection state and calls
+        this hook again, giving subclasses a chance to refresh their cache
+        with current device values.
+
+        Subclasses that add further override levels should call
+        ``super().on_first_connect_read()`` first.
+
+        The base implementation does nothing.
+        """
+        pass
 
     def _cycle_expect_unit(self, count: int = 1) -> None:
         self._last_cycle_result.expected_units += count
