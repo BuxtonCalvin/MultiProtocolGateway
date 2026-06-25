@@ -296,12 +296,9 @@ class modbus_base(transport_base):
         return True
 
     def _get_correct_device_arg(self, kwargs: dict[str, Any]) -> dict[str, Any]:
-        # 1. Identify which keyword the current Pymodbus version expects
-        # Check the signature of a standard client method
         if self.client is None:
-            msg: str = f"Transport '{self.transport_name}' has no client assigned — subclass __init__ must assign self.client before calling " \
-            "_get_correct_device_arg"
-            raise RuntimeError(msg)
+            raise RuntimeError("Cannot resolve device arguments: Modbus client is not initialized.")
+
 
         sig: inspect.Signature = inspect.signature(self.client.read_input_registers)
 
