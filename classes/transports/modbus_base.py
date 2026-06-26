@@ -326,7 +326,6 @@ class modbus_base(transport_base):
 
         return kwargs
 
-
     def _entry_byte_order(self, entry: registry_map_entry) -> WordOrder:
         """Return the ``WordOrder`` for *entry* by delegating to ``DataAdjustments``."""
         return self._protocol._adjustments.get_entry_byteorder(entry)
@@ -729,6 +728,18 @@ class modbus_base(transport_base):
             # regardless of which read mode the gateway uses.  The hook runs
             # after the transport is confirmed connected and Modbus-ready.
             # On reconnect this will fire again, refreshing stale cached values.
+            #
+            # IMPORTANT: on_first_connect_read() runs synchronously inside
+            # connect(), which is called before the interleaved scheduler starts.
+            # Any blocking I/O here (Modbus reads with retries) will freeze ALL
+            # transports for the duration.  Subclasses that need to read registers
+            # at startup should either:
+            #   a) Defer the I/O to the first post_process_data() cycle (preferred
+            #      for interleaved mode — see modbus_eg4_ll_s_tcp for the pattern), or
+            #   b) Keep reads minimal (single register, no retries) if they must
+            #      execute here.
+            # A WARNING is logged if on_first_connect_read() takes more than 2s.
+            _connect_hook_start: float = time.time()
             try:
                 self.on_first_connect_read()
             except Exception:
@@ -737,6 +748,16 @@ class modbus_base(transport_base):
                     "startup cache may be incomplete; defaults will be used.",
                     self.transport_name,
                 )
+            finally:
+                _elapsed: float = time.time() - _connect_hook_start
+                if _elapsed > 2.0:
+                    self._log.warning(
+                        "[%s] on_first_connect_read took %.1fs — this blocks ALL "
+                        "transports during connection.  Defer blocking I/O to "
+                        "post_process_data() for interleaved compatibility.",
+                        self.transport_name,
+                        _elapsed,
+                    )
 
     def cleanup(self) -> None:
         """Clean up transport resources and close connections."""

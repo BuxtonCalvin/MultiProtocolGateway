@@ -145,7 +145,7 @@ class modbus_eg4_ll_s_rtu(modbus_rtu):
 
     transport_type: str = "scraper"
     """
-    EG4 LL battery transport over Modbus RTU (Waveshare RS485 bridge),
+    EG4 LL battery transport over Modbus RTU
     targeting the PDF V01.06 register map.
 
     Inherits all connection, retry, and register-read logic from modbus_rtu.
@@ -171,11 +171,32 @@ class modbus_eg4_ll_s_rtu(modbus_rtu):
         # configurations.
         self._holding_cache: dict[str, int | float | str] = {}
         self._cell_stats_inputs_warned: bool = False
+        self._holding_cache_loaded: bool = False
         super().__init__(settings)
 
     # ------------------------------------------------------------------
     # modbus_base / transport_base hook: post-connection startup read
     # ------------------------------------------------------------------
+    @property
+    def synthetic_fields_metadata(self) -> list[tuple[str, str, float, str]]:
+        """Declare data types for fields injected by post_process_data.
+
+        Used by TimescaleDB init_bridge to create wide table columns with
+        the correct PostgreSQL types at schema registration time, so
+        _validate_wide_row never sees these as unknown extra_keys.
+
+        Tuple format: (variable_name, data_type, unit_mod, note)
+        data_type strings match Data_Type enum names in protocol_settings.
+        """
+        return [
+            ("cell_voltage_max_v",   "FLOAT32",  1.0, "Highest individual cell voltage (V)"),
+            ("cell_voltage_min_v",   "FLOAT32",  1.0, "Lowest individual cell voltage (V)"),
+            ("cell_voltage_diff_v",  "FLOAT32",  1.0, "Cell voltage spread max-min (V)"),
+            ("balancing_state",      "USHORT", 1.0, "0=Idle  1=Balancing  2=Finished"),
+            ("balancing_state_text", "ASCII",   1.0, "Human-readable balancing state"),
+        ]
+
+
 
     @property
     def synthetic_field_names(self) -> frozenset[str]:
@@ -189,7 +210,7 @@ class modbus_eg4_ll_s_rtu(modbus_rtu):
         Fields produced by _compute_cell_stats:
           cell_voltage_max_v    highest individual cell voltage (V)
           cell_voltage_min_v    lowest individual cell voltage (V)
-          cell_voltage_diff_mv  spread between max and min (mV)
+          cell_voltage_diff_v  spread between max and min (V)
 
         Fields produced by _compute_balancing_state:
           balancing_state       int  0=Idle  1=Balancing  2=Finished
@@ -204,25 +225,59 @@ class modbus_eg4_ll_s_rtu(modbus_rtu):
         })
 
     def on_first_connect_read(self) -> None:
-        """Load BMS configuration thresholds once per connection.
+        """Schedule the holding register cache load for the first scrape cycle.
 
-        Called by modbus_base.connect() after self.connected is True —
-        fires on every connect and reconnect, ensuring the cache always
-        reflects the device's current configuration values.
+        Rather than loading the cache synchronously here — which would block
+        the main connection loop for the full retry duration (up to 2.5 minutes
+        at 5 retries x 29s timeout) and prevent other transports in the
+        interleaved scheduler from running — we set a flag that causes
+        post_process_data to load the cache on the first successful cycle.
 
-        The cache is populated from Registry_Type.HOLDING because the
-        EG4-LL V01.06 protocol exposes all registers (measurement and
-        configuration alike) via FC 0x03.  The result reflects whatever
-        mask / screen filter the transport has configured — if threshold
-        registers have been excluded, built-in defaults are used during
-        balancing state inference.
+        This means synthetic metrics use built-in defaults on cycle 1, then
+        switch to device-sourced thresholds from cycle 2 onward.  That is
+        always acceptable — one cycle of default-based balancing inference
+        is harmless.
+
+        The flag is reset here (not just in __init__) so it also re-arms
+        on reconnect, ensuring the cache is refreshed after each reconnection
+        without ever blocking the scheduler.
         """
         super().on_first_connect_read()
         self._holding_cache = {}
-        # Reset the one-time scrape-input warning so it fires again after
-        # reconnect (in case the mask changed between sessions).
-        self._cell_stats_inputs_warned: bool = False
+        self._cell_stats_inputs_warned = False
+        self._holding_cache_loaded = False  # arm the deferred load
 
+        # Log which threshold inputs will use defaults until cache loads
+        _BALANCING_STATE_INPUTS: dict[str, str] = {
+            "balance_volt":      "minimum cell voltage to enable balancing",
+            "balance_volt_diff": "cell voltage delta threshold to start balancing",
+            "cell_ov_release":   "OV release voltage used for balancing hysteresis",
+        }
+        self._log.info(
+            "[%s] Holding register cache will load on first successful scrape cycle. "
+            "Balancing inference will use built-in defaults until then: %s",
+            self.transport_name,
+            ", ".join(
+                f"{k}={v}" for k, v in [
+                    ("balance_volt",      self._BALANCE_VOLT_DEFAULT),
+                    ("balance_volt_diff", self._BALANCE_VOLT_DIFF_DEFAULT),
+                    ("cell_ov_release",   self._CELL_OV_RELEASE_DEFAULT),
+                ]
+            ),
+        )
+
+    def _load_holding_cache(self) -> None:
+        """Load the BMS configuration threshold registers into the cache.
+
+        Called from post_process_data on the first successful scrape cycle
+        so the load happens within the normal scheduler timeslot rather than
+        blocking the connection phase.
+
+        Uses the same mask/screen filter as the main scrape because
+        read_registry() calls get_registry_map() which already reflects the
+        filtered map.  Threshold variables excluded from the mask will be
+        absent from the cache and built-in defaults will be used instead.
+        """
         if self.protocolSettings is None:
             return
 
@@ -233,52 +288,61 @@ class modbus_eg4_ll_s_rtu(modbus_rtu):
                 self.scrape_target,
             )
             self._holding_cache = self.read_registry(Registry_Type.HOLDING)
+            self._holding_cache_loaded = True
             self._log.info(
                 "EG4 BMS holding registers loaded for %s: %d values cached.",
                 self.transport_name,
                 len(self._holding_cache),
             )
+
+            # Log any threshold inputs missing from the cache
+            _BALANCING_STATE_INPUTS: dict[str, str] = {
+                "balance_volt":      "minimum cell voltage to enable balancing",
+                "balance_volt_diff": "cell voltage delta threshold to start balancing",
+                "cell_ov_release":   "OV release voltage used for balancing hysteresis",
+            }
+            missing: list[str] = [
+                k for k in _BALANCING_STATE_INPUTS if k not in self._holding_cache
+            ]
+            if missing:
+                self._log.info(
+                    "[%s] To enable accurate 'balancing_state' / 'balancing_state_text' "
+                    "synthetic metrics, add the following register(s) to the variable mask: %s  "
+                    "(%s).  Built-in defaults will be used until then.",
+                    self.transport_name,
+                    ", ".join(missing),
+                    " | ".join(
+                        f"{k}: {_BALANCING_STATE_INPUTS[k]}" for k in missing
+                    ),
+                )
         except Exception:
             self._log.exception(
                 "Failed to load holding registers for %s — "
-                "balancing inference will use built-in defaults.",
+                "balancing inference will use built-in defaults. "
+                "Will retry on next cycle.",
                 self.transport_name,
             )
-
-        # Check which holding-register inputs to _compute_balancing_state are
-        # absent from the cache.  Missing entries mean the variable_mask for
-        # this transport excludes them — the method will fall back to built-in
-        # defaults, which may not match the device's actual configuration.
-        _BALANCING_STATE_INPUTS: dict[str, str] = {
-            "balance_volt":      "minimum cell voltage to enable balancing",
-            "balance_volt_diff": "cell voltage delta threshold to start balancing",
-            "cell_ov_release":   "OV release voltage used for balancing hysteresis",
-        }
-        missing_balancing: list[str] = [
-            k for k in _BALANCING_STATE_INPUTS if k not in self._holding_cache
-        ]
-        if missing_balancing:
-            self._log.info(
-                "[%s] To enable accurate 'balancing_state' / 'balancing_state_text' "
-                "synthetic metrics, add the following register(s) to the variable mask: %s  "
-                "(%s).  Built-in defaults will be used until then.",
-                self.transport_name,
-                ", ".join(missing_balancing),
-                " | ".join(
-                    f"{k}: {_BALANCING_STATE_INPUTS[k]}" for k in missing_balancing
-                ),
-            )
+            # Leave _holding_cache_loaded = False so we retry next cycle
 
     # ------------------------------------------------------------------
     # modbus_base / transport_base hook: per-cycle post-processing
     # ------------------------------------------------------------------
 
-    def post_process_data(self, info: dict[str, int | float | str]) -> dict[str, int | float | str]:
+    def post_process_data(
+        self,
+        info: dict[str, int | float | str],
+    ) -> dict[str, int | float | str]:
         """Inject EG4-specific derived metrics after every scrape cycle.
 
         Called by _finish_cycle_tracking() which is the single convergence
         point for all three read modes (sequential, group, interleaved),
         so this fires exactly once per cycle regardless of gateway config.
+
+        On the first successful cycle after connect, triggers the deferred
+        holding register cache load (_load_holding_cache).  This avoids
+        blocking the main connection loop — see on_first_connect_read.
+        If the cache load fails, it retries on the next cycle until it
+        succeeds.
 
         Derived fields are computed in dependency order:
           1. cell_stats   — produces cell_voltage_max_v / min_v
@@ -294,10 +358,16 @@ class modbus_eg4_ll_s_rtu(modbus_rtu):
         if not info:
             return info
 
+        # Deferred cache load — runs on the first successful scrape cycle
+        # (and retries on subsequent cycles if the previous load failed).
+        # This keeps on_first_connect_read non-blocking.
+        if not self._holding_cache_loaded:
+            self._load_holding_cache()
+
         # One-time check on the first cycle: warn if cell voltage registers
         # are absent from the scrape data so the user knows which metrics to
         # add to the mask to enable cell_voltage_* synthetic metrics.
-        if not getattr(self, '_cell_stats_inputs_warned', False):
+        if not self._cell_stats_inputs_warned:
             self._cell_stats_inputs_warned = True
             missing_cell: list[str] = [
                 f"cell_{i:02d}_voltage"
@@ -307,7 +377,7 @@ class modbus_eg4_ll_s_rtu(modbus_rtu):
             if missing_cell:
                 self._log.info(
                     "[%s] To enable 'cell_voltage_max_v', 'cell_voltage_min_v', and "
-                    "'cell_voltage_diff_mv' synthetic metrics, add the following "
+                    "'cell_voltage_diff_v' synthetic metrics, add the following "
                     "register(s) to the variable mask: %s",
                     self.transport_name,
                     ", ".join(missing_cell),
@@ -321,18 +391,21 @@ class modbus_eg4_ll_s_rtu(modbus_rtu):
     # Derived field computations
     # ------------------------------------------------------------------
 
-    def _compute_cell_stats(self, info: dict[str, int | float | str]) -> dict[str, int | float | str]:
+    def _compute_cell_stats(
+        self,
+        info: dict[str, int | float | str],
+    ) -> dict[str, int | float | str]:
         """Compute per-poll cell voltage statistics from decoded register values.
 
         Cell voltage registers (cell_01_voltage through cell_16_voltage) are
         decoded by protocol_settings as raw V integers (USHORT, unit_mod=1,
-        unit=0.001V).  This method converts them to volts and computes spread.
+        unit=1mV).  This method converts them to volts and computes spread.
         Skips any cell reporting 0 mV (absent or unpopulated cell slot).
 
         Produces:
           cell_voltage_max_v    float V   highest individual cell voltage
           cell_voltage_min_v    float V   lowest individual cell voltage
-          cell_voltage_diff_mv  float mV  spread between max and min
+          cell_voltage_diff_v  float V  spread between max and min
         """
         derived: dict[str, int | float | str] = {}
         cell_voltages_v: list[float] = []
@@ -347,13 +420,14 @@ class modbus_eg4_ll_s_rtu(modbus_rtu):
         if cell_voltages_v:
             derived["cell_voltage_max_v"]   = round(max(cell_voltages_v), 3)
             derived["cell_voltage_min_v"]   = round(min(cell_voltages_v), 3)
-            derived["cell_voltage_diff_v"] = round(
-                (max(cell_voltages_v) - min(cell_voltages_v)), 3
-            )
+            derived["cell_voltage_diff_v"] = round((max(cell_voltages_v) - min(cell_voltages_v)), 3)
 
         return derived
 
-    def _compute_balancing_state(self, info: dict[str, int | float | str]) -> dict[str, int | float | str]:
+    def _compute_balancing_state(
+        self,
+        info: dict[str, int | float | str],
+    ) -> dict[str, int | float | str]:
         """Infer the pack balancing state from cell voltage stats and BMS thresholds.
 
         Thresholds come from the holding register cache loaded by

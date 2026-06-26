@@ -519,7 +519,47 @@ class transport_base:
         """
         return frozenset()
 
-    def post_process_data(self, info: dict[str, int | float | str]) -> dict[str, int | float | str]:
+    @property
+    def synthetic_fields_metadata(self) -> list[tuple[str, str, float, str]]:
+        """Rich metadata for fields injected by ``post_process_data``.
+
+        Used by TimescaleDB's ``init_bridge`` to register synthetic fields
+        as first-class columns in the wide table schema alongside CSV-derived
+        metrics.  This ensures the bridge knows the correct data type and unit
+        for each synthetic field at schema-creation time, avoiding the
+        type-inference ambiguity that would arise if columns were created on
+        the fly during ``_validate_wide_row``.
+
+        Returns a list of ``(variable_name, data_type, unit_mod, note)``
+        tuples matching the signature of ``_extract_metric_names`` output so
+        the two sources can be concatenated directly before being passed to
+        ``_ensure_columns_for_metrics``.
+
+        Data type strings must match the ``Data_Type`` enum names used
+        elsewhere in ``protocol_settings`` (e.g. ``"FLOAT"``, ``"USHORT"``,
+        ``"SHORT"``, ``"TEXT"``).
+
+        The base implementation returns an empty list — no synthetic columns
+        are registered for transports that do not override this property.
+
+        Example::
+
+            @property
+            def synthetic_fields_metadata(self) -> list[tuple[str, str, float, str]]:
+                return [
+                    ("cell_voltage_max_v",   "FLOAT",  1.0, "Highest cell voltage V"),
+                    ("cell_voltage_min_v",   "FLOAT",  1.0, "Lowest cell voltage V"),
+                    ("cell_voltage_diff_mv", "FLOAT",  1.0, "Cell voltage spread mV"),
+                    ("balancing_state",      "USHORT", 1.0, "0=Idle 1=Balancing 2=Finished"),
+                    ("balancing_state_text", "TEXT",   1.0, "Balancing state label"),
+                ]
+        """
+        return []
+
+    def post_process_data(
+        self,
+        info: dict[str, int | float | str],
+    ) -> dict[str, int | float | str]:
         """Post-processing hook called after every complete scrape cycle.
 
         Invoked by ``_finish_cycle_tracking`` which is the single convergence
