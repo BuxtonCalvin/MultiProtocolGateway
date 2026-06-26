@@ -345,7 +345,7 @@ class modbus_eg4_ll_s_tcp(modbus_tcp):
         Produces:
           cell_voltage_max_v    float V   highest individual cell voltage
           cell_voltage_min_v    float V   lowest individual cell voltage
-          cell_voltage_diff_mv  float mV  spread between max and min
+          cell_voltage_diff_v  float mV  spread between max and min
         """
         derived: dict[str, int | float | str] = {}
         cell_voltages_v: list[float] = []

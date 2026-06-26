@@ -46,7 +46,7 @@ register,variable_name,documented_name,unit,data_type,values,read_interval,writa
 27.b1,protection_cell_ov,Protection Cell OV,,1bit,"{""0"":"""",""1"":""Cell_OV""}",,R,,"Reg 27 bit 1. Hard protection: one or more cell voltages exceeded the cell over-voltage protection limit. BMS opens charge FET. 1=Cell_OV tripped, 0=clear."
 27.b3,protection_cell_uv,Protection Cell UV,,1bit,"{""0"":"""",""1"":""Cell_UV""}",,R,,"Reg 27 bit 3. Hard protection: one or more cell voltages dropped below the cell under-voltage protection limit. BMS opens discharge FET. 1=Cell_UV tripped, 0=clear."
 27.b4,protection_charge_oc,Protection Charge OC,,1bit,"{""0"":"""",""1"":""Charge_OC""}",,R,,"Reg 27 bit 4. Hard protection: charge current exceeded the over-current protection threshold. BMS opens charge FET. 1=Charge_OC tripped, 0=clear. See reg 78 for release timer."
-27.b8,protection_charge_ot,Protection Charge OT,,1bit,"{""0"":"""",""1"""":""""Charge_OT""""}""",,R,,"Reg 27 bit 8. Hard protection: battery temperature during charging exceeded the over-temperature protection limit. BMS opens charge FET. 1=Charge_OT tripped, 0=clear."
+27.b8,protection_charge_ot,Protection Charge OT,,1bit,"{""0"":"""",""1"":""Charge_OT""}",,R,,"Reg 27 bit 8. Hard protection: battery temperature during charging exceeded the over-temperature protection limit. BMS opens charge FET. 1=Charge_OT tripped, 0=clear."
 27.b10,protection_charge_ut,Protection Charge UT,,1bit,"{""0"":"""",""1"":""Charge_UT""}",,R,,"Reg 27 bit 10. Hard protection: battery temperature during charging dropped below the under-temperature protection limit. BMS opens charge FET to prevent lithium plating. 1=Charge_UT tripped, 0=clear."
 27.b5,protection_discharge_oc,Protection Discharge OC,,1bit,"{""0"":"""",""1"":""Discharge_OC""}",,R,,"Reg 27 bit 5. Hard protection: discharge current exceeded the over-current protection threshold. BMS opens discharge FET. 1=Discharge_OC tripped, 0=clear. See reg 79 for release timer."
 27.b9,protection_discharge_ot,Protection Discharge OT,,1bit,"{""0"":"""",""1"":""Discharge_OT""}",,R,,"Reg 27 bit 9. Hard protection: battery temperature during discharging exceeded the over-temperature protection limit. BMS opens discharge FET. 1=Discharge_OT tripped, 0=clear."
@@ -63,7 +63,7 @@ register,variable_name,documented_name,unit,data_type,values,read_interval,writa
 28.b1,error_temperature_error,Error Temperature_Error,,1bit,"{""0"":"""",""1"":""Temperature_Error""}",,R,,"Reg 28 bit 1. Fault: a temperature sensor error has been detected (e.g. open/short thermistor, reading out of physical range). 1=Temperature_Error active, 0=clear. Affects thermal protection reliability."
 28.b0,error_voltage_error,Error Voltage_Error,,1bit,"{""0"":"""",""1"":""Pack_OV""}",,R,,"Reg 28 bit 0. Fault: a voltage measurement error has been detected by the BMS (e.g. ADC fault, sensor out of range, or pack voltage reading is implausible). 1=Voltage_Error active, 0=clear. Requires BMS inspection."
 29_30,cycle_count,cycle_count,,UINT,,,W,,Cycle count. Big Endian ABCD. Technically not low_high but high_low.  Except battery expects high to be read first.
-31_32,full_capacity,full_capacity,0.0000002778mAS,UINT,,,W,,Full capacity. Big Endian ABCD. Displayed in Amp Hours. Technically not low_high but high_low.  Except battery expects high to be read first.
+31_32,full_capacity,full_capacity,0.00000027778aH,UINT,,,W,,Full capacity. Big Endian ABCD. Displayed in Amp Hours. Technically not low_high but high_low.  Except battery expects high to be read first.
 33.b8,temp_sensor_1,temp_sensor_1,1C,_8SBIT,,,R,,Temperature sensor 1. High byte of reg 33.  s8(offset 69). Signed degC.
 33.b0,temp_sensor_2,temp_sensor_2,1C,_8SBIT,,,R,,Temperature sensor 2. Low byte of reg 33.  s8(offset 70). Signed degC.
 34.b8,temp_sensor_3,temp_sensor_3,1C,_8SBIT,,,R,,Temperature sensor 3. High byte of reg 34.  s8(offset 71). Signed degC.
@@ -116,9 +116,9 @@ register,variable_name,documented_name,unit,data_type,values,read_interval,writa
 102,pcb_ot_warn,pcb_ot_warn,1C,SHORT,,,W,"{""Offset"":-50}",PCB/MOSFET overtemperature WARNING.  offset 117-119. offset: raw-50=degC.
 103,pcb_ot_protect,pcb_ot_protect,1C,SHORT,,,W,"{""Offset"":-50}",PCB/MOSFET overtemperature PROTECTION.  offset 119-121. offset: raw-50=degC.
 104,pcb_ot_release,pcb_ot_release,1C,SHORT,,,W,"{""Offset"":-50}",PCB/MOSFET overtemperature RELEASE.  offset 121-123. offset: raw-50=degC.
-105-116,model,model,,ASCII,,,R,,Product model number.  result[2:25] -> regs 105-116. 24-byte ASCII string.
-117-119,fw_version,fw_version,,ASCII,,,R,,BMS firmware version.  result[27:33] -> regs 117-119. 6-byte ASCII string e.g. V03R04.
-120-127,serial_no,serial_no,,ASCII,,,W,,Product serial number.  result[33:48] -> regs 120-127. 16-byte ASCII string. RW per PDF.
+105-116,model,model,,ASCII,,3600,R,,Product model number.  result[2:25] -> regs 105-116. 24-byte ASCII string.
+117-119,fw_version,fw_version,,ASCII,,3600,R,,BMS firmware version.  result[27:33] -> regs 117-119. 6-byte ASCII string e.g. V03R04.
+120-127,serial_no,serial_no,,ASCII,,3600,R,,Product serial number.  result[33:48] -> regs 120-127. 16-byte ASCII string. RW per PDF.
 
 
 #            .b8 = high byte (bits 8-15)   .b0 = low byte (bits 0-7),,,,,,,,,
