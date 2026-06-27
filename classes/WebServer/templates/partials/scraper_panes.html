@@ -359,6 +359,20 @@
       <p class="surface-muted text-xs font-semibold tracking-wide">
         (W)rite, (M)ask, (S)creen  -- Add and subtract metrics to mask, screen, and custom write files.
       </p>
+      {% if has_no_selections %}
+      <span id="no-selections-notice"
+            class="text-green-400 text-xs font-semibold"
+            title="No mask or screen selections — all metrics will be forwarded to every bridge.">
+        ✓ No chosen metrics: all metrics will write to bridges.
+      </span>
+      {% endif %}
+      <button id="refresh-values-btn"
+              class="ml-auto btn-secondary text-xs px-2 py-1 flex items-center gap-1"
+              title="Wait for the next scrape cycle then populate the Value column"
+              onclick="refreshProtocolValues()">
+        <span id="refresh-btn-icon">↺</span>
+        <span id="refresh-btn-label">Refresh Values</span>
+      </button>
     </div>
 
     {% if proto_tabs %}
@@ -567,6 +581,67 @@
       });
     });
   });
+
+  // ── Refresh Values button ─────────────────────────────────────────────────
+  // Calls /api/device/{name}/last-values/wait which blocks server-side until
+  // the next complete scrape cycle is forwarded to a bridge, then populates
+  // the [data-value-key] cells in the protocol table.
+  function refreshProtocolValues() {
+    const btn       = document.getElementById('refresh-values-btn');
+    const icon      = document.getElementById('refresh-btn-icon');
+    const label     = document.getElementById('refresh-btn-label');
+    const deviceName = JSON.parse('{{ device.name | tojson | safe }}');
+    // const deviceName = '{{ device.name }}';
+    // const deviceName = {{ device.name | tojson | safe }};
+
+    if (!btn || btn.disabled) return;
+
+    // Show waiting state
+    btn.disabled = true;
+    btn.classList.add('opacity-60', 'cursor-not-allowed');
+    if (icon)  icon.textContent  = '⏳';
+    if (label) label.textContent = 'Waiting for cycle…';
+
+    fetch(`/api/device/${encodeURIComponent(deviceName)}/last-values/wait`)
+      .then(r => r.json())
+      .then(resp => {
+        if (resp.status === 'timeout') {
+          if (label) label.textContent = 'Timed out — retry?';
+        } else if (resp.status !== 'ok' || !resp.values) {
+          if (label) label.textContent = 'No data received';
+        } else {
+          // Populate every [data-value-key] cell in the visible table
+          const values = resp.values;
+          let filled = 0;
+          document.querySelectorAll('[data-value-key]').forEach(cell => {
+            const key = cell.dataset.valueKey;
+            if (key && values[key] !== undefined) {
+              cell.textContent = values[key];
+              cell.classList.add('text-mpg-100');
+              cell.classList.remove('text-mpg-300');
+              filled++;
+            }
+          });
+          if (label) label.textContent = `✓ ${filled} values`;
+          // Reset button label after 3s
+          setTimeout(() => {
+            if (icon)  icon.textContent  = '↺';
+            if (label) label.textContent = 'Refresh Values';
+          }, 3000);
+        }
+      })
+      .catch(() => {
+        if (label) label.textContent = 'Error — retry?';
+      })
+      .finally(() => {
+        btn.disabled = false;
+        btn.classList.remove('opacity-60', 'cursor-not-allowed');
+        if (icon && label.textContent.startsWith('Timed') ||
+            label && label.textContent.startsWith('Error')) {
+          icon.textContent = '↺';
+        }
+      });
+  }
 
   // After any settings PATCH in this pane, update the row DOM without a full re-render.
   document.addEventListener('htmx:afterRequest', function(evt) {

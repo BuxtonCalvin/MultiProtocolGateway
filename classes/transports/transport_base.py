@@ -205,6 +205,15 @@ class transport_base:
         self._last_cycle_result: TransportCycleResult = TransportCycleResult()
         self.transport_name = settings.name #section name
 
+        # Last-known scrape values — populated in write_data() so the snapshot
+        # is taken at the point data is confirmed complete and bridge-bound.
+        # The web UI refresh button reads from this via /api/device/{name}/last-values.
+        self._last_known_data: dict[str, int | float | str] = {}
+        # Event that fires each time write_data() stores a new snapshot.
+        # /api/device/{name}/last-values/wait blocks on this event so the
+        # refresh button waits for the next real cycle rather than polling.
+        self._values_ready_event: threading.Event = threading.Event()
+
         # Bridges set this to True if they require a complete, end-of-cycle
         # batch rather than partial mid-cycle data.  The gateway will suppress
         # write_data calls for this bridge when the data is known to be partial
@@ -614,8 +623,6 @@ class transport_base:
         self._last_cycle_result.is_complete = False
         self._last_cycle_result.skipped_units += skipped_units
 
-
-
     def get_cycle_result(self) -> TransportCycleResult:
         return self._last_cycle_result
 
@@ -685,7 +692,8 @@ class transport_base:
         pass
 
     def write_coil(self, register: int, value: bool, **kwargs) -> None:
-        """Write a single coil (bit) register. Modbus FC 0x05.
+        """
+        Write a single coil (bit) register. Modbus FC 0x05.
         Override in modbus_base; base no-op prevents AttributeError on non-modbus transports.
         """
         pass

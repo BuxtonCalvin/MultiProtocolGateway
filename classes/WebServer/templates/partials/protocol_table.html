@@ -36,6 +36,7 @@
           <th class="px-2 py-2 text-center w-10 border-r border-mpg-700 font-semibold text-mpg-50" scope="col" title="Write-back (also enables Mask)">W</th>
           <th class="px-2 py-2 text-center w-10 border-r border-mpg-700 font-semibold text-mpg-50" scope="col" title="Mask (mutually exclusive with Screen)">M</th>
           <th class="px-2 py-2 text-center w-10 border-r border-mpg-700 font-semibold text-mpg-50" scope="col" title="Screen (mutually exclusive with Write and Mask)">S</th>
+          <th class="px-2 py-2 text-left w-28 border-r border-mpg-700 font-semibold text-mpg-50" scope="col" title="Last known value from most recent scrape cycle">Value</th>
           {% endif %}
           <th class="px-2 py-2 text-left w-20 cursor-pointer select-none" scope="col" data-sort-key="address">Addr</th>
           <th class="px-2 py-2 text-left w-56 cursor-pointer select-none" scope="col" data-sort-key="variable">Variable</th>
@@ -112,6 +113,13 @@
                    hx-trigger="change">
             {% endif %}
           </td>
+          {% endif %}
+
+          {# Value cell — last known value, populated by refreshProtocolValues() #}
+          {% if device_name %}
+          <td class="px-2 py-1.5 font-mono text-mpg-300 text-xs border-r border-mpg-700/20 whitespace-nowrap"
+              role="cell"
+              data-value-key="{{ row.variable_name }}">—</td>
           {% endif %}
 
           {# Address range cell #}
@@ -350,6 +358,18 @@
             data-screen="{{ 1 if row.screen_enabled else 0 }}">
 
           {% if device_name %}
+          {# Synthetic rows are display-only — no toggle endpoints #}
+          {% if row.is_synthetic | default(false) %}
+          <td class="px-2 py-1.5 text-center border-r border-mpg-700/30" role="cell">
+            <span class="text-mpg-600 select-none" title="Synthetic metric — not saved to mask/screen">—</span>
+          </td>
+          <td class="px-2 py-1.5 text-center border-r border-mpg-700/30" role="cell">
+            <span class="text-mpg-600 select-none" title="Synthetic metric — not saved to mask/screen">—</span>
+          </td>
+          <td class="px-2 py-1.5 text-center border-r border-mpg-700/30" role="cell">
+            <span class="text-mpg-600 select-none" title="Synthetic metric — not saved to mask/screen">—</span>
+          </td>
+          {% else %}
           <td class="px-2 py-1.5 text-center border-r border-mpg-700/30" role="cell">
             {% if row.is_writable_by_protocol %}
             <input type="checkbox"
@@ -392,12 +412,28 @@
                    hx-trigger="change">
             {% endif %}
           </td>
+          {% endif %}{# end is_synthetic toggle gate #}
           {% endif %}
 
-          <td class="px-2 py-1.5 font-mono text-mpg-400 dark:text-mpg-200" role="cell">{{ row.register_address }}</td>
+          {# Value cell — last known value, populated by refreshProtocolValues() #}
+          {% if device_name %}
+          <td class="px-2 py-1.5 font-mono text-mpg-300 text-xs border-r border-mpg-700/20 whitespace-nowrap"
+              role="cell"
+              data-value-key="{{ row.variable_name }}">—</td>
+          {% endif %}
+
+          <td class="px-2 py-1.5 font-mono text-mpg-400 dark:text-mpg-200" role="cell">
+            {% if row.is_synthetic | default(false) %}
+            <span class="text-mpg-600 italic text-xs">computed</span>
+            {% else %}
+            {{ row.register_address }}
+            {% endif %}
+          </td>
 
           <td class="px-2 py-1.5 font-mono text-mpg-500 dark:text-mpg-100" title="{{ row.variable_name }}" role="cell">
-            {% if device_name %}
+            {% if row.is_synthetic | default(false) %}
+            <span class="text-green-400">{{ row.variable_name }}</span>
+            {% elif device_name %}
             {{ row.variable_name }}
             {% else %}
             <input type="text"
@@ -767,7 +803,7 @@
     }
 
     // Update the dirty-row highlight when HTMX returns the toggle response.
-    // This keeps visual feedback (row colour, dirty star) in sync without a
+    // This keeps visual feedback (row color, dirty star) in sync without a
     // DOM re-sort or any scroll side-effect.
     table.addEventListener('htmx:afterRequest', function(evt) {
       if (evt.detail.xhr.status < 200 || evt.detail.xhr.status >= 300) return;
