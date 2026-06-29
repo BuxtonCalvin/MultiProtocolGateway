@@ -194,15 +194,15 @@ class modbus_base(transport_base):
         self.client: Optional[ModbusBaseClient] = None
 
         # Initialize instance-specific variables (not class-level)
-        self.modbus_delay_increament : float = 0.05
+        self.modbus_delay_increament: float = 0.05
         ''' delay adjustment every error. todo: add a setting for this '''
 
-        self.modbus_delay_setting : float = 0.85
+        self.modbus_delay_setting: float = 0.85
         '''time in between requests, unmodified by user setting'''
 
-        self.modbus_delay : float = 0.85
+        self.modbus_delay: float = 0.85
         '''time in between requests'''
-
+        self.slave_id: int = 1
         # per transport tuning — batteries with known intermittent blocks can have higher retry counts;
         # a totally dead device will exhaust retries quickly and yield control
         self.max_retries_per_block: int = int(settings.get("max_retries_per_block", fallback=3))
@@ -221,11 +221,11 @@ class modbus_base(transport_base):
         self.disable_duration_hours: int = 12
 
         # Initialize transport-specific lock
-        self._transport_lock = threading.Lock()
+        self._transport_lock: Lock = threading.Lock()
 
         # Initialize instance-specific register failure tracking
         self.register_failure_trackers: dict[str, RegisterFailureTracker] = {}
-        self._failure_tracking_lock = threading.Lock()
+        self._failure_tracking_lock: Lock = threading.Lock()
         self._last_disabled_status_log: float = 0.0
 
         # Register failure tracking settings
@@ -261,7 +261,7 @@ class modbus_base(transport_base):
         # shared Modbus bus are differentiated by their slave/unit address.
         # Stored as a string so scrape_target can use it directly.
         # The address fallback covers modbus_rtu which uses that config key instead of slave_id.
-        self._slave_id: str = settings.get("slave_id", fallback=settings.get("address", fallback="1"))
+        self._slave_id: str = settings.get("slave_id", fallback=settings.get("address", fallback=self.slave_id))
 
     @property
     def _protocol(self) -> "protocol_settings":
@@ -1177,6 +1177,7 @@ class modbus_base(transport_base):
         end: int = 65535,
         batch_size: int = 40,
         delay: float = 0.05,
+        include_input: bool = True,
         include_holding: bool = True,
         include_coil: bool = False,
         include_discrete: bool = False,
@@ -1281,7 +1282,8 @@ class modbus_base(transport_base):
         # physical connection.  read_data() and read_group_data() both acquire
         # this lock, so they will block until the scan completes.
         with self._transport_lock:
-            scan_range(Registry_Type.INPUT, input_result)
+            if include_input:
+                scan_range(Registry_Type.INPUT, input_result)
             if include_holding:
                 scan_range(Registry_Type.HOLDING, holding_result)
             if include_coil:
@@ -1411,7 +1413,35 @@ class modbus_base(transport_base):
         (e.g. free text) are treated as in-range (no penalty) so that
         unspecified ranges do not unfairly reduce the score.
         """
-        scan: Dict[str, Dict[int, int]] = self.capture_analysis_scan(progress_cb=progress_cb, batch_size=batch_size)
+        # Determine which register types actually have a map loaded so we only
+        # scan what the device can answer.  Scanning an unsupported type causes
+        # the transport to block until retries are exhausted for every batch in
+        # the 0-65535 range — a multi-minute freeze for a map that yields nothing.
+        _has_input    = bool(self._protocol.registry_map.get(Registry_Type.INPUT))
+        _has_holding  = bool(self._protocol.registry_map.get(Registry_Type.HOLDING))
+        _has_coil     = bool(self._protocol.registry_map.get(Registry_Type.COIL))
+        _has_discrete = bool(self._protocol.registry_map.get(Registry_Type.DISCRETE))
+
+        if not (_has_input or _has_holding or _has_coil or _has_discrete):
+            self._log.warning(
+                "[%s] analyze_protocols: no registry maps loaded — scan skipped",
+                self.transport_name,
+            )
+            return {
+                "transport_name": self.transport_name,
+                "current_protocol": current_protocol or "",
+                "scan_counts": {"input": 0, "holding": 0},
+                "protocols": {},
+            }
+
+        scan: Dict[str, Dict[int, int]] = self.capture_analysis_scan(
+            progress_cb=progress_cb,
+            batch_size=batch_size,
+            include_input=_has_input,
+            include_holding=_has_holding,
+            include_coil=_has_coil,
+            include_discrete=_has_discrete,
+        )
         raw_input: Dict[int, int] = scan["input"]
         raw_holding: Dict[int, int] = scan["holding"]
         raw_coil: Dict[int, int] = scan["coil"]

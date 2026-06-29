@@ -459,7 +459,7 @@ Key settings available on every transport:
 | --- | --- | --- |
 | `device_name` | | Unique identifier linking scraper and bridge |
 | `protocol_version` | | Protocol map to load (e.g. `growatt_v0.14`) |
-| `batch_size` | `40` | Number of registers to batch read per a given poll |
+| `batch_size` | `40` | Number of registers to batch read per a given scraper poll |
 | `read_interval` | `15` | Seconds between register polls |
 | `bridge` | | Output transport section name |
 | `log_level` | `INFO` | Per-transport log verbosity |

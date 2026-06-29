@@ -25,23 +25,21 @@ on top of modbus_tcp.
 
 Protocol notes
 --------------
-This class targets the EG4-LL battery using the PDF V01.06 register map
-(eg4_ll_pdf_holding_registry_map.csv).
+This class targets the EG4-LL battery using the EG4 PDF V01.06 register map
+(eg4_ll_s.holding_registry_map.csv).
 That protocol uses a SINGLE Modbus address space, ALL accessed via FC 0x03
-(Read Holding Registers).  There is no FC 0x04 input space — do not use the
-input CSV for live reads.
+(Read Holding Registers).
 
 Flag decoding (warning, protection, error_code registers) is handled
 entirely by protocol_settings using Data_Type._16BIT_FLAGS together with
-the bit-label JSON codes in eg4_ll_pdf.json.  This class does NOT manually
+the bit-label JSON codes in eg4_ll_s.json.  This class does NOT manually
 re-decode those registers.  The decoded info dict will already contain
 string values like "Pack_OV, Cell_UV" for those fields by the time
-post_process_data() sees them — attempting int() on those strings would
-raise ValueError.
+post_process_data() sees them.
 
 Status and heater_state are _8BIT enum registers.  protocol_settings
 resolves those to human-readable strings via the status_codes and
-heater_state_codes entries in eg4_ll_pdf.json before this class sees them.
+heater_state_codes entries in eg4_ll_s.json before this class sees them.
 
 Derived fields
 --------------
@@ -81,7 +79,7 @@ on every reconnect so stale threshold values from a previous session never
 persist.
 
 Variable names used from the holding cache match the variable_name column
-in eg4_ll_pdf_holding_registry_map.csv exactly:
+in eg4_ll_s.holding_registry_map.csv exactly:
   balance_volt        (reg 56)  minimum cell voltage to enable balancing
   balance_volt_diff   (reg 57)  delta threshold to consider cells imbalanced
   cell_ov_release     (reg 69)  OV release voltage used for hysteresis
@@ -101,6 +99,8 @@ DIP switch / slave address notes
 ---------------------------------
 Per ll firmware, DIP address 1 activates inverter closed-loop RS485 mode on
 the master battery — full BMS register data is unavailable at that address.
+Note that many values are averages from across all batteries and some slave
+addresses do not produce the same type of data as the master.
 Set batteries to DIP addresses 2-64 for full data access.  If using CAN for
 inverter comms, all RS485 ports are free and all addresses 2-64 are usable.
 
@@ -125,16 +125,13 @@ Manual verification commands (send to RS485 bus to confirm addressing):
   Battery 6 (DIP=06): 06 03 00 00 00 01 85 BD
   (Each asks for pack voltage at register 0 — a safe probe register.)
   Typical opening commands per BMS tools:
-                      02 03 00 00 00 27 05 E3
                       02 03 00 69 00 17 D5 EB
                       02    Slave ID = 2
                       03    Function = Read Holding Registers
                       0069  Starting register = 105
                       0017  Number of registers = 23
                       D5EB  CRC (RTU only)
-                      02 03 00 00 00 27 CRC
-                      02 03 00 2D 00 5B CRC
-                      02 03 00 69 00 17 CRC
+
 """
 
 from __future__ import annotations

@@ -38,9 +38,9 @@
           <th class="px-2 py-2 text-center w-10 border-r border-mpg-700 font-semibold text-mpg-50" scope="col" title="Screen (mutually exclusive with Write and Mask)">S</th>
           <th class="px-2 py-2 text-left w-28 border-r border-mpg-700 font-semibold text-mpg-50" scope="col" title="Last known value from most recent scrape cycle">Value</th>
           {% endif %}
-          <th class="px-2 py-2 text-left w-20 cursor-pointer select-none" scope="col" data-sort-key="address">Addr</th>
+          <th class="px-2 py-2 text-left w-20 cursor-pointer select-none" scope="col" data-sort-key="address">Address</th>
           <th class="px-2 py-2 text-left w-56 cursor-pointer select-none" scope="col" data-sort-key="variable">Variable</th>
-          <th class="px-2 py-2 text-left w-56 cursor-pointer select-none" scope="col" data-sort-key="documented">Doc Name</th>
+          <th class="px-2 py-2 text-left w-56 cursor-pointer select-none" scope="col" data-sort-key="documented">Documented Name</th>
           <th class="px-2 py-2 text-left w-16 cursor-pointer select-none" scope="col" data-sort-key="unit">Unit</th>
           <th class="px-2 py-2 text-left w-20 cursor-pointer select-none" scope="col" data-sort-key="type">Type</th>
           <th class="px-2 py-2 text-left w-32 cursor-pointer select-none" scope="col" data-sort-key="range">Range</th>
@@ -115,14 +115,13 @@
           </td>
           {% endif %}
 
-          {# Value cell — last known value, populated by refreshProtocolValues() #}
+          {# Value cell — last known value, populated on table load and by Refresh Values #}
           {% if device_name %}
-          <td class="px-2 py-1.5 font-mono text-mpg-300 text-xs border-r border-mpg-700/20 whitespace-nowrap"
+          <td class="px-2 py-1.5 font-mono text-xs whitespace-nowrap
+                     bg-mpg-700/5 border-r border-mpg-700/20 text-mpg-500"
               role="cell"
               data-value-key="{{ row.variable_name }}">—</td>
           {% endif %}
-
-          {# Address range cell #}
           <td class="px-2 py-1.5 font-mono text-mpg-400 dark:text-mpg-200 whitespace-nowrap" role="cell">
             {{ row.register_address }}–{{ row.paired_high_address }}
           </td>
@@ -415,9 +414,10 @@
           {% endif %}{# end is_synthetic toggle gate #}
           {% endif %}
 
-          {# Value cell — last known value, populated by refreshProtocolValues() #}
+          {# Value cell — last known value, populated on table load and by Refresh Values #}
           {% if device_name %}
-          <td class="px-2 py-1.5 font-mono text-mpg-300 text-xs border-r border-mpg-700/20 whitespace-nowrap"
+          <td class="px-2 py-1.5 font-mono text-xs whitespace-nowrap
+                     bg-mpg-700/5 border-r border-mpg-700/20 text-mpg-500"
               role="cell"
               data-value-key="{{ row.variable_name }}">—</td>
           {% endif %}

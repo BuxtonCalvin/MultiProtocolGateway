@@ -57,6 +57,7 @@
     "send_discrete_register": "false",
     "send_holding_register": "true",
     "send_input_register": "true",
+    "slave_id": "1",
     "timeout": "7"
   },
   "canbus": {
@@ -176,7 +177,7 @@
     "send_discrete_register": "",
     "send_holding_register": "",
     "send_input_register": "",
-    "slave_id": "",
+    "slave_id": "1",
     "transport": "",
     "variable_mask": "",
     "variable_screen": "",
@@ -204,7 +205,7 @@
   },
   "modbus_eg4_ll_s_tcp": {
     "$extends": "_modbus_base",
-    "slave_id": ""
+    "slave_id": "1"
   },
   "modbus_pace": {
     "batch_size": "40",
@@ -257,7 +258,8 @@
     "write_type": ""
   },
   "modbus_tcp": {
-    "$extends": "_modbus_base"
+    "$extends": "_modbus_base",
+    "slave_id": "1"
   },
   "modbus_tls": {
     "batch_size": "40",

@@ -856,13 +856,28 @@
     if (!toggle) return;
     const change = JSON.parse(toggle.dataset.change);
     const key = queueKey(change);
+    const isAdd = change.action === 'add';
     if (state.queuedChanges.has(key)) {
       state.queuedChanges.delete(key);
+      toggle.classList.replace('btn-primary', 'btn-secondary');
+      toggle.textContent = isAdd ? 'Add' : 'Remove';
     } else {
       state.queuedChanges.set(key, change);
+      toggle.classList.replace('btn-secondary', 'btn-primary');
+      toggle.textContent = '✓';
     }
     updateQueueSummary();
-    renderFocusedProtocol();
+    // Sync the bulk checkboxes for the affected registry without re-rendering
+    // the entire panel — avoids the visible lag on large register lists.
+    const registry = change.registry_type;
+    const addChk = resultShell.querySelector(
+      `.analysis-add-all-check[data-registry="${registry}"][data-protocol="${change.protocol_name}"]`
+    );
+    const removeChk = resultShell.querySelector(
+      `.analysis-remove-all-check[data-registry="${registry}"][data-protocol="${change.protocol_name}"]`
+    );
+    if (addChk) addChk.checked = _allAddValueQueued(change.protocol_name, registry);
+    if (removeChk) removeChk.checked = _allRemoveQueued(change.protocol_name, registry);
   });
 
   // Bulk checkbox handler — covers both add-all and remove-all checkboxes
@@ -907,8 +922,26 @@
         });
       }
     }
+
+    // Update every affected toggle button in-place rather than re-rendering
+    // the entire panel, to keep the UI instant even with hundreds of rows.
+    const action = addChk ? 'add' : 'remove';
+    resultShell.querySelectorAll('.analysis-action-toggle').forEach((btn) => {
+      try {
+        const change = JSON.parse(btn.dataset.change);
+        if (change.registry_type !== registry || change.protocol_name !== protocolName || change.action !== action) return;
+        const selected = state.queuedChanges.has(queueKey(change));
+        if (selected) {
+          btn.classList.replace('btn-secondary', 'btn-primary');
+          btn.textContent = '✓';
+        } else {
+          btn.classList.replace('btn-primary', 'btn-secondary');
+          btn.textContent = action === 'add' ? 'Add' : 'Remove';
+        }
+      } catch (_) {}
+    });
+
     updateQueueSummary();
-    renderFocusedProtocol();
   });
 
   updateQueueSummary();
