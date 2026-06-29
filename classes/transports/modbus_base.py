@@ -194,15 +194,15 @@ class modbus_base(transport_base):
         self.client: Optional[ModbusBaseClient] = None
 
         # Initialize instance-specific variables (not class-level)
-        self.modbus_delay_increament : float = 0.05
+        self.modbus_delay_increament: float = 0.05
         ''' delay adjustment every error. todo: add a setting for this '''
 
-        self.modbus_delay_setting : float = 0.85
+        self.modbus_delay_setting: float = 0.85
         '''time in between requests, unmodified by user setting'''
 
-        self.modbus_delay : float = 0.85
+        self.modbus_delay: float = 0.85
         '''time in between requests'''
-
+        self.slave_id: int = 1
         # per transport tuning — batteries with known intermittent blocks can have higher retry counts;
         # a totally dead device will exhaust retries quickly and yield control
         self.max_retries_per_block: int = int(settings.get("max_retries_per_block", fallback=3))
@@ -221,11 +221,11 @@ class modbus_base(transport_base):
         self.disable_duration_hours: int = 12
 
         # Initialize transport-specific lock
-        self._transport_lock = threading.Lock()
+        self._transport_lock: Lock = threading.Lock()
 
         # Initialize instance-specific register failure tracking
         self.register_failure_trackers: dict[str, RegisterFailureTracker] = {}
-        self._failure_tracking_lock = threading.Lock()
+        self._failure_tracking_lock: Lock = threading.Lock()
         self._last_disabled_status_log: float = 0.0
 
         # Register failure tracking settings
@@ -261,7 +261,7 @@ class modbus_base(transport_base):
         # shared Modbus bus are differentiated by their slave/unit address.
         # Stored as a string so scrape_target can use it directly.
         # The address fallback covers modbus_rtu which uses that config key instead of slave_id.
-        self._slave_id: str = settings.get("slave_id", fallback=settings.get("address", fallback="1"))
+        self._slave_id: str = settings.get("slave_id", fallback=settings.get("address", fallback=self.slave_id))
 
     @property
     def _protocol(self) -> "protocol_settings":
@@ -723,6 +723,42 @@ class modbus_base(transport_base):
                     f"[{self.transport_name}] Register failure counts cleared on reconnection."
                 )
 
+            # Call the post-connect read hook so subclasses can populate
+            # startup caches (e.g. threshold registers, calibration values)
+            # regardless of which read mode the gateway uses.  The hook runs
+            # after the transport is confirmed connected and Modbus-ready.
+            # On reconnect this will fire again, refreshing stale cached values.
+            #
+            # IMPORTANT: on_first_connect_read() runs synchronously inside
+            # connect(), which is called before the interleaved scheduler starts.
+            # Any blocking I/O here (Modbus reads with retries) will freeze ALL
+            # transports for the duration.  Subclasses that need to read registers
+            # at startup should either:
+            #   a) Defer the I/O to the first post_process_data() cycle (preferred
+            #      for interleaved mode — see modbus_eg4_ll_s_tcp for the pattern), or
+            #   b) Keep reads minimal (single register, no retries) if they must
+            #      execute here.
+            # A WARNING is logged if on_first_connect_read() takes more than 2s.
+            _connect_hook_start: float = time.time()
+            try:
+                self.on_first_connect_read()
+            except Exception:
+                self._log.exception(
+                    "[%s] on_first_connect_read raised an unexpected exception — "
+                    "startup cache may be incomplete; defaults will be used.",
+                    self.transport_name,
+                )
+            finally:
+                _elapsed: float = time.time() - _connect_hook_start
+                if _elapsed > 2.0:
+                    self._log.warning(
+                        "[%s] on_first_connect_read took %.1fs — this blocks ALL "
+                        "transports during connection.  Defer blocking I/O to "
+                        "post_process_data() for interleaved compatibility.",
+                        self.transport_name,
+                        _elapsed,
+                    )
+
     def cleanup(self) -> None:
         """Clean up transport resources and close connections."""
         with self._transport_lock:
@@ -893,7 +929,9 @@ class modbus_base(transport_base):
                 if entry is not None:
                     # Respect the entry's write_mode — skip read-only and disabled entries.
                     if entry.write_mode in (WriteMode.READ, WriteMode.READDISABLED):
-                        self._log.debug(f"Skipping write for '{variable_name}' — write_mode is {entry.write_mode.name}")
+                        self._log.debug(
+                            f"Skipping write for '{variable_name}' — write_mode is {entry.write_mode.name}"
+                        )
                         continue
                     # Pass value through unchanged — write_variable handles
                     # int, float, and str (code values) natively
@@ -946,6 +984,9 @@ class modbus_base(transport_base):
                     self._log.warning(f"No registry data returned for {self.transport_name} {registry_type.name}")
 
                 new_info: Dict[str, int | float | str ] = self._protocol.process_registery(registry, self._protocol.get_registry_map(registry_type))
+
+                if False:
+                    new_info = {self.__input_register_prefix + key: value for key, value in new_info.items()}
 
                 info.update(new_info)
 
@@ -1041,7 +1082,9 @@ class modbus_base(transport_base):
                     f"{len(ranges)} ranges across {len(union_entries)} entries"
                 )
 
-                registry: dict[int, int] = self.read_modbus_registers(ranges=ranges, registry_type=registry_type)
+                registry: dict[int, int] = self.read_modbus_registers(
+                    ranges=ranges, registry_type=registry_type
+                )
 
                 if not registry:
                     self._log.warning(f"No grouped registry data returned for {self.transport_name} {registry_type.name}")
@@ -1134,6 +1177,7 @@ class modbus_base(transport_base):
         end: int = 65535,
         batch_size: int = 40,
         delay: float = 0.05,
+        include_input: bool = True,
         include_holding: bool = True,
         include_coil: bool = False,
         include_discrete: bool = False,
@@ -1238,7 +1282,8 @@ class modbus_base(transport_base):
         # physical connection.  read_data() and read_group_data() both acquire
         # this lock, so they will block until the scan completes.
         with self._transport_lock:
-            scan_range(Registry_Type.INPUT, input_result)
+            if include_input:
+                scan_range(Registry_Type.INPUT, input_result)
             if include_holding:
                 scan_range(Registry_Type.HOLDING, holding_result)
             if include_coil:
@@ -1316,7 +1361,11 @@ class modbus_base(transport_base):
         try:
             v = float(s)
         except ValueError as exc:
-            modbus_base._log.debug("Failed to parse single value '%s': %s",s,str(exc))
+            modbus_base._log.debug(
+                "Failed to parse single value '%s': %s",
+                s,
+                str(exc),
+            )
         else:
             return (v, v)
 
@@ -1364,7 +1413,35 @@ class modbus_base(transport_base):
         (e.g. free text) are treated as in-range (no penalty) so that
         unspecified ranges do not unfairly reduce the score.
         """
-        scan: Dict[str, Dict[int, int]] = self.capture_analysis_scan(progress_cb=progress_cb, batch_size=batch_size)
+        # Determine which register types actually have a map loaded so we only
+        # scan what the device can answer.  Scanning an unsupported type causes
+        # the transport to block until retries are exhausted for every batch in
+        # the 0-65535 range — a multi-minute freeze for a map that yields nothing.
+        _has_input    = bool(self._protocol.registry_map.get(Registry_Type.INPUT))
+        _has_holding  = bool(self._protocol.registry_map.get(Registry_Type.HOLDING))
+        _has_coil     = bool(self._protocol.registry_map.get(Registry_Type.COIL))
+        _has_discrete = bool(self._protocol.registry_map.get(Registry_Type.DISCRETE))
+
+        if not (_has_input or _has_holding or _has_coil or _has_discrete):
+            self._log.warning(
+                "[%s] analyze_protocols: no registry maps loaded — scan skipped",
+                self.transport_name,
+            )
+            return {
+                "transport_name": self.transport_name,
+                "current_protocol": current_protocol or "",
+                "scan_counts": {"input": 0, "holding": 0},
+                "protocols": {},
+            }
+
+        scan: Dict[str, Dict[int, int]] = self.capture_analysis_scan(
+            progress_cb=progress_cb,
+            batch_size=batch_size,
+            include_input=_has_input,
+            include_holding=_has_holding,
+            include_coil=_has_coil,
+            include_discrete=_has_discrete,
+        )
         raw_input: Dict[int, int] = scan["input"]
         raw_holding: Dict[int, int] = scan["holding"]
         raw_coil: Dict[int, int] = scan["coil"]
@@ -1565,7 +1642,7 @@ class modbus_base(transport_base):
             return
 
         temp_map: list[registry_map_entry] = [entry]
-        word_count: int = self._entry_word_count(entry)
+        word_count = self._entry_word_count(entry)
         registry: Dict[int, int] = self.read_modbus_registers(
             start=entry.register,
             end=entry.register + word_count - 1,
@@ -1875,11 +1952,11 @@ class modbus_base(transport_base):
         if batch_size is None:
             if hasattr(self, 'protocolSettings') and self._protocol:
                 try:
-                   batch_size = int(self._protocol.settings.get("batch_size", 40))
+                   batch_size = int(self._protocol.settings.get("batch_size", 45))
                 except (ValueError, TypeError):
-                    batch_size = 40
+                    batch_size = 45
             else:
-                batch_size = 40
+                batch_size = 45
 
         if not ranges: #ranges is empty, use min max
             if start == 0 and end is None:
@@ -1894,7 +1971,7 @@ class modbus_base(transport_base):
                     count: int = batch_size
                     if start + batch_size > end:
                         count = end - start + 1
-                    ranges.append((start, count))
+                    ranges.append((start, count)) ##APPEND TUPLE
 
         registry: dict[int, int] = {}
         retries = 7
@@ -1912,7 +1989,7 @@ class modbus_base(transport_base):
             # Check if this register range is currently disabled
             if self._is_register_range_disabled(register_range, registry_type):
                 remaining_hours: float = self._get_or_create_failure_tracker(register_range, registry_type).get_remaining_disable_time() / 3600
-                self._log.info(f"Skipping disabled register range {self.transport_name} {registry_type.name} {register_range[0]}-{register_range[0]+register_range[1]-1} (disabled for {remaining_hours:.1f}h)")
+                self._log.info(f"Skipping disabled register range {registry_type.name} {register_range[0]}-{register_range[0]+register_range[1]-1} (disabled for {remaining_hours:.1f}h)")
                 self._cycle_mark_incomplete()
                 continue
 
@@ -2197,6 +2274,9 @@ class modbus_base(transport_base):
         )
 
         # Process raw int values into named, typed register readings
-        register_readings: dict[str, int | float | str] = self._protocol.process_registery(raw_registers, registry_map)
+        register_readings: dict[str, int | float | str] = self._protocol.process_registery(
+            raw_registers,
+            registry_map
+        )
 
         return register_readings

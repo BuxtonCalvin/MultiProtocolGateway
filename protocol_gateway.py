@@ -716,6 +716,7 @@ class Protocol_Gateway:
                         f"keys=[{', '.join(repr(k) for k in list(member_data.keys())[:3])}"
                         f"{', ...' if len(member_data) > 3 else ''}]"
                     )
+                    self._snapshot_scraper_data(member, member_data)
                     bridge.write_data(member_data, member)
 
                 group.mark_forwarded(member, now)
@@ -836,19 +837,26 @@ class Protocol_Gateway:
            registry map when no explicit mask file was loaded.
 
         3. Forward everything — no mask configured at all.
+
+        Synthetic fields
+        ----------------
+        Keys listed in ``member.synthetic_field_names`` are always forwarded
+        on paths 1 and 2, regardless of mask or registry map contents.  These
+        are fields injected by ``post_process_data`` that have no corresponding
+        row in the protocol CSV and therefore cannot appear in any mask file.
+        Path 3 already forwards everything, so no special handling is needed.
         """
         ps = getattr(member, 'protocolSettings', None)
+        synthetic: frozenset[str] = member.synthetic_field_names
 
         # Path 1 — explicit variable mask.
-        # Both the mask (normalized by _load_filter_file) and full_data (merged
-        # by load__registry) use logical stem names, so a simple set lookup is
-        # all that's required.  No _l/_h expansion is needed here.
         if ps is not None and ps.variable_mask:
             mask: set[str] = set(ps.variable_mask)
             return {
                 k: v for k, v in full_data.items()
                 if k.lower() in mask
                 or (k.lower().endswith('_desc') and k.lower()[:-5] in mask)
+                or k.lower() in synthetic
             }
 
         # Path 2 — fall back to the registry map variable names.
@@ -861,7 +869,11 @@ class Protocol_Gateway:
         if not member_keys:
             return full_data  # Path 3 — no mask at all, forward everything
 
-        return {k: v for k, v in full_data.items() if k in member_keys}
+        return {
+            k: v for k, v in full_data.items()
+            if k in member_keys
+            or k.lower() in synthetic
+        }
 
     def _submit_concurrent_group_read(self, group: ScrapeGroup, now: float) -> None:
         """
@@ -926,6 +938,44 @@ class Protocol_Gateway:
         # handles logging, notification, and _needs_reconnection automatically.
         target.connected = False
         target.last_read_time = 0.0
+
+    def _snapshot_scraper_data(
+        self,
+        scraper: "transport_base",
+        data: dict[str, int | float | str],
+    ) -> None:
+        """Cache the bridge-bound data on the scraper transport.
+
+        Called immediately before every ``bridge.write_data(data, scraper)``
+        call so ``scraper._last_known_data`` always reflects the most recent
+        complete, bridge-confirmed cycle result — not a mid-cycle partial.
+
+        Also sets and immediately clears ``scraper._values_ready_event`` so
+        any thread blocked in ``/api/device/{name}/last-values/wait`` is
+        woken and receives the fresh snapshot.
+        """
+        if not data:
+            return
+        scraper._last_known_data = dict(data)
+        scraper._values_ready_event.set()
+        # Clear immediately so the next wait() blocks until the next cycle.
+        scraper._values_ready_event.clear()
+
+    def get_transport(self, transport_name: str) -> "transport_base | None":
+        """Return the transport instance with the given fully-qualified name.
+
+        ``transport_name`` must include the ``transport.`` prefix as it appears
+        in config.cfg (e.g. ``'transport.eg4_ll_s_2'``).  Used by the web
+        server to access ``synthetic_fields_metadata`` from a live scraper
+        transport so the protocol table can display synthetic metrics alongside
+        CSV-derived register rows.
+
+        Returns ``None`` if no transport with that name exists or has connected.
+        """
+        return next(
+            (t for t in self.__transports if t.transport_name == transport_name),
+            None,
+        )
 
     # init the variable request_upstream_reconnect in the bridge __init__.  If it goes true during stale
     # detection, reconnect routine triggers.
@@ -1233,6 +1283,7 @@ class Protocol_Gateway:
                         f"keys=[{', '.join(repr(k) for k in list(member_data.keys())[:3])}"
                         f"{', ...' if len(member_data) > 3 else ''}]"
                     )
+                    self._snapshot_scraper_data(member, member_data)
                     bridge.write_data(member_data, member)
                 group.mark_forwarded(member, now)
         else:
@@ -1249,6 +1300,7 @@ class Protocol_Gateway:
                 ):
                     self.__log.warning(f"Skipping '{bridge_name}' for '{transport.transport_name}' - cycle incomplete.")
                     continue
+                self._snapshot_scraper_data(transport, data)
                 bridge.write_data(data, transport)
 
     def run(self) -> None:
@@ -1272,6 +1324,9 @@ class Protocol_Gateway:
         pending futures.
         """
         self.__running = True
+
+        if False:
+            self.enable_write()
 
         try:
             while self.__running:

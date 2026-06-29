@@ -185,13 +185,21 @@ Refer to the EG4 3000EHV manual for port location. Hardware options A–C in Sec
 
 ## 5. Wiring & Pinout
 
-### Standard RJ45 RS485 Pinout (EG4 6000XP / 12000XP)
+### Standard RJ45 RS485 Pinout (EG4 6000XP / 12000XP/ 18kPV)
 
 ``` text
 RJ45 Pin   Wire (T568B)    Signal
 ────────   ────────────    ──────────
   7        Brown/White     RS485 B−
   8        Brown           RS485 A+
+
+or
+
+RJ45 Pin   Wire (T568B)    Signal
+────────   ────────────    ──────────
+  1        Orange/White     RS485 B−
+  2        Orange           RS485 A+
+
 ```
 
 ### USB RS485 Adapter Terminal Mapping
@@ -201,6 +209,14 @@ Adapter Terminal   →   EG4 RJ45
       A+           →   Pin 8 (brown)
       B−           →   Pin 7 (brown/white)
      GND (opt.)    →   Pin 3 or bare shield
+
+or
+
+Adapter Terminal   →   EG4 RJ45
+      A+           →   Pin 1 (orange)
+      B−           →   Pin 2 (orange/white)
+     GND (opt.)    →   Pin 3 or bare shield
+
 ```
 
 ### 18KPV Terminal Block Wiring

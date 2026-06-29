@@ -60,6 +60,11 @@ class DeviceRegisterView:
     # a _l/_h pair.  paired_high_address holds the _h register address so the
     # UI can render the range "40-41" and show the expand/collapse detail rows.
     paired_high_address: str | None = None
+    # True for fields injected by post_process_data rather than read from
+    # a protocol CSV register.  Synthetic rows are display-only — they have
+    # no ProtocolRegister DB row, no toggle endpoints, and are never written
+    # to mask / screen files.
+    is_synthetic: bool = False
 
     @property
     def is_paired(self) -> bool:
@@ -89,9 +94,10 @@ def _safe_paired_address(row: Any) -> str | None:
     # Slow path: attempt instrumented access, catch anything SQLAlchemy raises
     try:
         val = row.paired_high_address  # type: ignore[union-attr]
-        return val
     except Exception:
         return None
+    else:
+        return val
 
 
 def get_protocol_registers(
@@ -185,9 +191,7 @@ def get_protocol_registers(
     }
 
 
-def get_protocols_for_device(
-    db: Session, protocol_version: str, device_name: str | None = None
-) -> list[dict]:
+def get_protocols_for_device(db: Session, protocol_version: str, device_name: str | None = None) -> list[dict]:
     """
     Given a protocol_version string (e.g. "eg4_18kpv"),
     returns the available registry_types (tabs) for that device,
@@ -304,18 +308,14 @@ def toggle_register_field(
     return target  # type: ignore[return-value]  # concrete type is ProtocolRegister | DeviceProtocolSelection
 
 
-def update_protocol_register_field(
-    db: Session,
-    register_id: int,
-    field: str,
-    value: str,
-) -> ProtocolRegister | None:
+def update_protocol_register_field(db: Session, register_id: int, field: str, value: str) -> ProtocolRegister | None:
     allowed_fields: set[str] = {
         "variable_name",
         "documented_name",
         "unit",
         "data_type",
         "values_range",
+        "adjustments",
         "note",
         "read_interval",
         "write_mode_protocol",
@@ -368,6 +368,56 @@ def get_protocol_json(
             return None, False
     _log.debug("get_protocol_json: no json file found for %s/%s", protocol_group, protocol_name)
     return None, False
+
+
+def build_synthetic_rows(transport: Any) -> list[DeviceRegisterView]:
+    """Build display-only DeviceRegisterView rows for a transport's synthetic fields.
+
+    Reads ``transport.synthetic_fields_metadata`` (list of
+    ``(variable_name, data_type, unit_mod, note)`` tuples) and constructs
+    one ``DeviceRegisterView`` per field with ``is_synthetic=True``.
+
+    Synthetic rows are display-only:
+    - ``id = -1`` so no toggle PATCH endpoint is reachable
+    - ``register_address = "synthetic"`` to distinguish from CSV rows
+    - ``write_mode_protocol = "R"`` so the W checkbox is always disabled
+    - W / M / S toggles are always False and non-interactive in the template
+
+    Returns an empty list when the transport has no synthetic fields or
+    ``synthetic_fields_metadata`` is not defined.
+    """
+    metadata: list[tuple[str, str, float, str]] = getattr(
+        transport, "synthetic_fields_metadata", []
+    )
+    if not metadata:
+        return []
+
+    rows: list[DeviceRegisterView] = []
+    for variable_name, data_type, unit_mod, note in metadata:
+        rows.append(
+            DeviceRegisterView(
+                id=-1,
+                protocol_name=getattr(transport, "protocol_version", ""),
+                registry_type="synthetic",
+                register_address="synthetic",
+                variable_name=variable_name,
+                documented_name=variable_name,
+                unit=str(unit_mod),
+                data_type=data_type,
+                values_range="",
+                adjustments=None,
+                note=note,
+                read_interval=None,
+                write_mode_protocol="R",
+                user_write_enabled=False,
+                mask_enabled=False,
+                screen_enabled=False,
+                is_dirty=False,
+                paired_high_address=None,
+                is_synthetic=True,
+            )
+        )
+    return rows
 
 
 def export_protocol_registers(

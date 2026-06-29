@@ -1075,7 +1075,7 @@ class protocol_settings:
         resolution, value-range and enum parsing, register address parsing
         (decimal, hex, bit-offset ``N.bX``, byte-offset ``N.Y``, range
         ``A-B``), and dynamic register expressions (deferred into
-        ``dynamic_registry_rows``).  After all rows are processed,
+        ``dynamic_registry_rows``).  After all rows are processed, adjacent
         ``_l``/``_h`` pairs are merged into single 32-bit entries, the variable
         mask (allowlist) and variable screen (denylist) are applied, and
         ``_add_code_description_entries`` appends synthetic ``_desc`` entries for
@@ -1282,7 +1282,7 @@ class protocol_settings:
                 try:
                     codes_json = json.loads(row["values"])
                     value_is_json = True
-                    name: str = row["documented name"] + "_codes"
+                    name = row["documented name"] + "_codes"
                     if name not in self.codes:
                         self.codes[name] = codes_json
                 except ValueError:
@@ -1988,9 +1988,9 @@ class protocol_settings:
             value = reg_bytes[0]
 
         elif entry.data_type.value > 200:  # unsigned bit types
-            bit_size: int = Data_Type.getSize(entry.data_type)
-            bit_mask: int = (1 << bit_size) - 1
-            bit_index: int = entry.register_bit
+            bit_size = Data_Type.getSize(entry.data_type)
+            bit_mask = (1 << bit_size) - 1
+            bit_index = entry.register_bit
             reg_bytes = register[:2]
             if word_order.bytes_reversed:
                 reg_bytes = bytes([reg_bytes[1], reg_bytes[0]])
@@ -2150,8 +2150,33 @@ class protocol_settings:
         return ((val & 0xFF) << 8) | ((val >> 8) & 0xFF)
 
     def _decode_text_bytes(self, raw_bytes: bytes) -> str:
-        """Decode ``raw_bytes`` as UTF-8, replace invalid sequences, strip null characters and surrounding whitespace."""
-        return raw_bytes.decode("utf-8", errors="replace").replace("\x00", "").strip()
+        """Decode raw register bytes as a printable ASCII string.
+
+        Behavior matches the EG4 BMS firmware's ``extract_ascii_string_``
+        and is appropriate for any Modbus device that uses fixed-length
+        null-padded or space-padded ASCII fields:
+
+        * Accepts only bytes in the printable ASCII range ``0x20``-``0x7E``.
+        * Stops at the first null byte ``0x00`` (null terminator).
+        * Silently drops all other bytes — non-printable control characters,
+          high bytes (``0x80``-``0xFE``), and ``0xFF`` register-padding.
+          Using ``errors="replace"`` would substitute ``\ufffd`` for these,
+          polluting the string with garbage characters.
+        * Strips trailing spaces from the final result (leading spaces are
+          preserved — some devices left-pad strings).
+
+        This replaces the previous ``raw_bytes.decode("utf-8", errors="replace")``
+        approach which passed ``\ufffd`` replacement characters through to the
+        output for every non-ASCII byte.
+        """
+        result: list[str] = []
+        for b in raw_bytes:
+            if b == 0x00:
+                break                   # null terminator — discard remainder
+            if 0x20 <= b <= 0x7E:
+                result.append(chr(b))   # printable ASCII — keep
+            # else: 0x01-0x1F control chars, 0x7F DEL, 0x80-0xFF high/padding — drop
+        return "".join(result).rstrip()
 
     def process_register_ushort(self, registry: Mapping[int, int], entry: registry_map_entry) -> int | float | str | None:
         """Process a ushort (integer-per-register) registry entry into a typed value.

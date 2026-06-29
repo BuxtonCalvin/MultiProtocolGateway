@@ -9,7 +9,7 @@
   "backlog_storage_path": "Directory path where backlog files are stored when the primary bridge is unreachable.",
   "base_topic": "MQTT base topic prefix. All published messages are nested under this topic path.",
   "batch_delay": "Delay in seconds between batched write operations to avoid overwhelming the device.",
-  "batch_size": "Number of data points to batch together before flushing to InfluxDB. Larger batches improve throughput at the cost of latency.",
+  "batch_size": "Number of registers to batch read per a given scraper poll. For the influxdb bridge, the number of metrics to write at once",
   "batch_timeout": "Maximum time in seconds to wait before flushing a partial batch to InfluxDB, even if batch_size has not been reached.",
   "baud": "Serial baud rate in bits per second. Alias for baudrate — must match the device s configured serial speed.",
   "baudrate": "Serial communication baud rate (bits per second). Must match the device s configured baud rate.",

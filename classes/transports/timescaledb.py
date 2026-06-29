@@ -494,6 +494,7 @@ class timescaledb(transport_base):
         "STRING": "TEXT",
         "STRING16": "TEXT",
         "STRING32": "TEXT",
+        "TEXT": "TEXT",
         "_1BIT": "BOOLEAN",
 
         # 1. Unsigned Bit-lengths (_2BIT to _15BIT)
@@ -514,7 +515,7 @@ class timescaledb(transport_base):
     # Type Coercion based on timescale_type_map values for field definitions.
     # data is coerced to improve compression in metrics' tables.
     INT_TYPES: set[str] = {"SMALLINT", "INTEGER", "BIGINT"}
-    FLOAT_TYPES: set[str] = {"REAL", "DOUBLE PRECISION", "NUMERIC"}
+    FLOAT_TYPES: set[str] = {"REAL", "DOUBLE PRECISION", "NUMERIC", "FLOAT"}
 
     # persistent storage/backlog settings. Default folder name and file name are the same but can be user configured.
     enable_persistent_storage: bool = True
@@ -1214,7 +1215,11 @@ class timescaledb(transport_base):
                     self._verified_devices.add(t_name)
                     return db_id
 
-    def _extract_metric_names(self, registry_map: dict[Registry_Type, list[registry_map_entry]]) -> list[tuple[str, str, Any, Any]] :
+    def _extract_metric_names(
+        self,
+        registry_map: dict[Registry_Type, list[registry_map_entry]],
+        synthetic_fields: list[tuple[str, str, Any, Any]] | None = None,
+    ) -> list[tuple[str, str, Any, Any]]:
 
         """
         Extracts metric names, data types, unit modifiers and notes from a
@@ -1228,10 +1233,20 @@ class timescaledb(transport_base):
                         accessed via from_transport.registry_map.
                         Keyed by Registry_Type, values are lists of
                         registry_map_entry objects.
+            synthetic_fields: Optional list of (variable_name, data_type,
+                        unit_mod, note) tuples from
+                        transport_base.synthetic_fields_metadata.  These are
+                        appended to the registry-derived metrics so that
+                        columns computed by post_process_data are registered
+                        in the wide table schema with the correct types at
+                        init_bridge time.  This prevents _validate_wide_row
+                        from seeing them as unknown extra_keys and crashing
+                        the flush worker.
 
         Returns:
             Sorted list of (variable_name, data_type, unit_mod, note) tuples,
-            filtered to INPUT, HOLDING, COIL and DISCRETE registry types only.
+            filtered to INPUT, HOLDING, COIL and DISCRETE registry types only,
+            with synthetic fields appended (duplicates removed by variable_name).
             Returns empty list if registry_map is None, empty, or malformed.
             TODO  adapt for non-modbus registers.
         """
@@ -1239,6 +1254,7 @@ class timescaledb(transport_base):
             return []
 
         results: list[tuple[str, str, Any, Any]] = []
+        seen_names: set[str] = set()
 
         for registry_type in (Registry_Type.INPUT, Registry_Type.HOLDING, Registry_Type.COIL, Registry_Type.DISCRETE):
 
@@ -1251,12 +1267,33 @@ class timescaledb(transport_base):
                 if not hasattr(entry, 'variable_name') or not entry.variable_name:
                     continue
 
+                if entry.variable_name in seen_names:
+                    continue
+                seen_names.add(entry.variable_name)
+
                 results.append((
                     entry.variable_name,
                     getattr(entry, 'data_type', ''),
                     getattr(entry, 'unit_mod', 1.0),   # default to 1.0 — no scaling
                     getattr(entry, 'note', '')
                 ))
+
+        # Append transport-declared synthetic fields, skipping any that
+        # collide with registry-derived names (registry takes precedence).
+        if synthetic_fields:
+            for variable_name, data_type, unit_mod, note in synthetic_fields:
+                if variable_name in seen_names:
+                    self._log.debug(
+                        f"_extract_metric_names: synthetic field '{variable_name}' "
+                        f"already present in registry map — skipping duplicate"
+                    )
+                    continue
+                seen_names.add(variable_name)
+                results.append((variable_name, data_type, unit_mod, note))
+                self._log.debug(
+                    f"_extract_metric_names: registered synthetic field "
+                    f"'{variable_name}' ({data_type}) from transport"
+                )
 
         return sorted(results)
 
@@ -1527,16 +1564,14 @@ class timescaledb(transport_base):
 
     # wide table row validation
     def _validate_wide_row(self, row: dict, table_name: str) -> tuple[bool, str | None]:
+        # 1. Strip metadata keys instantly to prevent false-positive resyncs
         METADATA_KEYS: set[str] = {"m_time", "device_info_id"}
         row_keys: set[str] = set(row) - METADATA_KEYS
 
         with self._schema_lock:
             wide_columns: set[str] = self._wide_columns_cache.get(table_name, set())
             if not wide_columns:
-                self._log.debug(
-                    f"_validate_wide_row: no cache entry for '{table_name}'. "
-                    f"Cache keys: {list(self._wide_columns_cache.keys())}"
-                )
+                self._log.debug(f"_validate_wide_row: no cache entry for '{table_name}'. Cache keys: {list(self._wide_columns_cache.keys())}")
 
             extra_keys: set[str] = row_keys - wide_columns
             fewer_keys: set[str] = wide_columns - row_keys
@@ -1544,9 +1579,14 @@ class timescaledb(transport_base):
 
             if extra_keys:
                 self._log.info(f"New metrics detected: {extra_keys}. Triggering resync...")
+
+                # Safe to call because it's an RLock, but it will block other threads during the sync
                 self._sync_single_table_schema(table_name)
+
+                # Re-read the cache inside the lock context
                 refreshed_cols: set[str] = self._wide_columns_cache.get(table_name, set())
                 still_extra: set[str] = row_keys - refreshed_cols
+
                 if still_extra:
                     msg = f"Database schema is still missing columns after resync: {sorted(still_extra)}"
                     self._log.error(msg)
@@ -1554,34 +1594,20 @@ class timescaledb(transport_base):
                 return True, None
 
             elif fewer_keys:
-                # Schema has more columns than the current scrape provided.
-                # This is expected when a variable_mask limits which registers
-                # are read — the omitted columns will simply be NULL for this row.
-                # Log at DEBUG so it doesn't flood logs every cycle; only escalate
-                # if the count is suspiciously large (possible genuine schema drift).
-                threshold: int = max(10, len(wide_columns) // 4)  # >25% missing → warn
-                if fewer_keys_count > threshold:
-                    self._log.warning(
-                        f"Wide-table schema mismatch; {fewer_keys_count} columns "
-                        f"absent from scrape data (>{threshold} threshold): {sorted(fewer_keys)}"
-                    )
-                else:
-                    self._log.debug(
-                        f"Wide-table partial row: {fewer_keys_count} schema columns "
-                        f"not in this scrape (variable_mask in effect): {sorted(fewer_keys)}"
-                    )
-                msg: str = f"Missing {fewer_keys_count} columns: {sorted(fewer_keys)}"
-                return True, msg   # ← return True, not False; partial rows are valid
+                self._log.warning(f"Wide-table schema mismatch; missing {fewer_keys_count} keys in scrape data: {sorted(fewer_keys)}")
+                msg: str = f"Missing {len(sorted(fewer_keys))} columns: {sorted(fewer_keys)}"
+                return False, msg
 
             else:
                 return True, None
+
 
     # resync single wide table schema after dynamic column changes
     def _sync_single_table_schema(self, table_name: str) -> None:
         with self._schema_lock:
             self._log.info(f"Resyncing schema for {table_name}...")
 
-            old_table: Table | None = Base.metadata.tables.get(table_name)
+            old_table = Base.metadata.tables.get(table_name)
             if old_table is not None:
                 Base.metadata.remove(old_table)
 
@@ -1699,10 +1725,22 @@ class timescaledb(transport_base):
         self._log.debug("Flush thread started.")
 
 
-    def _register_protocol_schema(self, protocol: str, registry_map: dict[Registry_Type, list[registry_map_entry]]) -> None:
+    def _register_protocol_schema(
+        self,
+        protocol: str,
+        registry_map: dict[Registry_Type, list[registry_map_entry]],
+        synthetic_fields: list[tuple[str, str, Any, Any]] | None = None,
+    ) -> None:
         """
         Ensures wide table columns and metric_catalog entries exist for
-        all metrics in this protocol's registry map that have been filtered in by the variable_mask/variable_screen config.
+        all metrics in this protocol's registry map that have been filtered
+        in by the variable_mask/variable_screen config, plus any synthetic
+        fields declared by the transport via synthetic_fields_metadata.
+
+        Synthetic fields are registered with the correct data type at
+        schema-creation time so _validate_wide_row never encounters them
+        as unknown extra_keys during the flush worker cycle.
+
         Each protocol gets its own wide table: device_metrics_wide__{protocol}
         The narrow table is shared across all protocols.
         """
@@ -1710,8 +1748,12 @@ class timescaledb(transport_base):
         # so it can be passed to every downstream method that needs it
         wide_table_name: str = self._safe_table_name(protocol)
 
-        # Extract metric names from this transport's registry map
-        metric_names: list[tuple[str, str, Any, Any]] = self._extract_metric_names(registry_map)
+        # Extract metric names from this transport's registry map,
+        # appending transport-declared synthetic fields
+        metric_names: list[tuple[str, str, Any, Any]] = self._extract_metric_names(
+            registry_map,
+            synthetic_fields=synthetic_fields,
+        )
         metric_count: int = len(metric_names)
 
         if metric_count == 0:
@@ -1825,7 +1867,20 @@ class timescaledb(transport_base):
         self._log.info(f"Registering protocol '{protocol}' from transport '{from_transport.transport_name}'")
 
         try:
-            self._register_protocol_schema(protocol, from_transport.registry_map)
+            synthetic: list[tuple[str, str, Any, Any]] = getattr(
+                from_transport, 'synthetic_fields_metadata', []
+            )
+            if synthetic:
+                self._log.info(
+                    f"Transport '{from_transport.transport_name}' declares "
+                    f"{len(synthetic)} synthetic field(s) for schema registration: "
+                    f"{[s[0] for s in synthetic]}"
+                )
+            self._register_protocol_schema(
+                protocol,
+                from_transport.registry_map,
+                synthetic_fields=synthetic or None,
+            )
             self._registered_protocols.add(protocol)
         except Exception as e:
             self._log.error(f"Failed to register schema for protocol '{protocol}': {e}")

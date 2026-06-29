@@ -89,6 +89,7 @@ from .services.device_service import (
     get_transport_library,
 )
 from .services.protocol_service import (
+    build_synthetic_rows,
     get_protocol_groups,
     get_protocol_json,
     get_protocol_registers,
@@ -395,6 +396,12 @@ def create_app(
                 if summary and summary.protocol_version
                 else []
             )
+            # Pre-compute whether any M/S/W selection exists across all tabs so
+            # protocol_section.html can show "No chosen metrics" without Jinja sum.
+            has_no_selections: bool = not any(
+                t.get("mask_count", 0) or t.get("screen_count", 0) or t.get("write_count", 0)
+                for t in proto_tabs
+            ) if proto_tabs else False
             protocol_match = None
             if summary is None:
                 protocol_match: Row[Tuple[str, str]] | None = (
@@ -457,6 +464,7 @@ def create_app(
                 "device":       summary,
                 "settings":     settings,
                 "proto_tabs":   proto_tabs,
+                "has_no_selections": has_no_selections,
                 "proto_groups": proto_groups,
                 "transport_library": get_transport_library(request.app.state.transports_dir),
                 "device_partial_template": partial_template_name,
@@ -471,6 +479,81 @@ def create_app(
         favicon_path: Path = BASE_WEB_DIR / "static" / "favicon.ico"
 
         return FileResponse(favicon_path)
+
+    @app.get("/api/device/{device_name}/last-values")
+    async def device_last_values(request: Request, device_name: str) -> JSONResponse:
+        """Return the last bridge-confirmed scrape values for a device transport.
+
+        Values come from ``_last_known_data`` which is populated in
+        ``protocol_gateway._snapshot_scraper_data`` immediately before each
+        ``bridge.write_data()`` call — the authoritative point where a cycle
+        is confirmed complete and bridge-bound.
+        """
+        gateway = getattr(request.app.state, "gateway", None)
+        if gateway is None:
+            return JSONResponse({"values": {}, "status": "no_gateway"})
+        transport = gateway.get_transport(f"transport.{device_name}")
+        if transport is None:
+            return JSONResponse({"values": {}, "status": "not_found"})
+
+        raw: dict = getattr(transport, "_last_known_data", {})
+        clean: dict[str, str] = {}
+        for k, v in raw.items():
+            if k.endswith("_desc"):
+                continue
+            try:
+                clean[k] = str(round(v, 4)) if isinstance(v, float) else str(v)
+            except Exception as e :
+                _log.debug(f"error retrieving _last_known_data {e}")
+                pass
+
+        return JSONResponse({"values": clean, "status": "ok"})
+
+    @app.get("/api/device/{device_name}/last-values/wait")
+    async def device_last_values_wait(request: Request, device_name: str) -> JSONResponse:
+        """Block until the next scrape cycle completes, then return its values.
+
+        The refresh button calls this endpoint.  It waits on
+        ``transport._values_ready_event`` which is set (then immediately
+        cleared) in ``_snapshot_scraper_data`` each time a cycle's data is
+        forwarded to a bridge.  The client therefore receives the values from
+        the next complete cycle rather than a cached stale snapshot.
+
+        Times out after ``timeout`` seconds (default 90 — enough for even a
+        slow polling interval plus retries) and returns ``status: timeout``
+        so the client can show an appropriate message.
+        """
+        import asyncio
+        timeout: float = 90.0
+        gateway = getattr(request.app.state, "gateway", None)
+        if gateway is None:
+            return JSONResponse({"values": {}, "status": "no_gateway"})
+        transport = gateway.get_transport(f"transport.{device_name}")
+        if transport is None:
+            return JSONResponse({"values": {}, "status": "not_found"})
+
+        event: threading.Event = getattr(transport, "_values_ready_event", threading.Event())
+        if event is None:
+            return JSONResponse({"values": {}, "status": "no_event"})
+
+        # Run the blocking wait() in a thread pool so we don't block the
+        # async event loop.  asyncio.to_thread requires Python 3.9+.
+        fired: bool = await asyncio.to_thread(event.wait, timeout)
+        if not fired:
+            return JSONResponse({"values": {}, "status": "timeout"})
+
+        raw: dict = getattr(transport, "_last_known_data", {})
+        clean: dict[str, str] = {}
+        for k, v in raw.items():
+            if k.endswith("_desc"):
+                continue
+            try:
+                clean[k] = str(round(v, 4)) if isinstance(v, float) else str(v)
+            except Exception as e :
+                _log.debug(f"error retrieving _last_known_data {e}")
+                pass
+
+        return JSONResponse({"values": clean, "status": "ok"})
 
     @app.get("/protocol/{protocol_name}/{registry_type}", response_class=HTMLResponse, response_model=None)
     async def protocol_table_partial(
@@ -511,6 +594,19 @@ def create_app(
             data: dict[str, Any] = get_protocol_registers(
                 db, protocol_name, registry_type, page, page_size=5000, device_name=device_name
             )
+
+        # Append synthetic metric rows when rendering a device (scraper) view.
+        # Synthetic rows are display-only — they have no DB row, no toggle
+        # endpoints, and are never written to mask/screen files.  The transport
+        # is looked up by name via the gateway so the metadata stays live.
+        if device_name:
+            gateway = getattr(request.app.state, "gateway", None)
+            if gateway is not None:
+                transport = gateway.get_transport(f"transport.{device_name}")
+                if transport is not None:
+                    synthetic = build_synthetic_rows(transport)
+                    if synthetic:
+                        data["rows"] = list(data.get("rows", [])) + synthetic
 
         return templates.TemplateResponse(
             request=request,

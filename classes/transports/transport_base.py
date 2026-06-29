@@ -205,6 +205,15 @@ class transport_base:
         self._last_cycle_result: TransportCycleResult = TransportCycleResult()
         self.transport_name = settings.name #section name
 
+        # Last-known scrape values — populated in write_data() so the snapshot
+        # is taken at the point data is confirmed complete and bridge-bound.
+        # The web UI refresh button reads from this via /api/device/{name}/last-values.
+        self._last_known_data: dict[str, int | float | str] = {}
+        # Event that fires each time write_data() stores a new snapshot.
+        # /api/device/{name}/last-values/wait blocks on this event so the
+        # refresh button waits for the next real cycle rather than polling.
+        self._values_ready_event: threading.Event = threading.Event()
+
         # Bridges set this to True if they require a complete, end-of-cycle
         # batch rather than partial mid-cycle data.  The gateway will suppress
         # write_data calls for this bridge when the data is known to be partial
@@ -471,8 +480,138 @@ class transport_base:
         self._partial_registry: dict[int, int] = {}
 
     def _finish_cycle_tracking(self, data: dict[str, int | float | str]) -> None:
+        """Finalize a scrape cycle.
+
+        Calls ``post_process_data`` before marking the cycle complete so
+        synthetic metrics injected by subclasses are present in the data
+        regardless of whether the caller used ``read_data()``,
+        ``read_group_data()``, or ``read_data_iter()``.
+        """
+        processed: dict[str, int | float | str] = self.post_process_data(data)
+        # Reflect any mutations back into the original dict so callers
+        # that hold a reference to it see the enriched version.
+        if processed is not data:
+            data.clear()
+            data.update(processed)
         self._cycle_active = False
         self._last_cycle_result.has_data = bool(data)
+
+    @property
+    def synthetic_field_names(self) -> frozenset[str]:
+        """Names of fields injected by ``post_process_data`` for this transport.
+
+        ``_filter_for_member`` in ``protocol_gateway`` always forwards keys
+        that appear in this set, bypassing the variable mask and registry map
+        filter.  This ensures derived metrics computed in ``post_process_data``
+        reach the bridge layer even though they have no corresponding row in
+        the protocol CSV and therefore no entry in the mask file.
+
+        Override in subclasses and return a ``frozenset`` of every field name
+        that ``post_process_data`` injects.  Use lowercase names — the filter
+        compares against ``k.lower()``.
+
+        The base implementation returns an empty frozenset so the filter
+        behavior is unchanged for all existing transports that do not
+        override ``post_process_data``.
+
+        Example::
+
+            @property
+            def synthetic_field_names(self) -> frozenset[str]:
+                return frozenset({
+                    "cell_voltage_max_v",
+                    "cell_voltage_min_v",
+                    "cell_voltage_diff_mv",
+                    "balancing_state",
+                    "balancing_state_text",
+                })
+        """
+        return frozenset()
+
+    @property
+    def synthetic_fields_metadata(self) -> list[tuple[str, str, float, str]]:
+        """Rich metadata for fields injected by ``post_process_data``.
+
+        Used by TimescaleDB's ``init_bridge`` to register synthetic fields
+        as first-class columns in the wide table schema alongside CSV-derived
+        metrics.  This ensures the bridge knows the correct data type and unit
+        for each synthetic field at schema-creation time, avoiding the
+        type-inference ambiguity that would arise if columns were created on
+        the fly during ``_validate_wide_row``.
+
+        Returns a list of ``(variable_name, data_type, unit_mod, note)``
+        tuples matching the signature of ``_extract_metric_names`` output so
+        the two sources can be concatenated directly before being passed to
+        ``_ensure_columns_for_metrics``.
+
+        Data type strings must match the ``Data_Type`` enum names used
+        elsewhere in ``protocol_settings`` (e.g. ``"FLOAT"``, ``"USHORT"``,
+        ``"SHORT"``, ``"TEXT"``).
+
+        The base implementation returns an empty list — no synthetic columns
+        are registered for transports that do not override this property.
+
+        Example::
+
+            @property
+            def synthetic_fields_metadata(self) -> list[tuple[str, str, float, str]]:
+                return [
+                    ("cell_voltage_max_v",   "FLOAT",  1.0, "Highest cell voltage V"),
+                    ("cell_voltage_min_v",   "FLOAT",  1.0, "Lowest cell voltage V"),
+                    ("cell_voltage_diff_mv", "FLOAT",  1.0, "Cell voltage spread mV"),
+                    ("balancing_state",      "USHORT", 1.0, "0=Idle 1=Balancing 2=Finished"),
+                    ("balancing_state_text", "TEXT",   1.0, "Balancing state label"),
+                ]
+        """
+        return []
+
+    def post_process_data(
+        self,
+        info: dict[str, int | float | str],
+    ) -> dict[str, int | float | str]:
+        """Post-processing hook called after every complete scrape cycle.
+
+        Invoked by ``_finish_cycle_tracking`` which is the single convergence
+        point for all three read paths — sequential (``read_data``), group
+        (``read_group_data``), and interleaved (``read_data_iter``).  The hook
+        therefore fires exactly once per cycle regardless of read mode.
+
+        Override in subclasses to inject synthetic / derived metrics, validate
+        mandatory fields, or apply device-specific transformations.
+
+        ``info`` contains all decoded register values for this cycle after
+        mask and screen filtering have been applied.  Subclasses may mutate
+        the dict in place and return it, or return a new dict — both are safe.
+
+        Returning an empty dict suppresses all bridge output for this cycle,
+        which can be useful when a mandatory field is absent and publishing
+        partial data would be misleading.
+
+        The base implementation returns ``info`` unchanged.
+        """
+        return info
+
+    def on_first_connect_read(self) -> None:
+        """Hook called once after the first successful physical connection.
+
+        Override in subclasses to read auxiliary registers that need to be
+        cached for the lifetime of the connection — configuration thresholds,
+        serial numbers, calibration constants, etc.
+
+        The hook is called by ``modbus_base.connect()`` after
+        ``self.connected`` is set to ``True``, so the transport is ready to
+        issue Modbus requests when it runs.
+
+        On reconnect, ``connect()`` clears per-connection state and calls
+        this hook again, giving subclasses a chance to refresh their cache
+        with current device values.
+
+        Subclasses that add further override levels should call
+        ``super().on_first_connect_read()`` first.
+
+        The base implementation does nothing.
+        """
+        pass
 
     def _cycle_expect_unit(self, count: int = 1) -> None:
         self._last_cycle_result.expected_units += count
@@ -483,8 +622,6 @@ class transport_base:
     def _cycle_mark_incomplete(self, skipped_units: int = 1) -> None:
         self._last_cycle_result.is_complete = False
         self._last_cycle_result.skipped_units += skipped_units
-
-
 
     def get_cycle_result(self) -> TransportCycleResult:
         return self._last_cycle_result
@@ -555,7 +692,8 @@ class transport_base:
         pass
 
     def write_coil(self, register: int, value: bool, **kwargs) -> None:
-        """Write a single coil (bit) register. Modbus FC 0x05.
+        """
+        Write a single coil (bit) register. Modbus FC 0x05.
         Override in modbus_base; base no-op prevents AttributeError on non-modbus transports.
         """
         pass

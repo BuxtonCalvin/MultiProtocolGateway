@@ -35,6 +35,20 @@
     <p class="surface-muted text-xs font-semibold tracking-wide">
       (W)rite, (M)ask, (S)creen  -- Add and subtract metrics to mask, screen, and custom write files.
     </p>
+    {% if has_no_selections %}
+    <span id="no-selections-notice"
+          class="text-green-400 text-xs font-semibold"
+          title="No mask or screen selections — all metrics will be forwarded to every bridge.">
+      ✓ No chosen metrics: all metrics will write to bridges.
+    </span>
+    {% endif %}
+    <button id="refresh-values-btn"
+            class="ml-auto btn-secondary text-xs px-2 py-1 flex items-center gap-1"
+            title="Wait for the next scrape cycle then populate the Value column"
+            onclick="refreshProtocolValues()">
+      <span id="refresh-btn-icon">↺</span>
+      <span id="refresh-btn-label">Refresh Values</span>
+    </button>
   </div>
 
   {% if proto_tabs %}
