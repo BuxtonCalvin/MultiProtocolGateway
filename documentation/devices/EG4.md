@@ -200,6 +200,28 @@ RJ45 Pin   Wire (T568B)    Signal
   1        Orange/White     RS485 B−
   2        Orange           RS485 A+
 
+┌─────────────────────────────────────────────────────────────────┐
+│                                                                 │
+│  EG4 BMS RJ45 Port (looking into the socket, tab down)          │
+│  ┌─────────────────────────┐                                    │
+│  │  1  2  3  4  5  6  7  8 │                                    │
+│  │  │  │  │  │  │  │  │  │ │                                    │
+│  └──┼──┼──┼──┼──┼──┼──┼──┼─┘                                    │
+│     │  │  │  │  │  │  │  │                                      │
+│     │  │  │  │  │  │  │  └── RS485 B  (Brown)                   │
+│     │  │  │  │  │  │  └───── RS485 A  (Brown/White)             │
+│     │  │  │  │  │  └──────── GND      (Green)                   │
+│     │  │  │  │  └─────────── (unused) (Blue/White)              │
+│     │  │  │  └────────────── (unused) (Blue)                    │
+│     │  │  └───────────────── GND      (Green/White)             │
+│     │  └──────────────────── RS485 A  (Orange)                  │
+│     └─────────────────────── RS485 B  (Orange/White)            │
+│                                                                 │
+│  Pins 1/8 (B) and 2/7 (A) are bridged — use either end.         │
+│  Pins 4/5 are not RS485 on this port. Do not tap them.          │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘  
+
 ```
 
 ### USB RS485 Adapter Terminal Mapping
