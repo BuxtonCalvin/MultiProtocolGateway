@@ -35,8 +35,8 @@
       "id": "scraper-settings",
       "x_percent": 9.026856240126381,
       "y_percent": 17.10762331838565,
-      "label_x_percent": 15.191153238546603,
-      "label_y_percent": 22.242152466367713,
+      "label_x_percent": 17.827465731846303,
+      "label_y_percent": 30.334784865433708,
       "label": "Left panel shows the scraper's transport, bridge, protocol version, log level, and all active config key/value pairs. Changed values appear with an orange dirty-state dot.",
       "shape_type": "dot"
     },
@@ -44,8 +44,8 @@
       "id": "scraper-tabs",
       "x_percent": 48.89415481832543,
       "y_percent": 9.461883408071749,
-      "label_x_percent": 41.50078988941548,
-      "label_y_percent": 18.860986547085204,
+      "label_x_percent": 55.58858477548576,
+      "label_y_percent": 6.645692359815776,
       "label": "Tabs switch between register maps (Holding, Input, Coil, Discrete) and the JSON config editor. Each tab shows a summary of write (W), mask (M), and screen (S) counts.",
       "shape_type": "dot"
     },
@@ -59,15 +59,26 @@
       "shape_type": "dot"
     },
     {
+      "id": "device__scraper_read_values",
+      "x_percent": 26,
+      "y_percent": 73.7,
+      "label": "Live values from your scraper appear here.  Use the refresh button at the top right to update to the latest scrape.",
+      "shape_type": "dot",
+      "label_x_percent": 30.9,
+      "label_y_percent": 70.3
+    },
+    {
       "id": "scraper-table",
-      "x_percent": 55.3,
-      "y_percent": 58.4,
-      "label_x_percent": 55,
-      "label_y_percent": 68,
-      "width_percent": 71.3,
-      "height_percent": 80.4,
-      "label": "Protocol metrics table. W = write-back enabled, M = metric included in variable_mask (scraped), S = metric added to variable_screen (excluded from output). Address, variable name, unit, type, range, adjustments, and notes are shown for each register.",
-      "shape_type": "rect"
+      "x_percent": 59.14146288874055,
+      "y_percent": 48.531161758613926,
+      "label_x_percent": 66.6,
+      "label_y_percent": 64,
+      "width_percent": 81.1,
+      "height_percent": 66.7,
+      "label": "Protocol metrics table. W = write-back enabled, M = metric included in variable_mask (scraped), S = metric added to variable_screen (excluded from output). Live value, address, variable name, doc name, unit, type, range, adjustments, and notes are shown for each register.",
+      "shape_type": "rect",
+      "stroke_color": "rgb(14,165,233)",
+      "fill_color": "rgba(14,165,233,0.18)"
     }
   ],
   "device__scraper_write_generic": [
