@@ -44,7 +44,7 @@ from ..protocol_settings import (
 from .transport_base import TransportWriteMode, transport_base
 
 # Modbus function codes for exception interpretation
-MODBUS_FUNCTION_CODES = {
+MODBUS_FUNCTION_CODES: Dict[Any, str] = {
     0x01: "Read Coils",
     0x02: "Read Discrete Inputs",
     0x03: "Read Holding Registers",
@@ -189,7 +189,7 @@ class modbus_base(transport_base):
         if self.protocolSettings is None:
             msg: str = f"modbus_base transport '{settings.name}' requires a protocol_version to be set in config. No protocol settings were loaded."
             raise ValueError(msg)
-        assert self.protocolSettings is not None  # noqa: S101
+        assert self.protocolSettings is not None
 
         self.client: Optional[ModbusBaseClient] = None
 
@@ -585,7 +585,7 @@ class modbus_base(transport_base):
                 - `disabled_until`: Timestamp when disabled until (for disabled ranges)
                 - `remaining_hours`: Hours remaining until re-enabled (for disabled ranges)
         """
-        status = {
+        status: dict[str,Any] = {
             "enabled": self.enable_register_failure_tracking,
             "max_failures_before_disable": self.max_failures_before_disable,
             "disable_duration_hours": self.disable_duration_hours,
@@ -599,7 +599,7 @@ class modbus_base(transport_base):
             status["total_tracked_ranges"] = len(self.register_failure_trackers)
 
             for tracker in self.register_failure_trackers.values():
-                range_info = {
+                range_info: dict[str,Any] = {
                     "registry_type": tracker.registry_type.name,
                     "range": f"{tracker.register_range[0]}-{tracker.register_range[1]}",
                     "failure_count": tracker.failure_count,
@@ -1093,7 +1093,7 @@ class modbus_base(transport_base):
                 # Decode each member's entries through their own protocolSettings
                 # so adjustments and code lookups use the correct protocol context.
                 for member in members:
-                    entry_data = member_entry_map.get(id(member))
+                    entry_data: tuple[protocol_settings, list[registry_map_entry]] | None = member_entry_map.get(id(member))
                     if entry_data is None:
                         continue
                     ps, member_entries = entry_data
@@ -1224,26 +1224,11 @@ class modbus_base(transport_base):
                 # out-of-protocol addresses as disabled after the first failed
                 # read.  We also do not write back to the failure tracker so
                 # this scan never pollutes the scraper's disabled-range state.
-
+                response = None
                 try:
-                    response = self.read_registers(
-                        addr,
-                        range_count,
-                        registry_type=registry_type,
-                    )
-                    if response is None:
-                        msg = f"read_registers returned None for range {addr}-{addr + range_count - 1}"
-                        raise RuntimeError(msg)  # noqa: TRY301
-
-                    extracted: Dict[int, int] | None = self._extract_response_values(response, registry_type, register_range)
-                    if extracted is None:
-                        msg: str = (f"Response for {registry_type.name} {addr}-{addr + range_count - 1} "
-                            f"missing expected attribute (.registers or .bits)")
-
-                        raise RuntimeError(msg)  # noqa: TRY301
-
-                    result_dict.update(extracted)
-                    total_reads += 1
+                    response = self.read_registers(addr, range_count, registry_type=registry_type)
+                    # Only assign extracted if response is valid
+                    extracted: Dict[int, int] | None = self._extract_response_values(response, registry_type, register_range) if response is not None else None
                 except Exception as exc:
                     failures += 1
                     self._log.debug(
@@ -1254,6 +1239,21 @@ class modbus_base(transport_base):
                         addr + range_count - 1,
                         str(exc),
                     )
+                    extracted = None  # Ensure it skips the block below
+
+                # Validate outside of the try-except scope
+                if extracted is None:
+                    if response is None:
+                        msg: str = f"read_registers returned None for range {addr}-{addr + range_count - 1}"
+                    else:
+                        msg = (
+                            f"Response for {registry_type.name} {addr}-{addr + range_count - 1} "
+                            f"missing expected attribute (.registers or .bits)"
+                        )
+                    raise RuntimeError(msg)
+
+                result_dict.update(extracted)
+                total_reads += 1
 
                 batches_done += 1
                 if progress_cb is not None:
@@ -1627,11 +1627,11 @@ class modbus_base(transport_base):
         if isinstance(value, str):
             value = value.strip().lower()
 
-        # ------------------------------------------------------------------ #
-        # COIL fast path — booleans need no multi-word read-back, no type     #
-        # encoding, and no byte-order handling.  Resolve the value to a bool  #
-        # and write directly via FC 0x05.                                      #
-        # ------------------------------------------------------------------ #
+        # ------------------------------------------------------------------
+        # COIL fast path — booleans need no multi-word read-back, no type
+        # encoding, and no byte-order handling.  Resolve the value to a bool
+        # and write directly via FC 0x05.
+        # ------------------------------------------------------------------
         if registry_type == Registry_Type.COIL:
             if isinstance(value, str):
                 coil_bool: bool = value not in ("0", "false", "off", "no", "")

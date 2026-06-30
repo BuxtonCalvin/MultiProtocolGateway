@@ -538,17 +538,14 @@ class transport_base:
         """Names of fields injected by ``post_process_data``.
 
         Derived automatically from ``synthetic_fields_metadata`` — subclasses
-        should override that property only; this one stays in sync for free.
+        should override that property only.
 
         ``_filter_for_member`` in ``protocol_gateway`` uses this frozenset to
         bypass the variable mask for fields that have no protocol CSV row.
         """
         return frozenset(name for name, *_ in self.synthetic_fields_metadata)
 
-    def post_process_data(
-        self,
-        info: dict[str, int | float | str],
-    ) -> dict[str, int | float | str]:
+    def post_process_data(self, info: dict[str, int | float | str]) -> dict[str, int | float | str]:
         """Post-processing hook called after every complete scrape cycle.
 
         Invoked by ``_finish_cycle_tracking`` which is the single convergence

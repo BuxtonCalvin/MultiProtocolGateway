@@ -197,7 +197,7 @@ class MessageHandler:
 
     def _init_pushover(self, cfg: ConfigParser) -> None:
         """Initialise the Pushover client if pushover_enabled = true."""
-        enabled: bool = _cfg_bool(cfg, "messages", "pushover_enabled", False)  # noqa: FBT003
+        enabled: bool = _cfg_bool(cfg, "messages", "pushover_enabled", fallback = False)
         if not enabled:
             return
 
@@ -222,7 +222,7 @@ class MessageHandler:
             _log.error("Failed to initialise Pushover client: %s", exc)
 
     def _init_telegram(self, cfg: ConfigParser) -> None:
-        enabled: bool = _cfg_bool(cfg, "messages", "telegram_enabled", False)  # noqa: FBT003
+        enabled: bool = _cfg_bool(cfg, "messages", "telegram_enabled", fallback = False)
         if not enabled:
             return
 
@@ -350,7 +350,7 @@ class MessageHandler:
 # Config helper — tolerates both ConfigParser and CustomConfigParser
 # ---------------------------------------------------------------------------
 
-def _cfg_bool(cfg: ConfigParser, section: str, option: str, fallback: bool) -> bool:
+def _cfg_bool(cfg: ConfigParser, section: str, option: str, *, fallback: bool) -> bool:
     try:
         raw: str = cfg.get(section, option, fallback=str(fallback))
         return raw.strip().lower() in ("true", "yes", "1", "on", "enabled", "enable")
