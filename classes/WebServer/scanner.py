@@ -394,7 +394,7 @@ def scan_protocols_dir(protocols_dir: Path) -> list[dict[str, Any]]:
 
         for proto_file in sorted(group_dir.iterdir()):
             if proto_file.suffix.lower() == ".csv":
-                regs = _parse_protocol_csv(proto_file, group_name)
+                regs: List[dict[str, Any]] = _parse_protocol_csv(proto_file, group_name)
                 registers.extend(regs)
             elif proto_file.suffix.lower() == ".json" and not proto_file.name.endswith(".override.json"):
                 regs = _parse_protocol_json(proto_file, group_name)
@@ -550,19 +550,19 @@ def _parse_protocol_csv(csv_path: Path, group_name: str) -> list[dict[str, Any]]
                 write_mode: str = row.get("write_mode", "R").strip().upper() or "R"
 
                 entry: dict[str, str] = {
-                    "protocol_group":    group_name,
-                    "protocol_name":     protocol_name,
-                    "registry_type":     registry_type,
-                    "register_address":  register,
-                    "variable_name":     clean_var,
-                    "documented_name":   doc_name or var_name,
-                    "unit":              row.get("unit", ""),
-                    "data_type":         row.get("data_type", ""),
-                    "values_range":      row.get("values", ""),
-                    "adjustments":       row.get("adjustments", ""),
-                    "note":              row.get("note", ""),
-                    "read_interval":     row.get("read_interval", ""),
-                    "write_mode_protocol": write_mode,
+                    "protocol_group":       group_name,
+                    "protocol_name":        protocol_name,
+                    "registry_type":        registry_type,
+                    "register_address":     register,
+                    "variable_name":        clean_var,
+                    "documented_name":      doc_name or var_name,
+                    "unit":                 row.get("unit", ""),
+                    "data_type":            row.get("data_type", ""),
+                    "values_range":         row.get("values", ""),
+                    "adjustments":          row.get("adjustments", ""),
+                    "note":                 row.get("note", ""),
+                    "read_interval":        row.get("read_interval", ""),
+                    "write_mode_protocol":  write_mode,
                 }
 
                 # Last definition for a given address wins — resolves CSV duplicates
@@ -590,8 +590,8 @@ def _parse_protocol_csv(csv_path: Path, group_name: str) -> list[dict[str, Any]]
     merged_count: int = 0
     i: int = 0
     while i < len(result) - 1:
-        low  = result[i]
-        high = result[i + 1]
+        low: dict[str, Any]  = result[i]
+        high: dict[str, Any] = result[i + 1]
         low_var:  str = low["variable_name"]
         high_var: str = high["variable_name"]
 

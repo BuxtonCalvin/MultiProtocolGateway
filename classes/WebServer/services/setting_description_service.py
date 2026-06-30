@@ -45,11 +45,7 @@ from ..transport_registry import (
 _log: logging.Logger = logging.getLogger(__name__)
 
 
-def seed_setting_descriptions(
-    db: Session,
-    transports_dir: Path,
-    purge_removed: bool = False,
-) -> tuple[int, list[str]]:
+def seed_setting_descriptions(db: Session, transports_dir: Path, purge_removed: bool = False) -> tuple[int, list[str]]:
     """
     Scan the transport library and populate setting_descriptions with all
     discovered keys.  Runs on every startup — updates the transports list for
