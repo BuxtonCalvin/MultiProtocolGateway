@@ -497,38 +497,6 @@ class transport_base:
         self._last_cycle_result.has_data = bool(data)
 
     @property
-    def synthetic_field_names(self) -> frozenset[str]:
-        """Names of fields injected by ``post_process_data`` for this transport.
-
-        ``_filter_for_member`` in ``protocol_gateway`` always forwards keys
-        that appear in this set, bypassing the variable mask and registry map
-        filter.  This ensures derived metrics computed in ``post_process_data``
-        reach the bridge layer even though they have no corresponding row in
-        the protocol CSV and therefore no entry in the mask file.
-
-        Override in subclasses and return a ``frozenset`` of every field name
-        that ``post_process_data`` injects.  Use lowercase names — the filter
-        compares against ``k.lower()``.
-
-        The base implementation returns an empty frozenset so the filter
-        behavior is unchanged for all existing transports that do not
-        override ``post_process_data``.
-
-        Example::
-
-            @property
-            def synthetic_field_names(self) -> frozenset[str]:
-                return frozenset({
-                    "cell_voltage_max_v",
-                    "cell_voltage_min_v",
-                    "cell_voltage_diff_mv",
-                    "balancing_state",
-                    "balancing_state_text",
-                })
-        """
-        return frozenset()
-
-    @property
     def synthetic_fields_metadata(self) -> list[tuple[str, str, float, str]]:
         """Rich metadata for fields injected by ``post_process_data``.
 
@@ -565,10 +533,19 @@ class transport_base:
         """
         return []
 
-    def post_process_data(
-        self,
-        info: dict[str, int | float | str],
-    ) -> dict[str, int | float | str]:
+    @property
+    def synthetic_field_names(self) -> frozenset[str]:
+        """Names of fields injected by ``post_process_data``.
+
+        Derived automatically from ``synthetic_fields_metadata`` — subclasses
+        should override that property only.
+
+        ``_filter_for_member`` in ``protocol_gateway`` uses this frozenset to
+        bypass the variable mask for fields that have no protocol CSV row.
+        """
+        return frozenset(name for name, *_ in self.synthetic_fields_metadata)
+
+    def post_process_data(self, info: dict[str, int | float | str]) -> dict[str, int | float | str]:
         """Post-processing hook called after every complete scrape cycle.
 
         Invoked by ``_finish_cycle_tracking`` which is the single convergence

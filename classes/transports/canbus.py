@@ -160,6 +160,7 @@ class canbus(transport_base):
             try:
                 result: subprocess.CompletedProcess[str] = subprocess.run(  # noqa: S603
                     cmd,
+                    shell=False,
                     check=True,
                     capture_output=True,
                     text=True,

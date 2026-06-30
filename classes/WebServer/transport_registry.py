@@ -136,11 +136,7 @@ def _save_json(path: Path, data: dict[str, Any], comment: str = "") -> None:
         _log.error("transport_registry: could not write %s: %s", path, exc)
 
 
-def _resolve_transport(
-    name: str,
-    raw: dict[str, Any],
-    visited: set[str] | None = None,
-) -> dict[str, str]:
+def _resolve_transport(name: str, raw: dict[str, Any], visited: set[str] | None = None,) -> dict[str, str]:
     """
     Recursively resolve $extends inheritance for a single transport entry.
 

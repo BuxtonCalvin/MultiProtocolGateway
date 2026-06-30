@@ -2545,9 +2545,13 @@ class BacklogManager:
                             expired_ids.append(row_id)
 
                     if expired_ids:
-                        con.execute(
-                            f"DELETE FROM backlog WHERE id IN ({','.join('?' * len(expired_ids))})",  # noqa: S608
-                            expired_ids
+                        # Use a static SQL query with a single placeholder
+                        # Format the IDs as a list of single-item tuples: [(1,), (2,), (3,)]
+                        id_parameters: List[Tuple[int]] = [(row_id,) for row_id in expired_ids]
+
+                        con.executemany(
+                            "DELETE FROM backlog WHERE id = ?",
+                            id_parameters
                         )
                         con.commit()
                 finally:

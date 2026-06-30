@@ -180,37 +180,9 @@ class modbus_eg4_ll_s_rtu(modbus_rtu):
             ("cell_voltage_max_v",   "FLOAT32",  1.0, "Highest individual cell voltage (V)"),
             ("cell_voltage_min_v",   "FLOAT32",  1.0, "Lowest individual cell voltage (V)"),
             ("cell_voltage_diff_v",  "FLOAT32",  1.0, "Cell voltage spread max-min (V)"),
-            ("balancing_state",      "USHORT", 1.0, "0=Idle  1=Balancing  2=Finished"),
-            ("balancing_state_text", "ASCII",   1.0, "Human-readable balancing state"),
+            ("balancing_state",      "USHORT",   1.0, "0=Idle  1=Balancing  2=Finished"),
+            ("balancing_state_text", "ASCII",    1.0, "Human-readable balancing state"),
         ]
-
-
-
-    @property
-    def synthetic_field_names(self) -> frozenset[str]:
-        """Declare all fields injected by post_process_data.
-
-        ``_filter_for_member`` in ``protocol_gateway`` uses this set to pass
-        these fields through the variable mask / registry map filter so they
-        reach the bridge layer even though they have no corresponding row in
-        the protocol CSV and cannot appear in the mask file.
-
-        Fields produced by _compute_cell_stats:
-          cell_voltage_max_v    highest individual cell voltage (V)
-          cell_voltage_min_v    lowest individual cell voltage (V)
-          cell_voltage_diff_v  spread between max and min (V)
-
-        Fields produced by _compute_balancing_state:
-          balancing_state       int  0=Idle  1=Balancing  2=Finished
-          balancing_state_text  str  human-readable label
-        """
-        return frozenset({
-            "cell_voltage_max_v",
-            "cell_voltage_min_v",
-            "cell_voltage_diff_v",
-            "balancing_state",
-            "balancing_state_text",
-        })
 
     def on_first_connect_read(self) -> None:
         """Schedule the holding register cache load for the first scrape cycle.
