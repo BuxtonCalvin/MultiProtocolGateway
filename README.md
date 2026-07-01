@@ -461,7 +461,7 @@ Key settings available on every transport:
 | `protocol_version` | | Protocol map to load (e.g. `growatt_v0.14`) |
 | `batch_size` | `40` | Number of registers to batch read per a given scraper poll |
 | `read_interval` | `15` | Seconds between register polls |
-| `bridge` | | Output transport section name |
+| `bridge` | | Output transport section name or names |
 | `log_level` | `INFO` | Per-transport log verbosity |
 | `max_precision` | `2` | Decimal places for float values |
 | `write_enabled` | `false` | Enable Modbus write operations |
@@ -473,6 +473,10 @@ For Modbus transports, additional keys include `host`, `port`, `unit_id`,  `max_
 Full configuration documentation: [`transports.md`](documentation/usage/transports.md) and for full settings available:
 
 ![Settings](classes/WebServer/static/screenshots/transport_settings_trunc.png)
+
+and the UI for setting the configuration keys:
+
+![Settings](classes/WebServer/static/screenshots/device__scraper_read_generic.png)
 
 For manufacturer device-specific wiring and installation guides: [devices](documentation/devices)
 
