@@ -39,12 +39,13 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Any, List
+from typing import Any, List, Sequence, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select
+from sqlalchemy.engine.row import Row
 from sqlalchemy.orm import Session
 
 from classes.messaging.message_handler import _handler, send_message
@@ -61,7 +62,11 @@ from ..services.device_service import (
     get_nav_data,
     get_transport_library,
 )
-from ..services.protocol_service import export_protocol_registers, get_protocol_groups, get_protocol_json
+from ..services.protocol_service import (
+    export_protocol_registers,
+    get_protocol_groups,
+    get_protocol_json,
+)
 
 router = APIRouter(tags=["pages"])
 _log: logging.Logger = logging.getLogger(__name__)
@@ -82,7 +87,7 @@ def _analysis_protocol_options(protocol_groups: list[dict[str, Any]]) -> list[di
             continue
         for protocol_name in group.get("protocols", []):
             protocol_name = str(protocol_name)
-            lower_name = protocol_name.lower()
+            lower_name: str = protocol_name.lower()
             if protocol_name.startswith("_"):
                 continue
             if "registry" in lower_name or "debug" in lower_name:
@@ -232,7 +237,7 @@ async def create_device_page(request: Request):
     proto_groups: List[dict[str, Any]] = get_protocol_groups(
         request.app.state.protocols_dir
     )
-    transport_library = scan_transport_library(request.app.state.transports_dir)
+    transport_library: dict[str, dict[str, Any]] = scan_transport_library(request.app.state.transports_dir)
     create_device_data = {
         "scrapers": [
             {
@@ -278,7 +283,7 @@ def _protocol_create_groups(protocols_dir: Path) -> list[dict[str, Any]]:
         for item in group_dir.iterdir():
             if item.suffix.lower() not in (".csv", ".json"):
                 continue
-            name = item.stem
+            name: str = item.stem
             if name.startswith("_") or name.endswith(".override"):
                 continue
             protocol_names.add(
@@ -385,7 +390,7 @@ async def protocol_editor(
     with session_scope() as db:
         nav: NavData = get_nav_data(db)
 
-        rows = (
+        rows: Sequence[Row[Tuple[str, str, int]]] = (
             db.execute(
                 select(
                     ProtocolRegister.protocol_name,
@@ -472,12 +477,12 @@ def export_registers_csv(
 
     import io
     buf = io.StringIO()
-    writer = csv.DictWriter(buf, fieldnames=list(rows[0].keys()))
+    writer: csv.DictWriter[str] = csv.DictWriter(buf, fieldnames=list(rows[0].keys()))
     writer.writeheader()
     writer.writerows(rows)
     buf.seek(0)
 
-    filename = (
+    filename: str = (
         f"{protocol_name}_{registry_type}"
         + (f"_{device_name}" if device_name else "")
         + ".csv"
@@ -650,7 +655,7 @@ class CreateDeviceRequest(BaseModel):
     @field_validator("log_level")
     @classmethod
     def validate_log_level(cls, value: str) -> str:
-        upper = value.upper()
+        upper: str = value.upper()
         if upper not in LOG_LEVELS:
             msg: str = (f"Unknown log level '{value}'.")
             raise ValueError(msg)
@@ -695,11 +700,11 @@ class CreateProtocolRequest(BaseModel):
 
 
 def _append_section_to_config(config_path: Path, section: str, fields: list[tuple[str, str]]) -> None:
-    section_text = "\n".join(
+    section_text: str = "\n".join(
         [f"[{section}]", *[f"{key} = {value}" for key, value in fields]]
     ) + "\n"
 
-    existing_text = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
+    existing_text: str = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
     if existing_text:
         separator = ""
         if not existing_text.endswith("\n"):
@@ -730,38 +735,34 @@ def _base_protocol_json(manufacturer: str, protocol_name: str, protocol_type: st
 
 
 @router.post("/api/devices/create")
-def create_device(
-    request: Request,
-    payload: CreateDeviceRequest,
-    db: Session = Depends(get_session),
-):
+def create_device(request: Request, payload: CreateDeviceRequest, db: Session = Depends(get_session)) -> dict[str, Any]:
     """
     Create a new device directly in config.cfg, then re-scan so the staging
     database reflects the new on-disk section without disturbing existing rows.
     """
-    section = f"transport.{payload.device_name}"
+    section: str = f"transport.{payload.device_name}"
     config_path: Path = request.app.state.config_path
-    config_data = _load_config(config_path)
+    config_data: dict[str, dict[str, str]] = _load_config(config_path)
     if section in config_data or db.query(Setting).filter_by(section=section).first():
         raise HTTPException(status_code=409, detail=f"Device '{payload.device_name}' already exists.")
 
-    library = scan_transport_library(request.app.state.transports_dir)
-    scraper_info = library.get(payload.scraper_transport)
+    library: dict[str, dict[str, Any]] = scan_transport_library(request.app.state.transports_dir)
+    scraper_info: dict[str, Any] | None = library.get(payload.scraper_transport)
     if not scraper_info or scraper_info.get("classification") != "scraper":
         raise HTTPException(status_code=400, detail="Selected scraper transport is not valid.")
 
     # Validate each bridge section reference against the library
     if payload.bridge:
         for bridge_part in payload.bridge.split(","):
-            bridge_part = bridge_part.strip()
+            bridge_part: str = bridge_part.strip()
             if not bridge_part:
                 continue
-            bridge_name = bridge_part.removeprefix("transport.")
-            bridge_info = library.get(bridge_name)
+            bridge_name: str = bridge_part.removeprefix("transport.")
+            bridge_info: dict[str, Any] | None = library.get(bridge_name)
             if not bridge_info or bridge_info.get("classification") != "bridge":
                 raise HTTPException(status_code=400, detail=f"Selected bridge '{bridge_part}' is not valid.")
 
-    allowed_keys = {
+    allowed_keys: set[Any] = {
         key for key in scraper_info.get("keys", {}).keys()
         if key not in FIXED_CREATE_KEYS
     }
@@ -810,18 +811,14 @@ def create_device(
 
 
 @router.post("/api/protocols/create")
-def create_protocol(
-    request: Request,
-    payload: CreateProtocolRequest,
-    db: Session = Depends(get_session),
-):
+def create_protocol(request: Request, payload: CreateProtocolRequest, db: Session = Depends(get_session)) -> dict[str, str]:
     """
     Create a protocol JSON file and one register-map CSV under protocols/<manufacturer>.
     The browser keeps drafts in memory until this endpoint is called, so canceling
     the wizard leaves disk untouched.
     """
-    manufacturer = payload.manufacturer
-    protocol_name = payload.protocol_name
+    manufacturer: str = payload.manufacturer
+    protocol_name: str = payload.protocol_name
     if not protocol_name.startswith(f"{manufacturer}_"):
         raise HTTPException(
             status_code=400,
@@ -829,14 +826,14 @@ def create_protocol(
         )
 
     protocols_dir: Path = request.app.state.protocols_dir
-    manufacturer_dir = protocols_dir / manufacturer
+    manufacturer_dir: Path = protocols_dir / manufacturer
     try:
         manufacturer_dir.relative_to(protocols_dir)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid manufacturer path.")
 
-    csv_path = manufacturer_dir / _csv_filename(protocol_name, payload.protocol_type)
-    json_path = manufacturer_dir / f"{protocol_name}.json"
+    csv_path: Path = manufacturer_dir / _csv_filename(protocol_name, payload.protocol_type)
+    json_path: Path = manufacturer_dir / f"{protocol_name}.json"
 
     if csv_path.exists():
         raise HTTPException(status_code=409, detail=f"{csv_path.name} already exists.")
@@ -849,10 +846,10 @@ def create_protocol(
             created_dir = True
 
         with csv_path.open("w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=CREATE_PROTOCOL_CSV_HEADERS)
+            writer: csv.DictWriter[str] = csv.DictWriter(f, fieldnames=CREATE_PROTOCOL_CSV_HEADERS)
             writer.writeheader()
             for item in payload.rows:
-                row = {
+                row: dict[str, str] = {
                     key: str(getattr(item, key, "") or "").strip()
                     for key in CREATE_PROTOCOL_CSV_HEADERS
                 }

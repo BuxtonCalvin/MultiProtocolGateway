@@ -40,6 +40,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Generator
 
+from alembic.config import Config
 from sqlalchemy import create_engine, event, func, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -169,7 +170,7 @@ def run_migrations(db_path: Path, alembic_ini_path: Path) -> None:
         from alembic import command as alembic_command
         from alembic.config import Config as AlembicConfig
 
-        cfg = AlembicConfig(str(alembic_ini_path))
+        cfg: Config = AlembicConfig(str(alembic_ini_path))
         cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path.as_posix()}")
         cfg.set_main_option("script_location", str(alembic_ini_path.parent / "migrations"))
 
@@ -190,7 +191,7 @@ def ensure_app_state(db: Session) -> AppState:
     Ensure the single AppState row (id=1) exists.
     Called during startup after migrations run.
     """
-    state = db.get(AppState, 1)
+    state: AppState | None = db.get(AppState, 1)
     if state is None:
         state = AppState(id=1)
         db.add(state)
@@ -227,7 +228,7 @@ def refresh_app_state(db: Session) -> AppState:
         select(func.count()).where(DeviceProtocolSelection.is_dirty == True)  # noqa: E712
     ) or 0
 
-    state = ensure_app_state(db)
+    state: AppState = ensure_app_state(db)
     state.dirty_settings_count = dirty_settings + dirty_descriptions
     state.orphan_count = orphan_count
     state.dirty_protocols_count = dirty_protocols + dirty_device_protocols

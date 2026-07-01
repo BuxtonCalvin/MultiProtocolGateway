@@ -410,7 +410,7 @@ async def analysis_progress(device_name: str, request: Request):
 
 @router.post("/{device_name}")
 async def run_analysis(device_name: str, payload: AnalyzeRequest, request: Request):
-    transport = _require_modbus_transport(request, device_name)
+    transport: modbus_base = _require_modbus_transport(request, device_name)
     protocol_names: list[str] = [name for name in payload.protocol_names if name]
     if not protocol_names:
         raise HTTPException(status_code=400, detail="Select at least one protocol to analyze")

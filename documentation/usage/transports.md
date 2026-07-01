@@ -48,7 +48,7 @@ MPG separates transports into two roles:
 
 **Bridges** receive data from scrapers and write it somewhere. They are passive — they do not poll. Examples: `mqtt`, `timescaledb`, `influxdb_out`, `json_out`.
 
-A scraper is linked to one or more bridges via the `bridge` setting. The bridge name is the section name of the destination transport. Multiple bridges can be comma-separated, or set to `broadcast` to forward data to all configured transports:
+A scraper is linked to one or more bridges via the `bridge` setting. The bridge name is the section name of the destination transport. Multiple bridges can be comma-separated:
 
 ```ini
 # Single bridge
@@ -57,8 +57,6 @@ bridge = transport.mqtt
 # Multiple specific bridges
 bridge = transport.mqtt, transport.timescaledb
 
-# Broadcast to every transport
-bridge = broadcast
 ```
 
 ---
@@ -115,7 +113,7 @@ Write topics follow this pattern:
 {base_topic}/write/{variable_name}
 ```
 
-During initialization, the MQTT bridge inspects the linked scraper's protocol map and subscribes only to variables that are marked as writable (`write_mode = RW` in the CSV). Variables marked read-only are never subscribed.
+During initialization, the MQTT bridge inspects the linked scraper's protocol map and subscribes only to variables that are marked as writable (`write_mode = RW` in the CSV and Write checked in the UI). Variables marked read-only are never subscribed.
 
 ---
 
@@ -399,8 +397,8 @@ TimescaleDB manages its own schema. On first connection MPG will:
 
 1. Create the target database if it does not exist
 2. Create a `device_info` table tracking all connected scrapers
-3. Create a `device_metrics_wide` hypertable with one column per register in the protocol map
-4. Create a `device_metrics_narrow` hypertable for arbitrary key-value queries
+3. If the chosen amount of metrics is less than 200, create a `device_metrics_wide` hypertable with one column per register in the protocol map
+4. Always creates a `device_metrics_narrow` hypertable for arbitrary key-value queries
 5. Configure hypertable compression
 6. Create continuous aggregate views: `hourly_rollup`, `daily_rollup`, `weekly_rollup`, `monthly_rollup`
 
@@ -447,6 +445,18 @@ TimescaleDB can send a Pushover push notification when the bridge loses or resto
 | `enable_pushover` | `false` | Enable Pushover notifications for connection events. |
 | `pushover_token` | *(empty)* | Pushover application API token. |
 | `pushover_user` | *(empty)* | Pushover user key. |
+
+---
+
+#### Telegram Notifications
+
+TimescaleDB can send a Telegram push notification when the bridge loses or restores database connectivity.
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `enable_telegram` | `false` | Enable Telegram notifications for connection events. |
+| `telegram_bot_token` | *(empty)* | Telegram application bot token. |
+| `telegram_chat_ids` | *(empty)* | Telegram chat id key. |
 
 ---
 
@@ -528,10 +538,12 @@ Writes register values as JSON to stdout or a file. Primarily useful for debuggi
 ```ini
 [transport.json_out]
 transport = json_out
-output_file = stdout
 pretty_print = true
 include_timestamp = true
+use_utc_timestamp = false
 include_device_info = true
+output_file = /json_out/output.json
+save_file = true
 ```
 
 | Setting | Default | Description |
@@ -540,7 +552,9 @@ include_device_info = true
 | `pretty_print` | `true` | Indent JSON output for readability. Set to `false` for compact single-line output. |
 | `append_mode` | `false` | When writing to a file, append each cycle's output rather than overwriting the file. Useful for log files. |
 | `include_timestamp` | `true` | Include a Unix timestamp in the output. |
+| `use_utc_timestamp` | `true` | Flag to indicate if you want the timestamp to be UTC or local machine time. |
 | `include_device_info` | `true` | Include device metadata block in the output. |
+| `save_file` | `true` | Flag to indicate if you want the output file saved to disk. |
 
 #### Output Format
 
@@ -566,6 +580,8 @@ include_device_info = true
 ---
 
 ## Complete Configuration Examples
+
+Though you can hand craft your config, it's best to use the UI to configure your transports as you have access to all configurable variables as well as pop-up help for each variable. Pop-up help can be accessed by clicking the default value key for the variable.
 
 ### Modbus RTU → MQTT (Home Assistant)
 

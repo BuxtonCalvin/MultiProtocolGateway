@@ -20,7 +20,7 @@
 from __future__ import annotations
 
 import logging
-from typing import List
+from typing import Any, List
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
@@ -48,7 +48,7 @@ def list_registers(
     page_size: int = 50,
     device_name: str | None = None,
     db: Session = Depends(get_session),
-):
+) -> dict[str, Any]:
     return get_protocol_registers(db, protocol_name, registry_type, page, page_size, device_name)
 
 
@@ -116,8 +116,9 @@ def toggle_register(
     payload: ToggleRequest,
     device_name: str | None = None,
     db: Session = Depends(get_session),
-):
-    result = toggle_register_field(db, register_id, payload.field, payload.value, device_name)
+)-> dict[str, Any]:
+
+    result: ProtocolRegister | DeviceProtocolSelection | None = toggle_register_field(db, register_id, payload.field, payload.value, device_name)
     if result is None:
         raise HTTPException(
             status_code=403,
@@ -135,11 +136,7 @@ def toggle_register(
     }
 
 @router.patch("/{register_id}/field")
-def update_register_field(
-    register_id: int,
-    payload: FieldUpdateRequest,
-    db: Session = Depends(get_session),
-):
+def update_register_field(register_id: int, payload: FieldUpdateRequest, db: Session = Depends(get_session))-> dict[str, Any]:
     result: ProtocolRegister | None = update_protocol_register_field(db, register_id, payload.field, payload.value)
     if result is None:
         raise HTTPException(status_code=404, detail="Protocol register or field not found")

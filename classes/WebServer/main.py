@@ -63,6 +63,7 @@ from classes.WebServer.models import (
     Setting,
     SettingDescription,
 )
+from classes.WebServer.services.protocol_service import DeviceRegisterView
 
 from ..transports.modbus_base import modbus_base
 from .database import ensure_app_state, init_db, run_migrations, session_scope
@@ -604,7 +605,7 @@ def create_app(
             if gateway is not None:
                 transport = gateway.get_transport(f"transport.{device_name}")
                 if transport is not None:
-                    synthetic = build_synthetic_rows(transport)
+                    synthetic: List[DeviceRegisterView] = build_synthetic_rows(transport)
                     if synthetic:
                         data["rows"] = list(data.get("rows", [])) + synthetic
 
@@ -620,11 +621,7 @@ def create_app(
         )
 
     @app.post("/api/protocol/{protocol_group}/{protocol_name}/json", response_class=HTMLResponse, response_model=None)
-    async def save_protocol_json(
-        request: Request,
-        protocol_group: str,
-        protocol_name: str,
-    ):
+    async def save_protocol_json(request: Request, protocol_group: str, protocol_name: str) -> JSONResponse:
         """Save updated JSON config for a protocol directly to disk."""
 
         try:
