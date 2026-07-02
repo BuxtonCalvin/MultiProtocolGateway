@@ -252,6 +252,8 @@ Each transport is independently configurable with its own scan interval, log lev
 - Python 3.10 or later
 - A hardware device connected via USB serial adapter, RS-485 adapter, or network
 
+![Hardware](documentation/assets/waveshare_mpg_eg4.png)
+
 ### Install
 
 From source:
@@ -380,7 +382,7 @@ Data produced by any of the MPG bridges can be visualized in Grafana.  This exam
 ![Grafana Dashboard](documentation/assets/GrafanaSolar.png)
 
 The code for this dashboard can be found here:
-![Grafana JSON](documentation/dashboards/GrafanaInfluxDBDashboard.json)
+[Grafana JSON](documentation/dashboards/GrafanaInfluxDBDashboard.json)
 
 ## Protocol Maps & Register Configuration
 

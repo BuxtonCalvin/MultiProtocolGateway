@@ -1,0 +1,48 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note
+256,battery_soc,Battery SOC,%,ushort,0-100,,R,,State of charge. skip_updates:1. addr 0x100.
+257,battery_voltage,Battery Voltage,0.1V,ushort,,,R,,Battery voltage. raw*0.1=V. addr 0x0101.
+258,battery_current,Battery Current,0.1A,ushort,,,R,,"Battery current. raw*-0.1=A (sign inverted in filter, so positive=discharge as read from register but displayed negative per multiply:-0.1). skip_updates:1. addr 0x0102."
+263,pv1_voltage,PV1 Voltage,0.1V,ushort,,,R,,PV1 voltage. raw*0.1=V. addr 0x0107.
+264,pv1_current,PV1 Current,0.1A,ushort,,,R,,PV1 current. raw*0.1=A. addr 0x0108.
+265,pv1_power,PV1 Power,W,ushort,,,R,,PV1 power (no scaling). addr 0x0109.
+271,pv2_voltage,PV2 Voltage,0.1V,ushort,,,R,,PV2 voltage. raw*0.1=V. addr 0x010F.
+272,pv2_current,PV2 Current,0.1A,ushort,,,R,,PV2 current. raw*0.1=A. addr 0x0110.
+273,pv2_power,PV2 Power,W,ushort,,,R,,PV2 power (no scaling). addr 0x0111.
+516,fault_code_1,Fault Code 1,,ushort,"see fault code table (1-64)",,R,,"Active fault/error code 1. Diagnostic. Also read as HEXBYTES for text_sensor decode (Fault 1 Text). addr 0x0204."
+517,fault_code_2,Fault Code 2,,ushort,"see fault code table (1-64)",,R,,"Active fault/error code 2. Diagnostic. Also read as HEXBYTES for text_sensor decode (Fault 2 Text). addr 0x0205."
+531,grid_voltage_l1,Grid Voltage L1,0.1V,ushort,,,R,,Grid input voltage L1. raw*0.1=V. addr 0x0213.
+532,grid_current_l1,Grid Current L1,0.1A,ushort,,,R,,Grid input current L1. raw*0.1=A. addr 0x0214.
+533,grid_frequency,Grid Frequency,0.01Hz,ushort,,,R,,Grid input frequency. raw*0.01=Hz. addr 0x0215.
+534,inverter_voltage_l1,Inverter Voltage L1,0.1V,ushort,,,R,,Inverter output voltage L1. raw*0.1=V. addr 0x0216.
+535,inverter_current_l1,Inverter Current L1,0.1A,ushort,,,R,,Inverter output current L1. raw*0.1=A. addr 0x0217.
+536,inverter_frequency,Inverter Frequency,0.01Hz,ushort,,,R,,Inverter output frequency. raw*0.01=Hz. addr 0x0218.
+539,inverter_active_power_l1,Inverter Active Power L1,W,ushort,,,R,,Inverter output active power L1 (no scaling). addr 0x021B.
+543,inverter_load_ratio_l1,Inverter Load Ratio L1,%,ushort,,,R,,Inverter output load ratio L1 (no scaling). addr 0x021F.
+544,inverter_dcdc_temperature,Inverter DCDC Temperature,0.1C,ushort,,,R,,DC/DC stage temperature. raw*0.1=degC. addr 0x0220.
+545,inverter_dcac_temperature,Inverter DCAC Temperature,0.1C,ushort,,,R,,DC/AC stage temperature. raw*0.1=degC. addr 0x0221.
+546,inverter_translator_temperature,Inverter Translator Temperature,0.1C,ushort,,,R,,Translator/transformer temperature. raw*0.1=degC. addr 0x0222.
+554,grid_voltage_l2,Grid Voltage L2,0.1V,ushort,,,R,,Grid input voltage L2. raw*0.1=V. addr 0x022A.
+555,grid_voltage_l3,Grid Voltage L3,0.1V,ushort,,,R,,Grid input voltage L3. raw*0.1=V. addr 0x022B.
+556,inverter_voltage_l2,Inverter Voltage L2,0.1V,ushort,,,R,,Inverter output voltage L2. raw*0.1=V. addr 0x022C.
+557,inverter_voltage_l3,Inverter Voltage L3,0.1V,ushort,,,R,,Inverter output voltage L3. raw*0.1=V. addr 0x022D.
+558,inverter_current_l2,Inverter Current L2,0.1A,ushort,,,R,,Inverter output current L2. raw*0.1=A. addr 0x022E.
+559,inverter_current_l3,Inverter Current L3,0.1A,ushort,,,R,,Inverter output current L3. raw*0.1=A. addr 0x022F.
+562,inverter_active_power_l2,Inverter Active Power L2,W,ushort,,,R,,Inverter output active power L2 (no scaling). addr 0x0232.
+563,inverter_active_power_l3,Inverter Active Power L3,W,ushort,,,R,,Inverter output active power L3 (no scaling). addr 0x0233.
+566,inverter_load_ratio_l2,Inverter Load Ratio L2,%,ushort,,,R,,Inverter output load ratio L2 (no scaling). addr 0x0236.
+567,inverter_load_ratio_l3,Inverter Load Ratio L3,%,ushort,,,R,,Inverter output load ratio L3 (no scaling). addr 0x0237.
+568,grid_current_l2,Grid Current L2,0.1A,ushort,,,R,,Grid input current L2. raw*0.1=A. addr 0x0238.
+569,grid_current_l3,Grid Current L3,0.1A,ushort,,,R,,Grid input current L3. raw*0.1=A. addr 0x0239.
+57345,pv_maximum_charging_current,PV Maximum Charging Current,0.1A,ushort,,,R,,PV maximum charging current setting. raw*0.1=A. addr 0xE001.
+57350,inverter_charge_limit_voltage,Inverter Charge Limit Voltage,0.4V,ushort,,,R,,"Charge limit (absorption) voltage setting. raw*0.4=V (unverified scaling, marked ToDo/write in source). addr 0xE006."
+57353,inverter_float_charge_voltage,Inverter Float Charge Voltage,0.4V,ushort,,,R,,"Float charge voltage setting. raw*0.4=V (unverified scaling, marked ToDo/write in source). addr 0xE009."
+57373,charge_cutoff_soc,Set Charge Cut-off SOC,%,ushort,50-100,,W,"",Writable max-SOC charge cut-off used for HA charge optimization. addr 0xE01D.
+57860,output_source_priority,Output Source Priority,,ushort,"{""0"":""Solar-Utility-Battery (SUB)"",""1"":""Utility-Solar-Battery (USB)"",""2"":""Solar-Battery-Utility (SBU)""}",,W,,Select entity (optimistic) controlling output source priority order. addr 0xE204.
+57861,inverter_grid_maximum_charging_current,Inverter Grid Maximum Charging Current,0.1A,ushort,,,R,,Grid/AC-assisted maximum charging current. raw*0.1=A. addr 0xE205.
+57866,inverter_maximum_charging_current,Inverter Maximum Charging Current,0.1A,ushort,,,R,,Overall inverter maximum charging current. raw*0.1=A. addr 0xE20A.
+57872,buzzer_alarm,Buzzer Alarm,,ushort,"{""0"":""Off"",""1"":""On""}",,W,,Select entity (optimistic) toggling buzzer alarm. addr 0xE210.
+61485,battery_charge_today,Battery Charge Today,Ah,ushort,,,R,,Battery Ah charged today (no scaling). addr 0xF02D.
+61486,battery_discharge_today,Battery Discharge Today,Ah,ushort,,,R,,Battery Ah discharged today (no scaling). addr 0xF02E.
+61487,power_generation_today,Power Generation Today,0.1kWh,ushort,,,R,,Energy generated today. raw*0.1=kWh. skip_updates:1. addr 0xF02F.
+61488,power_consumption_today,Power Consumption Today,0.1kWh,ushort,,,R,,Energy consumed today. raw*0.1=kWh. skip_updates:1. addr 0xF030.
+61489,total_number_operating_days,Total Number Operating Days,,ushort,,,R,,Cumulative days of operation (no scaling). skip_updates:1. addr 0xF031.
