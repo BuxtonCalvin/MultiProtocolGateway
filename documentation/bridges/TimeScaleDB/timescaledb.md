@@ -105,6 +105,12 @@ One row per timestamp with multiple metric columns.
 - Faster inserts
 - Easier CSV/SQL exports
 
+#### Wide Table Column Deletion
+
+- You may add and subtract metrics from the wide table to your liking via the mask and screen settings detailed in the MPG readme.  However, if you subtract a metric from the timescaledb bridge, you should delete the column in the wide table that captures that metric.  
+
+![Timescale Delete](../../../classes/WebServer/static/screenshots/timescaleDelete.png)
+
 ### 4.3 Device Info Table
 
 | Column | Description |
@@ -134,7 +140,7 @@ One row per timestamp with multiple metric columns.
 
 Here is a screen shot of how the schema looks in PGadmin.  The tables reside in the public folder.
 
-![PGAdmin for TimescaleDB](image.png)
+![PGAdmin for TimescaleDB](pgAdminImage.png)
 
 ---
 
@@ -468,7 +474,7 @@ The following timestamp columns are affected:
 ###### Rollup Calculations
 
 - The rollup system uses `anchor_start_time_utc` (already UTC-based)
-- Time bucket boundaries are calculated correctly with UTC timestamps
+- Time bucket boundaries are calculated correctly with UTC timestamps or local timestamps
 - Hierarchical continuous aggregates (hourly → daily → weekly → monthly) work seamlessly
 
 ###### Stale Data Detection

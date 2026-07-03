@@ -89,7 +89,13 @@ def do_commit(request: Request, db: Session = Depends(get_session))-> dict[str, 
         # without requiring a second press.
         refresh_app_state(db)
     except Exception as exc:
-        _log.debug("descriptions not committed")
+        # Was previously a hardcoded, debug-level "descriptions not
+        # committed" message regardless of which step actually failed
+        # (config write, descriptions, or a staged TimescaleDB column
+        # deletion) -- misleading and, at debug level, invisible in most
+        # deployments' default logging config. Log what actually failed,
+        # at error level, so a commit failure is never silent.
+        _log.error(f"do_commit: commit failed: {exc}")
         raise HTTPException(status_code=500, detail=str(exc))
     else:
         return {"status": "ok", **result, **timescale_summary}

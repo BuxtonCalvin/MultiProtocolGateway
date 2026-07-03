@@ -1594,7 +1594,7 @@ class timescaledb(transport_base):
                 return True, None
 
             elif fewer_keys:
-                self._log.warning(f"Wide-table schema mismatch; missing {fewer_keys_count} keys in scrape data:"
+                self._log.warning(f"TimescaleDB Wide-table schema mismatch; missing {fewer_keys_count} keys in scrape data:"
                                   f"{sorted(fewer_keys)} consider deleting {sorted(fewer_keys)} "
                                   f"column from the wide table or adding them to the scrape data.")
                 msg: str = f"Missing {len(sorted(fewer_keys))} columns: {sorted(fewer_keys)}"

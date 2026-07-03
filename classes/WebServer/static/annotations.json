@@ -621,6 +621,39 @@
       "label_y_percent": 40
     }
   ],
+  "timescaleDelete": [
+    {
+      "id": "timescaleDelete-wide_tables",
+      "x_percent": 11.1,
+      "y_percent": 28.9,
+      "label": "Choose the wide table from which you want to delete columns.",
+      "shape_type": "dot",
+      "label_x_percent": 1.9,
+      "label_y_percent": 43.9
+    },
+    {
+      "id": "timescaleDelete-columns",
+      "x_percent": 27.9,
+      "y_percent": 55.5,
+      "label": "List of all columns in the Timescale DB wide table database.",
+      "shape_type": "rect",
+      "label_x_percent": 39.3,
+      "label_y_percent": 28.4,
+      "width_percent": 17.3,
+      "height_percent": 80.2,
+      "stroke_color": "rgb(14,165,233)",
+      "fill_color": "rgba(14,165,233,0.18)"
+    },
+    {
+      "id": "timescaleDelete-commit",
+      "x_percent": 92.5,
+      "y_percent": 9.7,
+      "label": "After you check the columns in the wide table, press commit to save your changes.",
+      "shape_type": "dot",
+      "label_x_percent": 82.4,
+      "label_y_percent": 17.9
+    }
+  ],
   "_aliases": {
     "device__inverter_read": "device__scraper_read_generic",
     "device__inverter_write": "device__scraper_write_generic",
@@ -642,6 +675,7 @@
     "pages__analyze*": "analysis",
     "device__influxdb3": "device__bridge_generic",
     "pages__create-protocol": "create_protocol",
-    "device__device_help": "device__device_help"
+    "device__device_help": "device__device_help",
+    "pages__timescale-delete-columns": "timescaleDelete"
   }
 }
