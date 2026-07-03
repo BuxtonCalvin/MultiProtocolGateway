@@ -31,7 +31,12 @@ from classes.WebServer.models import ConfigBackup
 from ..config_writer import commit_all
 from ..database import get_session, refresh_app_state
 from ..diff_engine import build_diff
-from ..models import DeviceProtocolSelection, ProtocolRegister, Setting
+from ..models import (
+    DeviceProtocolSelection,
+    ProtocolRegister,
+    Setting,
+    SettingDescription,
+)
 from ..services.backup_service import list_backups, rollback_to
 from ..services.setting_description_service import (
     commit_descriptions,
@@ -43,24 +48,62 @@ _log: logging.Logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/commit", tags=["commit"])
 
 
+def _has_dirty_config_state(db: Session) -> bool:
+    """
+    True if anything commit_all() would act on is currently staged.
+
+    commit_all() rebuilds config.cfg, every mask/screen file, and every
+    override CSV from ALL rows in these three tables every time it runs --
+    not just dirty ones (see config_writer.py). That means when nothing
+    here is dirty, value_staged already equals value_disk for every row,
+    so running it anyway would only reproduce byte-identical output on
+    disk. Gating on exactly these three tables' is_dirty flags is safe
+    because they're the same flags discard_changes() below already treats
+    as authoritative for "is there a config-side change pending".
+    """
+    return (
+        db.query(Setting).filter(Setting.is_dirty == True).first() is not None  # noqa: E712
+        or db.query(ProtocolRegister).filter(ProtocolRegister.is_dirty == True).first() is not None  # noqa: E712
+        or db.query(DeviceProtocolSelection).filter(DeviceProtocolSelection.is_dirty == True).first() is not None  # noqa: E712
+    )
+
+
+def _has_dirty_descriptions(db: Session) -> bool:
+    """True if any setting_descriptions row is staged — gates commit_descriptions()."""
+    return db.query(SettingDescription).filter(SettingDescription.is_dirty == True).first() is not None  # noqa: E712
+
+
 @router.post("")
 def do_commit(request: Request, db: Session = Depends(get_session))-> dict[str, Any]:
     """
     Full commit: backup → write config.cfg → write masks/screens/overrides →
-    reset dirty flags.
+    reset dirty flags → commit setting descriptions → apply any staged
+    TimescaleDB column deletions.
+
+    Each of those tracks only runs when it actually has something staged
+    (see _has_dirty_config_state / _has_dirty_descriptions /
+    commit_staged_deletions' own has_staged_deletions() check) — so a
+    commit with only, say, a Timescale column deletion pending no longer
+    also rewrites config.cfg and every mask/screen/override/description
+    file along with it.
     """
     state = request.app.state
     try:
-        result: dict[str, int | str] = commit_all(
-            db=db,
-            config_path=state.config_path,
-            project_root=state.project_root,
-            protocols_dir=state.protocols_dir,
-            config_dir=getattr(state, "config_dir", None),
-        )
-        desc_count: int = commit_descriptions(db)
+        result: dict[str, int | str] = {}
+
+        if _has_dirty_config_state(db):
+            result = commit_all(
+                db=db,
+                config_path=state.config_path,
+                project_root=state.project_root,
+                protocols_dir=state.protocols_dir,
+                config_dir=getattr(state, "config_dir", None),
+            )
+
+        if _has_dirty_descriptions(db):
+            result["descriptions_committed"] = commit_descriptions(db)
+
         db.commit()
-        result["descriptions_committed"] = desc_count
 
         # Apply any staged TimescaleDB wide-table column deletions. This is
         # live Postgres schema work (drop rollups -> ALTER TABLE -> rebuild

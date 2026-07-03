@@ -4812,13 +4812,14 @@ class WideTableFieldManager:
         # drop that happens before the rebuild.
         self._bridge.migration_in_progress.set()
         rebuilt: bool = False
+        paused_job_ids: list[int] = []
 
         try:
             with self.SessionFactory() as session:
                 # Whitelist requested names against what's actually in
                 # metric_catalog for this protocol -- column names handed in
                 # from the UI layer are never trusted directly in DDL.
-                catalog_rows  = session.execute(
+                catalog_rows = session.execute(
                     text("""
                         SELECT catalog_id, clean_column_name
                         FROM metric_catalog
@@ -4856,6 +4857,21 @@ class WideTableFieldManager:
                 f"WideTableFieldManager: deleting {len(to_delete)} field(s) from "
                 f"'{wide_table_name}' (protocol='{protocol_name}'): {to_delete}"
             )
+
+            # Pause any compression policy job configured for this specific
+            # wide table before touching its schema. ALTER TABLE DROP
+            # COLUMN needs a lock across every chunk of the hypertable; a
+            # background compression job concurrently compressing one of
+            # those chunks holds a lock TimescaleDB doesn't always resolve
+            # cleanly against that ALTER TABLE, which can stall or deadlock
+            # the drop. Scoped to this table only (see
+            # _pause_compression_job) -- not a blanket pause of every
+            # compression job in the database, which would needlessly
+            # affect unrelated protocols. Always resumed in the finally
+            # block below, including on failure.
+            with self.SessionFactory() as session:
+                paused_job_ids = self._pause_compression_job(session, wide_table_name)
+                session.commit()
 
             # 1. Tear down this protocol's rollups first. They SELECT every
             #    current wide-table column by name, so they cannot survive
@@ -4948,6 +4964,75 @@ class WideTableFieldManager:
             # before reaching the rebuild step.
             self._bridge.migration_in_progress.clear()
 
+            if paused_job_ids:
+                try:
+                    with self.SessionFactory() as session:
+                        self._resume_compression_job(session, paused_job_ids)
+                        session.commit()
+                except Exception as e:
+                    # Never let a resume failure mask the original error (if
+                    # any) or fail an otherwise-successful edit. Logged at
+                    # warning rather than silently swallowed, since a job
+                    # left paused needs a human to notice and re-enable it
+                    # (e.g. via TimescaleDB's own alter_job) until this is
+                    # retried successfully.
+                    self._log.warning(
+                        f"delete_fields: could not resume compression job(s) {paused_job_ids} "
+                        f"for '{wide_table_name}': {e}"
+                    )
+
+    def _pause_compression_job(self, session: Session, table_name: str) -> list[int]:
+        """
+        Temporarily disables (scheduled => false) any compression policy
+        job(s) TimescaleDB has configured specifically for table_name.
+        Returns the job_id(s) paused, so the caller can re-enable them
+        afterward via _resume_compression_job.
+
+        Scoped to this one table via hypertable_name -- deliberately not a
+        blanket "pause every compress_chunks job in the database" query,
+        which would needlessly pause compression on every other protocol's
+        wide/narrow tables too. proc_name is matched with ILIKE '%compress%'
+        rather than an exact name because TimescaleDB has used different
+        proc names for the compression policy job across versions (e.g.
+        legacy 'compress_chunks' vs. current 'policy_compression'); this
+        works regardless of which one a given install uses.
+
+        Best-effort: if timescaledb_information.jobs doesn't exist, has a
+        different shape than expected, or there's simply no compression
+        policy configured for this table, this returns [] rather than
+        failing the edit -- the decompress-before-ALTER step still runs
+        either way, this only closes a lock-contention window, it isn't
+        required for correctness.
+        """
+        try:
+            rows = session.execute(
+                text("""
+                    SELECT job_id FROM timescaledb_information.jobs
+                    WHERE hypertable_name = :table_name
+                      AND proc_name ILIKE '%compress%'
+                      AND scheduled = true
+                """),
+                {"table_name": table_name}
+            ).fetchall()
+            job_ids: list[int] = [r[0] for r in rows]
+            for job_id in job_ids:
+                session.execute(text("SELECT alter_job(:job_id, scheduled => false)"), {"job_id": job_id})
+            if job_ids:
+                self._log.info(f"_pause_compression_job: paused job(s) {job_ids} for '{table_name}'")
+
+        except Exception as e:
+            self._log.warning(f"_pause_compression_job: could not pause compression job for '{table_name}': {e}")
+            return []
+        else:
+            return job_ids
+
+    def _resume_compression_job(self, session: Session, job_ids: list[int]) -> None:
+        """Re-enables (scheduled => true) job_ids previously paused by _pause_compression_job."""
+        for job_id in job_ids:
+            session.execute(text("SELECT alter_job(:job_id, scheduled => true)"), {"job_id": job_id})
+        if job_ids:
+            self._log.info(f"_resume_compression_job: resumed job(s) {job_ids}")
+
     def _decompress_chunks_best_effort(self, session: Session, table_name: str) -> None:
         """
         Decompresses any compressed chunks of table_name before an
@@ -4959,14 +5044,47 @@ class WideTableFieldManager:
 
         Best-effort: a table with no compressed chunks (or not yet a
         hypertable) simply no-ops here rather than failing the edit.
+
+        Runs inside a SAVEPOINT (session.begin_nested()), not directly in
+        the caller's transaction. Postgres aborts an entire transaction --
+        not just the one failing statement -- the moment any statement in
+        it errors, and that abort can only be cleared by a ROLLBACK (or
+        ROLLBACK TO SAVEPOINT), never by simply catching the Python
+        exception. Without the SAVEPOINT here, a failure in this
+        best-effort step would silently poison the caller's transaction:
+        the except block below would swallow the Python-level exception,
+        but every statement after it -- including the ALTER TABLE DROP
+        COLUMN this is meant to prepare for -- would then fail with
+        "current transaction is aborted, commands ignored until end of
+        transaction block", surfacing as a confusing failure far from its
+        real cause. begin_nested() ensures only the SAVEPOINT is rolled
+        back on failure, leaving the rest of the caller's transaction
+        (including the DROP COLUMN that follows) usable.
         """
         try:
-            session.execute(
-                text("""
-                    SELECT decompress_chunk(c, if_not_compressed => true)
-                    FROM show_chunks(:tname) AS c;
-                """),
-                {"tname": table_name}
-            )
+            with session.begin_nested():
+                # Positional arg, not `if_not_compressed => true`: the
+                # second parameter's name has changed across TimescaleDB
+                # versions, which makes a named-argument call fail to
+                # resolve to any overload ("function decompress_chunk(...)
+                # does not exist") on some installs even though the
+                # positional signature is stable.
+                session.execute(
+                    text("""
+                        SELECT decompress_chunk(c, true)
+                        FROM show_chunks(:tname) AS c;
+                    """),
+                    {"tname": table_name}
+                )
         except Exception as e:
-            self._log.debug(f"_decompress_chunks_best_effort: nothing to decompress for '{table_name}': {e}")
+            # Not a debug-only footnote: swallowing this without a visible
+            # log is exactly how a real decompression failure used to
+            # masquerade as an unrelated "transaction is aborted" error on
+            # the DROP COLUMN two statements later. Kept best-effort (not
+            # re-raised) since the common case -- no compressed chunks yet
+            # -- is entirely expected, but logged at warning so an
+            # unexpected failure here is never silent again.
+            self._log.warning(
+                f"_decompress_chunks_best_effort: could not decompress chunks for '{table_name}' "
+                f"(continuing -- this step is best-effort): {e}"
+            )
