@@ -37,6 +37,7 @@ from ..services.setting_description_service import (
     commit_descriptions,
     discard_descriptions,
 )
+from ..services.timescale_service import clear_staged_deletions, commit_staged_deletions
 
 _log: logging.Logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/commit", tags=["commit"])
@@ -57,9 +58,31 @@ def do_commit(request: Request, db: Session = Depends(get_session))-> dict[str, 
             protocols_dir=state.protocols_dir,
             config_dir=getattr(state, "config_dir", None),
         )
-        desc_count = commit_descriptions(db)
+        desc_count: int = commit_descriptions(db)
         db.commit()
         result["descriptions_committed"] = desc_count
+
+        # Apply any staged TimescaleDB wide-table column deletions. This is
+        # live Postgres schema work (drop rollups -> ALTER TABLE -> rebuild
+        # rollups), not a config.cfg write, so it runs against the live
+        # gateway rather than through config_writer.commit_all(). A failure
+        # here is raised same as any other commit-step failure below; any
+        # protocol that finished before the failure is already cleared from
+        # staging (see commit_staged_deletions), so retrying the commit only
+        # retries what's left.
+        #
+        # Kept in its own dict rather than folded into `result` — result is
+        # typed dict[str, int | str] to match commit_all()'s return type,
+        # and timescale_protocols_updated is a list[str], which doesn't fit
+        # that value type.
+        timescale_results: list[dict[str, Any]] = commit_staged_deletions(
+            getattr(state, "gateway", None), state
+        )
+        timescale_summary: dict[str, int | list[str]] = {}
+        if timescale_results:
+            timescale_summary["timescale_columns_deleted"] = sum(len(r["deleted"]) for r in timescale_results)
+            timescale_summary["timescale_protocols_updated"] = [r["protocol_name"] for r in timescale_results]
+
         # Recompute AppState dirty/orphan counts from the now-cleared flags so
         # the very next /api/devices/state poll (fired by base.html after the
         # commit response) sees zero dirty items and disables the commit button
@@ -69,7 +92,7 @@ def do_commit(request: Request, db: Session = Depends(get_session))-> dict[str, 
         _log.debug("descriptions not committed")
         raise HTTPException(status_code=500, detail=str(exc))
     else:
-        return {"status": "ok", **result}
+        return {"status": "ok", **result, **timescale_summary}
 
 
 @router.get("/diff")
@@ -120,10 +143,12 @@ def get_backups(db: Session = Depends(get_session))-> list[dict[str, Any]]:
 
 
 @router.post("/discard")
-def discard_changes(db: Session = Depends(get_session)) -> dict[str, str]:
+def discard_changes(request: Request, db: Session = Depends(get_session)) -> dict[str, str]:
     """
     Discard all staged changes: reset value_staged = value_disk and
     clear all is_dirty flags. Does NOT touch the config file on disk.
+    Also clears any staged TimescaleDB column deletions — those are
+    in-memory only, so nothing on disk or in Postgres needs reverting.
     """
 
     # Reset Setting rows
@@ -143,6 +168,7 @@ def discard_changes(db: Session = Depends(get_session)) -> dict[str, str]:
         row.is_dirty = False
 
     discard_descriptions(db)
+    clear_staged_deletions(request.app.state)
     db.flush()
     refresh_app_state(db)
     db.commit()

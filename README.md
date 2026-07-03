@@ -239,6 +239,48 @@ Hardware Device
 
 Each transport is independently configurable with its own scan interval, log level, variable mask, and protocol version. A scraper and bridge sharing the same `device_name` are linked — the scraper reads data, the bridge publishes it.
 
+### Transport
+
+Transport
+    │
+    ▼
+read_registers()
+
+One Modbus transaction, block of registers or a single register.
+
+### Bus Logic
+
+Bus logic
+    │
+    ▼
+read_modbus_registers()
+
+Retries, delays, batching, locking, disabled ranges.
+
+### Scheduler
+
+Scheduler
+    │
+    ▼
+read_data_iter(), read_data(), read_group_data()
+
+Interleaving across devices per device response, or concurrently for similar, robust scrapers, or read sequentially.
+
+### Protocol Decoding
+
+Protocol
+    │
+    ▼
+process_registery()
+
+↓
+
+derived values
+
+↓
+
+publish to bridges
+
 ---
 
 ## Quick Start

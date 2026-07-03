@@ -93,7 +93,7 @@ def _safe_paired_address(row: Any) -> str | None:
         return instance_state["paired_high_address"]
     # Slow path: attempt instrumented access, catch anything SQLAlchemy raises
     try:
-        val = row.paired_high_address  # type: ignore[union-attr]
+        val = row.paired_high_address
     except Exception:
         return None
     else:

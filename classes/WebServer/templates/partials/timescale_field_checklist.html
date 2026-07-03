@@ -1,0 +1,120 @@
+<!--
+  Description: partials/timescale_field_checklist.html HTMX partial — column checklist for one wide table.
+  File: timescale_field_checklist.html
+
+  Copyright 2026 Kevin Burke
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://apache.org
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+
+{#
+  partials/timescale_field_checklist.html
+  Swapped into #timescale-fields-container when a wide table is selected.
+  Context: protocol_name, wide_table_name, fields — [{metric_name,
+  column_name, data_type, checked}, ...] in alphabetical column_name order.
+
+  Checking a box PATCHes /api/timescale/.../stage to add it to the
+  in-memory staged-deletion set (services/timescale_service.py) — no
+  ALTER TABLE happens here. hx-swap="none" because the checkbox itself is
+  the only thing that needs to reflect the change; the header's Commit /
+  Discard buttons pick up the new dirty state via base.html's
+  htmx:afterRequest -> refreshState() listener.
+
+  Styling notes (mirrors protocol_table.html):
+  - Row text uses paired light/dark classes (e.g. "text-mpg-500
+    dark:text-mpg-100") rather than a single shade — the app is used in
+    both light and dark mode, and a shade tuned for a dark background
+    reads as low-contrast/washed-out on the light background. Only the
+    header row's classes are fixed (bg-mpg-800 / text-mpg-50), since the
+    header bar itself stays dark in both themes.
+  - The table has no fixed widths and Column/Data Type cells use
+    whitespace-nowrap, so the browser's default auto table layout sizes
+    each column to its longest cell content (plus the cell's px-3
+    padding) rather than stretching to fill the pane. Note: mpg.css has a
+    global `table { width: 100%; }` rule, so `w-auto` on <table> here is
+    required (not optional) to override it — a class selector beats that
+    bare element selector on specificity, but simply omitting a width
+    class isn't enough since the global rule still applies by default.
+#}
+<div>
+  <div class="flex items-center justify-between mb-2 px-1">
+    <h2 class="surface-title font-semibold text-sm">
+      Columns
+      <span class="surface-muted font-normal">[{{ protocol_name }}]</span>
+    </h2>
+    <span class="text-mpg-600 dark:text-mpg-400 text-xs font-mono">{{ wide_table_name }}</span>
+  </div>
+
+  <table id="timescale-field-table"
+         class="w-auto text-xs border-collapse"
+         role="table"
+         aria-label="Deletable columns for {{ protocol_name }}">
+
+    <thead class="sticky top-0 bg-mpg-800 z-10">
+      <tr class="text-mpg-100 text-xs uppercase tracking-wide" role="row">
+        <th class="px-2 py-2 text-center w-10 border-r border-mpg-700 font-semibold text-mpg-50"
+            scope="col" title="Mark this column for deletion on next commit">
+          Del
+        </th>
+        <th class="px-3 py-2 text-left border-r border-mpg-700 font-semibold text-mpg-50 whitespace-nowrap" scope="col">
+          Column
+        </th>
+        <th class="px-3 py-2 text-left font-semibold text-mpg-50 whitespace-nowrap border-r border-mpg-700" scope="col">
+          Data Type
+        </th>
+      </tr>
+    </thead>
+
+    <tbody id="timescale-field-rows">
+      {% for f in fields %}
+      <tr class="border-t border-mpg-700/50 {% if f.checked %}bg-dirty/5{% endif %}
+                 hover:bg-mpg-800/60 transition-colors"
+          role="row"
+          id="tsfield-{{ protocol_name }}-{{ f.column_name }}"
+          data-column="{{ f.column_name }}">
+
+        <td class="px-2 py-1.5 text-center border-r border-mpg-700/30" role="cell">
+          <input type="checkbox"
+                 class="accent-danger w-3 h-3 cursor-pointer timescale-field-toggle"
+                 {% if f.checked %}checked{% endif %}
+                 aria-label="Mark {{ f.column_name }} for deletion"
+                 hx-patch="/api/timescale/wide-tables/{{ protocol_name }}/fields/{{ f.column_name }}/stage"
+                 hx-vals='{"wide_table_name": {{ wide_table_name | tojson }}, "data_type": {{ f.data_type | tojson }}}'
+                 hx-on:htmx:config-request="event.detail.parameters.checked = this.checked"
+                 hx-swap="none"
+                 hx-trigger="change"
+                 hx-on:htmx:after-request="
+                   const row = document.getElementById('tsfield-{{ protocol_name }}-{{ f.column_name }}');
+                   if (row) row.classList.toggle('bg-dirty/5', this.checked);
+                 ">
+        </td>
+        <td class="px-3 py-1.5 font-mono text-mpg-500 dark:text-mpg-100 border-r border-mpg-700/30 whitespace-nowrap" role="cell">
+          {{ f.column_name }}
+          {% if f.metric_name != f.column_name %}
+          <span class="text-mpg-600 dark:text-mpg-500 text-[10px] block">{{ f.metric_name }}</span>
+          {% endif %}
+        </td>
+        <td class="px-3 py-1.5 text-mpg-500 dark:text-mpg-100 whitespace-nowrap border-r border-mpg-700/30" role="cell">{{ f.data_type }}</td>
+      </tr>
+      {% endfor %}
+
+      {% if not fields %}
+      <tr>
+        <td colspan="3" class="px-4 py-8 text-center text-mpg-600 dark:text-mpg-400 text-sm whitespace-normal">
+          No deletable columns found for <strong class="font-mono">{{ protocol_name }}</strong>.
+        </td>
+      </tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>

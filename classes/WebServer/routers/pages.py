@@ -67,6 +67,13 @@ from ..services.protocol_service import (
     get_protocol_groups,
     get_protocol_json,
 )
+from ..services.timescale_service import (
+    get_staged_columns,
+    is_timescale_available,
+    list_wide_table_fields,
+    list_wide_tables,
+    resolve_wide_table_name,
+)
 
 router = APIRouter(tags=["pages"])
 _log: logging.Logger = logging.getLogger(__name__)
@@ -267,6 +274,70 @@ async def create_device_page(request: Request):
             "nav": nav,
             "proto_groups": proto_groups,
             "create_device_data": create_device_data,
+        },
+    )
+
+
+@router.get("/pages/timescale-delete-columns", response_class=HTMLResponse, response_model=None)
+async def timescale_delete_columns_page(request: Request):
+    """
+    Step 4 of the Delete Columns flow — lists every wide table on the live
+    TimescaleDB bridge. Selecting one loads its column checklist via HTMX
+    (see timescale_fields_partial below).
+    """
+    gateway = getattr(request.app.state, "gateway", None)
+    if not is_timescale_available(gateway):
+        raise HTTPException(
+            status_code=404,
+            detail="No TimescaleDB bridge is attached to this gateway.",
+        )
+
+    with session_scope() as db:
+        nav: NavData = get_nav_data(db)
+
+    try:
+        wide_tables: list[dict[str, str]] = list_wide_tables(gateway)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return request.app.state.templates.TemplateResponse(
+        request=request,
+        name="pages/timescale_delete_columns.html",
+        context={**_base_context(request, nav), "wide_tables": wide_tables},
+    )
+
+
+@router.get("/pages/timescale/fields/{protocol_name}", response_class=HTMLResponse, response_model=None)
+async def timescale_fields_partial(protocol_name: str, request: Request):
+    """
+    Step 5 of the Delete Columns flow — the alpha-ordered, checkbox-ready
+    column list for one wide table. `checked` reflects whatever is
+    currently staged for deletion, so navigating away and back doesn't
+    lose the admin's selections before they commit.
+    """
+    gateway = getattr(request.app.state, "gateway", None)
+    if not is_timescale_available(gateway):
+        raise HTTPException(
+            status_code=404,
+            detail="No TimescaleDB bridge is attached to this gateway.",
+        )
+
+    staged: set[str] = get_staged_columns(request.app.state, protocol_name)
+    try:
+        fields: list[dict[str, Any]] = list_wide_table_fields(gateway, protocol_name, staged_columns=staged)
+        wide_table_name: str = resolve_wide_table_name(gateway, protocol_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return request.app.state.templates.TemplateResponse(
+        request=request,
+        name="partials/timescale_field_checklist.html",
+        context={
+            "protocol_name": protocol_name,
+            "wide_table_name": wide_table_name,
+            "fields": fields,
         },
     )
 

@@ -41,6 +41,7 @@ from ..services.device_service import (
     get_device_summary,
     get_orphaned_settings,
 )
+from ..services.timescale_service import has_staged_deletions, staged_deletion_count
 
 _log: logging.Logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/devices", tags=["devices"])
@@ -160,14 +161,19 @@ def nav_data(db: Session = Depends(get_session)) -> dict[str, Any]:
 
 
 @router.get("/state")
-def app_state(db: Session = Depends(get_session)) -> dict[str, Any]:
+def app_state(request: Request, db: Session = Depends(get_session)) -> dict[str, Any]:
     state: AppState = get_app_state(db)
     return {
         "has_dirty_settings": state.has_dirty_settings,
         "has_dirty_protocols": state.has_dirty_protocols,
+        # Timescale column deletions are staged in-memory on app.state
+        # (see services/timescale_service.py), not in the staging DB, since
+        # they're live Postgres schema rather than config.cfg settings.
+        "has_dirty_timescale": has_staged_deletions(request.app.state),
         "has_orphans": state.has_orphans,
         "dirty_settings_count": state.dirty_settings_count,
         "dirty_protocols_count": state.dirty_protocols_count,
+        "dirty_timescale_count": staged_deletion_count(request.app.state),
         "orphan_count": state.orphan_count,
         "last_scan_at": state.last_scan_at.isoformat() if state.last_scan_at else None,
         "last_commit_at": state.last_commit_at.isoformat() if state.last_commit_at else None,
