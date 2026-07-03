@@ -346,6 +346,38 @@
   <!-- Right side: Analyze + Commit + Dark toggle -->
   <div class="ml-auto flex flex-wrap items-center justify-end gap-2">
 
+    <!-- TIMESCALE DB dropdown — only shown when a live TimescaleDB bridge
+         is attached to this gateway (see timescale_bridge_available() in
+         main.py, backed by services/timescale_service.is_timescale_available). -->
+    {% if timescale_bridge_available() %}
+    <div class="relative group dropdown-root" role="none" data-dropdown>
+      <button type="button"
+              class="nav-item px-3 py-1.5 rounded hover:bg-mpg-600 text-mpg-100
+                     focus:outline-none focus:ring-2 focus:ring-accent
+                     flex items-center gap-1"
+              data-dropdown-trigger
+              aria-haspopup="true" aria-expanded="false"
+              aria-label="Timescale DB menu">
+        Timescale DB
+        <svg class="w-3 h-3 opacity-60" fill="none" stroke="currentColor"
+             viewBox="0 0 24 24" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+        </svg>
+      </button>
+      <ul class="dropdown-menu absolute right-0 top-full mt-1 w-48 bg-mpg-800
+                 border border-mpg-600 rounded shadow-xl z-50
+                 hidden group-hover:block group-focus-within:block"
+          role="menu" aria-label="Timescale DB submenu">
+        <li role="none">
+          <a href="/pages/timescale-delete-columns" role="menuitem"
+             class="dropdown-item block px-4 py-2 text-mpg-200 hover:bg-mpg-600 hover:text-white">
+            Delete Columns
+          </a>
+        </li>
+      </ul>
+    </div>
+    {% endif %}
+
     <!-- Create Device -->
     <a href="/pages/create-device"
        class="nav-item px-3 py-1.5 rounded hover:bg-mpg-600 text-mpg-100
@@ -492,7 +524,7 @@
         const btn = document.getElementById('commit-btn');
         const discardBtn = document.getElementById('discard-btn');
         if (!btn) return;
-        const dirty = data.has_dirty_settings || data.has_dirty_protocols;
+        const dirty = data.has_dirty_settings || data.has_dirty_protocols || data.has_dirty_timescale;
         btn.dataset.dirty = dirty ? 'true' : 'false';
         btn.disabled = !dirty;
         if (discardBtn) {
@@ -516,7 +548,7 @@
 
   document.body.addEventListener('htmx:afterRequest', function(evt) {
     const path = evt.detail?.requestConfig?.path || evt.detail?.pathInfo?.requestPath || evt.detail?.xhr?.responseURL || '';
-    if (path.includes('/api/protocols/') || path.includes('/api/devices/')) {
+    if (path.includes('/api/protocols/') || path.includes('/api/devices/') || path.includes('/api/timescale/')) {
       refreshState();
     }
     // Commit response — render a dismissible toast instead of raw JSON

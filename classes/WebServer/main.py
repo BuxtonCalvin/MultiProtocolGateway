@@ -77,6 +77,7 @@ from .routers.help import FileResponse
 from .routers.help import router as help_router
 from .routers.pages import router as pages_router
 from .routers.protocols import router as protocols_router
+from .routers.timescale import router as timescale_router
 from .routers.transport_settings import router as transport_settings_router
 from .scanner import Scanner, scan_transport_library
 from .services.analysis_service import get_transport_connection_status
@@ -100,6 +101,7 @@ from .services.setting_description_service import (
     get_all_setting_descriptions,
     seed_setting_descriptions,
 )
+from .services.timescale_service import is_timescale_available
 
 _log: logging.Logger = logging.getLogger(__name__)
 
@@ -299,6 +301,13 @@ def create_app(
         app.state.gateway        = gateway_instance
         app.state.scanner        = scanner
 
+        # In-memory staging for the Timescale DB "Delete Columns" screen —
+        # see services/timescale_service.py. Lives alongside the gateway
+        # rather than in the staging DB since wide-table columns are live
+        # Postgres schema, not config.cfg settings.
+        app.state.timescale_pending_deletions = {}
+        app.state.timescale_pending_lock = threading.RLock()
+
         watcher: FileWatcher = FileWatcher(scanner, config_path, protocols_dir)
         watcher.start()
         app.state.file_watcher = watcher
@@ -329,6 +338,15 @@ def create_app(
     templates: Jinja2Templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
     app.state.templates = templates
 
+    # Jinja global — lets base.html decide whether to show the "Timescale DB"
+    # nav pad without every single page route having to thread the answer
+    # through its own context dict. app.state.gateway is set once below
+    # during lifespan startup; this closes over `app` (not `request`), so it
+    # always reads the current live value at render time.
+    templates.env.globals["timescale_bridge_available"] = (
+        lambda: is_timescale_available(getattr(app.state, "gateway", None))
+    )
+
     # ------------------------------------------------------------------
     # Routers
     # ------------------------------------------------------------------
@@ -340,6 +358,7 @@ def create_app(
     app.include_router(analysis_router)
     app.include_router(help_router)
     app.include_router(pages_router)
+    app.include_router(timescale_router)
 
     # ------------------------------------------------------------------
     # Core routes

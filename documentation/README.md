@@ -40,7 +40,7 @@ This README file contains an index of all files in the documentation directory.
 
 #### TimescaleDB
 
-- [timescaledb_protocol_gateway.md](bridges/TimeScaleDB/timescaledb_protocol_gateway.md) - Configuring the TimescaleDB Bridge
+- [timescaledb_protocol_gateway.md](bridges/TimeScaleDB/timescaledb.md) - Configuring the TimescaleDB Bridge
 - [pgAdminImage.png](bridges/TimeScaleDB/pgAdminImage.png) - Snapshot of TimescaleDB Bridge in the Timescale Database
 - [LICENSE.md](bridges/TimeScaleDB/LICENSE.md) - Terms of use license
 - [config.cfg.example](bridges/TimeScaleDB/config.cfg.example) - Example configuration for the TimescaleDB Bridge

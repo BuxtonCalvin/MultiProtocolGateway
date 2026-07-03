@@ -1594,7 +1594,9 @@ class timescaledb(transport_base):
                 return True, None
 
             elif fewer_keys:
-                self._log.warning(f"Wide-table schema mismatch; missing {fewer_keys_count} keys in scrape data: {sorted(fewer_keys)}")
+                self._log.warning(f"TimescaleDB Wide-table schema mismatch; missing {fewer_keys_count} keys in scrape data:"
+                                  f"{sorted(fewer_keys)} consider deleting {sorted(fewer_keys)} "
+                                  f"column from the wide table or adding them to the scrape data.")
                 msg: str = f"Missing {len(sorted(fewer_keys))} columns: {sorted(fewer_keys)}"
                 return False, msg
 
@@ -3785,7 +3787,7 @@ class RollupManager:
                         start_offset=start_offset,
                         protocol_name="shared_narrow"
                     )
-                    previous_source = view_name
+                    previous_source: str = view_name
 
             self._log.info("Shared narrow CAGG views created/verified.")
 
@@ -4019,7 +4021,7 @@ class RollupManager:
         Returns:
             bool: True if the view exists, False otherwise.
         """
-        check_sql = text("SELECT 1 FROM timescaledb_information.continuous_aggregates WHERE view_name = :name")
+        check_sql: TextClause = text("SELECT 1 FROM timescaledb_information.continuous_aggregates WHERE view_name = :name")
 
         try:
             # Keep ONLY the risky operation in the try block
@@ -4083,7 +4085,7 @@ class RollupManager:
     def _view_exists_conn_helper(self, conn: Connection, view_name: str) -> bool:
         """Session-free variant of _view_exists for use inside autocommit engine.connect() blocks."""
         try:
-            result = conn.execute(
+            result: Row[Any] | None = conn.execute(
                 text("SELECT 1 FROM timescaledb_information.continuous_aggregates WHERE view_name = :name"),
                 {"name": view_name}
             ).fetchone()
@@ -4478,7 +4480,7 @@ class RollupManager:
             The backend_pid will be NULL for ORPHANED_METADATA and GHOST_PROCESS rows (by definition — ghost processes have no active PID),
             so checking if backend_pid is not None before calling pg_terminate_backend prevents a spurious error on those branches."""
 
-        detect_sql = text("""
+        detect_sql: TextClause = text("""
             WITH job_thresholds AS (
                 SELECT
                     j.job_id,
@@ -4548,3 +4550,531 @@ class RollupManager:
         except Exception as e:
             session.rollback()
             self._log.error(f"Sweep failed: {e}")
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# Wide table field (column) administration
+# ----------------------------------------------------------------------------------------------------------------------
+
+@dataclass
+class WideTableField:
+    """
+    A single deletable field (dynamic metric column) belonging to a
+    protocol's wide table, as presented to an administrative UI.
+
+    column_name is the physical, sanitized column that lives in the wide
+    table (see timescaledb._clean_column_name); metric_name is the original
+    source/registry name it was derived from. The two can differ, so the UI
+    should key off column_name and echo it back unchanged to
+    WideTableFieldManager.delete_fields().
+    """
+    metric_name: str
+    column_name: str
+    data_type: str
+    unit_mod: float | None
+    notes: str | None
+
+
+@dataclass
+class WideTableFieldDeletionResult:
+    """Outcome of a WideTableFieldManager.delete_fields() call."""
+    protocol_name: str
+    wide_table_name: str
+    deleted: list[str]              # column_names actually dropped
+    not_found: list[str]            # requested column_names that didn't match any existing field
+    remaining_fields: list[str]     # column_names still present on the wide table after the operation
+    rollups_rebuilt: bool           # whether the protocol's rollups were successfully rebuilt
+
+
+class WideTableFieldManager:
+    """
+    Administrative helper for deleting dynamic metric columns ("fields")
+    from a protocol's wide table. Intended to be driven by an encapsulating
+    web app that manages bridge administration -- the web UI lists fields
+    with checkboxes, the admin selects some for removal, and on commit the
+    UI calls delete_fields() with the selected column names.
+
+    Why this can't be a plain ALTER TABLE:
+    Wide tables are dynamically shaped -- every metric a protocol reports
+    becomes its own column (see timescaledb._ensure_columns_for_metrics).
+    RollupManager then builds four hierarchical continuous aggregates
+    (hourly/daily/weekly/monthly) on top of each wide table, and every one
+    of those materialized views has a SELECT list built directly from the
+    wide table's current columns (see
+    RollupManager._resolve_rollup_metric_descriptors_helper). A column
+    can't simply disappear out from under that -- the dependent rollups
+    have to be torn down first, or TimescaleDB will either block the
+    ALTER TABLE or leave the views referencing a column that no longer
+    exists. This class always performs a delete as a single
+    tear-down / alter / rebuild sequence, never a bare column drop.
+
+    Typical usage from the web app:
+
+        field_mgr = WideTableFieldManager(bridge)
+
+        # populate the admin screen
+        protocols = field_mgr.list_editable_protocols()
+        fields = field_mgr.list_fields("eg4_18kpv")
+
+        # ... admin checks some boxes and hits "Delete" ...
+        result = field_mgr.delete_fields("eg4_18kpv", ["soc_percent", "grid_voltage"])
+    """
+
+    # Structural columns that exist on every wide table and can never be
+    # removed through this class.
+    PROTECTED_COLUMNS: frozenset[str] = frozenset({"m_time", "device_info_id"})
+
+    def __init__(self, bridge: "timescaledb") -> None:
+        if not isinstance(bridge, timescaledb):
+            msg: str = f"WideTableFieldManager requires a timescaledb bridge instance, got {type(bridge)}"
+            raise TypeError(msg)
+        self._bridge: "timescaledb" = bridge
+        self._log: logging.Logger = bridge._log
+        self.engine: Engine = bridge.engine
+        self.SessionFactory: sessionmaker[Session] = bridge.SessionFactory
+
+    # -------------------------
+    # Resolution helpers
+    # -------------------------
+
+    def _resolve_wide_table(self, protocol_name: str) -> tuple[int, str]:
+        """
+        Looks up the protocol_id and wide_table_name for protocol_name.
+
+        Raises:
+            ValueError: protocol is unknown, or is narrow-only (>200
+                        metrics) and therefore has no wide table to edit.
+        """
+        with self.SessionFactory() as session:
+            row: Row[Any] | None = session.execute(
+                text("""
+                    SELECT protocol_id, wide_table_name
+                    FROM protocol_registry
+                    WHERE protocol_name = :p
+                """),
+                {"p": protocol_name}
+            ).fetchone()
+
+        if row is None:
+            msg: str = f"Protocol '{protocol_name}' is not registered in protocol_registry."
+            raise ValueError(msg)
+
+        protocol_id, wide_table_name = row
+        if wide_table_name is None:
+            msg: str = f"Protocol '{protocol_name}' is narrow-only (>200 metrics) and has no wide table to edit."
+            raise ValueError(msg)
+
+        return protocol_id, wide_table_name
+
+    def _wide_view_names(self, wide_table_name: str) -> list[str]:
+        """
+        Reproduces RollupManager's per-protocol view-naming convention, e.g.
+        'device_metrics_wide__eg4_18kpv' ->
+            ['hourly_rollup_wide__eg4_18kpv', 'daily_rollup_wide__eg4_18kpv',
+             'weekly_rollup_wide__eg4_18kpv', 'monthly_rollup_wide__eg4_18kpv']
+
+        Must stay in sync with RollupManager._ensure_cagg_views_for_protocol.
+        """
+        suffix: str = wide_table_name.removeprefix("device_metrics_")
+        rollup_prefix: str = f"rollup_{suffix}"
+        return [f"{gran}_{rollup_prefix}" for gran in ("hourly", "daily", "weekly", "monthly")]
+
+    # -------------------------
+    # Read-only listing for the UI
+    # -------------------------
+
+    def list_editable_protocols(self) -> list[tuple[str, str]]:
+        """
+        Returns (protocol_name, wide_table_name) pairs for every protocol
+        that has a wide table and is therefore editable via this class
+        (narrow-only protocols are excluded). Useful for populating a
+        wide-table selector in the admin UI without an extra round trip
+        per protocol to resolve its table name.
+        """
+        with self.SessionFactory() as session:
+            rows = session.execute(
+                text("""
+                    SELECT protocol_name, wide_table_name FROM protocol_registry
+                    WHERE wide_table_name IS NOT NULL
+                    ORDER BY protocol_name
+                """)
+            ).fetchall()
+        return [(r[0], r[1]) for r in rows]
+
+    def resolve_wide_table_name(self, protocol_name: str) -> str:
+        """
+        Public wrapper around _resolve_wide_table for callers (e.g. the web
+        UI layer) that only need the table name, not the protocol_id.
+
+        Raises:
+            ValueError: unknown or narrow-only protocol.
+        """
+        _protocol_id, wide_table_name = self._resolve_wide_table(protocol_name)
+        return wide_table_name
+
+    def list_fields(self, protocol_name: str) -> list[WideTableField]:
+        """
+        Returns the current set of deletable metric columns for a
+        protocol's wide table, for the calling web UI to render as a
+        checkbox list.
+
+        Raises:
+            ValueError: unknown or narrow-only protocol (see
+                        _resolve_wide_table).
+        """
+        protocol_id, _wide_table_name = self._resolve_wide_table(protocol_name)
+
+        with self.SessionFactory() as session:
+            rows = session.execute(
+                text("""
+                    SELECT metric_name, clean_column_name, data_type, unit_mod, notes
+                    FROM metric_catalog
+                    WHERE protocol_id = :pid
+                    ORDER BY clean_column_name
+                """),
+                {"pid": protocol_id}
+            ).fetchall()
+
+        return [
+            WideTableField(
+                metric_name=metric_name,
+                column_name=column_name,
+                data_type=data_type,
+                unit_mod=unit_mod,
+                notes=notes,
+            )
+            for metric_name, column_name, data_type, unit_mod, notes in rows
+            if column_name not in self.PROTECTED_COLUMNS
+        ]
+
+    # -------------------------
+    # Deletion
+    # -------------------------
+
+    def delete_fields(self, protocol_name: str, field_names: list[str]) -> WideTableFieldDeletionResult:
+        """
+        Deletes the given fields (wide-table column names, as returned by
+        list_fields()) from protocol_name's wide table, then rebuilds that
+        protocol's rollups, indexes, and compression/retention policies.
+
+        Safe to call with a mix of valid/unrecognized names -- anything not
+        found in metric_catalog for this protocol is reported back in
+        `not_found` and simply skipped rather than raising, so a UI
+        double-submit or a stale checkbox list doesn't hard-fail the whole
+        request.
+
+        Args:
+            protocol_name: The protocol whose wide table is being edited.
+            field_names: column_name values from list_fields(), i.e. the
+                         checked boxes the admin committed for deletion.
+
+        Returns:
+            WideTableFieldDeletionResult summarizing what happened.
+
+        Raises:
+            ValueError: unknown/narrow-only protocol, empty selection, only
+                        protected columns requested, or the request would
+                        delete every remaining metric column (an empty wide
+                        table isn't supported -- disable/remove the
+                        protocol instead).
+            RuntimeError: RollupManager isn't initialized yet (bridge not
+                        connected to TimescaleDB).
+            Exception: any failure partway through the drop/rebuild
+                        sequence is logged and re-raised so the caller
+                        (and the admin) know the operation did not
+                        complete cleanly. rollup_setup_complete is left
+                        False in that case, so the background reconnect /
+                        rediscovery path will retry the rollup rebuild
+                        automatically (see timescaledb._rediscover_protocols).
+        """
+        if not field_names:
+            raise ValueError("No fields were provided to delete.")
+
+        # de-dupe, preserve order, drop blanks
+        requested: list[str] = [f for f in dict.fromkeys(field_names) if f]
+
+        protected_requested: list[str] = [f for f in requested if f in self.PROTECTED_COLUMNS]
+        if protected_requested:
+            msg: str = f"Refusing to delete protected columns: {protected_requested}"
+            raise ValueError(msg)
+
+        if self._bridge.rollup_mgr is None:
+            raise RuntimeError(
+                "RollupManager is not initialized -- bridge must be connected before editing wide tables."
+            )
+
+        protocol_id, wide_table_name = self._resolve_wide_table(protocol_name)
+        rollup_mgr: "RollupManager" = self._bridge.rollup_mgr
+
+        # Pause the flush worker for the duration of the edit. add_wide_rollup()
+        # (called below) also sets/clears this same event around its own work;
+        # setting it here first just widens the window to cover the column
+        # drop that happens before the rebuild.
+        self._bridge.migration_in_progress.set()
+        rebuilt: bool = False
+        paused_job_ids: list[int] = []
+
+        try:
+            with self.SessionFactory() as session:
+                # Whitelist requested names against what's actually in
+                # metric_catalog for this protocol -- column names handed in
+                # from the UI layer are never trusted directly in DDL.
+                catalog_rows = session.execute(
+                    text("""
+                        SELECT catalog_id, clean_column_name
+                        FROM metric_catalog
+                        WHERE protocol_id = :pid
+                    """),
+                    {"pid": protocol_id}
+                ).fetchall()
+
+            existing_columns: dict[str, int] = {col: cid for cid, col in catalog_rows}
+            to_delete: list[str] = [f for f in requested if f in existing_columns]
+            not_found: list[str] = [f for f in requested if f not in existing_columns]
+
+            if not to_delete:
+                self._log.info(
+                    f"WideTableFieldManager: none of {requested} matched existing fields on "
+                    f"'{wide_table_name}' — nothing to delete."
+                )
+                return WideTableFieldDeletionResult(
+                    protocol_name=protocol_name,
+                    wide_table_name=wide_table_name,
+                    deleted=[],
+                    not_found=not_found,
+                    remaining_fields=sorted(existing_columns.keys()),
+                    rollups_rebuilt=False,
+                )
+
+            if len(to_delete) >= len(existing_columns):
+                raise ValueError(  # noqa: TRY301
+                    "Refusing to delete every remaining field -- a wide table needs at least "
+                    "one metric column. Disable or remove the protocol instead if it's no "
+                    "longer needed."
+                )
+
+            self._log.info(
+                f"WideTableFieldManager: deleting {len(to_delete)} field(s) from "
+                f"'{wide_table_name}' (protocol='{protocol_name}'): {to_delete}"
+            )
+
+            # Pause any compression policy job configured for this specific
+            # wide table before touching its schema. ALTER TABLE DROP
+            # COLUMN needs a lock across every chunk of the hypertable; a
+            # background compression job concurrently compressing one of
+            # those chunks holds a lock TimescaleDB doesn't always resolve
+            # cleanly against that ALTER TABLE, which can stall or deadlock
+            # the drop. Scoped to this table only (see
+            # _pause_compression_job) -- not a blanket pause of every
+            # compression job in the database, which would needlessly
+            # affect unrelated protocols. Always resumed in the finally
+            # block below, including on failure.
+            with self.SessionFactory() as session:
+                paused_job_ids = self._pause_compression_job(session, wide_table_name)
+                session.commit()
+
+            # 1. Tear down this protocol's rollups first. They SELECT every
+            #    current wide-table column by name, so they cannot survive
+            #    the ALTER TABLE below and must be rebuilt afterward anyway.
+            view_names: list[str] = self._wide_view_names(wide_table_name)
+            with self.SessionFactory() as session:
+                rollup_mgr._drop_protocol_rollup(session=session, view_names=view_names)
+
+            # Mark the protocol's rollup setup incomplete for the duration of
+            # the edit. This mirrors the crash-safety pattern used during
+            # initial setup: if the process dies mid-edit, restart-time
+            # rediscovery (_rediscover_protocols) will see setup_complete =
+            # False and retry the rollup rebuild automatically instead of
+            # silently leaving the protocol without rollups.
+            rollup_mgr._mark_rollup_setup_complete_helper(protocol_name, complete=False)
+
+            # 2. Drop the columns and their metric_catalog rows, serialized
+            #    against other schema changes with the same advisory lock
+            #    that column *additions* use.
+            with self._bridge._schema_lock:
+                with self.SessionFactory() as session:
+                    with session.begin():
+                        self._bridge._schema_advisory_lock(session)
+
+                        self._decompress_chunks_best_effort(session, wide_table_name)
+
+                        # table_name/col come from _safe_table_name() /
+                        # _clean_column_name() at creation time and are
+                        # re-validated against metric_catalog above, so the
+                        # f-string is safe here (same pattern used by
+                        # _ensure_columns_for_metrics' ADD COLUMN).
+                        for col in to_delete:
+                            session.execute(text(f"ALTER TABLE {wide_table_name} DROP COLUMN IF EXISTS {col};"))
+
+                        catalog_ids: list[int] = [existing_columns[col] for col in to_delete]
+                        session.execute(
+                            text("DELETE FROM metric_catalog WHERE catalog_id = ANY(:ids)"),
+                            {"ids": catalog_ids},
+                        )
+
+                        session.execute(
+                            text("""
+                                UPDATE protocol_registry
+                                SET metric_count = GREATEST(metric_count - :n, 0),
+                                    updated_at = :now
+                                WHERE protocol_id = :pid
+                            """),
+                            {"n": len(to_delete), "now": _now_tz(), "pid": protocol_id}
+                        )
+
+                    # 3. Resync the ORM reflection + write-path column cache
+                    #    so in-flight/next writes see the new shape
+                    #    immediately, same as after a column addition.
+                    self._bridge._sync_single_table_schema(wide_table_name)
+
+            # 4. Drop any now-stale metric_name -> column mappings used to
+            #    coerce incoming raw values before insert.
+            mapping: dict[str, tuple[str, str]] = self._bridge._protocol_metric_mappings.get(protocol_name, {})
+            for metric_name, (col, _dtype) in list(mapping.items()):
+                if col in to_delete:
+                    mapping.pop(metric_name, None)
+
+            # 5. Rebuild rollups (indexes, compression policy, retention
+            #    policy, and the four hierarchical CAGGs) from whatever
+            #    columns remain in metric_catalog.
+            rollup_mgr.add_wide_rollup(protocol_name, wide_table_name)
+            rebuilt = True
+
+            remaining_fields: list[str] = sorted(set(existing_columns.keys()) - set(to_delete))
+
+            self._log.info(f"WideTableFieldManager: deleted {to_delete} from '{wide_table_name}' and rebuilt rollups.")
+
+            return WideTableFieldDeletionResult(
+                protocol_name=protocol_name,
+                wide_table_name=wide_table_name,
+                deleted=to_delete,
+                not_found=not_found,
+                remaining_fields=remaining_fields,
+                rollups_rebuilt=rebuilt,
+            )
+
+        except Exception as e:
+            self._log.error(f"WideTableFieldManager.delete_fields failed for '{protocol_name}': {e}")
+            raise
+
+        finally:
+            # add_wide_rollup() clears this same event in its own finally
+            # block on the success path, so this is a no-op by the time we
+            # get here normally -- it's a safety net for paths that raised
+            # before reaching the rebuild step.
+            self._bridge.migration_in_progress.clear()
+
+            if paused_job_ids:
+                try:
+                    with self.SessionFactory() as session:
+                        self._resume_compression_job(session, paused_job_ids)
+                        session.commit()
+                except Exception as e:
+                    # Never let a resume failure mask the original error (if
+                    # any) or fail an otherwise-successful edit. Logged at
+                    # warning rather than silently swallowed, since a job
+                    # left paused needs a human to notice and re-enable it
+                    # (e.g. via TimescaleDB's own alter_job) until this is
+                    # retried successfully.
+                    self._log.warning(
+                        f"delete_fields: could not resume compression job(s) {paused_job_ids} "
+                        f"for '{wide_table_name}': {e}"
+                    )
+
+    def _pause_compression_job(self, session: Session, table_name: str) -> list[int]:
+        """
+        Temporarily disables (scheduled => false) any compression policy
+        job(s) TimescaleDB has configured specifically for table_name.
+        Returns the job_id(s) paused, so the caller can re-enable them
+        afterward via _resume_compression_job.
+
+        Scoped to this one table via hypertable_name -- deliberately not a
+        blanket "pause every compress_chunks job in the database" query,
+        which would needlessly pause compression on every other protocol's
+        wide/narrow tables too. proc_name is matched with ILIKE '%compress%'
+        rather than an exact name because TimescaleDB has used different
+        proc names for the compression policy job across versions (e.g.
+        legacy 'compress_chunks' vs. current 'policy_compression'); this
+        works regardless of which one a given install uses.
+
+        Best-effort: if timescaledb_information.jobs doesn't exist, has a
+        different shape than expected, or there's simply no compression
+        policy configured for this table, this returns [] rather than
+        failing the edit -- the decompress-before-ALTER step still runs
+        either way, this only closes a lock-contention window, it isn't
+        required for correctness.
+        """
+        try:
+            rows = session.execute(
+                text("""
+                    SELECT job_id FROM timescaledb_information.jobs
+                    WHERE hypertable_name = :table_name
+                      AND proc_name ILIKE '%compress%'
+                      AND scheduled = true
+                """),
+                {"table_name": table_name}
+            ).fetchall()
+            job_ids: list[int] = [r[0] for r in rows]
+            for job_id in job_ids:
+                session.execute(text("SELECT alter_job(:job_id, scheduled => false)"), {"job_id": job_id})
+            if job_ids:
+                self._log.info(f"_pause_compression_job: paused job(s) {job_ids} for '{table_name}'")
+
+        except Exception as e:
+            self._log.warning(f"_pause_compression_job: could not pause compression job for '{table_name}': {e}")
+            return []
+        else:
+            return job_ids
+
+    def _resume_compression_job(self, session: Session, job_ids: list[int]) -> None:
+        """Re-enables (scheduled => true) job_ids previously paused by _pause_compression_job."""
+        for job_id in job_ids:
+            session.execute(text("SELECT alter_job(:job_id, scheduled => true)"), {"job_id": job_id})
+        if job_ids:
+            self._log.info(f"_resume_compression_job: resumed job(s) {job_ids}")
+
+    def _decompress_chunks_best_effort(self, session: Session, table_name: str) -> None:
+        """
+        Decompresses any compressed chunks of table_name before an
+        ALTER TABLE ... DROP COLUMN. Support for dropping columns directly
+        on compressed hypertable chunks is inconsistent across TimescaleDB
+        versions, so this proactively decompresses first. Newly written
+        data is recompressed on the normal compression policy schedule --
+        this only affects already-compressed historical chunks.
+
+        Best-effort: a table with no compressed chunks (or not yet a
+        hypertable) simply no-ops here rather than failing the edit.
+
+        Runs inside a SAVEPOINT (session.begin_nested()), not directly in
+        the caller's transaction. Postgres aborts an entire transaction --
+        not just the one failing statement -- the moment any statement in
+        it errors, and that abort can only be cleared by a ROLLBACK (or
+        ROLLBACK TO SAVEPOINT), never by simply catching the Python
+        exception. Without the SAVEPOINT here, a failure in this
+        best-effort step would silently poison the caller's transaction:
+        the except block below would swallow the Python-level exception,
+        but every statement after it -- including the ALTER TABLE DROP
+        COLUMN this is meant to prepare for -- would then fail with
+        "current transaction is aborted, commands ignored until end of
+        transaction block", surfacing as a confusing failure far from its
+        real cause. begin_nested() ensures only the SAVEPOINT is rolled
+        back on failure, leaving the rest of the caller's transaction
+        (including the DROP COLUMN that follows) usable.
+        """
+        try:
+            with session.begin_nested():
+                session.execute(
+                    text("""
+                        SELECT decompress_chunk(c, true)
+                        FROM show_chunks(:tname) AS c;
+                    """),
+                    {"tname": table_name}
+                )
+        except Exception as e:
+            # the common case -- no compressed chunks yet
+            # -- is entirely expected, but logged at warning so an
+            # unexpected failure here is never silent again.
+            self._log.warning(
+                f"_decompress_chunks_best_effort: could not decompress chunks for '{table_name}' "
+                f"(continuing -- this step is best-effort): {e}"
+            )

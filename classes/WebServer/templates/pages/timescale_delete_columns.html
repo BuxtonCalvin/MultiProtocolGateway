@@ -1,0 +1,109 @@
+<!--
+  Description: Defines the Timescale DB "Delete Columns" admin screen.
+  File: timescale_delete_columns.html
+
+  Copyright 2026 Kevin Burke
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://apache.org
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+
+{#
+  pages/timescale_delete_columns.html
+  Left  (aside):  list of wide tables (one per wide-table protocol on the
+                   live TimescaleDB bridge)
+  Right (section): column checklist for whichever wide table is selected,
+                   loaded via HTMX into #timescale-fields-container
+
+  Context: wide_tables — [{protocol_name, wide_table_name}, ...]
+
+  Checking a box stages the column for deletion (see partials/
+  timescale_field_checklist.html) — nothing is dropped until the admin
+  presses the existing "Commit All Changes" button in the header.
+#}
+
+{% extends "base.html" %}
+{% block title %}Timescale DB — Delete Columns — MPG Admin{% endblock %}
+{% block content %}
+<div class="col-span-12 flex gap-4" style="height: calc(100vh - 56px); overflow: hidden;">
+
+  <!-- ══ LEFT: WIDE TABLE PICKER ══ -->
+  <aside class="flex-shrink-0 overflow-y-auto
+                bg-mpg-800 rounded border border-mpg-700 p-3"
+         style="width: 28%; min-width: 268px; max-width: 368px;">
+
+    <h2 class="text-mpg-200 text-xs font-semibold uppercase tracking-widest mb-1">
+      Wide Tables
+    </h2>
+    <p class="text-mpg-400 text-xs mb-3">
+      Select a table, check the columns you want removed, then use
+      <span class="text-mpg-200 font-medium">Commit All Changes</span>
+      in the header to apply.
+    </p>
+
+    <ul class="space-y-1" role="list" aria-label="TimescaleDB wide tables">
+      {% for t in wide_tables %}
+      <li>
+        <button type="button"
+                class="wide-table-btn w-full text-left px-3 py-2 rounded text-xs
+                       text-mpg-200 hover:bg-mpg-600 hover:text-white
+                       border border-transparent transition-colors"
+                data-protocol="{{ t.protocol_name }}"
+                aria-label="Show columns for {{ t.protocol_name }}"
+                hx-get="/pages/timescale/fields/{{ t.protocol_name }}"
+                hx-target="#timescale-fields-container"
+                hx-swap="innerHTML scroll:false"
+                hx-headers='{"Cache-Control": "no-cache"}'
+                {% if loop.first %}hx-trigger="load, click"{% else %}hx-trigger="click"{% endif %}>
+          <div class="font-mono">{{ t.protocol_name }}</div>
+          <div class="text-mpg-500 text-[10px] truncate">{{ t.wide_table_name }}</div>
+        </button>
+      </li>
+      {% endfor %}
+      {% if not wide_tables %}
+      <li class="text-mpg-500 text-xs italic px-1 py-2">
+        No wide tables found — every registered protocol on this bridge is narrow-only.
+      </li>
+      {% endif %}
+    </ul>
+  </aside>
+
+  <!-- ══ RIGHT: COLUMN CHECKLIST ══ -->
+  <section class="flex-1 overflow-y-auto" aria-label="Wide table column list">
+    <div id="timescale-fields-container"
+         class="overflow-x-auto rounded border border-mpg-700">
+      <p class="text-mpg-300 text-xs p-4">Select a wide table to load its columns.</p>
+    </div>
+  </section>
+
+</div>
+
+<script>
+  // Active-state styling for the wide-table list, mirrors the tab-active
+  // pattern used in protocol_section.html.
+  (function bindWideTableButtons() {
+    document.querySelectorAll('.wide-table-btn').forEach(btn => {
+      btn.removeEventListener('click', btn._wtHandler);
+      btn._wtHandler = function() {
+        document.querySelectorAll('.wide-table-btn').forEach(b => {
+          b.classList.remove('bg-mpg-600', 'text-white');
+        });
+        this.classList.add('bg-mpg-600', 'text-white');
+      };
+      btn.addEventListener('click', btn._wtHandler);
+    });
+    // Highlight the first entry — it auto-loads via hx-trigger="load".
+    const first = document.querySelector('.wide-table-btn');
+    if (first) first.classList.add('bg-mpg-600', 'text-white');
+  })();
+</script>
+{% endblock %}
