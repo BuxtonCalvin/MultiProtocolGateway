@@ -168,7 +168,7 @@ Here are overviews of two database bridges:
 
 - TimeScale DB [![Timescale DB](https://img.shields.io/badge/Postgres-%23316192.svg?logo=postgresql&logoColor=white)](https://timescale.com)
   - Readme
-    [`Timescale DB`](documentation/bridges/TimeScaleDB/timescaledb_protocol_gateway.md)
+    [`Timescale DB`](documentation/bridges/TimeScaleDB/timescaledb.md)
 
 Here are the overviews of the MQTT and JSON bridges
 
