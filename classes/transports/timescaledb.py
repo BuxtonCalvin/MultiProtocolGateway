@@ -4987,36 +4987,28 @@ class WideTableFieldManager:
         job(s) TimescaleDB has configured specifically for table_name.
         Returns the job_id(s) paused, so the caller can re-enable them
         afterward via _resume_compression_job.
-
-        Scoped to this one table via hypertable_name -- deliberately not a
-        blanket "pause every compress_chunks job in the database" query,
-        which would needlessly pause compression on every other protocol's
-        wide/narrow tables too. proc_name is matched with ILIKE '%compress%'
-        rather than an exact name because TimescaleDB has used different
-        proc names for the compression policy job across versions (e.g.
-        legacy 'compress_chunks' vs. current 'policy_compression'); this
-        works regardless of which one a given install uses.
-
-        Best-effort: if timescaledb_information.jobs doesn't exist, has a
-        different shape than expected, or there's simply no compression
-        policy configured for this table, this returns [] rather than
-        failing the edit -- the decompress-before-ALTER step still runs
-        either way, this only closes a lock-contention window, it isn't
-        required for correctness.
         """
         try:
+            # Pass wildcards as parameter values to avoid SQLAlchemy bind errors
             rows = session.execute(
                 text("""
                     SELECT job_id FROM timescaledb_information.jobs
                     WHERE hypertable_name = :table_name
-                      AND proc_name ILIKE '%compress%'
+                      AND proc_name ILIKE :search_term
                       AND scheduled = true
                 """),
-                {"table_name": table_name}
+                {"table_name": table_name, "search_term": "%compress%"}
             ).fetchall()
+
             job_ids: list[int] = [r[0] for r in rows]
+
             for job_id in job_ids:
-                session.execute(text("SELECT alter_job(:job_id, scheduled => false)"), {"job_id": job_id})
+                # Changed '=>' to ':=' for modern PostgreSQL argument binding
+                session.execute(
+                    text("SELECT alter_job(:job_id, scheduled := false)"),
+                    {"job_id": job_id}
+                )
+
             if job_ids:
                 self._log.info(f"_pause_compression_job: paused job(s) {job_ids} for '{table_name}'")
 
@@ -5025,6 +5017,7 @@ class WideTableFieldManager:
             return []
         else:
             return job_ids
+
 
     def _resume_compression_job(self, session: Session, job_ids: list[int]) -> None:
         """Re-enables (scheduled => true) job_ids previously paused by _pause_compression_job."""
