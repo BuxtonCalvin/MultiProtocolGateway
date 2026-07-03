@@ -5063,12 +5063,6 @@ class WideTableFieldManager:
         """
         try:
             with session.begin_nested():
-                # Positional arg, not `if_not_compressed => true`: the
-                # second parameter's name has changed across TimescaleDB
-                # versions, which makes a named-argument call fail to
-                # resolve to any overload ("function decompress_chunk(...)
-                # does not exist") on some installs even though the
-                # positional signature is stable.
                 session.execute(
                     text("""
                         SELECT decompress_chunk(c, true)
@@ -5077,11 +5071,7 @@ class WideTableFieldManager:
                     {"tname": table_name}
                 )
         except Exception as e:
-            # Not a debug-only footnote: swallowing this without a visible
-            # log is exactly how a real decompression failure used to
-            # masquerade as an unrelated "transaction is aborted" error on
-            # the DROP COLUMN two statements later. Kept best-effort (not
-            # re-raised) since the common case -- no compressed chunks yet
+            # the common case -- no compressed chunks yet
             # -- is entirely expected, but logged at warning so an
             # unexpected failure here is never silent again.
             self._log.warning(
