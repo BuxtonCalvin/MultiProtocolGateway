@@ -130,6 +130,75 @@ def is_timescale_available(gateway: Any) -> bool:
     return get_timescale_bridge(gateway) is not None
 
 
+def _get_live_transport(gateway: Any, protocol_name: str) -> Any | None:
+    """
+    Finds the live transport instance whose protocol_name matches, so its
+    current (post variable_mask/variable_screen) registry_map can be
+    compared against the columns already committed to the wide table.
+
+    Duck-typed on the `protocol_name` property (see
+    transport_base.protocol_name) rather than isinstance, mirroring
+    get_timescale_bridge()'s walk of __transports. Returns None if the
+    protocol has no live transport right now — a wide table can outlive
+    its transport (e.g. config was edited to remove it, or it just hasn't
+    connected yet), and that's a legitimate state, not an error.
+    """
+    if gateway is None:
+        return None
+    transports = getattr(gateway, "_Protocol_Gateway__transports", [])
+    for t in transports:
+        if getattr(t, "protocol_name", None) == protocol_name:
+            return t
+    return None
+
+
+def _active_metric_names_for_protocol(gateway: Any, protocol_name: str) -> set[str] | None:
+    """
+    Returns the metric/variable names the live transport for
+    protocol_name is currently configured to produce, via its
+    variable_mask/variable_screen-filtered registry_map, plus any
+    transport-declared synthetic fields (see
+    transport_base.synthetic_fields_metadata). This is the same source
+    timescaledb._extract_metric_names reads at schema-registration time.
+
+    This is the "expected" side of the comparison
+    timescaledb._validate_wide_row makes against a live scrape row
+    (row_keys vs wide_columns) — used by list_wide_table_fields() to flag
+    wide-table columns the current mask/screen config no longer produces,
+    so the Delete Columns UI can highlight them for the admin instead of
+    only surfacing the mismatch as a warning log line the next time data
+    is scraped.
+
+    Returns None — "unknown, don't flag anything" — if the protocol has
+    no live transport attached right now, or that transport hasn't loaded
+    a registry map yet. Callers must treat None as "no opinion", not as
+    "everything is stale", since flagging every column red just because a
+    transport hasn't connected yet would be misleading.
+    """
+    transport: Any | None = _get_live_transport(gateway, protocol_name)
+    if transport is None:
+        return None
+
+    registry_map: dict[Any, list[Any]] = getattr(transport, "registry_map", None) or {}
+    if not registry_map:
+        return None
+
+    names: set[str] = set()
+    for entries in registry_map.values():
+        for entry in entries:
+            variable_name: str | None = getattr(entry, "variable_name", None)
+            if variable_name:
+                names.add(variable_name)
+
+    for synthetic in getattr(transport, "synthetic_fields_metadata", []):
+        # synthetic is a (variable_name, data_type, unit_mod, note) tuple —
+        # see transport_base.synthetic_fields_metadata.
+        if synthetic:
+            names.add(synthetic[0])
+
+    return names
+
+
 def _field_manager(gateway: Any) -> "WideTableFieldManager":
     bridge = get_timescale_bridge(gateway)
     if bridge is None:
@@ -166,20 +235,31 @@ def list_wide_table_fields(
 ) -> list[dict[str, Any]]:
     """
     Returns the alpha-ordered field list (step 5 of the Delete Columns
-    flow) for one protocol's wide table, each row annotated with `checked`
-    reflecting the currently staged-for-deletion set — so the checklist
-    re-renders with the right boxes ticked if the admin navigates away and
-    comes back before committing.
+    flow) for one protocol's wide table, each row annotated with:
+      - `checked` reflecting the currently staged-for-deletion set — so the
+        checklist re-renders with the right boxes ticked if the admin
+        navigates away and comes back before committing.
+      - `stale` flagging columns the protocol's live variable_mask/
+        variable_screen config no longer produces (see
+        _active_metric_names_for_protocol) — the same condition
+        timescaledb._validate_wide_row logs as `fewer_keys` when it turns
+        up in a scraped row, surfaced here proactively so the UI can
+        render likely-deletable columns in a distinct color. Never True
+        when the protocol has no live transport attached right now — see
+        _active_metric_names_for_protocol for why that's "no opinion"
+        rather than "everything is stale".
     """
     mgr: WideTableFieldManager = _field_manager(gateway)
     staged: set[str] = staged_columns or set()
-    fields: list[WideTableField] = mgr.list_fields(protocol_name)
+    active_metric_names: set[str] | None = _active_metric_names_for_protocol(gateway, protocol_name)
+    fields: list[WideTableField] = mgr.list_fields(protocol_name, active_metric_names=active_metric_names)
     return [
         {
             "metric_name": f.metric_name,
             "column_name": f.column_name,
             "data_type": f.data_type,
             "checked": f.column_name in staged,
+            "stale": f.stale,
         }
         for f in fields
     ]

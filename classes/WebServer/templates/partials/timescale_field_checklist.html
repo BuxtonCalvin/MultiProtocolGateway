@@ -21,7 +21,17 @@
   partials/timescale_field_checklist.html
   Swapped into #timescale-fields-container when a wide table is selected.
   Context: protocol_name, wide_table_name, fields — [{metric_name,
-  column_name, data_type, checked}, ...] in alphabetical column_name order.
+  column_name, data_type, checked, stale}, ...] in alphabetical
+  column_name order.
+
+  `stale` (services/timescale_service._active_metric_names_for_protocol)
+  means the column's metric_name is no longer produced by the protocol's
+  live variable_mask/variable_screen config — the same "column exists in
+  the wide table but the scrape data doesn't have it" condition
+  timescaledb._validate_wide_row otherwise only surfaces as a warning log
+  line. Those rows render their column name in `text-danger` (red) with a
+  small caption, as a hint for what's likely safe to check off — the admin
+  still has to check the box and commit, nothing is pre-selected.
 
   Checking a box PATCHes /api/timescale/.../stage to add it to the
   in-memory staged-deletion set (services/timescale_service.py) — no
@@ -77,11 +87,13 @@
 
     <tbody id="timescale-field-rows">
       {% for f in fields %}
-      <tr class="border-t border-mpg-700/50 {% if f.checked %}bg-dirty/5{% endif %}
+      <tr class="border-t border-mpg-700/50
+                 {% if f.checked %}bg-dirty/5{% elif f.stale %}bg-danger/5{% endif %}
                  hover:bg-mpg-800/60 transition-colors"
           role="row"
           id="tsfield-{{ protocol_name }}-{{ f.column_name }}"
-          data-column="{{ f.column_name }}">
+          data-column="{{ f.column_name }}"
+          data-stale="{{ 'true' if f.stale else 'false' }}">
 
         <td class="px-2 py-1.5 text-center border-r border-mpg-700/30" role="cell">
           <input type="checkbox"
@@ -95,13 +107,24 @@
                  hx-trigger="change"
                  hx-on:htmx:after-request="
                    const row = document.getElementById('tsfield-{{ protocol_name }}-{{ f.column_name }}');
-                   if (row) row.classList.toggle('bg-dirty/5', this.checked);
+                   if (row) {
+                     row.classList.toggle('bg-dirty/5', this.checked);
+                     row.classList.toggle('bg-danger/5', !this.checked && row.dataset.stale === 'true');
+                   }
                  ">
         </td>
-        <td class="px-3 py-1.5 font-mono text-mpg-500 dark:text-mpg-100 border-r border-mpg-700/30 whitespace-nowrap" role="cell">
+        <td class="px-3 py-1.5 font-mono border-r border-mpg-700/30 whitespace-nowrap
+                   {% if f.stale %}text-danger dark:text-danger{% else %}text-mpg-500 dark:text-mpg-100{% endif %}"
+            role="cell">
           {{ f.column_name }}
           {% if f.metric_name != f.column_name %}
-          <span class="text-mpg-600 dark:text-mpg-500 text-[10px] block">{{ f.metric_name }}</span>
+          <span class="{% if f.stale %}text-danger/70{% else %}text-mpg-600 dark:text-mpg-500{% endif %} text-[10px] block">{{ f.metric_name }}</span>
+          {% endif %}
+          {% if f.stale %}
+          <span class="text-danger/80 text-[10px] block italic"
+                title="Not produced by the current variable_mask/variable_screen config">
+            not in current mask/screen
+          </span>
           {% endif %}
         </td>
         <td class="px-3 py-1.5 text-mpg-500 dark:text-mpg-100 whitespace-nowrap border-r border-mpg-700/30" role="cell">{{ f.data_type }}</td>

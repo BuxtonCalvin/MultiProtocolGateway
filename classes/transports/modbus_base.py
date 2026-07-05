@@ -551,6 +551,42 @@ class modbus_base(transport_base):
         tracker: RegisterFailureTracker = self._get_or_create_failure_tracker(register_range, registry_type)
         return tracker.is_disabled()
 
+    def _describe_range_metrics(
+        self,
+        register_range: tuple[int, int],
+        registry_type: Registry_Type,
+        entries: list["registry_map_entry"] | None = None,
+    ) -> list[str]:
+        """
+        Returns the variable_name of every registry entry whose register
+        falls inside register_range for registry_type, so a disabled/skipped
+        range can be logged in terms of the metrics it covers rather than
+        just a bare address span. Used only for debug/warning log messages —
+        never on a hot path that needs to be fast, so a linear scan is fine
+        here.
+
+        entries, when provided (e.g. read_group_data's union_entries), is
+        searched instead of self._protocol.registry_map[registry_type] — the
+        union spans every group member's own post-mask/screen view, whereas
+        self._protocol.registry_map only reflects this one transport's own
+        mask and will silently omit names that another member's mask pulled
+        into a shared range. Pass entries whenever this is called from a
+        grouped read; the self._protocol fallback exists only for solo
+        (non-grouped) reads that don't have a union to hand in.
+        """
+        start, count = register_range
+        end: int = start + count  # exclusive
+        if entries is None:
+            try:
+                entries = self._protocol.registry_map.get(registry_type, [])
+            except Exception:
+                entries = []
+        return sorted({
+            entry.variable_name
+            for entry in entries
+            if start <= entry.register < end and entry.variable_name
+        })
+
     def _get_disabled_ranges_info(self) -> list[str]:
         """Get information about currently disabled register ranges"""
         disabled_info = []
@@ -1083,7 +1119,7 @@ class modbus_base(transport_base):
                 )
 
                 registry: dict[int, int] = self.read_modbus_registers(
-                    ranges=ranges, registry_type=registry_type
+                    ranges=ranges, registry_type=registry_type, entries=union_entries
                 )
 
                 if not registry:
@@ -1946,7 +1982,19 @@ class modbus_base(transport_base):
             return results.get(entry.variable_name)  # safer than direct dict access.
 
     def read_modbus_registers(self, ranges: list[tuple[int, int]] | None = None, start : int = 0, end : int | None = None,
-                              batch_size : int | None = None, registry_type : Registry_Type = Registry_Type.INPUT ) -> dict[int, int]:
+                              batch_size : int | None = None, registry_type : Registry_Type = Registry_Type.INPUT,
+                              entries: list["registry_map_entry"] | None = None) -> dict[int, int]:
+        """
+        entries, when provided, is the exact set of registry_map_entry objects
+        this read was built from (e.g. read_group_data's union_entries, which
+        spans every group member's own post-mask/screen registry map — not
+        just this transport's). It exists purely so debug/warning logging
+        (_describe_range_metrics) can name the metrics inside a range
+        accurately for a grouped/shared read. When omitted, naming falls back
+        to self._protocol.registry_map[registry_type] — this transport's own
+        view only, which will under-report names for a range whose metrics
+        were pulled in on another group member's mask.
+        """
 
         # Get batch_size from protocol settings if not provided
         if batch_size is None:
@@ -1987,9 +2035,28 @@ class modbus_base(transport_base):
                 self._cycle_expect_unit()
 
             # Check if this register range is currently disabled
-            if self._is_register_range_disabled(register_range, registry_type):
+            is_disabled: bool = self._is_register_range_disabled(register_range, registry_type)
+            # Unconditional per-range visibility — previously this state was
+            # silent unless a range was actually being skipped, which made it
+            # impossible to confirm from the log alone whether a range that
+            # *looked* fine was quietly sitting in the disabled set the whole
+            # time. Logged every cycle for every range regardless of outcome.
+            self._log.debug(
+                f"Register range check {registry_type.name} "
+                f"{register_range[0]}-{register_range[0]+register_range[1]-1} "
+                f"for {self.transport_name}: "
+                f"{'DISABLED' if is_disabled else 'enabled'}"
+            )
+            if is_disabled:
                 remaining_hours: float = self._get_or_create_failure_tracker(register_range, registry_type).get_remaining_disable_time() / 3600
+                covered_metrics: list[str] = self._describe_range_metrics(register_range, registry_type, entries=entries)
                 self._log.info(f"Skipping disabled register range {registry_type.name} {register_range[0]}-{register_range[0]+register_range[1]-1} (disabled for {remaining_hours:.1f}h)")
+                self._log.debug(
+                    f"Register range {registry_type.name} "
+                    f"{register_range[0]}-{register_range[0]+register_range[1]-1} "
+                    f"for {self.transport_name} is DISABLED and will not be read — "
+                    f"metrics affected ({len(covered_metrics)}): {covered_metrics}"
+                )
                 self._cycle_mark_incomplete()
                 continue
 

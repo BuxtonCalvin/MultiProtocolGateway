@@ -75,6 +75,7 @@ from typing import (
     Literal,
     Optional,
     Protocol,
+    Sequence,
     Tuple,
     Union,
 )
@@ -103,6 +104,7 @@ from sqlalchemy.dialects.postgresql import Insert
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 # from sqlalchemy.engine.interfaces import ReflectedColumn
+from sqlalchemy.engine.interfaces import ReflectedColumn
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.orm import (
     DeclarativeBase,
@@ -112,6 +114,7 @@ from sqlalchemy.orm import (
     sessionmaker,
 )
 from sqlalchemy.orm.session import Session
+from sqlalchemy.sql.dml import ReturningInsert
 from tzlocal import get_localzone_name
 
 from classes.protocol_settings import (
@@ -433,7 +436,7 @@ class TimescaleDBConnectionManager:
         try:
             default_engine: Engine = create_engine(default_url, isolation_level="AUTOCOMMIT", pool_pre_ping=True)
             with default_engine.connect() as conn:
-                row = conn.execute(
+                row: Row[Any] | None = conn.execute(
                     text("SELECT 1 FROM pg_database WHERE datname = :d"),
                     {"d": self.database}
                 ).fetchone()
@@ -743,8 +746,8 @@ class timescaledb(transport_base):
         self._connection_manager.register()
 
         # Engine and SessionFactory come from the manager
-        self.engine = self._connection_manager.engine
-        self.SessionFactory = self._connection_manager.make_session_factory()
+        self.engine: Engine = self._connection_manager.engine
+        self.SessionFactory: sessionmaker[Session] = self._connection_manager.make_session_factory()
 
         # -------------------------
         # threading
@@ -1342,7 +1345,7 @@ class timescaledb(transport_base):
             try:
                 with session.begin():
 
-                    stmt = pg_insert(ProtocolRegistry).values(
+                    stmt: ReturningInsert[Tuple[int]] = pg_insert(ProtocolRegistry).values(
                         protocol_name=protocol,
                         wide_table_name=wide_table_name,
                         metric_count=metric_count,
@@ -1554,7 +1557,7 @@ class timescaledb(transport_base):
     def _cache_wide_table_columns(self, table_name: str) -> None:
         try:
             insp: Inspector = inspect(self.engine)
-            cols = insp.get_columns(table_name, schema='public')
+            cols: List[ReflectedColumn] = insp.get_columns(table_name, schema='public')
             self._wide_columns_cache[table_name] = {
                 col['name'] for col in cols
                 if col['name'] not in ("m_time", "device_info_id")
@@ -1609,7 +1612,7 @@ class timescaledb(transport_base):
         with self._schema_lock:
             self._log.info(f"Resyncing schema for {table_name}...")
 
-            old_table = Base.metadata.tables.get(table_name)
+            old_table: Table | None = Base.metadata.tables.get(table_name)
             if old_table is not None:
                 Base.metadata.remove(old_table)
 
@@ -1632,7 +1635,7 @@ class timescaledb(transport_base):
         """
         with self.SessionFactory() as session:
             try:
-                rows = session.execute(
+                rows: Sequence[Row[Any]] = session.execute(
                     text("""
                         SELECT protocol_name, wide_table_name,
                             rollup_setup_complete
@@ -1692,7 +1695,7 @@ class timescaledb(transport_base):
         """
         with self.SessionFactory() as session:
             try:
-                rows = session.execute(
+                rows: Sequence[Row[Any]] = session.execute(
                     text("""
                         SELECT mc.metric_name, mc.clean_column_name, mc.data_type
                         FROM metric_catalog mc
@@ -1835,7 +1838,7 @@ class timescaledb(transport_base):
 
     def _safe_table_name(self, protocol: str) -> str:
         """Converts a protocol name to a safe PostgreSQL table name."""
-        safe = re.sub(r'[^a-zA-Z0-9_]', '_', protocol.strip().lower())
+        safe: str = re.sub(r'[^a-zA-Z0-9_]', '_', protocol.strip().lower())
         if not re.match(r'^[a-zA-Z_]', safe):
             safe = '_' + safe
         return f"device_metrics_wide__{safe}"[:63]
@@ -1993,10 +1996,10 @@ class timescaledb(transport_base):
                         # timestamp/device with multiple metric columns.
 
                         valid_row: bool = False
-                        msg = None
+                        msg: str | None = None
                         if wide_data and wide_table_name is not None:
                             valid_row, msg = self._validate_wide_row(wide_data, wide_table_name)
-                            wide_data = wide_data | {
+                            wide_data: dict[str, Any] = wide_data | {
                                 "device_info_id": device_info_id,
                                 "m_time": timestamp,
                             }
@@ -2140,7 +2143,7 @@ class timescaledb(transport_base):
             # Pass 1: Process and harvest all descriptions first
             for key, value in newData.items():
                 if key.endswith("_desc"):
-                    clean_key = key.removesuffix("_desc")
+                    clean_key: str = key.removesuffix("_desc")
                     processed_descriptions[clean_key] = value
 
             # Pass 2: Build the rows and skip the original '_desc' keys
@@ -2148,7 +2151,7 @@ class timescaledb(transport_base):
                 if key.endswith("_desc"):
                     continue  # Skips this iteration so no row is created or appended
 
-                row = {
+                row: dict[str,Any]  = {
                     "m_time": reading_time,
                     "device_info_id": device_info_id,
                     "metric_name": key,
@@ -3045,12 +3048,7 @@ class RollupManager:
             self._log.error("Failed to ensure hypertables: %s", e)
             raise
 
-    def _configure_compression(
-        self,
-        table_name: str,
-        segment_by: str,
-        compression_policy_intervals: list[str],
-    ) -> None:
+    def _configure_compression(self, table_name: str, segment_by: str, compression_policy_intervals: list[str]) -> None:
         """
         Apply compression settings and compression policies to one source table.
 
@@ -4567,12 +4565,20 @@ class WideTableField:
     source/registry name it was derived from. The two can differ, so the UI
     should key off column_name and echo it back unchanged to
     WideTableFieldManager.delete_fields().
+
+    stale is True when metric_name is no longer produced by the protocol's
+    current variable_mask/variable_screen-filtered registry map -- the same
+    "column exists in the wide table but the live scrape data doesn't have
+    it" condition timescaledb._validate_wide_row logs as `fewer_keys` at
+    row-scrape time, computed proactively here instead of waiting for it to
+    show up in a log line. See WideTableFieldManager.list_fields().
     """
     metric_name: str
     column_name: str
     data_type: str
     unit_mod: float | None
     notes: str | None
+    stale: bool = False
 
 
 @dataclass
@@ -4692,7 +4698,7 @@ class WideTableFieldManager:
         per protocol to resolve its table name.
         """
         with self.SessionFactory() as session:
-            rows = session.execute(
+            rows: Sequence[Row[Any]] = session.execute(
                 text("""
                     SELECT protocol_name, wide_table_name FROM protocol_registry
                     WHERE wide_table_name IS NOT NULL
@@ -4712,11 +4718,37 @@ class WideTableFieldManager:
         _protocol_id, wide_table_name = self._resolve_wide_table(protocol_name)
         return wide_table_name
 
-    def list_fields(self, protocol_name: str) -> list[WideTableField]:
+    def list_fields(self, protocol_name: str, active_metric_names: set[str] | None = None) -> list[WideTableField]:
         """
         Returns the current set of deletable metric columns for a
         protocol's wide table, for the calling web UI to render as a
         checkbox list.
+
+        Args:
+            protocol_name: The protocol whose wide table is being listed.
+            active_metric_names: The metric/variable names the protocol's
+                        live transport is currently configured (via
+                        variable_mask/variable_screen) to produce -- i.e.
+                        what timescaledb._extract_metric_names would derive
+                        from from_transport.registry_map right now, plus
+                        any transport-declared synthetic fields. Typically
+                        built by the caller (see
+                        timescale_service._active_metric_names_for_protocol)
+                        rather than by this class, since resolving "the
+                        live transport for this protocol" is a gateway
+                        concern, not a wide-table-schema concern.
+
+                        When provided, every returned WideTableField whose
+                        metric_name is NOT in this set is flagged
+                        `stale=True`, so the UI can highlight columns the
+                        mask/screen config no longer produces -- the same
+                        condition _validate_wide_row would otherwise only
+                        surface as a warning log line the next time data is
+                        scraped. When None (the protocol has no live
+                        transport attached right now, e.g. it's connected
+                        only for wide-table history), no field is flagged --
+                        there's nothing to compare against, and guessing
+                        would risk flagging every column red.
 
         Raises:
             ValueError: unknown or narrow-only protocol (see
@@ -4725,7 +4757,7 @@ class WideTableFieldManager:
         protocol_id, _wide_table_name = self._resolve_wide_table(protocol_name)
 
         with self.SessionFactory() as session:
-            rows = session.execute(
+            rows: Sequence[Row[Any]] = session.execute(
                 text("""
                     SELECT metric_name, clean_column_name, data_type, unit_mod, notes
                     FROM metric_catalog
@@ -4742,6 +4774,7 @@ class WideTableFieldManager:
                 data_type=data_type,
                 unit_mod=unit_mod,
                 notes=notes,
+                stale=active_metric_names is not None and metric_name not in active_metric_names,
             )
             for metric_name, column_name, data_type, unit_mod, notes in rows
             if column_name not in self.PROTECTED_COLUMNS
@@ -4990,7 +5023,7 @@ class WideTableFieldManager:
         """
         try:
             # Pass wildcards as parameter values to avoid SQLAlchemy bind errors
-            rows = session.execute(
+            rows: Sequence[Row[Any]] = session.execute(
                 text("""
                     SELECT job_id FROM timescaledb_information.jobs
                     WHERE hypertable_name = :table_name
@@ -5003,7 +5036,6 @@ class WideTableFieldManager:
             job_ids: list[int] = [r[0] for r in rows]
 
             for job_id in job_ids:
-                # Changed '=>' to ':=' for modern PostgreSQL argument binding
                 session.execute(
                     text("SELECT alter_job(:job_id, scheduled := false)"),
                     {"job_id": job_id}
