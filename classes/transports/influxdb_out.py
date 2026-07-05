@@ -512,6 +512,11 @@ class influxdb_out(transport_base):
                 continue
 
             try:
+                # If it's already a string and contains alpha characters ie synthetic labels, don't log it as a failure
+                if isinstance(value, str) and any(c.isalpha() for c in value):
+                    fields[key] = value
+                    continue
+
                 float_val: float = float(value)
                 if self.force_float or should_force_float:
                     fields[key] = float_val
