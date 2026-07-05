@@ -42,6 +42,8 @@ if TYPE_CHECKING:
 @dataclass
 class TransportCycleResult:
     """
+    Scheduling path: All (Sequential, Concurrent, Interleaved).
+
     Transport-owned read cycle outcome used by the gateway to decide whether
     a payload is safe to forward to completeness-sensitive bridges.
     """
@@ -63,6 +65,7 @@ class TransportWriteMode(Enum):
 
     @classmethod
     def fromString(cls, name: str) -> "TransportWriteMode":
+        """Scheduling path: N/A — config parsing, used during setup regardless of read_mode."""
         name = name.strip().upper()
 
         # Map inputs to the STRING names of the Enum members
@@ -89,13 +92,18 @@ class TransportWriteMode(Enum):
         return cls[target_member]
 
 class transport_base:
+    """Scheduling path: All (Sequential, Concurrent, Interleaved) — base class for every transport regardless of read_mode."""
+
     @property
     def connected(self) -> bool:
+        """Scheduling path: All (Sequential, Concurrent, Interleaved)."""
         return self._connected
 
     @connected.setter
     def connected(self, value: bool) -> None:
         """
+        Scheduling path: All (Sequential, Concurrent, Interleaved).
+
         Centralized connection state manager. Intercepts every assignment to
         self.connected anywhere in the transport hierarchy — subclasses set
         self.connected = True/False exactly as before and this fires automatically.
@@ -155,6 +163,7 @@ class transport_base:
 
 
     def __init__(self, settings : "TransportSettings") -> None:
+        """Scheduling path: N/A — setup, runs once regardless of read_mode."""
 
         self.protocolSettings: Optional["protocol_settings"] = None
         self.type: str = self.__class__.__name__
@@ -264,6 +273,8 @@ class transport_base:
     @property
     def registry_map(self) -> dict:
         """
+        Scheduling path: All (Sequential, Concurrent, Interleaved).
+
         Returns this transport's registry map, or empty dict if no protocol loaded.
         Consumers should always use this rather than protocol_settings.registry_map
         directly.
@@ -274,29 +285,36 @@ class transport_base:
 
     @property
     def protocol_name(self) -> str:
+        """Scheduling path: All (Sequential, Concurrent, Interleaved)."""
         if hasattr(self, "protocolSettings") and self.protocolSettings:
             return self.protocolSettings.protocol
         return ""
 
 
     def update_identifier(self) -> None:
+        """Scheduling path: N/A — setup, runs once regardless of read_mode."""
         self.device_identifier = str(self.device_serial_number or "").strip().lower()
 
     def init_bridge(self, from_transport : "transport_base") -> None:
+        """Scheduling path: N/A — setup, runs once regardless of read_mode."""
         pass
 
     @classmethod
     def _get_top_class_name(cls, cls_obj):
+        """Scheduling path: N/A — utility used during setup/type-detection, independent of read_mode."""
         if not cls_obj.__bases__:
             return cls_obj.__name__
         else:
             return cls._get_top_class_name(cls_obj.__bases__[0])
 
     def connect(self) -> bool | None:
+        """Scheduling path: All (Sequential, Concurrent, Interleaved) — base stub; modbus_base overrides with the real implementation."""
         pass
 
     def cleanup(self) -> None:
         """
+        Scheduling path: N/A — shutdown, runs once regardless of read_mode.
+
         Clean up transport resources and close connections.
         Sets connected = False which flows through the property setter,
         handling _needs_reconnection, logging, and notification automatically.
@@ -310,12 +328,17 @@ class transport_base:
     # write_data receives either the full batch dict
     # or a single-entry dict constructed in on_message, both with same value type
     def write_data( self, data: dict[str, int | float | str ], from_transport: "transport_base" ) -> None:
-        ''' general purpose write function for between transports'''
+        '''Scheduling path: All (Sequential, Concurrent, Interleaved) — base stub; bridge subclasses override with their real implementation.
+
+        general purpose write function for between transports'''
         pass
 
     #let's convert this to dict[str, registry_map_entry]
     def read_data(self) -> dict[str, int | float | str]:
         '''
+        Scheduling path: Sequential, Concurrent — base stub; modbus_base overrides
+        with the real implementation. Not used by interleaved mode (see read_data_iter).
+
         general purpose read function for between transports;
         return type may be changed to dict[str, registry_map_entry]. still thinking about this
         '''
@@ -323,6 +346,10 @@ class transport_base:
 
     def read_group_data(self, members: list["transport_base"]) -> dict[str, int | float | str]:
         """
+        Scheduling path: Sequential, Concurrent — base default; modbus_base overrides
+        with its own consolidated-union implementation (see modbus_base.read_group_data).
+        Not used by interleaved mode (see read_group_data_iter below).
+
         Read data for a scrape group.
         The default behavior is a normal transport read; transports with
         grouped-read optimizations can override this.
@@ -334,6 +361,10 @@ class transport_base:
 
     def read_group_data_iter(self, members: list["transport_base"]) -> Iterator[bool]:
         """
+        Scheduling path: Interleaved only (called from
+        _process_transports_interleaved for any group with more than one
+        member — see protocol_gateway.py).
+
         Interleaved variant of read_group_data. Builds the union registry
         across all group members, reads one block at a time via the primary
         transport's _read_registry_type_iter(), then decodes and stores the
@@ -443,6 +474,10 @@ class transport_base:
 
     def read_data_iter(self) -> "Iterator[bool]":
         """
+        Scheduling path: Interleaved only (called directly for standalone transports,
+        or as read_group_data_iter's per-solo-member fallback). modbus_base overrides
+        this with true block-level yielding; this default is for non-modbus transports.
+
         Block-level generator variant of read_data for interleaved scheduling.
         Yields True after each register block attempt (success or failure),
         allowing the caller to interleave reads across transports on a shared bus.
@@ -460,27 +495,35 @@ class transport_base:
             self._start_cycle_tracking()
 
         yield True  # non-modbus: treat the entire read as one atomic block
-        self._partial_data: dict[str, int | float | str] = self.read_data()
-        self._partial_info.update(self._partial_data)
+        self._partial_info.update(self.read_data())
 
         if _owner:
-            self._finish_cycle_tracking(self._partial_data)
+            self._finish_cycle_tracking(self._partial_info)
 
     def get_partial_data(self) -> dict[str, int | float | str]:
         """
-        Returns data accumulated by read_data_iter().
-        Non-modbus transports return whatever read_data() produced.
+        Scheduling path: Interleaved only.
+
+        Returns data accumulated so far this cycle — by read_data_iter() for a
+        standalone transport, or by read_group_data_iter() for a group member
+        (each member's own _partial_info is populated directly by the
+        consolidated read; see that method's docstring). Both write to the
+        same _partial_info dict, so this one accessor is correct for either
+        path with no override needed.
         """
-        return getattr(self, '_partial_data', {})
+        return getattr(self, '_partial_info', {})
 
     def _start_cycle_tracking(self) -> None:
+        """Scheduling path: All (Sequential, Concurrent, Interleaved)."""
         self._cycle_active: bool = True
         self._last_cycle_result = TransportCycleResult()
         self._partial_info: dict[str, int | float | str] = {}
         self._partial_registry: dict[int, int] = {}
 
     def _finish_cycle_tracking(self, data: dict[str, int | float | str]) -> None:
-        """Finalize a scrape cycle.
+        """Scheduling path: All (Sequential, Concurrent, Interleaved).
+
+        Finalize a scrape cycle.
 
         Calls ``post_process_data`` before marking the cycle complete so
         synthetic metrics injected by subclasses are present in the data
@@ -498,7 +541,9 @@ class transport_base:
 
     @property
     def synthetic_fields_metadata(self) -> list[tuple[str, str, float, str]]:
-        """Rich metadata for fields injected by ``post_process_data``.
+        """Scheduling path: All (Sequential, Concurrent, Interleaved) — consumed via post_process_data/_finish_cycle_tracking regardless of read_mode; also read directly by TimescaleDB's init_bridge (setup, not per-cycle).
+
+        Rich metadata for fields injected by ``post_process_data``.
 
         Used by TimescaleDB's ``init_bridge`` to register synthetic fields
         as first-class columns in the wide table schema alongside CSV-derived
@@ -535,7 +580,9 @@ class transport_base:
 
     @property
     def synthetic_field_names(self) -> frozenset[str]:
-        """Names of fields injected by ``post_process_data``.
+        """Scheduling path: All (Sequential, Concurrent, Interleaved) — consumed via _filter_for_member regardless of read_mode.
+
+        Names of fields injected by ``post_process_data``.
 
         Derived automatically from ``synthetic_fields_metadata`` — subclasses
         should override that property only.
@@ -546,7 +593,9 @@ class transport_base:
         return frozenset(name for name, *_ in self.synthetic_fields_metadata)
 
     def post_process_data(self, info: dict[str, int | float | str]) -> dict[str, int | float | str]:
-        """Post-processing hook called after every complete scrape cycle.
+        """Scheduling path: All (Sequential, Concurrent, Interleaved).
+
+        Post-processing hook called after every complete scrape cycle.
 
         Invoked by ``_finish_cycle_tracking`` which is the single convergence
         point for all three read paths — sequential (``read_data``), group
@@ -569,7 +618,9 @@ class transport_base:
         return info
 
     def on_first_connect_read(self) -> None:
-        """Hook called once after the first successful physical connection.
+        """Scheduling path: N/A — setup, runs once per connect/reconnect regardless of read_mode.
+
+        Hook called once after the first successful physical connection.
 
         Override in subclasses to read auxiliary registers that need to be
         cached for the lifetime of the connection — configuration thresholds,
@@ -591,24 +642,32 @@ class transport_base:
         pass
 
     def _cycle_expect_unit(self, count: int = 1) -> None:
+        """Scheduling path: All (Sequential, Concurrent, Interleaved)."""
         self._last_cycle_result.expected_units += count
 
     def _cycle_mark_unit_complete(self, count: int = 1) -> None:
+        """Scheduling path: All (Sequential, Concurrent, Interleaved)."""
         self._last_cycle_result.completed_units += count
 
     def _cycle_mark_incomplete(self, skipped_units: int = 1) -> None:
+        """Scheduling path: All (Sequential, Concurrent, Interleaved)."""
         self._last_cycle_result.is_complete = False
         self._last_cycle_result.skipped_units += skipped_units
 
     def get_cycle_result(self) -> TransportCycleResult:
+        """Scheduling path: All (Sequential, Concurrent, Interleaved)."""
         return self._last_cycle_result
 
     def cycle_is_complete_for_bridge(self) -> bool:
+        """Scheduling path: All (Sequential, Concurrent, Interleaved) — called from _process_group_read and _route_interleaved_state."""
         result: TransportCycleResult = self.get_cycle_result()
         return result.has_data and result.is_complete
 
     def interleaved_cycle_timeout(self) -> float:
         """
+        Scheduling path: Interleaved only. modbus_base overrides this with a
+        protocol-aware estimate; this default is for non-modbus transports.
+
         Return a reasonable full-cycle timeout for one interleaved read.
         Transports with better knowledge of their block structure can override.
         """
@@ -617,6 +676,8 @@ class transport_base:
     @property
     def scrape_target(self) -> str:
         """
+        Scheduling path: All (Sequential, Concurrent, Interleaved) — base default; modbus_base overrides with the real endpoint identifier.
+
         Identifies the physical device this transport reads from.
         Two transports with the same scrape_target share an endpoint
         and can be consolidated into a scrape group.
@@ -626,16 +687,19 @@ class transport_base:
         return ""
 
     def enable_write(self) -> None:
-        ''' required for sensitive / manually defined protocols '''
+        '''Scheduling path: N/A — setup, runs once regardless of read_mode. required for sensitive / manually defined protocols '''
         pass
 
     # on_message helper to filter out None.
     def _emit_message( self, entry: registry_map_entry, value: int | float | str ) -> None:
+        """Scheduling path: All (Sequential, Concurrent, Interleaved) — on_message helper to filter out None."""
         if self.on_message is not None:
             self.on_message(self, entry, value)
 
     def send_message(self, message: str, title: str = "", priority: int = 0, services: "list[str] | str | None" = None, **kwargs) -> None:
         """
+        Scheduling path: N/A — messaging utility, independent of read_mode.
+
         Send a notification through all configured messaging services
         (Pushover, Telegram, …).
 
@@ -663,13 +727,17 @@ class transport_base:
     #region - modbus
     # keep here as methods might also apply to future protocols
     def read_registers(self, start, count=1, registry_type : Registry_Type = Registry_Type.INPUT, **kwargs) -> Any:
+        """Scheduling path: All (Sequential, Concurrent, Interleaved) — base stub; modbus_base overrides with the real implementation."""
         pass
 
     def write_register(self, register : int, value : int, **kwargs) -> None:
+        """Scheduling path: N/A — write path, independent of read_mode; base stub, modbus_base overrides."""
         pass
 
     def write_coil(self, register: int, value: bool, **kwargs) -> None:
         """
+        Scheduling path: N/A — write path, independent of read_mode.
+
         Write a single coil (bit) register. Modbus FC 0x05.
         Override in modbus_base; base no-op prevents AttributeError on non-modbus transports.
         """
@@ -677,6 +745,8 @@ class transport_base:
 
     def validate_protocol(self, registry_type: Registry_Type) -> float:
         """
+        Scheduling path: N/A — setup, called once from enable_write regardless of read_mode.
+
         Validates the protocol by reading registers and scoring results.
         Args:
             registry_type: Which register type to validate against (required).
@@ -688,5 +758,6 @@ class transport_base:
         return 0.0
 
     def analyse_protocol(self) -> None:
+        """Scheduling path: N/A — Analyze feature stub, not part of the read-scheduling loop."""
         pass
     #endregion

@@ -89,6 +89,8 @@ MODBUS_EXCEPTION_DESCRIPTIONS: dict[ExcCodes, str] = {
 
 def interpret_modbus_exception_code(code) -> str:
     """
+    Scheduling path: All (Sequential, Concurrent, Interleaved) — error-formatting utility called from any read/write path.
+
     Interpret a Modbus exception response code and return human-readable information.
 
     Args:
@@ -115,7 +117,9 @@ def interpret_modbus_exception_code(code) -> str:
 
 @dataclass()
 class RegisterFailureTracker:
-    """Tracks register read failures and manages soft disabling"""
+    """Scheduling path: All (Sequential, Concurrent, Interleaved) — shared by read_modbus_registers and read_modbus_registers_iter.
+
+    Tracks register read failures and manages soft disabling"""
     register_range: tuple[int, int]  # (start, end) register range
     registry_type: Registry_Type
     failure_count: int = 0
@@ -125,7 +129,9 @@ class RegisterFailureTracker:
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
     def record_failure(self, max_failures: int = 5, disable_duration_hours: int = 12) -> bool:
-        """Record a failed read attempt"""
+        """Scheduling path: All (Sequential, Concurrent, Interleaved).
+
+        Record a failed read attempt"""
         with self._lock:
             current_time: float = time.time()
             self.failure_count += 1
@@ -138,7 +144,9 @@ class RegisterFailureTracker:
             return False
 
     def record_success(self) -> None:
-        """Record a successful read attempt"""
+        """Scheduling path: All (Sequential, Concurrent, Interleaved).
+
+        Record a successful read attempt"""
         with self._lock:
             current_time: float = time.time()
             self.last_success_time = current_time
@@ -147,20 +155,25 @@ class RegisterFailureTracker:
             self.disabled_until = 0
 
     def is_disabled(self) -> bool:
-        """Check if this register range is currently disabled"""
+        """Scheduling path: All (Sequential, Concurrent, Interleaved).
+
+        Check if this register range is currently disabled"""
         with self._lock:
             if self.disabled_until == 0:
                 return False
             return time.time() < self.disabled_until
 
     def get_remaining_disable_time(self) -> float:
-        """Get remaining time until re-enabled (0 if not disabled)"""
+        """Scheduling path: All (Sequential, Concurrent, Interleaved).
+
+        Get remaining time until re-enabled (0 if not disabled)"""
         with self._lock:
             if self.disabled_until == 0:
                 return 0
             remaining: float = self.disabled_until - time.time()
             return max(0, remaining)
 class modbus_base(transport_base):
+    """Scheduling path: All (Sequential, Concurrent, Interleaved) — base class for every Modbus transport regardless of read_mode."""
 
 
     transport_type = "base class"
@@ -182,6 +195,7 @@ class modbus_base(transport_base):
 
 
     def __init__(self, settings : TransportSettings) -> None:
+        """Scheduling path: N/A — setup, runs once regardless of read_mode."""
         super().__init__(settings)
 
         # modbus_base requires a protocol to function — fail early with a clear message
@@ -266,6 +280,8 @@ class modbus_base(transport_base):
     @property
     def _protocol(self) -> "protocol_settings":
         """
+        Scheduling path: All (Sequential, Concurrent, Interleaved).
+
         Non-optional accessor for protocolSettings.
         Raises RuntimeError rather than propagating None through callers.
         """
@@ -277,6 +293,8 @@ class modbus_base(transport_base):
 
     def _should_send_registry_type(self, registry_type: Registry_Type) -> bool:
         """
+        Scheduling path: All (Sequential, Concurrent, Interleaved) — called from read_data, read_group_data, read_data_iter.
+
         Return False when the given registry type has been disabled via the
         send_*_register flags, or when no registry map was loaded for it.
         Centralizes the repeated per-type enable/disable checks so callers
@@ -296,6 +314,7 @@ class modbus_base(transport_base):
         return True
 
     def _get_correct_device_arg(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        """Scheduling path: All (Sequential, Concurrent, Interleaved)."""
         if self.client is None:
             raise RuntimeError("Cannot resolve device arguments: Modbus client is not initialized.")
 
@@ -327,11 +346,15 @@ class modbus_base(transport_base):
         return kwargs
 
     def _entry_byte_order(self, entry: registry_map_entry) -> WordOrder:
-        """Return the ``WordOrder`` for *entry* by delegating to ``DataAdjustments``."""
+        """Scheduling path: All (Sequential, Concurrent, Interleaved).
+
+        Return the ``WordOrder`` for *entry* by delegating to ``DataAdjustments``."""
         return self._protocol._adjustments.get_entry_byteorder(entry)
 
     def _register_words_to_bytes(self, register_values: list[int], word_order: WordOrder) -> bytes:
-        """Convert a list of 16-bit register words to a contiguous byte string.
+        """Scheduling path: All (Sequential, Concurrent, Interleaved).
+
+        Convert a list of 16-bit register words to a contiguous byte string.
 
         Applied on the **read** side of a write-verify cycle: the current
         register values are assembled into bytes so the existing decoded value
@@ -353,7 +376,9 @@ class modbus_base(transport_base):
         return b"".join(word.to_bytes(2, byteorder=per_word_byteorder, signed=False) for word in words)
 
     def _bytes_to_register_words(self, data: bytes, word_order: WordOrder) -> list[int]:
-        """Convert a byte string back to a list of 16-bit Modbus register values.
+        """Scheduling path: All (Sequential, Concurrent, Interleaved).
+
+        Convert a byte string back to a list of 16-bit Modbus register values.
 
         This is the exact inverse of ``_register_words_to_bytes`` and is used
         on the **write** side: after the new value has been merged into *data*,
@@ -382,6 +407,7 @@ class modbus_base(transport_base):
         return words
 
     def _entry_word_count(self, entry: registry_map_entry) -> int:
+        """Scheduling path: All (Sequential, Concurrent, Interleaved)."""
         return self._protocol.entry_word_count(entry)
 
     def _extract_response_values(
@@ -391,6 +417,10 @@ class modbus_base(transport_base):
         register_range: tuple[int, int],
     ) -> dict[int, int] | None:
         """
+        Scheduling path: All (Sequential, Concurrent, Interleaved) — called from
+        read_modbus_registers and read_modbus_registers_iter; also used by the
+        Analyze feature outside the scheduling loop.
+
         Extract register values from a pymodbus response object into a flat
         {address: value} dict, handling the two distinct response shapes:
 
@@ -420,6 +450,7 @@ class modbus_base(transport_base):
             }
 
     def write_registers(self, start_register: int, values: list[int], **kwargs: Any) -> None:
+        """Scheduling path: N/A — write path, independent of read_mode."""
         if not self.write_enabled:
             return
         if self.client is None:
@@ -431,7 +462,9 @@ class modbus_base(transport_base):
             self.client.write_registers(start_register, values, **kwargs)
 
     def write_coil(self, register: int, value: bool, **kwargs: Any) -> None:
-        """Write a single coil (bit) register using Modbus function code 0x05."""
+        """Scheduling path: N/A — write path, independent of read_mode.
+
+        Write a single coil (bit) register using Modbus function code 0x05."""
         if not self.write_enabled:
             return
         if self.client is None:
@@ -444,6 +477,8 @@ class modbus_base(transport_base):
 
     def _get_port_identifier(self) -> str:
         """
+        Scheduling path: All (Sequential, Concurrent, Interleaved).
+
         Get a unique identifier for this transport's physical connection.
         Used to key the shared client and port lock dictionaries.
         TCP:    host_port     e.g. '192.168.1.10_502'
@@ -464,7 +499,9 @@ class modbus_base(transport_base):
             return self.transport_name
 
     def _get_port_lock(self) -> threading.Lock:
-        """Get or create a lock for this transport's port"""
+        """Scheduling path: All (Sequential, Concurrent, Interleaved).
+
+        Get or create a lock for this transport's port"""
         port_id: str = self._get_port_identifier()
 
         with self._clients_lock:
@@ -474,11 +511,15 @@ class modbus_base(transport_base):
         return self._client_locks[port_id]
 
     def _get_register_range_key(self, register_range: tuple[int, int], registry_type: Registry_Type) -> str:
-        """Generate a unique key for a register range"""
+        """Scheduling path: All (Sequential, Concurrent, Interleaved).
+
+        Generate a unique key for a register range"""
         return f"{registry_type.name}_{register_range[0]}_{register_range[1]}"
 
     def _get_or_create_failure_tracker(self, register_range: tuple[int, int], registry_type: Registry_Type) -> RegisterFailureTracker:
-        """Get or create a failure tracker for a register range"""
+        """Scheduling path: All (Sequential, Concurrent, Interleaved).
+
+        Get or create a failure tracker for a register range"""
         key: str = self._get_register_range_key(register_range, registry_type)
 
         with self._failure_tracking_lock:
@@ -491,7 +532,9 @@ class modbus_base(transport_base):
             return self.register_failure_trackers[key]
 
     def _record_register_read_success(self, register_range: tuple[int, int], registry_type: Registry_Type) -> None:
-        """Record a successful register read"""
+        """Scheduling path: All (Sequential, Concurrent, Interleaved) — called from read_modbus_registers and read_modbus_registers_iter.
+
+        Record a successful register read"""
         if not self.enable_register_failure_tracking:
             return
 
@@ -508,7 +551,9 @@ class modbus_base(transport_base):
             self._log.info(msg)
 
     def _record_register_read_failure(self, register_range: tuple[int, int], registry_type: Registry_Type) -> bool:
-        """Record a failed register read, returns True if range should be disabled"""
+        """Scheduling path: All (Sequential, Concurrent, Interleaved) — called from read_modbus_registers and read_modbus_registers_iter.
+
+        Record a failed register read, returns True if range should be disabled"""
         if not self.enable_register_failure_tracking:
             return False
 
@@ -544,7 +589,9 @@ class modbus_base(transport_base):
         return should_disable
 
     def _is_register_range_disabled(self, register_range: tuple[int, int], registry_type: Registry_Type) -> bool:
-        """Check if a register range is currently disabled"""
+        """Scheduling path: All (Sequential, Concurrent, Interleaved) — called from read_modbus_registers and read_modbus_registers_iter.
+
+        Check if a register range is currently disabled"""
         if not self.enable_register_failure_tracking:
             return False
 
@@ -558,6 +605,8 @@ class modbus_base(transport_base):
         entries: list["registry_map_entry"] | None = None,
     ) -> list[str]:
         """
+        Scheduling path: All (Sequential, Concurrent, Interleaved) — called from read_modbus_registers and read_modbus_registers_iter.
+
         Returns the variable_name of every registry entry whose register
         falls inside register_range for registry_type, so a disabled/skipped
         range can be logged in terms of the metrics it covers rather than
@@ -588,7 +637,9 @@ class modbus_base(transport_base):
         })
 
     def _get_disabled_ranges_info(self) -> list[str]:
-        """Get information about currently disabled register ranges"""
+        """Scheduling path: N/A — diagnostic accessor, not part of the read-scheduling loop; usable regardless of read_mode.
+
+        Get information about currently disabled register ranges"""
         disabled_info = []
 
         with self._failure_tracking_lock:
@@ -603,7 +654,9 @@ class modbus_base(transport_base):
         return disabled_info
 
     def get_register_failure_status(self) -> dict:
-        """Get comprehensive status of register failure tracking
+        """Scheduling path: N/A — diagnostic accessor, not part of the read-scheduling loop; usable regardless of read_mode.
+
+        Get comprehensive status of register failure tracking
             - `enabled`: Whether failure tracking is enabled
             - `max_failures_before_disable`: Configured failure threshold
             - `disable_duration_hours`: Configured disable duration
@@ -655,7 +708,9 @@ class modbus_base(transport_base):
         return status
 
     def reset_register_failure_tracking(self, registry_type: Optional[Registry_Type] = None, register_range: Optional[tuple[int, int]] = None) -> None:
-        """Reset register failure tracking for specific ranges or all ranges"""
+        """Scheduling path: N/A — manual/administrative reset, not part of the read-scheduling loop; usable regardless of read_mode.
+
+        Reset register failure tracking for specific ranges or all ranges"""
         with self._failure_tracking_lock:
             if registry_type is None and register_range is None:
                 self.register_failure_trackers.clear()
@@ -691,7 +746,9 @@ class modbus_base(transport_base):
                 )
 
     def enable_register_range(self, register_range: tuple[int, int], registry_type: Registry_Type) -> None:
-        """Manually enable a disabled register range"""
+        """Scheduling path: N/A — manual/administrative override, not part of the read-scheduling loop; usable regardless of read_mode.
+
+        Manually enable a disabled register range"""
         tracker: RegisterFailureTracker = self._get_or_create_failure_tracker(register_range, registry_type)
         with self._failure_tracking_lock:
             tracker.disabled_until = 0
@@ -699,6 +756,7 @@ class modbus_base(transport_base):
         self._log.info(f"Manually enabled register range {registry_type.name} {register_range[0]}-{register_range[1]}")
 
     def init_after_connect(self) -> None:
+        """Scheduling path: N/A — setup, runs once per connect/reconnect regardless of read_mode."""
         # Use transport lock to prevent concurrent access during initialization
         # Note: Connection-sensitive setup happens only after subclass initialization is complete.
         with self._transport_lock:
@@ -716,7 +774,9 @@ class modbus_base(transport_base):
                 self._log.debug(f"Transport {self.transport_name} already has serial number: {self.device_serial_number}")
 
     def connect(self) -> bool | None:
-        """Connect to the Modbus device"""
+        """Scheduling path: All (Sequential, Concurrent, Interleaved) — called at startup and on reconnect from any read path.
+
+        Connect to the Modbus device"""
         # Add debugging information
         port_info: Any | str = getattr(self, 'port', 'unknown')
         address_info: str = getattr(self, 'address', 'unknown')
@@ -796,7 +856,9 @@ class modbus_base(transport_base):
                     )
 
     def cleanup(self) -> None:
-        """Clean up transport resources and close connections."""
+        """Scheduling path: N/A — shutdown, runs once regardless of read_mode.
+
+        Clean up transport resources and close connections."""
         with self._transport_lock:
             self._log.info(f"Cleaning up transport {self.transport_name}")
 
@@ -830,6 +892,8 @@ class modbus_base(transport_base):
 
     def read_serial_number(self) -> str:
         """
+        Scheduling path: N/A — setup, runs once at connect regardless of read_mode.
+
         Attempts to read the device serial number from registers.
         Tries 'Serial_Number' variable first, then falls back to
         concatenating 'Serial No 1-5' for both Holding and Input registers.
@@ -862,7 +926,9 @@ class modbus_base(transport_base):
         return ""
 
     def _read_sn_from_registry(self, registry_type) -> str | None:
-        """Helper for single-variable lookup."""
+        """Scheduling path: N/A — setup, runs once at connect regardless of read_mode.
+
+        Helper for single-variable lookup."""
         self._log.info(f"Looking for serial_number in {registry_type.name}...")
         result: int | float | str | None = self.read_variable("Serial_Number", registry_type)
         if result is not None:
@@ -873,7 +939,9 @@ class modbus_base(transport_base):
         return None
 
     def _read_concatenated_sn(self, r_type) -> str:
-        """Helper to build SN from multiple registers (Serial No 1-5)."""
+        """Scheduling path: N/A — setup, runs once at connect regardless of read_mode.
+
+        Helper to build SN from multiple registers (Serial No 1-5)."""
         sn_decoded: str = ""
         fields: list[str] = ["Serial No 1", "Serial No 2", "Serial No 3", "Serial No 4", "Serial No 5"]
 
@@ -907,6 +975,7 @@ class modbus_base(transport_base):
         return ""
 
     def enable_write(self) -> None:
+        """Scheduling path: N/A — setup, runs once at connect regardless of read_mode."""
         if self.write_enabled and self.write_mode == TransportWriteMode.UNSAFE:
             self._log.warning("enable write - WARNING - UNSAFE MODE - validation SKIPPED")
             return
@@ -937,6 +1006,7 @@ class modbus_base(transport_base):
                 self._log.error("enable write FAILED - WRITE DISABLED")
 
     def write_data(self, data: dict[str, int | float | str ], from_transport: transport_base) -> None:
+        """Scheduling path: All (Sequential, Concurrent, Interleaved) — bridge-side receiver called from both _process_group_read and _forward_to_bridges."""
         with self._transport_lock:
             if not self.write_enabled:  # guard for checking inverter scraper flag to allow write back to the inverter.
                 return
@@ -976,6 +1046,7 @@ class modbus_base(transport_base):
             time.sleep(self.modbus_delay) #sleep in between requests so modbus can rest
 
     def read_data(self) -> dict[str, int | float | str ]:
+        """Scheduling path: Sequential, Concurrent (via _process_group_read for a solo/standalone transport). Not used by interleaved mode — see read_data_iter."""
         # Use transport lock to prevent concurrent access to this transport instance
         with self._transport_lock:
             self._start_cycle_tracking()
@@ -1043,6 +1114,10 @@ class modbus_base(transport_base):
 
     def read_group_data(self, members: list[transport_base]) -> dict[str, int | float | str]:
         """
+        Scheduling path: Sequential, Concurrent (called from _process_group_read on the
+        group primary). Not used by interleaved mode — see read_group_data_iter
+        (transport_base) instead, which this method is the non-interleaved analog of.
+
         Read one consolidated payload for all transports sharing this physical
         Modbus endpoint. The gateway stays transport-agnostic; Modbus-specific
         batching lives here.
@@ -1143,6 +1218,8 @@ class modbus_base(transport_base):
 
     def interleaved_cycle_timeout(self) -> float:
         """
+        Scheduling path: Interleaved only.
+
         Estimate a realistic timeout for one interleaved full-cycle read based
         on protocol ranges, Modbus timeout, and retry policy.
         """
@@ -1157,6 +1234,8 @@ class modbus_base(transport_base):
 
     def validate_protocol(self, registry_type: Registry_Type) -> float:
         """
+        Scheduling path: N/A — setup, called once from enable_write regardless of read_mode.
+
         Validates the protocol by reading registers and scoring results
         against expected value ranges defined in the protocol CSV.
 
@@ -1172,6 +1251,7 @@ class modbus_base(transport_base):
 
 
     def validate_registry(self, registry_type: Registry_Type = Registry_Type.INPUT) -> float:
+        """Scheduling path: N/A — setup, called once from validate_protocol/enable_write regardless of read_mode."""
         registry_map: list[registry_map_entry] = self._protocol.get_registry_map(registry_type)
         register_readings: dict[str, int | float | str] = self.read_registry(registry_type)
 
@@ -1220,6 +1300,7 @@ class modbus_base(transport_base):
         progress_cb=None,
     ) -> dict[str, dict[int, int]]:
         """
+        Scheduling path: N/A — Analyze feature, invoked on demand via the web API; not part of the read-scheduling loop.
         Perform a dense raw Modbus scan for UI-driven protocol analysis.
         Returns in-memory register maps only; no _analysis files are used.
 
@@ -1243,6 +1324,7 @@ class modbus_base(transport_base):
         )
 
         def scan_range(registry_type: Registry_Type, result_dict: dict[int, int]) -> None:
+            """Scheduling path: N/A — Analyze feature helper, not part of the read-scheduling loop."""
             total_reads = 0
             failures = 0
             phase = registry_type.name.lower()
@@ -1338,6 +1420,8 @@ class modbus_base(transport_base):
         values_str: str,
     ) -> tuple[float, float] | list[float] | None:
         """
+        Scheduling path: N/A — Analyze feature, invoked on demand via the web API; not part of the read-scheduling loop.
+
         Parse the 'values' column from a protocol CSV into a constraint
         that can be used to range-check a raw hardware reading.
 
@@ -1410,6 +1494,8 @@ class modbus_base(transport_base):
     @staticmethod
     def _value_in_range(raw_value: int | float, constraint: tuple[float, float] | list[float] | None) -> bool:
         """
+        Scheduling path: N/A — Analyze feature, invoked on demand via the web API; not part of the read-scheduling loop.
+
         Return True when raw_value satisfies the parsed constraint.
         Returns True (no penalty) when constraint is None so that entries
         with free-text or missing values columns are not penalized.
@@ -1432,6 +1518,8 @@ class modbus_base(transport_base):
         batch_size: int = 40,
     ) -> dict[str, Any]:
         """
+        Scheduling path: N/A — Analyze feature, invoked on demand via the web API; not part of the read-scheduling loop.
+
         Compare a live Modbus scan against selected protocol maps and return
         scores plus add/remove suggestions for the web UI.
 
@@ -1658,7 +1746,9 @@ class modbus_base(transport_base):
 
 
     def write_variable(self, entry : registry_map_entry, value :int | float | str, registry_type : Registry_Type = Registry_Type.HOLDING) -> None:
-        """ writes a value to a ModBus register"""
+        """Scheduling path: N/A — write path, independent of read_mode.
+
+        writes a value to a ModBus register"""
 
         if isinstance(value, str):
             value = value.strip().lower()
@@ -1956,6 +2046,7 @@ class modbus_base(transport_base):
 
 
     def read_variable(self, variable_name : str, registry_type : Registry_Type, entry : registry_map_entry | None = None) -> int | float | str | None:
+        """Scheduling path: N/A — single-variable on-demand accessor (e.g. serial-number lookup at connect), independent of read_mode."""
         if variable_name:
             variable_name = variable_name.strip().lower().replace(" ", "_")
 
@@ -1985,6 +2076,11 @@ class modbus_base(transport_base):
                               batch_size : int | None = None, registry_type : Registry_Type = Registry_Type.INPUT,
                               entries: list["registry_map_entry"] | None = None) -> dict[int, int]:
         """
+        Scheduling path: Sequential, Concurrent (called from read_data and
+        read_group_data); also used by validate_registry, _read_concatenated_sn,
+        and capture_analysis_scan outside the scheduling loop. Not used by
+        interleaved mode — see read_modbus_registers_iter instead.
+
         entries, when provided, is the exact set of registry_map_entry objects
         this read was built from (e.g. read_group_data's union_entries, which
         spans every group member's own post-mask/screen registry map — not
@@ -2162,10 +2258,44 @@ class modbus_base(transport_base):
         self,
         ranges: list[tuple[int, int]],
         registry_type: Registry_Type = Registry_Type.INPUT,
+        entries: list["registry_map_entry"] | None = None,
     ) -> Iterator[tuple[tuple[int, int], dict[int, int] | None]]:
+        """
+        Scheduling path: Interleaved only (called from _read_registry_type_iter).
+
+        entries, when provided, is the exact registry_map_entry list this
+        read was built from — e.g. _read_registry_type_iter's own
+        union_entries parameter, which for a consolidated group read (see
+        read_group_data_iter) spans every group member's own post-mask/
+        screen registry map, not just this transport's. Passed straight
+        through to _describe_range_metrics for disabled-range logging; see
+        that method's docstring for why the distinction matters.
+        """
 
         for register_range in ranges:
-            if self._is_register_range_disabled(register_range, registry_type):
+            is_disabled: bool = self._is_register_range_disabled(register_range, registry_type)
+            # Same unconditional per-range visibility added to
+            # read_modbus_registers's disabled-range check — this is the
+            # separate check site read_data_iter()/read_group_data_iter()
+            # (interleaved mode) actually go through via
+            # _read_registry_type_iter; read_modbus_registers's own check is
+            # only hit by read_data()/read_group_data() (sequential/concurrent).
+            self._log.debug(
+                f"Register range check {registry_type.name} "
+                f"{register_range[0]}-{register_range[0]+register_range[1]-1} "
+                f"for {self.transport_name}: "
+                f"{'DISABLED' if is_disabled else 'enabled'}"
+            )
+            if is_disabled:
+                remaining_hours: float = self._get_or_create_failure_tracker(register_range, registry_type).get_remaining_disable_time() / 3600
+                covered_metrics: list[str] = self._describe_range_metrics(register_range, registry_type, entries=entries)
+                self._log.info(f"Skipping disabled register range {registry_type.name} {register_range[0]}-{register_range[0]+register_range[1]-1} (disabled for {remaining_hours:.1f}h)")
+                self._log.debug(
+                    f"Register range {registry_type.name} "
+                    f"{register_range[0]}-{register_range[0]+register_range[1]-1} "
+                    f"for {self.transport_name} is DISABLED and will not be read — "
+                    f"metrics affected ({len(covered_metrics)}): {covered_metrics}"
+                )
                 yield register_range, {}
                 continue
             self._log.debug(
@@ -2205,6 +2335,9 @@ class modbus_base(transport_base):
 
     def read_data_iter(self) -> Iterator[bool]:
         """
+        Scheduling path: Interleaved only (called directly for standalone transports,
+        or as read_group_data_iter's per-solo-member fallback).
+
         Generator that reads all register ranges one block at a time,
         yielding True after each block (success or failure) so the
         caller can interleave reads across transports.
@@ -2249,6 +2382,9 @@ class modbus_base(transport_base):
         max_register: int,
     ) -> Iterator[bool]:
         """
+        Scheduling path: Interleaved only (called from read_data_iter and, via
+        transport_base, read_group_data_iter).
+
         Reads one registry type block-by-block, yielding after each block.
         Accumulates raw register values into self._partial_registry.
         Does NOT call _start_cycle_tracking or _finish_cycle_tracking —
@@ -2277,7 +2413,7 @@ class modbus_base(transport_base):
 
             # Single-range call so the iterator covers exactly this one block.
             _, result = next(iter(
-                self.read_modbus_registers_iter([register_range], registry_type)
+                self.read_modbus_registers_iter([register_range], registry_type, entries=union_entries)
             ))
 
             if result == {}:
@@ -2306,12 +2442,12 @@ class modbus_base(transport_base):
                 idx += 1            # success — advance to next range
                 yield True
 
-    def get_partial_data(self) -> dict[str, int | float | str]:
-        return getattr(self, '_partial_info', {})
 
     @property
     def scrape_target(self) -> str:
         """
+        Scheduling path: All (Sequential, Concurrent, Interleaved).
+
         Returns a string uniquely identifying the scrape target for this transport,
         used for logging and scraper tracking.
         """
@@ -2325,6 +2461,10 @@ class modbus_base(transport_base):
 
     def read_registry(self, registry_type: Registry_Type = Registry_Type.INPUT) -> dict[str, int | float | str]:
         """
+        Scheduling path: N/A — used internally for protocol validation and serial
+        number reading (validate_registry, _read_sn_from_registry), independent
+        of read_mode. For per-cycle scheduled reads use read_data()/read_data_iter().
+
         Reads and processes a single registry type from the device.
         Returns processed register data keyed by variable name.
         Used internally for protocol validation and serial number reading.

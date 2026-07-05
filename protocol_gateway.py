@@ -87,7 +87,9 @@ class CustomConfigParser(ConfigParser):
 
     """
     def get(self, section, option, *args, **kwargs) -> str:
-        """Read a string value from the config, with alias support and comment stripping.
+        """Scheduling path: N/A — config parsing, used during setup regardless of read_mode.
+
+        Read a string value from the config, with alias support and comment stripping.
 
         ``option`` may be a single key name or a list of candidate names; when a
         list is given, each name is tried in order and the first match wins.
@@ -106,7 +108,9 @@ class CustomConfigParser(ConfigParser):
 
         # Helper to safely call the parent get method
         def safe_get(sect, opt) -> str | None:
-            """Call the parent ``ConfigParser.get`` and return ``None`` on any missing-key error."""
+            """Scheduling path: N/A — config parsing, used during setup regardless of read_mode.
+
+            Call the parent ``ConfigParser.get`` and return ``None`` on any missing-key error."""
             try:
                 return super(CustomConfigParser, self).get(sect, opt, *args, **kwargs)
             except (NoOptionError, NoSectionError):
@@ -141,9 +145,11 @@ class CustomConfigParser(ConfigParser):
             value = value.split('#')[0].strip()
 
         return value
-
+    # because using get, None is not reachable, so removed and type checker is happy.
     def getint(self, section: str, option: str | list[str], *args: Any, **kwargs: Any ) -> int:
-        """Read a config value and return it as an ``int``.
+        """Scheduling path: N/A — config parsing, used during setup regardless of read_mode.
+
+        Read a config value and return it as an ``int``.
 
         Delegates to ``get``, inheriting alias-list and fallback support.
         Raises ``ValueError`` if the resolved string cannot be converted to an integer.
@@ -152,7 +158,9 @@ class CustomConfigParser(ConfigParser):
         return int(value)
 
     def getfloat(self, section: str, option: str | list[str], *args: Any, **kwargs: Any ) -> float:
-        """Read a config value and return it as a ``float``.
+        """Scheduling path: N/A — config parsing, used during setup regardless of read_mode.
+
+        Read a config value and return it as a ``float``.
 
         Delegates to ``get``, inheriting alias-list and fallback support.
         Raises ``ValueError`` if the resolved string cannot be converted to a float.
@@ -161,7 +169,9 @@ class CustomConfigParser(ConfigParser):
         return float(value)
 
     def getboolean(self, section: str, option: str | list[str], *args: Any, **kwargs: Any) -> bool:
-        """Read a config value and return it as a ``bool``.
+        """Scheduling path: N/A — config parsing, used during setup regardless of read_mode.
+
+        Read a config value and return it as a ``bool``.
 
         Delegates to ``get``, inheriting alias-list and fallback support.
         Accepts ``true/yes/on/1/enable/enabled`` as ``True`` and
@@ -190,6 +200,8 @@ class NetworkError(Enum):
 
 class ScrapeGroup:
     """
+    Scheduling path: All (Sequential, Concurrent, Interleaved).
+
     Represents a set of scraper transports that all read from the same
     physical device (same scrape_target) and can therefore share a single
     Modbus read cycle.
@@ -201,7 +213,9 @@ class ScrapeGroup:
     """
 
     def __init__(self, primary: transport_base) -> None:
-        """Initialise a single-member group with ``primary`` as the initial sole member.
+        """Scheduling path: All (Sequential, Concurrent, Interleaved).
+
+        Initialise a single-member group with ``primary`` as the initial sole member.
 
         ``primary`` will be promoted or replaced by a faster member if
         ``add_member`` is subsequently called with a transport whose
@@ -215,7 +229,9 @@ class ScrapeGroup:
         }
 
     def add_member(self, transport: transport_base) -> None:
-        """Add ``transport`` to this group and promote it to primary if it has the shortest read interval.
+        """Scheduling path: All (Sequential, Concurrent, Interleaved).
+
+        Add ``transport`` to this group and promote it to primary if it has the shortest read interval.
 
         A transport with a shorter ``read_interval`` drives more frequent scrapes,
         so it becomes the primary to ensure no member is starved.  Transports with
@@ -233,12 +249,16 @@ class ScrapeGroup:
 
     @property
     def scrape_interval(self) -> float:
-        """Fastest read_interval among all members — drives the scrape cadence."""
+        """Scheduling path: All (Sequential, Concurrent, Interleaved).
+
+        Fastest read_interval among all members — drives the scrape cadence."""
         intervals: list[float] = [m.read_interval for m in self.members if m.read_interval > 0]
         return min(intervals) if intervals else 0.0
 
     def members_due(self, now: float) -> list[transport_base]:
-        """Returns members whose own read_interval has elapsed since last forward."""
+        """Scheduling path: All (Sequential, Concurrent, Interleaved).
+
+        Returns members whose own read_interval has elapsed since last forward."""
         return [
             m for m in self.members
             if m.read_interval > 0
@@ -246,7 +266,9 @@ class ScrapeGroup:
         ]
 
     def mark_forwarded(self, transport: transport_base, now: float) -> None:
-        """Record ``now`` as the last time ``transport``'s data was forwarded to its bridges.
+        """Scheduling path: All (Sequential, Concurrent, Interleaved).
+
+        Record ``now`` as the last time ``transport``'s data was forwarded to its bridges.
 
         Used by ``members_due`` to determine when a member's ``read_interval``
         has elapsed and it is eligible to receive the next scrape result.
@@ -256,6 +278,8 @@ class ScrapeGroup:
 @dataclass
 class TransportState:
     """
+    Scheduling path: Interleaved only.
+
     Carries the result of one transport's interleaved read cycle.
     Created by _process_transports_interleaved, consumed by
     _route_interleaved_state.
@@ -281,6 +305,8 @@ class TransportState:
 @dataclass
 class InterleavedCycleState:
     """
+    Scheduling path: Interleaved only.
+
     Tracks one active interleaved cycle running on the shared executor.
     """
     cycle_done: threading.Event
@@ -301,7 +327,9 @@ class Protocol_Gateway:
 
     @classmethod
     def _setup_logging(cls, cfg: ConfigParser) -> None:
-        """Configure the root logger from the ``[logging]`` section of ``cfg``. Class-level no-op after first call.
+        """Scheduling path: N/A — setup, runs once regardless of read_mode.
+
+        Configure the root logger from the ``[logging]`` section of ``cfg``. Class-level no-op after first call.
 
         Reads ``level``, ``log_dir``, ``log_file``, ``rotation``, ``backup_count``,
         ``when``, ``interval``, and ``max_bytes`` from ``[logging]``, falling back
@@ -392,6 +420,8 @@ class Protocol_Gateway:
     @classmethod
     def _setup_messaging(cls, cfg: ConfigParser) -> None:
         """
+        Scheduling path: N/A — setup, runs once regardless of read_mode.
+
         Initialise the application-wide messaging subsystem.
 
         Reads the [messages] section of config.cfg and wires up every
@@ -406,7 +436,9 @@ class Protocol_Gateway:
 
     @staticmethod
     def _compact_thread_label(label: str, max_length: int = 80) -> str:
-        """Truncate ``label`` to ``max_length`` characters, appending ``...`` if truncated.
+        """Scheduling path: Concurrent, Interleaved (the two modes that use thread pools).
+
+        Truncate ``label`` to ``max_length`` characters, appending ``...`` if truncated.
 
         Keeps thread names visible in debugger thread lists and OS views within
         a predictable width.  Labels at or below ``max_length`` are returned unchanged.
@@ -417,7 +449,9 @@ class Protocol_Gateway:
 
     @staticmethod
     def _base_thread_name(thread_name: str) -> str:
-        """Return the stable base name of a worker thread by stripping any trailing ``[task]`` suffix.
+        """Scheduling path: Concurrent, Interleaved (the two modes that use thread pools).
+
+        Return the stable base name of a worker thread by stripping any trailing ``[task]`` suffix.
 
         Worker threads are temporarily renamed to ``BaseName [task_label]`` by
         ``_run_with_thread_task_name``.  This method reverses that so the
@@ -427,7 +461,9 @@ class Protocol_Gateway:
 
     @staticmethod
     def _display_transport_name(transport_name: str) -> str:
-        """Strip the ``transport.`` config-section prefix from ``transport_name`` for compact display.
+        """Scheduling path: Concurrent, Interleaved (the two modes that use thread pools).
+
+        Strip the ``transport.`` config-section prefix from ``transport_name`` for compact display.
 
         Config section names follow the pattern ``transport.<name>``.  Removing
         the prefix keeps thread labels and log messages short while still
@@ -436,7 +472,9 @@ class Protocol_Gateway:
         return transport_name.removeprefix("transport.")
 
     def _thread_task_label(self, read_mode: str, transport_names: list[str]) -> str:
-        """Build a compact, human-readable task label from a list of transport names.
+        """Scheduling path: Concurrent, Interleaved (the two modes that use thread pools).
+
+        Build a compact, human-readable task label from a list of transport names.
 
         Strips the ``transport.`` prefix from each name for brevity, joins them
         with commas, and truncates the result to the ``_compact_thread_label``
@@ -451,7 +489,9 @@ class Protocol_Gateway:
         return self._compact_thread_label(joined_names)
 
     def _run_with_thread_task_name(self, task_label: str, fn, *args, **kwargs):
-        """Execute ``fn(*args, **kwargs)`` on the current thread with a temporary task-specific name.
+        """Scheduling path: Concurrent, Interleaved (the two modes that use thread pools).
+
+        Execute ``fn(*args, **kwargs)`` on the current thread with a temporary task-specific name.
 
         Appends ``[task_label]`` to the current worker thread's base name before
         calling ``fn``, then restores the original base name in a ``finally``
@@ -471,7 +511,9 @@ class Protocol_Gateway:
     config_file : Path
 
     def __init__(self, config_file : str) -> None:
-        """Initialise the gateway: load config, set up logging and messaging, instantiate and connect all transports.
+        """Scheduling path: N/A — setup, runs once regardless of read_mode (this is what decides read_mode).
+
+        Initialise the gateway: load config, set up logging and messaging, instantiate and connect all transports.
 
         Resolves ``config_file`` relative to ``config/`` inside the project
         root, falling back to ``config/config.cfg`` if the requested file does
@@ -650,7 +692,9 @@ class Protocol_Gateway:
                 )
 
     def on_message( self, from_transport: transport_base, entry: registry_map_entry, data: int | float | str) -> None:
-        """Handle a single decoded register value and write it immediately to the paired bridge.
+        """Scheduling path: All (Sequential, Concurrent, Interleaved) — called from within any transport's decode path regardless of read_mode.
+
+        Handle a single decoded register value and write it immediately to the paired bridge.
 
         Called by a scraper transport as each register is decoded, before a full
         cycle is complete.  Walks ``__transports`` to find the first transport
@@ -668,6 +712,12 @@ class Protocol_Gateway:
 
     def _process_group_read(self, group: ScrapeGroup, now: float) -> None:
         """
+        Scheduling path: Sequential, Concurrent (called directly by ``run()`` in
+        sequential mode; called via ``_submit_concurrent_group_read`` in
+        concurrent mode). Not used by interleaved mode — see
+        ``_process_transports_interleaved``/``_route_interleaved_state`` for
+        the interleaved equivalent.
+
         Performs one scrape via the group primary and routes the results
         to each member's bridge(s) for members whose read_interval is due.
         The gateway only schedules and routes; transports own the read path.
@@ -753,6 +803,11 @@ class Protocol_Gateway:
         full_data: dict[str, int | float | str],
     ) -> None:
         """
+        Scheduling path: Sequential, Concurrent (called only from
+        ``_process_group_read``). Interleaved mode's consolidated reads
+        aren't covered by this method — its per-member breakdown happens
+        inline in ``_route_interleaved_state`` instead.
+
         Heavy, per-cycle DEBUG dump of exactly what a grouped read produced,
         broken down member-by-member, so a "why isn't metric X showing up"
         question can be answered by reading the log instead of re-deriving
@@ -860,7 +915,9 @@ class Protocol_Gateway:
         full_data: dict[str, int | float | str],
         member_data: dict[str, int | float | str],
     ) -> None:
-        """Log mask-vs-data diagnostics for one member after filtering.
+        """Scheduling path: All (Sequential, Concurrent, Interleaved) — called from ``_process_group_read`` and ``_route_interleaved_state``.
+
+        Log mask-vs-data diagnostics for one member after filtering.
 
         Under the new paradigm both the variable mask and ``full_data`` use
         logical stem names (``_l``/``_h`` pairs have been merged upstream), so
@@ -937,7 +994,9 @@ class Protocol_Gateway:
             )
 
     def _filter_for_member(self, full_data: dict[str, int | float | str], member: transport_base) -> dict[str, int | float | str]:
-        """Filter ``full_data`` to only the metrics relevant to ``member``.
+        """Scheduling path: All (Sequential, Concurrent, Interleaved) — called from ``_process_group_read`` and ``_route_interleaved_state``.
+
+        Filter ``full_data`` to only the metrics relevant to ``member``.
 
         Resolution order
         ----------------
@@ -999,6 +1058,8 @@ class Protocol_Gateway:
 
     def _submit_concurrent_group_read(self, group: ScrapeGroup, now: float) -> None:
         """
+        Scheduling path: Concurrent only.
+
         Submit one group read to the persistent concurrent executor.
         Reuses worker threads between successful cycles and prevents duplicate
         submissions while a prior cycle for the same scrape target is still
@@ -1036,7 +1097,9 @@ class Protocol_Gateway:
             self.__concurrent_futures[group_key] = future
 
     def _are_bridged(self, a: transport_base, b: transport_base) -> bool:
-        """Return ``True`` if transport ``a`` and ``b`` are linked as a bridge pair in either direction.
+        """Scheduling path: All (Sequential, Concurrent, Interleaved) — called from ``on_message``, independent of read_mode.
+
+        Return ``True`` if transport ``a`` and ``b`` are linked as a bridge pair in either direction.
 
         A bridge relationship exists when ``b``'s transport name appears in
         ``a.bridges``, or ``a``'s transport name appears in ``b.bridges``.
@@ -1048,6 +1111,8 @@ class Protocol_Gateway:
 
     def reconnect_upstream_bridge(self, transport_id: str) -> None:
         """
+        Scheduling path: N/A — not part of the read-scheduling loop; a bridge-triggered callback, independent of read_mode.
+
         Callback for bridge transports to trigger a reconnect of their primary scraper when stale data is detected.
         """
         target: transport_base | None = next(
@@ -1066,7 +1131,9 @@ class Protocol_Gateway:
         scraper: "transport_base",
         data: dict[str, int | float | str],
     ) -> None:
-        """Cache the bridge-bound data on the scraper transport.
+        """Scheduling path: All (Sequential, Concurrent, Interleaved) — called from ``_process_group_read`` and ``_forward_to_bridges``.
+
+        Cache the bridge-bound data on the scraper transport.
 
         Called immediately before every ``bridge.write_data(data, scraper)``
         call so ``scraper._last_known_data`` always reflects the most recent
@@ -1084,7 +1151,9 @@ class Protocol_Gateway:
         scraper._values_ready_event.clear()
 
     def get_transport(self, transport_name: str) -> "transport_base | None":
-        """Return the transport instance with the given fully-qualified name.
+        """Scheduling path: N/A — not part of the read-scheduling loop; used by the web server, independent of read_mode.
+
+        Return the transport instance with the given fully-qualified name.
 
         ``transport_name`` must include the ``transport.`` prefix as it appears
         in config.cfg (e.g. ``'transport.eg4_ll_s_2'``).  Used by the web
@@ -1102,7 +1171,9 @@ class Protocol_Gateway:
     # init the variable request_upstream_reconnect in the bridge __init__.  If it goes true during stale
     # detection, reconnect routine triggers.
     def _wire_reconnect_hooks(self) -> None:
-        """Attach the gateway's ``reconnect_upstream_bridge`` callback to every bridge transport.
+        """Scheduling path: N/A — setup, runs once regardless of read_mode.
+
+        Attach the gateway's ``reconnect_upstream_bridge`` callback to every bridge transport.
 
         Iterates all transports and identifies those acting as bridges — i.e.
         other transports list them by name in their ``bridges`` attribute.  For
@@ -1129,6 +1200,10 @@ class Protocol_Gateway:
     """
     def _build_scrape_groups(self) -> list[ScrapeGroup]:
             """
+            Scheduling path: All (Sequential, Concurrent, Interleaved) — setup, runs
+            once regardless of read_mode; the resulting groups are what all three
+            paths schedule against.
+
             Groups scraper transports by scrape_target.
             Transports with no scrape_target (bridges) are excluded.
             Each unique scrape_target gets one ScrapeGroup. The primary is
@@ -1151,6 +1226,8 @@ class Protocol_Gateway:
 
     def _poll_interleaved_cycles(self) -> None:
             """
+            Scheduling path: Interleaved only.
+
             Route completed interleaved reads and retire cycles only after
             all worker futures have really finished.
             """
@@ -1213,6 +1290,8 @@ class Protocol_Gateway:
 
     def _process_transports_interleaved(self, transports: list[transport_base], now: float, ready_groups: list[ScrapeGroup],) -> None:
         """
+        Scheduling path: Interleaved only.
+
         Reads transports in parallel on the shared interleaved executor,
         consolidating multi-member ScrapeGroups into one physical read each.
 
@@ -1310,7 +1389,9 @@ class Protocol_Gateway:
             )
 
         def run_transport(state: TransportState) -> TransportState:
-            """Drain ``state.transport``'s read generator to completion and update ``state`` with the outcome.
+            """Scheduling path: Interleaved only.
+
+            Drain ``state.transport``'s read generator to completion and update ``state`` with the outcome.
 
             Runs ``read_group_data_iter(state.group.members)`` when ``state.group``
             is set (one consolidated physical read decoded into every member's
@@ -1399,7 +1480,9 @@ class Protocol_Gateway:
         member_data: dict[str, int | float | str],
         cycle_complete: bool,
     ) -> None:
-        """Writes member_data to every bridge configured on member.
+        """Scheduling path: Interleaved only.
+
+        Writes member_data to every bridge configured on member.
 
         Shared by both branches of _route_interleaved_state (consolidated
         group member and standalone transport) so the bridge lookup,
@@ -1430,7 +1513,9 @@ class Protocol_Gateway:
             bridge.write_data(member_data, member)
 
     def _route_interleaved_state(self, state: TransportState, now: float, ready_groups: list["ScrapeGroup"],) -> None:
-        """Forward one completed interleaved read to its bridge(s).
+        """Scheduling path: Interleaved only.
+
+        Forward one completed interleaved read to its bridge(s).
 
         Called by ``_poll_interleaved_cycles`` as each worker future resolves.
 
@@ -1510,7 +1595,9 @@ class Protocol_Gateway:
                     break
 
     def run(self) -> None:
-        """Start the main polling loop and block until the gateway is stopped.
+        """Scheduling path: All (Sequential, Concurrent, Interleaved) — this is the dispatcher that reads __read_mode and picks one.
+
+        Start the main polling loop and block until the gateway is stopped.
 
         On each tick, calls ``_poll_interleaved_cycles`` to service any
         in-flight interleaved futures, then identifies scrape groups whose
@@ -1584,7 +1671,9 @@ class Protocol_Gateway:
 
 
 def main(args=None) -> None:
-    """Entry point: parse CLI arguments, resolve the config path, and start the gateway and web server.
+    """Scheduling path: N/A — CLI entry point, runs once before any read_mode is dispatched.
+
+    Entry point: parse CLI arguments, resolve the config path, and start the gateway and web server.
 
     Accepts ``--config``/``-c <file>`` or a bare positional argument to name the
     config file; defaults to ``config.cfg``.  Resolves the path by walking up

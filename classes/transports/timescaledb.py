@@ -3227,7 +3227,7 @@ class RollupManager:
                 ]
 
                 # 2. Scan Phase: Detect if any bucket change exists across the whole stack
-                # 2. Scan Phase: Detect whether the stack is missing, mismatched, or already valid
+                #    Scan Phase: Detect whether the stack is missing, mismatched, or already valid
                 any_rebuild_needed: bool = False
                 any_missing_views: bool = False
 
@@ -4057,7 +4057,7 @@ class RollupManager:
         # Then per-protocol wide views
         try:
             with self.SessionFactory() as session:
-                rows = session.execute(
+                rows: Sequence[Row[Any]] = session.execute(
                     text("""
                         SELECT rollup_prefix
                         FROM protocol_registry
@@ -4528,7 +4528,7 @@ class RollupManager:
         """)
 
         try:
-            ghosts = session.execute(detect_sql).fetchall()
+            ghosts: Sequence[Row[Any]] = session.execute(detect_sql).fetchall()
 
             if not ghosts:
                 self._log.info("All background workers healthy.")
