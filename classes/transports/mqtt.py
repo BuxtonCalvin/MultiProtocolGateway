@@ -239,37 +239,49 @@ class mqtt(transport_base):
             self.client.subscribe(topic)
         self._log.info("Re-subscribed to %d write topic(s).", len(self._write_topics))
 
-    def _load_override_write_allowlist(self, from_transport: transport_base) -> set[str]:
+    def _load_writable_allowlist(self, from_transport: transport_base) -> set[str]:
         """
-        Load documented-name allowlist from holding and coil override CSVs.
+        Load documented-name allowlist from this transport's device-scoped writable CSV.
 
-        If no override files exist, return an empty set
+        If no writable file exists, return an empty set
         (no write topics allowed).
         """
         if from_transport.protocolSettings is None:
             return set()
 
+        # device_name, not protocol_name — write-enable selections are
+        # per-device (DeviceProtocolSelection.device_name), not per-protocol.
+        # Two transports sharing the same protocol_version (e.g. two 18KPV
+        # inverters) can have different write-enabled registers — only one
+        # of them might actually be wired up for remote control — and a
+        # protocol-scoped file couldn't represent that: every transport on
+        # that protocol would share the same file and therefore the same
+        # write-enabled set. Mirrors scanner.py's
+        # device_name = section.removeprefix("transport.") exactly, since
+        # that's the value DeviceProtocolSelection.device_name is populated
+        # with (transport_name is the full "transport.<n>" config section
+        # name; from_transport.device_name is a separate, human-readable
+        # display field from the "device_name" config key and is NOT this).
+        device_name: str = from_transport.transport_name.removeprefix("transport.")
         protocol_name: str = from_transport.protocolSettings.protocol
         allowlist: set[str] = set()
 
-        override_files: list[str] = [
-            f"{protocol_name}.holding_registry_map.override.csv",
-            f"{protocol_name}.coil_registry_map.override.csv",
-        ]
+        # Single combined file per device, holding and coil entries together
+        # — this is what config_writer.py's _write_writable_csv() actually
+        # writes (config/<device_name>.writable.csv) and what scanner.py's
+        # _load_writable_names() reads back on every re-scan.
 
-        for override_file in override_files:
-            override_path: str | None = (
-                from_transport.protocolSettings.find_protocol_file(
-                    override_file,
-                    "config",
-                )
+        writable_file: str = f"{device_name}.writable.csv"
+        writable_path: str | None = (
+            from_transport.protocolSettings.find_protocol_file(
+                writable_file,
+                "config",
             )
+        )
 
-            if not override_path:
-                continue
-
+        if writable_path:
             try:
-                with open(Path(override_path), newline="", encoding="utf-8") as f:
+                with open(Path(writable_path), newline="", encoding="utf-8") as f:
                     reader: csv.DictReader[str] = csv.DictReader(f)
 
                     for row in reader:
@@ -285,22 +297,26 @@ class mqtt(transport_base):
 
             except Exception as exc:
                 self._log.warning(
-                    "Unable to read override write allowlist '%s': %s",
-                    override_path,
+                    "Unable to read writable allowlist '%s': %s",
+                    writable_path,
                     exc,
                 )
 
         if not allowlist:
             self._log.warning(
-                "No holding or coil override write allowlists found for '%s'; "
-                "MQTT write topics disabled until write selections are made.",
+                "No writable allowlist found for device '%s' (protocol '%s'; "
+                "expected %s in the config directory); MQTT write topics "
+                "disabled until write selections are made and committed.",
+                device_name,
                 protocol_name,
+                writable_file,
             )
             return set()
 
         self._log.info(
-            "Loaded %d entries from holding/coil override write allowlists",
+            "Loaded %d entries from the '%s' writable allowlist",
             len(allowlist),
+            writable_path,
         )
 
         return allowlist
@@ -363,6 +379,19 @@ class mqtt(transport_base):
         if msg.topic in self._write_topics:
             entry: registry_map_entry = self._write_topics[msg.topic]
             self._emit_message(entry, msg.payload.decode("utf-8"))
+        else:
+            # Broker only delivers messages for topics we've subscribed to
+            # (no wildcard subscription exists in this class), so this
+            # should be unreachable in practice — but if it ever fires, it
+            # means a topic-string mismatch (trailing slash, case, a stale
+            # entry after init_bridge reset _write_topics) is silently
+            # eating a write. Better to log it than have it vanish again.
+            self._log.warning(
+                "MQTT message on '%s' received but not in _write_topics — "
+                "write ignored. This shouldn't happen without a wildcard "
+                "subscription; check for a topic-string mismatch.",
+                msg.topic,
+            )
 
     # ------------------------------------------------------------------
     # Bridge initialization
@@ -375,15 +404,16 @@ class mqtt(transport_base):
         if from_transport.write_enabled:
             # Reset per-transport so a second call (e.g. after reconnect) is clean
             self._write_topics = {}
-            write_allowlist: set[str] = self._load_override_write_allowlist(from_transport)
+            write_allowlist: set[str] = self._load_writable_allowlist(from_transport)
             if not write_allowlist:
                 self._log.info(
-                    "No holding override allowlist found for '%s'; MQTT write topics disabled until write selections are committed.",
+                    "No writable allowlist found for '%s'; MQTT write topics disabled until write selections are committed.",
                     from_transport.transport_name,
                 )
 
             # Subscribe to holding and coil register write topics
             registry_types: list[Registry_Type] = [Registry_Type.HOLDING, Registry_Type.COIL]
+            excluded_by_allowlist: list[str] = []
 
             for reg_type in registry_types:
                 for entry in from_transport.protocolSettings.get_registry_map(reg_type):
@@ -397,6 +427,27 @@ class mqtt(transport_base):
 
                         self._write_topics[topic] = entry
                         self.client.subscribe(topic)
+                    elif is_protocol_writable:
+                        # Protocol-level write_mode says this entry is writable,
+                        # but it's missing from the writable CSV's allowlist, so
+                        # no write topic gets subscribed for it at all — this is
+                        # the exact gap that made a "W"-checked variable silently
+                        # do nothing over MQTT with no error anywhere. Previously
+                        # un-logged; flagged here so the mismatch shows up the
+                        # moment init_bridge runs, not only when someone notices
+                        # a write isn't landing.
+                        excluded_by_allowlist.append(entry.variable_name)
+
+            if excluded_by_allowlist:
+                self._log.warning(
+                    "'%s': %d variable(s) are protocol-writable but excluded from "
+                    "MQTT write topics because they're missing from the "
+                    "writable CSV allowlist (check the 'documented name' column) — "
+                    "no write topic was subscribed for: %s",
+                    from_transport.transport_name,
+                    len(excluded_by_allowlist),
+                    sorted(excluded_by_allowlist),
+                )
 
             self._log.info(
                 "MQTT write topic allowlist for '%s': %d topic(s)",

@@ -87,7 +87,9 @@ class CustomConfigParser(ConfigParser):
 
     """
     def get(self, section, option, *args, **kwargs) -> str:
-        """Read a string value from the config, with alias support and comment stripping.
+        """Scheduling path: N/A — config parsing, used during setup regardless of read_mode.
+
+        Read a string value from the config, with alias support and comment stripping.
 
         ``option`` may be a single key name or a list of candidate names; when a
         list is given, each name is tried in order and the first match wins.
@@ -106,7 +108,9 @@ class CustomConfigParser(ConfigParser):
 
         # Helper to safely call the parent get method
         def safe_get(sect, opt) -> str | None:
-            """Call the parent ``ConfigParser.get`` and return ``None`` on any missing-key error."""
+            """Scheduling path: N/A — config parsing, used during setup regardless of read_mode.
+
+            Call the parent ``ConfigParser.get`` and return ``None`` on any missing-key error."""
             try:
                 return super(CustomConfigParser, self).get(sect, opt, *args, **kwargs)
             except (NoOptionError, NoSectionError):
@@ -143,7 +147,9 @@ class CustomConfigParser(ConfigParser):
         return value
     # because using get, None is not reachable, so removed and type checker is happy.
     def getint(self, section: str, option: str | list[str], *args: Any, **kwargs: Any ) -> int:
-        """Read a config value and return it as an ``int``.
+        """Scheduling path: N/A — config parsing, used during setup regardless of read_mode.
+
+        Read a config value and return it as an ``int``.
 
         Delegates to ``get``, inheriting alias-list and fallback support.
         Raises ``ValueError`` if the resolved string cannot be converted to an integer.
@@ -152,7 +158,9 @@ class CustomConfigParser(ConfigParser):
         return int(value)
 
     def getfloat(self, section: str, option: str | list[str], *args: Any, **kwargs: Any ) -> float:
-        """Read a config value and return it as a ``float``.
+        """Scheduling path: N/A — config parsing, used during setup regardless of read_mode.
+
+        Read a config value and return it as a ``float``.
 
         Delegates to ``get``, inheriting alias-list and fallback support.
         Raises ``ValueError`` if the resolved string cannot be converted to a float.
@@ -161,7 +169,9 @@ class CustomConfigParser(ConfigParser):
         return float(value)
 
     def getboolean(self, section: str, option: str | list[str], *args: Any, **kwargs: Any) -> bool:
-        """Read a config value and return it as a ``bool``.
+        """Scheduling path: N/A — config parsing, used during setup regardless of read_mode.
+
+        Read a config value and return it as a ``bool``.
 
         Delegates to ``get``, inheriting alias-list and fallback support.
         Accepts ``true/yes/on/1/enable/enabled`` as ``True`` and
@@ -190,6 +200,8 @@ class NetworkError(Enum):
 
 class ScrapeGroup:
     """
+    Scheduling path: All (Sequential, Concurrent, Interleaved).
+
     Represents a set of scraper transports that all read from the same
     physical device (same scrape_target) and can therefore share a single
     Modbus read cycle.
@@ -201,7 +213,9 @@ class ScrapeGroup:
     """
 
     def __init__(self, primary: transport_base) -> None:
-        """Initialise a single-member group with ``primary`` as the initial sole member.
+        """Scheduling path: All (Sequential, Concurrent, Interleaved).
+
+        Initialise a single-member group with ``primary`` as the initial sole member.
 
         ``primary`` will be promoted or replaced by a faster member if
         ``add_member`` is subsequently called with a transport whose
@@ -215,7 +229,9 @@ class ScrapeGroup:
         }
 
     def add_member(self, transport: transport_base) -> None:
-        """Add ``transport`` to this group and promote it to primary if it has the shortest read interval.
+        """Scheduling path: All (Sequential, Concurrent, Interleaved).
+
+        Add ``transport`` to this group and promote it to primary if it has the shortest read interval.
 
         A transport with a shorter ``read_interval`` drives more frequent scrapes,
         so it becomes the primary to ensure no member is starved.  Transports with
@@ -233,12 +249,16 @@ class ScrapeGroup:
 
     @property
     def scrape_interval(self) -> float:
-        """Fastest read_interval among all members — drives the scrape cadence."""
+        """Scheduling path: All (Sequential, Concurrent, Interleaved).
+
+        Fastest read_interval among all members — drives the scrape cadence."""
         intervals: list[float] = [m.read_interval for m in self.members if m.read_interval > 0]
         return min(intervals) if intervals else 0.0
 
     def members_due(self, now: float) -> list[transport_base]:
-        """Returns members whose own read_interval has elapsed since last forward."""
+        """Scheduling path: All (Sequential, Concurrent, Interleaved).
+
+        Returns members whose own read_interval has elapsed since last forward."""
         return [
             m for m in self.members
             if m.read_interval > 0
@@ -246,7 +266,9 @@ class ScrapeGroup:
         ]
 
     def mark_forwarded(self, transport: transport_base, now: float) -> None:
-        """Record ``now`` as the last time ``transport``'s data was forwarded to its bridges.
+        """Scheduling path: All (Sequential, Concurrent, Interleaved).
+
+        Record ``now`` as the last time ``transport``'s data was forwarded to its bridges.
 
         Used by ``members_due`` to determine when a member's ``read_interval``
         has elapsed and it is eligible to receive the next scrape result.
@@ -256,11 +278,26 @@ class ScrapeGroup:
 @dataclass
 class TransportState:
     """
+    Scheduling path: Interleaved only.
+
     Carries the result of one transport's interleaved read cycle.
     Created by _process_transports_interleaved, consumed by
     _route_interleaved_state.
+
+    group, when set, means this state represents ONE consolidated physical
+    read for an entire ScrapeGroup — transport is the group's primary,
+    and the read was done via transport.read_group_data_iter(group.members)
+    rather than transport.read_data_iter(). This is what makes interleaved
+    mode do one read per physical device even when several scraper
+    transports (e.g. a read-only scraper and a write-focused transport on
+    the same inverter) share it — mirroring the non-interleaved grouped
+    path's read-once-forward-to-each-member behavior instead of every
+    member independently re-reading the same hardware. When group is None,
+    transport was read standalone via read_data_iter() and get_partial_data()
+    on transport itself is the whole story.
     """
     transport: transport_base
+    group: "ScrapeGroup | None" = None
     completed_cleanly: bool = False
     error: Exception | None = None
 
@@ -268,6 +305,8 @@ class TransportState:
 @dataclass
 class InterleavedCycleState:
     """
+    Scheduling path: Interleaved only.
+
     Tracks one active interleaved cycle running on the shared executor.
     """
     cycle_done: threading.Event
@@ -288,7 +327,9 @@ class Protocol_Gateway:
 
     @classmethod
     def _setup_logging(cls, cfg: ConfigParser) -> None:
-        """Configure the root logger from the ``[logging]`` section of ``cfg``. Class-level no-op after first call.
+        """Scheduling path: N/A — setup, runs once regardless of read_mode.
+
+        Configure the root logger from the ``[logging]`` section of ``cfg``. Class-level no-op after first call.
 
         Reads ``level``, ``log_dir``, ``log_file``, ``rotation``, ``backup_count``,
         ``when``, ``interval``, and ``max_bytes`` from ``[logging]``, falling back
@@ -379,6 +420,8 @@ class Protocol_Gateway:
     @classmethod
     def _setup_messaging(cls, cfg: ConfigParser) -> None:
         """
+        Scheduling path: N/A — setup, runs once regardless of read_mode.
+
         Initialise the application-wide messaging subsystem.
 
         Reads the [messages] section of config.cfg and wires up every
@@ -393,7 +436,9 @@ class Protocol_Gateway:
 
     @staticmethod
     def _compact_thread_label(label: str, max_length: int = 80) -> str:
-        """Truncate ``label`` to ``max_length`` characters, appending ``...`` if truncated.
+        """Scheduling path: Concurrent, Interleaved (the two modes that use thread pools).
+
+        Truncate ``label`` to ``max_length`` characters, appending ``...`` if truncated.
 
         Keeps thread names visible in debugger thread lists and OS views within
         a predictable width.  Labels at or below ``max_length`` are returned unchanged.
@@ -404,7 +449,9 @@ class Protocol_Gateway:
 
     @staticmethod
     def _base_thread_name(thread_name: str) -> str:
-        """Return the stable base name of a worker thread by stripping any trailing ``[task]`` suffix.
+        """Scheduling path: Concurrent, Interleaved (the two modes that use thread pools).
+
+        Return the stable base name of a worker thread by stripping any trailing ``[task]`` suffix.
 
         Worker threads are temporarily renamed to ``BaseName [task_label]`` by
         ``_run_with_thread_task_name``.  This method reverses that so the
@@ -414,7 +461,9 @@ class Protocol_Gateway:
 
     @staticmethod
     def _display_transport_name(transport_name: str) -> str:
-        """Strip the ``transport.`` config-section prefix from ``transport_name`` for compact display.
+        """Scheduling path: Concurrent, Interleaved (the two modes that use thread pools).
+
+        Strip the ``transport.`` config-section prefix from ``transport_name`` for compact display.
 
         Config section names follow the pattern ``transport.<name>``.  Removing
         the prefix keeps thread labels and log messages short while still
@@ -423,7 +472,9 @@ class Protocol_Gateway:
         return transport_name.removeprefix("transport.")
 
     def _thread_task_label(self, read_mode: str, transport_names: list[str]) -> str:
-        """Build a compact, human-readable task label from a list of transport names.
+        """Scheduling path: Concurrent, Interleaved (the two modes that use thread pools).
+
+        Build a compact, human-readable task label from a list of transport names.
 
         Strips the ``transport.`` prefix from each name for brevity, joins them
         with commas, and truncates the result to the ``_compact_thread_label``
@@ -438,7 +489,9 @@ class Protocol_Gateway:
         return self._compact_thread_label(joined_names)
 
     def _run_with_thread_task_name(self, task_label: str, fn, *args, **kwargs):
-        """Execute ``fn(*args, **kwargs)`` on the current thread with a temporary task-specific name.
+        """Scheduling path: Concurrent, Interleaved (the two modes that use thread pools).
+
+        Execute ``fn(*args, **kwargs)`` on the current thread with a temporary task-specific name.
 
         Appends ``[task_label]`` to the current worker thread's base name before
         calling ``fn``, then restores the original base name in a ``finally``
@@ -458,7 +511,9 @@ class Protocol_Gateway:
     config_file : Path
 
     def __init__(self, config_file : str) -> None:
-        """Initialise the gateway: load config, set up logging and messaging, instantiate and connect all transports.
+        """Scheduling path: N/A — setup, runs once regardless of read_mode (this is what decides read_mode).
+
+        Initialise the gateway: load config, set up logging and messaging, instantiate and connect all transports.
 
         Resolves ``config_file`` relative to ``config/`` inside the project
         root, falling back to ``config/config.cfg`` if the requested file does
@@ -637,7 +692,9 @@ class Protocol_Gateway:
                 )
 
     def on_message( self, from_transport: transport_base, entry: registry_map_entry, data: int | float | str) -> None:
-        """Handle a single decoded register value and write it immediately to the paired bridge.
+        """Scheduling path: All (Sequential, Concurrent, Interleaved) — called from within any transport's decode path regardless of read_mode.
+
+        Handle a single decoded register value and write it immediately to the paired bridge.
 
         Called by a scraper transport as each register is decoded, before a full
         cycle is complete.  Walks ``__transports`` to find the first transport
@@ -655,6 +712,12 @@ class Protocol_Gateway:
 
     def _process_group_read(self, group: ScrapeGroup, now: float) -> None:
         """
+        Scheduling path: Sequential, Concurrent (called directly by ``run()`` in
+        sequential mode; called via ``_submit_concurrent_group_read`` in
+        concurrent mode). Not used by interleaved mode — see
+        ``_process_transports_interleaved``/``_route_interleaved_state`` for
+        the interleaved equivalent.
+
         Performs one scrape via the group primary and routes the results
         to each member's bridge(s) for members whose read_interval is due.
         The gateway only schedules and routes; transports own the read path.
@@ -668,6 +731,8 @@ class Protocol_Gateway:
             self.__log.debug(f"Scraping [{primary.scrape_target}] via '{primary.transport_name}'")
             full_data: dict[str, int | float | str] = primary.read_group_data(group.members)
             cycle_complete: bool = primary.cycle_is_complete_for_bridge()
+
+            self._log_group_read_diagnostics(group, full_data)
 
             if not full_data:
                 self.__log.warning(f"No data from [{primary.scrape_target}] - device may be unresponsive.")
@@ -732,13 +797,127 @@ class Protocol_Gateway:
                     self.__log.info(f"Primary '{primary.transport_name}' not connected, trying to connect...")
                     primary.connect()
 
+    def _log_group_read_diagnostics(
+        self,
+        group: ScrapeGroup,
+        full_data: dict[str, int | float | str],
+    ) -> None:
+        """
+        Scheduling path: Sequential, Concurrent (called only from
+        ``_process_group_read``). Interleaved mode's consolidated reads
+        aren't covered by this method — its per-member breakdown happens
+        inline in ``_route_interleaved_state`` instead.
+
+        Heavy, per-cycle DEBUG dump of exactly what a grouped read produced,
+        broken down member-by-member, so a "why isn't metric X showing up"
+        question can be answered by reading the log instead of re-deriving
+        the read/mask/decode pipeline from source every time.
+
+        Guarded by isEnabledFor(logging.DEBUG) since building these sets is
+        real work (full registry-map scans per member, per cycle) that
+        should cost nothing when DEBUG isn't enabled.
+
+        For each member this logs three distinct sets, which correspond to
+        three distinct places a metric can be lost:
+
+        * ``mask`` — what the member's variable_mask file asks for (or, with
+          no mask file, the member's own registry_map variable names). If a
+          name is missing here, it's a config problem (typo in the mask
+          file, or the name isn't spelled the way you think it is) — nothing
+          downstream is even going to try for it.
+        * ``requested`` — the subset of ``mask`` that is actually present in
+          member.protocolSettings.registry_map[registry_type] for *some*
+          registry_type. If a name is in ``mask`` but not ``requested``, the
+          mask/screen filtering at load time (protocol_settings.load__registry)
+          dropped it before it ever became a register range — check the
+          member's variable_screen file, and confirm send_input_register /
+          send_holding_register / send_coil_register / send_discrete_register
+          aren't quietly excluding the whole registry type for this member.
+        * ``decoded`` — the subset of ``requested`` that actually shows up in
+          ``full_data`` this cycle. If a name is in ``requested`` but not
+          ``decoded``, the register was asked for but never came back
+          decoded — that's a physical read problem (Modbus exception,
+          disabled range — see modbus_base's per-range DEBUG logging — or a
+          decode-time skip), not a configuration problem. This is the
+          "requested but never actually read" bucket most worth checking
+          first for a metric that's been missing since the mask was set up.
+
+        Names present in ``mask`` but absent from both ``requested`` and
+        ``decoded`` are logged explicitly as "never even requested" to make
+        that distinction impossible to miss.
+        """
+        if not self.__log.isEnabledFor(logging.DEBUG):
+            return
+
+        self.__log.debug(
+            f"Group [{group.primary.scrape_target}] read diagnostics — "
+            f"primary='{group.primary.transport_name}' "
+            f"members={[m.transport_name for m in group.members]} "
+            f"full_data ({len(full_data)} keys): {sorted(full_data.keys())}"
+        )
+
+        for member in group.members:
+            ps: protocol_settings | None = getattr(member, 'protocolSettings', None)
+
+            if ps is not None and ps.variable_mask:
+                mask: set[str] = set(ps.variable_mask)
+            else:
+                mask = {
+                    entry.variable_name
+                    for entries in getattr(member, 'registry_map', {}).values()
+                    for entry in entries
+                    if getattr(entry, 'variable_name', None)
+                }
+
+            requested: set[str] = {
+                entry.variable_name
+                for entries in getattr(member, 'registry_map', {}).values()
+                for entry in entries
+                if getattr(entry, 'variable_name', None) and entry.variable_name.lower() in mask
+            }
+
+            never_requested: set[str] = mask - requested
+            requested_not_decoded: set[str] = requested - full_data.keys()
+
+            send_flags: dict[str, bool] = {
+                "input":    getattr(member, 'send_input_register',    True),
+                "holding":  getattr(member, 'send_holding_register',  True),
+                "coil":     getattr(member, 'send_coil_register',     True),
+                "discrete": getattr(member, 'send_discrete_register', True),
+            }
+
+            self.__log.debug(
+                f"  member='{member.transport_name}' read_interval={member.read_interval} "
+                f"mask_file={getattr(ps, 'mask_file_name', None)!r} "
+                f"screen_file={getattr(ps, 'screen_file_name', None)!r} "
+                f"send_flags={send_flags} "
+                f"mask({len(mask)})={sorted(mask)}"
+            )
+            if never_requested:
+                self.__log.debug(
+                    f"  member='{member.transport_name}': in mask but NEVER REQUESTED "
+                    f"(not in this member's own registry_map for any registry_type — "
+                    f"check variable_screen_{member.transport_name}.txt and the "
+                    f"send_*_register flags above) "
+                    f"({len(never_requested)}): {sorted(never_requested)}"
+                )
+            if requested_not_decoded:
+                self.__log.debug(
+                    f"  member='{member.transport_name}': REQUESTED but not decoded this cycle "
+                    f"(register was in range but came back with no value — physical read/"
+                    f"decode issue, not a config issue; see modbus_base's per-range DEBUG log) "
+                    f"({len(requested_not_decoded)}): {sorted(requested_not_decoded)}"
+                )
+
     def _log_mask_diagnostics(
         self,
         member: "transport_base",
         full_data: dict[str, int | float | str],
         member_data: dict[str, int | float | str],
     ) -> None:
-        """Log mask-vs-data diagnostics for one member after filtering.
+        """Scheduling path: All (Sequential, Concurrent, Interleaved) — called from ``_process_group_read`` and ``_route_interleaved_state``.
+
+        Log mask-vs-data diagnostics for one member after filtering.
 
         Under the new paradigm both the variable mask and ``full_data`` use
         logical stem names (``_l``/``_h`` pairs have been merged upstream), so
@@ -815,7 +994,9 @@ class Protocol_Gateway:
             )
 
     def _filter_for_member(self, full_data: dict[str, int | float | str], member: transport_base) -> dict[str, int | float | str]:
-        """Filter ``full_data`` to only the metrics relevant to ``member``.
+        """Scheduling path: All (Sequential, Concurrent, Interleaved) — called from ``_process_group_read`` and ``_route_interleaved_state``.
+
+        Filter ``full_data`` to only the metrics relevant to ``member``.
 
         Resolution order
         ----------------
@@ -877,6 +1058,8 @@ class Protocol_Gateway:
 
     def _submit_concurrent_group_read(self, group: ScrapeGroup, now: float) -> None:
         """
+        Scheduling path: Concurrent only.
+
         Submit one group read to the persistent concurrent executor.
         Reuses worker threads between successful cycles and prevents duplicate
         submissions while a prior cycle for the same scrape target is still
@@ -914,7 +1097,9 @@ class Protocol_Gateway:
             self.__concurrent_futures[group_key] = future
 
     def _are_bridged(self, a: transport_base, b: transport_base) -> bool:
-        """Return ``True`` if transport ``a`` and ``b`` are linked as a bridge pair in either direction.
+        """Scheduling path: All (Sequential, Concurrent, Interleaved) — called from ``on_message``, independent of read_mode.
+
+        Return ``True`` if transport ``a`` and ``b`` are linked as a bridge pair in either direction.
 
         A bridge relationship exists when ``b``'s transport name appears in
         ``a.bridges``, or ``a``'s transport name appears in ``b.bridges``.
@@ -926,6 +1111,8 @@ class Protocol_Gateway:
 
     def reconnect_upstream_bridge(self, transport_id: str) -> None:
         """
+        Scheduling path: N/A — not part of the read-scheduling loop; a bridge-triggered callback, independent of read_mode.
+
         Callback for bridge transports to trigger a reconnect of their primary scraper when stale data is detected.
         """
         target: transport_base | None = next(
@@ -944,7 +1131,9 @@ class Protocol_Gateway:
         scraper: "transport_base",
         data: dict[str, int | float | str],
     ) -> None:
-        """Cache the bridge-bound data on the scraper transport.
+        """Scheduling path: All (Sequential, Concurrent, Interleaved) — called from ``_process_group_read`` and ``_forward_to_bridges``.
+
+        Cache the bridge-bound data on the scraper transport.
 
         Called immediately before every ``bridge.write_data(data, scraper)``
         call so ``scraper._last_known_data`` always reflects the most recent
@@ -962,7 +1151,9 @@ class Protocol_Gateway:
         scraper._values_ready_event.clear()
 
     def get_transport(self, transport_name: str) -> "transport_base | None":
-        """Return the transport instance with the given fully-qualified name.
+        """Scheduling path: N/A — not part of the read-scheduling loop; used by the web server, independent of read_mode.
+
+        Return the transport instance with the given fully-qualified name.
 
         ``transport_name`` must include the ``transport.`` prefix as it appears
         in config.cfg (e.g. ``'transport.eg4_ll_s_2'``).  Used by the web
@@ -980,7 +1171,9 @@ class Protocol_Gateway:
     # init the variable request_upstream_reconnect in the bridge __init__.  If it goes true during stale
     # detection, reconnect routine triggers.
     def _wire_reconnect_hooks(self) -> None:
-        """Attach the gateway's ``reconnect_upstream_bridge`` callback to every bridge transport.
+        """Scheduling path: N/A — setup, runs once regardless of read_mode.
+
+        Attach the gateway's ``reconnect_upstream_bridge`` callback to every bridge transport.
 
         Iterates all transports and identifies those acting as bridges — i.e.
         other transports list them by name in their ``bridges`` attribute.  For
@@ -1007,6 +1200,10 @@ class Protocol_Gateway:
     """
     def _build_scrape_groups(self) -> list[ScrapeGroup]:
             """
+            Scheduling path: All (Sequential, Concurrent, Interleaved) — setup, runs
+            once regardless of read_mode; the resulting groups are what all three
+            paths schedule against.
+
             Groups scraper transports by scrape_target.
             Transports with no scrape_target (bridges) are excluded.
             Each unique scrape_target gets one ScrapeGroup. The primary is
@@ -1029,6 +1226,8 @@ class Protocol_Gateway:
 
     def _poll_interleaved_cycles(self) -> None:
             """
+            Scheduling path: Interleaved only.
+
             Route completed interleaved reads and retire cycles only after
             all worker futures have really finished.
             """
@@ -1091,11 +1290,29 @@ class Protocol_Gateway:
 
     def _process_transports_interleaved(self, transports: list[transport_base], now: float, ready_groups: list[ScrapeGroup],) -> None:
         """
-        Reads all transports in parallel, each running its full generator
-        cycle independently on the shared interleaved executor.
+        Scheduling path: Interleaved only.
+
+        Reads transports in parallel on the shared interleaved executor,
+        consolidating multi-member ScrapeGroups into one physical read each.
 
         Transports on separate physical endpoints (different scrape_targets)
         run entirely in parallel with no cross-transport waiting.
+
+        A transport that is the sole member of its own group, or belongs to
+        no group at all, is read standalone via read_data_iter() — one task,
+        one transport, same as before.
+
+        A transport that shares a multi-member ScrapeGroup with at least one
+        other due transport is NOT read on its own. Instead, exactly one task
+        per such group is submitted, calling group.primary.read_group_data_iter
+        (group.members) — the same "read once via the primary, decode into
+        every member's own state" consolidation the non-interleaved grouped
+        path (read_group_data) already does. This is what interleaved mode's
+        second design goal (one physical read per piece of hardware, however
+        many scraper transports reference it, to avoid extra wear/collisions)
+        actually requires; reading every member independently defeats that
+        goal even though it happens to still produce correct-looking data for
+        whichever member does its own read successfully.
 
         Transports sharing a physical bus (same scrape_target) serialize
         their individual block reads automatically via _bus_lock inside
@@ -1139,10 +1356,47 @@ class Protocol_Gateway:
                 wire_key = transport.transport_name
             transport._bus_lock = bus_locks[wire_key]
 
-        def run_transport(state: TransportState) -> TransportState:
-            """Drain ``state.transport.read_data_iter()`` to completion and update ``state`` with the outcome.
+        # Partition this tick's due transports into consolidated group
+        # work-units vs standalone reads. A group only counts as a
+        # consolidation target here if it has more than one member — a
+        # "group" of one is just the primary, and read_group_data_iter would
+        # do nothing read_data_iter doesn't already do, so there's no reason
+        # to take the extra code path for it.
+        groups_to_read: list[ScrapeGroup] = []
+        seen_group_ids: set[int] = set()
+        standalone: list[transport_base] = []
+        for t in transports:
+            owning_group: ScrapeGroup | None = next(
+                (g for g in ready_groups if len(g.members) > 1 and t in g.members),
+                None,
+            )
+            if owning_group is None:
+                standalone.append(t)
+                continue
+            if id(owning_group) not in seen_group_ids:
+                seen_group_ids.add(id(owning_group))
+                groups_to_read.append(owning_group)
 
-            On success sets ``state.completed_cleanly = True``.  On exception,
+        states: list[TransportState] = (
+            [TransportState(transport=g.primary, group=g) for g in groups_to_read]
+            + [TransportState(transport=t) for t in standalone]
+        )
+        if groups_to_read:
+            self.__log.debug(
+                f"Interleaved tick: {len(groups_to_read)} consolidated group read(s) "
+                f"{[(g.primary.transport_name, [m.transport_name for m in g.members]) for g in groups_to_read]}, "
+                f"{len(standalone)} standalone: {[t.transport_name for t in standalone]}"
+            )
+
+        def run_transport(state: TransportState) -> TransportState:
+            """Scheduling path: Interleaved only.
+
+            Drain ``state.transport``'s read generator to completion and update ``state`` with the outcome.
+
+            Runs ``read_group_data_iter(state.group.members)`` when ``state.group``
+            is set (one consolidated physical read decoded into every member's
+            own partial data), otherwise the plain ``read_data_iter()``.  On
+            success sets ``state.completed_cleanly = True``.  On exception,
             records the error, marks the cycle incomplete on the transport, and
             clears ``_bus_lock`` so the lock is not held after failure.
             """
@@ -1168,8 +1422,12 @@ class Protocol_Gateway:
                         )
                         return state
 
-                for _ in state.transport.read_data_iter():
-                    pass
+                if state.group is not None:
+                    for _ in state.transport.read_group_data_iter(state.group.members):
+                        pass
+                else:
+                    for _ in state.transport.read_data_iter():
+                        pass
                 state.completed_cleanly = True
             except Exception as exc:
                 state.error = exc
@@ -1180,7 +1438,6 @@ class Protocol_Gateway:
                 state.transport._bus_lock = None
             return state
 
-        states: list[TransportState] = [TransportState(transport=transport) for transport in transports]
         overall_timeout: float = max(
             (state.transport.interleaved_cycle_timeout() for state in states),
             default=60.0,
@@ -1217,94 +1474,130 @@ class Protocol_Gateway:
                 ready_groups=ready_groups,
             )
 
+    def _forward_to_bridges(
+        self,
+        member: transport_base,
+        member_data: dict[str, int | float | str],
+        cycle_complete: bool,
+    ) -> None:
+        """Scheduling path: Interleaved only.
+
+        Writes member_data to every bridge configured on member.
+
+        Shared by both branches of _route_interleaved_state (consolidated
+        group member and standalone transport) so the bridge lookup,
+        write_requires_complete_cycle gating, and logging stay identical
+        regardless of which read path produced member_data.
+        """
+        for bridge_name in member.bridges:
+            bridge: transport_base | None = next(
+                (t for t in self.__transports if t.transport_name == bridge_name),
+                None,
+            )
+            if bridge is None:
+                self.__log.warning(f"Bridge '{bridge_name}' not found for '{member.transport_name}'.")
+                continue
+            if (
+                getattr(bridge, 'write_requires_complete_cycle', False)
+                and not cycle_complete
+            ):
+                self.__log.warning(f"Skipping '{bridge_name}' for '{member.transport_name}' - cycle incomplete.")
+                continue
+            self.__log.debug(
+                f"Writing to bridge {bridge_name} for member {member.transport_name} "
+                f"device_identifier={member.device_identifier} "
+                f"keys=[{', '.join(repr(k) for k in list(member_data.keys())[:3])}"
+                f"{', ...' if len(member_data) > 3 else ''}]"
+            )
+            self._snapshot_scraper_data(member, member_data)
+            bridge.write_data(member_data, member)
+
     def _route_interleaved_state(self, state: TransportState, now: float, ready_groups: list["ScrapeGroup"],) -> None:
-        """Forward a completed interleaved transport's data to its bridges without waiting for sibling transports.
+        """Scheduling path: Interleaved only.
+
+        Forward one completed interleaved read to its bridge(s).
 
         Called by ``_poll_interleaved_cycles`` as each worker future resolves.
-        Retrieves the decoded metrics via ``get_partial_data`` and routes them
-        as follows:
 
-        - If the transport is the primary of a ``ScrapeGroup`` in ``ready_groups``,
-          iterates the group's due members, filters the full data set to each
-          member's variable mask via ``_filter_for_member``, and calls
-          ``write_data`` on each member's configured bridges.  Bridges that
-          require a complete cycle (``write_requires_complete_cycle``) are skipped
-          when the cycle is only partial.  Each forwarded member is stamped via
-          ``mark_forwarded``.
-        - If the transport belongs to no group (standalone scraper), its data is
-          written directly to its own bridges subject to the same cycle-completeness
-          check.
+        state.group set (consolidated group read): state.transport (the
+        group's primary) just ran ONE physical read via
+        read_group_data_iter(), which decoded every member's own data into
+        that member's own get_partial_data() (see transport_base.
+        read_group_data_iter — it updates member._partial_info per member,
+        not just the primary's). So each due member is filtered and
+        forwarded against ITS OWN data here — never the primary's reused
+        wholesale — which is what makes a metric that only exists on a
+        non-primary member's mask (e.g. a write-focused transport's own
+        holding-register setpoints the primary never reads at all) match
+        correctly instead of being reported "unmatched" forever regardless
+        of whether that member's own read actually succeeded.
+
+        state.group is None (standalone read): state.transport ran its own
+        read_data_iter() with nothing to consolidate; filter and forward its
+        own data the same way.
+
+        cycle_complete is read from state.transport (the primary, for a
+        consolidated read) and reused for every member's bridge-write
+        gating, mirroring _process_group_read's non-interleaved behavior —
+        the group shares one physical read, so it shares one completeness
+        verdict.
         """
         transport: transport_base = state.transport
-        data: dict[str, int | float | str] = transport.get_partial_data()
         cycle_complete: bool = transport.cycle_is_complete_for_bridge()
 
-        if not data:
-            self.__log.warning(f"'{transport.transport_name}' produced no data this cycle.")
-            return
-
-        self.__log.debug(
-            f"'{transport.transport_name}' completed "
-            f"({'complete' if cycle_complete else 'partial'}) "
-            f"with {len(data)} metrics."
-        )
-
-        group_by_primary: dict[str, ScrapeGroup] = {
-            g.primary.transport_name: g for g in ready_groups
-        }
-
-        group: ScrapeGroup | None = group_by_primary.get(transport.transport_name)
-        if group is not None:
-            due_members: list[transport_base] = group.members_due(now)
-            self.__log.debug(f"Group members due for '{transport.transport_name}': {[m.transport_name for m in due_members]}")
+        if state.group is not None:
+            due_members: list[transport_base] = state.group.members_due(now)
+            self.__log.debug(
+                f"Group [{transport.scrape_target}] consolidated read via "
+                f"'{transport.transport_name}' "
+                f"({'complete' if cycle_complete else 'partial'}) - "
+                f"due members: {[m.transport_name for m in due_members]}"
+            )
             for member in due_members:
-                member_data: dict[str, int | float | str] = self._filter_for_member(data, member)
-                self._log_mask_diagnostics(member, data, member_data)
-
+                member_own_data: dict[str, int | float | str] = member.get_partial_data()
+                if not member_own_data:
+                    self.__log.warning(f"'{member.transport_name}' produced no data this cycle.")
+                    continue
+                member_data: dict[str, int | float | str] = self._filter_for_member(member_own_data, member)
+                self._log_mask_diagnostics(member, member_own_data, member_data)
                 if not member_data:
                     continue
-                for bridge_name in member.bridges:
-                    bridge: transport_base | None = next(
-                        (t for t in self.__transports if t.transport_name == bridge_name),
-                        None,
-                    )
-                    if bridge is None:
-                        self.__log.warning(f"Bridge '{bridge_name}' not found for '{member.transport_name}'.")
-                        continue
-                    if (
-                        getattr(bridge, 'write_requires_complete_cycle', False)
-                        and not cycle_complete
-                    ):
-                        self.__log.warning(f"Skipping '{bridge_name}' for '{member.transport_name}' - cycle incomplete.")
-                        continue
-                    self.__log.debug(
-                        f"Writing to bridge {bridge_name} for member {member.transport_name} "
-                        f"device_identifier={member.device_identifier} "
-                        f"keys=[{', '.join(repr(k) for k in list(member_data.keys())[:3])}"
-                        f"{', ...' if len(member_data) > 3 else ''}]"
-                    )
-                    self._snapshot_scraper_data(member, member_data)
-                    bridge.write_data(member_data, member)
-                group.mark_forwarded(member, now)
+                self._forward_to_bridges(member, member_data, cycle_complete)
+                state.group.mark_forwarded(member, now)
         else:
-            for bridge_name in transport.bridges:
-                bridge = next(
-                    (t for t in self.__transports if t.transport_name == bridge_name),
-                    None,
-                )
-                if bridge is None:
-                    continue
-                if (
-                    getattr(bridge, 'write_requires_complete_cycle', False)
-                    and not cycle_complete
-                ):
-                    self.__log.warning(f"Skipping '{bridge_name}' for '{transport.transport_name}' - cycle incomplete.")
-                    continue
-                self._snapshot_scraper_data(transport, data)
-                bridge.write_data(data, transport)
+            data: dict[str, int | float | str] = transport.get_partial_data()
+            if not data:
+                self.__log.warning(f"'{transport.transport_name}' produced no data this cycle.")
+                return
+
+            self.__log.debug(
+                f"'{transport.transport_name}' completed "
+                f"({'complete' if cycle_complete else 'partial'}) "
+                f"with {len(data)} metrics."
+            )
+
+            member_data = self._filter_for_member(data, transport)
+            self._log_mask_diagnostics(transport, data, member_data)
+
+            if not member_data:
+                return
+
+            self._forward_to_bridges(transport, member_data, cycle_complete)
+
+            # transport wasn't part of a consolidated group read this cycle,
+            # but it may still nominally belong to a group (a solo-member
+            # group, or a group where none of its siblings happened to be
+            # due) — update its own forward timestamp either way so
+            # members_due() reflects it was just serviced.
+            for g in ready_groups:
+                if transport in g.members:
+                    g.mark_forwarded(transport, now)
+                    break
 
     def run(self) -> None:
-        """Start the main polling loop and block until the gateway is stopped.
+        """Scheduling path: All (Sequential, Concurrent, Interleaved) — this is the dispatcher that reads __read_mode and picks one.
+
+        Start the main polling loop and block until the gateway is stopped.
 
         On each tick, calls ``_poll_interleaved_cycles`` to service any
         in-flight interleaved futures, then identifies scrape groups whose
@@ -1378,7 +1671,9 @@ class Protocol_Gateway:
 
 
 def main(args=None) -> None:
-    """Entry point: parse CLI arguments, resolve the config path, and start the gateway and web server.
+    """Scheduling path: N/A — CLI entry point, runs once before any read_mode is dispatched.
+
+    Entry point: parse CLI arguments, resolve the config path, and start the gateway and web server.
 
     Accepts ``--config``/``-c <file>`` or a bare positional argument to name the
     config file; defaults to ``config.cfg``.  Resolves the path by walking up

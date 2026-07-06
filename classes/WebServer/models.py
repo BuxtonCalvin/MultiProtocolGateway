@@ -146,7 +146,7 @@ class ProtocolRegister(Base):
     One row per register entry per protocol CSV file.
 
     write_mode_protocol — the R/RW/RD/WO value from the CSV (never changed by UI)
-    user_write_enabled  — toggled by user in the UI (fed into .override.csv on commit)
+    user_write_enabled  — toggled by user in the UI (fed into .writable.csv on commit)
     mask_enabled        — drives the variable_mask_*.txt file on commit
     screen_enabled      — drives the variable_screen_*.txt file on commit
     is_dirty            — any of the three toggles differs from what is on disk

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 from classes.WebServer.diff_engine import (
@@ -85,7 +86,7 @@ def test_build_diff_uses_mocked_database_rows() -> None:
     db = MagicMock()
     db.query.side_effect = [QueryStub([dirty_setting, orphan]), QueryStub([dirty_protocol])]
 
-    result = build_diff(db)
+    result: DiffResult = build_diff(db)
 
     assert [d.change_type for d in result.settings] == ["modified", "orphan"]
     assert result.protocols[0].field == "user_write_enabled"
@@ -122,8 +123,8 @@ def test_device_service_delete_orphan_commits_only_for_orphans() -> None:
 
 def test_backup_service_rollback_restores_file_and_records_backup(tmp_path: Path) -> None:
     """Mocks config backup storage: rollback copies a backup over config and records a pre-rollback backup."""
-    config = tmp_path / "config.cfg"
-    backup = tmp_path / "backup.cfg"
+    config: Path = tmp_path / "config.cfg"
+    backup: Path = tmp_path / "backup.cfg"
     config.write_text("current", encoding="utf-8")
     backup.write_text("previous", encoding="utf-8")
     db = MagicMock()
@@ -153,7 +154,7 @@ def test_get_transport_library_shapes_scanner_output(mock_scan: MagicMock, tmp_p
         "mqtt": {"classification": "bridge", "keys": {"host": "", "port": ""}},
         "modbus_tcp": {"classification": "scraper", "keys": {"host": "", "protocol_version": ""}},
     }
-    result = device_service.get_transport_library(tmp_path)
+    result: list[dict[str, Any]] = device_service.get_transport_library(tmp_path)
     assert [row["name"] for row in result] == ["modbus_tcp", "mqtt"]
     assert result[0]["key_count"] == 2
 
@@ -189,7 +190,7 @@ def test_scanner_classifies_transport_from_transport_type_attribute(tmp_path: Pa
 
 def test_scanner_treats_missing_transport_type_as_base_class(tmp_path: Path) -> None:
     """Edge case: modules without a transport_type attribute are base classes, regardless of comments."""
-    transports_dir = tmp_path / "transports"
+    transports_dir: Path = tmp_path / "transports"
     transports_dir.mkdir()
     (transports_dir / "helper.py").write_text(
         "# scraper misleading old comment\n"

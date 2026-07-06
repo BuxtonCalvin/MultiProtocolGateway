@@ -37,9 +37,8 @@ import logging
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, List, Tuple
+from typing import Any, List
 
-from sqlalchemy.engine.row import Row
 from sqlalchemy.orm import Session
 
 from .database import refresh_app_state, session_scope
@@ -882,43 +881,47 @@ def _load_filter_names(path: Path) -> set[str]:
     return names
 
 
-def _load_override_names(
-    protocols_dir: Path,
-    protocol_name: str,
+def _load_writable_names(
+    device_name: str,
     config_dir: Path | None = None,
 ) -> set[str]:
     """
-    Load write-enabled register names from the override CSV.
-    Checks config_dir first (user override location), falls back to protocols_dir.
-    This matches the JSON override lookup pattern so overrides survive updates.
+    Load write-enabled register names from the device's writable CSV.
+
+    Keyed by device_name, not protocol_name — write-enable selections are
+    per-device (DeviceProtocolSelection.device_name), so two devices sharing
+    the same protocol can have different write-enabled registers (e.g. only
+    one of a pair of identical inverters wired up for remote control). A
+    protocol-scoped file couldn't represent that at all, since every device
+    on that protocol would share the same file and therefore the same
+    write-enabled set.
+
+    Only checks config_dir (where commit_all writes it via
+    config_writer._write_writable_csv) — unlike the old protocol-scoped
+    version, there's no protocols_dir fallback here, since protocols_dir is
+    organized by protocol name, not device name, so a per-device file has no
+    sensible home there.
+
     """
-    # Check config_dir first (where commit writes overrides)
-    override_path: Path | None = None
-    if config_dir is not None:
-        candidate: Path = config_dir / f"{protocol_name}.override.csv"
-        if candidate.exists():
-            override_path = candidate
-            _log.debug(f"Loading override from config_dir: {override_path}")
-
-    # Fall back to protocols_dir search
-    if override_path is None:
-        for candidate in protocols_dir.rglob(f"{protocol_name}.override.csv"):
-            override_path = candidate
-            break
-
-    if override_path is None or not override_path.exists():
+    if config_dir is None:
         return set()
+
+    writable_path: Path = config_dir / f"{device_name}.writable.csv"
+    if not writable_path.exists():
+        return set()
+
+    _log.debug(f"Loading writable names from config_dir: {writable_path}")
 
     names: set[str] = set()
     try:
-        with open(override_path, newline="", encoding="utf-8", errors="replace") as f:
+        with open(writable_path, newline="", encoding="utf-8", errors="replace") as f:
             reader: csv.DictReader[str] = csv.DictReader(f)
             for row in reader:
                 value: str = (row.get("documented name") or row.get("variable_name") or "").strip()
                 if value:
                     names.add(value.lower().replace(" ", "_"))
     except Exception as exc:
-        _log.warning(f"Could not read override file {override_path}: {exc}")
+        _log.warning(f"Could not read writable-names file {writable_path}: {exc}")
     return names
 
 
@@ -978,7 +981,6 @@ def _sync_device_protocol_selections(
     db: Session,
     config_data: dict[str, dict[str, str]],
     project_root: Path,
-    protocols_dir: Path,
 ) -> None:
     config_dir: Path = project_root / "config"
 
@@ -1000,14 +1002,18 @@ def _sync_device_protocol_selections(
         write_names: set[str] = set()
         device_write_enabled: bool = keys.get("write_enabled", "false").strip().lower() == "true"
         if device_write_enabled:
-            protocol_names: List[Row[Tuple[str]]] = (
-                db.query(ProtocolRegister.protocol_name)
-                .filter(ProtocolRegister.protocol_name.like(f"{protocol_version}%"))
-                .distinct()
-                .all()
-            )
-            for (protocol_name,) in protocol_names:
-                write_names |= _load_override_names(protocols_dir, protocol_name, config_dir=config_dir)
+            # Keyed by device_name, not protocol_version — write-enable is a
+            # per-device decision (DeviceProtocolSelection.device_name), not a
+            # per-protocol one. Two inverters on the same protocol can (and
+            # often should) have different write selections, e.g. only one of
+            # a pair of identical inverters actually wired up for remote
+            # control. A single {protocol_version}.writable.csv shared by
+            # every device on that protocol couldn't represent that at all —
+            # it used to loop over every protocol_name matching this
+            # protocol_version and union their (protocol-scoped) writable
+            # files together, which meant every device sharing a protocol
+            # necessarily shared the same write-enabled set too.
+            write_names = _load_writable_names(device_name, config_dir=config_dir)
 
         protocol_rows: List[ProtocolRegister] = (
             db.query(ProtocolRegister)
@@ -1190,7 +1196,6 @@ class Scanner:
                 db,
                 config_data,
                 self.project_root,
-                self.protocols_dir,
             )
 
             # Flush all pending INSERTs/UPDATEs in one shot.

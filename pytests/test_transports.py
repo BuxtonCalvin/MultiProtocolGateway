@@ -264,7 +264,7 @@ def test_mqtt_init_bridge_subscribes_only_allowlisted_holding_write_topics(dummy
     out.discovery_enabled = False
     out._log = MagicMock()
     out._write_topics = {}
-    out._load_override_write_allowlist = MagicMock(return_value={"charge_limit"})
+    out._load_writable_allowlist = MagicMock(return_value={"charge_limit"})
     source = transport_base(dummy_settings(name="transport.src", device_serial_number="SN1"))
     source.write_enabled = True
     writable = registry_map_entry(
@@ -293,7 +293,7 @@ def test_mqtt_init_bridge_subscribes_allowlisted_coil_write_topics(dummy_setting
     out.discovery_enabled = False
     out._log = MagicMock()
     out._write_topics = {}
-    out._load_override_write_allowlist = MagicMock(return_value={"grid_charge_enable"})
+    out._load_writable_allowlist = MagicMock(return_value={"grid_charge_enable"})
     source = transport_base(dummy_settings(name="transport.src", device_serial_number="SN1"))
     source.write_enabled = True
     coil_entry = registry_map_entry(
@@ -319,7 +319,7 @@ def test_mqtt_init_bridge_coil_topic_not_in_allowlist_not_subscribed(dummy_setti
     out.discovery_enabled = False
     out._log = MagicMock()
     out._write_topics = {}
-    out._load_override_write_allowlist = MagicMock(return_value=set())  # empty allowlist
+    out._load_writable_allowlist = MagicMock(return_value=set())  # empty allowlist
     source = transport_base(dummy_settings(name="transport.src", device_serial_number="SN1"))
     source.write_enabled = True
     coil_entry = registry_map_entry(
