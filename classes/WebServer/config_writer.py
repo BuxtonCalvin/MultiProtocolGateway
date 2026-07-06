@@ -22,7 +22,7 @@ When the user clicks "COMMIT ALL CHANGES" this module:
   1. Archives the current config.cfg to a timestamped backup
   2. Rebuilds config.cfg from scratch using active settings rows
   3. Writes variable_mask_*.txt and variable_screen_*.txt files
-  4. Writes *.override.csv files for user_write_enabled changes
+  4. Writes *.writable.csv files (one per device) for user_write_enabled changes
   5. Resets all is_dirty flags and updates AppState.last_commit_at
 """
 
@@ -202,25 +202,40 @@ def _write_mask_screen_files(
     return written
 
 
-def _write_override_csv(db: Session, protocols_dir: Path, config_dir: Path) -> int:
+def _write_writable_csv(db: Session, protocols_dir: Path, config_dir: Path) -> int:
     """
-    For each protocol with user_write_enabled changes, write/update the
-    <protocol_name>.override.csv in the config_dir.
+    For each device with user_write_enabled changes, write/update the
+    <device_name>.writable.csv in the config_dir.
 
-    Storing overrides in config_dir (not protocols_dir) means they survive
+    This is a per-device write-enable allowlist gating which protocol-writable
+    variables get an MQTT write topic, driven entirely by the "W" checkbox
+    (DeviceProtocolSelection.user_write_enabled) — reusing "override" for both
+    made the two easy to confuse despite sharing no directory, filename
+    pattern, writer, or reader.
+
+    One file per DEVICE, <device_name>.writable.csv. Write-enable selections are inherently
+    per-device (DeviceProtocolSelection.device_name), so two devices sharing
+    the same protocol can (and often should) have different write-enabled
+    registers — e.g. only one of a pair of identical inverters is actually
+    wired up for remote control. A protocol-scoped file couldn't represent
+    that: every device on that protocol would share the same file and
+    therefore the same write-enabled set, regardless of what each device's
+    own "W" checkboxes actually said.
+
+    Storing these in config_dir (not protocols_dir) means they survive
     software updates and are accessible via a Docker volume mount on config/.
 
-    The override file contains only rows where user_write_enabled=True and
+    The writable file contains only rows where user_write_enabled=True and
     the protocol allows writing (write_mode_protocol in RW/W/WO).
-    Setting user_write_enabled=False removes a row from the override file.
+    Setting user_write_enabled=False removes a row from the writable file.
 
-    Returns count of override files written.
+    Returns count of writable files written.
     """
     config_dir.mkdir(parents=True, exist_ok=True)
-    protocol_names: list[Any] = [
+    device_names: list[Any] = [
         row[0]
         for row in (
-            db.query(DeviceProtocolSelection.protocol_name)
+            db.query(DeviceProtocolSelection.device_name)
             .filter(DeviceProtocolSelection.registry_type.in_(["holding", "coil"]))
             .distinct()
             .all()
@@ -228,28 +243,38 @@ def _write_override_csv(db: Session, protocols_dir: Path, config_dir: Path) -> i
     ]
 
     written = 0
-    for protocol_name in protocol_names:
-        # Find the CSV file
-        csv_path: Path | None = _find_protocol_csv(protocols_dir, protocol_name)
-        if not csv_path:
-            _log.warning(f"Cannot find CSV for protocol '{protocol_name}' — override not written")
+    for device_name in device_names:
+        # Which protocol(s) this device's selections reference — used only to
+        # confirm the underlying CSV(s) still exist, so a missing/renamed
+        # protocol file surfaces as a warning here instead of silently
+        # writing a writable file with no protocol behind it.
+        protocol_names_for_device: list[Any] = [
+            row[0]
+            for row in (
+                db.query(DeviceProtocolSelection.protocol_name)
+                .filter(
+                    DeviceProtocolSelection.device_name == device_name,
+                    DeviceProtocolSelection.registry_type.in_(["holding", "coil"]),
+                )
+                .distinct()
+                .all()
+            )
+        ]
+        if not any(_find_protocol_csv(protocols_dir, p) for p in protocol_names_for_device):
+            _log.warning(
+                f"Cannot find a protocol CSV for any of {protocol_names_for_device} "
+                f"used by device '{device_name}' — writable file not written"
+            )
             continue
 
-        override_path: Path = config_dir / f"{protocol_name}.override.csv"
+        writable_path: Path = config_dir / f"{device_name}.writable.csv"
 
-        # Load existing override entries (so we don't lose unrelated overrides)
-        existing_overrides: dict[str, dict[str, str]] = {}
-        if override_path.exists():
-            try:
-                with open(override_path, newline="", encoding="utf-8") as f:
-                    reader: csv.DictReader[str] = csv.DictReader(f)
-                    for r in reader:
-                        key: str | Any = r.get("documented name", r.get("variable_name", ""))
-                        if key:
-                            existing_overrides[key] = r
-            except Exception as exc:
-                _log.warning(f"Could not read existing override file {override_path}: {exc}")
-
+        # Note: previously this loaded the existing writable file into a dict
+        # before immediately clear()-ing and rebuilding it from the DB query
+        # below — the load was completely discarded and never fed into the
+        # rebuilt result. Removed rather than fixed, since the DB is already
+        # authoritative here and there was nothing from the on-disk file this
+        # function needed to preserve.
         selected_rows: List[ProtocolRegister] = (
             db.query(ProtocolRegister)
             .join(
@@ -259,36 +284,36 @@ def _write_override_csv(db: Session, protocols_dir: Path, config_dir: Path) -> i
                 (DeviceProtocolSelection.register_address == ProtocolRegister.register_address),
             )
             .filter(
-                ProtocolRegister.protocol_name == protocol_name,
+                DeviceProtocolSelection.device_name == device_name,
                 ProtocolRegister.registry_type.in_(["holding", "coil"]),
                 DeviceProtocolSelection.user_write_enabled == True,  # noqa: E712
             )
             .all()
         )
 
-        existing_overrides.clear()
+        writable_entries: dict[str, dict[str, str]] = {}
         for row in selected_rows:
             if row.is_writable_by_protocol:
                 key = row.documented_name or row.variable_name
-                existing_overrides[key] = {
+                writable_entries[key] = {
                     "documented name": row.documented_name,
                     "write": "W",
                 }
 
-        # Write override file
-        if existing_overrides:
-            with open(override_path, "w", newline="", encoding="utf-8") as f:
+        # Write writable file
+        if writable_entries:
+            with open(writable_path, "w", newline="", encoding="utf-8") as f:
                 writer: csv.DictWriter[str] = csv.DictWriter(
                     f, fieldnames=["documented name", "write"]
                 )
                 writer.writeheader()
-                for entry in existing_overrides.values():
+                for entry in writable_entries.values():
                     writer.writerow(entry)
-        elif override_path.exists():
-            override_path.unlink()  # Remove empty override file
+        elif writable_path.exists():
+            writable_path.unlink()  # Remove empty writable file
 
         written += 1
-        _log.info(f"Override CSV updated: {override_path}")
+        _log.info(f"Writable CSV updated: {writable_path}")
 
     return written
 
@@ -430,9 +455,13 @@ def commit_all(db: Session, config_path: Path, project_root: Path, protocols_dir
     result["mask_files_written"] = mask_screen["mask"]
     result["screen_files_written"] = mask_screen["screen"]
 
-    # 4. Override CSVs — saved to config_dir so they survive updates and Docker mounts
+    # 4. Writable CSVs — saved to config_dir so they survive updates and Docker mounts.
+    # Result key kept as "override_files_written" (not renamed to match the new
+    # .writable.csv filename) since it's part of the JSON response the commit
+    # button's frontend code reads — renaming it here without knowing what
+    # reads it there risks a silent breakage this change didn't need to cause.
     _config_dir: Path = config_dir or config_path.parent
-    result["override_files_written"] = _write_override_csv(db, protocols_dir, _config_dir)
+    result["override_files_written"] = _write_writable_csv(db, protocols_dir, _config_dir)
 
     # 5. Protocol CSVs
     result["protocol_csvs_written"] = _write_protocol_csvs(db, protocols_dir)
