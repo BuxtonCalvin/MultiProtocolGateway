@@ -26,8 +26,8 @@ import random
 import threading
 import time
 import warnings
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal
 
 import paho.mqtt.packettypes
 import paho.mqtt.properties
@@ -72,7 +72,10 @@ class mqtt(transport_base):
 
         self.port = settings.getint("port", fallback=self.port)
         self.base_topic = settings.get("base_topic", fallback=self.base_topic).rstrip("/")
-        self.error_topic = settings.get("error_topic", fallback=self.error_topic).rstrip("/")
+        # Was .rstrip("/") only — the default "/error" has a leading slash
+        # too, which needs stripping for this to compose cleanly as a plain
+        # topic segment below (base_topic/error_topic, no accidental "//").
+        self.error_topic = settings.get("error_topic", fallback=self.error_topic).strip("/")
         self.discovery_topic = settings.get("discovery_topic", fallback=self.discovery_topic)
         self.discovery_enabled = strtobool(settings.get("discovery_enabled", self.discovery_enabled))
         self.json = strtobool(settings.get("json", self.json))
@@ -89,11 +92,34 @@ class mqtt(transport_base):
         self.input_register_prefix = settings.get("input_register_prefix", fallback="")
         self.coil_register_prefix = settings.get("coil_register_prefix", fallback="")
         self.discrete_register_prefix = settings.get("discrete_register_prefix", fallback="")
+        # These four were previously parsed and stored but never referenced
+        # anywhere else in this class — dead config. Wired up here into a
+        # single lookup used by write_data() to optionally namespace
+        # telemetry topics by registry type (e.g. separating coil/discrete
+        # booleans from holding/input numeric values in the topic tree).
+        # Empty by default for all four, which reproduces the exact
+        # previous (flat, unprefixed) topic shape — this is opt-in, not a
+        # breaking change for existing deployments.
+        self._registry_type_prefix: dict[Registry_Type, str] = {
+            Registry_Type.HOLDING: self.holding_register_prefix,
+            Registry_Type.INPUT: self.input_register_prefix,
+            Registry_Type.COIL: self.coil_register_prefix,
+            Registry_Type.DISCRETE: self.discrete_register_prefix,
+        }
 
         # Instance-level state — never class-level to avoid shared-dict bugs across instances
         self._first_connection: bool = True
         self._reconnect_thread: threading.Thread | None = None
         self._write_topics: dict[str, registry_map_entry] = {}
+        # Populated in write_data() the first time each device's telemetry
+        # is published; consumed by exit_handler() to mark every actually-
+        # seen device offline on clean shutdown (see exit_handler's docstring
+        # for why this replaced a single hardcoded, usually-wrong topic).
+        self._known_device_identifiers: set[str] = set()
+        # variable_name -> Registry_Type, per bridged scraper transport_name.
+        # Built in init_bridge, consumed by write_data() to resolve which
+        # per-registry-type prefix (if any) applies to a given metric.
+        self._registry_type_by_name: dict[str, dict[str, Registry_Type]] = {}
 
         username: str = settings.get("username", fallback="")
         password: str = settings.get("password", fallback="")
@@ -112,6 +138,28 @@ class mqtt(transport_base):
         self.client.on_connect = self.on_connect
         self.client.on_message = self.client_on_message
         self.client.on_disconnect = self.on_disconnect
+
+        # Bridge-level connectivity status, distinct from the existing
+        # per-device `.../availability` topics (see write_data()). This one
+        # answers "is the MQTT bridge's own broker connection up" and is
+        # backed by a real Last Will and Testament, so an ungraceful crash
+        # (killed process, power loss, segfault) is reflected automatically
+        # by the broker — no periodic republish or clean-exit handler
+        # required for correctness. It deliberately does NOT try to be a
+        # per-device signal: at __init__ time (and even at connect() time,
+        # which must happen before any device is known — see connect())
+        # nothing here yet knows which scraper transport(s), if any, will
+        # end up bridged to this instance via init_bridge(), and a single
+        # paho client only supports one Last Will. Per-device data
+        # freshness is a different question from broker connectivity and
+        # keeps using the periodic-republish mechanism it always has.
+        self._bridge_status_topic: str = f"{self.base_topic}/bridge_status"
+        self.client.will_set(
+            self._bridge_status_topic,
+            payload="offline",
+            qos=1,
+            retain=True,
+        )
 
         self.mqtt_properties = paho.mqtt.properties.Properties(paho.mqtt.packettypes.PacketTypes.PUBLISH)
         self.mqtt_properties.MessageExpiryInterval = 30  # in seconds
@@ -199,10 +247,22 @@ class mqtt(transport_base):
         """Publish offline availability and cleanly shut down the paho loop on exit."""
         self._log.warning("MQTT Exiting...")
         if self.client is not None:
-            self.client.publish(
-                self.base_topic + "/" + self.device_identifier + "/availability",
-                "offline",
-            )
+            # Previously published "offline" to
+            # {base_topic}/{self.device_identifier}/availability — this
+            # transport's OWN device_identifier, which for a bridge like
+            # this is typically blank (nothing in [transport.mqtt] usually
+            # sets device_serial_number). write_data() publishes "online"
+            # per bridged SCRAPER's own device_identifier instead, so the
+            # clean-exit "offline" was landing on a different topic than
+            # any "online" message ever did. Fixed by tracking every device
+            # this instance has actually published availability for, and
+            # marking each of them offline here.
+            for device_identifier in self._known_device_identifiers:
+                self.client.publish(
+                    f"{self.base_topic}/{device_identifier}/availability",
+                    "offline",
+                )
+            self.client.publish(self._bridge_status_topic, "offline", qos=1, retain=True)
             # Give the final publish a moment to flush before the loop stops
             time.sleep(0.5)
             self.client.loop_stop()
@@ -220,6 +280,8 @@ class mqtt(transport_base):
         """Called when the client receives a CONNACK response from the server."""
         self._log.info("Connected with result code %s", str(reason_code))
         self.connected = True
+        if self.client is not None:
+            self.client.publish(self._bridge_status_topic, "online", qos=1, retain=True)
         # Re-subscribe to all write topics so they survive a reconnect
         self._resubscribe_write_topics()
 
@@ -269,8 +331,22 @@ class mqtt(transport_base):
         # Single combined file per device, holding and coil entries together
         # — this is what config_writer.py's _write_writable_csv() actually
         # writes (config/<device_name>.writable.csv) and what scanner.py's
-        # _load_writable_names() reads back on every re-scan.
-
+        # _load_writable_names() reads back on every re-scan. Named
+        # "writable" rather than "override" deliberately — protocol_settings.py
+        # has its own, unrelated ".override.csv" sidecar convention (per
+        # registry-type file, living next to the source CSV in protocols_dir,
+        # patching individual CSV row fields at load time); reusing "override"
+        # for this file too made the two easy to confuse despite sharing no
+        # directory, filename pattern, writer, or reader. This also used to
+        # look for two separate per-registry-type, PROTOCOL-scoped filenames
+        # (<protocol_name>.holding_registry_map.override.csv /
+        # .coil_registry_map.override.csv) that nothing in the codebase has
+        # ever written — meaning no commit through the web UI could update
+        # what this method found, regardless of what was staged in the DB.
+        # It was then briefly protocol-scoped (<protocol_name>.writable.csv),
+        # which fixed the filename mismatch but still meant every device on
+        # a shared protocol was forced to have identical write selections —
+        # now fixed by scoping to device_name instead.
         writable_file: str = f"{device_name}.writable.csv"
         writable_path: str | None = (
             from_transport.protocolSettings.find_protocol_file(
@@ -341,8 +417,11 @@ class mqtt(transport_base):
         self.connected = self.client.is_connected()
 
         self._log.info(f"write data from [{from_transport.transport_name}] to mqtt transport {data}")
+        self._known_device_identifiers.add(from_transport.device_identifier)
         # Publish availability every loop — required because HA doesn't disconnect
-        # cleanly on restart (HA bug), so we can't rely on LWT alone.
+        # cleanly on restart (HA bug), so we can't rely on LWT alone for this
+        # per-device signal (see _bridge_status_topic in __init__ for the
+        # connectivity-level signal that *is* LWT-backed).
         info: MQTTMessageInfo = self.client.publish(
             f"{self.base_topic}/{from_transport.device_identifier}/availability",
             "online",
@@ -364,13 +443,48 @@ class mqtt(transport_base):
                 properties=self.mqtt_properties,
             )
         else:
+            # Optional per-registry-type topic segment (see
+            # _registry_type_prefix / _registry_type_by_name in __init__ and
+            # init_bridge) — empty/unset by default, which reproduces the
+            # exact flat topic shape this always had.
+            names_by_type: dict[str, Registry_Type] = self._registry_type_by_name.get(
+                from_transport.transport_name, {}
+            )
             for entry, val in data.items():
                 if isinstance(val, float) and self.max_precision >= 0:
                     val = round(val, self.max_precision)
-                self.client.publish(
-                    str(self.base_topic + "/" + from_transport.device_identifier + "/" + entry).lower(),
-                    str(val),
-                )
+                registry_type: Registry_Type | None = names_by_type.get(entry)
+                prefix: str = self._registry_type_prefix.get(registry_type, "") if registry_type else ""
+                topic_parts: list[str] = [self.base_topic, from_transport.device_identifier]
+                if prefix:
+                    topic_parts.append(prefix)
+                topic_parts.append(entry)
+                self.client.publish(str("/".join(topic_parts)).lower(), str(val))
+
+    def _publish_error(self, context: str, message: str) -> None:
+        """
+        Scheduling path: N/A — error reporting, independent of read_mode.
+
+        Publish a structured error report to error_topic, if connected.
+
+        error_topic was previously parsed from config and never used
+        anywhere — this is its first real consumer. Best-effort only: the
+        publish itself is wrapped so a failure while *reporting* an error
+        can't cascade into a second, noisier failure, and this is a no-op
+        entirely when disconnected (there's nowhere to publish to, and the
+        disconnected case is already covered by _bridge_status_topic's LWT).
+        """
+        if self.client is None or not self.connected:
+            return
+        payload: str = json.dumps({
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "context": context,
+            "message": message,
+        })
+        try:
+            self.client.publish(f"{self.base_topic}/{self.error_topic}", payload, qos=0, retain=False)
+        except Exception as exc:
+            self._log.debug(f"Failed to publish to error_topic (non-fatal): {exc}")
 
     def client_on_message(self, client, userdata, msg) -> None:
         """Callback for PUBLISH messages received from the broker."""
@@ -378,7 +492,21 @@ class mqtt(transport_base):
 
         if msg.topic in self._write_topics:
             entry: registry_map_entry = self._write_topics[msg.topic]
-            self._emit_message(entry, msg.payload.decode("utf-8"))
+            try:
+                self._emit_message(entry, msg.payload.decode("utf-8"))
+            except Exception as exc:
+                # Previously unhandled: an exception here (bad payload, a
+                # type coercion failure downstream, etc.) would propagate up
+                # into paho's own callback thread, where it's swallowed by
+                # paho's internal handling and logged (if at all) somewhere
+                # this application never sees or reacts to. Caught here so
+                # it's both logged clearly and, for anyone monitoring
+                # error_topic, actionable without needing application logs.
+                self._log.error(f"Failed to process write command on '{msg.topic}': {exc}")
+                self._publish_error(
+                    "write_command",
+                    f"Failed to process write on '{msg.topic}': {exc}",
+                )
         else:
             # Broker only delivers messages for topics we've subscribed to
             # (no wildcard subscription exists in this class), so this
@@ -401,6 +529,22 @@ class mqtt(transport_base):
         if self.client is None or from_transport.protocolSettings is None:
             return
 
+        # Build the variable_name -> Registry_Type lookup used by
+        # write_data() for optional per-registry-type telemetry prefixes
+        # (see _registry_type_prefix in __init__). Done for every bridged
+        # transport, not just write-enabled ones — prefixing telemetry
+        # topics is unrelated to whether this transport can be written to.
+        registry_type_by_name: dict[str, Registry_Type] = {}
+        for reg_type in (
+            Registry_Type.HOLDING,
+            Registry_Type.INPUT,
+            Registry_Type.COIL,
+            Registry_Type.DISCRETE,
+        ):
+            for entry in from_transport.protocolSettings.get_registry_map(reg_type):
+                registry_type_by_name[entry.variable_name.lower().replace(" ", "_")] = reg_type
+        self._registry_type_by_name[from_transport.transport_name] = registry_type_by_name
+
         if from_transport.write_enabled:
             # Reset per-transport so a second call (e.g. after reconnect) is clean
             self._write_topics = {}
@@ -411,7 +555,30 @@ class mqtt(transport_base):
                     from_transport.transport_name,
                 )
 
-            # Subscribe to holding and coil register write topics
+            # Subscribe to holding and coil register write topics.
+            #
+            # Topic shape: {base_topic}/{device_identifier}/{var_name}/write
+            # — i.e. exactly the read/telemetry topic for that variable
+            # (published in write_data(), below) with /write appended.
+            #
+            # Deliberately does NOT encode holding vs coil in the topic at
+            # all (previously .../write/{holding|coil}/{var_name}). That
+            # distinction was never actually needed by anything reading
+            # self._write_topics: the dict already maps the topic straight
+            # to the concrete registry_map_entry object built here, and
+            # client_on_message hands that entry to _emit_message()
+            # unchanged — nothing re-derives registry type from the topic
+            # string. Encoding it there just meant a write topic had to be
+            # hand-typed with a segment inserted in the middle rather than
+            # simply the existing read topic plus a suffix, which is exactly
+            # the awkwardness this was worth fixing given these topics are
+            # constructed by hand, outside the app, by whoever wants to
+            # trigger a write. Since variable names are no longer namespaced
+            # by registry type in the topic, a name collision between a
+            # holding entry and a coil entry (unusual, but not structurally
+            # impossible) would now overwrite one write topic with the
+            # other — guarded against below with a warning rather than a
+            # silent overwrite.
             registry_types: list[Registry_Type] = [Registry_Type.HOLDING, Registry_Type.COIL]
             excluded_by_allowlist: list[str] = []
 
@@ -422,8 +589,20 @@ class mqtt(transport_base):
 
                     if is_protocol_writable and entry_name in write_allowlist:
                         var_name: str = entry.variable_name.lower().replace(" ", "_")
-                        reg_prefix: Literal['coil'] | Literal['holding'] = "coil" if reg_type == Registry_Type.COIL else "holding"
-                        topic: str = f"{self.base_topic}/{from_transport.device_identifier}/write/{reg_prefix}/{var_name}"
+                        topic: str = f"{self.base_topic}/{from_transport.device_identifier}/{var_name}/write"
+
+                        existing_entry: registry_map_entry | None = self._write_topics.get(topic)
+                        if existing_entry is not None and existing_entry is not entry:
+                            self._log.warning(
+                                "'%s': write topic '%s' already maps to a different "
+                                "register (variable name collision between holding "
+                                "and coil entries) — keeping the first one seen, "
+                                "'%s' registered second is being ignored for writes.",
+                                from_transport.transport_name,
+                                topic,
+                                entry.variable_name,
+                            )
+                            continue
 
                         self._write_topics[topic] = entry
                         self.client.subscribe(topic)
@@ -433,7 +612,7 @@ class mqtt(transport_base):
                         # no write topic gets subscribed for it at all — this is
                         # the exact gap that made a "W"-checked variable silently
                         # do nothing over MQTT with no error anywhere. Previously
-                        # un-logged; flagged here so the mismatch shows up the
+                        # unlogged; flagged here so the mismatch shows up the
                         # moment init_bridge runs, not only when someone notices
                         # a write isn't landing.
                         excluded_by_allowlist.append(entry.variable_name)
