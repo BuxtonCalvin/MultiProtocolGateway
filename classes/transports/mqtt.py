@@ -88,18 +88,11 @@ class mqtt(transport_base):
         if not isinstance(self.reconnect_attempts, int) or self.reconnect_attempts < 0:  # minimum 0
             self.reconnect_attempts = 0
 
-        self.holding_register_prefix = settings.get("holding_register_prefix", fallback="")
-        self.input_register_prefix = settings.get("input_register_prefix", fallback="")
-        self.coil_register_prefix = settings.get("coil_register_prefix", fallback="")
-        self.discrete_register_prefix = settings.get("discrete_register_prefix", fallback="")
-        # These four were previously parsed and stored but never referenced
-        # anywhere else in this class — dead config. Wired up here into a
-        # single lookup used by write_data() to optionally namespace
-        # telemetry topics by registry type (e.g. separating coil/discrete
-        # booleans from holding/input numeric values in the topic tree).
-        # Empty by default for all four, which reproduces the exact
-        # previous (flat, unprefixed) topic shape — this is opt-in, not a
-        # breaking change for existing deployments.
+        self.holding_register_prefix = settings.get("holding_register_prefix", fallback="Holding")
+        self.input_register_prefix = settings.get("input_register_prefix", fallback="Input")
+        self.coil_register_prefix = settings.get("coil_register_prefix", fallback="Coil")
+        self.discrete_register_prefix = settings.get("discrete_register_prefix", fallback="Discrete")
+
         self._registry_type_prefix: dict[Registry_Type, str] = {
             Registry_Type.HOLDING: self.holding_register_prefix,
             Registry_Type.INPUT: self.input_register_prefix,
@@ -114,7 +107,7 @@ class mqtt(transport_base):
         # Populated in write_data() the first time each device's telemetry
         # is published; consumed by exit_handler() to mark every actually-
         # seen device offline on clean shutdown (see exit_handler's docstring
-        # for why this replaced a single hardcoded, usually-wrong topic).
+        # for why this replaced a single hardcoded topic).
         self._known_device_identifiers: set[str] = set()
         # variable_name -> Registry_Type, per bridged scraper transport_name.
         # Built in init_bridge, consumed by write_data() to resolve which
@@ -203,9 +196,9 @@ class mqtt(transport_base):
         """
         self._log.info("Disconnected from MQTT Broker — starting background reconnect.")
 
-        base_delay = self.reconnect_delay
-        max_delay = 600  # 10 minutes
-        attempt = 0
+        base_delay: int = self.reconnect_delay
+        max_delay: int = 600  # 10 minutes
+        attempt: int = 0
 
         try:
             while not self.connected:
@@ -318,35 +311,12 @@ class mqtt(transport_base):
         # of them might actually be wired up for remote control — and a
         # protocol-scoped file couldn't represent that: every transport on
         # that protocol would share the same file and therefore the same
-        # write-enabled set. Mirrors scanner.py's
-        # device_name = section.removeprefix("transport.") exactly, since
-        # that's the value DeviceProtocolSelection.device_name is populated
-        # with (transport_name is the full "transport.<n>" config section
-        # name; from_transport.device_name is a separate, human-readable
-        # display field from the "device_name" config key and is NOT this).
+        # write-enabled set.
         device_name: str = from_transport.transport_name.removeprefix("transport.")
         protocol_name: str = from_transport.protocolSettings.protocol
         allowlist: set[str] = set()
 
-        # Single combined file per device, holding and coil entries together
-        # — this is what config_writer.py's _write_writable_csv() actually
-        # writes (config/<device_name>.writable.csv) and what scanner.py's
-        # _load_writable_names() reads back on every re-scan. Named
-        # "writable" rather than "override" deliberately — protocol_settings.py
-        # has its own, unrelated ".override.csv" sidecar convention (per
-        # registry-type file, living next to the source CSV in protocols_dir,
-        # patching individual CSV row fields at load time); reusing "override"
-        # for this file too made the two easy to confuse despite sharing no
-        # directory, filename pattern, writer, or reader. This also used to
-        # look for two separate per-registry-type, PROTOCOL-scoped filenames
-        # (<protocol_name>.holding_registry_map.override.csv /
-        # .coil_registry_map.override.csv) that nothing in the codebase has
-        # ever written — meaning no commit through the web UI could update
-        # what this method found, regardless of what was staged in the DB.
-        # It was then briefly protocol-scoped (<protocol_name>.writable.csv),
-        # which fixed the filename mismatch but still meant every device on
-        # a shared protocol was forced to have identical write selections —
-        # now fixed by scoping to device_name instead.
+        # Single combined file per device, not per protocol — see the comment above about why this is device-scoped.
         writable_file: str = f"{device_name}.writable.csv"
         writable_path: str | None = (
             from_transport.protocolSettings.find_protocol_file(
@@ -561,24 +531,7 @@ class mqtt(transport_base):
             # — i.e. exactly the read/telemetry topic for that variable
             # (published in write_data(), below) with /write appended.
             #
-            # Deliberately does NOT encode holding vs coil in the topic at
-            # all (previously .../write/{holding|coil}/{var_name}). That
-            # distinction was never actually needed by anything reading
-            # self._write_topics: the dict already maps the topic straight
-            # to the concrete registry_map_entry object built here, and
-            # client_on_message hands that entry to _emit_message()
-            # unchanged — nothing re-derives registry type from the topic
-            # string. Encoding it there just meant a write topic had to be
-            # hand-typed with a segment inserted in the middle rather than
-            # simply the existing read topic plus a suffix, which is exactly
-            # the awkwardness this was worth fixing given these topics are
-            # constructed by hand, outside the app, by whoever wants to
-            # trigger a write. Since variable names are no longer namespaced
-            # by registry type in the topic, a name collision between a
-            # holding entry and a coil entry (unusual, but not structurally
-            # impossible) would now overwrite one write topic with the
-            # other — guarded against below with a warning rather than a
-            # silent overwrite.
+
             registry_types: list[Registry_Type] = [Registry_Type.HOLDING, Registry_Type.COIL]
             excluded_by_allowlist: list[str] = []
 
@@ -609,12 +562,7 @@ class mqtt(transport_base):
                     elif is_protocol_writable:
                         # Protocol-level write_mode says this entry is writable,
                         # but it's missing from the writable CSV's allowlist, so
-                        # no write topic gets subscribed for it at all — this is
-                        # the exact gap that made a "W"-checked variable silently
-                        # do nothing over MQTT with no error anywhere. Previously
-                        # unlogged; flagged here so the mismatch shows up the
-                        # moment init_bridge runs, not only when someone notices
-                        # a write isn't landing.
+                        # no write topic gets subscribed for it at all
                         excluded_by_allowlist.append(entry.variable_name)
 
             if excluded_by_allowlist:
