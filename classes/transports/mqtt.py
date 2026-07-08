@@ -250,12 +250,18 @@ class mqtt(transport_base):
             # any "online" message ever did. Fixed by tracking every device
             # this instance has actually published availability for, and
             # marking each of them offline here.
-            for device_identifier in self._known_device_identifiers:
+            #
+            # getattr rather than direct attribute access: tests in this
+            # codebase commonly construct via mqtt.__new__(mqtt), bypassing
+            # __init__ entirely.
+            for device_identifier in getattr(self, "_known_device_identifiers", set()):
                 self.client.publish(
                     f"{self.base_topic}/{device_identifier}/availability",
                     "offline",
                 )
-            self.client.publish(self._bridge_status_topic, "offline", qos=1, retain=True)
+            bridge_status_topic: str | None = getattr(self, "_bridge_status_topic", None)
+            if bridge_status_topic:
+                self.client.publish(bridge_status_topic, "offline", qos=1, retain=True)
             # Give the final publish a moment to flush before the loop stops
             time.sleep(0.5)
             self.client.loop_stop()
@@ -273,8 +279,9 @@ class mqtt(transport_base):
         """Called when the client receives a CONNACK response from the server."""
         self._log.info("Connected with result code %s", str(reason_code))
         self.connected = True
-        if self.client is not None:
-            self.client.publish(self._bridge_status_topic, "online", qos=1, retain=True)
+        bridge_status_topic: str | None = getattr(self, "_bridge_status_topic", None)
+        if self.client is not None and bridge_status_topic:
+            self.client.publish(bridge_status_topic, "online", qos=1, retain=True)
         # Re-subscribe to all write topics so they survive a reconnect
         self._resubscribe_write_topics()
 
@@ -387,6 +394,8 @@ class mqtt(transport_base):
         self.connected = self.client.is_connected()
 
         self._log.info(f"write data from [{from_transport.transport_name}] to mqtt transport {data}")
+        if not hasattr(self, "_known_device_identifiers"):
+            self._known_device_identifiers = set()
         self._known_device_identifiers.add(from_transport.device_identifier)
         # Publish availability every loop — required because HA doesn't disconnect
         # cleanly on restart (HA bug), so we can't rely on LWT alone for this
@@ -416,15 +425,18 @@ class mqtt(transport_base):
             # Optional per-registry-type topic segment (see
             # _registry_type_prefix / _registry_type_by_name in __init__ and
             # init_bridge) — empty/unset by default, which reproduces the
-            # exact flat topic shape this always had.
-            names_by_type: dict[str, Registry_Type] = self._registry_type_by_name.get(
-                from_transport.transport_name, {}
-            )
+            # exact flat topic shape this always had. getattr rather than
+            # direct attribute access since these are read-only here and
+            # tests in this codebase commonly construct via
+            # mqtt.__new__(mqtt), bypassing __init__ entirely.
+            all_names_by_type: dict[str, dict[str, Registry_Type]] = getattr(self, "_registry_type_by_name", {})
+            names_by_type: dict[str, Registry_Type] = all_names_by_type.get(from_transport.transport_name, {})
+            registry_type_prefix: dict[Registry_Type, str] = getattr(self, "_registry_type_prefix", {})
             for entry, val in data.items():
                 if isinstance(val, float) and self.max_precision >= 0:
                     val = round(val, self.max_precision)
                 registry_type: Registry_Type | None = names_by_type.get(entry)
-                prefix: str = self._registry_type_prefix.get(registry_type, "") if registry_type else ""
+                prefix: str = registry_type_prefix.get(registry_type, "") if registry_type else ""
                 topic_parts: list[str] = [self.base_topic, from_transport.device_identifier]
                 if prefix:
                     topic_parts.append(prefix)
@@ -504,6 +516,14 @@ class mqtt(transport_base):
         # (see _registry_type_prefix in __init__). Done for every bridged
         # transport, not just write-enabled ones — prefixing telemetry
         # topics is unrelated to whether this transport can be written to.
+        #
+        # Guarded with hasattr rather than assuming __init__ ran: tests in
+        # this codebase commonly construct via mqtt.__new__(mqtt) and set
+        # only the specific attributes under test, deliberately bypassing
+        # __init__ — same reason transport_base.read_group_data_iter
+        # guards member._partial_info the same way rather than assuming it.
+        if not hasattr(self, "_registry_type_by_name"):
+            self._registry_type_by_name = {}
         registry_type_by_name: dict[str, Registry_Type] = {}
         for reg_type in (
             Registry_Type.HOLDING,
