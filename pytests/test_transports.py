@@ -455,14 +455,14 @@ def test_serial_frame_transport_marker_parsing_and_raw_decode(dummy_settings) ->
     """Happy path: serial_frame_transport parses hex/literal markers and returns raw hex without a protocol map."""
     assert serial_frame_transport._parse_frame_marker("0x7E") == b"~"
     assert serial_frame_transport._parse_frame_marker("END") == b"END"
-    transport: serial_frame_transport = serial_frame_transport.__new__(serial_frame_transport)
+    transport = serial_frame_transport.__new__(serial_frame_transport)
     transport.protocolSettings = None
     assert transport._decode_frame(b"\x01\x02") == {"raw_frame": "0102"}
 
 
 def test_canbus_serial_number_scoring_and_cache_cleanup(dummy_settings) -> None:
     """Happy path and edge case: CAN serial-number heuristics score ASCII payloads and drop stale cache."""
-    instance: canbus = canbus.__new__(canbus)
+    instance = canbus.__new__(canbus)
     instance._SN_ASCII_RATIO = canbus._SN_ASCII_RATIO
     instance._SN_MIN_ALNUM = canbus._SN_MIN_ALNUM
     instance._log = MagicMock()

@@ -120,12 +120,18 @@ See [Availability](#availability) above for why these are two separate signals r
 {base_topic}/{device_identifier}/{variable_name}/write
 ```
 
-This is deliberately just the telemetry topic with `/write` appended — not a separate namespace requiring the registry type (`holding` vs `coil`) to be inserted into the middle of the path. That distinction is tracked internally (`self._write_topics` maps the full topic string straight to the underlying `registry_map_entry`, registry type included). The intent is that anyone setting up a write from outside the app — an MQTT client, Home Assistant automation, or a script — can take the read topic they already see for a metric and just add `/write`.
+or, when a registry-type prefix is configured for that variable's registry type (see [Telemetry Topics](#telemetry-topics) above):
 
 **Example:** to trigger `quick_charge_start_enable` on device `4066670074`, publish `1` to:
 
 ```text
 inverter_write/4066670074/quick_charge_start_enable/write
+```
+
+With `holding_register_prefix = holding` configured, the same command instead goes to:
+
+```text
+inverter_write/4066670074/holding/quick_charge_start_enable/write
 ```
 
 Only metrics that pass both gates below get a write topic subscribed at all — publishing to an unsubscribed topic is accepted by the broker but never reaches this module.
@@ -163,10 +169,16 @@ If a metric that should be writable doesn't respond to a publish, check the log 
 - `"No writable allowlist found for '<device>'..."` — the writable CSV doesn't exist yet for this device; commit write selections and restart.
 - `"'<device>': N variable(s) are protocol-writable but excluded from MQTT write topics because they're missing from the writable CSV allowlist..."` — names the specific variables that failed Gate 2 despite passing Gate 1.
 
-And when actually testing a write, check for:
+### Tracing a Write Command End-to-End
 
-- `"MQTT MSG: <topic> <payload>"` — logged unconditionally for every message this client receives, before any topic matching happens. If this line never appears for your topic, the message never reached this client at all (broker accepted the publish, but nothing here was subscribed to it) — almost always a stale/missing allowlist file or a process that hasn't been restarted since the file was created.
-- If that line *does* appear but nothing changes on the device, the message was received and routed correctly, and the problem is further downstream in the actual Modbus write (see the write-response logging added to `write_registers`/`write_coil` in `modbus_base.py`, which now logs explicitly whether the device confirmed or rejected the write).
+Every stage of a write command's journey is now tagged with the same `variable_name`, so a single `grep` for that name against the log shows the complete story in order:
+
+1. **`"MQTT MSG: <topic> <payload>"`** — logged unconditionally for *every* message this client receives, before any topic matching happens. If this line never appears for your topic, the message never reached this client at all (broker accepted the publish, but nothing here was subscribed to it) — almost always a stale/missing allowlist file, a process that hasn't been restarted since the file was created, or a topic built without the registry-type prefix your config actually requires (see [Write Topics](#write-topics) above).
+2. **`"Write command received: variable='<name>' topic='<topic>' payload='<payload>'"`** — confirms the topic matched a subscribed write topic and the command was handed off into the gateway's write path. If step 1 appears but this doesn't, the topic string wasn't found in `self._write_topics` — check for a trailing slash, casing, or (again) a missing/extra prefix segment.
+3. **`"WRITE: <old> => <new> ( <old_raw> => <new_raw> ) to Register <n>"`** (from `modbus_base.write_variable`) — confirms the value was decoded and a Modbus write was about to be dispatched. This one only reflects *intent*; it fires before the actual wire call.
+4. **`"write_registers to register <n> ('<name>') confirmed by device"`** or a matching failure line (from `modbus_base._check_write_response`) — the actual, authoritative answer to "did the inverter acknowledge this." Logged at INFO for a confirmed write, at ERROR for anything the device rejected (illegal address, illegal value, etc.) or that never got a response at all. If step 3 appears but this doesn't follow at all, the write call itself raised an exception before ever reaching the device — check the ERROR line just above it for the exception message.
+
+Steps 1–2 happen in `mqtt.py`; steps 3–4 happen in `modbus_base.py`, potentially interleaved in the raw log with unrelated read-cycle debug output from other transports running concurrently — grepping by variable name cuts through that interleaving cleanly since every line above includes it.
 
 ---
 
@@ -252,7 +264,7 @@ device_serial_number = 4066670074
 
 Documented here rather than silently left unmentioned, since accuracy matters more than the module looking more finished than it is:
 
-- **A same-name collision between a holding entry and a coil entry** on the same device (unusual, but not structurally impossible) would have the second one processed silently lose its write topic to the first, now that registry type is no longer part of the topic string. `init_bridge` logs a warning if this happens; it does not attempt to disambiguate further.
+- **A same-name collision between a holding entry and a coil entry** on the same device — see the note under [Write Topics](#write-topics) above.
 - **`error_topic` only covers write-command processing failures.** It cannot report connection-level problems (reconnect exhaustion, publish failures while disconnected) for the structural reason described in [Error Reporting](#error-reporting) above — those remain log-only, backed instead by `bridge_status`'s LWT for the connectivity case specifically.
 
 ---

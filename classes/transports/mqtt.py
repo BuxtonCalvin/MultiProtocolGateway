@@ -560,9 +560,19 @@ class mqtt(transport_base):
 
             # Subscribe to holding and coil register write topics.
             #
-            # Topic shape: {base_topic}/{device_identifier}/{var_name}/write
-            # — i.e. exactly the read/telemetry topic for that variable
-            # (published in write_data(), below) with /write appended.
+            # Topic shape: {base_topic}/{device_identifier}/{prefix}/{var_name}/write
+            # (prefix segment only present if holding_register_prefix /
+            # coil_register_prefix is configured — see _registry_type_prefix
+            # in __init__) — i.e. exactly the read/telemetry topic for that
+            # variable (published in write_data(), below) with /write
+            # appended. This must build the topic exactly the same way
+            # write_data() does, prefix included: the whole point of this
+            # topic shape is "take the read topic you already see and add
+            # /write" — if this used a different topic than write_data()
+            # actually publishes to, that promise would be broken for
+            # anyone who has a registry-type prefix configured, silently
+            # subscribing to a topic nobody would ever guess from what they
+            # see in an MQTT browser.
             #
 
             registry_types: list[Registry_Type] = [Registry_Type.HOLDING, Registry_Type.COIL]
@@ -575,7 +585,12 @@ class mqtt(transport_base):
 
                     if is_protocol_writable and entry_name in write_allowlist:
                         var_name: str = entry.variable_name.lower().replace(" ", "_")
-                        prefix: str = self._registry_type_prefix.get(reg_type, "")
+                        # getattr rather than direct attribute access: tests in
+                        # this codebase commonly construct via mqtt.__new__(mqtt),
+                        # bypassing __init__ entirely (same reasoning as the
+                        # _registry_type_by_name guard above).
+                        registry_type_prefix: dict[Registry_Type, str] = getattr(self, "_registry_type_prefix", {})
+                        prefix: str = registry_type_prefix.get(reg_type, "")
                         topic_parts: list[str] = [self.base_topic, from_transport.device_identifier]
                         if prefix:
                             topic_parts.append(prefix)
