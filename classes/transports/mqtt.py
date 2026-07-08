@@ -474,6 +474,19 @@ class mqtt(transport_base):
 
         if msg.topic in self._write_topics:
             entry: registry_map_entry = self._write_topics[msg.topic]
+            # Distinct from the generic "MQTT MSG" line above — this one is
+            # tagged by variable_name specifically so it lines up with the
+            # eventual device-confirmation log from
+            # modbus_base._check_write_response (also tagged by
+            # variable_name), letting a specific command be traced end to
+            # end with a single grep for its variable name, from receipt
+            # here through to whether the device actually acknowledged it.
+            self._log.info(
+                "Write command received: variable='%s' topic='%s' payload='%s'",
+                entry.variable_name,
+                msg.topic,
+                msg.payload.decode("utf-8"),
+            )
             try:
                 self._emit_message(entry, msg.payload.decode("utf-8"))
             except Exception as exc:
@@ -562,7 +575,12 @@ class mqtt(transport_base):
 
                     if is_protocol_writable and entry_name in write_allowlist:
                         var_name: str = entry.variable_name.lower().replace(" ", "_")
-                        topic: str = f"{self.base_topic}/{from_transport.device_identifier}/{var_name}/write"
+                        prefix: str = self._registry_type_prefix.get(reg_type, "")
+                        topic_parts: list[str] = [self.base_topic, from_transport.device_identifier]
+                        if prefix:
+                            topic_parts.append(prefix)
+                        topic_parts.append(var_name)
+                        topic: str = "/".join(topic_parts) + "/write"
 
                         existing_entry: registry_map_entry | None = self._write_topics.get(topic)
                         if existing_entry is not None and existing_entry is not entry:

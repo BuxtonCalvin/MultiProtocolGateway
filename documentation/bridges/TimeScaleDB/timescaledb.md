@@ -194,6 +194,7 @@ ORDER BY m_time ASC, device_info_id ASC
 ### 6.1 Images Used in the stack
 
 - **TimescaleDB HA:** `timescaledb-ha:pg18`  The Timescale DB Application
+     Note that currently this image is approximately 4.5 gb in size.
 - **Protocol Gateway:** `buxtoncalvin/multiprotocolgateway:latest` The MPG application/inverter scraper
 - **Grafana:** `grafana/grafana:latest`   The graphing application
 - **PostGres Admin:** `dpage/pgadmin4:latest` The database administration application
