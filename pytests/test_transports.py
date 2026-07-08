@@ -282,7 +282,7 @@ def test_mqtt_init_bridge_subscribes_only_allowlisted_holding_write_topics(dummy
 
     out.init_bridge(source)
 
-    out.client.subscribe.assert_called_once_with("base/sn1/write/holding/charge_limit")
+    out.client.subscribe.assert_called_once_with("base/sn1/charge_limit/write")
 
 
 def test_mqtt_init_bridge_subscribes_allowlisted_coil_write_topics(dummy_settings) -> None:
@@ -307,8 +307,8 @@ def test_mqtt_init_bridge_subscribes_allowlisted_coil_write_topics(dummy_setting
 
     out.init_bridge(source)
 
-    out.client.subscribe.assert_called_once_with("base/sn1/write/coil/grid_charge_enable")
-    assert "base/sn1/write/coil/grid_charge_enable" in out._write_topics
+    out.client.subscribe.assert_called_once_with("base/sn1/grid_charge_enable/write")
+    assert "base/sn1/grid_charge_enable/write" in out._write_topics
 
 
 def test_mqtt_init_bridge_coil_topic_not_in_allowlist_not_subscribed(dummy_settings) -> None:
@@ -455,14 +455,14 @@ def test_serial_frame_transport_marker_parsing_and_raw_decode(dummy_settings) ->
     """Happy path: serial_frame_transport parses hex/literal markers and returns raw hex without a protocol map."""
     assert serial_frame_transport._parse_frame_marker("0x7E") == b"~"
     assert serial_frame_transport._parse_frame_marker("END") == b"END"
-    transport = serial_frame_transport.__new__(serial_frame_transport)
+    transport: serial_frame_transport = serial_frame_transport.__new__(serial_frame_transport)
     transport.protocolSettings = None
     assert transport._decode_frame(b"\x01\x02") == {"raw_frame": "0102"}
 
 
 def test_canbus_serial_number_scoring_and_cache_cleanup(dummy_settings) -> None:
     """Happy path and edge case: CAN serial-number heuristics score ASCII payloads and drop stale cache."""
-    instance = canbus.__new__(canbus)
+    instance: canbus = canbus.__new__(canbus)
     instance._SN_ASCII_RATIO = canbus._SN_ASCII_RATIO
     instance._SN_MIN_ALNUM = canbus._SN_MIN_ALNUM
     instance._log = MagicMock()
