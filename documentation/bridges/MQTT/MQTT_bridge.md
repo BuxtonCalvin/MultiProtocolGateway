@@ -152,7 +152,7 @@ Defined in the protocol's registry CSV (e.g. `eg4_18kpv.holding_registry_map.csv
 
 Even if a register is hardware-capable of being written, nothing gets a write topic until a user explicitly enables it for **that specific device** via the "W" checkbox in the admin UI. This is intentionally scoped per-device rather than per-protocol: two inverters running the identical protocol can have different write selections — e.g. only one of a pair of otherwise-identical units is actually wired up for remote control.
 
-![Write](/MultiProtocolGateway/classes/WebServer/static/screenshots/device__scraper_write_generic.png)
+![Write]![Write](../../../classes/WebServer/static/screenshots/device__scraper_write_generic.png)
 
 This selection is committed to a per-device allowlist file:
 
