@@ -39,6 +39,8 @@ The module does **not** scrape data itself and does **not** decide on its own wh
 
 Telemetry flows down the left side every scrape cycle. Write commands flow up the right side only for the specific topics this module chose to subscribe to at startup — nothing is accepted on a wildcard basis.
 
+![MQTT Flow](MQTT-Flow.jpg)
+
 ---
 
 ## What the MQTT Module Does
@@ -150,6 +152,8 @@ Defined in the protocol's registry CSV (e.g. `eg4_18kpv.holding_registry_map.csv
 
 Even if a register is hardware-capable of being written, nothing gets a write topic until a user explicitly enables it for **that specific device** via the "W" checkbox in the admin UI. This is intentionally scoped per-device rather than per-protocol: two inverters running the identical protocol can have different write selections — e.g. only one of a pair of otherwise-identical units is actually wired up for remote control.
 
+![Write](/MultiProtocolGateway/classes/WebServer/static/screenshots/device__scraper_write_generic.png)
+
 This selection is committed to a per-device allowlist file:
 
 ```text
@@ -177,8 +181,6 @@ Every stage of a write command's journey is now tagged with the same `variable_n
 2. **`"Write command received: variable='<name>' topic='<topic>' payload='<payload>'"`** — confirms the topic matched a subscribed write topic and the command was handed off into the gateway's write path. If step 1 appears but this doesn't, the topic string wasn't found in `self._write_topics` — check for a trailing slash, casing, or (again) a missing/extra prefix segment.
 3. **`"WRITE: <old> => <new> ( <old_raw> => <new_raw> ) to Register <n>"`** (from `modbus_base.write_variable`) — confirms the value was decoded and a Modbus write was about to be dispatched. This one only reflects *intent*; it fires before the actual wire call.
 4. **`"write_registers to register <n> ('<name>') confirmed by device"`** or a matching failure line (from `modbus_base._check_write_response`) — the actual, authoritative answer to "did the inverter acknowledge this." Logged at INFO for a confirmed write, at ERROR for anything the device rejected (illegal address, illegal value, etc.) or that never got a response at all. If step 3 appears but this doesn't follow at all, the write call itself raised an exception before ever reaching the device — check the ERROR line just above it for the exception message.
-
-Steps 1–2 happen in `mqtt.py`; steps 3–4 happen in `modbus_base.py`, potentially interleaved in the raw log with unrelated read-cycle debug output from other transports running concurrently — grepping by variable name cuts through that interleaving cleanly since every line above includes it.
 
 ---
 
@@ -262,7 +264,7 @@ device_serial_number = 4066670074
 
 ## Known Limitations
 
-Documented here rather than silently left unmentioned, since accuracy matters more than the module looking more finished than it is:
+Documented here rather than silently left unmentioned:
 
 - **A same-name collision between a holding entry and a coil entry** on the same device — see the note under [Write Topics](#write-topics) above.
 - **`error_topic` only covers write-command processing failures.** It cannot report connection-level problems (reconnect exhaustion, publish failures while disconnected) for the structural reason described in [Error Reporting](#error-reporting) above — those remain log-only, backed instead by `bridge_status`'s LWT for the connectivity case specifically.
