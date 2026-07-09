@@ -17,7 +17,7 @@ This application was inspired by and built upon the excellent work by [@HotNoob]
 
 ## What MPG does
 
-MPG reads live register data from Modbus RTU/TCP, CAN bus, and proprietary serial protocols, then fans that data out to any combination of MQTT brokers, Timescale DB, InfluxDB, and JSON outputs — all managed through a built-in web administration UI.  It is planned to extend hardware reads to include REST apis as well as proprietary protocols that do not rely on serial data.
+MPG reads live register data from Modbus RTU/TCP, CAN bus, and proprietary serial protocols, then fans that data out to any combination of MQTT brokers, Timescale DB, InfluxDB, and JSON outputs — all managed through a built-in web administration UI.  Using the MQTT bridge, you can write back to your inverter allowing automation routines.  It is planned to extend hardware reads to include REST apis as well as proprietary protocols that do not rely on serial data.
 
 MPG is purpose-built for solar inverters, battery management systems (BMS), energy meters, and any device that speaks Modbus, but its protocol-map architecture means it can be adapted to virtually any register-based hardware.
 
@@ -45,8 +45,8 @@ MPG is purpose-built for solar inverters, battery management systems (BMS), ener
 
 | Capability | Details |
 | --- | --- |
-| **Input protocols** | Modbus RTU, Modbus TCP, Modbus TLS, Modbus UDP, CAN bus, PACE BMS serial, Pylon serial, EG4 LL-S RS-485 |
-| **Output transports** | MQTT, Timescale DB (PostgreSQL hypertable), InfluxDB, JSON file |
+| **Input protocols** (scrapers) | Modbus RTU, Modbus TCP, Modbus TLS, Modbus UDP, CAN bus, PACE BMS serial, Pylon serial, EG4 LL-S RS-485 |
+| **Output transports** (bridges) | MQTT, Timescale DB (PostgreSQL hypertable), InfluxDB, JSON file |
 | **Web UI** | Full browser-based configuration and live management on port **1717** |
 | **Protocol library** | 50+ pre-built device protocol maps; live register analysis tool to build new ones |
 | **Config management** | SQLite staging database; changes are previewed and committed — no raw file editing required |

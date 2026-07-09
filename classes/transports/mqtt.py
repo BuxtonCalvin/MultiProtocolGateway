@@ -26,8 +26,8 @@ import random
 import threading
 import time
 import warnings
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal
 
 import paho.mqtt.packettypes
 import paho.mqtt.properties
@@ -72,7 +72,10 @@ class mqtt(transport_base):
 
         self.port = settings.getint("port", fallback=self.port)
         self.base_topic = settings.get("base_topic", fallback=self.base_topic).rstrip("/")
-        self.error_topic = settings.get("error_topic", fallback=self.error_topic).rstrip("/")
+        # Was .rstrip("/") only — the default "/error" has a leading slash
+        # too, which needs stripping for this to compose cleanly as a plain
+        # topic segment below (base_topic/error_topic, no accidental "//").
+        self.error_topic = settings.get("error_topic", fallback=self.error_topic).strip("/")
         self.discovery_topic = settings.get("discovery_topic", fallback=self.discovery_topic)
         self.discovery_enabled = strtobool(settings.get("discovery_enabled", self.discovery_enabled))
         self.json = strtobool(settings.get("json", self.json))
@@ -85,15 +88,31 @@ class mqtt(transport_base):
         if not isinstance(self.reconnect_attempts, int) or self.reconnect_attempts < 0:  # minimum 0
             self.reconnect_attempts = 0
 
-        self.holding_register_prefix = settings.get("holding_register_prefix", fallback="")
-        self.input_register_prefix = settings.get("input_register_prefix", fallback="")
-        self.coil_register_prefix = settings.get("coil_register_prefix", fallback="")
-        self.discrete_register_prefix = settings.get("discrete_register_prefix", fallback="")
+        self.holding_register_prefix = settings.get("holding_register_prefix", fallback="Holding")
+        self.input_register_prefix = settings.get("input_register_prefix", fallback="Input")
+        self.coil_register_prefix = settings.get("coil_register_prefix", fallback="Coil")
+        self.discrete_register_prefix = settings.get("discrete_register_prefix", fallback="Discrete")
+
+        self._registry_type_prefix: dict[Registry_Type, str] = {
+            Registry_Type.HOLDING: self.holding_register_prefix,
+            Registry_Type.INPUT: self.input_register_prefix,
+            Registry_Type.COIL: self.coil_register_prefix,
+            Registry_Type.DISCRETE: self.discrete_register_prefix,
+        }
 
         # Instance-level state — never class-level to avoid shared-dict bugs across instances
         self._first_connection: bool = True
         self._reconnect_thread: threading.Thread | None = None
         self._write_topics: dict[str, registry_map_entry] = {}
+        # Populated in write_data() the first time each device's telemetry
+        # is published; consumed by exit_handler() to mark every actually-
+        # seen device offline on clean shutdown (see exit_handler's docstring
+        # for why this replaced a single hardcoded topic).
+        self._known_device_identifiers: set[str] = set()
+        # variable_name -> Registry_Type, per bridged scraper transport_name.
+        # Built in init_bridge, consumed by write_data() to resolve which
+        # per-registry-type prefix (if any) applies to a given metric.
+        self._registry_type_by_name: dict[str, dict[str, Registry_Type]] = {}
 
         username: str = settings.get("username", fallback="")
         password: str = settings.get("password", fallback="")
@@ -112,6 +131,28 @@ class mqtt(transport_base):
         self.client.on_connect = self.on_connect
         self.client.on_message = self.client_on_message
         self.client.on_disconnect = self.on_disconnect
+
+        # Bridge-level connectivity status, distinct from the existing
+        # per-device `.../availability` topics (see write_data()). This one
+        # answers "is the MQTT bridge's own broker connection up" and is
+        # backed by a real Last Will and Testament, so an ungraceful crash
+        # (killed process, power loss, segfault) is reflected automatically
+        # by the broker — no periodic republish or clean-exit handler
+        # required for correctness. It deliberately does NOT try to be a
+        # per-device signal: at __init__ time (and even at connect() time,
+        # which must happen before any device is known — see connect())
+        # nothing here yet knows which scraper transport(s), if any, will
+        # end up bridged to this instance via init_bridge(), and a single
+        # paho client only supports one Last Will. Per-device data
+        # freshness is a different question from broker connectivity and
+        # keeps using the periodic-republish mechanism it always has.
+        self._bridge_status_topic: str = f"{self.base_topic}/bridge_status"
+        self.client.will_set(
+            self._bridge_status_topic,
+            payload="offline",
+            qos=1,
+            retain=True,
+        )
 
         self.mqtt_properties = paho.mqtt.properties.Properties(paho.mqtt.packettypes.PacketTypes.PUBLISH)
         self.mqtt_properties.MessageExpiryInterval = 30  # in seconds
@@ -155,9 +196,9 @@ class mqtt(transport_base):
         """
         self._log.info("Disconnected from MQTT Broker — starting background reconnect.")
 
-        base_delay = self.reconnect_delay
-        max_delay = 600  # 10 minutes
-        attempt = 0
+        base_delay: int = self.reconnect_delay
+        max_delay: int = 600  # 10 minutes
+        attempt: int = 0
 
         try:
             while not self.connected:
@@ -199,10 +240,28 @@ class mqtt(transport_base):
         """Publish offline availability and cleanly shut down the paho loop on exit."""
         self._log.warning("MQTT Exiting...")
         if self.client is not None:
-            self.client.publish(
-                self.base_topic + "/" + self.device_identifier + "/availability",
-                "offline",
-            )
+            # Previously published "offline" to
+            # {base_topic}/{self.device_identifier}/availability — this
+            # transport's OWN device_identifier, which for a bridge like
+            # this is typically blank (nothing in [transport.mqtt] usually
+            # sets device_serial_number). write_data() publishes "online"
+            # per bridged SCRAPER's own device_identifier instead, so the
+            # clean-exit "offline" was landing on a different topic than
+            # any "online" message ever did. Fixed by tracking every device
+            # this instance has actually published availability for, and
+            # marking each of them offline here.
+            #
+            # getattr rather than direct attribute access: tests in this
+            # codebase commonly construct via mqtt.__new__(mqtt), bypassing
+            # __init__ entirely.
+            for device_identifier in getattr(self, "_known_device_identifiers", set()):
+                self.client.publish(
+                    f"{self.base_topic}/{device_identifier}/availability",
+                    "offline",
+                )
+            bridge_status_topic: str | None = getattr(self, "_bridge_status_topic", None)
+            if bridge_status_topic:
+                self.client.publish(bridge_status_topic, "offline", qos=1, retain=True)
             # Give the final publish a moment to flush before the loop stops
             time.sleep(0.5)
             self.client.loop_stop()
@@ -220,6 +279,9 @@ class mqtt(transport_base):
         """Called when the client receives a CONNACK response from the server."""
         self._log.info("Connected with result code %s", str(reason_code))
         self.connected = True
+        bridge_status_topic: str | None = getattr(self, "_bridge_status_topic", None)
+        if self.client is not None and bridge_status_topic:
+            self.client.publish(bridge_status_topic, "online", qos=1, retain=True)
         # Re-subscribe to all write topics so they survive a reconnect
         self._resubscribe_write_topics()
 
@@ -256,21 +318,12 @@ class mqtt(transport_base):
         # of them might actually be wired up for remote control — and a
         # protocol-scoped file couldn't represent that: every transport on
         # that protocol would share the same file and therefore the same
-        # write-enabled set. Mirrors scanner.py's
-        # device_name = section.removeprefix("transport.") exactly, since
-        # that's the value DeviceProtocolSelection.device_name is populated
-        # with (transport_name is the full "transport.<n>" config section
-        # name; from_transport.device_name is a separate, human-readable
-        # display field from the "device_name" config key and is NOT this).
+        # write-enabled set.
         device_name: str = from_transport.transport_name.removeprefix("transport.")
         protocol_name: str = from_transport.protocolSettings.protocol
         allowlist: set[str] = set()
 
-        # Single combined file per device, holding and coil entries together
-        # — this is what config_writer.py's _write_writable_csv() actually
-        # writes (config/<device_name>.writable.csv) and what scanner.py's
-        # _load_writable_names() reads back on every re-scan.
-
+        # Single combined file per device, not per protocol — see the comment above about why this is device-scoped.
         writable_file: str = f"{device_name}.writable.csv"
         writable_path: str | None = (
             from_transport.protocolSettings.find_protocol_file(
@@ -341,8 +394,13 @@ class mqtt(transport_base):
         self.connected = self.client.is_connected()
 
         self._log.info(f"write data from [{from_transport.transport_name}] to mqtt transport {data}")
+        if not hasattr(self, "_known_device_identifiers"):
+            self._known_device_identifiers = set()
+        self._known_device_identifiers.add(from_transport.device_identifier)
         # Publish availability every loop — required because HA doesn't disconnect
-        # cleanly on restart (HA bug), so we can't rely on LWT alone.
+        # cleanly on restart (HA bug), so we can't rely on LWT alone for this
+        # per-device signal (see _bridge_status_topic in __init__ for the
+        # connectivity-level signal that *is* LWT-backed).
         info: MQTTMessageInfo = self.client.publish(
             f"{self.base_topic}/{from_transport.device_identifier}/availability",
             "online",
@@ -364,13 +422,51 @@ class mqtt(transport_base):
                 properties=self.mqtt_properties,
             )
         else:
+            # Optional per-registry-type topic segment (see
+            # _registry_type_prefix / _registry_type_by_name in __init__ and
+            # init_bridge) — empty/unset by default, which reproduces the
+            # exact flat topic shape this always had. getattr rather than
+            # direct attribute access since these are read-only here and
+            # tests in this codebase commonly construct via
+            # mqtt.__new__(mqtt), bypassing __init__ entirely.
+            all_names_by_type: dict[str, dict[str, Registry_Type]] = getattr(self, "_registry_type_by_name", {})
+            names_by_type: dict[str, Registry_Type] = all_names_by_type.get(from_transport.transport_name, {})
+            registry_type_prefix: dict[Registry_Type, str] = getattr(self, "_registry_type_prefix", {})
             for entry, val in data.items():
                 if isinstance(val, float) and self.max_precision >= 0:
                     val = round(val, self.max_precision)
-                self.client.publish(
-                    str(self.base_topic + "/" + from_transport.device_identifier + "/" + entry).lower(),
-                    str(val),
-                )
+                registry_type: Registry_Type | None = names_by_type.get(entry)
+                prefix: str = registry_type_prefix.get(registry_type, "") if registry_type else ""
+                topic_parts: list[str] = [self.base_topic, from_transport.device_identifier]
+                if prefix:
+                    topic_parts.append(prefix)
+                topic_parts.append(entry)
+                self.client.publish(str("/".join(topic_parts)).lower(), str(val))
+
+    def _publish_error(self, context: str, message: str) -> None:
+        """
+        Scheduling path: N/A — error reporting, independent of read_mode.
+
+        Publish a structured error report to error_topic, if connected.
+
+        error_topic was previously parsed from config and never used
+        anywhere — this is its first real consumer. Best-effort only: the
+        publish itself is wrapped so a failure while *reporting* an error
+        can't cascade into a second, noisier failure, and this is a no-op
+        entirely when disconnected (there's nowhere to publish to, and the
+        disconnected case is already covered by _bridge_status_topic's LWT).
+        """
+        if self.client is None or not self.connected:
+            return
+        payload: str = json.dumps({
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "context": context,
+            "message": message,
+        })
+        try:
+            self.client.publish(f"{self.base_topic}/{self.error_topic}", payload, qos=0, retain=False)
+        except Exception as exc:
+            self._log.debug(f"Failed to publish to error_topic (non-fatal): {exc}")
 
     def client_on_message(self, client, userdata, msg) -> None:
         """Callback for PUBLISH messages received from the broker."""
@@ -378,7 +474,34 @@ class mqtt(transport_base):
 
         if msg.topic in self._write_topics:
             entry: registry_map_entry = self._write_topics[msg.topic]
-            self._emit_message(entry, msg.payload.decode("utf-8"))
+            # Distinct from the generic "MQTT MSG" line above — this one is
+            # tagged by variable_name specifically so it lines up with the
+            # eventual device-confirmation log from
+            # modbus_base._check_write_response (also tagged by
+            # variable_name), letting a specific command be traced end to
+            # end with a single grep for its variable name, from receipt
+            # here through to whether the device actually acknowledged it.
+            self._log.info(
+                "Write command received: variable='%s' topic='%s' payload='%s'",
+                entry.variable_name,
+                msg.topic,
+                msg.payload.decode("utf-8"),
+            )
+            try:
+                self._emit_message(entry, msg.payload.decode("utf-8"))
+            except Exception as exc:
+                # Previously unhandled: an exception here (bad payload, a
+                # type coercion failure downstream, etc.) would propagate up
+                # into paho's own callback thread, where it's swallowed by
+                # paho's internal handling and logged (if at all) somewhere
+                # this application never sees or reacts to. Caught here so
+                # it's both logged clearly and, for anyone monitoring
+                # error_topic, actionable without needing application logs.
+                self._log.error(f"Failed to process write command on '{msg.topic}': {exc}")
+                self._publish_error(
+                    "write_command",
+                    f"Failed to process write on '{msg.topic}': {exc}",
+                )
         else:
             # Broker only delivers messages for topics we've subscribed to
             # (no wildcard subscription exists in this class), so this
@@ -401,6 +524,30 @@ class mqtt(transport_base):
         if self.client is None or from_transport.protocolSettings is None:
             return
 
+        # Build the variable_name -> Registry_Type lookup used by
+        # write_data() for optional per-registry-type telemetry prefixes
+        # (see _registry_type_prefix in __init__). Done for every bridged
+        # transport, not just write-enabled ones — prefixing telemetry
+        # topics is unrelated to whether this transport can be written to.
+        #
+        # Guarded with hasattr rather than assuming __init__ ran: tests in
+        # this codebase commonly construct via mqtt.__new__(mqtt) and set
+        # only the specific attributes under test, deliberately bypassing
+        # __init__ — same reason transport_base.read_group_data_iter
+        # guards member._partial_info the same way rather than assuming it.
+        if not hasattr(self, "_registry_type_by_name"):
+            self._registry_type_by_name = {}
+        registry_type_by_name: dict[str, Registry_Type] = {}
+        for reg_type in (
+            Registry_Type.HOLDING,
+            Registry_Type.INPUT,
+            Registry_Type.COIL,
+            Registry_Type.DISCRETE,
+        ):
+            for entry in from_transport.protocolSettings.get_registry_map(reg_type):
+                registry_type_by_name[entry.variable_name.lower().replace(" ", "_")] = reg_type
+        self._registry_type_by_name[from_transport.transport_name] = registry_type_by_name
+
         if from_transport.write_enabled:
             # Reset per-transport so a second call (e.g. after reconnect) is clean
             self._write_topics = {}
@@ -411,7 +558,23 @@ class mqtt(transport_base):
                     from_transport.transport_name,
                 )
 
-            # Subscribe to holding and coil register write topics
+            # Subscribe to holding and coil register write topics.
+            #
+            # Topic shape: {base_topic}/{device_identifier}/{prefix}/{var_name}/write
+            # (prefix segment only present if holding_register_prefix /
+            # coil_register_prefix is configured — see _registry_type_prefix
+            # in __init__) — i.e. exactly the read/telemetry topic for that
+            # variable (published in write_data(), below) with /write
+            # appended. This must build the topic exactly the same way
+            # write_data() does, prefix included: the whole point of this
+            # topic shape is "take the read topic you already see and add
+            # /write" — if this used a different topic than write_data()
+            # actually publishes to, that promise would be broken for
+            # anyone who has a registry-type prefix configured, silently
+            # subscribing to a topic nobody would ever guess from what they
+            # see in an MQTT browser.
+            #
+
             registry_types: list[Registry_Type] = [Registry_Type.HOLDING, Registry_Type.COIL]
             excluded_by_allowlist: list[str] = []
 
@@ -422,20 +585,37 @@ class mqtt(transport_base):
 
                     if is_protocol_writable and entry_name in write_allowlist:
                         var_name: str = entry.variable_name.lower().replace(" ", "_")
-                        reg_prefix: Literal['coil'] | Literal['holding'] = "coil" if reg_type == Registry_Type.COIL else "holding"
-                        topic: str = f"{self.base_topic}/{from_transport.device_identifier}/write/{reg_prefix}/{var_name}"
+                        # getattr rather than direct attribute access: tests in
+                        # this codebase commonly construct via mqtt.__new__(mqtt),
+                        # bypassing __init__ entirely (same reasoning as the
+                        # _registry_type_by_name guard above).
+                        registry_type_prefix: dict[Registry_Type, str] = getattr(self, "_registry_type_prefix", {})
+                        prefix: str = registry_type_prefix.get(reg_type, "")
+                        topic_parts: list[str] = [self.base_topic, from_transport.device_identifier]
+                        if prefix:
+                            topic_parts.append(prefix)
+                        topic_parts.append(var_name)
+                        topic: str = "/".join(topic_parts) + "/write"
+
+                        existing_entry: registry_map_entry | None = self._write_topics.get(topic)
+                        if existing_entry is not None and existing_entry is not entry:
+                            self._log.warning(
+                                "'%s': write topic '%s' already maps to a different "
+                                "register (variable name collision between holding "
+                                "and coil entries) — keeping the first one seen, "
+                                "'%s' registered second is being ignored for writes.",
+                                from_transport.transport_name,
+                                topic,
+                                entry.variable_name,
+                            )
+                            continue
 
                         self._write_topics[topic] = entry
                         self.client.subscribe(topic)
                     elif is_protocol_writable:
                         # Protocol-level write_mode says this entry is writable,
                         # but it's missing from the writable CSV's allowlist, so
-                        # no write topic gets subscribed for it at all — this is
-                        # the exact gap that made a "W"-checked variable silently
-                        # do nothing over MQTT with no error anywhere. Previously
-                        # un-logged; flagged here so the mismatch shows up the
-                        # moment init_bridge runs, not only when someone notices
-                        # a write isn't landing.
+                        # no write topic gets subscribed for it at all
                         excluded_by_allowlist.append(entry.variable_name)
 
             if excluded_by_allowlist:

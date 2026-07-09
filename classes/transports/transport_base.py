@@ -734,14 +734,15 @@ class transport_base:
         """Scheduling path: N/A — write path, independent of read_mode; base stub, modbus_base overrides."""
         pass
 
-    def write_coil(self, register: int, value: bool, **kwargs) -> None:
+    def write_coil(self, register: int, value: bool, **kwargs) -> bool:
         """
         Scheduling path: N/A — write path, independent of read_mode.
 
         Write a single coil (bit) register. Modbus FC 0x05.
         Override in modbus_base; base no-op prevents AttributeError on non-modbus transports.
+        Returns False — a no-op is never a confirmed write.
         """
-        pass
+        return False
 
     def validate_protocol(self, registry_type: Registry_Type) -> float:
         """

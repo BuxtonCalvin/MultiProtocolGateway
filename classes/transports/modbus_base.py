@@ -449,31 +449,110 @@ class modbus_base(transport_base):
                 for i in range(min(count, len(response.registers)))
             }
 
-    def write_registers(self, start_register: int, values: list[int], **kwargs: Any) -> None:
+    def _check_write_response(
+        self,
+        response: Any,
+        register: int,
+        op_name: str,
+        variable_name: str | None = None,
+    ) -> bool:
+        """
+        Scheduling path: N/A — write path, independent of read_mode.
+
+        Inspect a pymodbus write response and log success/failure. Mirrors
+        the read-side error handling in _read_registry_type_iter/
+        read_modbus_registers_iter (isError / exception_code /
+        interpret_modbus_exception_code) — write_registers() and
+        write_coil() previously called self.client.write_registers()/
+        write_coil() and discarded the return value entirely, so a write
+        the device actively rejected (illegal address, illegal value, an
+        ExceptionResponse — anything that comes back as a normal response
+        object rather than a raised Python exception, which is how pymodbus
+        reports most write rejections) looked identical in the logs to one
+        that actually succeeded. Returns True if the write appears to have
+        succeeded, False otherwise.
+
+        variable_name, when provided by the caller (write_variable always
+        has it via entry.variable_name), is included in every log line here
+        so a specific command — e.g. one received over MQTT and logged
+        there by variable name — can be traced through to this final
+        confirmation by grepping that name, without having to separately
+        know or track which register number it happened to resolve to.
+        """
+        label: str = f"{op_name} to register {register}" + (f" ('{variable_name}')" if variable_name else "")
+
+        if response is None:
+            self._log.error(f"{label}: no response received from Modbus device")
+            return False
+
+        if isinstance(response, bytes):
+            self._log.error(f"{label}: {response.decode('utf-8', errors='replace')}")
+            return False
+
+        if hasattr(response, "isError") and response.isError():
+            error_msg: str = str(response)
+            if hasattr(response, "function_code") and hasattr(response, "exception_code"):
+                exception_code = response.function_code | 0x80
+                interpreted_error: str = interpret_modbus_exception_code(exception_code)
+                self._log.error(f"{label} failed: {error_msg} - {interpreted_error}")
+            else:
+                self._log.error(f"{label} failed: {error_msg}")
+            return False
+
+        # INFO rather than DEBUG deliberately — this is the one line that
+        # answers "did the device actually acknowledge the command", which
+        # is worth being visible at default log levels, not just when
+        # debugging.
+        self._log.info(f"{label} confirmed by device")
+        return True
+
+    def write_registers(
+        self,
+        start_register: int,
+        values: list[int],
+        variable_name: str | None = None,
+        **kwargs: Any,
+    ) -> bool:
         """Scheduling path: N/A — write path, independent of read_mode."""
         if not self.write_enabled:
-            return
+            return False
         if self.client is None:
             self._log.error("write_registers called before client was initialized")
-            return
+            return False
         kwargs = self._get_correct_device_arg(kwargs)
         port_lock: Lock = self._get_port_lock()
         with port_lock:
-            self.client.write_registers(start_register, values, **kwargs)
+            try:
+                response: Any = self.client.write_registers(start_register, values, **kwargs)
+            except Exception as exc:
+                self._log.error(f"write_registers to register {start_register} raised an exception: {exc}")
+                return False
+        return self._check_write_response(response, start_register, "write_registers", variable_name)
 
-    def write_coil(self, register: int, value: bool, **kwargs: Any) -> None:
+    def write_coil(
+        self,
+        register: int,
+        value: bool,
+        variable_name: str | None = None,
+        **kwargs: Any,
+    ) -> bool:
         """Scheduling path: N/A — write path, independent of read_mode.
 
         Write a single coil (bit) register using Modbus function code 0x05."""
         if not self.write_enabled:
-            return
+            return False
         if self.client is None:
             self._log.error("write_coil called before client was initialized")
-            return
+            return False
         kwargs = self._get_correct_device_arg(kwargs)
         port_lock: Lock = self._get_port_lock()
         with port_lock:
-            self.client.write_coil(register, value, **kwargs)
+            try:
+                response: Any = self.client.write_coil(register, value, **kwargs)
+            except Exception as exc:
+                self._log.error(f"write_coil to register {register} raised an exception: {exc}")
+                return False
+        return self._check_write_response(response, register, "write_coil", variable_name)
 
     def _get_port_identifier(self) -> str:
         """
@@ -1764,7 +1843,7 @@ class modbus_base(transport_base):
             else:
                 coil_bool = bool(int(float(value))) if value != "" else False
             self._log.info(f"WRITE COIL: {entry.variable_name} => {coil_bool} to Register {entry.register}")
-            self.write_coil(entry.register, coil_bool)
+            self.write_coil(entry.register, coil_bool, variable_name=entry.variable_name)
             return
 
         temp_map: list[registry_map_entry] = [entry]
@@ -2036,13 +2115,30 @@ class modbus_base(transport_base):
 
         # Coil registers use a dedicated single-bit write function.
         # Holding/input registers use the standard word-oriented write path.
+        #
+        # Previously this branched on len(register_values) == 1 and called
+        # self.write_register() (singular) for single-word writes. That
+        # method has never had a real implementation anywhere in this class
+        # — only the no-op stub inherited from transport_base.py
+        # (`def write_register(...): pass`) — so every single-register write
+        # (the majority of writable variables: any plain numeric or
+        # single-word bit-flag register, e.g. quick_charge_start_enable,
+        # dischgcurr, funcen_acchargeen, funcen_forcedchgen,
+        # accharge_bat_current) silently did nothing: no exception, no log
+        # of failure, not even a Modbus request sent on the wire — just the
+        # "WRITE: ..." INFO log above, which fires unconditionally before
+        # this dispatch and therefore only ever reflected intent, never
+        # success. write_registers() (plural) already has a working
+        # implementation and handles a length-1 list correctly via
+        # pymodbus's write_registers (Modbus function code 16, "Write
+        # Multiple Registers"), so every non-coil write goes through it now
+        # regardless of length rather than maintaining a separate, broken
+        # single-register path.
         if registry_type == Registry_Type.COIL:
             coil_value: bool = bool(register_values[0]) if register_values else False
-            self.write_coil(entry.register, coil_value)
-        elif len(register_values) == 1:
-            self.write_register(entry.register, register_values[0])
+            self.write_coil(entry.register, coil_value, variable_name=entry.variable_name)
         else:
-            self.write_registers(entry.register, register_values)
+            self.write_registers(entry.register, register_values, variable_name=entry.variable_name)
 
 
     def read_variable(self, variable_name : str, registry_type : Registry_Type, entry : registry_map_entry | None = None) -> int | float | str | None:
@@ -2442,6 +2538,9 @@ class modbus_base(transport_base):
                 idx += 1            # success — advance to next range
                 yield True
 
+    # get_partial_data() override removed — transport_base's base
+    # implementation now reads _partial_info directly (see that class),
+    # which is exactly what this override used to do. No behavior change.
 
     @property
     def scrape_target(self) -> str:
