@@ -240,16 +240,6 @@ class mqtt(transport_base):
         """Publish offline availability and cleanly shut down the paho loop on exit."""
         self._log.warning("MQTT Exiting...")
         if self.client is not None:
-            # Previously published "offline" to
-            # {base_topic}/{self.device_identifier}/availability — this
-            # transport's OWN device_identifier, which for a bridge like
-            # this is typically blank (nothing in [transport.mqtt] usually
-            # sets device_serial_number). write_data() publishes "online"
-            # per bridged SCRAPER's own device_identifier instead, so the
-            # clean-exit "offline" was landing on a different topic than
-            # any "online" message ever did. Fixed by tracking every device
-            # this instance has actually published availability for, and
-            # marking each of them offline here.
             #
             # getattr rather than direct attribute access: tests in this
             # codebase commonly construct via mqtt.__new__(mqtt), bypassing
@@ -432,6 +422,7 @@ class mqtt(transport_base):
             all_names_by_type: dict[str, dict[str, Registry_Type]] = getattr(self, "_registry_type_by_name", {})
             names_by_type: dict[str, Registry_Type] = all_names_by_type.get(from_transport.transport_name, {})
             registry_type_prefix: dict[Registry_Type, str] = getattr(self, "_registry_type_prefix", {})
+            val: int | float | str
             for entry, val in data.items():
                 if isinstance(val, float) and self.max_precision >= 0:
                     val = round(val, self.max_precision)
@@ -565,15 +556,7 @@ class mqtt(transport_base):
             # coil_register_prefix is configured — see _registry_type_prefix
             # in __init__) — i.e. exactly the read/telemetry topic for that
             # variable (published in write_data(), below) with /write
-            # appended. This must build the topic exactly the same way
-            # write_data() does, prefix included: the whole point of this
-            # topic shape is "take the read topic you already see and add
-            # /write" — if this used a different topic than write_data()
-            # actually publishes to, that promise would be broken for
-            # anyone who has a registry-type prefix configured, silently
-            # subscribing to a topic nobody would ever guess from what they
-            # see in an MQTT browser.
-            #
+            # appended.
 
             registry_types: list[Registry_Type] = [Registry_Type.HOLDING, Registry_Type.COIL]
             excluded_by_allowlist: list[str] = []

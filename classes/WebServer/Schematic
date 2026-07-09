@@ -2,12 +2,12 @@ MultiProtocolGateway or App/
 ├── protocol_gateway.py               ← wire webserver start here
 ├── config.cfg
 ├── protocols/
-│   └── [protocol_group]/
-│       ├── eg4_18kpv_holding.csv
-│       ├── eg4_18kpv_input.csv
-│       ├── eg4_18kpv_coil.csv
-│       ├── eg4_18kpv_discrete.csv
-│       └── eg4_18kpv.json
+│   └── [<protocol_group>]/
+│       ├── <protocol>_holding.csv
+│       ├── <protocol>_input.csv
+│       ├── <protocol>_coil.csv
+│       ├── <protocol>_discrete.csv
+│       └── <protocol>.json
 └── classes/
     └── WebServer/
         ├── main.py                   ← FastAPI app, startup, uvicorn launcher

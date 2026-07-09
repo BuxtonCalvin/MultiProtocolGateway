@@ -78,6 +78,10 @@ On the left side of the page, each device gets a dedicated settings pane with a 
 
 Changes are submitted via HTMX PATCH calls and buffered in a SQLite staging database. Nothing touches `config.cfg` until you explicitly commit.
 
+There is an integrated help screen for each key listed in the left hand pane.  Click on the default value to show help for that key.
+
+![Devices](classes/WebServer/static/screenshots/device__device_help.png)
+
 ### Create Device
 
 The create device wizard walks you through creating a scraper device from scratch.
