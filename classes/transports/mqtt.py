@@ -88,10 +88,10 @@ class mqtt(transport_base):
         if not isinstance(self.reconnect_attempts, int) or self.reconnect_attempts < 0:  # minimum 0
             self.reconnect_attempts = 0
 
-        self.holding_register_prefix = settings.get("holding_register_prefix", fallback="Holding")
-        self.input_register_prefix = settings.get("input_register_prefix", fallback="Input")
-        self.coil_register_prefix = settings.get("coil_register_prefix", fallback="Coil")
-        self.discrete_register_prefix = settings.get("discrete_register_prefix", fallback="Discrete")
+        self.holding_register_prefix = settings.get("holding_register_prefix", fallback="")
+        self.input_register_prefix = settings.get("input_register_prefix", fallback="")
+        self.coil_register_prefix = settings.get("coil_register_prefix", fallback="")
+        self.discrete_register_prefix = settings.get("discrete_register_prefix", fallback="")
 
         self._registry_type_prefix: dict[Registry_Type, str] = {
             Registry_Type.HOLDING: self.holding_register_prefix,
