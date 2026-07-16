@@ -31,20 +31,24 @@ if str(PROJECT_ROOT) not in sys.path:
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    """Pre-initialize protocol_settings cleanly to break the circular dependency loop."""
-    import importlib.util
+    """Break circular imports by pre-initializing protocol_settings with a mocked sub-dependency."""
+    import importlib
     import sys
+    import types
 
-    # Create a blank module placeholder for 'classes.protocol_settings' in the system cache
-    # This prevents eg4_metadata from crashing when it hits 'from .protocol_settings import ...'
-    spec = importlib.util.find_spec("classes.protocol_settings")
-    if spec and spec.loader:
-        module = importlib.util.module_from_spec(spec)
-        sys.modules["classes.protocol_settings"] = module
+    # 1. Create a fake empty module for eg4_metadata and put it in Python's cache.
+    # This prevents protocol_settings from jumping into the real eg4_metadata too early.
+    fake_eg4 = types.ModuleType("classes.eg4_metadata")
+    sys.modules["classes.eg4_metadata"] = fake_eg4
 
-        #  Execute the file contents into our module placeholder.
-        # Python will safely evaluate everything linearly, resolving the cross-imports
-        spec.loader.exec_module(module)
+    # 2. Now import protocol_settings. It will hit our fake_eg4 and load completely,
+    # registering Data_Type, Registry_Type, and everything else in memory.
+    importlib.import_module("classes.protocol_settings")
+
+    # 3. Clean up our hack: Remove the fake module from the cache so Python can
+    # load the real eg4_metadata properly with all its dependencies.
+    del sys.modules["classes.eg4_metadata"]
+    importlib.import_module("classes.eg4_metadata")
 
 
 
