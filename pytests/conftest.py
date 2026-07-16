@@ -19,6 +19,7 @@
 
 from __future__ import annotations
 
+import importlib
 import sys
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,15 @@ import pytest
 PROJECT_ROOT: Path = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Force load application modules on startup to fix the pytest import loop.
+
+    Using importlib avoids linting errors regarding un-accessed top-level imports.
+    """
+    importlib.import_module("classes.protocol_settings")
+    importlib.import_module("classes.eg4_metadata")
 
 
 class DummySettings:
@@ -71,3 +81,4 @@ class DummySettings:
 def dummy_settings() -> type[DummySettings]:
     """Return the reusable TransportSettings test double class."""
     return DummySettings
+
