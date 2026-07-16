@@ -24,8 +24,8 @@ from pathlib import Path
 
 import pytest
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-CLASSES_ROOT = PROJECT_ROOT / "classes"
+PROJECT_ROOT: Path = Path(__file__).resolve().parents[1]
+CLASSES_ROOT: Path = PROJECT_ROOT / "classes"
 
 
 def module_names() -> list[str]:

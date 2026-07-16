@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -44,7 +45,7 @@ class DescriptionUpdate(BaseModel):
 
 
 @router.get("")
-def list_settings(db: Session = Depends(get_session)):
+def list_settings(db: Session = Depends(get_session)) -> list[dict[str, Any]]:
     rows: list[SettingDescription] = get_all_setting_descriptions(db)
     return [
         {
@@ -97,7 +98,7 @@ def scan_for_new_settings(request: Request, db: Session = Depends(get_session))-
     Re-scan the transport library and report any newly discovered setting keys
     that were not previously in the database. Returns a summary message.
     """
-    transports_dir = request.app.state.transports_dir
+    transports_dir: Path = request.app.state.transports_dir
 
     library: dict[str, dict[str, Any]] = scan_transport_library(transports_dir)
 
@@ -110,7 +111,7 @@ def scan_for_new_settings(request: Request, db: Session = Depends(get_session))-
     # Find genuinely new keys (not yet in DB)
     existing_keys: set[Any] = {r[0] for r in db.query(SettingDescription.key).all()}
 
-    new_findings: list[dict] = []
+    new_findings: list[dict[str, Any]] = []
     for key, transport_set in sorted(key_to_transports.items()):
         if key not in existing_keys:
             new_findings.append({
@@ -119,6 +120,8 @@ def scan_for_new_settings(request: Request, db: Session = Depends(get_session))-
             })
 
     # Run the full seed: insert new rows, update transport lists, purge removed keys
+    touched: int
+    purged_keys: list[str]
     touched, purged_keys = seed_setting_descriptions(db, transports_dir, purge_removed=True)
 
     _log.info(

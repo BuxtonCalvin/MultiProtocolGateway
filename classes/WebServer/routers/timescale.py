@@ -67,6 +67,7 @@ def _require_bridge(request: Request) -> Any:
     gateway: Any | None = getattr(request.app.state, "gateway", None)
     bridge: Any | None = get_timescale_bridge(gateway)
     if bridge is None:
+        _log.warning("No TimescaleDB bridge is attached to this gateway.")
         raise HTTPException(status_code=404, detail="No TimescaleDB bridge is attached to this gateway.")
     return bridge
 
@@ -125,6 +126,7 @@ def stage_field(
         data_type=payload.data_type,
         checked=payload.checked,
     )
+    _log.debug(f"Field staged for deletion: {column_name}")
     return {
         "protocol_name": protocol_name,
         "column_name": column_name,
@@ -136,6 +138,7 @@ def stage_field(
 @router.get("/staged")
 def get_staged(request: Request) -> dict[str, Any]:
     """Summary of everything currently staged for deletion, for a review/diff panel."""
+    _log.debug("get_staged() called")
     return {
         "has_staged": has_staged_deletions(request.app.state),
         "count": staged_deletion_count(request.app.state),

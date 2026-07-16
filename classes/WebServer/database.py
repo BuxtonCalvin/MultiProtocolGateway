@@ -43,7 +43,9 @@ from typing import Generator
 from alembic.config import Config
 from sqlalchemy import create_engine, event, func, select
 from sqlalchemy.engine import Engine
+from sqlalchemy.engine.interfaces import DBAPIConnection
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import ConnectionPoolEntry
 
 from .models import (
     AppState,
@@ -60,7 +62,7 @@ _log: logging.Logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _engine: Engine | None = None
-_SessionLocal: sessionmaker | None = None
+_SessionLocal: sessionmaker[Session] | None = None
 
 
 def init_db(db_path: Path) -> Engine:
@@ -81,12 +83,15 @@ def init_db(db_path: Path) -> Engine:
     )
 
     # Enable WAL mode so the gateway thread and web thread don't block each other
-    @event.listens_for(_engine, "connect")
-    def set_wal_mode(dbapi_connection, connection_record) -> None:
+    def set_wal_mode(
+        dbapi_connection: DBAPIConnection, connection_record: ConnectionPoolEntry
+    ) -> None:
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
+
+    event.listens_for(_engine, "connect")(set_wal_mode)
 
     _SessionLocal = sessionmaker(
         bind=_engine,
@@ -105,7 +110,7 @@ def get_engine() -> Engine:
     return _engine
 
 
-def get_session_factory() -> sessionmaker:
+def get_session_factory() -> sessionmaker[Session]:
     if _SessionLocal is None:
         raise RuntimeError("Database not initialized. Call init_db() first.")
     return _SessionLocal

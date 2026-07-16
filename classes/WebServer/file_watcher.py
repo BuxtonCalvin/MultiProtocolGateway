@@ -26,10 +26,12 @@ degrades gracefully to a no-op so the server still starts.
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from pathlib import Path
+from typing import Any
 
-from watchdog.events import FileSystemEventHandler
+from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
 _log: logging.Logger = logging.getLogger(__name__)
@@ -42,23 +44,23 @@ logging.getLogger("watchdog").setLevel(logging.WARNING)
 class _MPGEventHandler:
     """Handles file system events from watchdog."""
 
-    def __init__(self, scanner, debounce_seconds: float = 2.0) -> None:
-        self._scanner = scanner
+    def __init__(self, scanner: Any, debounce_seconds: float = 2.0) -> None:
+        self._scanner: Any = scanner
         self._debounce: float = debounce_seconds
         self._pending: threading.Timer | None = None
-        self._lock = threading.Lock()
+        self._lock: threading.Lock = threading.Lock()
 
-    def _schedule_scan(self, path: str) -> None:
+    def _schedule_scan(self, path: Path) -> None:
         """Debounce: wait briefly before triggering scan in case of burst saves."""
         with self._lock:
-            if self._pending:
+            if self._pending is not None:
                 self._pending.cancel()
             self._pending = threading.Timer(self._debounce, self._do_scan, args=(path,))
             self._pending.daemon = True
             self._pending.name = "MPGFileScanDebounce"
             self._pending.start()
 
-    def _do_scan(self, path: str) -> None:
+    def _do_scan(self, path: Path) -> None:
         _log.info(f"File change detected: {path} — triggering re-scan")
         try:
             self._scanner.run()
@@ -67,17 +69,12 @@ class _MPGEventHandler:
             _log.error(msg)
 
     # watchdog interface
-    def on_modified(self, event) -> None:
-        if not getattr(event, "is_directory", False):
-            self._schedule_scan(event.src_path)
 
-    def on_created(self, event) -> None:
-        if not getattr(event, "is_directory", False):
-            self._schedule_scan(event.src_path)
-
-    def on_deleted(self, event) -> None:
-        if not getattr(event, "is_directory", False):
-            self._schedule_scan(event.src_path)
+    def on_any_event(self, event: FileSystemEvent) -> None:
+        # Filter for only the event types you care about
+        if event.event_type in ("modified", "created", "deleted"):
+            if not getattr(event, "is_directory", False):
+                self._schedule_scan(Path(os.fsdecode(event.src_path)))
 
 
 class FileWatcher:
@@ -86,11 +83,11 @@ class FileWatcher:
     Starts in a daemon thread; stops cleanly on server shutdown.
     """
 
-    def __init__(self, scanner, config_path: Path, protocols_dir: Path) -> None:
-        self._scanner = scanner
+    def __init__(self, scanner: Any, config_path: Path, protocols_dir: Path) -> None:
+        self._scanner: Any = scanner
         self._config_path: Path = config_path
         self._protocols_dir: Path = protocols_dir
-        self._observer = None
+        self._observer: Any | None = None
         self._available = False
 
         try:
@@ -107,14 +104,11 @@ class FileWatcher:
 
         # Shim watchdog's ABC onto our handler
         class _WatchdogShim(FileSystemEventHandler):
-            def __init__(self, inner) -> None:
-                self._inner = inner
-            def on_modified(self, event) -> None:
-                self._inner.on_modified(event)
-            def on_created(self, event) -> None:
-                self._inner.on_created(event)
-            def on_deleted(self, event) -> None:
-                self._inner.on_deleted(event)
+            def __init__(self, inner: _MPGEventHandler) -> None:
+                super().__init__()
+                self._inner: _MPGEventHandler = inner
+            def on_any_event(self, event: FileSystemEvent) -> None:
+                self._inner.on_any_event(event)
 
         shim = _WatchdogShim(handler_obj)
         self._observer = Observer()

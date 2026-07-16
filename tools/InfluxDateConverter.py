@@ -21,8 +21,10 @@ from pathlib import Path
 from typing import Any, cast
 
 import pandas as pd
-from influxdb import InfluxDBClient
-from influxdb.resultset import InfluxDBClientError, ResultSet
+
+# Influxdb does not have type information.
+from influxdb import InfluxDBClient  # type: ignore
+from influxdb.resultset import InfluxDBClientError, ResultSet  # type: ignore
 
 # --- CONFIGURATION ---
 #----------------------------------------------------------------------------------------------------------
@@ -183,35 +185,35 @@ def guess_mapping(csv_field: str, influx_candidates: set[str]) -> tuple[str, flo
 # Compare CSV columns to InfluxDB fields and identify anomalies such as missing fields or potential mapping issues.
 # If any anomalies are found, a mapping_needed.csv file will be created with suggested mappings for user review and correction
 # before proceeding with the data import.
-def perform_schema_validation(csv_path) -> None:
+def perform_schema_validation(csv_path: Path) -> None:
     global influx_fields
 
     print(f"--- Schema Validation: {csv_path} columns vs InfluxDB columns---")
 
-    # 1. Get Fields from CSV
+    # Get Fields from CSV
     df_sample: pd.DataFrame = pd.read_csv(csv_path, nrows=0)
     csv_cols: set[str] = set(df_sample.columns)
 
-    # 2. Get Fields from InfluxDB
-    results: ResultSet = cast(ResultSet, InfluxClient.query(f'SHOW FIELD KEYS FROM "{MEASUREMENT}"'))
-    influx_fields = { point["fieldKey"] : point["fieldType"] for point in results.get_points() if "fieldKey" in point and "fieldType" in point}
+    # Get Fields from InfluxDB
+    results: ResultSet = cast(ResultSet, InfluxClient.query(f'SHOW FIELD KEYS FROM "{MEASUREMENT}"'))   # type: ignore
+    _influx_fields: dict[str, str] = { point["fieldKey"] : point["fieldType"] for point in results.get_points() if "fieldKey" in point and "fieldType" in point}  # type: ignore
 
     csv_fields: set[str] = csv_cols - IGNORE_TAGS
 
-    anomalies = []
+    anomalies: list[dict[str, str | float]] = []
 
-    csv_missing = []
-    influx_missing = []
+    csv_missing: list[str] = []
+    influx_missing: list[str] = []
 
     # CSV fields missing from Influx
     for f in csv_fields:
-        if f not in influx_fields and f not in FIELD_MAPPER:
-            csv_missing.append(f)
+        if f not in _influx_fields and f not in FIELD_MAPPER:
+            csv_missing.append(f)  # type: ignore
 
     # Influx fields missing from CSV
-    for f in influx_fields:
+    for f in _influx_fields:
         if f not in csv_fields and f not in FIELD_MAPPER.values():
-            influx_missing.append(f)
+            influx_missing.append(f)  # type: ignore
 
     # Equal names
     for f in csv_fields:
@@ -251,7 +253,7 @@ def perform_schema_validation(csv_path) -> None:
 
 
     if anomalies:
-        anomalies.sort(key=lambda x: (x["source"].lower(), (x["import_names"] or "").lower()))
+        anomalies.sort(key=lambda x: (x["source"].lower(), (x["import_names"] or "").lower())) # type: ignore
         anomaly_df = pd.DataFrame(anomalies)
 
         # export anomalies to CSV for user review and mapping
@@ -396,7 +398,7 @@ def coerce_to_influx_type(field_name: str, value: Any, influx_types: dict[str, s
 
     return value
 
-def check_field_type(field_name, value, influx_field_names):
+def check_field_type(field_name, value, influx_field_names) -> bool:
     """
     Prevent writing a value whose type conflicts with the
     existing InfluxDB field type.

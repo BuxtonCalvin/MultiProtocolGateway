@@ -60,8 +60,8 @@ def test_transport_base_tracks_cycle_and_emits_messages(dummy_settings) -> None:
     transport._start_cycle_tracking()
     transport._cycle_expect_unit(2)
     transport._cycle_mark_unit_complete()
-    transport._cycle_mark_incomplete()
-    transport._finish_cycle_tracking({"soc": 99})
+    transport.cycle_mark_incomplete()
+    transport.finish_cycle_tracking({"soc": 99})
     transport._emit_message(entry, 99)
 
     result = transport.get_cycle_result()

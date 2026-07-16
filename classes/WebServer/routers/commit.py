@@ -22,6 +22,7 @@ import logging
 from typing import Any, List
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -29,7 +30,7 @@ from classes.WebServer.diff_engine import DiffResult
 from classes.WebServer.models import ConfigBackup
 
 from ..config_writer import commit_all
-from ..database import get_session, refresh_app_state
+from ..database import get_session, refresh_app_state, session_scope
 from ..diff_engine import build_diff
 from ..models import (
     DeviceProtocolSelection,
@@ -254,3 +255,22 @@ def do_rollback(payload: RollbackRequest, request: Request, db: Session = Depend
     db.commit()
 
     return {"status": "rolled_back", "backup_id": payload.backup_id}
+
+
+# ---------------------------------------------------------------------------
+# HTML partial route — renders the same build_diff() result as GET /diff
+# above, just as HTML instead of JSON.
+# ---------------------------------------------------------------------------
+
+
+@router.get("/diff-panel", response_class=HTMLResponse, response_model=None)
+async def diff_panel(request: Request):
+    """HTMX partial — visual diff of staged vs disk state."""
+    with session_scope() as db:
+        diff: DiffResult = build_diff(db)
+
+    return request.app.state.templates.TemplateResponse(
+        request=request,
+        name="partials/diff_panel.html",
+        context={"diff": diff},
+    )

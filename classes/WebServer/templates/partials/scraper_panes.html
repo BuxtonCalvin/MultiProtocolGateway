@@ -384,7 +384,7 @@
               data-protocol="{{ tab.protocol_name }}"
               data-registry="{{ tab.registry_type }}"
               aria-selected="{{ 'true' if loop.first else 'false' }}"
-              hx-get="/protocol/{{ tab.protocol_name }}/{{ tab.registry_type }}?device_name={{ device.name }}"
+              hx-get="/api/protocols/{{ tab.protocol_name }}/{{ tab.registry_type }}/table?device_name={{ device.name }}"
               hx-target="#protocol-table-container"
               hx-swap="innerHTML"
               hx-headers='{"Cache-Control": "no-cache"}'
@@ -488,7 +488,11 @@
     });
   });
 
-  // Update W/M/S counts on the active tab after a toggle
+  // Update W/M/S counts on the active tab after a toggle.
+  // Re-fetches the full tab list from GET /api/protocols/device/{version}/tabs
+  // — the same endpoint, calling the same get_protocols_for_device(), that
+  // renders the initial tab strip — so a refresh can never disagree with
+  // what was shown on page load.
   document.addEventListener('htmx:afterRequest', function(evt) {
     const path = evt.detail?.requestConfig?.path || '';
     if (!path.includes('/toggle') && !path.includes('/field')) return;
@@ -499,15 +503,17 @@
     if (!activeTab) return;
     const protocol = activeTab.dataset.protocol;
     const registry  = activeTab.dataset.registry;
-    const deviceName = '{{ device.name }}';
-    if (!protocol || !registry) return;
+    const deviceName = JSON.parse('{{ device.name | tojson | safe }}');
+    const protocolVersion = JSON.parse('{{ device.protocol_version | tojson | safe }}');
+    if (!protocol || !registry || !protocolVersion) return;
 
-    fetch(`/api/protocols/device/${encodeURIComponent(protocol + '_' + registry)}/counts?device_name=${encodeURIComponent(deviceName)}&protocol_name=${encodeURIComponent(protocol)}&registry_type=${encodeURIComponent(registry)}`)
+    fetch(`/api/protocols/device/${encodeURIComponent(protocolVersion)}/tabs?device_name=${encodeURIComponent(deviceName)}`)
       .then(r => r.json())
-      .then(data => {
+      .then(tabs => {
+        const tab = (tabs || []).find(t => t.protocol_name === protocol && t.registry_type === registry);
         const span = activeTab.querySelector('.tab-counts');
-        if (span && data) {
-          span.textContent = `W:${data.write_count} M:${data.mask_count} S:${data.screen_count}`;
+        if (span && tab) {
+          span.textContent = `W:${tab.write_count} M:${tab.mask_count} S:${tab.screen_count}`;
         }
       })
       .catch(() => {});
@@ -610,7 +616,7 @@
   // Called on page load and each time the HTMX table swap completes.
   function loadExistingValues() {
     const deviceName = JSON.parse('{{ device.name | tojson | safe }}');
-    fetch(`/api/device/${encodeURIComponent(deviceName)}/last-values`)
+    fetch(`/api/devices/${encodeURIComponent(deviceName)}/last-values`)
       .then(r => r.json())
       .then(resp => {
         if (resp.status === 'ok' && resp.values) {
@@ -636,7 +642,7 @@
   loadExistingValues();
 
   // ── Refresh Values button ─────────────────────────────────────────────────
-  // Calls /api/device/{name}/last-values/wait which blocks server-side until
+  // Calls /api/devices/{name}/last-values/wait which blocks server-side until
   // the next complete scrape cycle is forwarded to a bridge, then populates
   // the [data-value-key] cells in the protocol table.
   function refreshProtocolValues() {
@@ -655,7 +661,7 @@
     if (icon)  icon.textContent  = '⏳';
     if (label) label.textContent = 'Waiting for cycle…';
 
-    fetch(`/api/device/${encodeURIComponent(deviceName)}/last-values/wait`)
+    fetch(`/api/devices/${encodeURIComponent(deviceName)}/last-values/wait`)
       .then(r => r.json())
       .then(resp => {
         if (resp.status === 'timeout') {

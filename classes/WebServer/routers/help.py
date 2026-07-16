@@ -23,7 +23,7 @@ import html
 import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import quote, unquote
 
 import markdown as markdown_lib
@@ -80,13 +80,13 @@ def _load_annotations() -> dict[str, list[Annotation]]:
     if not ANNOTATIONS_PATH.exists():
         return {}
     try:
-        raw = json.loads(ANNOTATIONS_PATH.read_text(encoding="utf-8"))
+        raw: dict[str, Any] = json.loads(ANNOTATIONS_PATH.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise HTTPException(status_code=500, detail=f"Invalid annotations.json: {exc}") from exc
-    if not isinstance(raw, dict):
+    if not raw:
         raise HTTPException(status_code=500, detail="annotations.json must be an object.")
     return {
-        str(image_id): [Annotation.model_validate(item) for item in items]
+        str(image_id): [Annotation.model_validate(item) for item in items]  # type: ignore[reportUnknownVariableType]
         for image_id, items in raw.items()
         if isinstance(items, list) and image_id != "_aliases"  # _aliases is a dict, not an annotation list
     }
@@ -110,11 +110,13 @@ def _load_aliases() -> dict[str, str]:
     if not ANNOTATIONS_PATH.exists():
         return {}
     try:
-        raw = json.loads(ANNOTATIONS_PATH.read_text(encoding="utf-8"))
+        raw: dict[str, Any] = json.loads(ANNOTATIONS_PATH.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return {}
-    aliases = raw.get("_aliases", {})
-    return {str(k): str(v) for k, v in aliases.items()} if isinstance(aliases, dict) else {}
+    aliases: dict[str, str] = raw.get("_aliases", {})
+    if aliases:
+        return {str(k): str(v) for k, v in aliases.items()}
+    return {}
 
 
 def _resolve_image_id(image_id: str) -> str:
@@ -390,8 +392,10 @@ def _markdown_to_html(markdown: str, doc_path: str) -> str:
     return final_html
 
 
-def _render_inline(text: str, link_resolver) -> str:
+def _render_inline(text: str, link_resolver: Callable[[str], str]) -> str:
     escaped: str = html.escape(text)
+
+    # Image resolution
     escaped = re.sub(
         r"!\[([^\]]*)\]\(([^)]+)\)",
         lambda m: (
@@ -400,6 +404,8 @@ def _render_inline(text: str, link_resolver) -> str:
         ),
         escaped,
     )
+
+    # Link resolution
     escaped = re.sub(
         r"\[([^\]]+)\]\(([^)]+)\)",
         lambda m: (
@@ -408,16 +414,21 @@ def _render_inline(text: str, link_resolver) -> str:
         ),
         escaped,
     )
-    escaped = re.sub(r"`([^`]+)`", r"<code>\1</code>", escaped)
+
+    escaped = re.sub(r"`([^`]+)`", lambda m: f"<code>{m.group(1)}</code>", escaped)
+
     # Bold+italic: ***text*** or ___text___
-    escaped = re.sub(r"\*{3}(.+?)\*{3}", r"<strong><em>\1</em></strong>", escaped)
-    escaped = re.sub(r"_{3}(.+?)_{3}", r"<strong><em>\1</em></strong>", escaped)
+    escaped = re.sub(r"\*{3}(.+?)\*{3}", lambda m: f"<strong><em>{m.group(1)}</em></strong>", escaped)
+    escaped = re.sub(r"_{3}(.+?)_{3}", lambda m: f"<strong><em>{m.group(1)}</em></strong>", escaped)
+
     # Bold: **text** or __text__
-    escaped = re.sub(r"\*{2}(.+?)\*{2}", r"<strong>\1</strong>", escaped)
-    escaped = re.sub(r"_{2}(.+?)_{2}", r"<strong>\1</strong>", escaped)
+    escaped = re.sub(r"\*{2}(.+?)\*{2}", lambda m: f"<strong>{m.group(1)}</strong>", escaped)
+    escaped = re.sub(r"_{2}(.+?)_{2}", lambda m: f"<strong>{m.group(1)}</strong>", escaped)
+
     # Italic: *text* or _text_
-    escaped = re.sub(r"\*(.+?)\*", r"<em>\1</em>", escaped)
-    escaped = re.sub(r"_(.+?)_", r"<em>\1</em>", escaped)
+    escaped = re.sub(r"\*(.+?)\*", lambda m: f"<em>{m.group(1)}</em>", escaped)
+    escaped = re.sub(r"_(.+?)_", lambda m: f"<em>{m.group(1)}</em>", escaped)
+
     return escaped
 
 

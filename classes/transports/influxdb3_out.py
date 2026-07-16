@@ -17,6 +17,9 @@
 # limitations under the License.
 
 # Bridge module for InfluxDB v3 output transport with persistent disk backlog and connection monitoring
+
+# When working with InfluxDB v3 (influxdb_client_3), query results are natively returned as Apache Arrow tables (pyarrow.Table).
+
 from __future__ import annotations
 
 import logging
@@ -30,6 +33,8 @@ from typing import Any, Callable, Literal, Optional, cast
 
 import pyarrow as pa
 import requests
+
+# influx db methods are not recognized by type checker
 from influxdb_client_3 import InfluxDBClient3, Point
 from tzlocal import get_localzone_name
 
@@ -103,10 +108,6 @@ class influxdb3_out(transport_base):
 
     def __init__(self, settings: TransportSettings) -> None:
 
-        # This explicitly checks: "Does this object actually have the methods I need?"
-        if not isinstance(settings, TransportSettings):
-            msg: str = f"Provided settings object {type(settings)} is missing required methods!"
-            raise TypeError(msg)
         super().__init__(settings)
 
         self.host = settings.get("host", fallback=self.host)
@@ -265,7 +266,7 @@ class influxdb3_out(transport_base):
             ]
 
             if self.client is not None:
-                self.client.write(record=points_to_send, database=self.database)
+                self.client.write(record=points_to_send, database=self.database) # type: ignore[reportUnknownMemberType]
                 self._log.info(f"Successfully wrote {len(points_to_send)} backlog points to InfluxDB v3")
                 self.backlog_points = []
                 self._save_backlog()
@@ -293,12 +294,16 @@ class influxdb3_out(transport_base):
         self._log.info("influxdb3_out connect")
 
         try:
+            # Cast the client initialization if self._build_client_kwargs returns dict[str, Any]
             self.client = InfluxDBClient3(**self._build_client_kwargs())
 
-            # Query system table to check if it exists
-            databases_table: pa.Table = self.client.query("SELECT database_name FROM system.databases")
-            # Convert the Apache Arrow table column to a flat Python list
-            existing_databases = databases_table["database_name"].to_pylist()
+            # Use cast() to resolve the missing type definition on the external .query() method
+            raw_table: Any = self.client.query("SELECT database_name FROM system.databases") # type: ignore[reportUnknownMemberType]
+            databases_table = cast(pa.Table, raw_table)
+
+            # Handle chunk indexing strictly if PyArrow's __getitem__ returns an untyped ChunkedArray
+            column_data: Any = databases_table["database_name"]
+            existing_databases: list[str] = cast(list[str], column_data.to_pylist())
 
             if self.database not in existing_databases:
                 if not self.auto_create_database:
@@ -391,11 +396,7 @@ class influxdb3_out(transport_base):
         if self.client is None:
             raise RuntimeError("Client not initialized")
         # This query returns nothing but validates auth + network reachability.
-        self.client.query(
-            "SHOW TABLES LIMIT 1",
-            database=self.database,
-            language="sql",
-        )
+        self.client.query("SHOW TABLES LIMIT 1", database=self.database,language="sql") # type: ignore[reportUnknownMemberType]
 
     def _check_connection(self) -> bool:
         """Check if the connection is still alive and reconnect if necessary."""
@@ -620,13 +621,13 @@ class influxdb3_out(transport_base):
         p: Point = Point(cast(str, point_dict["measurement"]))
 
         for tag_key, tag_val in cast(dict[str, str], point_dict.get("tags", {})).items():
-            p = p.tag(tag_key, tag_val)
+            p = p.tag(tag_key, tag_val) # type: ignore[reportUnknownMemberType]
 
         for field_key, field_val in cast(dict[str, int | float | str], point_dict.get("fields", {})).items():
-            p = p.field(field_key, field_val)
+            p = p.field(field_key, field_val) # type: ignore[reportUnknownMemberType]
 
         if "time" in point_dict:
-            p = p.time(cast(int, point_dict["time"]))
+            p = p.time(cast(int, point_dict["time"])) # type: ignore[reportUnknownMemberType]
         return p
 
     def _commit_transport_state(self, transport_id: str, row: DataPayload, timestamp: datetime, is_stale: bool) -> None:
@@ -717,51 +718,56 @@ class influxdb3_out(transport_base):
             self._log.exception(f"[{transport_id}] Failed sending stale data notification.")
 
     def _log_batch_debug(self, points: list[InfluxPoint], verb: str) -> None:
-        """Emit structured debug lines for a batch of point dicts."""
-        sample_field_names: list[str] = [
-            "vacr", "VacR", "soc", "SOC", "fwcode", "FWCode",
-            "vbat", "Vbat", "pinv", "Pinv",
-        ]
-        # Allow None in the list type
-        serial_numbers: list[str | None] = []
-        sample_values: list[dict[str, object] | str] = []
+            """Emit structured debug lines for a batch of point dicts."""
+            sample_field_names: list[str] = [
+                "vacr", "VacR", "soc", "SOC", "fwcode", "FWCode",
+                "vbat", "Vbat", "pinv", "Pinv",
+            ]
 
-        for point in points:
-            raw_tags: object = point.get("tags", {})
-            tags: dict[str, str] = raw_tags if isinstance(raw_tags, dict) else {}
+            serial_numbers: list[str | None] = []
+            sample_values: list[dict[str, object] | str] = []
 
-            serial_numbers.append(tags.get("device_serial_number", None))
-            # Fetch the raw object first
-            raw_fields: object = point.get("fields", {})
+            for point in points:
+                raw_tags: object = point.get("tags", {})
+                if isinstance(raw_tags, dict):
+                    tags: dict[str, str] = cast(dict[str, str], raw_tags)
+                else:
+                    tags = {}
+                serial_numbers.append(tags.get("device_serial_number", None))
 
-            # Check the type and assign it to typed variable
-            fields: dict[str, int | float | str] = raw_fields if isinstance(raw_fields, dict) else {}
+                raw_fields: object = point.get("fields", {})
+                if isinstance(raw_fields, dict):
+                    fields: dict[str, int | float | str] = cast(dict[str, int | float | str], raw_fields)
+                else:
+                    fields = {}
 
-            sample_data: dict[str, object] = {k: fields[k] for k in sample_field_names if k in fields}
-            if sample_data:
-                sample_values.append(sample_data)
-            elif fields:
-                sample_values.append(f"No sample fields found. Available fields: {list(fields.keys())[:10]}")
-            else:
-                sample_values.append("No fields found")
+                sample_data: dict[str, object] = {k: fields[k] for k in sample_field_names if k in fields}
 
-        # Use a fallback for serial numbers when joining strings
-        serial_str: str = ", ".join(s for s in serial_numbers if s is not None)
-        self._log.info(f"{verb} {len(points)} points to InfluxDB v3 (serial numbers: {serial_str})")
+                if sample_data:
+                    sample_values.append(sample_data)
+                elif fields:
+                    sample_values.append(f"No sample fields found. Available fields: {list(fields.keys())[:10]}")
+                else:
+                    sample_values.append("No fields found")
 
-        for i, (serial, samples) in enumerate(zip(serial_numbers, sample_values)):
-            # Extract tags safely into a local dictionary variable first
-            raw_point_tags: object = points[i].get("tags", {})
-            point_tags: dict[str, str] = raw_point_tags if isinstance(raw_point_tags, dict) else {}
-            transport_name: str = point_tags.get("transport", "unknown")
+            serial_str: str = ",".join(s for s in serial_numbers if s is not None)
+            self._log.info(f"{verb} {len(points)} points to InfluxDB (serial numbers: {serial_str})")
 
-            self._log.debug(f"Point {i+1} tags: {point_tags}")
+            for i, (serial, samples) in enumerate(zip(serial_numbers, sample_values)):
+                raw_point_tags: object = points[i].get("tags", {})
+                if isinstance(raw_point_tags, dict):
+                    point_tags: dict[str, str] = cast(dict[str, str], raw_point_tags)
+                else:
+                    point_tags = {}
 
-            if isinstance(samples, dict):
-                sample_str: str = ", ".join(f"{k}={v}" for k, v in samples.items())
-                self._log.debug(f"  Point {i+1} ({serial}) from {transport_name}: {sample_str}")
-            else:
-                self._log.debug(f"  Point {i+1} ({serial}) from {transport_name}: {samples}")
+                transport_name: str = point_tags.get("transport", "unknown")
+                self._log.debug(f"Point {i+1} tags: {point_tags}")
+
+                if isinstance(samples, dict):
+                    sample_str: str = ",".join(f"{k}={v}" for k, v in samples.items())
+                    self._log.debug(f"Point {i+1} ({serial}) from {transport_name}: {sample_str}")
+                else:
+                    self._log.debug(f"Point {i+1} ({serial}) from {transport_name}: {samples}")
 
     def _process_and_store_data(self, data: DataPayload, from_transport: transport_base) -> None:
         """Build a point and place it in the persistent backlog (offline path)."""
@@ -816,7 +822,7 @@ class influxdb3_out(transport_base):
 
         try:
             if self.client is not None:
-                self.client.write(record=influx_points, database=self.database)
+                self.client.write(record=influx_points, database=self.database) # type: ignore[reportUnknownMemberType]
 
             if self._log.isEnabledFor(logging.DEBUG):
                 self._log_batch_debug(points_to_write, "Wrote")
@@ -830,7 +836,7 @@ class influxdb3_out(transport_base):
             if self._attempt_reconnect():
                 try:
                     if self.client is not None:
-                        self.client.write(record=influx_points, database=self.database)
+                        self.client.write(record=influx_points, database=self.database) # type: ignore[reportUnknownMemberType]
 
                     if self._log.isEnabledFor(logging.DEBUG):
                         self._log_batch_debug(points_to_write, "Successfully wrote (after reconnect)")

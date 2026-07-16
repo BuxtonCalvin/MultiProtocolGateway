@@ -144,7 +144,7 @@ class json_out(transport_base):
                 output_data["timestamp"] = str(datetime.now().astimezone())
 
         # Add the actual data
-        output_data["data"] = data
+        output_data["data"] = dict(data)
 
         # Convert to JSON
         if self.pretty_print:

@@ -74,7 +74,7 @@
             data-protocol="{{ tab.protocol_name }}"
             data-registry="{{ tab.registry_type }}"
             aria-selected="{{ 'true' if loop.first else 'false' }}"
-            hx-get="/protocol/{{ tab.protocol_name }}/{{ tab.registry_type }}?device_name={{ device.name }}"
+            hx-get="/api/protocols/{{ tab.protocol_name }}/{{ tab.registry_type }}/table?device_name={{ device.name }}"
             hx-target="#protocol-table-container"
             hx-swap="innerHTML scroll:false"
             hx-headers='{"Cache-Control": "no-cache"}'

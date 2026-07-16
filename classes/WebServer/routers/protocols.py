@@ -19,17 +19,23 @@
 
 from __future__ import annotations
 
+import json
 import logging
-from typing import Any, List
+from typing import Any, List, Tuple
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy import Row
 from sqlalchemy.orm import Session
 
 from classes.WebServer.models import DeviceProtocolSelection, ProtocolRegister
 
-from ..database import get_session
+from ..database import get_session, session_scope
 from ..services.protocol_service import (
+    DeviceRegisterView,
+    build_synthetic_rows,
+    get_protocol_json,
     get_protocol_registers,
     get_protocols_for_device,
     toggle_register_field,
@@ -57,35 +63,16 @@ def device_protocol_tabs(
     protocol_version: str,
     device_name: str | None = None,
     db: Session = Depends(get_session),
-) -> list[dict]:
+) -> list[dict[str, Any]]:
+    """
+    Returns every protocol tab for a device, each with its W/M/S counts
+    already computed by get_protocols_for_device(). This is the single
+    source of truth for those counts: pages.py calls the same function
+    directly for the initial page render, and the client re-fetches this
+    endpoint after a toggle to refresh the tab strip — so the two can
+    never disagree.
+    """
     return get_protocols_for_device(db, protocol_version, device_name=device_name)
-
-@router.get("/device/{slug}/counts")
-def tab_counts(
-    slug: str,
-    protocol_name: str,
-    registry_type: str,
-    device_name: str | None = None,
-    db: Session = Depends(get_session),
-) -> dict:
-    """Return W/M/S counts for one tab — called after each toggle to refresh the display."""
-    from ..models import DeviceProtocolSelection
-    write_count = mask_count = screen_count = 0
-    if device_name:
-        sels: List[DeviceProtocolSelection] = (
-            db.query(DeviceProtocolSelection)
-            .filter(
-                DeviceProtocolSelection.device_name == device_name,
-                DeviceProtocolSelection.protocol_name == protocol_name,
-                DeviceProtocolSelection.registry_type == registry_type,
-            )
-            .all()
-        )
-        write_count: int  = sum(1 for s in sels if s.user_write_enabled)
-        mask_count: int   = sum(1 for s in sels if s.mask_enabled)
-        screen_count: int = sum(1 for s in sels if s.screen_enabled)
-        _log.debug(f"write_count: {write_count}, mask_count: {mask_count},  screen_count: ", {screen_count})
-    return {"write_count": write_count, "mask_count": mask_count, "screen_count": screen_count}
 
 
 class ToggleRequest(BaseModel):
@@ -147,3 +134,95 @@ def update_register_field(register_id: int, payload: FieldUpdateRequest, db: Ses
         "value": getattr(result, payload.field),
         "is_dirty": result.is_dirty,
     }
+
+
+# ---------------------------------------------------------------------------
+# HTML partial routes
+#
+# Same /api/protocols prefix as the JSON endpoints above. `/table` and
+# `/json` distinguish these from GET /{protocol_name}/{registry_type|
+# (the JSON register list) — same resource, different representation.
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{protocol_name}/{registry_type}/table", response_class=HTMLResponse, response_model=None)
+async def protocol_table_partial(
+    request: Request,
+    protocol_name: str,
+    registry_type: str,
+    page: int = 1,
+    device_name: str | None = None,
+):
+    """HTMX partial — register table rows, or JSON editor for json registry_type."""
+    if registry_type == "json":
+        # Look up protocol_group so we can find the .json file
+        with session_scope() as db:
+            row: Row[Tuple[str]] | None = (
+                db.query(ProtocolRegister.protocol_group)
+                .filter(ProtocolRegister.protocol_name == protocol_name)
+                .first()
+            )
+        protocol_group = row[0] if row else ""
+        config_dir = getattr(request.app.state, "config_dir", None)
+        json_data, is_override = get_protocol_json(
+            request.app.state.protocols_dir, protocol_group, protocol_name,
+            config_dir=config_dir,
+        )
+        json_data: Any = json_data or {}
+        return request.app.state.templates.TemplateResponse(
+            request=request,
+            name="partials/json_editor.html",
+            context={
+                "protocol_name": protocol_name,
+                "protocol_group": protocol_group,
+                "json_data": json_data,
+                "is_override": is_override,
+            },
+        )
+
+    with session_scope() as db:
+        data: dict[str, Any] = get_protocol_registers(
+            db, protocol_name, registry_type, page, page_size=5000, device_name=device_name
+        )
+
+    # Append synthetic metric rows when rendering a device (scraper) view.
+    # Synthetic rows are display-only — they have no DB row, no toggle
+    # endpoints, and are never written to mask/screen files.  The transport
+    # is looked up by name via the gateway so the metadata stays live.
+    if device_name:
+        gateway = getattr(request.app.state, "gateway", None)
+        if gateway is not None:
+            transport = gateway.get_transport(f"transport.{device_name}")
+            if transport is not None:
+                synthetic: List[DeviceRegisterView] = build_synthetic_rows(transport)
+                if synthetic:
+                    data["rows"] = list(data.get("rows", [])) + synthetic
+
+    return request.app.state.templates.TemplateResponse(
+        request=request,
+        name="partials/protocol_table.html",
+        context={
+            "protocol_name": protocol_name,
+            "registry_type": registry_type,
+            "device_name": device_name,
+            **data,
+        },
+    )
+
+
+@router.post("/{protocol_group}/{protocol_name}/json", response_class=HTMLResponse, response_model=None)
+async def save_protocol_json(request: Request, protocol_group: str, protocol_name: str) -> JSONResponse:
+    """Save updated JSON config for a protocol directly to disk."""
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"status": "error", "detail": "Invalid JSON body"}, status_code=400)
+    config_dir = getattr(request.app.state, "config_dir", request.app.state.protocols_dir / protocol_group)
+    config_dir.mkdir(parents=True, exist_ok=True)
+    json_path = config_dir / f"{protocol_name}.json"
+    try:
+        json_path.write_text(json.dumps(body, indent=2, ensure_ascii=False), encoding="utf-8")
+    except Exception as exc:
+        return JSONResponse({"status": "error", "detail": str(exc)}, status_code=500)
+    return JSONResponse({"status": "ok", "path": str(json_path)})

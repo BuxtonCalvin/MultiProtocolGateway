@@ -353,6 +353,9 @@ def sync_from_library(
         # Always reload from disk so we include any hand-edits made since startup.
         # _load_json keeps "_base" / "_modbus_base" entries so $extends chains
         # survive the round-trip intact.
+        raw: dict[str, Any]
+        _: dict[str, dict[str, str]]
+
         raw, _ = _load_defaults()
 
         changed = False

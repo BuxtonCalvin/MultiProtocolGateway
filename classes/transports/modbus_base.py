@@ -19,13 +19,14 @@ from __future__ import annotations
 
 # Modbus base transport class with shared client management, register failure tracking, and protocol analysis support
 import inspect
+import logging
 import re
 import struct
 import threading
 import time
 from dataclasses import dataclass, field
 from threading import Lock
-from typing import Any, Dict, Iterator, Literal, Optional
+from typing import Any, Callable, Dict, Iterator, Literal, LiteralString, Optional
 
 from pymodbus.client.base import ModbusBaseClient
 from pymodbus.constants import ExcCodes
@@ -33,6 +34,7 @@ from pymodbus.exceptions import ModbusIOException
 
 from defs.common import TransportSettings, strtobool
 
+from .. import eg4_metadata
 from ..protocol_settings import (
     Data_Type,
     Registry_Type,
@@ -61,7 +63,7 @@ MODBUS_FUNCTION_CODES: Dict[Any, str] = {
 }
 
 
-MODBUS_EXCEPTION_CODES: dict[ExcCodes, str] = {
+MODBUS_EXCEPTION_CODES: dict[ExcCodes | int, str]  = {
     ExcCodes.ILLEGAL_FUNCTION: "ILLEGAL_FUNCTION",
     ExcCodes.ILLEGAL_ADDRESS: "ILLEGAL_ADDRESS",
     ExcCodes.ILLEGAL_VALUE: "ILLEGAL_VALUE",
@@ -74,7 +76,7 @@ MODBUS_EXCEPTION_CODES: dict[ExcCodes, str] = {
     ExcCodes.GATEWAY_NO_RESPONSE: "GATEWAY_NO_RESPONSE"
 }
 
-MODBUS_EXCEPTION_DESCRIPTIONS: dict[ExcCodes, str] = {
+MODBUS_EXCEPTION_DESCRIPTIONS: dict[ExcCodes | int, str] = {
     ExcCodes.ILLEGAL_FUNCTION: "The function code received is not allowed for this device.",
     ExcCodes.ILLEGAL_ADDRESS: "The data address received is not allowed for this device.",
     ExcCodes.DEVICE_FAILURE: "An unrecoverable error occurred while performing the action.",
@@ -87,7 +89,7 @@ MODBUS_EXCEPTION_DESCRIPTIONS: dict[ExcCodes, str] = {
     ExcCodes.GATEWAY_NO_RESPONSE: "The gateway target device failed to respond."
 }
 
-def interpret_modbus_exception_code(code) -> str:
+def interpret_modbus_exception_code(code: int) -> str:
     """
     Scheduling path: All (Sequential, Concurrent, Interleaved) — error-formatting utility called from any read/write path.
 
@@ -100,20 +102,27 @@ def interpret_modbus_exception_code(code) -> str:
         str: Human-readable description of the exception
     """
     # Extract function code (lower 7 bits)
-    function_code = code & 0x7F
+    function_code: int = code & 0x7F
 
     # Check if this is an exception response (upper bit set)
     if code & 0x80:
-        # This is an exception response
-        exception_code = code & 0x7F  # The exception code is in the lower 7 bits
+        # Convert raw int to Enum key. If the int is invalid, it falls back to the int itself.
+        # This keeps the dictionary lookup type-safe for Pylance/Pyright.
+        try:
+            exc_key: ExcCodes | int = ExcCodes(code & 0x7F)
+        except ValueError:
+            exc_key = code & 0x7F
+
         function_name: str = MODBUS_FUNCTION_CODES.get(function_code, f"Unknown Function ({function_code})")
-        exception_name: str = MODBUS_EXCEPTION_CODES.get(exception_code, f"Unknown Exception ({exception_code})")
-        description: str = MODBUS_EXCEPTION_DESCRIPTIONS.get(exception_code, "Unknown exception code")
+        exception_name: str = MODBUS_EXCEPTION_CODES.get(exc_key, f"Unknown Exception ({exc_key})")
+        description: str = MODBUS_EXCEPTION_DESCRIPTIONS.get(exc_key, "Unknown exception code")
+
         return f"Modbus Exception: {function_name} failed with {exception_name} - {description}"
     else:
         # This is not an exception response
-        function_name = MODBUS_FUNCTION_CODES.get(function_code, f"Unknown Function ({function_code})")
+        function_name: str = MODBUS_FUNCTION_CODES.get(function_code, f"Unknown Function ({function_code})")
         return f"Modbus Function: {function_name} (not an exception response)"
+
 
 @dataclass()
 class RegisterFailureTracker:
@@ -172,6 +181,8 @@ class RegisterFailureTracker:
                 return 0
             remaining: float = self.disabled_until - time.time()
             return max(0, remaining)
+
+
 class modbus_base(transport_base):
     """Scheduling path: All (Sequential, Concurrent, Interleaved) — base class for every Modbus transport regardless of read_mode."""
 
@@ -224,6 +235,11 @@ class modbus_base(transport_base):
         self.first_connect : bool = True
         self._needs_reconnection : bool = False
 
+        self.device_metadata: eg4_metadata.EG4DeviceMetadata | eg4_metadata.EG4BatteryMetadata | None = None
+        ''' Populated at connect for EG4 protocols by eg4_metadata.read_eg4_device_metadata(); None otherwise. '''
+        self.eg4_hardware_kind_cache: str | None = None
+        ''' Cached result of eg4_metadata.detect_eg4_hardware_kind(): "inverter", "battery", or "unknown". '''
+
         self.send_holding_register : bool = True
         self.send_input_register : bool = True
         self.send_coil_register: bool = True
@@ -275,7 +291,7 @@ class modbus_base(transport_base):
         # shared Modbus bus are differentiated by their slave/unit address.
         # Stored as a string so scrape_target can use it directly.
         # The address fallback covers modbus_rtu which uses that config key instead of slave_id.
-        self._slave_id: str = settings.get("slave_id", fallback=settings.get("address", fallback=self.slave_id))
+        self._slave_id: str = str(settings.get("slave_id", fallback=settings.get("address", fallback=self.slave_id)))
 
     @property
     def _protocol(self) -> "protocol_settings":
@@ -290,6 +306,31 @@ class modbus_base(transport_base):
             raise RuntimeError(msg)
 
         return self.protocolSettings
+
+    @property
+    def proto(self) -> "protocol_settings":
+        """
+        Scheduling path: All (Sequential, Concurrent, Interleaved).
+
+        Public alias for ``_protocol``, for use by external companion modules
+        (e.g. eg4_metadata.py) that need a non-optional accessor for
+        protocolSettings without reaching past this class's leading-
+        underscore naming convention. Same behavior as ``_protocol`` (raises
+        RuntimeError if protocolSettings is None) — this just gives external
+        code a public name to call instead.
+        """
+        return self._protocol
+
+    @property
+    def log(self) -> logging.Logger:
+        """
+        Scheduling path: All (Sequential, Concurrent, Interleaved).
+
+        Public alias for ``_log`` (defined on transport_base), for the same
+        reason as ``proto`` above: external companion modules need a logger
+        without reaching past a leading-underscore name.
+        """
+        return self._log
 
     def _should_send_registry_type(self, registry_type: Registry_Type) -> bool:
         """
@@ -346,10 +387,12 @@ class modbus_base(transport_base):
         return kwargs
 
     def _entry_byte_order(self, entry: registry_map_entry) -> WordOrder:
-        """Scheduling path: All (Sequential, Concurrent, Interleaved).
+        """
+        Scheduling path: All (Sequential, Concurrent, Interleaved).
 
-        Return the ``WordOrder`` for *entry* by delegating to ``DataAdjustments``."""
-        return self._protocol._adjustments.get_entry_byteorder(entry)
+        Return the ``WordOrder`` for *entry* by delegating to ``DataAdjustments``.
+        """
+        return self._protocol.get_entry_byteorder(entry)
 
     def _register_words_to_bytes(self, register_values: list[int], word_order: WordOrder) -> bytes:
         """Scheduling path: All (Sequential, Concurrent, Interleaved).
@@ -702,6 +745,8 @@ class modbus_base(transport_base):
         grouped read; the self._protocol fallback exists only for solo
         (non-grouped) reads that don't have a union to hand in.
         """
+        start: int
+        count: int
         start, count = register_range
         end: int = start + count  # exclusive
         if entries is None:
@@ -719,7 +764,7 @@ class modbus_base(transport_base):
         """Scheduling path: N/A — diagnostic accessor, not part of the read-scheduling loop; usable regardless of read_mode.
 
         Get information about currently disabled register ranges"""
-        disabled_info = []
+        disabled_info: list[str] = []
 
         with self._failure_tracking_lock:
             for tracker in self.register_failure_trackers.values():
@@ -732,7 +777,7 @@ class modbus_base(transport_base):
 
         return disabled_info
 
-    def get_register_failure_status(self) -> dict:
+    def get_register_failure_status(self) -> dict[str, Any]:
         """Scheduling path: N/A — diagnostic accessor, not part of the read-scheduling loop; usable regardless of read_mode.
 
         Get comprehensive status of register failure tracking
@@ -852,6 +897,23 @@ class modbus_base(transport_base):
             else:
                 self._log.debug(f"Transport {self.transport_name} already has serial number: {self.device_serial_number}")
 
+            # EG4 devices expose useful discovery metadata (model, device type,
+            # firmware version, parallel-group role, or — for EG4 batteries —
+            # pack voltage/SOC/SOH) beyond just the serial number. See
+            # eg4_metadata.read_eg4_device_metadata() for details. Only
+            # attempted once; safe to skip on reconnect.
+            protocol_name: str = getattr(self._protocol, "protocol", "") or ""
+            if eg4_metadata.is_eg4_protocol(protocol_name) and self.device_metadata is None:
+                try:
+                    self.device_metadata = eg4_metadata.read_eg4_device_metadata(self)
+                    if self.device_metadata:
+                        self._log.info(f"Transport {self.transport_name} EG4 metadata: {self.device_metadata}")
+                except Exception:
+                    self._log.exception(
+                        f"Transport {self.transport_name} failed to read EG4 device metadata — "
+                        f"continuing without it."
+                    )
+
     def connect(self) -> bool | None:
         """Scheduling path: All (Sequential, Concurrent, Interleaved) — called at startup and on reconnect from any read path.
 
@@ -934,6 +996,8 @@ class modbus_base(transport_base):
                         _elapsed,
                     )
 
+        return self.connected
+
     def cleanup(self) -> None:
         """Scheduling path: N/A — shutdown, runs once regardless of read_mode.
 
@@ -977,7 +1041,26 @@ class modbus_base(transport_base):
         Tries 'Serial_Number' variable first, then falls back to
         concatenating 'Serial No 1-5' for both Holding and Input registers.
         Respects the send_holding_register and send_input_register flags to determine which registry types to read from.
+
+        EG4 trap: EG4 registry maps (protocol name starting with "eg4") don't
+        follow the 'Serial_Number' / 'Serial No 1-5' conventions the generic
+        paths below look for, and the "eg4" protocol family also covers EG4
+        lithium batteries whose serial number isn't readable over Modbus at
+        all. That EG4-specific handling lives in eg4_metadata.py (see that
+        module's docstring for the full explanation) rather than here, since
+        it has nothing to do with generic Modbus transport behavior.
         """
+
+        protocol_name: str = getattr(self._protocol, "protocol", "") or ""
+        if eg4_metadata.is_eg4_protocol(protocol_name):
+            eg4_sn: str = eg4_metadata.read_eg4_serial_number(self)
+            if eg4_sn:
+                return eg4_sn
+            self._log.warning(
+                f"EG4 serial number read path (eg4_metadata) found nothing "
+                f"for protocol '{protocol_name}' — falling back to the "
+                f"generic serial number lookup."
+            )
 
         # Try single-register 'Serial_Number' variable
         if self.send_holding_register:
@@ -1004,7 +1087,7 @@ class modbus_base(transport_base):
 
         return ""
 
-    def _read_sn_from_registry(self, registry_type) -> str | None:
+    def _read_sn_from_registry(self, registry_type: Registry_Type) -> str | None:
         """Scheduling path: N/A — setup, runs once at connect regardless of read_mode.
 
         Helper for single-variable lookup."""
@@ -1017,7 +1100,7 @@ class modbus_base(transport_base):
                 return sn
         return None
 
-    def _read_concatenated_sn(self, r_type) -> str:
+    def _read_concatenated_sn(self, r_type: Registry_Type) -> str:
         """Scheduling path: N/A — setup, runs once at connect regardless of read_mode.
 
         Helper to build SN from multiple registers (Serial No 1-5)."""
@@ -1171,9 +1254,6 @@ class modbus_base(transport_base):
 
                 new_info: Dict[str, int | float | str ] = self._protocol.process_registery(registry, self._protocol.get_registry_map(registry_type))
 
-                if False:
-                    new_info = {self.__input_register_prefix + key: value for key, value in new_info.items()}
-
                 info.update(new_info)
 
             if not info:
@@ -1188,7 +1268,7 @@ class modbus_base(transport_base):
                         self._log.info(f"  - {range_info}")
                 self._last_disabled_status_log = time.time()
 
-            self._finish_cycle_tracking(info)
+            self.finish_cycle_tracking(info)
             return info
 
     def read_group_data(self, members: list[transport_base]) -> dict[str, int | float | str]:
@@ -1292,7 +1372,7 @@ class modbus_base(transport_base):
             if not info:
                 self._log.info("Grouped register read returned no data; transport busy?")
 
-            self._finish_cycle_tracking(info)
+            self.finish_cycle_tracking(info)
             return info
 
     def interleaved_cycle_timeout(self) -> float:
@@ -1376,7 +1456,7 @@ class modbus_base(transport_base):
         include_holding: bool = True,
         include_coil: bool = False,
         include_discrete: bool = False,
-        progress_cb=None,
+        progress_cb: Callable[[str, int, int], None] | None = None,
     ) -> dict[str, dict[int, int]]:
         """
         Scheduling path: N/A — Analyze feature, invoked on demand via the web API; not part of the read-scheduling loop.
@@ -1406,7 +1486,7 @@ class modbus_base(transport_base):
             """Scheduling path: N/A — Analyze feature helper, not part of the read-scheduling loop."""
             total_reads = 0
             failures = 0
-            phase = registry_type.name.lower()
+            phase: LiteralString = registry_type.name.lower()
             total_batches: int = max(1, (end - start) // batch_size + 1)
             batches_done = 0
 
@@ -1496,7 +1576,7 @@ class modbus_base(transport_base):
 
     @staticmethod
     def _parse_values_range(
-        values_str: str,
+        values_str: str | list[Any],
     ) -> tuple[float, float] | list[float] | None:
         """
         Scheduling path: N/A — Analyze feature, invoked on demand via the web API; not part of the read-scheduling loop.
@@ -1593,7 +1673,7 @@ class modbus_base(transport_base):
         self,
         protocol_names: list[str],
         current_protocol: str | None = None,
-        progress_cb=None,
+        progress_cb: Callable[[str, int, int], None] | None = None,
         batch_size: int = 40,
     ) -> dict[str, Any]:
         """
@@ -1746,10 +1826,6 @@ class modbus_base(transport_base):
                 unknown_in_scan: list[int] = sorted(reg for reg in raw_map.keys() if reg not in known_registers)
                 accuracy: float = round((matches / total) * 100, 2) if total else 0.0
 
-                # --- removable suggestions ---
-                # Bug fix: use register as the primary key so entries are
-                # grouped by physical address rather than by name, avoiding
-                # accidental multi-row matches on shared documented_names.
                 removable: list[dict[str, Any]] = []
                 entries_by_register: dict[int, list[registry_map_entry]] = {}
                 for entry in entries:
@@ -1762,7 +1838,7 @@ class modbus_base(transport_base):
                             "variable_name": entry.variable_name,
                             "documented_name": entry.documented_name,
                             "data_type": entry.data_type.name if entry.data_type else "",
-                            "read_interval": str(entry.read_interval) if entry.read_interval is not None else "",
+                            "read_interval": str(entry.read_interval),
                             "write_mode": {
                                 WriteMode.READ: "R",
                                 WriteMode.READDISABLED: "RD",
@@ -1841,13 +1917,13 @@ class modbus_base(transport_base):
             if isinstance(value, str):
                 coil_bool: bool = value not in ("0", "false", "off", "no", "")
             else:
-                coil_bool = bool(int(float(value))) if value != "" else False
+                coil_bool = bool(int(float(value)))
             self._log.info(f"WRITE COIL: {entry.variable_name} => {coil_bool} to Register {entry.register}")
             self.write_coil(entry.register, coil_bool, variable_name=entry.variable_name)
             return
 
         temp_map: list[registry_map_entry] = [entry]
-        word_count = self._entry_word_count(entry)
+        word_count: int = self._entry_word_count(entry)
         registry: Dict[int, int] = self.read_modbus_registers(
             start=entry.register,
             end=entry.register + word_count - 1,
@@ -1888,7 +1964,7 @@ class modbus_base(transport_base):
                 return self._log.error(f"WRITE_ERROR: Invalid value in register '{current_value}'. Unsafe to write")
                 #raise ValueError(err)
 
-            if not (entry.data_type == Data_Type._16BIT_FLAGS or entry.data_type == Data_Type._8BIT_FLAGS or entry.data_type == Data_Type._32BIT_FLAGS): #skip validation for write; validate further down
+            if not (entry.data_type == Data_Type.BIT16_FLAGS or entry.data_type == Data_Type.BIT8_FLAGS or entry.data_type == Data_Type.BIT32_FLAGS): #skip validation for write; validate further down
                 if not self._protocol.validate_registry_entry(entry, value):
                     return self._log.error(f"WRITE_ERROR: Invalid new value, '{value}'. Unsafe to write")
 
@@ -1987,7 +2063,7 @@ class modbus_base(transport_base):
                 word_order,
             )
 
-        elif entry.data_type in (Data_Type._16BIT_FLAGS, Data_Type._8BIT_FLAGS, Data_Type._32BIT_FLAGS):
+        elif entry.data_type in (Data_Type.BIT16_FLAGS, Data_Type.BIT8_FLAGS, Data_Type.BIT32_FLAGS):
             flag_size: int = Data_Type.getSize(entry.data_type)
             value_str: str = str(value)
 
@@ -2094,8 +2170,8 @@ class modbus_base(transport_base):
             )
             return
 
-        if register_values is None:
-            raise ValueError("Invalid value - None")
+        if not register_values:
+            raise ValueError("Invalid value - Empty register_values after processing")
 
         bit_index_dbg: int | Literal['n/a'] = entry.register_bit if entry.register_bit > 0 else "n/a"
         self._log.debug(
@@ -2134,11 +2210,10 @@ class modbus_base(transport_base):
         # Multiple Registers"), so every non-coil write goes through it now
         # regardless of length rather than maintaining a separate, broken
         # single-register path.
-        if registry_type == Registry_Type.COIL:
-            coil_value: bool = bool(register_values[0]) if register_values else False
-            self.write_coil(entry.register, coil_value, variable_name=entry.variable_name)
-        else:
-            self.write_registers(entry.register, register_values, variable_name=entry.variable_name)
+        # COIL registers are handled by the fast path near the top of this
+        # method (which returns before reaching here), so this is always a
+        # Holding/Input register write.
+        self.write_registers(entry.register, register_values, variable_name=entry.variable_name)
 
 
     def read_variable(self, variable_name : str, registry_type : Registry_Type, entry : registry_map_entry | None = None) -> int | float | str | None:
@@ -2167,6 +2242,7 @@ class modbus_base(transport_base):
             registers: Dict[int, int] = self.read_modbus_registers(start=start, end=end, registry_type=registry_type)
             results: Dict[str, int | float | str] = self._protocol.process_registery(registers, registry_map)
             return results.get(entry.variable_name)  # safer than direct dict access.
+        return None
 
     def read_modbus_registers(self, ranges: list[tuple[int, int]] | None = None, start : int = 0, end : int | None = None,
                               batch_size : int | None = None, registry_type : Registry_Type = Registry_Type.INPUT,
@@ -2228,11 +2304,7 @@ class modbus_base(transport_base):
 
             # Check if this register range is currently disabled
             is_disabled: bool = self._is_register_range_disabled(register_range, registry_type)
-            # Unconditional per-range visibility — previously this state was
-            # silent unless a range was actually being skipped, which made it
-            # impossible to confirm from the log alone whether a range that
-            # *looked* fine was quietly sitting in the disabled set the whole
-            # time. Logged every cycle for every range regardless of outcome.
+
             self._log.debug(
                 f"Register range check {registry_type.name} "
                 f"{register_range[0]}-{register_range[0]+register_range[1]-1} "
@@ -2249,7 +2321,7 @@ class modbus_base(transport_base):
                     f"for {self.transport_name} is DISABLED and will not be read — "
                     f"metrics affected ({len(covered_metrics)}): {covered_metrics}"
                 )
-                self._cycle_mark_incomplete()
+                self.cycle_mark_incomplete()
                 continue
 
             self._log.info("get registers ("+str(index)+"): " +str(registry_type)+ " - " + str(register_range[0]) + " to " + str(register_range[0]+register_range[1]-1) + " ("+str(register_range[1])+")")
@@ -2265,7 +2337,7 @@ class modbus_base(transport_base):
             # full retry chain to exhaust.
             # bus_lock is just a local variable inside this loop, so if the transport doesn't have a bus lock,
             # it will be None and skipped without error.
-            bus_lock: Lock | None = self._bus_lock
+            bus_lock: Lock | None = self.bus_lock
             if bus_lock is not None:
                 bus_lock.acquire()
             try:
@@ -2301,11 +2373,11 @@ class modbus_base(transport_base):
                     self._log.error(register.decode("utf-8"))
                 else:
                     # Enhanced error logging with Modbus exception interpretation
-                    error_msg = str(register)
+                    error_msg: str = str(register)
 
                     # Check if this is an ExceptionResponse and extract the exception code
                     if hasattr(register, 'function_code') and hasattr(register, 'exception_code'):
-                        exception_code = register.function_code | 0x80  # Convert to exception response code
+                        exception_code: int = register.function_code | 0x80  # Convert to exception response code
                         interpreted_error: str = interpret_modbus_exception_code(exception_code)
                         self._log.debug(f"{error_msg} - {interpreted_error}")
                     else:
@@ -2321,7 +2393,7 @@ class modbus_base(transport_base):
                     self.modbus_delay = 60
 
                 if retry > retries: #instead of none, attempt to continue to read. but with no retries.
-                    self._cycle_mark_incomplete()
+                    self.cycle_mark_incomplete()
                     continue
                 else:
                     #undo step in loop and retry read
@@ -2403,7 +2475,7 @@ class modbus_base(transport_base):
             isError = False
             register = None
 
-            bus_lock: Lock | None = self._bus_lock
+            bus_lock: Lock | None = self.bus_lock
             if bus_lock is not None:
                 bus_lock.acquire()
             try:
@@ -2442,7 +2514,7 @@ class modbus_base(transport_base):
 
         When called as a fallback from read_group_data_iter the
         _cycle_active flag will already be True, so _start_cycle_tracking
-        and _finish_cycle_tracking are skipped — the group iter owns
+        and finish_cycle_tracking are skipped — the group iter owns
         the cycle lifecycle in that case.
         """
         _owner: bool = not getattr(self, '_cycle_active', False)
@@ -2469,7 +2541,7 @@ class modbus_base(transport_base):
             self._partial_registry.clear()
 
         if _owner:
-            self._finish_cycle_tracking(self._partial_info)
+            self.finish_cycle_tracking(self._partial_info)
 
     def _read_registry_type_iter(
         self,
@@ -2483,7 +2555,7 @@ class modbus_base(transport_base):
 
         Reads one registry type block-by-block, yielding after each block.
         Accumulates raw register values into self._partial_registry.
-        Does NOT call _start_cycle_tracking or _finish_cycle_tracking —
+        Does NOT call _start_cycle_tracking or finish_cycle_tracking —
         those are the caller's responsibility.
         """
         ranges: list[tuple[int, int]] = self._protocol.calculate_registry_ranges(
@@ -2513,7 +2585,7 @@ class modbus_base(transport_base):
             ))
 
             if result == {}:
-                self._cycle_mark_incomplete()
+                self.cycle_mark_incomplete()
                 idx += 1
                 yield True
             elif result is None:
@@ -2529,7 +2601,7 @@ class modbus_base(transport_base):
                     # Do not advance idx — retry the same range next time in.
                 else:
                     self._log.warning(f"Block {register_range} exceeded {self.max_retries_per_block} retries, skipping.")
-                    self._cycle_mark_incomplete()
+                    self.cycle_mark_incomplete()
                     idx += 1        # give up on this range, move to next
                     yield True      # still signal coordinator we made progress
             else:
@@ -2537,10 +2609,6 @@ class modbus_base(transport_base):
                 self._partial_registry.update(result)
                 idx += 1            # success — advance to next range
                 yield True
-
-    # get_partial_data() override removed — transport_base's base
-    # implementation now reads _partial_info directly (see that class),
-    # which is exactly what this override used to do. No behavior change.
 
     @property
     def scrape_target(self) -> str:

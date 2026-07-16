@@ -25,14 +25,14 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, List, Sequence, Tuple
+from typing import Any, List, Literal, Sequence, Tuple
 
 from sqlalchemy import select
 from sqlalchemy.engine.row import Row
 from sqlalchemy.orm import Query, Session
 
 from ..database import refresh_app_state
-from ..models import DeviceProtocolSelection, ProtocolRegister, RegisterToggleTarget
+from ..models import DeviceProtocolSelection, ProtocolRegister
 
 _log: logging.Logger = logging.getLogger(__name__)
 
@@ -191,7 +191,7 @@ def get_protocol_registers(
     }
 
 
-def get_protocols_for_device(db: Session, protocol_version: str, device_name: str | None = None) -> list[dict]:
+def get_protocols_for_device(db: Session, protocol_version: str, device_name: str | None = None) -> List[dict[str, Any]]:
     """
     Given a protocol_version string (e.g. "eg4_18kpv"),
     returns the available registry_types (tabs) for that device,
@@ -210,7 +210,9 @@ def get_protocols_for_device(db: Session, protocol_version: str, device_name: st
         .all()
     )
 
-    tabs = []
+    tabs: List[dict[str, Any]] = []
+    protocol_name: str
+    registry_type: str
     for r in rows:
         protocol_name, registry_type = r[0], r[1]
 
@@ -261,7 +263,7 @@ def toggle_register_field(
     if row is None:
         return None
 
-    target: RegisterToggleTarget = row
+    target: ProtocolRegister | DeviceProtocolSelection = row
 
     if device_name:
         existing: DeviceProtocolSelection | None = (
@@ -298,14 +300,14 @@ def toggle_register_field(
     setattr(target, field, value)
     # Mask and screen are mutually exclusive for a register.
     if field == "mask_enabled" and value:
-        target.screen_enabled = False
+        setattr(target, "screen_enabled", False)
     elif field == "screen_enabled" and value:
-        target.mask_enabled = False
+        setattr(target, "mask_enabled", False)
     target.mark_dirty()
     db.flush()
     refresh_app_state(db)
     _log.debug("toggle_register_field: register=%d field=%s value=%s device=%s", register_id, field, value, device_name)
-    return target  # type: ignore[return-value]  # concrete type is ProtocolRegister | DeviceProtocolSelection
+    return target
 
 
 def update_protocol_register_field(db: Session, register_id: int, field: str, value: str) -> ProtocolRegister | None:
@@ -339,7 +341,7 @@ def get_protocol_json(
     protocol_group: str,
     protocol_name: str,
     config_dir: Path | None = None,
-) -> tuple[dict | None, bool]:
+)  -> Tuple[Any, Literal[True]] | Tuple[None, Literal[False]] | Tuple[Any, Literal[False]]:
     """
     Load the JSON config file for a protocol.
     Checks config_dir first (user override), then falls back to protocols_dir.
@@ -354,8 +356,6 @@ def get_protocol_json(
                 return json.loads(override_path.read_text(encoding="utf-8")), True
             except Exception:
                 _log.warning("Failed to load protocol json override file %s", override_path)
-                # Fix 5: add the missing return so the checker sees a complete
-                # set of return paths and --warn-return-type is satisfied.
                 return None, False
 
     json_path: Path = protocols_dir / protocol_group / f"{protocol_name}.json"

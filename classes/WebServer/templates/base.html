@@ -440,7 +440,7 @@
     <button class="px-2 py-1.5 text-xs rounded border border-mpg-600
                    text-mpg-300 hover:bg-mpg-700
                    focus:outline-none focus:ring-2 focus:ring-accent"
-            hx-get="/diff-panel"
+            hx-get="/api/commit/diff-panel"
             hx-target="#diff-overlay"
             hx-swap="innerHTML"
             aria-label="View pending changes diff">
@@ -471,7 +471,7 @@
     ⚠ Database contains <strong>{{ app_state.orphan_count }}</strong>
     setting{{ 's' if app_state.orphan_count != 1 else '' }} no longer found in code.
   </span>
-  <button hx-get="/orphan-modal"
+  <button hx-get="/api/devices/orphan-modal"
           hx-target="#diff-overlay"
           hx-swap="innerHTML"
           class="underline hover:no-underline font-medium focus:outline-none focus:ring-2 focus:ring-warning">

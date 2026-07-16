@@ -29,14 +29,20 @@ Change types
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Literal
+from dataclasses import dataclass
+from dataclasses import field as dc_field
+from enum import Enum
 
 from sqlalchemy.orm import Session
 
 from .models import ProtocolRegister, Setting
 
-ChangeType = Literal["modified", "added", "removed", "orphan", "unchanged"]
+
+class ChangeType(str, Enum):
+    ADDED = "added"
+    MODIFIED = "modified"
+    REMOVED = "removed"
+    ORPHAN = "orphan"
 
 
 @dataclass
@@ -63,8 +69,10 @@ class ProtocolDiff:
 
 @dataclass
 class DiffResult:
-    settings: list[SettingDiff] = field(default_factory=list)
-    protocols: list[ProtocolDiff] = field(default_factory=list)
+    # Force the factory to explicitly return a list of the specific dataclass
+    settings: list[SettingDiff] = dc_field(default_factory=lambda: list[SettingDiff]())
+    protocols: list[ProtocolDiff] = dc_field(default_factory=lambda: list[ProtocolDiff]())
+
 
     @property
     def has_changes(self) -> bool:
@@ -76,11 +84,11 @@ class DiffResult:
         sc: Counter[str] = Counter(d.change_type for d in self.settings)
         pc: Counter[str] = Counter(d.change_type for d in self.protocols)
         return {
-            "settings_modified": sc["modified"],
-            "settings_added": sc["added"],
-            "settings_removed": sc["removed"],
-            "settings_orphaned": sc["orphan"],
-            "protocols_modified": pc["modified"],
+            "settings_modified": sc[ChangeType.MODIFIED],
+            "settings_added": sc[ChangeType.ADDED],
+            "settings_removed": sc[ChangeType.REMOVED],
+            "settings_orphaned": sc[ChangeType.ORPHAN],
+            "protocols_modified": pc[ChangeType.MODIFIED],
             "total_changes": len(self.settings) + len(self.protocols),
         }
 
@@ -103,7 +111,7 @@ def build_diff(db: Session) -> DiffResult:
                     key=row.key,
                     old_value=row.value_disk,
                     new_value=row.value_staged,
-                    change_type="orphan",
+                    change_type=ChangeType.ORPHAN,
                     is_orphan=True,
                 ))
             continue
@@ -115,11 +123,11 @@ def build_diff(db: Session) -> DiffResult:
         staged: str = row.value_staged or ""
 
         if not disk and staged:
-            change_type: ChangeType = "added"
+            change_type: ChangeType = ChangeType.ADDED
         elif disk and not row.is_active:
-            change_type = "removed"
+            change_type: ChangeType = ChangeType.REMOVED
         elif disk != staged:
-            change_type = "modified"
+            change_type: ChangeType = ChangeType.MODIFIED
         else:
             continue
 
@@ -147,7 +155,7 @@ def build_diff(db: Session) -> DiffResult:
                     field=field_name,
                     old_value=disk_field,
                     new_value=staged_field,
-                    change_type="modified",
+                    change_type=ChangeType.MODIFIED,
                 ))
 
     return result

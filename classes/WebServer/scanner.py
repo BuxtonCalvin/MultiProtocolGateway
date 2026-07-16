@@ -37,7 +37,7 @@ import logging
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, List
+from typing import Any, List, Literal
 
 from sqlalchemy.orm import Session
 
@@ -64,7 +64,7 @@ TRANSPORT_BASE_KEYS: dict[str, str] = get_transport_base_keys()
 # Config parser  (reuses the CustomConfigParser from protocol_gateway)
 # ---------------------------------------------------------------------------
 
-def _load_config(config_path: Path) -> dict[str, dict[str, str]]:
+def load_config(config_path: Path) -> dict[str, dict[str, str]]:
     """
     Parse config.cfg using the same CustomConfigParser as the gateway.
     Returns {section: {key: value}}.
@@ -444,7 +444,7 @@ def _parse_protocol_csv(csv_path: Path, group_name: str) -> list[dict[str, Any]]
             # ── Detect delimiter ──────────────────────────────────────────
             sample: str = f.read(4096)
             f.seek(0)
-            delimiter = ";" if sample.count(";") > sample.count(",") else ","
+            delimiter: Literal[';'] | Literal[','] = ";" if sample.count(";") > sample.count(",") else ","
 
             reader: csv.DictReader[str] = csv.DictReader(
                 f,
@@ -462,7 +462,7 @@ def _parse_protocol_csv(csv_path: Path, group_name: str) -> list[dict[str, Any]]
             def _norm(s: str) -> str:
                 return s.strip().lower().replace(" ", "_").replace("/", "_")
 
-            norm_fields: dict[str, str] = {k: _norm(k) for k in reader.fieldnames if k is not None}
+            norm_fields: dict[str, str] = {k: _norm(k) for k in reader.fieldnames if k}
 
             # Canonical field aliases — maps normalized header → canonical key
             ALIASES: dict[str, str] = {
@@ -1097,7 +1097,7 @@ class Scanner:
             # ----------------------------------------------------------------
             # Scan config.cfg
             # ----------------------------------------------------------------
-            config_data: dict[str, dict[str, str]] = _load_config(self.config_path)
+            config_data: dict[str, dict[str, str]] = load_config(self.config_path)
             transport_library: dict[str, dict[str, Any]] = scan_transport_library(self.transports_dir)
 
             for section, keys in config_data.items():

@@ -28,7 +28,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Literal, Optional, cast
 
-from influxdb import InfluxDBClient
+#  influx db methods are not recognized by type checker
+from influxdb import InfluxDBClient  # type: ignore
 from tzlocal import get_localzone_name
 
 from classes.protocol_settings import registry_map_entry
@@ -46,7 +47,7 @@ InfluxPoint = dict[str, object]
 
 
 class InfluxDBLogAliaser(logging.Filter):
-    def filter(self, record) -> Literal[True]:
+    def filter(self, record: logging.LogRecord) -> Literal[True]:
         # Check if a log comes from urllib3: not used for anything else in this class.
         # Change the urllib3 name to make log entries legible to users.
         if record.name == "urllib3.connectionpool" or "urllib3.connectionpool" in record.getMessage():
@@ -118,10 +119,6 @@ class influxdb_out(transport_base):
 
     def __init__(self, settings: TransportSettings) -> None:
 
-        # This explicitly checks: "Does this object actually have the methods I need?"
-        if not isinstance(settings, TransportSettings):
-            msg: str = f"Provided settings object {type(settings)} is missing required methods!"
-            raise TypeError(msg)
         super().__init__(settings)
 
         self.host = settings.get("host", fallback=self.host)
@@ -277,7 +274,7 @@ class influxdb_out(transport_base):
             ]
 
             if self.client is not None:
-                self.client.write_points(points_to_send)
+                self.client.write_points(points_to_send) # type: ignore[reportUnknownMemberType]
                 self._log.info(f"Successfully wrote {len(points_to_send)} backlog points to InfluxDB")
                 self.backlog_points = []
                 self._save_backlog()
@@ -316,10 +313,10 @@ class influxdb_out(transport_base):
             self.client.ping()
 
             # Create database if it doesn't exist
-            databases: list[dict[str, str]] = self.client.get_list_database()
+            databases: list[dict[str, str]] = self.client.get_list_database() # type: ignore[reportUnknownMemberType]
             if not any(db["name"] == self.database for db in databases):
                 self._log.info(f"Creating database: {self.database}")
-                self.client.create_database(self.database)
+                self.client.create_database(self.database) # type: ignore[reportUnknownMemberType]
 
         except ImportError:
             self._log.error("InfluxDB client not installed. Please install with: pip install influxdb")
@@ -660,22 +657,26 @@ class influxdb_out(transport_base):
             "vacr", "VacR", "soc", "SOC", "fwcode", "FWCode",
             "vbat", "Vbat", "pinv", "Pinv",
         ]
-        # Allow None in the list type
+
         serial_numbers: list[str | None] = []
         sample_values: list[dict[str, object] | str] = []
 
         for point in points:
             raw_tags: object = point.get("tags", {})
-            tags: dict[str, str] = raw_tags if isinstance(raw_tags, dict) else {}
-
+            if isinstance(raw_tags, dict):
+                tags: dict[str, str] = cast(dict[str, str], raw_tags)
+            else:
+                tags = {}
             serial_numbers.append(tags.get("device_serial_number", None))
-            # Fetch the raw object first
-            raw_fields: object = point.get("fields", {})
 
-            # Check the type and assign it to typed variable
-            fields: dict[str, int | float | str] = raw_fields if isinstance(raw_fields, dict) else {}
+            raw_fields: object = point.get("fields", {})
+            if isinstance(raw_fields, dict):
+                fields: dict[str, int | float | str] = cast(dict[str, int | float | str], raw_fields)
+            else:
+                fields = {}
 
             sample_data: dict[str, object] = {k: fields[k] for k in sample_field_names if k in fields}
+
             if sample_data:
                 sample_values.append(sample_data)
             elif fields:
@@ -683,20 +684,21 @@ class influxdb_out(transport_base):
             else:
                 sample_values.append("No fields found")
 
-        # Use a fallback for serial numbers when joining strings
-        serial_str: str = ", ".join(s for s in serial_numbers if s is not None)
+        serial_str: str = ",".join(s for s in serial_numbers if s is not None)
         self._log.info(f"{verb} {len(points)} points to InfluxDB (serial numbers: {serial_str})")
 
         for i, (serial, samples) in enumerate(zip(serial_numbers, sample_values)):
-            # Extract tags safely into a local dictionary variable first
             raw_point_tags: object = points[i].get("tags", {})
-            point_tags: dict[str, str] = raw_point_tags if isinstance(raw_point_tags, dict) else {}
-            transport_name: str = point_tags.get("transport", "unknown")
+            if isinstance(raw_point_tags, dict):
+                point_tags: dict[str, str] = cast(dict[str, str], raw_point_tags)
+            else:
+                point_tags = {}
 
+            transport_name: str = point_tags.get("transport", "unknown")
             self._log.debug(f"Point {i+1} tags: {point_tags}")
 
             if isinstance(samples, dict):
-                sample_str: str = ", ".join(f"{k}={v}" for k, v in samples.items())
+                sample_str: str = ",".join(f"{k}={v}" for k, v in samples.items())
                 self._log.debug(f"Point {i+1} ({serial}) from {transport_name}: {sample_str}")
             else:
                 self._log.debug(f"Point {i+1} ({serial}) from {transport_name}: {samples}")
@@ -753,7 +755,7 @@ class influxdb_out(transport_base):
 
         try:
             if self.client is not None:
-                self.client.write_points(points_to_write)
+                self.client.write_points(points_to_write) # type: ignore[reportUnknownMemberType]
 
             if self._log.isEnabledFor(logging.DEBUG):
                 self._log_batch_debug(points_to_write, "Wrote")
@@ -767,7 +769,7 @@ class influxdb_out(transport_base):
             if self._attempt_reconnect():
                 try:
                     if self.client is not None:
-                        self.client.write_points(points_to_write)
+                        self.client.write_points(points_to_write)  # type: ignore[reportUnknownMemberType]
 
                     if self._log.isEnabledFor(logging.DEBUG):
                         self._log_batch_debug(points_to_write, "Successfully wrote (after reconnect)")

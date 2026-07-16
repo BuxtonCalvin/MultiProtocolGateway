@@ -19,9 +19,6 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 
-
-from __future__ import annotations
-
 You can find a copy of the GNU Affero General Public License in the documentation/bridges/timescaledb folder.
 If not, see <https://www.gnu.org>.
 ----------------------------------------------------------------------------------------------------------------------
@@ -54,6 +51,8 @@ Continuous Rollups	 This term refers to the process of downsampling data into su
     aggregate would be defined based on the hourly rollup continuous aggregate, and so on.
 
 """
+
+from __future__ import annotations
 
 import json
 import logging
@@ -500,14 +499,14 @@ class timescaledb(transport_base):
         "TEXT": "TEXT",
         "_1BIT": "BOOLEAN",
 
-        # 1. Unsigned Bit-lengths (_2BIT to _15BIT)
+        # Unsigned Bit-lengths (_2BIT to _15BIT)
         **{f"_{i}BIT": "SMALLINT" for i in range(2, 16)},
         "_16BIT": "INTEGER", # 16-bit unsigned needs INTEGER
 
-        # 2. Signed Bits (_2SBIT to _16SBIT)
+        # Signed Bits (_2SBIT to _16SBIT)
         **{f"_{i}SBIT": "SMALLINT" for i in range(2, 17)},
 
-        # 3. Signed Magnitude (_2SMBIT to _16SMBIT)
+        # Signed Magnitude (_2SMBIT to _16SMBIT)
         **{f"_{i}SMBIT": "SMALLINT" for i in range(2, 17)},
 
         # Float (Add these to the register maps if you use them - Gorilla compression)
@@ -541,7 +540,7 @@ class timescaledb(transport_base):
     # whether to enable compression on hypertables at startup.
     #Compression policies are created regardless, but this controls whether existing data is compressed on init.
     enable_compression: bool = True
-    enable_rollups = True  # whether to create continuous aggregate rollups on init and start the auto-refresh thread.
+    enable_rollups: bool = True  # whether to create continuous aggregate rollups on init and start the auto-refresh thread.
     auto_refresh_interval: int = 21600  # seconds (default 6 hours), auto-refresh rollup
     enable_auto_refresh: bool = True  # whether to auto-refresh rollups periodically
     drop_after: str = "1 year"  # default retention policy for raw data in tables and views, can be overridden by settings SectionProxy
@@ -562,14 +561,11 @@ class timescaledb(transport_base):
     # of metrics for a given protocol, as determined by the registry map.  This allows the transport
     # to ensure that all expected metrics for a given timestamp have been received before writing to the database,
     # which is important for maintaining data integrity and ensuring that rollups are accurate.
-    write_requires_complete_cycle = True
+    write_requires_complete_cycle: bool = True
 
 
     def __init__(self, settings: TransportSettings, connection_manager: TimescaleDBConnectionManager | None = None) -> None:
-        # This explicitly checks: "Does this object actually have the methods I need?"
-        if not isinstance(settings, TransportSettings):
-            msg: str = f"Provided settings object {type(settings)} is missing required methods!"
-            raise TypeError(msg)
+
         """
         Initialize the TimescaleDB transport bridge.
 
@@ -619,7 +615,7 @@ class timescaledb(transport_base):
 
         # Maps protocol_name -> metric_mapping dict
         # Each protocol has its own metric_name -> (clean_column_name, data_type) map
-        self._protocol_metric_mappings: dict[str, dict[str, tuple[str, str]]] = {}
+        self.protocol_metric_mappings: dict[str, dict[str, tuple[str, str]]] = {}
         # -------------------------
         # load user settings from SectionProxy
         # -------------------------
@@ -638,16 +634,16 @@ class timescaledb(transport_base):
             warnings.warn("TimeScaleDB Password is empty", RuntimeWarning)
 
         # load reconnect/backoff settings
-        self.use_exponential_backoff = settings.getboolean("use_exponential_backoff", fallback=self.use_exponential_backoff)
-        self.max_reconnect_delay = settings.getint("max_reconnect_delay", fallback=self.max_reconnect_delay)
+        self.use_exponential_backoff: bool = settings.getboolean("use_exponential_backoff", fallback=self.use_exponential_backoff)
+        self.max_reconnect_delay: int = settings.getint("max_reconnect_delay", fallback=self.max_reconnect_delay)
         self.reconnect_attempts: int = settings.getint("reconnect_attempts", fallback=self.reconnect_attempts)
         self.reconnect_delay: int = settings.getint("reconnect_delay", fallback=self.reconnect_delay)
-        self.force_float = settings.getboolean("force_float", fallback=self.force_float)
+        self.force_float: bool = settings.getboolean("force_float", fallback=self.force_float)
 
         # stale data settings
         self.stale_data_timeout: int = settings.getint("stale_data_timeout", fallback=self.stale_data_timeout)
         # wait for complete data to write to db.
-        self.write_requires_complete_cycle = settings.getboolean("write_requires_complete_cycle", fallback=self.write_requires_complete_cycle)
+        self.write_requires_complete_cycle: bool = settings.getboolean("write_requires_complete_cycle", fallback=self.write_requires_complete_cycle)
 
         # UTC timestamp mode setting - set context for this transport instance
         self.use_utc_timestamp: bool = settings.getboolean("use_utc_timestamp", fallback=False)
@@ -657,7 +653,7 @@ class timescaledb(transport_base):
         # persistent backlog settings
         project_root: Path = Path(__file__).resolve().parents[2]
         # Force path to look relative by stripping leading slashes/drives
-        self.enable_persistent_storage = settings.getboolean("enable_persistent_storage", fallback=self.enable_persistent_storage)
+        self.enable_persistent_storage: bool = settings.getboolean("enable_persistent_storage", fallback=self.enable_persistent_storage)
         self.backlog_storage_path_value: str | Path = settings.get("backlog_storage_path", fallback=self.backlog_storage_path)
         if not isinstance(self.backlog_storage_path_value, Path):
             clean_setting: str = self.backlog_storage_path_value.lstrip("\\/")
@@ -665,8 +661,8 @@ class timescaledb(transport_base):
 
         self.backlog_storage_path = (project_root /self.backlog_storage_path_value).resolve()
 
-        self.backlog_file_name = settings.get("backlog_file_name", fallback=self.backlog_file_name)
-        self.max_backlog_size = settings.getint("max_backlog_size", fallback=self.max_backlog_size)
+        self.backlog_file_name: str = settings.get("backlog_file_name", fallback=self.backlog_file_name)
+        self.max_backlog_size: int = settings.getint("max_backlog_size", fallback=self.max_backlog_size)
         self.max_backlog_age: int = settings.getint("max_backlog_age", fallback=self.max_backlog_age)
 
         # hypertable / rollup options that are user defined.  These are sent to the rollup manager class
@@ -688,7 +684,7 @@ class timescaledb(transport_base):
 
         # Explicitly set bridge name if not set by user, since this transport doesn't have a device name from an
         # upstream transport to pull from.
-        self.device_name = settings.get("device_name", fallback="TimescaleDB MPG Bridge")
+        self.device_name: str = settings.get("device_name", fallback="TimescaleDB MPG Bridge")
 
         super().__init__(settings)
 
@@ -712,11 +708,7 @@ class timescaledb(transport_base):
 
         # keyed as: self._wide_columns_cache[wide_table_name] = {col1, col2, ...}
         self._wide_columns_cache: dict[str, set[str]] = {}
-
-        # keyed as: self._protocol_metric_mappings[protocol_name][metric_name] = (clean_col, data_type)
-        self._protocol_metric_mappings: dict[str, dict[str, tuple[str, str]]] = {}
-
-        self.device_info_id = None  # will be set after data scrape, per transport batch.
+        self.device_info_id: int | None = None  # will be set after data scrape, per transport batch.
 
         # SQLAlchemy init runtime
         # If a shared manager is provided, use it.
@@ -754,7 +746,7 @@ class timescaledb(transport_base):
         # -------------------------
 
         # Initialize async flush queue and worker thread.  Start it here so it's ready at full init.
-        self._flush_queue: queue.Queue = queue.Queue(maxsize=0)
+        self._flush_queue: queue.Queue[dict[str, Any] | None] = queue.Queue(maxsize=0)
         self._flush_thread = threading.Thread(target=self._flush_worker, daemon=True, name="FlushWorker")
         self._flush_lock: Lock = threading.Lock()
         self._flush_event: threading.Event = getattr(self, "_flush_event", threading.Event())
@@ -774,7 +766,7 @@ class timescaledb(transport_base):
         # Lock for protecting schema mutations and metadata reflection
         # RLock to allow nested calls within the same thread
         # Protects the SQLAlchemy Metadata and Table Identifiers (the "structure" of the Wide Table).
-        self._schema_lock: RLock = threading.RLock()
+        self.schema_lock: RLock = threading.RLock()
 
         # lock for protecting device_info appends when incoming data is from two or more source transports
         self._device_lock: Lock = threading.Lock()
@@ -906,17 +898,17 @@ class timescaledb(transport_base):
             use_exp = bool(getattr(self, "use_exponential_backoff", True))
             max_delay: int = getattr(self, "max_reconnect_delay", 300)
 
-            attempt_no = 0
+            attempt_no: int = 0
             while (attempts <= 0) or (attempt_no < attempts):  # attempts <= 0 => unlimited attempts
                 self._log.info(f"Reconnect attempt {attempt_no} starting")
                 if self._stop_reconnect_event.is_set():
                     self._log.info("Auto-reconnect: stop requested, exiting reconnect loop.")
                     break
 
-                attempt_no += 1
+                attempt_no: int = attempt_no + 1
                 self._log.info(f"Reconnect attempt {attempt_no}{'' if attempts <= 0 else f'/{attempts}'} — waiting {delay}s before connect.")
                 # Wait but allow early exit on stop
-                waited = 0.0
+                waited: float = 0.0
                 while waited < delay:
                     if self._stop_reconnect_event.is_set():
                         self._log.info("Auto-reconnect: stop requested during delay.")
@@ -1062,7 +1054,7 @@ class timescaledb(transport_base):
         with self.SessionFactory() as session:
             try:
                 with session.begin():
-                    self._schema_advisory_lock(session)
+                    self.schema_advisory_lock(session)
 
                     # 1. Create the base table if it doesn't exist.
                     #    Only the structural columns are created here —
@@ -1090,7 +1082,7 @@ class timescaledb(transport_base):
                 # 3. Register the new table in SQLAlchemy metadata so the ORM
                 #    and flush worker can reference it by name immediately.
                 #    Uses extend_existing=True so re-running on restart is safe.
-                with self._schema_lock:
+                with self.schema_lock:
                     Table(table_name, Base.metadata, autoload_with=self.engine, extend_existing=True)
 
                 self._log.info(f"Wide table '{table_name}' created/verified successfully.")
@@ -1420,10 +1412,10 @@ class timescaledb(transport_base):
                 raise ValueError("No metric column names were detected.")
 
             try:
-                with self._schema_lock:
+                with self.schema_lock:
                     with session.begin():
                         # advisory lock to serialize schema changes
-                        self._schema_advisory_lock(session)
+                        self.schema_advisory_lock(session)
 
                         # lookup the protocol ID from the protocol name
                         protocol_id: int = session.execute(
@@ -1451,8 +1443,8 @@ class timescaledb(transport_base):
                                     """),
                                     {"d": d_type, "u": u, "m": m, "n": n, "p": protocol_id}
                                 )
-                                # _protocol_metric_mappings is used to process raw metrics data for coercion.
-                                self._protocol_metric_mappings.setdefault(protocol, {})[m] = (clean_value, d_type)
+                                # protocol_metric_mappings is used to process raw metrics data for coercion.
+                                self.protocol_metric_mappings.setdefault(protocol, {})[m] = (clean_value, d_type)
                                 # metric exists so return to the top of the loop.
                                 continue
 
@@ -1475,7 +1467,7 @@ class timescaledb(transport_base):
                                     f"ALTER TABLE {table_name} ADD COLUMN IF NOT EXISTS {col} {d_type};"
                                 ))
 
-                            params: dict = {
+                            params: dict[str, Any] = {
                                 'm': m,         # metric_name
                                 'p': protocol_id, # protocol ID
                                 'col': col,     # clean_column_name
@@ -1496,10 +1488,10 @@ class timescaledb(transport_base):
                                     notes = EXCLUDED.notes
                             """), params)
 
-                            self._protocol_metric_mappings.setdefault(protocol, {})[m] = (col, d_type)
+                            self.protocol_metric_mappings.setdefault(protocol, {})[m] = (col, d_type)
 
                     self._cache_wide_table_columns(table_name)  # cache existing wide table columns for fast lookup validation during writes
-                    self._sync_single_table_schema(table_name)  # resync ORM table after dynamic column changes
+                    self.sync_single_table_schema(table_name)  # resync ORM table after dynamic column changes
 
                     self._log.info(f"Ensured {len(metric_start_names)} metric columns.")
                     return True
@@ -1509,18 +1501,18 @@ class timescaledb(transport_base):
                 return False
 
     # advisory lock for schema changes
-    def _schema_advisory_lock(self, session: Session, key_text: str = "timescaledb_schema_lock") -> None:
+    def schema_advisory_lock(self, session: Session, key_text: str = "timescaledb_schema_lock") -> None:
         """ transaction scoped advisory lock based on hash of key_text
             Locks wide table schema in postgres DB to allow dynamic wide table refactor.
         """
 
         session.execute(text("SELECT pg_advisory_xact_lock(hashtext(:k));"), {"k": key_text})
 
-    def _timescale_type(self,data_type,unit) -> str:
-        dt_name = getattr(data_type, "name", data_type)
+    def _timescale_type(self, data_type: Any, unit: Any) -> str:
+        dt_name: str = getattr(data_type, "name", data_type)
 
         # --- base type from lookup, use DOUBLE PRECISION as fall back to be safe.
-        base_type: Any = self.timescale_type_map.get(dt_name, "DOUBLE PRECISION")
+        base_type: str = self.timescale_type_map.get(dt_name, "DOUBLE PRECISION")
 
         # --- text and boolean never scale ---
         if base_type in ("TEXT", "BOOLEAN"):
@@ -1566,12 +1558,12 @@ class timescaledb(transport_base):
             self._log.error(f"Failed to cache wide columns for {table_name}: {e}")
 
     # wide table row validation
-    def _validate_wide_row(self, row: dict, table_name: str) -> tuple[bool, str | None]:
+    def _validate_wide_row(self, row: dict[str, Any], table_name: str) -> tuple[bool, str | None]:
         # 1. Strip metadata keys instantly to prevent false-positive resyncs
         METADATA_KEYS: set[str] = {"m_time", "device_info_id"}
         row_keys: set[str] = set(row) - METADATA_KEYS
 
-        with self._schema_lock:
+        with self.schema_lock:
             wide_columns: set[str] = self._wide_columns_cache.get(table_name, set())
             if not wide_columns:
                 self._log.debug(f"_validate_wide_row: no cache entry for '{table_name}'. Cache keys: {list(self._wide_columns_cache.keys())}")
@@ -1584,7 +1576,7 @@ class timescaledb(transport_base):
                 self._log.info(f"New metrics detected: {extra_keys}. Triggering resync...")
 
                 # Safe to call because it's an RLock, but it will block other threads during the sync
-                self._sync_single_table_schema(table_name)
+                self.sync_single_table_schema(table_name)
 
                 # Re-read the cache inside the lock context
                 refreshed_cols: set[str] = self._wide_columns_cache.get(table_name, set())
@@ -1608,8 +1600,8 @@ class timescaledb(transport_base):
 
 
     # resync single wide table schema after dynamic column changes
-    def _sync_single_table_schema(self, table_name: str) -> None:
-        with self._schema_lock:
+    def sync_single_table_schema(self, table_name: str) -> None:
+        with self.schema_lock:
             self._log.info(f"Resyncing schema for {table_name}...")
 
             old_table: Table | None = Base.metadata.tables.get(table_name)
@@ -1663,7 +1655,7 @@ class timescaledb(transport_base):
             # Re-reflect the wide table into Base.metadata so the flush worker
             # can look it up by name after reconnect.
             if wide_table_name is not None:
-                with self._schema_lock:
+                with self.schema_lock:
                     Table(
                         wide_table_name,
                         Base.metadata,
@@ -1689,7 +1681,7 @@ class timescaledb(transport_base):
 
     def _restore_metric_mapping(self, protocol: str) -> None:
         """
-        Rebuilds _protocol_metric_mappings[protocol] from metric_catalog
+        Rebuilds protocol_metric_mappings[protocol] from metric_catalog
         after a reconnect, so _process_raw_metrics can coerce values
         correctly without re-running _ensure_columns_for_metrics.
         """
@@ -1711,7 +1703,7 @@ class timescaledb(transport_base):
                     for metric_name, clean_column_name, data_type in rows
                 }
 
-                self._protocol_metric_mappings[protocol] = mapping
+                self.protocol_metric_mappings[protocol] = mapping
 
                 self._log.debug(f"Restored {len(mapping)} metric mappings for protocol '{protocol}'")
 
@@ -1792,7 +1784,7 @@ class timescaledb(transport_base):
 
         self._init_or_update_rollup_manager(protocol)
 
-    def _init_or_update_rollup_manager(self, protocol) -> None:
+    def _init_or_update_rollup_manager(self, protocol: str) -> None:
         """
         Creates RollupManager on first call, adds new protocol views on
         subsequent calls as more protocols register via init_bridge.
@@ -1851,9 +1843,6 @@ class timescaledb(transport_base):
         schema setup should happen, since we now know which transports
         (and therefore which registry maps) are actually feeding us.
         """
-        if not isinstance(from_transport, transport_base):
-            return
-
         if not from_transport.registry_map:
             self._log.debug(
                 f"init_bridge: skipping '{from_transport.transport_name}' "
@@ -1894,13 +1883,13 @@ class timescaledb(transport_base):
 
     def write_data(self, data: dict[str, int | float | str ], from_transport: transport_base) -> None:
 
-        if not isinstance(data, dict) or not data:
+        if not data:
             return
 
         protocol: str = from_transport.protocol_name
         device_id: int = self._get_or_create_device(from_transport)
 
-        if device_id is None:
+        if not device_id:
             self._log.error("Could not resolve Device ID. Dropping packet.")
             return
 
@@ -1945,8 +1934,8 @@ class timescaledb(transport_base):
                     #************** Drain the queue with a 1s timeout to stay responsive************
                     data_in: dict[str, Any] | None = self._flush_queue.get(block=True)
 
-                    if data_in is None or data_in is True:
-                        self._log.info("Shutdown sentinel received. Exiting flush worker.")
+                    if data_in is None:
+                        self._log.info("No data in flush queue. Exiting flush worker.")
                         self._flush_queue.task_done()
                         break # Exit the loop cleanly and immediately
 
@@ -1962,10 +1951,10 @@ class timescaledb(transport_base):
                     # Backlog replay deserializes datetime as ISO string — convert back.
                     if isinstance(timestamp, str):
                         timestamp = datetime.fromisoformat(timestamp)
-                    metrics_only: dict = data_in["metrics"]
+                    metrics_only: dict[str, Any] = data_in["metrics"]
                     transport_name: str = data_in["transport_name"]
                     protocol: str = data_in["protocol"]
-                    wide_table_name: str = data_in["wide_table_name"]
+                    wide_table_name: str | None = data_in["wide_table_name"]
 
                     # Check for stale data before attempting to process/write to the database. This is based on the timestamp from the transport
                     # and the previous saved timestamp.
@@ -2012,7 +2001,7 @@ class timescaledb(transport_base):
                             break
                         time.sleep(0.5)
                     try:
-                        with self._schema_lock:
+                        with self.schema_lock:
                             with session.begin():
                                 # Further process the narrow data with the timestamp and device_info_id for insertion
                                 # to the narrow table, by applying the timestamp and device_info_id to each metric/value pair.
@@ -2081,11 +2070,11 @@ class timescaledb(transport_base):
         finally:
             session.close()
 
-    def _process_raw_metrics(self, datacopy: dict, protocol: str) -> tuple[dict, dict]:
+    def _process_raw_metrics(self, datacopy: dict[str, Any], protocol: str) -> tuple[dict[str, Any], dict[str, Any]]:
         try:
-            processed_wide_data: dict = {}
-            processed_narrow_data: dict = {}
-            metric_mapping: dict[str, tuple[str, str]] = self._protocol_metric_mappings.get(protocol, {})
+            processed_wide_data: dict[str, Any] = {}
+            processed_narrow_data: dict[str, Any] = {}
+            metric_mapping: dict[str, tuple[str, str]] = self.protocol_metric_mappings.get(protocol, {})
 
             for k, v in datacopy.items():
                 mapping_info: tuple[str, str] | None = metric_mapping.get(k)
@@ -2131,14 +2120,14 @@ class timescaledb(transport_base):
             self._log.debug("All metrics processed for wide and narrow paths")
             return processed_wide_data, processed_narrow_data
 
-    def _flush_batch_narrow(self, newData: dict, device_info_id: int, timestamp: datetime, session: Session, transport_name: str) -> None:
+    def _flush_batch_narrow(self, newData: dict[str, Any], device_info_id: int, timestamp: datetime, session: Session, transport_name: str) -> None:
         try:
             reading_time: datetime = timestamp
             if isinstance(reading_time, str):
                 reading_time = datetime.fromisoformat(reading_time)
 
-            narrow_mappings: list = []
-            processed_descriptions: dict = {}
+            narrow_mappings: list[Any] = []
+            processed_descriptions: dict[str, Any] = {}
 
             # Pass 1: Process and harvest all descriptions first
             for key, value in newData.items():
@@ -2195,7 +2184,7 @@ class timescaledb(transport_base):
             raise  # Re-raise to be caught by outer handler for potential backlog queuing
 
 
-    def _check_is_stale(self, transport_id: str, row: dict, timestamp: datetime) -> bool:
+    def _check_is_stale(self, transport_id: str, row: dict[str, Any], timestamp: datetime) -> bool:
         """_summary_   Stale Data Detection and Handling
             The following methods implement a mechanism to detect when incoming data from a transport has become stale
             (i.e., unchanged for a certain period) and to handle such situations by triggering reconnects and notifications.
@@ -2226,7 +2215,7 @@ class timescaledb(transport_base):
         elapsed = timestamp - state["start_ts"]
         return elapsed > timedelta(seconds=int(self.stale_data_timeout))
 
-    def _commit_transport_state(self, transport_id: str, row: dict, timestamp: datetime, is_stale: bool) -> None:
+    def _commit_transport_state(self, transport_id: str, row: dict[str, Any], timestamp: datetime, is_stale: bool) -> None:
         """_summary_ The method _commit_transport_state is responsible for tracking the state of each transport's
             data freshness. It maintains a registry (_stale_registry) that records the last received data, the timestamp of when that
             data was received, and whether the data is currently considered stale. When new data arrives, this method
@@ -2432,7 +2421,7 @@ class SendMessageProtocol(Protocol):
         title: str = "",
         priority: int = 0,
         services: Optional[Union[list[str], str]] = None,
-        **kwargs
+        **kwargs: Any,
     ) -> None:
         ...
 class BacklogManager:
@@ -2478,7 +2467,7 @@ class BacklogManager:
         max_backlog_age: int,
         max_backlog_size: int,
         send_message: SendMessageProtocol,
-        flush_queue: queue.Queue,
+        flush_queue: queue.Queue[dict[str, Any] | None],
         flush_event: threading.Event,
         backlog_lock: threading.RLock,
         log: logging.Logger
@@ -2488,12 +2477,12 @@ class BacklogManager:
         self.max_backlog_age: int = max_backlog_age
         self.max_backlog_size: int = max_backlog_size
         self.send_message: SendMessageProtocol = send_message
-        self._flush_queue: queue.Queue = flush_queue
+        self._flush_queue: queue.Queue[dict[str, Any] | None] = flush_queue
         self._flush_event: threading.Event = flush_event
         self._backlog_lock: threading.RLock = backlog_lock
         self._log: logging.Logger = log
 
-        self.backlog_points: list[dict] = []
+        self.backlog_points: list[dict[str, Any]] = []
         self._backlog_rowids: list[int] = []    # parallel to backlog_points: rowid[i] belongs to backlog_points[i]
 
     # -------------------------
@@ -2524,7 +2513,7 @@ class BacklogManager:
             return
 
         cutoff: datetime = _now_tz() - timedelta(seconds=int(self.max_backlog_age))
-        loaded_points: list[dict] = []
+        loaded_points: list[dict[str, Any]] = []
         loaded_rowids: list[int] = []
         expired_ids: list[int] = []
 
@@ -2575,7 +2564,7 @@ class BacklogManager:
                 priority=1
             )
 
-    def enqueue(self, point: dict) -> None:
+    def enqueue(self, point: dict[str, Any]) -> None:
         """
         Add a point to the backlog. SQLite is always written before memory is updated so that
         a crash mid-call leaves SQLite as the authoritative record.
@@ -2652,7 +2641,7 @@ class BacklogManager:
     # Disk helpers
     # -------------------------
 
-    def _append_to_disk(self, point: dict) -> int:
+    def _append_to_disk(self, point: dict[str, Any]) -> int:
         """
         Insert a single point into SQLite. Returns the new rowid.
         Raises on failure — caller must not update memory if this raises.
@@ -2767,26 +2756,26 @@ class RollupManager:
 
     def __init__(
         self,
-        rollup_policy: dict,
+        rollup_policy: dict[str, Any],
         my_session_factory: sessionmaker[Session],
         my_engine: Engine,
         migration_in_progress: threading.Event,
         log: logging.Logger,
         send_message:  SendMessageProtocol,
         backlog_lock: threading.RLock,
-        flush_queue: queue.Queue,
+        flush_queue: queue.Queue[dict[str, Any] | None],
         backlog: BacklogManager,
         reconnect_lock: threading.RLock
         ) -> None:
 
-        self.rollup_policy: dict = rollup_policy
+        self.rollup_policy: dict[str, Any] = rollup_policy
         self.SessionFactory: sessionmaker[Session] = my_session_factory
         self.engine: Engine = my_engine
         self.migration_in_progress: threading.Event = migration_in_progress
         self._log: logging.Logger = log
         self.send_message:  SendMessageProtocol = send_message
         self._backlog_lock: threading.RLock = backlog_lock
-        self._flush_queue: queue.Queue  = flush_queue
+        self._flush_queue: queue.Queue[dict[str, Any] | None]  = flush_queue
         self.backlog: 'BacklogManager'  = backlog
         self._reconnect_lock: threading.RLock = reconnect_lock
 
@@ -2906,7 +2895,7 @@ class RollupManager:
             This allows the RollupManager to react immediately to changes in TSDB connection status,
             which is critical for coordinating rollup refreshes and backlog replays.
         """
-        val: bool = self.rollup_policy.get("tsdb_connected", False)
+        val: Any = self.rollup_policy.get("tsdb_connected", False)
         # If val is the boolean False, the expression 'val is True or val == "True"' will return False.
         # basically tries to capture string "True" as well as boolean True if somehow the config was passed as a string.
         if val is True or val == "True":
@@ -3131,7 +3120,7 @@ class RollupManager:
             except SQLAlchemyError as e2:
                 self._log.error(f"Rollback error for {table_name}: {e2}")
 
-    def ensure_compression_policy(self, source, chunk_interval) -> None:
+    def ensure_compression_policy(self, source: str, chunk_interval: str) -> None:
         """Automatically compress chunks older than chunk_time_interval.
         Parameters:
             source (str): The hypertable to which the compression policy will be applied (e.g. "device_metrics_narrow").
@@ -3263,7 +3252,7 @@ class RollupManager:
                     current_source: str = source_table  # Reset source for each context (Narrow vs Wide)
                     rollup_segments: dict[str, str] = context["segments"]
 
-                    for view_key, bucket, start_offset, chunk_time_interval in view_configs:
+                    for view_key, bucket, start_offset, _ in view_configs:
                         # gran: str = view_key.split("_")[0]  # "hourly", "daily", etc.
                         view_name = rollup_segments[view_key]
 
@@ -3521,7 +3510,7 @@ class RollupManager:
         try:
             if wide_table_name is None:
                 self._log.info(f"Protocol '{protocol_name}' is narrow-only — skipping protocol-specific wide stack.")
-                self._mark_rollup_setup_complete_helper(protocol_name, complete=True)
+                self.mark_rollup_setup_complete_helper(protocol_name, complete=True)
                 return
 
             self.setup_rollup(
@@ -3539,12 +3528,14 @@ class RollupManager:
             )
 
             # Retention and Catalog Count
-            if wide_table_name is not None:
+            # None should have returned early, but this is a sanity check
+            if wide_table_name is not None:  # type: ignore[reportUnnecessaryComparison]
+
                 # Record this protocol's column count for dynamic settings tuning.
                 # wide_table_name is None for narrow-only and column count is irrelevant there.
                 try:
                     with self.SessionFactory() as session:
-                        cat_count = session.execute(
+                        cat_count: int = session.execute(
                             text("SELECT metric_count FROM protocol_registry WHERE protocol_name = :p"),
                             {"p": protocol_name}
                         ).scalar() or 0
@@ -3553,7 +3544,7 @@ class RollupManager:
                     pass  # Non-fatal — _get_dynamic_settings falls back to 0
 
             # Mark complete — protocol_name is in scope here naturally
-            self._mark_rollup_setup_complete_helper(protocol_name, complete=True)
+            self.mark_rollup_setup_complete_helper(protocol_name, complete=True)
 
             self._log.info(f"RollupManager.add_wide_rollup: setup complete for '{protocol_name}'")
 
@@ -3566,7 +3557,7 @@ class RollupManager:
             self.migration_in_progress.clear()
 
 
-    def _mark_rollup_setup_complete_helper(self, protocol: str, complete: bool = True ) -> None:
+    def mark_rollup_setup_complete_helper(self, protocol: str, complete: bool = True ) -> None:
         """
         Sets rollup_setup_complete for the given protocol in protocol_registry.
         Called by RollupManager after successful setup_narrow_rollup (complete=True),
@@ -3646,7 +3637,7 @@ class RollupManager:
                 # so they must be created in order
                 previous_view: str = wide_table_name
 
-                for gran, bucket, start_offset, compress_after in granularities:
+                for gran, bucket, start_offset, _ in granularities:
                     view_name: str = f"{gran}_{rollup_prefix}"
 
                     # Monthly sources directly from the base wide table,
@@ -3671,7 +3662,7 @@ class RollupManager:
 
                 if any_rebuild_needed:
                     self._log.info(f"Bucket change detected for protocol '{protocol_name}'. Purging protocol rollups for clean rebuild.")
-                    self._drop_protocol_rollup(session=session, view_names=[view_name for view_name, _, _, _ in view_specs])
+                    self.drop_protocol_rollup(session=session, view_names=[view_name for view_name, _, _, _ in view_specs])
                     self._purge_ghost_jobs_helper(session)
 
                 elif any_missing_views:
@@ -3696,7 +3687,7 @@ class RollupManager:
             self._log.error(f"CAGG view creation failed for protocol '{protocol_name}': {e}")
             raise
 
-    def _drop_protocol_rollup(self, session: Session, view_names: list[str]) -> None:
+    def drop_protocol_rollup(self, session: Session, view_names: list[str]) -> None:
         """
         Drop one protocol-specific rollup stack in dependency-safe reverse order.
 
@@ -4126,7 +4117,7 @@ class RollupManager:
             # This prevents internal _partial_view dependencies from blocking the drop.
             priority_map: dict[str, int] = {"monthly": 4, "weekly": 3, "daily": 2, "hourly": 1}
 
-            def get_drop_rank(v_tuple) -> int:
+            def get_drop_rank(v_tuple: Row[Any]) -> int:
                 name_lower: str = v_tuple[1].lower()
                 for key, val in priority_map.items():
                     if key in name_lower:
@@ -4290,7 +4281,7 @@ class RollupManager:
 
         # 2. Create the new stop signal
         stop_signal: List[bool] = [False]
-        self._current_watchdog_signal: List[bool] | None = stop_signal
+        self._current_watchdog_signal = stop_signal
 
         def monitor() -> None:
             # Use a short-lived session specifically for monitoring
@@ -4595,7 +4586,7 @@ class WideTableFieldDeletionResult:
 class WideTableFieldManager:
     """
     Administrative helper for deleting dynamic metric columns ("fields")
-    from a protocol's wide table. Intended to be driven by an encapsulating
+    from a protocol's wide table. Intended to be driven by the encapsulating
     web app that manages bridge administration -- the web UI lists fields
     with checkboxes, the admin selects some for removal, and on commit the
     UI calls delete_fields() with the selected column names.
@@ -4630,12 +4621,10 @@ class WideTableFieldManager:
     # removed through this class.
     PROTECTED_COLUMNS: frozenset[str] = frozenset({"m_time", "device_info_id"})
 
-    def __init__(self, bridge: "timescaledb") -> None:
-        if not isinstance(bridge, timescaledb):
-            msg: str = f"WideTableFieldManager requires a timescaledb bridge instance, got {type(bridge)}"
-            raise TypeError(msg)
+    def __init__(self, bridge: "timescaledb", log: logging.Logger) -> None:
+
         self._bridge: "timescaledb" = bridge
-        self._log: logging.Logger = bridge._log
+        self._log: logging.Logger = log
         self.engine: Engine = bridge.engine
         self.SessionFactory: sessionmaker[Session] = bridge.SessionFactory
 
@@ -4911,7 +4900,7 @@ class WideTableFieldManager:
             #    the ALTER TABLE below and must be rebuilt afterward anyway.
             view_names: list[str] = self._wide_view_names(wide_table_name)
             with self.SessionFactory() as session:
-                rollup_mgr._drop_protocol_rollup(session=session, view_names=view_names)
+                rollup_mgr.drop_protocol_rollup(session=session, view_names=view_names)
 
             # Mark the protocol's rollup setup incomplete for the duration of
             # the edit. This mirrors the crash-safety pattern used during
@@ -4919,15 +4908,15 @@ class WideTableFieldManager:
             # rediscovery (_rediscover_protocols) will see setup_complete =
             # False and retry the rollup rebuild automatically instead of
             # silently leaving the protocol without rollups.
-            rollup_mgr._mark_rollup_setup_complete_helper(protocol_name, complete=False)
+            rollup_mgr.mark_rollup_setup_complete_helper(protocol_name, complete=False)
 
             # 2. Drop the columns and their metric_catalog rows, serialized
             #    against other schema changes with the same advisory lock
             #    that column *additions* use.
-            with self._bridge._schema_lock:
+            with self._bridge.schema_lock:
                 with self.SessionFactory() as session:
                     with session.begin():
-                        self._bridge._schema_advisory_lock(session)
+                        self._bridge.schema_advisory_lock(session)
 
                         self._decompress_chunks_best_effort(session, wide_table_name)
 
@@ -4958,11 +4947,11 @@ class WideTableFieldManager:
                     # 3. Resync the ORM reflection + write-path column cache
                     #    so in-flight/next writes see the new shape
                     #    immediately, same as after a column addition.
-                    self._bridge._sync_single_table_schema(wide_table_name)
+                    self._bridge.sync_single_table_schema(wide_table_name)
 
             # 4. Drop any now-stale metric_name -> column mappings used to
             #    coerce incoming raw values before insert.
-            mapping: dict[str, tuple[str, str]] = self._bridge._protocol_metric_mappings.get(protocol_name, {})
+            mapping: dict[str, tuple[str, str]] = self._bridge.protocol_metric_mappings.get(protocol_name, {})
             for metric_name, (col, _dtype) in list(mapping.items()):
                 if col in to_delete:
                     mapping.pop(metric_name, None)

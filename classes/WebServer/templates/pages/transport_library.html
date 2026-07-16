@@ -52,11 +52,9 @@
           <td class="px-4 py-2.5 surface-text text-xs" role="cell">
             <div class="flex items-start gap-3">
               <span class="shrink-0">{{ t.key_count }} keys</span>
-              <div class="max-w-full overflow-x-auto pb-1">
-                <div class="min-w-max whitespace-nowrap surface-muted"
-                     title="{{ t.all_keys | join(', ') }}">
-                  {{ t.all_keys | join(', ') }}
-                </div>
+              <div class="surface-muted whitespace-nowrap pr-6"
+                   title="{{ t.all_keys | join(', ') }}">
+                {{ t.all_keys | join(', ') }}
               </div>
             </div>
           </td>

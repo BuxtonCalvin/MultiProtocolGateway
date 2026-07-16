@@ -19,19 +19,22 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import threading
 import types
-from typing import Any
+from pathlib import Path
+from typing import Any, List
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from classes.WebServer.models import AppState
 from classes.WebServer.services.device_service import DeviceSummary, NavData
 
-from ..database import get_session, refresh_app_state
+from ..database import get_session, refresh_app_state, session_scope
 from ..models import Setting
 from ..scanner import scan_transport_library
 from ..services.device_service import (
@@ -102,23 +105,23 @@ def diagnostics(db: Session = Depends(get_session)) -> dict[str, Any]:
     from sqlalchemy import text
     result: dict[str, Any] = {}
 
-    # 1. DB connectivity
+    # DB connectivity
     try:
-        row_count = db.execute(text("SELECT COUNT(*) FROM settings")).scalar()
+        row_count: int | None = db.execute(text("SELECT COUNT(*) FROM settings")).scalar()
         result["db_ok"] = True
         result["settings_row_count"] = row_count
     except Exception as exc:
         result["db_ok"] = False
         result["db_error"] = str(exc)
 
-    # 2. Dirty counts
+    # Dirty counts
     try:
-        dirty = db.execute(text("SELECT COUNT(*) FROM settings WHERE is_dirty=1")).scalar()
+        dirty: int | None = db.execute(text("SELECT COUNT(*) FROM settings WHERE is_dirty=1")).scalar()
         result["dirty_settings"] = dirty
     except Exception as exc:
         result["dirty_settings"] = f"error: {exc}"
 
-    # 3. App state row
+    # App state row
     try:
         state: AppState = get_app_state(db)
         result["app_state"] = {
@@ -130,7 +133,7 @@ def diagnostics(db: Session = Depends(get_session)) -> dict[str, Any]:
     except Exception as exc:
         result["app_state"] = f"error: {exc}"
 
-    # 4. Route self-check — confirm this endpoint resolved correctly
+    # Route self-check — confirm this endpoint resolved correctly
     result["route_resolution_ok"] = True
     result["note"] = (
         "If you see this response, /api/devices/diag resolved correctly. "
@@ -208,7 +211,7 @@ def delete_orphans(payload: OrphanDeleteRequest, db: Session = Depends(get_sessi
 def connection_status(request: Request) -> dict[str, bool]:
     """Returns live connection status for all transports from the gateway instance."""
     from ..services.analysis_service import get_transport_connection_status
-    gateway = getattr(request.app.state, "gateway", None)
+    gateway: str | None = getattr(request.app.state, "gateway", None)
     result: dict[str, bool] = get_transport_connection_status(gateway)
     if result:
         _log.debug("connection-status keys: %s", list(result.keys()))
@@ -265,10 +268,10 @@ def reconcile_settings(
     """
 
     section: str = f"transport.{device_name}"
-    transports_dir = request.app.state.transports_dir
+    transports_dir: Path = request.app.state.transports_dir
 
-    # 1. Stage the new transport / bridge value only — no db.commit() here.
-    #    This keeps the change reversible via the Cancel button.
+    # Stage the new transport / bridge value only — no db.commit() here.
+    #   This keeps the change reversible via the Cancel button.
     if payload.new_transport is not None:
         row: Setting | None = db.query(Setting).filter(
             Setting.section == section, Setting.key == "transport"
@@ -289,30 +292,30 @@ def reconcile_settings(
     refresh_app_state(db)
     db.commit()
 
-    # 2. Determine expected keys for the newly selected transport
+    # Determine expected keys for the newly selected transport
     transport_row: Setting | None = db.query(Setting).filter(
         Setting.section == section, Setting.key == "transport"
     ).first()
     current_transport: str | None = transport_row.value_staged if transport_row else ""
 
     library: dict[str, dict[str, Any]] = scan_transport_library(transports_dir)
-    transport_info = {}
+    transport_info: dict[str, Any] = {}
     if current_transport is not None:
-        transport_info: dict[str, Any] = library.get(current_transport, {})
+        transport_info = library.get(current_transport, {})
     expected_keys: dict[str, str] = transport_info.get("keys", {})
 
 
     FIXED_KEYS: set[str] = {"transport", "bridge", "protocol_version", "log_level",
                   "transport_type_cached"}
 
-    # 3. Build the display list without touching the DB
+    # Build the display list without touching the DB
     existing_rows: list[Setting] = get_device_settings(db, section)
     existing_map: dict[str, Setting] = {r.key: r for r in existing_rows}
 
     display_rows: list[Any] = []
 
     if expected_keys:
-        # 3a. Keys the new transport defines — use DB row if it exists, else virtual.
+        # Keys the new transport defines — use DB row if it exists, else virtual.
         # If the DB row exists but was orphaned by a previous transport switch,
         # clear is_orphan in memory so the template shows it correctly.
         # This is a display-only mutation — not committed to DB until user commits.
@@ -338,7 +341,7 @@ def reconcile_settings(
                     section=section,
                 ))
 
-        # 3b. DB rows NOT in the new transport — only include if active (user-intentional)
+        # DB rows NOT in the new transport — only include if active (user-intentional)
         for key, row in existing_map.items():
             if key in FIXED_KEYS or key in expected_keys:
                 continue
@@ -352,7 +355,7 @@ def reconcile_settings(
 
     display_rows.sort(key=lambda r: r.key)
 
-    # 4. Render the settings rows partial with the computed display list
+    # Render the settings rows partial with the computed display list
     summary: DeviceSummary | None = get_device_summary(db, device_name)
     templates = request.app.state.templates
     html = templates.get_template("partials/settings_rows.html").render(
@@ -438,7 +441,7 @@ def refresh_protocol_tabs(
         refresh_app_state(db)
         db.commit()
 
-    proto_tabs = get_protocols_for_device(db, payload.new_protocol, device_name=device_name)
+    proto_tabs: List[dict[str, Any]] = get_protocols_for_device(db, payload.new_protocol, device_name=device_name)
     summary: DeviceSummary | None = get_device_summary(db, device_name)
 
     # Rebuild summary with updated protocol_version so the heading shows correctly
@@ -515,3 +518,99 @@ def update_setting(device_name: str, setting_id: int, payload: SettingUpdate, re
         "is_dirty": row.is_dirty,
         "is_active": row.is_active,
     }
+
+
+# ---------------------------------------------------------------------------
+# Page-partial / device-data routes — now on the same /api/devices router
+# as everything else above.
+# ---------------------------------------------------------------------------
+
+
+@router.get("/orphan-modal", response_class=HTMLResponse, response_model=None)
+async def orphan_modal(request: Request):
+    """HTMX partial — orphan review modal content."""
+    with session_scope() as db:
+        orphans: List[Setting] = get_orphaned_settings(db)
+
+    return request.app.state.templates.TemplateResponse(
+        request=request,
+        name="partials/orphan_modal.html",
+        context={"orphans": orphans},
+    )
+
+
+@router.get("/{device_name}/last-values")
+async def device_last_values(request: Request, device_name: str) -> JSONResponse:
+    """Return the last bridge-confirmed scrape values for a device transport.
+
+    Values come from ``last_known_data`` which is populated in
+    ``protocol_gateway._snapshot_scraper_data`` immediately before each
+    ``bridge.write_data()`` call — the authoritative point where a cycle
+    is confirmed complete and bridge-bound.
+    """
+    gateway = getattr(request.app.state, "gateway", None)
+    if gateway is None:
+        return JSONResponse({"values": {}, "status": "no_gateway"})
+    transport = gateway.get_transport(f"transport.{device_name}")
+    if transport is None:
+        return JSONResponse({"values": {}, "status": "not_found"})
+
+    raw: dict[str, Any] = getattr(transport, "last_known_data", {})
+    clean: dict[str, str] = {}
+    for k, v in raw.items():
+        if k.endswith("_desc"):
+            continue
+        try:
+            clean[k] = str(round(v, 4)) if isinstance(v, float) else str(v)
+        except Exception as e:
+            _log.debug(f"error retrieving last_known_data {e}")
+            pass
+
+    return JSONResponse({"values": clean, "status": "ok"})
+
+
+@router.get("/{device_name}/last-values/wait")
+async def device_last_values_wait(request: Request, device_name: str) -> JSONResponse:
+    """Block until the next scrape cycle completes, then return its values.
+
+    The refresh button calls this endpoint.  It waits on
+    ``transport.values_ready_event`` which is set (then immediately
+    cleared) in ``_snapshot_scraper_data`` each time a cycle's data is
+    forwarded to a bridge.  The client therefore receives the values from
+    the next complete cycle rather than a cached stale snapshot.
+
+    Times out after ``timeout`` seconds (default 90 — enough for even a
+    slow polling interval plus retries) and returns ``status: timeout``
+    so the client can show an appropriate message.
+    """
+
+    timeout: float = 90.0
+    gateway = getattr(request.app.state, "gateway", None)
+    if gateway is None:
+        return JSONResponse({"values": {}, "status": "no_gateway"})
+    transport = gateway.get_transport(f"transport.{device_name}")
+    if transport is None:
+        return JSONResponse({"values": {}, "status": "not_found"})
+
+    event: threading.Event = getattr(transport, "values_ready_event", threading.Event())
+    if event is None:  # pyright: ignore[reportUnnecessaryComparison]
+        return JSONResponse({"values": {}, "status": "no_event"})
+
+    # Run the blocking wait() in a thread pool so we don't block the
+    # async event loop.  asyncio.to_thread requires Python 3.9+.
+    fired: bool = await asyncio.to_thread(event.wait, timeout)
+    if not fired:
+        return JSONResponse({"values": {}, "status": "timeout"})
+
+    raw: dict[str, Any] = getattr(transport, "last_known_data", {})
+    clean: dict[str, str] = {}
+    for k, v in raw.items():
+        if k.endswith("_desc"):
+            continue
+        try:
+            clean[k] = str(round(v, 4)) if isinstance(v, float) else str(v)
+        except Exception as e:
+            _log.debug(f"error retrieving last_known_data {e}")
+            pass
+
+    return JSONResponse({"values": clean, "status": "ok"})

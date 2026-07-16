@@ -65,16 +65,16 @@ The index page lists every configured **scraper** (input device) and **bridge** 
 
 ![Dashboard](classes/WebServer/static/screenshots/dashboard.png)
 
-### Device Settings Pane
+### Scraper Settings Pane
 
-On the left side of the page, each device gets a dedicated settings pane with a four-column table:
+On the left side of the page, each created device (scraper) gets a dedicated settings pane with a four-column table:
 
 - **(A)ctive** — toggle a checkbox setting in or out of the generated `config.cfg`
 - **Key** — the setting key name.
 - **Value** — the value that will be written on the next commit; highlighted amber when it differs from the on-disk value
 - **Default** — the fallback value from the transport module, shown for reference
 
-![Devices](classes/WebServer/static/screenshots/device__scraper_read_generic.png)
+![Scrapers](classes/WebServer/static/screenshots/device__scraper_read_generic.png)
 
 Changes are submitted via HTMX PATCH calls and buffered in a SQLite staging database. Nothing touches `config.cfg` until you explicitly commit.
 
@@ -437,9 +437,9 @@ Each supported device has a protocol directory under `protocols/` containing:
 - **`<name>.json`** — device metadata: transport type, default settings, lookup descriptions for codes
 - **`<name>.holding_registry_map.csv`** — read/write (holding) Modbus registers
   **additional optional registers**  - per manufacturer device properties
-- **`<name>.input_registry_map.csv`** — read-only (input) Modbus registers
-- **`<name>.coil_registry_map.csv`** — read/write (coil) Modbus registers
-- **`<name>.discrete_registry_map.csv`** — read-only (discrete) Modbus registers
+  - **`<name>.input_registry_map.csv`** — read-only (input) Modbus registers
+  - **`<name>.coil_registry_map.csv`** — read/write (coil) Modbus registers
+  - **`<name>.discrete_registry_map.csv`** — read-only (discrete) Modbus registers
 
 The CSV files use `,` as delimiter (OpenOffice/LibreOffice compatible) and support the following columns:
 
@@ -494,6 +494,16 @@ Each scraper has its own screen file.
 internal_temperature_raw
 debug_register_42
 ```
+
+### Register Failure Tracking
+
+The register failure tracking system automatically detects and soft-disables problematic register ranges that consistently fail to read. This helps improve system reliability by avoiding repeated attempts to read from registers that are known to be problematic.
+
+Find more register failure documentation here:  [`register_failure_tracking.md`](documentation/usage/register_failure_tracking.md)
+
+Register failures appear as red high-lit rows in the transport scraper window.
+
+![Scrapers](classes/WebServer/static/screenshots/device__scraper_read_generic.png)
 
 ---
 

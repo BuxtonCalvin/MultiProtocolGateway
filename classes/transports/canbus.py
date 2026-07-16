@@ -400,7 +400,7 @@ class canbus(transport_base):
         for word_size in (4, 2):
             if len(payload) % word_size != 0:
                 continue
-            parts = []
+            parts: list[str] = []
             for i in range(0, len(payload), word_size):
                 word: int = int.from_bytes(payload[i:i + word_size], byteorder="big")
                 # Skip all-zero or all-FF padding words
@@ -409,7 +409,7 @@ class canbus(transport_base):
                 parts.append(str(word))
             if not parts:
                 continue
-            candidate = "".join(parts)
+            candidate: str = "".join(parts)
             if re.fullmatch(r"\d{6,}", candidate):
                 # Lower confidence than ASCII; score by word count / payload use
                 score: float = 0.4 + 0.1 * len(parts)

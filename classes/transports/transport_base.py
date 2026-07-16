@@ -120,7 +120,7 @@ class transport_base:
         previous: bool = self._connected
         self._connected = value
 
-        # Ignore no-op assignments — scattered subclass code sets
+        # Ignore no-op assignments — subclass code sets
         # self.connected = False in multiple error handlers and that's fine;
         # we only care about genuine transitions.
         if value == previous:
@@ -210,18 +210,18 @@ class transport_base:
             a reconnect of the bridge when the bridge's connection drops.
         '''
         # Initialize the bus lock
-        self._bus_lock: threading.Lock | None = None
+        self.bus_lock: threading.Lock | None = None
         self._last_cycle_result: TransportCycleResult = TransportCycleResult()
         self.transport_name = settings.name #section name
 
         # Last-known scrape values — populated in write_data() so the snapshot
         # is taken at the point data is confirmed complete and bridge-bound.
         # The web UI refresh button reads from this via /api/device/{name}/last-values.
-        self._last_known_data: dict[str, int | float | str] = {}
+        self.last_known_data: dict[str, int | float | str] = {}
         # Event that fires each time write_data() stores a new snapshot.
         # /api/device/{name}/last-values/wait blocks on this event so the
         # refresh button waits for the next real cycle rather than polling.
-        self._values_ready_event: threading.Event = threading.Event()
+        self.values_ready_event: threading.Event = threading.Event()
 
         # Bridges set this to True if they require a complete, end-of-cycle
         # batch rather than partial mid-cycle data.  The gateway will suppress
@@ -271,7 +271,7 @@ class transport_base:
         self.update_identifier()
 
     @property
-    def registry_map(self) -> dict:
+    def registry_map(self) -> dict[Registry_Type, list[registry_map_entry]] :
         """
         Scheduling path: All (Sequential, Concurrent, Interleaved).
 
@@ -299,13 +299,23 @@ class transport_base:
         """Scheduling path: N/A — setup, runs once regardless of read_mode."""
         pass
 
+
     @classmethod
-    def _get_top_class_name(cls, cls_obj):
-        """Scheduling path: N/A — utility used during setup/type-detection, independent of read_mode."""
-        if not cls_obj.__bases__:
+    def _get_top_class_name(cls, cls_obj: Any) -> str:
+        """Finds the root class name in the inheritance chain."""
+        # Ensure it is a class and has bases, and that the bases tuple is not empty
+        if not hasattr(cls_obj, "__bases__") or not cls_obj.__bases__:
+            return getattr(cls_obj, "__name__", str(cls_obj))
+
+        # Safely extract the primary base class
+        base: Any = cls_obj.__bases__[0]
+
+        # Stop recursion if the base is 'object' (the ultimate root of all Python classes)
+        if base is object:
             return cls_obj.__name__
-        else:
-            return cls._get_top_class_name(cls_obj.__bases__[0])
+
+        return cls._get_top_class_name(base)
+
 
     def connect(self) -> bool | None:
         """Scheduling path: All (Sequential, Concurrent, Interleaved) — base stub; modbus_base overrides with the real implementation."""
@@ -356,7 +366,7 @@ class transport_base:
         """
         self._start_cycle_tracking()
         data: dict[str, int | float | str] = self.read_data()
-        self._finish_cycle_tracking(data)
+        self.finish_cycle_tracking(data)
         return data
 
     def read_group_data_iter(self, members: list["transport_base"]) -> Iterator[bool]:
@@ -470,7 +480,7 @@ class transport_base:
 
             self._partial_registry.clear()
 
-        self._finish_cycle_tracking(self._partial_info)
+        self.finish_cycle_tracking(self._partial_info)
 
     def read_data_iter(self) -> "Iterator[bool]":
         """
@@ -487,7 +497,7 @@ class transport_base:
 
         When called as a fallback from read_group_data_iter the _cycle_active
         flag will already be True, so _start_cycle_tracking and
-        _finish_cycle_tracking are skipped — the group iter owns the cycle
+        finish_cycle_tracking are skipped — the group iter owns the cycle
         lifecycle in that case.
         """
         _owner: bool = not getattr(self, '_cycle_active', False)
@@ -498,7 +508,7 @@ class transport_base:
         self._partial_info.update(self.read_data())
 
         if _owner:
-            self._finish_cycle_tracking(self._partial_info)
+            self.finish_cycle_tracking(self._partial_info)
 
     def get_partial_data(self) -> dict[str, int | float | str]:
         """
@@ -520,7 +530,7 @@ class transport_base:
         self._partial_info: dict[str, int | float | str] = {}
         self._partial_registry: dict[int, int] = {}
 
-    def _finish_cycle_tracking(self, data: dict[str, int | float | str]) -> None:
+    def finish_cycle_tracking(self, data: dict[str, int | float | str]) -> None:
         """Scheduling path: All (Sequential, Concurrent, Interleaved).
 
         Finalize a scrape cycle.
@@ -541,7 +551,7 @@ class transport_base:
 
     @property
     def synthetic_fields_metadata(self) -> list[tuple[str, str, float, str]]:
-        """Scheduling path: All (Sequential, Concurrent, Interleaved) — consumed via post_process_data/_finish_cycle_tracking regardless of read_mode; also read directly by TimescaleDB's init_bridge (setup, not per-cycle).
+        """Scheduling path: All (Sequential, Concurrent, Interleaved) — consumed via post_process_data/finish_cycle_tracking regardless of read_mode; also read directly by TimescaleDB's init_bridge (setup, not per-cycle).
 
         Rich metadata for fields injected by ``post_process_data``.
 
@@ -597,7 +607,7 @@ class transport_base:
 
         Post-processing hook called after every complete scrape cycle.
 
-        Invoked by ``_finish_cycle_tracking`` which is the single convergence
+        Invoked by ``finish_cycle_tracking`` which is the single convergence
         point for all three read paths — sequential (``read_data``), group
         (``read_group_data``), and interleaved (``read_data_iter``).  The hook
         therefore fires exactly once per cycle regardless of read mode.
@@ -649,7 +659,7 @@ class transport_base:
         """Scheduling path: All (Sequential, Concurrent, Interleaved)."""
         self._last_cycle_result.completed_units += count
 
-    def _cycle_mark_incomplete(self, skipped_units: int = 1) -> None:
+    def cycle_mark_incomplete(self, skipped_units: int = 1) -> None:
         """Scheduling path: All (Sequential, Concurrent, Interleaved)."""
         self._last_cycle_result.is_complete = False
         self._last_cycle_result.skipped_units += skipped_units
@@ -696,7 +706,7 @@ class transport_base:
         if self.on_message is not None:
             self.on_message(self, entry, value)
 
-    def send_message(self, message: str, title: str = "", priority: int = 0, services: "list[str] | str | None" = None, **kwargs) -> None:
+    def send_message(self, message: str, title: str = "", priority: int = 0, services: "list[str] | str | None" = None, **kwargs: Any) -> None:
         """
         Scheduling path: N/A — messaging utility, independent of read_mode.
 
@@ -726,15 +736,15 @@ class transport_base:
 
     #region - modbus
     # keep here as methods might also apply to future protocols
-    def read_registers(self, start, count=1, registry_type : Registry_Type = Registry_Type.INPUT, **kwargs) -> Any:
+    def read_registers(self, start: int, count: int = 1, registry_type : Registry_Type = Registry_Type.INPUT, **kwargs: Any) -> Any:
         """Scheduling path: All (Sequential, Concurrent, Interleaved) — base stub; modbus_base overrides with the real implementation."""
         pass
 
-    def write_register(self, register : int, value : int, **kwargs) -> None:
+    def write_register(self, register : int, value : int, **kwargs: Any) -> None:
         """Scheduling path: N/A — write path, independent of read_mode; base stub, modbus_base overrides."""
         pass
 
-    def write_coil(self, register: int, value: bool, **kwargs) -> bool:
+    def write_coil(self, register: int, value: bool, **kwargs: Any) -> bool:
         """
         Scheduling path: N/A — write path, independent of read_mode.
 

@@ -33,7 +33,7 @@ register,variable_name,documented_name,unit,data_type,values,read_interval,writa
 14.b8,,Time_Second,,8bit,0-59,,W,,inverter time-second
 15,,Com AddR,,,0-150,,W,,MODBUS address
 16,,Language,,,0-1,,W,,0-English 1-German Language 0-English 1-German
-19,,Register 19,,ushort,0-65535,,R,,Unknown
+19,,Device_Type_Code,,ushort,0-65535,,R,,Unknown
 20,,PVInputModel,,,0-4,,W,,0: No PV plug in 1: PV1 plug in 2: PV2 plug in 3: two PVs in parallel 4: two separate PVs
 21.b7,,FuncEn_ACChargeEn,,1bit,0-1,,W,,AC charging enable
 21.b4,,FuncEn_AntiIslandEn,,1bit,0-1,,W,,Anti-islanding enablement

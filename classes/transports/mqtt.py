@@ -28,12 +28,22 @@ import time
 import warnings
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import paho.mqtt.packettypes
-import paho.mqtt.properties
-from paho.mqtt.client import MQTT_ERR_NO_CONN, MQTT_ERR_SUCCESS, MQTTMessageInfo
-from paho.mqtt.client import Client as MQTTClient
+from paho.mqtt.client import (
+    MQTT_ERR_NO_CONN,
+    MQTT_ERR_SUCCESS,
+    ConnectFlags,
+    DisconnectFlags,
+    MQTTMessageInfo,
+)
+from paho.mqtt.client import (
+    Client as MQTTClient,
+)
 from paho.mqtt.enums import CallbackAPIVersion
+from paho.mqtt.properties import Properties
+from paho.mqtt.reasoncodes import ReasonCode
 
 from defs.common import TransportSettings, strtobool
 
@@ -63,7 +73,7 @@ class mqtt(transport_base):
     discrete_register_prefix : str = ""
 
     client : MQTTClient | None = None
-    mqtt_properties : paho.mqtt.properties.Properties | None = None
+    mqtt_properties : Properties | None = None
 
     def __init__(self, settings: TransportSettings) -> None:
         self.host = settings.get("host", fallback="")
@@ -81,11 +91,11 @@ class mqtt(transport_base):
         self.json = strtobool(settings.get("json", self.json))
         self.reconnect_delay = settings.getint("reconnect_delay", fallback=7)
 
-        if not isinstance(self.reconnect_delay, int) or self.reconnect_delay < 1:  # minimum 1 second
+        if self.reconnect_delay < 1:  # minimum 1 second
             self.reconnect_delay = 1
 
         self.reconnect_attempts = settings.getint("reconnect_attempts", fallback=21)
-        if not isinstance(self.reconnect_attempts, int) or self.reconnect_attempts < 0:  # minimum 0
+        if self.reconnect_attempts < 0:  # minimum 0
             self.reconnect_attempts = 0
 
         self.holding_register_prefix = settings.get("holding_register_prefix", fallback="")
@@ -154,7 +164,7 @@ class mqtt(transport_base):
             retain=True,
         )
 
-        self.mqtt_properties = paho.mqtt.properties.Properties(paho.mqtt.packettypes.PacketTypes.PUBLISH)
+        self.mqtt_properties = Properties(paho.mqtt.packettypes.PacketTypes.PUBLISH)
         self.mqtt_properties.MessageExpiryInterval = 30  # in seconds
 
         super().__init__(settings)
@@ -244,7 +254,7 @@ class mqtt(transport_base):
             # getattr rather than direct attribute access: tests in this
             # codebase commonly construct via mqtt.__new__(mqtt), bypassing
             # __init__ entirely.
-            for device_identifier in getattr(self, "_known_device_identifiers", set()):
+            for device_identifier in getattr(self, "_known_device_identifiers", set[str]()):
                 self.client.publish(
                     f"{self.base_topic}/{device_identifier}/availability",
                     "offline",
@@ -261,17 +271,35 @@ class mqtt(transport_base):
     # Paho callbacks
     # ------------------------------------------------------------------
 
-    def on_disconnect(self, client, userdata, disconnect_flags, reason_code, properties) -> None:
+    def on_disconnect(
+        self,
+        client: MQTTClient,
+        userdata: Any,
+        disconnect_flags: DisconnectFlags,
+        reason_code: ReasonCode,
+        properties: Properties | None
+        ) -> None:
         self.connected = False
         self._start_reconnect_thread()
 
-    def on_connect(self, client, userdata, flags, reason_code, properties) -> None:
+    def on_connect(
+        self,
+        client: MQTTClient,
+        userdata: Any,
+        flags: ConnectFlags,
+        reason_code: ReasonCode ,
+        properties: Properties | None,
+        ) -> None:
         """Called when the client receives a CONNACK response from the server."""
         self._log.info("Connected with result code %s", str(reason_code))
         self.connected = True
+
         bridge_status_topic: str | None = getattr(self, "_bridge_status_topic", None)
         if self.client is not None and bridge_status_topic:
-            self.client.publish(bridge_status_topic, "online", qos=1, retain=True)
+            self.client.publish(
+                bridge_status_topic, "online", qos=1, retain=True
+            )
+
         # Re-subscribe to all write topics so they survive a reconnect
         self._resubscribe_write_topics()
 
@@ -440,9 +468,7 @@ class mqtt(transport_base):
 
         Publish a structured error report to error_topic, if connected.
 
-        error_topic was previously parsed from config and never used
-        anywhere — this is its first real consumer. Best-effort only: the
-        publish itself is wrapped so a failure while *reporting* an error
+        Best-effort only: the publish itself is wrapped so a failure while *reporting* an error
         can't cascade into a second, noisier failure, and this is a no-op
         entirely when disconnected (there's nowhere to publish to, and the
         disconnected case is already covered by _bridge_status_topic's LWT).
@@ -459,7 +485,7 @@ class mqtt(transport_base):
         except Exception as exc:
             self._log.debug(f"Failed to publish to error_topic (non-fatal): {exc}")
 
-    def client_on_message(self, client, userdata, msg) -> None:
+    def client_on_message(self, client: MQTTClient, userdata: Any, msg: Any) -> None:
         """Callback for PUBLISH messages received from the broker."""
         self._log.info("MQTT MSG: " + msg.topic + " " + str(msg.payload.decode("utf-8")))
 
@@ -520,12 +546,7 @@ class mqtt(transport_base):
         # (see _registry_type_prefix in __init__). Done for every bridged
         # transport, not just write-enabled ones — prefixing telemetry
         # topics is unrelated to whether this transport can be written to.
-        #
-        # Guarded with hasattr rather than assuming __init__ ran: tests in
-        # this codebase commonly construct via mqtt.__new__(mqtt) and set
-        # only the specific attributes under test, deliberately bypassing
-        # __init__ — same reason transport_base.read_group_data_iter
-        # guards member._partial_info the same way rather than assuming it.
+
         if not hasattr(self, "_registry_type_by_name"):
             self._registry_type_by_name = {}
         registry_type_by_name: dict[str, Registry_Type] = {}
@@ -632,7 +653,7 @@ class mqtt(transport_base):
             self.base_topic + "/" + from_transport.device_identifier + "/availability"
         )
 
-        device: dict = {
+        device: dict[str, str] = {
             "manufacturer": from_transport.device_manufacturer,
             "model": from_transport.device_model,
             "identifiers": "MPG_" + from_transport.device_model + "_" + from_transport.device_serial_number,
@@ -673,7 +694,7 @@ class mqtt(transport_base):
             ):
                 writePrefix = ""  # Home Assistant doesn't like write prefix
 
-            disc_payload: dict = {
+            disc_payload: dict[str, Any] = {
                 "availability_topic": availability_topic,
                 "device": device,
                 "name": clean_name,

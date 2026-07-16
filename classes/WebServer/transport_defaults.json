@@ -462,5 +462,23 @@
     "variable_screen": "",
     "write_enabled": "True",
     "write_type": ""
+  },
+  "pace_5048": {
+    "bridge": "",
+    "device_manufacturer": "",
+    "variable_mask": "",
+    "device_name": "",
+    "device_location": "",
+    "variable_screen": "",
+    "max_precision": "2",
+    "device_model": "",
+    "write_type": "",
+    "log_level": "INFO",
+    "protocol_version": "",
+    "write_enabled": "false",
+    "device_serial_number": "",
+    "read_interval": "15",
+    "transport": "",
+    "batch_size": "40"
   }
 }
