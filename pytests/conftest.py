@@ -19,7 +19,6 @@
 
 from __future__ import annotations
 
-import importlib
 import sys
 from pathlib import Path
 from typing import Any
@@ -32,12 +31,21 @@ if str(PROJECT_ROOT) not in sys.path:
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    """Force load application modules on startup to fix the pytest import loop.
+    """Pre-initialize protocol_settings cleanly to break the circular dependency loop."""
+    import importlib.util
+    import sys
 
-    Using importlib avoids linting errors regarding un-accessed top-level imports.
-    """
-    importlib.import_module("classes.protocol_settings")
-    importlib.import_module("classes.eg4_metadata")
+    # Create a blank module placeholder for 'classes.protocol_settings' in the system cache
+    # This prevents eg4_metadata from crashing when it hits 'from .protocol_settings import ...'
+    spec = importlib.util.find_spec("classes.protocol_settings")
+    if spec and spec.loader:
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["classes.protocol_settings"] = module
+
+        #  Execute the file contents into our module placeholder.
+        # Python will safely evaluate everything linearly, resolving the cross-imports
+        spec.loader.exec_module(module)
+
 
 
 class DummySettings:
