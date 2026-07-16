@@ -42,6 +42,7 @@ from dataclasses import dataclass
 from typing import Dict, Protocol
 
 from .protocol_settings import (
+    Data_Type,
     Registry_Type,
     WriteMode,
     protocol_settings,
@@ -773,7 +774,7 @@ def _resolve_eg4_battery_serial(
 
 
 def _make_synthetic_entry(name: str, resolver_name: str, note: str) -> registry_map_entry:
-    from .protocol_settings import Data_Type
+
     return registry_map_entry(
         registry_type=Registry_Type.HOLDING,
         register=-1,

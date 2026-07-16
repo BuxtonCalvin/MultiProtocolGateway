@@ -24,6 +24,9 @@ from typing import Any
 
 import pytest
 
+import classes.protocol_settings
+
+## Import the classes and constants to be tested
 from classes.protocol_settings import (
     WORD_ORDER_ABCD,
     WORD_ORDER_BADC,
@@ -42,16 +45,17 @@ from classes.protocol_settings import (
 # Shared fixtures
 # ---------------------------------------------------------------------------
 
+
 def make_adjustments(
     default_word_order: WordOrder = WORD_ORDER_ABCD,
-) -> DataAdjustments:
+) -> classes.protocol_settings.DataAdjustments:
     """Create a DataAdjustments instance for focused unit tests.
 
     Accepts a ``WordOrder`` singleton; callers that previously passed
     ``"big"`` or ``"little"`` strings should use ``WORD_ORDER_ABCD`` or
     ``WORD_ORDER_CDAB`` respectively.
     """
-    return DataAdjustments(
+    return classes.protocol_settings.DataAdjustments(
         log=logging.getLogger("test.data_adjustments"),
         default_word_order=default_word_order,
     )
@@ -315,7 +319,7 @@ class TestGetEntryByteorderCanonicalNames:
     def test_canonical_name_lookup_is_case_insensitive(self) -> None:
         """The alias table key is always lowercased before lookup."""
         adj: DataAdjustments = make_adjustments()
-        entry = make_entry(adjustments={"Register_Endian": "LITTLE_ENDIAN-CDAB"})
+        entry: registry_map_entry = make_entry(adjustments={"Register_Endian": "LITTLE_ENDIAN-CDAB"})
         assert adj.get_entry_byteorder(entry) == WORD_ORDER_CDAB
 
     def test_short_mnemonic_big_endian_without_suffix(self) -> None:
