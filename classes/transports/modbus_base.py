@@ -26,7 +26,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from threading import Lock
-from typing import Any, Callable, Dict, Iterator, Literal, LiteralString, Optional
+from typing import Any, Callable, Dict, Iterator, Literal, Optional
 
 from pymodbus.client.base import ModbusBaseClient
 from pymodbus.constants import ExcCodes
@@ -1586,7 +1586,7 @@ class modbus_base(transport_base):
             """Scheduling path: N/A — Analyze feature helper, not part of the read-scheduling loop."""
             total_reads = 0
             failures = 0
-            phase: LiteralString = registry_type.name.lower()
+            phase: str = registry_type.name.lower()
             total_batches: int = max(1, (end - start) // batch_size + 1)
             batches_done = 0
 
