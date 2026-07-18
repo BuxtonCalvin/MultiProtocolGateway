@@ -25,17 +25,39 @@ from typing import Any
 
 import pytest
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT: Path = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Break circular imports by pre-initializing protocol_settings with a mocked sub-dependency."""
+    import importlib
+    import sys
+    import types
+    # ugly hack to break circular imports between protocol_settings and eg4_metadata
+    # 1. Create a fake empty module for eg4_metadata and put it in Python's cache.
+    # This prevents protocol_settings from jumping into the real eg4_metadata too early.
+    fake_eg4 = types.ModuleType("classes.eg4_metadata")
+    sys.modules["classes.eg4_metadata"] = fake_eg4
+
+    # 2. Now import protocol_settings. It will hit our fake_eg4 and load completely,
+    # registering Data_Type, Registry_Type, and everything else in memory.
+    importlib.import_module("classes.protocol_settings")
+
+    # 3. Clean up our hack: Remove the fake module from the cache so Python can
+    # load the real eg4_metadata properly with all its dependencies.
+    del sys.modules["classes.eg4_metadata"]
+    importlib.import_module("classes.eg4_metadata")
+
 
 
 class DummySettings:
     """Small TransportSettings-compatible test double."""
 
     def __init__(self, name: str = "transport.test", **values: Any) -> None:
-        self.name = name
-        self.values = values
+        self.name: str = name
+        self.values: dict[str, Any] = values
 
     def _first_key(self, option: str | list[str]) -> str:
         if isinstance(option, list):
@@ -71,3 +93,4 @@ class DummySettings:
 def dummy_settings() -> type[DummySettings]:
     """Return the reusable TransportSettings test double class."""
     return DummySettings
+

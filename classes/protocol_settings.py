@@ -30,7 +30,7 @@ from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Literal, Optional, cast
+from typing import Any, Callable, Literal, Optional, cast
 
 from defs.common import TransportSettings, strtoint_safe
 
@@ -118,6 +118,21 @@ class Data_Type(Enum):
     _14SMBIT = 414
     _15SMBIT = 415
     _16SMBIT = 416
+
+    # Public aliases for the four underscore-prefixed members above that get
+    # referenced by name from outside this class elsewhere in this file
+    # (protocol_settings/DataAdjustments methods). Those members are
+    # underscore-prefixed only because Python identifiers can't start with a
+    # digit (_8BIT, _16BIT_FLAGS, etc.), not because they're meant to be
+    # private — but pyright's reportPrivateUsage can't tell the difference
+    # and flags any leading-underscore attribute access across a class
+    # boundary. Enum members sharing a value automatically become aliases of
+    # each other (`Data_Type.BIT8 is Data_Type._8BIT`), so this is zero
+    # behavior change; external code should prefer these names.
+    BIT8 = 208
+    BIT8_FLAGS = 8
+    BIT16_FLAGS = 7
+    BIT32_FLAGS = 9
 
     @classmethod
     def fromString(cls, name: str) -> "Data_Type | None":
@@ -276,14 +291,14 @@ class registry_map_entry:
     adjustments: dict[str, Any]
     concatenate: bool
     concatenate_registers: list[int]
-    values: list
+    values: list[int | str] = field(default_factory=lambda: [])
     # For multi-register entries encoded as "low_high[_mid_msb]" in the CSV
     # address field (e.g. "40_41" for a UINT32 pair where 40 is the low word
     # and 41 is the high word).  When populated, the decoder reads exactly these
     # addresses in this order rather than assuming consecutive addresses starting
     # at entry.register.  For standard consecutive entries this list is empty
     # and the legacy start_register + offset path is used unchanged.
-    register_list: list[int] = field(default_factory=list)
+    register_list: list[int] = field(default_factory=lambda: [])
 
     value_regex: str = ""
 
@@ -318,7 +333,7 @@ class registry_map_entry:
         """Return the entry's ``variable_name`` as its string representation."""
         return self.variable_name
 
-    def __eq__(self, other) -> bool:
+    def __eq__(self, other: object) -> bool:
         """Return ``True`` when both entries address the same physical register location.
 
         Equality is based solely on ``register``, ``register_bit``,
@@ -497,7 +512,7 @@ class DataAdjustments:
             try:
                 parsed = json.loads(text)
                 if isinstance(parsed, dict):
-                    return parsed
+                    return cast(dict[str, Any], parsed)
                 else:
                     self._log.warning(f"Ignoring non-object adjustments JSON: {text}")
                     return {}
@@ -547,7 +562,7 @@ class DataAdjustments:
           ``abcd``, ``badc``, ``cdab``, ``dcba``
         """
         if entry.adjustments:
-            endian = self.get_adjustment(entry, "Register_Endian")
+            endian: Any | None = self.get_adjustment(entry, "Register_Endian")
             if endian is not None:
                 endian_str: str = str(endian).strip().lower()
                 word_order: WordOrder | None = _WORD_ORDER_ALIASES.get(endian_str)
@@ -649,6 +664,7 @@ class DataAdjustments:
             context_adjustment: Any | None = self.get_adjustment(entry, "Context")
             if not isinstance(context_adjustment, dict):
                 return value
+            context_adjustment = cast(dict[str, Any], context_adjustment)
 
             key: str = str(context_adjustment.get("key", "")).strip()
             if not key or key not in context:
@@ -657,10 +673,11 @@ class DataAdjustments:
                 )
                 return value
 
-            cases = context_adjustment.get("cases", {})
+            cases: Any = context_adjustment.get("cases", {})
             formula = ""
             context_value: int | float | str = context[key]
             if isinstance(cases, dict):
+                cases = cast(dict[Any, Any], cases)
                 formula = str(cases.get(str(context_value), cases.get(context_value, "")))
             if not formula:
                 formula = str(context_adjustment.get("default", ""))
@@ -699,7 +716,7 @@ class DataAdjustments:
             upper_f = float(upper)
 
             if lower_f < raw_value <= upper_f:
-                expression = formula.replace("x", str(raw_value))
+                expression: str = formula.replace("x", str(raw_value))
                 try:
                     evaluated: int | float = self.safe_eval_expression(expression)
                     self._log.debug(
@@ -738,7 +755,8 @@ class DataAdjustments:
                 left: int | float = _safe_eval(node.left)
                 right: int | float = _safe_eval(node.right)
 
-                ops: dict[type, Any] = {
+                # Type the dictionary explicitly with Callable
+                ops: dict[type[ast.operator], Callable[[Any, Any], int | float]] = {
                     ast.Add:      lambda a, b: a + b,
                     ast.Sub:      lambda a, b: a - b,
                     ast.Mult:     lambda a, b: a * b,
@@ -748,14 +766,17 @@ class DataAdjustments:
                     ast.Pow:      lambda a, b: a ** b,
                 }
 
-                op_type = type(node.op)
-                if op_type not in ops:
-                    msg = f"Unsupported operator: {op_type.__name__}"
-                    raise ValueError(msg)
-                return ops[op_type](left, right)
+                # Check instance type directly instead of type() comparison
+                for op_class, op_func in ops.items():
+                    if isinstance(node.op, op_class):
+                        return op_func(left, right)
+
+                msg = f"Unsupported operator: {type(node.op).__name__}"
+                raise ValueError(msg)
 
             if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
                 return -_safe_eval(node.operand)
+
             msg = f"Unsupported AST node: {type(node).__name__}"
             raise TypeError(msg)
 
@@ -766,7 +787,6 @@ class DataAdjustments:
         if isinstance(result, float) and result.is_integer():
             return int(result)
         return result
-
 
 class protocol_settings:
     """Load and expose a protocol's register map, code tables, and settings from JSON and CSV files.
@@ -832,7 +852,7 @@ class protocol_settings:
         self.registry_map_ranges: dict[Registry_Type, list[tuple[int, int]]] = {}
         self.dynamic_registry_rows: list[dict[str, str]] = []
         self.dynamic_registry_resolved = False
-        self.codes: dict[str, str | dict[str, str]] = {}
+        self.codes: dict[str, str | bool | int | float | dict[str, str]] = {}
         self.settings: dict[str, str] = {}
         self.variable_mask: list[str] = []
         self.mask_file_name: str = ""
@@ -888,6 +908,17 @@ class protocol_settings:
 
         for registry_type in Registry_Type:
             self.load_registry_map(registry_type)
+
+    def get_entry_byteorder(self, entry: "registry_map_entry") -> WordOrder:
+        """
+        Scheduling path: All (Sequential, Concurrent, Interleaved).
+
+        Public accessor delegating to ``self._adjustments.get_entry_byteorder()``,
+        so external callers (e.g. modbus_base's ``_entry_byte_order``) can get
+        the ``WordOrder`` for *entry* without reaching through the private
+        ``_adjustments`` attribute.
+        """
+        return self._adjustments.get_entry_byteorder(entry)
 
     def _load_filter_file(self, filename: str) -> list[str]:
         """Load a line-delimited filter file and return a list of cleaned, lowercased metric names.
@@ -948,7 +979,7 @@ class protocol_settings:
 
         return None
 
-    def get_code_by_value(self, entry: registry_map_entry, value: str, fallback: str) -> str:
+    def get_code_by_value(self, entry: registry_map_entry | None, value: str | None, fallback: str) -> str:
         """Return the code key whose description matches ``value`` for ``entry``, or ``fallback``.
 
         Performs a case-insensitive reverse lookup in the entry's code dict —
@@ -972,7 +1003,7 @@ class protocol_settings:
         method safely returns only dict values so callers always receive a
         iterable mapping.
         """
-        value: str | dict[str, str] | None = self.codes.get(key)
+        value: str | bool | int | float | dict[str, str] | None = self.codes.get(key)
         if isinstance(value, dict):
             return value
         return {}
@@ -1053,7 +1084,7 @@ class protocol_settings:
         ``documented name`` or ``register``, so the caller can match and apply
         overrides without a linear scan.
         """
-        overrides = {key: {} for key in keys}
+        overrides: dict[str, dict[str, dict[str, str]]] = {key: {} for key in keys}
 
         with open(override_path, newline="", encoding="latin-1") as csvfile:
             reader: csv.DictReader[str] = csv.DictReader(csvfile)
@@ -1107,9 +1138,9 @@ class protocol_settings:
         if not os.path.exists(path):
             return registry_map
 
-        overrides: dict[str, dict] | None = None
+        overrides: dict[str, dict[str, Any]] | None = None
         override_keys: list[str] = ["documented name", "register"]
-        overrided_keys = set()
+        overrided_keys: set[str] = set()
 
         override_path: str = path[:-4] + ".override.csv"
 
@@ -1117,14 +1148,7 @@ class protocol_settings:
             self._log.info("loading override file: " + override_path)
             overrides = self.load_registry_overrides(override_path, override_keys)
 
-        def determine_delimiter(first_row) -> str:
-            """Detect whether the CSV uses semicolons or commas as its column delimiter."""
-            if first_row.count(";") > first_row.count(","):
-                return ";"
-            else:
-                return ","
-
-        def process_row(row) -> None:
+        def process_row(row: dict[str, Any]) -> None:
             """Parse one CSV row and append the resulting ``registry_map_entry`` objects to ``registry_map``.
 
             Skips commented rows (leading ``#``), entirely empty rows, and rows
@@ -1139,7 +1163,9 @@ class protocol_settings:
             adjustments: dict[str, Any] = self._adjustments.parse_adjustments(row.get("adjustments", ""))
 
             # Strip \r from all field values at parse time to handle Windows CRLF CSVs
-            row = {k: v.strip("\r") if isinstance(v, str) else v for k, v in row.items()}
+            # Strip CR from all string field values at parse time to handle Windows CRLF CSVs
+            # (values are expected to be strings)
+            row = {k: v.strip("\r") for k, v in row.items()}
 
             if row["variable name"].startswith("#") or row["register"].startswith("#"):
                 return
@@ -1176,11 +1202,11 @@ class protocol_settings:
 
             # region overrides
             if overrides is not None:
-                override_row = None
+                override_row: dict[str, Any] | None = None
                 for key in override_keys:
-                    key_value = row.get(key)
+                    key_value: str | None = row.get(key)
                     if key_value and key_value in overrides[key]:
-                        override_row = overrides[key][key_value]
+                        override_row: dict[str, Any] | None = overrides[key][key_value]
                         overrided_keys.add(key_value)
                         break
 
@@ -1266,7 +1292,7 @@ class protocol_settings:
             # endregion data type
 
             # region values
-            values: list = []
+            values: list[int | str] = []
             value_min: int = 0
             value_max: int = 65535
             if data_type in (Data_Type.UINT, Data_Type.ACC32, Data_Type.FLOAT32):
@@ -1280,9 +1306,9 @@ class protocol_settings:
 
             if "{" in row["values"]:
                 try:
-                    codes_json = json.loads(row["values"])
+                    codes_json: Any = json.loads(row["values"])
                     value_is_json = True
-                    name = row["documented name"] + "_codes"
+                    name: str = row["documented name"] + "_codes"
                     if name not in self.codes:
                         self.codes[name] = codes_json
                 except ValueError:
@@ -1373,8 +1399,8 @@ class protocol_settings:
                             context="register address"
                         )
 
-                        bit_start_str: str = reg_match.group("bit_start")
-                        bit_end_str: str = reg_match.group("bit_end")
+                        bit_start_str: str | None = reg_match.group("bit_start")
+                        bit_end_str: str | None = reg_match.group("bit_end")
 
                         if bit_start_str is not None:
                             register_bit = strtoint_safe(bit_start_str, context="register bit start")
@@ -1398,14 +1424,14 @@ class protocol_settings:
                     if not range_match:
                         if "[" in row["register"]:
                             self._log.info(f"Deferred dynamic register expression: {row['register']}")
-                            deferred_row = dict(row)
+                            deferred_row: dict[str, Any] = dict(row)
                             deferred_row["_registry_type"] = registry_type
                             self.dynamic_registry_rows.append(deferred_row)
                             return
                         else:
                             register = strtoint_safe(row["register"])
                     else:
-                        reverse = range_match.group("reverse")
+                        reverse: str | Any = range_match.group("reverse")
                         start = strtoint_safe(range_match.group("start"))
                         end = strtoint_safe(range_match.group("end"))
                         register = start
@@ -1438,7 +1464,7 @@ class protocol_settings:
                 writeMode = WriteMode.fromString(row["write"])
 
             for i in r:
-                entry_kwargs = {
+                entry_kwargs: dict[str, Any] = {
                     "registry_type": registry_type,
                     "register": register,
                     "register_bit": register_bit,
@@ -1474,7 +1500,7 @@ class protocol_settings:
                     expected_words: dict[Data_Type, int] = {
                         Data_Type.UINT: 2, Data_Type.INT: 2,
                         Data_Type.FLOAT32: 2, Data_Type.ACC32: 2,
-                        Data_Type._32BIT_FLAGS: 2,
+                        Data_Type.BIT32_FLAGS: 2,
                         Data_Type.UINT64: 4, Data_Type.FLOAT64: 4,
                     }
                     expected: int | None = expected_words.get(item.data_type)
@@ -1505,7 +1531,7 @@ class protocol_settings:
             if overrides is not None:
                 for key in override_keys:
                     applied = False
-                    for key_value, override_row in overrides[key].items():
+                    for _key_value, override_row in overrides[key].items():
                         if all(override_row.get(k) for k in override_keys):
                             if all(override_row.get(k) not in overrided_keys for k in override_keys):
                                 self._log.info("Loading unique entry from overrides for both unique keys")
@@ -1704,9 +1730,9 @@ class protocol_settings:
                         # ALL addresses in the list — they may be non-contiguous or
                         # higher than start_register + word_count - 1.
                         if register.register_list:
-                            register_end = max(register.register_list)
+                            register_end: int = max(register.register_list)
                         else:
-                            register_end = register.register + self.entry_word_count(register) - 1
+                            register_end: int = register.register + self.entry_word_count(register) - 1
 
                         if window_min is None or register.register < window_min:
                             window_min: int | None = register.register
@@ -1839,7 +1865,7 @@ class protocol_settings:
         # ------------------------------------------------------------------
         def _reverse_words(data: bytes, word_count: int) -> bytes:
             """Return *data* with its ``word_count`` 16-bit words in reversed order."""
-            words = [data[i*2:(i+1)*2] for i in range(word_count)]
+            words: list[bytes] = [data[i*2:(i+1)*2] for i in range(word_count)]
             return b"".join(reversed(words))
 
         # Default fallback: single 16-bit unsigned read.
@@ -1910,7 +1936,7 @@ class protocol_settings:
                 raw_bytes = bytes([raw_bytes[1], raw_bytes[0]])
             value = int.from_bytes(raw_bytes, byteorder="big", signed=True)
 
-        elif entry.data_type in (Data_Type._16BIT_FLAGS, Data_Type._8BIT_FLAGS, Data_Type._32BIT_FLAGS):
+        elif entry.data_type in (Data_Type.BIT16_FLAGS, Data_Type.BIT8_FLAGS, Data_Type.BIT32_FLAGS):
             flag_size: int = Data_Type.getSize(entry.data_type)
             flag_word_count: int = max(1, flag_size // 16)
             flag_bytes: bytes = register[:flag_word_count * 2]
@@ -1947,15 +1973,15 @@ class protocol_settings:
 
                 value = ",".join(flags)
             else:
-                flags = []
+                flags: list[str] = []
                 for i in range(start_bit, end_bit):
                     flags.append("1" if (val >> i) & 1 else "0")
                 value = "".join(flags)
 
         elif entry.data_type.value > 400:  # signed-magnitude bit types
-            bit_size = Data_Type.getSize(entry.data_type)
-            bit_mask = (1 << bit_size) - 1
-            bit_index = entry.register_bit
+            bit_size: int = Data_Type.getSize(entry.data_type)
+            bit_mask: int = (1 << bit_size) - 1
+            bit_index: int = entry.register_bit
             reg_bytes: bytes = register[:2]
             if word_order.bytes_reversed:
                 reg_bytes = bytes([reg_bytes[1], reg_bytes[0]])
@@ -2040,10 +2066,10 @@ class protocol_settings:
         ``process_registery`` skips that step for these types.
         """
         if entry.data_type in (
-            Data_Type._8BIT,
-            Data_Type._8BIT_FLAGS,
-            Data_Type._16BIT_FLAGS,
-            Data_Type._32BIT_FLAGS,
+            Data_Type.BIT8,
+            Data_Type.BIT8_FLAGS,
+            Data_Type.BIT16_FLAGS,
+            Data_Type.BIT32_FLAGS,
         ):
             return True
 
@@ -2069,7 +2095,7 @@ class protocol_settings:
             Data_Type.INT: 2,
             Data_Type.FLOAT32: 2,
             Data_Type.ACC32: 2,
-            Data_Type._32BIT_FLAGS: 2,
+            Data_Type.BIT32_FLAGS: 2,
             Data_Type.UINT64: 4,
             Data_Type.FLOAT64: 4,
             Data_Type.STRING16: 8,
@@ -2240,7 +2266,7 @@ class protocol_settings:
                 return None
             value = int.from_bytes(register_bytes, byteorder="big", signed=True)
 
-        elif entry.data_type == Data_Type._8BIT:
+        elif entry.data_type == Data_Type.BIT8:
             # Single-register sub-byte field.  Swap bytes first when the
             # hardware delivers them in reversed order (bytes_reversed=True).
             raw = registry[entry.register] & 0xFFFF
@@ -2249,15 +2275,15 @@ class protocol_settings:
             start_bit = entry.register_bit if entry.register_bit >= 0 else 0
             value = (raw >> start_bit) & 0xFF
 
-        elif entry.data_type in (Data_Type._8BIT_FLAGS, Data_Type._16BIT_FLAGS, Data_Type._32BIT_FLAGS):
+        elif entry.data_type in (Data_Type.BIT8_FLAGS, Data_Type.BIT16_FLAGS, Data_Type.BIT32_FLAGS):
             bit_size: int = Data_Type.getSize(entry.data_type)
-            total_registers = max(1, bit_size // 16)
+            total_registers: int = max(1, bit_size // 16)
             if total_registers > 1:
                 # Multi-register flags: both word_reversed and bytes_reversed apply.
-                flag_bytes = self._register_words_to_bytes(registry, entry.register, total_registers, word_order, entry.register_list or None)
+                flag_bytes: bytes | None = self._register_words_to_bytes(registry, entry.register, total_registers, word_order, entry.register_list or None)
                 if flag_bytes is None:
                     return None
-                val = int.from_bytes(flag_bytes, byteorder="big", signed=False)
+                val: int = int.from_bytes(flag_bytes, byteorder="big", signed=False)
             else:
                 # Single register: only bytes_reversed applies.
                 val = registry[entry.register] & 0xFFFF
@@ -2269,7 +2295,7 @@ class protocol_settings:
 
             code_dict: dict[str, str] = self.get_code_dict(entry.documented_name + "_codes")
 
-            flags = []
+            flags: list[str] = []
             for i in range(start_bit, end_bit):
                 if (val >> i) & 1:
                     if code_dict:
@@ -2532,7 +2558,7 @@ class protocol_settings:
 
             def replace_vars(match: re.Match[str]) -> str:
                 """Return the variable's value as a string, or the original token if the name is not in ``variables``."""
-                var_name = match.group(1)
+                var_name: str = match.group(1)
                 if var_name in variables:
                     return str(variables[var_name])
                 return match.group(0)

@@ -182,13 +182,13 @@ class pace(modbus_base):
 
         # Instance-level serial attributes — no class-level declarations
         # to avoid the invariance conflict with modbus_base.port: int | str
-        self.port = settings.get("port", fallback="/dev/ttyUSB0")
         self.baudrate = settings.getint("baudrate", fallback=9600)
-        self.stopbits: int = settings.getint("stopbits", fallback=1)
         self.bytesize: int = settings.getint("bytesize", fallback=8)
         self.parity: str = settings.get("parity", fallback="N")
+        self.port = settings.get("port", fallback="/dev/ttyUSB0")
         self.serial_timeout: float = settings.getfloat("timeout", fallback=2.0)
         self.slave_id: int = settings.getint("slave_id", fallback=1)
+        self.stopbits: int = settings.getint("stopbits", fallback=1)
 
         # Raw serial connection — managed directly since pymodbus
         # no longer supports the binary framer needed for PACE BMS
@@ -389,10 +389,7 @@ class pace(modbus_base):
         elif registry_type == Registry_Type.DISCRETE:
             function_code = 0x02
         else:
-            self._log.warning(
-                f"PACE BMS: unsupported registry_type "
-                f"'{registry_type.name}' — returning error response"
-            )
+            self._log.warning(f"PACE BMS: unsupported registry_type '{registry_type.name}' — returning error response")
             return _PaceResponse.error()
 
         request: bytes = self._build_request(function_code, start, count)
@@ -426,12 +423,12 @@ class pace(modbus_base):
 
         # Route response parsing based on register type
         if registry_type in (Registry_Type.COIL, Registry_Type.DISCRETE):
-            bits = self._parse_bit_response(response, count)
+            bits: list[bool] | None = self._parse_bit_response(response, count)
             if bits is None:
                 return _PaceResponse.error()
             return _PaceResponse.from_bits(bits)
         else:
-            registers = self._parse_register_response(response, count)
+            registers: list[int] | None = self._parse_register_response(response, count)
             if registers is None:
                 return _PaceResponse.error()
             return _PaceResponse(registers)
@@ -471,17 +468,17 @@ class pace(modbus_base):
                 self._log.error(f"PACE BMS write_register serial error: {e}")
                 self.connected = False
 
-    def write_coil(self, register: int, value: bool, **kwargs: Any) -> None:
+    def write_coil(self, register: int, value: bool, variable_name: str | None = None, **kwargs: Any) -> bool:
         """
         Write a single coil to the PACE BMS device.
         Uses Modbus function code 0x05 (Write Single Coil).
         Coil ON = 0xFF00, coil OFF = 0x0000 per the Modbus specification.
         """
         if not self.write_enabled:
-            return
+            return False
         if self._serial is None or not self._serial.is_open:
             self._log.error("PACE BMS write_coil called but serial port is not open")
-            return
+            return False
 
         coil_value: int = 0xFF00 if value else 0x0000
         payload: bytes = struct.pack(">BBHH", self.slave_id, 0x05, register, coil_value)
@@ -497,14 +494,15 @@ class pace(modbus_base):
                 # Echo response for write single coil is the same 8 bytes as the request
                 response: bytes = self._serial.read(8)
                 if len(response) < 8:
-                    self._log.warning(
-                        f"PACE BMS write_coil short echo: {len(response)} bytes for coil {register}"
-                    )
-                    return
+                    self._log.warning(f"PACE BMS write_coil short echo: {len(response)} bytes for coil {register}")
+                    return False
 
                 if not self._verify_response_crc(response):
                     self._log.error(f"PACE BMS write_coil CRC mismatch for coil {register}")
 
+
             except serial.SerialException as e:
                 self._log.error(f"PACE BMS write_coil serial error: {e}")
                 self.connected = False
+
+            return True  # Successful write

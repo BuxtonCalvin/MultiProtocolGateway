@@ -33,7 +33,7 @@ AppState         — single-row global flags (dirty, orphan counts, last commit)
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, Tuple, runtime_checkable
 
 from sqlalchemy import (
     Boolean,
@@ -100,8 +100,8 @@ class Setting(Base):
     is_orphan     — True when the key no longer appears in any transport class
     transport_type— "scraper" | "bridge" | "general" | "logging"
     """
-    __tablename__ = "settings"
-    __table_args__ = (
+    __tablename__: str = "settings"
+    __table_args__: Tuple[Any, ...] = (
         UniqueConstraint("section", "key", name="uq_settings_section_key"),
     )
 
@@ -151,8 +151,8 @@ class ProtocolRegister(Base):
     screen_enabled      — drives the variable_screen_*.txt file on commit
     is_dirty            — any of the three toggles differs from what is on disk
     """
-    __tablename__ = "protocol_registers"
-    __table_args__ = (
+    __tablename__: str = "protocol_registers"
+    __table_args__: Tuple[Any, ...] = (
         UniqueConstraint(
             "protocol_name", "registry_type", "register_address",
             name="uq_register_protocol_type_addr"
@@ -225,8 +225,8 @@ class DeviceProtocolSelection(Base):
     ProtocolRegister table remains the shared protocol definition source.
     """
 
-    __tablename__ = "device_protocol_selections"
-    __table_args__ = (
+    __tablename__: str = "device_protocol_selections"
+    __table_args__: Tuple[Any, ...] = (
         UniqueConstraint(
             "device_name", "protocol_name", "registry_type", "register_address",
             name="uq_device_protocol_selection"
@@ -288,7 +288,7 @@ class DeviceProtocolSelection(Base):
 class ConfigBackup(Base):
     """Timestamped archive of each committed config.cfg."""
 
-    __tablename__ = "config_backups"
+    __tablename__: str = "config_backups"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -315,7 +315,7 @@ class AppState(Base):
     the COMMIT ALL CHANGES button enabled state.
     """
 
-    __tablename__ = "app_state"
+    __tablename__: str = "app_state"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
     last_scan_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -346,7 +346,7 @@ class SettingDescription(Base):
     Populated on first startup by scanning the transport library.
     Descriptions are user-editable; key + transports are derived from scans.
     """
-    __tablename__ = "setting_descriptions"
+    __tablename__: str = "setting_descriptions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     key: Mapped[str] = mapped_column(String(128), nullable=False, unique=True, index=True)

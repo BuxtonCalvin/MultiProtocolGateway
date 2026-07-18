@@ -167,7 +167,7 @@ register,variable_name,documented_name,unit,data_type,values,adjustments,note,wr
 112,t5,T5,0.1C,,,,Reserved,R,
 113.b0,masterorslave,MasterOrSlave,,2bit,,,Inverter is a master or slave.,R,
 113.b8,parallelnum,ParallelNum,,8bit,1-255,,Number of inverters in parallel,R,
-113.b4,resvd,Resvd,Bit4~7,4bit,,,Reserved,R,
+113.b4,resvd,Resvd,Bit4~7,4bit,,,Reserved  parallel-group config,R,
 113.b2,singleorthreephase,SingleOrThreePhase,,2bit,,,1:R 2:S  3:T Parallel phase 1:R 2:S 3:T,R,
 114,ongridloadpower,OnGridloadPower,W,,,,Load power of the 18k inverter when it is not off-grid,R,
 115~119,serial_number,Serial_Number,,ASCII,,,Serial Number as one string instead of split,R,

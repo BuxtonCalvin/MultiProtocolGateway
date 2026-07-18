@@ -59,7 +59,7 @@ first-class metrics alongside the register-decoded values.
 Post-processing hook
 --------------------
 Derived field computation is implemented in post_process_data(), which
-modbus_base calls via _finish_cycle_tracking() at the end of every scrape
+modbus_base calls via finish_cycle_tracking() at the end of every scrape
 cycle regardless of read mode (sequential, group, or interleaved).  This
 replaces the previous read_data() override that only fired on the
 sequential path.
@@ -261,9 +261,7 @@ class modbus_eg4_ll_s_rtu(modbus_rtu):
                 "balance_volt_diff": "cell voltage delta threshold to start balancing",
                 "cell_ov_release":   "OV release voltage used for balancing hysteresis",
             }
-            missing: list[str] = [
-                k for k in _BALANCING_STATE_INPUTS if k not in self._holding_cache
-            ]
+            missing: list[str] = [k for k in _BALANCING_STATE_INPUTS if k not in self._holding_cache]
             if missing:
                 self._log.info(
                     "[%s] To enable accurate 'balancing_state' / 'balancing_state_text' "
@@ -288,13 +286,10 @@ class modbus_eg4_ll_s_rtu(modbus_rtu):
     # modbus_base / transport_base hook: per-cycle post-processing
     # ------------------------------------------------------------------
 
-    def post_process_data(
-        self,
-        info: dict[str, int | float | str],
-    ) -> dict[str, int | float | str]:
+    def post_process_data(self, info: dict[str, int | float | str]) -> dict[str, int | float | str]:
         """Inject EG4-specific derived metrics after every scrape cycle.
 
-        Called by _finish_cycle_tracking() which is the single convergence
+        Called by finish_cycle_tracking() which is the single convergence
         point for all three read modes (sequential, group, interleaved),
         so this fires exactly once per cycle regardless of gateway config.
 
@@ -384,10 +379,7 @@ class modbus_eg4_ll_s_rtu(modbus_rtu):
 
         return derived
 
-    def _compute_balancing_state(
-        self,
-        info: dict[str, int | float | str],
-    ) -> dict[str, int | float | str]:
+    def _compute_balancing_state(self, info: dict[str, int | float | str]) -> dict[str, int | float | str]:
         """Infer the pack balancing state from cell voltage stats and BMS thresholds.
 
         Thresholds come from the holding register cache loaded by

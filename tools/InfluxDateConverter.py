@@ -97,12 +97,12 @@ CONFIDENCE_THRESHOLD = 0.85  # Minimum confidence score for auto - inserting a m
 IGNORE_TAGS: set[str] = set(STATIC_TAGS.keys()) | {"time", "Time", "measurement"}
 
 # --- mapping dictionary ---
-FIELD_MAPPER = {}
+FIELD_MAPPER: dict[str, str] = {}
 
 # ----------END CONFIG-----------------------------------------------------------------------------------------------------
 
 InfluxClient = InfluxDBClient(host=HOST, port=PORT, username=USER, password=PASSWORD, database=DATABASE)
-influx_fields ={}
+influx_fields: dict[str, str] = {}
 
 
 def normalize_metric_name(name: str) -> str:
@@ -175,15 +175,15 @@ def guess_mapping(csv_field: str, influx_candidates: set[str]) -> tuple[str, flo
             score += 0.1 * len(tokens_csv & tokens_cand)
 
             if score >= cutoff and score > best_score:
-                best_score: float = score
-                best_match: str = normalized_map[normalized_candidate]
+                best_score = score
+                best_match = normalized_map[normalized_candidate]
 
     return best_match, round(best_score, 3)
 
 # Compare CSV columns to InfluxDB fields and identify anomalies such as missing fields or potential mapping issues.
 # If any anomalies are found, a mapping_needed.csv file will be created with suggested mappings for user review and correction
 # before proceeding with the data import.
-def perform_schema_validation(csv_path) -> None:
+def perform_schema_validation(csv_path: Path) -> None:
     global influx_fields
 
     print(f"--- Schema Validation: {csv_path} columns vs InfluxDB columns---")
@@ -198,10 +198,10 @@ def perform_schema_validation(csv_path) -> None:
 
     csv_fields: set[str] = csv_cols - IGNORE_TAGS
 
-    anomalies = []
+    anomalies: list[dict[str, str | float]] = []
 
-    csv_missing = []
-    influx_missing = []
+    csv_missing: list[str] = []
+    influx_missing: list[str] = []
 
     # CSV fields missing from Influx
     for f in csv_fields:
@@ -251,7 +251,7 @@ def perform_schema_validation(csv_path) -> None:
 
 
     if anomalies:
-        anomalies.sort(key=lambda x: (x["source"].lower(), (x["import_names"] or "").lower()))
+        anomalies.sort(key=lambda x: (str(x["source"]).lower(), str(x["import_names"] or "").lower()))
         anomaly_df = pd.DataFrame(anomalies)
 
         # export anomalies to CSV for user review and mapping
@@ -274,10 +274,10 @@ def load_field_mapper(map_file: Path) -> dict[str, str]:
     if not map_file.exists():
         return {}
 
-    df = pd.read_csv(map_file)
+    df: pd.DataFrame = pd.read_csv(map_file)
 
     # Remove incomplete mappings using dropna on the relevant columns.  If any of these are missing, the mapping is not usable.
-    df: pd.DataFrame = df.dropna(subset=["import_names", "export_names"], how="any")
+    df = df.dropna(subset=["import_names", "export_names"], how="any")
 
     mapper: dict[str, str] = dict(zip(df["import_names"], df["export_names"]))
 
@@ -310,39 +310,39 @@ def normalize_value(myVal: Any) -> int | float | str | None:
 
     if isinstance(myVal, str):
 
-        myVal = myVal.strip()
+        str_val: str = myVal.strip()
 
-        if not myVal:
+        if not str_val:
             return None
 
         # hex value
-        if myVal.startswith(("0x", "0X")):
+        if str_val.startswith(("0x", "0X")):
             try:
-                return int(myVal, 16)
+                return int(str_val, 16)
             except ValueError:
-                return myVal
+                return str_val
 
         # percentage
-        if myVal.endswith("%"):
+        if str_val.endswith("%"):
             try:
-                return float(myVal[:-1])
+                return float(str_val[:-1])
             except ValueError:
-                return myVal
+                return str_val
 
         # integer
-        if myVal.isdigit():
+        if str_val.isdigit():
             try:
-                return int(myVal)
+                return int(str_val)
             except ValueError:
                 pass
 
         # float
         try:
-            return float(myVal)
+            return float(str_val)
         except ValueError:
-            return myVal
+            return str_val
 
-    return myVal
+    return cast("int | float | str | None", myVal)
 
 def coerce_to_influx_type(field_name: str, value: Any, influx_types: dict[str, str]) -> Any:
     """
@@ -396,7 +396,7 @@ def coerce_to_influx_type(field_name: str, value: Any, influx_types: dict[str, s
 
     return value
 
-def check_field_type(field_name, value, influx_field_names):
+def check_field_type(field_name: str, value: Any, influx_field_names: dict[str, str]) -> bool:
     """
     Prevent writing a value whose type conflicts with the
     existing InfluxDB field type.
@@ -527,7 +527,7 @@ def export_influx_data_to_csv() -> None:
     print(f"Successfully exported {len(processed_rows)} rows to {EXPORT_FILE_FROM_INFLUX}")
 
 
-def write_csv_to_influx(export_file_name) -> None:
+def write_csv_to_influx(export_file_name: Path) -> None:
 
     df: pd.DataFrame = pd.read_csv(export_file_name)
 
@@ -537,7 +537,7 @@ def write_csv_to_influx(export_file_name) -> None:
     # Calculate time delta for shifting the timestamps
     time_delta: pd.Timedelta = pd.to_datetime(TARGET_START_TIME) - pd.to_datetime(SOURCE_START_TIME)
     new_points = []
-    missing_columns = set()
+    missing_columns: set[str] = set()
 
     for row in df.to_dict("records"):
 
@@ -558,22 +558,24 @@ def write_csv_to_influx(export_file_name) -> None:
         # Build Fields and apply Mapping
         fields = {}
 
-        for col, val in row.items():
+        for col, raw_val in row.items():
 
             if col in IGNORE_TAGS:
                 continue
 
+            target_field_name: str | None
             if is_influx_source_csv:
                 target_field_name = str(col)
             else:
-                target_field_name: str | None = FIELD_MAPPER.get(str(col))
+                target_field_name = FIELD_MAPPER.get(str(col))
 
             if target_field_name is None:
-                missing_columns.add(col)
+                missing_columns.add(str(col))
                 continue
 
+            val: int | float | str | None = raw_val
             try:
-                val: int | float | str | None = normalize_value(val)
+                val = normalize_value(raw_val)
                 val = coerce_to_influx_type(target_field_name, val, influx_fields)
             except (ValueError, TypeError):
                 pass
@@ -685,6 +687,3 @@ else:
         # --- Data processing (Continues only if no anomalies) ---
         load_influx_field_types()
         write_csv_to_influx(EXPORT_FILE_FROM_EG4)
-
-
-

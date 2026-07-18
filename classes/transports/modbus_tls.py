@@ -17,6 +17,8 @@
 
 from __future__ import annotations
 
+import ssl
+
 # scraper for Modbus TLS devices, inheriting from modbus_base and implementing TLS-specific client setup and register access logic.
 from pathlib import Path
 from typing import Any, cast
@@ -26,7 +28,7 @@ from pymodbus import __version__ as pymodbus_version
 from pymodbus.client import ModbusTlsClient
 from pymodbus.client.base import ModbusBaseClient, ModbusBaseSyncClient
 from pymodbus.exceptions import ConnectionException, ModbusException, ModbusIOException
-from pymodbus.pdu import ModbusPDU
+from pymodbus.pdu import ExceptionResponse, ModbusPDU
 
 from classes.protocol_settings import Registry_Type
 from defs.common import TransportSettings
@@ -78,14 +80,14 @@ class modbus_tls(modbus_base):
             is_modern: bool = hasattr(ModbusTlsClient, "generate_ssl")
 
         # 3. Construct version-specific arguments
-        client_args = {
+        client_args: dict[str, Any] = {
             "host": self.host,
             "port": self.port,
             "timeout": self.timeout,
             "retries": self.retries
         }
         if is_modern:
-            # Pymodbus 3.7.0+
+            # Pymodbus 3.14.0+
             if not (cert_path.is_file() and key_path.is_file()):
                 self._log.error(f"TLS Files missing at: {cert_path.absolute()} or {key_path.absolute()}")
 
@@ -93,10 +95,20 @@ class modbus_tls(modbus_base):
                 raise FileNotFoundError(msg)
 
             # generate_ssl usually expects strings, so convert them back with str()
-            client_args["sslctx"] = ModbusTlsClient.generate_ssl(
-                certfile=str(cert_path),
-                keyfile=str(key_path)
-            )
+            # 1. Create a standard TLS client SSL context
+            ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+
+            # 2. Configure certificate validation and trust settings
+            ssl_context.verify_mode = ssl.CERT_REQUIRED
+            ssl_context.check_hostname = True
+
+            # 3. Load your certificates natively
+            ssl_context.load_verify_locations(cafile=str(cert_path))
+            ssl_context.load_cert_chain(certfile=str(cert_path), keyfile=str(key_path))
+
+            # 4. Pass the native context directly to your client arguments
+            client_args["sslctx"] = ssl_context
+
             client_args["server_hostname"] = self.hostname
         else:
             # Legacy Pymodbus support
@@ -153,7 +165,14 @@ class modbus_tls(modbus_base):
             self._log.error(f"Unexpected error during read: {e}")
             return None
 
-        if result is None or result.isError():
+        if isinstance(result, ExceptionResponse):
+            self._log.error("Modbus Error: Result is None")
+            return None
+
+        # Use hasattr to safely check for the error attribute/method
+        is_error: bool | Any = result.isError() if hasattr(result, "isError") else getattr(result, "is_error", False)
+
+        if is_error:
             self._log.error(f"Modbus Error: {result}")
             return None
 

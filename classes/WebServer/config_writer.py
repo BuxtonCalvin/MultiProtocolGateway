@@ -120,10 +120,7 @@ def _build_config_text(settings_rows: list[Setting]) -> str:
     return "\n".join(lines)
 
 
-def _write_mask_screen_files(
-    db: Session,
-    project_root: Path,
-) -> dict[str, int]:
+def _write_mask_screen_files(db: Session, project_root: Path) -> dict[str, int]:
     """
     For each transport section, rewrite its variable_mask_*.txt and
     variable_screen_*.txt files based on the ProtocolRegister toggles.
@@ -294,7 +291,7 @@ def _write_writable_csv(db: Session, protocols_dir: Path, config_dir: Path) -> i
         writable_entries: dict[str, dict[str, str]] = {}
         for row in selected_rows:
             if row.is_writable_by_protocol:
-                key = row.documented_name or row.variable_name
+                key: str = row.documented_name or row.variable_name
                 writable_entries[key] = {
                     "documented name": row.documented_name,
                     "write": "W",

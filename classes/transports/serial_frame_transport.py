@@ -24,7 +24,8 @@ from classes.transports.transport_base import TransportWriteMode, transport_base
 from defs.common import TransportSettings
 
 
-class serial_frame_transport(transport_base):
+class serial_frame_transport(transport_base):
+
     transport_type = "scraper"
     """
     Transport that communicates over a serial port using an SOI/EOI framing
@@ -92,7 +93,7 @@ class serial_frame_transport(transport_base):
             if self._async_mode:
                 self._client.on_message = self._on_async_frame
 
-            result = self._client.connect()
+            result: bool = self._client.connect()
             self.connected = bool(result)
 
             if self.connected:
@@ -145,7 +146,7 @@ class serial_frame_transport(transport_base):
             if not self.connect():
                 return
 
-        payload = self._encode_frame(data)
+        payload: bytes | None = self._encode_frame(data)
         if payload:
             try:
                 if self._client is not None:
@@ -164,7 +165,7 @@ class serial_frame_transport(transport_base):
                 # Stop the background thread if async mode was used.
                 self._client.running = False
 
-                if hasattr(self._client, "thread") and self._client.thread is not None:
+                if hasattr(self._client, "thread"):
                     self._client.thread.join(timeout=2.0)
 
                 # Close the underlying pyserial port.

@@ -22,7 +22,7 @@ from __future__ import annotations
 # for custom serial protocols that use simple start/end framing.
 import threading
 import time
-from typing import Callable
+from typing import Any, Callable
 
 import serial
 
@@ -61,14 +61,14 @@ class serial_frame_client():
     #endregion asynchronous
 
 
-    def __init__(self, port : str , baud : int , soi : bytes, eoi : bytes, **kwrgs) -> None:
+    def __init__(self, port : str , baud : int , soi : bytes, eoi : bytes, **kwrgs: Any) -> None:
         self.soi = soi
         self.eoi = eoi
         self.port = port
         self.baud = baud
         self.client = serial.Serial(port, baud, **kwrgs)
 
-    def connect(self):
+    def connect(self) -> bool:
         if self.asynchronous:
             self.running = True
             self.pending_frames = []
@@ -77,12 +77,12 @@ class serial_frame_client():
             self.thread.start()
         return True
 
-    def write(self, data : bytes):
+    def write(self, data : bytes) -> None:
         ''' write data, excluding SOI and EOI bytes'''
         data = self.soi + data + self.eoi
         self.client.write(data)
 
-    def read(self, reset_buffer=True, frames=1) -> list[bytes] | bytes | None:
+    def read(self, reset_buffer: bool = True, frames: int = 1) -> list[bytes] | bytes | None:
         buffer = bytearray()
         self.pending_frames.clear()
 
@@ -107,7 +107,7 @@ class serial_frame_client():
                         frame = buffer[len(self.soi):eoi_index]
 
                         if frames == 1:
-                            return frame
+                            return bytes(frame)
 
                         # Accumulate frames and return when we have enough
                         self.pending_frames.append(frame)
@@ -128,7 +128,7 @@ class serial_frame_client():
         return self.pending_frames if self.pending_frames else None
 
 
-    def read_thread(self):
+    def read_thread(self) -> None:
         buffer = bytearray()
         self.running = True
         while self.running:

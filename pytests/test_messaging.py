@@ -75,7 +75,7 @@ def test_telegram_message_formats_html_title_and_rejects_empty_text() -> None:
 
 def test_message_handler_dispatch_filters_services_and_clamps_priority() -> None:
     """Happy path: dispatch targets requested services and clamps Pushover priority."""
-    handler = MessageHandler.__new__(MessageHandler)
+    handler: MessageHandler = MessageHandler.__new__(MessageHandler)
     handler._default_title = "Default"
     pushover_client = MagicMock()
     telegram_client = MagicMock()

@@ -275,7 +275,7 @@
 
     try {
       const res = await fetch(
-        `/api/protocol/${encodeURIComponent(PROTOCOL_GROUP)}/${encodeURIComponent(PROTOCOL_NAME)}/json`,
+        `/api/protocols/${encodeURIComponent(PROTOCOL_GROUP)}/${encodeURIComponent(PROTOCOL_NAME)}/json`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

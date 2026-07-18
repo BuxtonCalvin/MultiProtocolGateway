@@ -59,7 +59,7 @@ first-class metrics alongside the register-decoded values.
 Post-processing hook
 --------------------
 Derived field computation is implemented in post_process_data(), which
-modbus_base calls via _finish_cycle_tracking() at the end of every scrape
+modbus_base calls via finish_cycle_tracking() at the end of every scrape
 cycle regardless of read mode (sequential, group, or interleaved).  This
 replaces the previous read_data() override that only fired on the
 sequential path.
@@ -188,7 +188,13 @@ class modbus_eg4_ll_s_tcp(modbus_tcp):
 
         Tuple format: (variable_name, data_type, unit_mod, note)
         data_type strings match Data_Type enum names in protocol_settings.
+
+        Gated by the shared synthetic_metrics_enabled() (the
+        enable_synthetic_metrics transport setting) — returns [] when disabled,
+        same as it would if this transport had no synthetic fields at all.
         """
+        if not self.synthetic_metrics_enabled():
+            return []
         return [
             ("cell_voltage_max_v",   "FLOAT32",  1.0, "Highest individual cell voltage (V)"),
             ("cell_voltage_min_v",   "FLOAT32",  1.0, "Lowest individual cell voltage (V)"),
@@ -274,9 +280,7 @@ class modbus_eg4_ll_s_tcp(modbus_tcp):
                 "balance_volt_diff": "cell voltage delta threshold to start balancing",
                 "cell_ov_release":   "OV release voltage used for balancing hysteresis",
             }
-            missing: list[str] = [
-                k for k in _BALANCING_STATE_INPUTS if k not in self._holding_cache
-            ]
+            missing: list[str] = [k for k in _BALANCING_STATE_INPUTS if k not in self._holding_cache]
             if missing:
                 self._log.info(
                     "[%s] To enable accurate 'balancing_state' / 'balancing_state_text' "
@@ -301,13 +305,10 @@ class modbus_eg4_ll_s_tcp(modbus_tcp):
     # modbus_base / transport_base hook: per-cycle post-processing
     # ------------------------------------------------------------------
 
-    def post_process_data(
-        self,
-        info: dict[str, int | float | str],
-    ) -> dict[str, int | float | str]:
+    def post_process_data(self, info: dict[str, int | float | str]) -> dict[str, int | float | str]:
         """Inject EG4-specific derived metrics after every scrape cycle.
 
-        Called by _finish_cycle_tracking() which is the single convergence
+        Called by finish_cycle_tracking() which is the single convergence
         point for all three read modes (sequential, group, interleaved),
         so this fires exactly once per cycle regardless of gateway config.
 
@@ -321,6 +322,13 @@ class modbus_eg4_ll_s_tcp(modbus_tcp):
           1. cell_stats   — produces cell_voltage_max_v / min_v
           2. balancing    — consumes cell_voltage_max_v / min_v
 
+        Gated by the shared synthetic_metrics_enabled() (the
+        enable_synthetic_metrics transport setting, defined on modbus_base):
+        the deferred cache load still runs even when disabled (it's
+        connection housekeeping, not a synthetic metric, and keeps the cache
+        warm in case synthetic metrics are re-enabled later without a
+        reconnect), but no derived fields are computed or injected.
+
         On the first cycle after connect, emits a one-time INFO log if the
         cell voltage registers needed by _compute_cell_stats are absent from
         the scrape data (e.g. excluded by the variable mask).
@@ -333,9 +341,16 @@ class modbus_eg4_ll_s_tcp(modbus_tcp):
 
         # Deferred cache load — runs on the first successful scrape cycle
         # (and retries on subsequent cycles if the previous load failed).
-        # This keeps on_first_connect_read non-blocking.
+        # This keeps on_first_connect_read non-blocking. Left un-gated by
+        # synthetic_metrics_enabled(): it's connection/cache housekeeping
+        # (nothing derived is computed here), and keeping the cache warm
+        # means synthetic metrics come back with fresh data immediately if
+        # enable_synthetic_metrics is re-enabled later without a reconnect.
         if not self._holding_cache_loaded:
             self._load_holding_cache()
+
+        if not self.synthetic_metrics_enabled():
+            return info
 
         # One-time check on the first cycle: warn if cell voltage registers
         # are absent from the scrape data so the user knows which metrics to
@@ -364,10 +379,7 @@ class modbus_eg4_ll_s_tcp(modbus_tcp):
     # Derived field computations
     # ------------------------------------------------------------------
 
-    def _compute_cell_stats(
-        self,
-        info: dict[str, int | float | str],
-    ) -> dict[str, int | float | str]:
+    def _compute_cell_stats(self, info: dict[str, int | float | str]) -> dict[str, int | float | str]:
         """Compute per-poll cell voltage statistics from decoded register values.
 
         Cell voltage registers (cell_01_voltage through cell_16_voltage) are
@@ -397,10 +409,7 @@ class modbus_eg4_ll_s_tcp(modbus_tcp):
 
         return derived
 
-    def _compute_balancing_state(
-        self,
-        info: dict[str, int | float | str],
-    ) -> dict[str, int | float | str]:
+    def _compute_balancing_state(self, info: dict[str, int | float | str],) -> dict[str, int | float | str]:
         """Infer the pack balancing state from cell voltage stats and BMS thresholds.
 
         Thresholds come from the holding register cache loaded by

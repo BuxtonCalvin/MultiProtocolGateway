@@ -61,7 +61,7 @@ class Message:
     def __init__(self, message: str, title: str = "", attachment: str = "", device: str = "", url: str = "",
                  url_title: str = "", priority: PriorityType = 0, sound: SoundType = "pushover", timestamp: float = 0.0,
                  retry: int = 30, expire: int = 10800) -> None:
-        if message is None:
+        if not message:
             raise ValueError("'message' cannot be None!")
 
         self._mime_test = None
@@ -76,20 +76,20 @@ class Message:
             except FileNotFoundError:
                 raise FileNotFoundError("Must input a valid file!")
 
-        self.message = str(message)[0:4096]
-        self.title = str(title)[0:250]
+        self.message: str = str(message)[0:4096]
+        self.title: str = str(title)[0:250]
         self._attachment = str(attachment)
         self.device = str(device)
-        self.url = str(url)[0:512]
-        self.url_title = str(url_title)[0:100]
+        self.url: str = str(url)[0:512]
+        self.url_title: str = str(url_title)[0:100]
         self.priority = int(priority)
         self.sound = str(sound)
         # Avoid mutable/dynamic defaults directly in the signature; evaluate time at runtime if 0.0 passed
-        self.timestamp = float(timestamp) if timestamp != 0.0 else time()
+        self.timestamp: float = float(timestamp) if timestamp != 0.0 else time()
         self.retry = int(retry)
         self.expire = int(expire)
         self.response_data = None
-        self._api_callback = "messages.json"
+        self.api_callback = "messages.json"
 
     @property
     def attachment(self) -> dict[str, tuple[str, Any, str | None]] | str:
@@ -121,20 +121,20 @@ class Glance:
             self.title = title[0:100]
         if isinstance(subtext, str):
             self.subtext = subtext[0:100]
-        if not isinstance(count, int):
+        if not isinstance(count, int):  # type: ignore[unnecessary-isinstance]
             raise TypeError("'count' must be an integer!")
-        if not isinstance(percent, int) or not (0 <= percent <= 100):
+        if not isinstance(percent, int) or not (0 <= percent <= 100):  # type: ignore[unnecessary-isinstance]
             raise ValueError("'percent' must be an integer between 0 and 100!")
         self.count: int = count
         self.percent: int = percent
-        self._api_callback: str = "glances.json"
+        self.api_callback: str = "glances.json"
         self.response_data: Any = None
 
     @property
     def json(self) -> dict[str, Any]:
         return {k: v for k, v in (
             ("title", self.title), ("text", self.text), ("subtext", self.subtext), ("count", self.count),
-            ("percent", self.percent)) if v is not None or v != 0}
+            ("percent", self.percent)) if v != "" and v != 0}
 
 
 class Client:
@@ -142,7 +142,7 @@ class Client:
     The client for using the Pushover API.
     """
 
-    def __init__(self, user_key: str, api_token: str):
+    def __init__(self, user_key: str, api_token: str) -> None:
         self.user_key: str = user_key
         self.api_token: str = api_token
         self._api_url: str = "https://api.pushover.net/1/"
@@ -159,8 +159,8 @@ class Client:
             timeout=10.0
         )
 
-        response_json = r.json()
-        if isinstance(response_json, dict) and response_json.get("status") == 1:
+        response_json: Any = r.json()
+        if isinstance(response_json, dict) and cast(dict[str, Any], response_json).get("status") == 1:
             print("User is verified!")
         else:
             print("User is not verified!")
@@ -181,7 +181,7 @@ class Client:
         Returns the requests.Response, or None if an error occurred before the request.
         """
         self.last_message = message_obj
-        url: str = self._api_url + message_obj._api_callback
+        url: str = self._api_url + message_obj.api_callback
 
         payload: dict[str, Any] = {
             "token": self.api_token,
@@ -201,7 +201,7 @@ class Client:
         try:
             if has_attachment:
                 # Multipart form — credentials + fields as data, file as the files arg.
-                r = requests.post(url, data=payload, files=files, timeout=10.0)
+                r: requests.Response = requests.post(url, data=payload, files=files, timeout=10.0)
             else:
                 r = requests.post(url, json=payload, timeout=10.0)
 

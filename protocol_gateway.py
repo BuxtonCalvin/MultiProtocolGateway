@@ -43,7 +43,6 @@ if sys.version_info < (3, 10):
 import argparse
 import logging
 import logging.handlers
-import sys
 from configparser import ConfigParser, NoOptionError, NoSectionError
 from dataclasses import dataclass
 from pathlib import Path
@@ -86,7 +85,7 @@ class CustomConfigParser(ConfigParser):
     - Strips whitespace and comments from values
 
     """
-    def get(self, section, option, *args, **kwargs) -> str:
+    def get(self, section: str, option: str | list[str], *args: ..., **kwargs: ...) -> str:
         """Scheduling path: N/A — config parsing, used during setup regardless of read_mode.
 
         Read a string value from the config, with alias support and comment stripping.
@@ -107,7 +106,7 @@ class CustomConfigParser(ConfigParser):
             kwargs["fallback"] = None
 
         # Helper to safely call the parent get method
-        def safe_get(sect, opt) -> str | None:
+        def safe_get(sect: str, opt: str) -> str | None:
             """Scheduling path: N/A — config parsing, used during setup regardless of read_mode.
 
             Call the parent ``ConfigParser.get`` and return ``None`` on any missing-key error."""
@@ -145,28 +144,59 @@ class CustomConfigParser(ConfigParser):
             value = value.split('#')[0].strip()
 
         return value
+
     # because using get, None is not reachable, so removed and type checker is happy.
-    def getint(self, section: str, option: str | list[str], *args: Any, **kwargs: Any ) -> int:
+    def getint(self, section: str, option: str | list[str], *args: Any, **kwargs: Any) -> int:
         """Scheduling path: N/A — config parsing, used during setup regardless of read_mode.
 
-        Read a config value and return it as an ``int``.
-
-        Delegates to ``get``, inheriting alias-list and fallback support.
-        Raises ``ValueError`` if the resolved string cannot be converted to an integer.
+        Read a config value and return it as an int. Delegates to get,
+        inheriting alias-list and fallback support. Falls back or raises
+        ValueError if the resolved string is empty or cannot be converted.
         """
-        value: str = self.get(section, option, *args, **kwargs)
-        return int(value)
+        fallback: int |None = kwargs.get("fallback", None)
+
+        def handle_error(error_msg: str) -> int:
+            """Process fallback if available; otherwise raise ValueError."""
+            if fallback is not None:
+                return int(fallback)
+            raise ValueError(error_msg)
+
+        try:
+            value: str = self.get(section, option, *args, **kwargs)
+
+            if value == "":
+                return handle_error(f"Config option '{option}' in section '{section}' is empty.")
+
+            return int(value)
+
+        except ValueError:
+            return handle_error(f"Config option '{option}' in section '{section}' is not a valid integer.")
 
     def getfloat(self, section: str, option: str | list[str], *args: Any, **kwargs: Any ) -> float:
         """Scheduling path: N/A — config parsing, used during setup regardless of read_mode.
 
-        Read a config value and return it as a ``float``.
-
-        Delegates to ``get``, inheriting alias-list and fallback support.
-        Raises ``ValueError`` if the resolved string cannot be converted to a float.
+        Read a config value and return it as an float. Delegates to get,
+        inheriting alias-list and fallback support. Falls back or raises
+        ValueError if the resolved string is empty or cannot be converted.
         """
-        value: str = self.get(section, option, *args, **kwargs)
-        return float(value)
+        fallback: float |None = kwargs.get("fallback", None)
+
+        def handle_error(error_msg: str) -> float:
+            """Process fallback if available; otherwise raise ValueError."""
+            if fallback is not None:
+                return float(fallback)
+            raise ValueError(error_msg)
+
+        try:
+            value: str = self.get(section, option, *args, **kwargs)
+
+            if value == "":
+                return handle_error(f"Config option '{option}' in section '{section}' is empty.")
+
+            return float(value)
+
+        except ValueError:
+            return handle_error(f"Config option '{option}' in section '{section}' is not a valid float.")
 
     def getboolean(self, section: str, option: str | list[str], *args: Any, **kwargs: Any) -> bool:
         """Scheduling path: N/A — config parsing, used during setup regardless of read_mode.
@@ -176,17 +206,37 @@ class CustomConfigParser(ConfigParser):
         Delegates to ``get``, inheriting alias-list and fallback support.
         Accepts ``true/yes/on/1/enable/enabled`` as ``True`` and
         ``false/no/off/0/disable/disabled`` as ``False`` (case-insensitive).
-        Raises ``ValueError`` for any other string.
+        Raises ``ValueError`` for any other string or empty value without a fallback.
         """
+        fallback: bool | str | None  = kwargs.get("fallback", None)
+
+        def handle_error(error_msg: str) -> bool:
+            """Process fallback if available; otherwise raise ValueError."""
+            if fallback is not None:
+                # Safely evaluate string-based fallbacks like 'True' or 'yes'
+                if isinstance(fallback, str):
+                    fb_str: str = fallback.lower().strip()
+                    if fb_str in ('true', 'yes', 'on', '1', 'enable', 'enabled'):
+                        return True
+                    if fb_str in ('false', 'no', 'off', '0', 'disable', 'disabled'):
+                        return False
+                return bool(fallback)
+            raise ValueError(error_msg)
+
         value: str = self.get(section, option, *args, **kwargs)
+
+        # Trap empty configurations before string parsing
+        if value == "":
+            return handle_error(f"Config option '{option}' in section '{section}' is empty.")
+
         value_str: str = value.lower().strip()
 
         if value_str in ('true', 'yes', 'on', '1', 'enable', 'enabled'):
             return True
         if value_str in ('false', 'no', 'off', '0', 'disable', 'disabled'):
             return False
-        msg: str =f"Not a boolean: {value}"
-        raise ValueError(msg)
+
+        return handle_error(f"Not a boolean: {value}")
 class NetworkError(Enum):
     # Standard codes
     CONN_RESET = '104'       # Errno 104 - Connection reset by peer (common for MQTT disconnects)
@@ -488,7 +538,7 @@ class Protocol_Gateway:
         ) if transport_names else "idle"
         return self._compact_thread_label(joined_names)
 
-    def _run_with_thread_task_name(self, task_label: str, fn, *args, **kwargs):
+    def _run_with_thread_task_name(self, task_label: str, fn: Any, *args: Any, **kwargs: Any) -> Any:
         """Scheduling path: Concurrent, Interleaved (the two modes that use thread pools).
 
         Execute ``fn(*args, **kwargs)`` on the current thread with a temporary task-specific name.
@@ -607,11 +657,11 @@ class Protocol_Gateway:
                     transport_type = protocol_settings.get_transport_type(protocol_version)
 
                     if not transport_type:
-                        # 1. Assign f-strings to variables first
+                        # Assign f-strings to variables first
                         msg: str = f"Cannot determine transport type for protocol {protocol_version}. " \
                             f"Ensure the protocol JSON contains a transport or reader key."
 
-                        # 2. Raise the exception with the variable
+                        # Raise the exception with the variable
                         raise ValueError(msg)
 
 
@@ -797,11 +847,11 @@ class Protocol_Gateway:
                     self.__log.info(f"Primary '{primary.transport_name}' not connected, trying to connect...")
                     primary.connect()
 
-    def _log_group_read_diagnostics(
-        self,
-        group: ScrapeGroup,
-        full_data: dict[str, int | float | str],
-    ) -> None:
+                case _:
+                    pass
+
+
+    def _log_group_read_diagnostics(self, group: ScrapeGroup, full_data: dict[str, int | float | str]) -> None:
         """
         Scheduling path: Sequential, Concurrent (called only from
         ``_process_group_read``). Interleaved mode's consolidated reads
@@ -1136,19 +1186,19 @@ class Protocol_Gateway:
         Cache the bridge-bound data on the scraper transport.
 
         Called immediately before every ``bridge.write_data(data, scraper)``
-        call so ``scraper._last_known_data`` always reflects the most recent
+        call so ``scraper.last_known_data`` always reflects the most recent
         complete, bridge-confirmed cycle result — not a mid-cycle partial.
 
-        Also sets and immediately clears ``scraper._values_ready_event`` so
+        Also sets and immediately clears ``scraper.values_ready_event`` so
         any thread blocked in ``/api/device/{name}/last-values/wait`` is
         woken and receives the fresh snapshot.
         """
         if not data:
             return
-        scraper._last_known_data = dict(data)
-        scraper._values_ready_event.set()
+        scraper.last_known_data = dict(data)
+        scraper.values_ready_event.set()
         # Clear immediately so the next wait() blocks until the next cycle.
-        scraper._values_ready_event.clear()
+        scraper.values_ready_event.clear()
 
     def get_transport(self, transport_name: str) -> "transport_base | None":
         """Scheduling path: N/A — not part of the read-scheduling loop; used by the web server, independent of read_mode.
@@ -1279,7 +1329,7 @@ class Protocol_Gateway:
                             self.__log.warning(
                                 f"Transport '{state.transport.transport_name}' cycle timed out - evicting."
                             )
-                            state.transport._bus_lock = None
+                            state.transport.bus_lock = None
 
                 if cycle.future_to_state:
                     continue
@@ -1315,7 +1365,7 @@ class Protocol_Gateway:
         whichever member does its own read successfully.
 
         Transports sharing a physical bus (same scrape_target) serialize
-        their individual block reads automatically via _bus_lock inside
+        their individual block reads automatically via bus_lock inside
         read_modbus_registers_iter.
 
         Completed reads are routed from the main loop poller so worker
@@ -1354,7 +1404,7 @@ class Protocol_Gateway:
             wire_key = getattr(transport, 'host', '') + ':' + str(getattr(transport, 'port', ''))
             if not wire_key.strip(':'):
                 wire_key = transport.transport_name
-            transport._bus_lock = bus_locks[wire_key]
+            transport.bus_lock = bus_locks[wire_key]
 
         # Partition this tick's due transports into consolidated group
         # work-units vs standalone reads. A group only counts as a
@@ -1398,7 +1448,7 @@ class Protocol_Gateway:
             own partial data), otherwise the plain ``read_data_iter()``.  On
             success sets ``state.completed_cleanly = True``.  On exception,
             records the error, marks the cycle incomplete on the transport, and
-            clears ``_bus_lock`` so the lock is not held after failure.
+            clears ``bus_lock`` so the lock is not held after failure.
             """
             try:
                 # Mirror the connection guard from _process_group_read so that
@@ -1431,11 +1481,11 @@ class Protocol_Gateway:
                 state.completed_cleanly = True
             except Exception as exc:
                 state.error = exc
-                state.transport._cycle_mark_incomplete()
-                state.transport._finish_cycle_tracking(state.transport.get_partial_data())
+                state.transport.cycle_mark_incomplete()
+                state.transport.finish_cycle_tracking(state.transport.get_partial_data())
                 self.__log.error(f"Unhandled error in '{state.transport.transport_name}': {exc}")
             finally:
-                state.transport._bus_lock = None
+                state.transport.bus_lock = None
             return state
 
         overall_timeout: float = max(
@@ -1618,9 +1668,6 @@ class Protocol_Gateway:
         """
         self.__running = True
 
-        if False:
-            self.enable_write()
-
         try:
             while self.__running:
                         try:
@@ -1670,7 +1717,7 @@ class Protocol_Gateway:
                 self.__interleaved_executor.shutdown(wait=False, cancel_futures=True)
 
 
-def main(args=None) -> None:
+def main(args: list[str] | None = None) -> None:
     """Scheduling path: N/A — CLI entry point, runs once before any read_mode is dispatched.
 
     Entry point: parse CLI arguments, resolve the config path, and start the gateway and web server.

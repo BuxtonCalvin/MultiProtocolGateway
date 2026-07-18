@@ -2,3 +2,5 @@ ruff
 modbus_tk
 pytest
 hbmqtt
+pyright
+mypy

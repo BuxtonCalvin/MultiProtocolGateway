@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Any, cast
 from pymodbus.client import ModbusSerialClient
 from pymodbus.client.base import ModbusBaseClient, ModbusBaseSyncClient
 from pymodbus.exceptions import ConnectionException, ModbusException, ModbusIOException
-from pymodbus.pdu import ModbusPDU
+from pymodbus.pdu import ExceptionResponse, ModbusPDU
 
 from classes.protocol_settings import Registry_Type
 from defs.common import (
@@ -74,7 +74,7 @@ class modbus_rtu(modbus_base):
         self._log.debug(f"Creating new client with baud rate: {self.baudrate}")
 
 
-        client_args = {
+        client_args: dict[str, Any] = {
             "port": self.port,
             "baudrate": int(self.baudrate),
             "stopbits": settings.getint("stopbits", fallback=1),
@@ -131,7 +131,14 @@ class modbus_rtu(modbus_base):
                 self._log.error(f"Unexpected error during read: {e}")
                 return None
 
-        if result is None or result.isError():
+        if isinstance(result, ExceptionResponse):
+            self._log.error("Modbus Error: Result is None")
+            return None
+
+        # Use hasattr to safely check for the error attribute/method
+        is_error: bool | Any = result.isError() if hasattr(result, "isError") else getattr(result, "is_error", False)
+
+        if is_error:
             self._log.error(f"Modbus Error: {result}")
             return None
 

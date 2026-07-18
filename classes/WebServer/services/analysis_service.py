@@ -37,8 +37,8 @@ def get_scraper_transports(gateway: Any) -> list[dict[str, str]]:
     if gateway is None:
         return []
 
-    transports = getattr(gateway, "_Protocol_Gateway__transports", [])
-    result = []
+    transports: Any | list[Any] = getattr(gateway, "_Protocol_Gateway__transports", [])
+    result: list[dict[str, Any]] = []
     for t in transports:
         if getattr(t, "protocolSettings", None) is not None:
             result.append({
@@ -57,5 +57,5 @@ def get_transport_connection_status(gateway: Any) -> dict[str, bool]:
     """
     if gateway is None:
         return {}
-    transports = getattr(gateway, "_Protocol_Gateway__transports", [])
+    transports: Any | list[Any] = getattr(gateway, "_Protocol_Gateway__transports", [])
     return {t.transport_name: getattr(t, "connected", False) for t in transports}

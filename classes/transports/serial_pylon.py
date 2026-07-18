@@ -58,7 +58,8 @@ class return_codes(Enum):
         except ValueError:
             return return_codes.UNKNOWN_ERROR
 
-class serial_pylon(transport_base):
+class serial_pylon(transport_base):
+
     transport_type = "scraper"
     ''' for a lack of a better name'''
 
@@ -68,9 +69,9 @@ class serial_pylon(transport_base):
 
     #this format is pretty common; i need a name for it.
     SOI : bytes = b"\x7e" # aka b"~"
-    VER : bytes = b"\x00"
+    ver : bytes = b"\x00"
     ''' version has to be fetched first '''
-    ADR : bytes
+    adr : bytes
     CID1 : bytes
     CID2 : bytes
     LENGTH : bytes
@@ -87,18 +88,19 @@ class serial_pylon(transport_base):
         if not self.port:
             raise ValueError("Port is not set")
 
-        self.port: str | None = find_usb_serial_port(self.port)
-        if not self.port:
+        resolved_port: str | None = find_usb_serial_port(self.port)
+        if not resolved_port:
             raise ValueError("Port is not valid / not found")
+        self.port: str = resolved_port
 
         self._log.info("Serial Port : " + self.port + " = "+get_usb_serial_port_info(self.port)) #print for config convenience
 
-        self.baudrate = settings.getint("baudrate", 9600)
+        self.baudrate: int = settings.getint("baudrate", 9600)
 
         address : int = settings.getint("address", 0)
         self.addresses = [address]
 
-        self.ADR = struct.pack("B", address)
+        self.adr = struct.pack("B", address)
         #todo, multi address support later
 
         self.client = serial_frame_client(self.port,
@@ -116,7 +118,7 @@ class serial_pylon(transport_base):
     def connect(self) -> None:
         self.client.connect()
 
-        if self.VER == b"\x00":
+        if self.ver == b"\x00":
             # Get the version.
             # Note: If attribute is NOT "info", read_variable returns the 'raw' attribute value.
             version_result: dict[str, int | float | str] | Any | None = self.read_variable("version", attribute="ver")
@@ -126,13 +128,13 @@ class serial_pylon(transport_base):
                 # If read_variable returns a dict, then: version_result.get("version")
                 # But since attribute="ver", it likely returns the raw bytes directly.
                 if isinstance(version_result, bytes):
-                    self.VER = version_result
+                    self.ver = version_result
                 else:
                     # Fallback: try to convert to bytes if it's a string/int
-                    self.VER = str(version_result).encode("utf-8")
+                    self.ver = str(version_result).encode("utf-8")
 
                 self.connected = True
-                self._log.info(f"pylon protocol version is {self.VER!r}")
+                self._log.info(f"pylon protocol version is {self.ver!r}")
 
                 # Get the battery name (this returns a dict)
                 name_dict: dict[str, int | float | str] | Any | None = self.read_variable("battery_name")
@@ -161,7 +163,7 @@ class serial_pylon(transport_base):
                             frame = b"".join(frame)
 
                         # 'frame' is guaranteed to be type 'bytes'
-                        raw_attr = getattr(self.decode_frame(frame), "info", None)
+                        raw_attr: Any | None = getattr(self.decode_frame(frame), "info", None)
 
                         if raw_attr:
                             # Decode hex string bytes to literal bytes
@@ -172,7 +174,7 @@ class serial_pylon(transport_base):
             # Process everything once, or update 'info' cumulatively
             # If process_registery can take the whole map at once, do it here:
             if all_raw_data:
-                processed = self.protocolSettings.process_registery(all_raw_data, registry_map=registry_map)
+                processed: dict[str, int | float | str] = self.protocolSettings.process_registery(all_raw_data, registry_map=registry_map)
                 info.update(processed)
 
         # logs if NO data was gathered across any registers
@@ -207,7 +209,7 @@ class serial_pylon(transport_base):
                         frame = b"".join(frame)
 
                     # Extract the attribute (e.g., "info") safely
-                    raw = getattr(self.decode_frame(frame), attribute, None)
+                    raw: Any | None = getattr(self.decode_frame(frame), attribute, None)
 
                     if raw and attribute == "info":
                         # Decode from hex string bytes to literal bytes
@@ -219,7 +221,7 @@ class serial_pylon(transport_base):
 
         return None
 
-    def calculate_checksum(self, data) -> int:
+    def calculate_checksum(self, data: bytes) -> int:
 
         """
         calculates the sum of the ASCII character values rather than raw binary data
@@ -250,7 +252,7 @@ class serial_pylon(transport_base):
         calc_checksum: bytes = struct.pack(">H", self.calculate_checksum(frame_data)).hex().upper().encode()
 
         if calc_checksum != frame_checksum:
-            self._log.warning(f"Serial Pylon checksum error, got {calc_checksum}, expected {frame_checksum}")
+            self._log.warning(f"Serial Pylon checksum error, got {calc_checksum!r}, expected {frame_checksum!r}")
 
         # 2. Use SimpleNamespace instead of Object()
         data = SimpleNamespace()
@@ -284,12 +286,12 @@ class serial_pylon(transport_base):
             lenid_invert_plus_one: int = 0b1111 - lenid_modulo + 1
             info_length: int = (lenid_invert_plus_one << 12) + lenid
 
-        # Ensure VER and ADR are bytes before calling .hex()
-        self.VER = b"\x20"
+        # Ensure ver and adr are bytes before calling .hex()
+        self.ver = b"\x20"
 
         # Build the frame as a string first (ASCII Hex protocol)
-        frame_str: str = self.VER.hex().upper()
-        frame_str += self.ADR.hex().upper()
+        frame_str: str = self.ver.hex().upper()
+        frame_str += self.adr.hex().upper()
         frame_str += struct.pack(">H", command).hex().upper()
         frame_str += f"{info_length:04X}" # Cleaner way to get 4-char hex
         frame_str += info.hex().upper()
@@ -307,7 +309,7 @@ class serial_pylon(transport_base):
         return final_frame
 
 
-    def send_command(self, cmd, info: bytes = b""):
+    def send_command(self, cmd: int, info: bytes = b"") -> None:
         data: bytes = self.build_frame(cmd, info)
         self.client.write(data)
 

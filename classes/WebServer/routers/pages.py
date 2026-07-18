@@ -42,22 +42,31 @@ from pathlib import Path
 from typing import Any, List, Sequence, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import HTMLResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import (
+    HTMLResponse,
+    PlainTextResponse,
+    RedirectResponse,
+    StreamingResponse,
+)
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.engine.row import Row
 from sqlalchemy.orm import Session
 
-from classes.messaging.message_handler import _handler, send_message
+from classes.messaging.message_handler import is_active
+from classes.messaging.message_handler import send_message as _send_message
 
 from ...transports.modbus_base import modbus_base
 from ..config_writer import create_backup
 from ..database import get_session, refresh_app_state, session_scope
-from ..models import ProtocolRegister, Setting
-from ..scanner import TRANSPORT_BASE_KEYS, _load_config, scan_transport_library
+from ..models import AppState, ProtocolRegister, Setting, SettingDescription
+from ..scanner import TRANSPORT_BASE_KEYS, load_config, scan_transport_library
+from ..services.analysis_service import get_transport_connection_status
 from ..services.device_service import (
     DeviceSummary,
     NavData,
+    get_app_state,
+    get_device_settings,
     get_device_summary,
     get_nav_data,
     get_transport_library,
@@ -66,7 +75,9 @@ from ..services.protocol_service import (
     export_protocol_registers,
     get_protocol_groups,
     get_protocol_json,
+    get_protocols_for_device,
 )
+from ..services.setting_description_service import get_all_setting_descriptions
 from ..services.timescale_service import (
     get_staged_columns,
     is_timescale_available,
@@ -104,6 +115,133 @@ def _analysis_protocol_options(protocol_groups: list[dict[str, Any]]) -> list[di
                 "name": protocol_name,
             })
     return options
+
+
+# ---------------------------------------------------------------------------
+# Dashboard & device pages
+# ---------------------------------------------------------------------------
+
+@router.get("/", response_class=HTMLResponse, response_model=None)
+async def dashboard(request: Request):
+    with session_scope() as db:
+        nav: NavData = get_nav_data(db)
+        state: AppState = get_app_state(db)
+
+    proto_groups: List[dict[str, Any]] = get_protocol_groups(request.app.state.protocols_dir)
+
+    return request.app.state.templates.TemplateResponse(
+        request=request,
+        name="index.html",
+        context={
+            "nav":          nav,
+            "app_state":    state,
+            "proto_groups": proto_groups,
+        },
+    )
+
+
+@router.get("/device/{device_name}", response_class=HTMLResponse, response_model=None)
+async def device_page(request: Request, device_name: str):
+    section: str = f"transport.{device_name}"
+
+    with session_scope() as db:
+        nav:      NavData                  = get_nav_data(db)
+        summary:  DeviceSummary | None     = get_device_summary(db, device_name)
+        all_settings: List[Setting]        = get_device_settings(db, section)
+
+        # For bridge devices, filter displayed settings to only the keys
+        # the bridge module actually reads (AST-scanned keys only).
+        # This prevents scraper base keys (protocol_version, read_interval,
+        # variable_mask, etc.) from appearing in the bridge settings pane.
+        if summary and summary.transport_type == "bridge":
+            library: dict[str, dict[str, Any]] = scan_transport_library(request.app.state.transports_dir)
+            bridge_info: dict[str, Any] = library.get(summary.transport_class, {})
+            bridge_keys: set[Any] = set(bridge_info.get("keys", {}).keys())
+            # Always keep log_level as it's shown in a dedicated dropdown
+            bridge_keys.add("log_level")
+            settings: List[Setting] = [
+                s for s in all_settings if s.key in bridge_keys
+            ] if bridge_keys else all_settings
+        else:
+            settings = all_settings
+        proto_tabs: List[dict[str, str]]   = (
+            get_protocols_for_device(db, summary.protocol_version, device_name=device_name)
+            if summary and summary.protocol_version
+            else []
+        )
+        # Pre-compute whether any M/S/W selection exists across all tabs so
+        # protocol_section.html can show "No chosen metrics" without Jinja sum.
+        has_no_selections: bool = not any(
+            t.get("mask_count", 0) or t.get("screen_count", 0) or t.get("write_count", 0)
+            for t in proto_tabs
+        ) if proto_tabs else False
+        protocol_match = None
+        if summary is None:
+            protocol_match: Row[Tuple[str, str]] | None = (
+                db.query(ProtocolRegister.protocol_group, ProtocolRegister.protocol_name)
+                .filter(ProtocolRegister.protocol_name == device_name)
+                .first()
+            )
+
+    if summary is None:
+        if protocol_match:
+            return RedirectResponse(
+                url=f"/protocol-editor/{protocol_match[0]}/{protocol_match[1]}",
+                status_code=307,
+            )
+        return HTMLResponse("<p>Device not found.</p>", status_code=404)
+
+    proto_groups: List[dict[str, Any]] = get_protocol_groups(request.app.state.protocols_dir)
+
+    partial_template_name: str = (
+        "partials/scraper_panes.html"
+        if summary.transport_type == "scraper"
+        else "partials/bridge_panes.html"
+    )
+
+    template_name = (
+        partial_template_name
+        if request.headers.get("HX-Request")
+        else "device.html"
+    )
+
+    # Populate live connection status from the gateway instance
+    gateway = getattr(request.app.state, "gateway", None)
+    analyze_enabled = False
+    if gateway is not None:
+        conn_status: dict[str, bool] = get_transport_connection_status(gateway)
+        # Gateway uses section name (e.g. "transport.mqtt") as transport_name
+        summary.is_connected = conn_status.get(
+            summary.section,                          # try "transport.mqtt"
+            conn_status.get(summary.name, False)      # fall back to "mqtt"
+        )
+        live_transport = next(
+            (
+                t for t in getattr(gateway, "_Protocol_Gateway__transports", [])
+                if t.transport_name in (summary.name, summary.section)
+            ),
+            None,
+        )
+        analyze_enabled = bool(
+            summary.transport_type == "scraper"
+            and isinstance(live_transport, modbus_base)
+        )
+
+    return request.app.state.templates.TemplateResponse(
+        request=request,
+        name=template_name,
+        context={
+            "nav":          nav,
+            "device":       summary,
+            "settings":     settings,
+            "proto_tabs":   proto_tabs,
+            "has_no_selections": has_no_selections,
+            "proto_groups": proto_groups,
+            "transport_library": get_transport_library(request.app.state.transports_dir),
+            "device_partial_template": partial_template_name,
+            "analyze_enabled": analyze_enabled,
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -176,13 +314,13 @@ async def messaging_test(request: Request) -> dict[str, str]:
     services fail.
     """
 
-    if _handler is None:
+    if not is_active():
         raise HTTPException(
             status_code=500,
             detail="Messaging subsystem is not initialized. "
                    "Check that [messages] enabled = true in config.cfg and restart.",
         )
-    send_message(
+    _send_message(
         message="This is a test notification from MPG Admin.",
         title="MPG Test",
         priority=0,
@@ -212,6 +350,29 @@ async def transport_library_page(request: Request):
         request=request,
         name="pages/transport_library.html",
         context={**_base_context(request, nav), "library": library},
+    )
+
+
+@router.get("/pages/transport-settings", response_class=HTMLResponse, response_model=None)
+async def transport_settings_page(request: Request):
+    with session_scope() as db:
+        nav: NavData = get_nav_data(db)
+        settings: List[SettingDescription] = get_all_setting_descriptions(db)
+        # Convert to plain dicts for template (avoids lazy-load issues outside session)
+        settings_data: List[dict[str, Any]] = [
+            {
+                "id": s.id,
+                "key": s.key,
+                "transports": s.transports or "",
+                "description": s.description or "",
+                "is_dirty": s.is_dirty,
+            }
+            for s in settings
+        ]
+    return request.app.state.templates.TemplateResponse(
+        request=request,
+        name="pages/transport_settings.html",
+        context={**_base_context(request, nav), "settings": settings_data},
     )
 
 
@@ -245,7 +406,7 @@ async def create_device_page(request: Request):
         request.app.state.protocols_dir
     )
     transport_library: dict[str, dict[str, Any]] = scan_transport_library(request.app.state.transports_dir)
-    create_device_data = {
+    create_device_data: dict[str, Any] = {
         "scrapers": [
             {
                 "name": name,
@@ -370,7 +531,7 @@ async def create_protocol_page(request: Request):
     with session_scope() as db:
         nav: NavData = get_nav_data(db)
 
-    protocol_create_data = {
+    protocol_create_data: dict[str, Any] = {
         "manufacturers": _protocol_create_groups(request.app.state.protocols_dir),
         "protocol_types": [
             {"label": "Coil", "value": "coil"},
@@ -813,7 +974,7 @@ def create_device(request: Request, payload: CreateDeviceRequest, db: Session = 
     """
     section: str = f"transport.{payload.device_name}"
     config_path: Path = request.app.state.config_path
-    config_data: dict[str, dict[str, str]] = _load_config(config_path)
+    config_data: dict[str, dict[str, str]] = load_config(config_path)
     if section in config_data or db.query(Setting).filter_by(section=section).first():
         raise HTTPException(status_code=409, detail=f"Device '{payload.device_name}' already exists.")
 

@@ -79,6 +79,9 @@ _log: logging.Logger = logging.getLogger(__name__)
 
 _handler: "MessageHandler | None" = None
 
+def is_active() -> bool:
+    """Return True if the messaging subsystem is fully initialized and operational."""
+    return _handler is not None
 
 def send_message(
     message: str,
@@ -162,7 +165,7 @@ class MessageHandler:
             return
 
         default_title: str = cfg.get("messages", "default_title", fallback="MPG Notification")
-        instance = cls(cfg, default_title)
+        instance: MessageHandler = cls(cfg, default_title)
         _handler = instance
         cls._initialized = True
         _log.info(
@@ -324,12 +327,12 @@ class MessageHandler:
         if service == "pushover":
             # Clamp priority to the Pushover range [-2, 2]
             p: int = max(-2, min(2, priority))
-            return MessageCls(message=text, title=title, priority=p)  # type: ignore[call-arg]
+            return MessageCls(message=text, title=title, priority=p)
 
         if service == "telegram":
             # Telegram has no numeric priority; map > 0 → sound on, ≤ 0 → silent
             silent: bool = priority < 0
-            return MessageCls(  # type: ignore[call-arg]
+            return MessageCls(
                 text=text,
                 title=title,
                 disable_notification=silent,

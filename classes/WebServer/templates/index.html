@@ -61,7 +61,7 @@
         <span class="label text-warning">Orphaned Keys</span>
         <span class="badge badge-warn">{{ app_state.orphan_count }}</span>
       </div>
-      <button hx-get="/orphan-modal"
+      <button hx-get="/api/devices/orphan-modal"
               hx-target="#diff-overlay"
               hx-swap="innerHTML"
               class="text-xs text-warning underline mt-1 hover:no-underline

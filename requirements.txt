@@ -1,24 +1,24 @@
-pymodbus>=3.13.0
+pymodbus
 paho-mqtt
 pyserial
 python-can
 influxdb
-sqlalchemy-timescaledb
-sqlalchemy>=2.0.28
-psycopg2-binary
-alembic>=1.13.1
-tzlocal
-fastapi>=0.110.0
-pydantic>=2.6.4
-uvicorn[standard]>=0.29.0  # for running FastAPI applications
-jinja2>=3.1.4              # for HTML templating in FastAPI
-python-multipart>=0.0.9    # required for form parsing in FastAPI
-markdown                   # for rendering Markdown in FastAPI docs
-pygments                   # for rendering Markdown in FastAPI docs
-pymdown-extensions         # for rendering Markdown in FastAPI docs
-watchdog>=4.0.0            # file watcher
-aiofiles>=23.2.1           # static file serving
-Pygments>=2.15.1           # for syntax highlighting in FastAPI docs
 influxdb3-python
-python-telegram-bot>=20.0  # for Telegram messaging support
+sqlalchemy-timescaledb
+sqlalchemy
+psycopg2-binary
+alembic
+tzlocal
+fastapi
+pydantic
+uvicorn[standard]     # for running FastAPI applications
+jinja2                # for HTML templating in FastAPI
+python-multipart      # required for form parsing in FastAPI
+markdown              # for rendering Markdown in FastAPI docs
+pygments              # for rendering Markdown in FastAPI docs
+pymdown-extensions    # for rendering Markdown in FastAPI docs
+watchdog              # file watcher
+aiofiles              # static file serving
+Pygments              # for syntax highlighting in FastAPI docs
+python-telegram-bot   # for Telegram messaging support
 

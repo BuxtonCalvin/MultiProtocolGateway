@@ -58,14 +58,14 @@ jobs:
         # your codebase is analyzed, see https://docs.github.com/en/code-security/code-scanning/creating-an-advanced-setup-for-code-scanning/codeql-code-scanning-for-compiled-languages
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         fetch-depth: 0 # Fetch all history for better blame data in security alerts
 
     # Advanced Python Performance tuning: Setup runtime and install cached dependencies
     - name: Set up Python
       if: matrix.language == 'python'
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: '3.13'
         cache: 'pip'

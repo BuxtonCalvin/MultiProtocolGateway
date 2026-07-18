@@ -151,9 +151,9 @@ def get_transport_library(transports_dir: Path) -> list[dict[str, Any]]:
     Each entry has: name, classification, keys.
     """
     library: dict[str, dict[str, Any]] = scan_transport_library(transports_dir)
-    result = []
+    result: list[dict[str, Any]] = []
     for name, info in sorted(library.items()):
-        all_keys = list(info["keys"].keys())
+        all_keys: list[str] = list(info["keys"].keys())
         result.append({
             "name": name,
             "classification": info["classification"],

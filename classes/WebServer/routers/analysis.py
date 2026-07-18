@@ -27,7 +27,7 @@ import threading
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, AsyncGenerator
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -46,19 +46,30 @@ _log: logging.Logger = logging.getLogger(__name__)
 # The GET/SSE endpoint reads from it.  This lets both share a single scan
 # that runs inside analyze_protocols (under _transport_lock) rather than
 # running two competing scans.
-_SCAN_DONE = object()
-_progress_queues: dict[str, queue.Queue] = {}
-_progress_queues_lock= threading.Lock()
+ProgressMessage = dict[str, Any]
 
 
-def _register_progress_queue(device_name: str) -> queue.Queue:
-    q: queue.Queue = queue.Queue()
+class _ScanDoneSentinel:
+    """Sentinel placed on a progress queue to signal scan completion."""
+
+    __slots__ = ()
+
+
+ProgressQueueItem = ProgressMessage | _ScanDoneSentinel
+
+_SCAN_DONE = _ScanDoneSentinel()
+_progress_queues: dict[str, "queue.Queue[ProgressQueueItem]"] = {}
+_progress_queues_lock = threading.Lock()
+
+
+def _register_progress_queue(device_name: str) -> "queue.Queue[ProgressQueueItem]":
+    q: "queue.Queue[ProgressQueueItem]" = queue.Queue()
     with _progress_queues_lock:
         _progress_queues[device_name] = q
     return q
 
 
-def _get_progress_queue(device_name: str) -> queue.Queue | None:
+def _get_progress_queue(device_name: str) -> "queue.Queue[ProgressQueueItem] | None":
     with _progress_queues_lock:
         return _progress_queues.get(device_name)
 
@@ -69,7 +80,7 @@ def _unregister_progress_queue(device_name: str) -> None:
 
 
 class AnalyzeRequest(BaseModel):
-    protocol_names: list[str] = Field(default_factory=list)
+    protocol_names: list[str] = Field(default_factory=list[str])
     current_protocol: str | None = None
     batch_size: int = Field(default=40, ge=1, le=125)
 
@@ -92,7 +103,7 @@ class AnalysisChange(BaseModel):
 
 
 class CommitAnalysisRequest(BaseModel):
-    changes: list[AnalysisChange] = Field(default_factory=list)
+    changes: list[AnalysisChange] = Field(default_factory=list[AnalysisChange])
 
 
 def _clean_device_name(device_name: str) -> str:
@@ -358,11 +369,11 @@ async def analysis_progress(device_name: str, request: Request):
     _require_modbus_transport(request, device_name)
     clean: str = _clean_device_name(device_name)
 
-    async def event_stream():
+    async def event_stream() -> AsyncGenerator[str, None]:
         # Wait up to 10 s for the POST to register a queue.  The browser
         # opens this SSE connection before issuing the POST, so a short
         # wait is expected.
-        progress_queue: queue.Queue | None = None
+        progress_queue: "queue.Queue[ProgressQueueItem] | None" = None
         for _ in range(200):          # 200 × 50 ms = 10 s
             await asyncio.sleep(0.05)
             if await request.is_disconnected():
@@ -379,7 +390,7 @@ async def analysis_progress(device_name: str, request: Request):
             if await request.is_disconnected():
                 break
 
-            msg = None
+            msg: ProgressQueueItem | None = None
             for _ in range(20):       # poll up to 1 s in 50 ms ticks
                 await asyncio.sleep(0.05)
                 try:
@@ -392,7 +403,7 @@ async def analysis_progress(device_name: str, request: Request):
                 yield ": keep-alive\n\n"
                 continue
 
-            if msg is _SCAN_DONE:
+            if isinstance(msg, _ScanDoneSentinel):
                 yield "data: " + json.dumps({"type": "done"}) + "\n\n"
                 break
 
@@ -409,7 +420,7 @@ async def analysis_progress(device_name: str, request: Request):
 
 
 @router.post("/{device_name}")
-async def run_analysis(device_name: str, payload: AnalyzeRequest, request: Request):
+async def run_analysis(device_name: str, payload: AnalyzeRequest, request: Request)-> dict[str, Any]:
     transport: modbus_base = _require_modbus_transport(request, device_name)
     protocol_names: list[str] = [name for name in payload.protocol_names if name]
     if not protocol_names:
@@ -446,7 +457,7 @@ async def run_analysis(device_name: str, payload: AnalyzeRequest, request: Reque
 
 
 @router.post("/{device_name}/commit")
-async def commit_analysis(device_name: str, payload: CommitAnalysisRequest, request: Request):
+async def commit_analysis(device_name: str, payload: CommitAnalysisRequest, request: Request)-> dict[str, Any]:
     _require_modbus_transport(request, device_name)
     if not payload.changes:
         return {"status": "ok", "files_written": 0, "changes_applied": 0}
