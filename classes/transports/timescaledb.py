@@ -4621,13 +4621,12 @@ class WideTableFieldManager:
     # removed through this class.
     PROTECTED_COLUMNS: frozenset[str] = frozenset({"m_time", "device_info_id"})
 
-    def __init__(self, bridge: "timescaledb", log: logging.Logger) -> None:
+    def __init__(self, bridge: "timescaledb") -> None:
 
         self._bridge: "timescaledb" = bridge
-        self._log: logging.Logger = log
         self.engine: Engine = bridge.engine
         self.SessionFactory: sessionmaker[Session] = bridge.SessionFactory
-
+        self._log: logging.Logger = logging.getLogger(__name__)
     # -------------------------
     # Resolution helpers
     # -------------------------

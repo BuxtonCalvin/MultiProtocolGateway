@@ -199,7 +199,6 @@
     "write_type": ""
   },
   "influxdb_out": {
-    "$extends": "_base",
     "batch_size": "100",
     "batch_timeout": "10.0",
     "connection_timeout": "10",
@@ -230,7 +229,6 @@
     "--write_type": ""    
   },
   "influxdb3_out": {
-    "$extends": "_base",
     "auto_create_database": "true",
     "batch_size": "100",
     "batch_timeout": "10.0",
@@ -263,7 +261,6 @@
     "--write_type": ""    
   },
   "mqtt": {
-    "$extends": "_base",
     "base_topic": "home/device",
     "coil_register_prefix": "",
     "discovery_enabled": "false",
@@ -283,7 +280,6 @@
     "--write_type": "" 
   },  
   "json_out": {
-    "$extends": "_base",
     "append_mode": "False",
     "include_device_info": "True",
     "include_timestamp": "True",
@@ -295,7 +291,6 @@
     "--write_type": ""     
   },
   "timescaledb": {
-    "$extends": "_base",
     "auto_refresh_interval": "21600",
     "backlog_file_name": "no_connect_backlog",
     "backlog_storage_path": "backlogs",
