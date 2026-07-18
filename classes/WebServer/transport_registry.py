@@ -49,6 +49,28 @@ resolution but are NEVER exposed to callers as real transports.
 
 The literal "_comment" key (written by _save_json for human readability)
 is stripped on load so it does not interfere with resolution.
+
+Removing an inherited key — the "--" prefix
+--------------------------------------------
+A transport entry can suppress a key it would otherwise inherit via
+"$extends" by listing it with a "--" prefix instead of a normal value,
+e.g.:
+
+    "modbus_tcp": {
+      "$extends": "_modbus_base",
+      "host": "",
+      "port": "502",
+      "--address": ""
+    }
+
+"--address" removes the inherited "address" key from modbus_tcp's
+resolved defaults — "address" (Modbus slave/unit ID) applies to serial
+transports but not to a TCP connection. The value on a "--" entry is
+ignored; only the key name (with the prefix stripped) matters. Removal
+is applied after the full $extends chain is resolved, so it also
+reaches keys inherited from a grandparent template. A "--key" entry is
+itself never emitted into resolved output — only real, non-removed keys
+are.
 """
 
 from __future__ import annotations
@@ -59,6 +81,10 @@ from pathlib import Path
 from typing import Any
 
 _log: logging.Logger = logging.getLogger(__name__)
+
+# Prefix marking a key in a transport entry as "remove this inherited key"
+# rather than "set this key". See module docstring for details.
+_REMOVAL_PREFIX: str = "--"
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -136,6 +162,16 @@ def _save_json(path: Path, data: dict[str, Any], comment: str = "") -> None:
         _log.error("transport_registry: could not write %s: %s", path, exc)
 
 
+def _is_removal_key(key: str) -> bool:
+    """True if `key` is a "--target" removal directive rather than a real setting key."""
+    return key.startswith(_REMOVAL_PREFIX) and len(key) > len(_REMOVAL_PREFIX)
+
+
+def _removal_target(key: str) -> str:
+    """The real key name a "--target" removal directive refers to."""
+    return key[len(_REMOVAL_PREFIX):]
+
+
 def _resolve_transport(name: str, raw: dict[str, Any], visited: set[str] | None = None,) -> dict[str, str]:
     """
     Recursively resolve $extends inheritance for a single transport entry.
@@ -146,6 +182,11 @@ def _resolve_transport(name: str, raw: dict[str, Any], visited: set[str] | None 
       another key in the raw dict (e.g. "_base" or "_modbus_base").
     - The resolved dict is: parent_keys | own_keys (own keys win).
     - "$extends" is stripped from the output.
+    - A key prefixed with "--" (e.g. "--address") is a removal directive:
+      after inheritance and own_keys are merged, the target key (with the
+      prefix stripped) is deleted from the result if present. This lets a
+      transport opt out of a key it would otherwise inherit. The "--key"
+      entry itself is never included in the output. See module docstring.
     - Cycles are detected and broken with a warning.
     - Keys named "$extends" or starting with "$" are never included in output.
     """
@@ -159,16 +200,33 @@ def _resolve_transport(name: str, raw: dict[str, Any], visited: set[str] | None 
     entry: dict[str, Any] = raw.get(name, {})
     parent_name: str | None = entry.get("$extends")
 
-    own_keys: dict[str, str] = {
-        k: str(v) for k, v in entry.items()
-        if not k.startswith("$")
-    }
+    own_keys: dict[str, str] = {}
+    removals: set[str] = set()
+    for k, v in entry.items():
+        if k.startswith("$"):
+            continue
+        if _is_removal_key(k):
+            removals.add(_removal_target(k))
+            continue
+        own_keys[k] = str(v)
 
     if parent_name:
         parent_keys: dict[str, str] = _resolve_transport(parent_name, raw, visited)
-        return {**parent_keys, **own_keys}
+        resolved: dict[str, str] = {**parent_keys, **own_keys}
+    else:
+        resolved = dict(own_keys)
 
-    return own_keys
+    for target in removals:
+        if target in resolved:
+            del resolved[target]
+        else:
+            _log.debug(
+                "transport_registry: '%s' has removal directive '--%s' but '%s' "
+                "isn't present to remove (already absent, or misspelled)",
+                name, target, target,
+            )
+
+    return resolved
 
 
 def _load_defaults() -> tuple[dict[str, Any], dict[str, dict[str, str]]]:
@@ -385,10 +443,21 @@ def sync_from_library(
                     _log.info("transport_registry: added new transport '%s' (%d keys)", transport_name, len(ast_all_keys))
                 else:
                     # Known transport — only add keys not already covered
-                    # (either directly or via $extends inheritance).
+                    # (either directly or via $extends inheritance), and
+                    # never re-add a key the entry explicitly removes via
+                    # a "--key" directive (see _resolve_transport) — the
+                    # AST scanner has no notion of that convention, so
+                    # without this check every sync would silently undo
+                    # an intentional removal the moment the source still
+                    # contains a settings.get() call for that key.
                     entry: dict[str, Any] = raw[transport_name]
                     resolved_existing: dict[str, str] = _resolve_transport(transport_name, raw)
+                    removed_keys: set[str] = {
+                        _removal_target(k) for k in entry if _is_removal_key(k)
+                    }
                     for key in sorted(ast_all_keys):
+                        if key in removed_keys:
+                            continue
                         if key not in resolved_existing:
                             # Use the AST default if available, otherwise ""
                             entry[key] = ast_keys_raw[key] if ast_keys_raw[key] is not None else ""
@@ -419,10 +488,19 @@ def sync_from_library(
             for transport_name, entry in raw.items():
                 if transport_name.startswith("_"):
                     continue  # leave _base / _modbus_base alone
-                keys_to_purge: list[str] = [
-                    k for k in list(entry.keys())
-                    if not k.startswith("$") and k not in all_live_keys
-                ]
+                keys_to_purge: list[str] = []
+                for k in list(entry.keys()):
+                    if k.startswith("$"):
+                        continue
+                    if _is_removal_key(k):
+                        # A "--key" directive is judged by whether its target
+                        # is still live, not by the literal "--key" string
+                        # (which will never appear in all_live_keys itself).
+                        if _removal_target(k) not in all_live_keys:
+                            keys_to_purge.append(k)
+                        continue
+                    if k not in all_live_keys:
+                        keys_to_purge.append(k)
                 for k in keys_to_purge:
                     del entry[k]
                     stats["purged_transport_keys"] += 1
@@ -439,7 +517,10 @@ def sync_from_library(
                 comment=(
                     "Default values for every known setting key, grouped by transport class name. "
                     "Edit this file to change defaults shown in the UI. The scanner merges these "
-                    "with live AST-scanned keys on every startup so the file stays in sync automatically."
+                    "with live AST-scanned keys on every startup so the file stays in sync automatically. "
+                    "A transport can opt out of a key it would otherwise inherit via $extends by listing "
+                    "it with a '--' prefix instead of a value, e.g. \"--address\": \"\" removes the "
+                    "inherited 'address' key."
                 ),
             )
             # Invalidate cache so callers pick up the updated data on next access.

@@ -26,7 +26,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from threading import Lock
-from typing import Any, Callable, Dict, Iterator, Literal, Optional
+from typing import Any, Callable, Dict, Iterator, Literal, LiteralString, Optional
 
 from pymodbus.client.base import ModbusBaseClient
 from pymodbus.constants import ExcCodes
@@ -218,19 +218,12 @@ class modbus_base(transport_base):
 
         self.client: Optional[ModbusBaseClient] = None
 
-        # Initialize instance-specific variables (not class-level)
-        self.modbus_delay_increament: float = 0.05
-        ''' delay adjustment every error. todo: add a setting for this '''
-
         self.modbus_delay_setting: float = 0.85
-        '''time in between requests, unmodified by user setting'''
+        '''default time in between requests, unmodified by user setting'''
 
         self.modbus_delay: float = 0.85
-        '''time in between requests'''
+        '''default time in between requests'''
         self.slave_id: int = 1
-        # per transport tuning — batteries with known intermittent blocks can have higher retry counts;
-        # a totally dead device will exhaust retries quickly and yield control
-        self.max_retries_per_block: int = int(settings.get("max_retries_per_block", fallback=3))
 
         self.first_connect : bool = True
         self._needs_reconnection : bool = False
@@ -253,16 +246,6 @@ class modbus_base(transport_base):
         # Initialize transport-specific lock
         self._transport_lock: Lock = threading.Lock()
 
-        # Initialize instance-specific register failure tracking
-        self.register_failure_trackers: dict[str, RegisterFailureTracker] = {}
-        self._failure_tracking_lock: Lock = threading.Lock()
-        self._last_disabled_status_log: float = 0.0
-
-        # Register failure tracking settings
-        self.enable_register_failure_tracking = settings.getboolean("enable_register_failure_tracking", fallback=self.enable_register_failure_tracking)
-        self.max_failures_before_disable = settings.getint("max_failures_before_disable", fallback=self.max_failures_before_disable)
-        self.disable_duration_hours = settings.getint("disable_duration_hours", fallback=self.disable_duration_hours)
-
         # get defaults from protocol settings if present, then override with transport settings if present there
         if "send_input_register" in self._protocol.settings:
             self.send_input_register = strtobool(self._protocol.settings["send_input_register"])
@@ -279,6 +262,16 @@ class modbus_base(transport_base):
         if "batch_delay" in self._protocol.settings:
             self.modbus_delay = float(self._protocol.settings["batch_delay"])
 
+        # Initialize instance-specific register failure tracking
+        self.register_failure_trackers: dict[str, RegisterFailureTracker] = {}
+        self._failure_tracking_lock: Lock = threading.Lock()
+        self._last_disabled_status_log: float = 0.0
+
+        # Register failure tracking settings
+        self.enable_register_failure_tracking = settings.getboolean("enable_register_failure_tracking", fallback=self.enable_register_failure_tracking)
+        self.max_failures_before_disable = settings.getint("max_failures_before_disable", fallback=self.max_failures_before_disable)
+        self.disable_duration_hours = settings.getint("disable_duration_hours", fallback=self.disable_duration_hours)
+
         # allow enable/disable of which registers to send
         self.send_holding_register = settings.getboolean("send_holding_register", fallback=self.send_holding_register)
         self.send_input_register = settings.getboolean("send_input_register", fallback=self.send_input_register)
@@ -286,12 +279,20 @@ class modbus_base(transport_base):
         self.send_discrete_register = settings.getboolean("send_discrete_register", fallback=self.send_discrete_register)
         self.modbus_delay = settings.getfloat("batch_delay", fallback=self.modbus_delay)
         self.modbus_delay_setting = self.modbus_delay
+        self.modbus_delay_increment: float = settings.getfloat("modbus_delay_increment", fallback=0.05)
+
+        # per transport tuning — batteries with known intermittent blocks can have higher retry counts;
+        # a totally dead device will exhaust retries quickly and yield control
+        self.max_retries_per_block: int = int(settings.getint("max_retries_per_block", fallback=3))
 
         # Store slave_id for scrape group uniqueness — devices chained on a
         # shared Modbus bus are differentiated by their slave/unit address.
         # Stored as a string so scrape_target can use it directly.
         # The address fallback covers modbus_rtu which uses that config key instead of slave_id.
         self._slave_id: str = str(settings.get("slave_id", fallback=settings.get("address", fallback=self.slave_id)))
+
+        # Synthetic metrics setting — default True, can be disabled per transport in config
+        self.enable_synthetic_metrics: bool = settings.getboolean("enable_synthetic_metrics", fallback=True)
 
     @property
     def _protocol(self) -> "protocol_settings":
@@ -331,6 +332,102 @@ class modbus_base(transport_base):
         without reaching past a leading-underscore name.
         """
         return self._log
+
+    def synthetic_metrics_enabled(self) -> bool:
+        """
+        Scheduling path: All (Sequential, Concurrent, Interleaved).
+
+        Whether this transport should compute and inject synthetic/derived
+        metrics at all this cycle — i.e. the single shared gate behind the
+        ``enable_synthetic_metrics`` transport setting (default enabled; set
+        ``enable_synthetic_metrics = false`` in this transport's config to
+        disable).
+
+        Any transport subclass that computes its own derived/synthetic
+        fields should call ``self.synthetic_metrics_enabled()`` at the top
+        of its ``post_process_data()``/``synthetic_fields_metadata``
+        overrides and skip its own computation when it returns ``False`` —
+        see ``modbus_eg4_ll_s_tcp.post_process_data`` for the pattern. This
+        is a convention, not something this base class can enforce on a
+        subclass that skips calling ``super()`` and doesn't call this
+        method itself; a subclass that does neither will keep computing its
+        own synthetic metrics regardless of this setting.
+        """
+        transport_settings: TransportSettings | None = getattr(self._protocol, "transport_settings", None)
+        if transport_settings is None:
+            return True
+        return bool(self.enable_synthetic_metrics)
+
+    def post_process_data(self, info: dict[str, int | float | str]) -> dict[str, int | float | str]:
+        """
+        Scheduling path: All (Sequential, Concurrent, Interleaved) — called
+        once per cycle via ``finish_cycle_tracking()``, regardless of read
+        mode.
+
+        Base implementation: for EG4 protocols (unless disabled via
+        ``synthetic_metrics_enabled()``), injects derived/synthetic metadata
+        fields computed by ``eg4_metadata.compute_eg4_post_process_fields()``
+        — model, firmware_version, hardware_kind, is_gridboss,
+        device_type_code, and corrected batteryserialnumber_<N> values —
+        following the same ``info.update(...)`` pattern
+        ``modbus_eg4_ll_s_tcp.post_process_data()`` uses for its own derived
+        fields (``cell_voltage_max_v`` etc.). This supersedes an earlier
+        approach that injected these via fabricated ``registry_map_entry``
+        objects and a ``process_registery()`` resolver pass — that
+        mechanism has been removed because it doesn't produce the
+        "synthetic, un-maskable" signal downstream tooling (the webUI,
+        TimescaleDB's wide-table schema) expects; plain ``info.update(...)``
+        with no backing registry entry does.
+
+        Subclasses that override this (e.g.
+        ``modbus_eg4_ll_s_tcp.post_process_data``) and want this base-class
+        EG4 injection too must call ``super().post_process_data(info)``
+        themselves — this base implementation does not run automatically
+        for an override that doesn't call it. Either way, any subclass
+        computing its own synthetic metrics should gate them behind
+        ``self.synthetic_metrics_enabled()`` too, so ``enable_synthetic_metrics``
+        covers the whole transport, not just this base class's EG4 fields.
+        """
+        protocol_name: str = getattr(self._protocol, "protocol", "") or ""
+        if eg4_metadata.is_eg4_protocol(protocol_name) and self.synthetic_metrics_enabled():
+            try:
+                info.update(eg4_metadata.compute_eg4_post_process_fields(self, info))
+            except Exception:
+                self._log.exception(
+                    f"Transport {self.transport_name} failed computing EG4 synthetic "
+                    f"post-process fields — continuing without them this cycle."
+                )
+        return info
+
+    @property
+    def synthetic_fields_metadata(self) -> list[tuple[str, str, float, str]]:
+        """
+        Scheduling path: All (Sequential, Concurrent, Interleaved).
+
+        Base implementation: for EG4 protocols (unless disabled via
+        ``synthetic_metrics_enabled()``), declares the fields
+        ``post_process_data()`` injects, in the
+        ``(variable_name, data_type, unit_mod, note)`` format TimescaleDB's
+        wide-table schema registration expects — see
+        ``modbus_eg4_ll_s_tcp.synthetic_fields_metadata`` for the reference
+        this matches. Returns ``[]`` for non-EG4 protocols or when disabled.
+
+        Subclasses that override this must call
+        ``super().synthetic_fields_metadata`` and merge if they want this
+        base-class EG4 declaration too (and should gate their own declared
+        fields behind ``self.synthetic_metrics_enabled()`` as well — see
+        ``post_process_data()``'s docstring above).
+        """
+        protocol_name: str = getattr(self._protocol, "protocol", "") or ""
+        if eg4_metadata.is_eg4_protocol(protocol_name) and self.synthetic_metrics_enabled():
+            try:
+                return eg4_metadata.eg4_synthetic_fields_metadata(self)
+            except Exception:
+                self._log.exception(
+                    f"Transport {self.transport_name} failed computing EG4 synthetic_fields_metadata."
+                )
+                return []
+        return []
 
     def _should_send_registry_type(self, registry_type: Registry_Type) -> bool:
         """
@@ -919,7 +1016,7 @@ class modbus_base(transport_base):
 
         Connect to the Modbus device"""
         # Add debugging information
-        port_info: Any | str = getattr(self, 'port', 'unknown')
+        port_info: str | int = getattr(self, 'port', 'unknown')
         address_info: str = getattr(self, 'address', 'unknown')
         host_info: str = getattr(self, 'host', 'unknown')
 
@@ -1208,13 +1305,16 @@ class modbus_base(transport_base):
             time.sleep(self.modbus_delay) #sleep in between requests so modbus can rest
 
     def read_data(self) -> dict[str, int | float | str ]:
-        """Scheduling path: Sequential, Concurrent (via _process_group_read for a solo/standalone transport). Not used by interleaved mode — see read_data_iter."""
+        """
+        Scheduling path: Sequential, Concurrent (via _process_group_read for a solo/standalone transport).
+        Not used by interleaved mode — see read_data_iter.
+        """
         # Use transport lock to prevent concurrent access to this transport instance
         with self._transport_lock:
             self._start_cycle_tracking()
             # Add debugging information
-            port_info = getattr(self, 'port', 'unknown')
-            address_info = getattr(self, 'address', 'unknown')
+            port_info: str| int = getattr(self, 'port', 'unknown')
+            address_info: str = getattr(self, 'address', 'unknown')
             self._log.debug(f"Reading data from {self.transport_name}: address={address_info}, port={port_info}")
 
             info: dict[str, int | float | str] = {}
@@ -1287,8 +1387,8 @@ class modbus_base(transport_base):
         """
         with self._transport_lock:
             self._start_cycle_tracking()
-            port_info = getattr(self, 'port', 'unknown')
-            address_info = getattr(self, 'address', 'unknown')
+            port_info: str | int = getattr(self, 'port', 'unknown')
+            address_info: str = getattr(self, 'address', 'unknown')
             self._log.debug(
                 f"Reading grouped data from {self.transport_name}: "
                 f"address={address_info}, port={port_info}, members={len(members)}"
@@ -1486,7 +1586,7 @@ class modbus_base(transport_base):
             """Scheduling path: N/A — Analyze feature helper, not part of the read-scheduling loop."""
             total_reads = 0
             failures = 0
-            phase: str = registry_type.name.lower()
+            phase: LiteralString = registry_type.name.lower()
             total_batches: int = max(1, (end - start) // batch_size + 1)
             batches_done = 0
 
@@ -2387,7 +2487,7 @@ class modbus_base(transport_base):
                 should_disable: bool = self._record_register_read_failure(register_range, registry_type)
                 self._log.warning("Disabled is ("+str(should_disable)+" range("+str(index)+")")
 
-                self.modbus_delay += self.modbus_delay_increament #increase delay, error is likely due to modbus being busy
+                self.modbus_delay += self.modbus_delay_increment # increase delay, error is likely due to modbus being busy
 
                 if self.modbus_delay > 60: #max delay. 60 seconds between requests should be way over kill if it happens
                     self.modbus_delay = 60
@@ -2402,8 +2502,8 @@ class modbus_base(transport_base):
                     self._log.warning("Retry("+str(retry)+" - ("+str(total_retries)+")) range("+str(index)+")")
                     index: int = index - 1
                     continue
-            elif self.modbus_delay > self.modbus_delay_setting: #no error, decrease delay
-                self.modbus_delay -= self.modbus_delay_increament
+            elif self.modbus_delay > self.modbus_delay_setting: # no error, decrease delay
+                self.modbus_delay -= self.modbus_delay_increment
                 if self.modbus_delay < self.modbus_delay_setting:
                     self.modbus_delay = self.modbus_delay_setting
 

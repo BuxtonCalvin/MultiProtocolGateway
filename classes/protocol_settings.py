@@ -34,8 +34,6 @@ from typing import Any, Callable, Literal, Optional, cast
 
 from defs.common import TransportSettings, strtoint_safe
 
-from . import eg4_metadata
-
 
 class Data_Type(Enum):
     BYTE = 1
@@ -276,56 +274,6 @@ class Registry_Type(Enum):
     INPUT = 0x04
 
 
-# ----------------------------------------------------------------------------
-# Synthetic value resolvers
-# ----------------------------------------------------------------------------
-# Generalizes the "_desc" mechanism below (registry_map_entry.description_source
-# + _add_code_description_entries): both let a registry_map_entry's value come
-# from something other than decoding registry_map_entry.register directly.
-# description_source covers the common case of "look this source entry's
-# decoded value up in a code dict". synthetic_resolver covers everything else
-# (e.g. a value assembled from several registers/entries by protocol-specific
-# logic that doesn't fit the code-dict shape) by delegating to an externally
-# registered function, so protocol-specific modules (e.g. eg4_metadata.py) can
-# plug derived/synthetic metrics into the normal process_registery() output —
-# and therefore into the same data stream every other metric flows through to
-# callers/exports — without protocol_settings.py needing any protocol-specific
-# knowledge of its own.
-SyntheticResolver = Callable[
-    ["protocol_settings", Mapping[int, int | bytes | tuple[bytes, float]], dict[str, int | float | str], "registry_map_entry"],
-    Optional[int | float | str],
-]
-
-_SYNTHETIC_RESOLVERS: dict[str, SyntheticResolver] = {}
-
-
-def register_synthetic_resolver(name: str, resolver: SyntheticResolver) -> None:
-    """Register a named resolver function usable via registry_map_entry.synthetic_resolver.
-
-    ``resolver`` is called as ``resolver(protocol_settings_instance, registry, info, entry)``
-    during process_registery()'s resolution pass, where ``registry`` is the raw
-    register snapshot for the current read cycle, ``info`` is the dict of
-    already-decoded values (including other synthetic/description entries
-    resolved earlier in that pass — order depends on registry_map order), and
-    ``entry`` is the specific registry_map_entry being resolved. Passing
-    ``entry`` lets one resolver function serve several entries generically by
-    reading whatever it needs off ``entry`` itself (e.g. ``entry.register``,
-    ``entry.variable_name``) instead of being pre-bound via closure to one
-    entry's specifics — which matters when multiple instances of the same
-    protocol (e.g. two inverters of the same model on one gateway) are
-    live at once and register resolvers under the same global name: a
-    closure baked with one instance's data would silently leak into the
-    other's reads, whereas re-deriving everything from ``entry``/``proto`` at
-    call time is instance-safe.
-    Should return the value to store under the entry's variable_name, or None
-    to leave it unset for this cycle (e.g. required source registers weren't
-    part of this read). Re-registering the same name overwrites the previous
-    resolver, so this is safe to call repeatedly (e.g. once per protocol_settings
-    instance construction).
-    """
-    _SYNTHETIC_RESOLVERS[name] = resolver
-
-
 @dataclass
 class registry_map_entry:
     registry_type: Registry_Type
@@ -380,14 +328,6 @@ class registry_map_entry:
 
     description_source: str = ""
     ''' variable_name of the source metric when this is a synthetic _desc entry '''
-
-    synthetic_resolver: str = ""
-    ''' Name of a resolver registered via register_synthetic_resolver(), used to compute
-    this entry's value in process_registery() instead of decoding it from a register.
-    Generalizes the description_source/_desc mechanism above for synthetic entries whose
-    value isn't a simple code-dict lookup on one source entry (e.g. a value assembled from
-    several registers/entries by external, protocol-specific logic). Entries with this set
-    are skipped by the normal per-register decode pass, same as description_source entries. '''
 
     def __str__(self) -> str:
         """Return the entry's ``variable_name`` as its string representation."""
@@ -1686,17 +1626,6 @@ class protocol_settings:
 
             self._add_code_description_entries(registry_map)
 
-            if self.protocol.lower().startswith("eg4"):
-                # Deferred import: eg4_metadata imports from this module at its
-                # top level, so importing it back here at protocol_settings'
-                # own module level would be circular. By the time
-                # load__registry() actually runs (an instance method call,
-                # not import-time), this module is already fully initialized,
-                # so a function-local import is safe. See eg4_metadata.py's
-                # docstring for why this lives there and not in this file.
-
-                eg4_metadata.ensure_eg4_synthetic_entries(self, registry_map, registry_type)
-
             return registry_map
 
     def _add_code_description_entries(self, registry_map: list[registry_map_entry]) -> None:
@@ -2464,24 +2393,20 @@ class protocol_settings:
 
         Dispatches each entry to ``process_register_bytes`` (for ``bytes`` or
         ``tuple`` values) or ``process_register_ushort`` (for plain ``int``
-        values).  Skips entries with a ``description_source`` or
-        ``synthetic_resolver`` (both handled in a later pass) and entries
-        whose register is absent from ``registry``.  After all values are
-        decoded, applies any ``context``-stage adjustments that depend on
-        sibling values.  In a final pass, resolves ``description_source``
-        entries by looking up the decoded source value in the entry's code
-        dict and populating a human-readable description string, then
-        resolves ``synthetic_resolver`` entries by calling their registered
-        resolver function (see register_synthetic_resolver()) with this
-        register snapshot and the values decoded so far.  Concatenated
-        registers are accumulated until all component registers have been
-        decoded before their combined value is emitted.
+        values).  Skips entries with a ``description_source`` (handled in a
+        second pass) and entries whose register is absent from ``registry``.
+        After all values are decoded, applies any ``context``-stage adjustments
+        that depend on sibling values.  In a final pass, resolves
+        ``description_source`` entries by looking up the decoded source value
+        in the entry's code dict and populating a human-readable description
+        string.  Concatenated registers are accumulated until all component
+        registers have been decoded before their combined value is emitted.
         """
         concatenate_registry: dict[int, int | float | str] = {}
         info: dict[str, int | float | str] = {}
 
         for entry in registry_map:
-            if entry.description_source or entry.synthetic_resolver:
+            if entry.description_source:
                 continue
             if entry.register not in registry:
                 continue
@@ -2555,28 +2480,6 @@ class protocol_settings:
             description: str | None = self._code_description_for_value(source_entry, info[source_name])
             if description is not None:
                 info[entry.variable_name] = description
-
-        for entry in registry_map:
-            if not entry.synthetic_resolver:
-                continue
-            resolver: SyntheticResolver | None = _SYNTHETIC_RESOLVERS.get(entry.synthetic_resolver)
-            if resolver is None:
-                self._log.debug(
-                    f"No synthetic resolver registered for '{entry.synthetic_resolver}' "
-                    f"(entry '{entry.variable_name}') — skipping."
-                )
-                continue
-            try:
-                resolved_value: int | float | str | None = resolver(self, registry, info, entry)
-            except Exception:
-                self._log.debug(
-                    f"Synthetic resolver '{entry.synthetic_resolver}' raised while "
-                    f"computing '{entry.variable_name}' — skipping for this cycle.",
-                    exc_info=True,
-                )
-                continue
-            if resolved_value is not None:
-                info[entry.variable_name] = resolved_value
 
         return info
 

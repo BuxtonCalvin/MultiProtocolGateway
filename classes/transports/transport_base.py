@@ -197,7 +197,7 @@ class transport_base:
 
         # Replace with transport-specific logger now that name is known
         if "log_level" in settings:
-            level = getattr(logging, settings.get("log_level").strip().upper(), logging.INFO)
+            level = getattr(logging, (settings.get("log_level") or "").strip().upper(), logging.INFO)
             self._log.setLevel(level)
         # else: leave the named logger's level unset so it inherits from the root
 

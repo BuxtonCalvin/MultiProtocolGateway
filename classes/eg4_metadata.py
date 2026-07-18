@@ -37,16 +37,12 @@ from __future__ import annotations
 import logging
 import re
 import time
-from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Dict, Protocol
 
 from .protocol_settings import (
-    Data_Type,
     Registry_Type,
-    WriteMode,
     protocol_settings,
-    register_synthetic_resolver,
     registry_map_entry,
 )
 
@@ -87,11 +83,27 @@ class EG4MetadataTransport(Protocol):
 # ----------------------------------------------------------------------------
 # Device type codes
 # ----------------------------------------------------------------------------
-# Read from EG4 holding register 19. This addressing convention (and the
-# codes themselves) is consistent across EG4/LuxPower firmware families and
-# isn't expressed anywhere in the per-model registry map CSVs (register 19
-# shows up there only as an unlabeled "Unknown" ushort), so it's captured
-# here instead of relying on a CSV field name.
+# Read directly from EG4 holding register 19 wherever this module needs the
+# device type code (see _read_inverter_metadata()) — a plain, unsigned
+# ushort (0-65535; observed values are all comfortably in range, e.g. 2092
+# for the 18kPV/12kPV family — see EG4_DEVICE_TYPE_CODE_* below). This
+# addressing convention (and the codes themselves) is consistent across
+# EG4/LuxPower firmware families. It's read via transport.read_modbus_registers()
+# with an explicit start/end rather than through a named registry_map entry,
+# which — deliberately — bypasses variable_mask/variable_screen filtering
+# entirely: those only constrain the registry_map-driven per-cycle read
+# (calculate_registry_ranges), not an explicit start/end range read like this
+# one, so this value is available regardless of what the transport's mask
+# includes.
+#
+# Some EG4 variant CSVs still leave register 19 as an unlabeled placeholder
+# entry (historically documented_name "Register 19", data_type ushort) with
+# no meaningful variable_name; others have since been updated to name it
+# 'device_type_code' directly, in which case it decodes through the normal
+# path like any other field. eg4_synthetic_fields_metadata() checks for this
+# per-transport (see _registry_has_named_entry()) so a variant with the
+# proper CSV naming doesn't get a redundant synthetic declaration alongside
+# its real one.
 EG4_DEVICE_TYPE_CODE_GRIDBOSS: int = 50
 EG4_DEVICE_TYPE_CODE_OFFGRID: int = 54       # 12000XP, 6000XP
 EG4_DEVICE_TYPE_CODE_OFFGRID_ALT: int = 38   # 6000XP variant (field-reported)
@@ -586,305 +598,270 @@ def _read_battery_metadata(transport: EG4MetadataTransport) -> EG4BatteryMetadat
 
 
 # ----------------------------------------------------------------------------
-# Synthetic registry entries — the injection path into process_registery()
+# Per-cycle synthetic metrics — the post_process_data() injection path
 # ----------------------------------------------------------------------------
-# Everything above this point is the connect-time path: read_eg4_serial_number()
-# and read_eg4_device_metadata() run once at connect and hand back a string or a
-# dataclass, which is fine for logging/one-off use but never reaches the normal
-# per-cycle metrics dict that flows to callers/exports (modbus_base.read_data()
-# etc.), since that dict is built entirely from registry_map_entry decoding.
+# Everything above this point is a plain function library used at connect
+# time (read_eg4_serial_number, read_eg4_device_metadata) or on demand.
+# Neither is wired into the per-cycle metrics dict that reaches
+# callers/exports (modbus_base.read_data() etc.) on its own.
 #
-# The functions below plug EG4-derived values into that dict instead, using
-# the same general-purpose synthetic-entry mechanism protocol_settings.py
-# already uses for '<name>_desc' entries (registry_map_entry.description_source
-# + a resolution pass in process_registery()), generalized via
-# registry_map_entry.synthetic_resolver + register_synthetic_resolver() so it
-# can carry a value more complex than a single code-dict lookup.
+# This codebase's established mechanism for adding derived/synthetic metrics
+# to that dict is the post_process_data(info) hook, called once per cycle by
+# transport_base.finish_cycle_tracking() regardless of read mode — see
+# modbus_eg4_ll_s_tcp.py's post_process_data() / _compute_cell_stats() /
+# _compute_balancing_state() for the reference implementation this follows.
+# Injected keys are plain dict entries added via info.update(...), not backed
+# by any registry_map_entry — this distinction matters, because it's what the
+# webUI and TimescaleDB's wide-table schema registration
+# (synthetic_fields_metadata) use to recognize "synthetic, un-maskable"
+# metrics and treat them differently from ordinary register-backed ones.
 #
-# Two distinct cases, per how the calling code should treat the result:
-#   - Genuinely new metrics (model, firmware_version, device_type_code,
-#     hardware_kind, is_gridboss) get brand new synthetic registry_map_entry
-#     objects appended to the map, so they show up as new keys.
-#   - Fields the CSV already declares but that protocol_settings' single-
-#     register ASCII decoder truncates (batteryserialnumber_1..N, spanning 8
-#     registers each) get their *existing* entry's synthetic_resolver field
-#     set in place, so the corrected value lands under the same key the
-#     truncated one used to.
+# An earlier version of this module used registry_map_entry.synthetic_resolver
+# + process_registery() to inject these instead (fabricating a
+# registry_map_entry with register=-1 for each synthetic field). That
+# mechanism has been removed: fabricated entries still look like ordinary,
+# maskable, register-backed fields to anything downstream that just inspects
+# the registry map, so it never produced the "synthetic" signal this needs.
 #
-# All resolvers here are pure functions of (proto, registry, info, entry) with
-# no closures over per-instance data, so they're safe to register once under
-# fixed global names even when multiple EG4 devices (possibly the same model)
-# are connected at once — see register_synthetic_resolver()'s docstring.
-
-
-def _find_registry_entry(proto: protocol_settings, registry_type: Registry_Type, variable_name: str) -> registry_map_entry | None:
-    try:
-        for entry in proto.get_registry_map(registry_type):
-            if entry.variable_name == variable_name:
-                return entry
-    except Exception:
-        msg: str = f"Could not find registry entry for {variable_name} in {registry_type.name}"
-        _log.debug(msg, exc_info=True)
-        pass
-    return None
-
-
-def _as_int(raw: int | bytes | tuple[bytes, float] | None) -> int | None:
-    """Narrow a process_registery()-style raw register value down to a plain
-    int. EG4 registers are always simple ints in practice (never the bytes/
-    tuple forms process_registery() also supports for other transports'
-    byte-oriented reads), but the shared SyntheticResolver signature has to
-    accommodate all of them, so every resolver below narrows through this
-    rather than assuming int."""
-    if isinstance(raw, int):
-        return raw
-    return None
-
-
-def _resolve_eg4_hardware_kind(
-    proto: protocol_settings,
-    registry: Mapping[int, int | bytes | tuple[bytes, float]],
-    info: dict[str, int | float | str],
-    entry: registry_map_entry,
-) -> str | None:
-    """Same signal as detect_eg4_hardware_kind() (cell_01_voltage in a
-    plausible 2.0-4.0V range), but re-derived from this cycle's actual
-    register snapshot rather than a cached connect-time read, and looked up
-    by variable name rather than a hard-coded register address so it still
-    works if a future EG4 variant puts cell_01_voltage somewhere else."""
-    cell_entry: registry_map_entry | None = _find_registry_entry(proto, Registry_Type.HOLDING, "cell_01_voltage")
-    if cell_entry is not None:
-        raw: int | None = _as_int(registry.get(cell_entry.register))
-        if raw is not None:
-            voltage: float = (raw & 0xFFFF) * (cell_entry.unit_mod or 1.0)
-            if EG4_CELL_VOLTAGE_MIN <= voltage <= EG4_CELL_VOLTAGE_MAX:
-                return "battery"
-    return "inverter"
-
-
-def _resolve_eg4_device_type_code(
-    proto: protocol_settings,
-    registry: Mapping[int, int | bytes | tuple[bytes, float]],
-    info: dict[str, int | float | str],
-    entry: registry_map_entry,
-) -> int | None:
-    """Holding register 19. Fixed address per the EG4/LuxPower firmware
-    convention (see the EG4_DEVICE_TYPE_CODE_* constants) — not something a
-    registry map ever names, so this is read directly rather than looked up
-    by variable name."""
-    raw: int | None = _as_int(registry.get(19))
-    return (raw & 0xFFFF) if raw is not None else None
-
-
-def _resolve_eg4_is_gridboss(
-    proto: protocol_settings,
-    registry: Mapping[int, int | bytes | tuple[bytes, float]],
-    info: dict[str, int | float | str],
-    entry: registry_map_entry,
-) -> int | None:
-    device_type_code: int | float | str | None = info.get("device_type_code")
-    if device_type_code is None:
-        device_type_code = _resolve_eg4_device_type_code(proto, registry, info, entry)
-    if device_type_code is None:
-        return None
-    _, is_gridboss = EG4_DEVICE_TYPE_MODEL_MAP.get(int(device_type_code), ("Unknown", False))
-    return 1 if is_gridboss else 0
-
-
-def _resolve_eg4_model(
-    proto: protocol_settings,
-    registry: Mapping[int, int | bytes | tuple[bytes, float]],
-    info: dict[str, int | float | str],
-    entry: registry_map_entry,
-) -> str | None:
-    device_type_code_value: int | float | str | None = info.get("device_type_code")
-    if device_type_code_value is None:
-        device_type_code_value = _resolve_eg4_device_type_code(proto, registry, info, entry)
-    if device_type_code_value is None:
-        return None
-    device_type_code: int = int(device_type_code_value)
-
-    _, is_gridboss = EG4_DEVICE_TYPE_MODEL_MAP.get(device_type_code, ("Unknown", False))
-    if not is_gridboss:
-        reg0: int | None = _as_int(registry.get(0))
-        reg1: int | None = _as_int(registry.get(1))
-        if reg0 is not None and reg1 is not None:
-            fine_model: str | None = EG4ModelInfo.from_registers(reg0 & 0xFFFF, reg1 & 0xFFFF).get_model_name(device_type_code)
-            if fine_model:
-                return fine_model
-
-    model, _ = EG4_DEVICE_TYPE_MODEL_MAP.get(device_type_code, ("Unknown", False))
-    return model
-
-
-def _resolve_eg4_firmware_version(
-    proto: protocol_settings,
-    registry: Mapping[int, int | bytes | tuple[bytes, float]],
-    info: dict[str, int | float | str],
-    entry: registry_map_entry,
-) -> str | None:
-    """See _read_inverter_metadata()'s docstring for why this specific
-    structure (registers 7-8 as a 4-char prefix, hi-byte-of-9/lo-byte-of-10 as
-    a hex version suffix) was chosen over the alternative reference
-    implementation that treats 7-10 as 8 raw ASCII characters."""
-    regs: dict[int, int | None] = {r: _as_int(registry.get(r)) for r in (7, 8, 9, 10)}
-    if any(v is None for v in regs.values()):
-        return None
-
-    prefix_chars: list[str] = []
-    for reg in (7, 8):
-        reg_value: int = regs[reg]  # type: ignore[assignment]  # narrowed non-None by the `any(...)` check above
-        for b in _decode_register_chars(reg_value & 0xFFFF):
-            if 0x20 <= b <= 0x7E:
-                prefix_chars.append(chr(b))
-    prefix: str = "".join(prefix_chars)
-
-    reg9: int = regs[9]  # type: ignore[assignment]  # narrowed non-None by the `any(...)` check above
-    reg10: int = regs[10]  # type: ignore[assignment]  # narrowed non-None by the `any(...)` check above
-    com_ver: int = (reg9 >> 8) & 0xFF
-    cntl_ver: int = reg10 & 0xFF
-    return f"{prefix}-{com_ver:02X}{cntl_ver:02X}" if prefix else f"{com_ver:02X}{cntl_ver:02X}"
-
-
-def _resolve_eg4_battery_serial(
-    proto: protocol_settings,
-    registry: Mapping[int, int | bytes | tuple[bytes, float]],
-    info: dict[str, int | float | str],
-    entry: registry_map_entry,
-) -> str | None:
-    """Reconstructs a batteryserialnumber_<N> field from all 8 of its
-    registers (per the CSV's own "(8 registers)" note), rather than the 1
-    register protocol_settings' ASCII decoder is limited to — this is the fix
-    for the truncated-to-2-characters serial number. Works for any
-    batteryserialnumber_<N> entry generically since it reads its span
-    starting at entry.register (already correct per-entry from the CSV
-    parse: 5019 for _1, 5049 for _2, etc.) rather than a hard-coded address,
-    so one resolver registration covers all of them."""
-    start: int = entry.register
-    chars: list[str] = []
-    for i in range(8):
-        raw: int | None = _as_int(registry.get(start + i))
-        if raw is None:
-            return None
-        for b in _decode_register_chars(raw & 0xFFFF):
-            if 0x20 <= b <= 0x7E:
-                chars.append(chr(b))
-    decoded: str = "".join(chars).strip()
-    return decoded or None
-
-
-def _make_synthetic_entry(name: str, resolver_name: str, note: str) -> registry_map_entry:
-
-    return registry_map_entry(
-        registry_type=Registry_Type.HOLDING,
-        register=-1,
-        register_bit=-1,
-        register_bit_end=-1,
-        register_byte=0,
-        variable_name=name,
-        documented_name=name,
-        note=note,
-        unit="",
-        unit_mod=1.0,
-        adjustments={},
-        concatenate=False,
-        concatenate_registers=[],
-        values=[],
-        value_regex="",
-        value_min=0,
-        value_max=0,
-        data_type=Data_Type.STRING,
-        data_type_size=-1,
-        read_command=None,
-        read_interval=0,
-        write_mode=WriteMode.READDISABLED,
-        has_enum_mapping=False,
-        synthetic_resolver=resolver_name,
-    )
-
-
-_resolvers_registered: bool = False
-
-
-def _register_eg4_resolvers() -> None:
-    """Idempotent; safe to call from ensure_eg4_synthetic_entries() every time
-    a new EG4 protocol_settings instance loads its registry map, since these
-    are stateless module-level functions, not per-instance closures."""
-    global _resolvers_registered
-    if _resolvers_registered:
-        return
-    register_synthetic_resolver("eg4_hardware_kind", _resolve_eg4_hardware_kind)
-    register_synthetic_resolver("eg4_device_type_code", _resolve_eg4_device_type_code)
-    register_synthetic_resolver("eg4_is_gridboss", _resolve_eg4_is_gridboss)
-    register_synthetic_resolver("eg4_model", _resolve_eg4_model)
-    register_synthetic_resolver("eg4_firmware_version", _resolve_eg4_firmware_version)
-    register_synthetic_resolver("eg4_battery_serial", _resolve_eg4_battery_serial)
-    _resolvers_registered = True
+# compute_eg4_post_process_fields() is meant to be called from a transport's
+# post_process_data(info) override:
+#
+#     def post_process_data(self, info):
+#         info.update(eg4_metadata.compute_eg4_post_process_fields(self, info))
+#         return info
+#
+# and eg4_synthetic_fields_metadata() from its synthetic_fields_metadata
+# property, so TimescaleDB's wide-table schema registration knows about
+# these columns ahead of time (same reason modbus_eg4_ll_s_tcp.py declares
+# its own cell_voltage_max_v etc. there). modbus_base.py provides default
+# implementations of both hooks that call these two functions directly for
+# any EG4 protocol that doesn't need to override them itself.
 
 
 _BATTERY_SERIAL_FIELD_REGEX: re.Pattern[str] = re.compile(r"^batteryserialnumber_\d+$")
 
 
-def ensure_eg4_synthetic_entries(proto: protocol_settings, registry_map: list[registry_map_entry], registry_type: Registry_Type) -> None:
-    """Called once per (protocol, registry_type) from protocol_settings.load__registry()
-    for any "eg4"-family protocol, right after its existing '_desc' synthetic-entry
-    pass. This is the injection point: after this runs, model/firmware_version/
-    device_type_code/hardware_kind/is_gridboss (for inverters) and corrected
-    batteryserialnumber_<N> values (for inverters reporting CANbus-connected
-    battery data) flow through process_registery() into the same dict every
-    other metric does.
+def _registry_has_named_entry(transport: EG4MetadataTransport, registry_type: Registry_Type, variable_name: str) -> bool:
+    """Whether this transport's CSV already declares ``variable_name`` as an
+    ordinary registry_map entry (i.e. it'll be decoded through the normal
+    process_registery() path and land in ``info`` on its own, mask/screen
+    permitting).
 
-    What gets added is decided from the entries already present in
-    ``registry_map`` (structural/static — no live register read is possible at
-    this stage, since this runs at CSV-parse time before any transport has
-    connected). This is deliberately coarser than detect_eg4_hardware_kind()'s
-    live, value-range-based check used at connect time: it only has to decide
-    which synthetic *entries* are even worth adding for this particular CSV,
-    not authoritatively classify hardware — that's still the runtime
-    _resolve_eg4_hardware_kind() resolver's job, re-evaluated every read cycle
-    from the actual register snapshot.
-
-    No-op (and never adds duplicate entries) if called again for a
-    registry_map that already has these entries — variable-name-checked, same
-    as protocol_settings._add_code_description_entries().
+    Used to avoid re-deriving/re-declaring fields this module would
+    otherwise treat as synthetic when the underlying CSV has since been
+    updated to name the register directly — e.g. some EG4 variants document
+    holding register 19 as a proper ``device_type_code`` entry, in which
+    case there's nothing "synthetic" about it and this module should get out
+    of the way, while others still only have it as an unlabeled placeholder,
+    where this module's own derivation is the only way that value surfaces
+    at all. Checked per-transport rather than assumed either way, since this
+    varies by EG4 variant/CSV revision.
     """
-    _register_eg4_resolvers()
+    try:
+        return any(e.variable_name == variable_name for e in transport.proto.get_registry_map(registry_type))
+    except Exception:
+        return False
 
-    if registry_type == Registry_Type.HOLDING:
-        existing_names: set[str] = {e.variable_name for e in registry_map}
-        is_battery_map: bool = "cell_01_voltage" in existing_names
 
-        additions: list[registry_map_entry] = []
+def compute_eg4_post_process_fields(
+    transport: EG4MetadataTransport,
+    info: dict[str, int | float | str],
+) -> dict[str, int | float | str]:
+    """Compute EG4 derived/synthetic fields for injection via ``info.update(...)``
+    from a transport's ``post_process_data(info)`` override.
 
-        def add(name: str, resolver_name: str, note: str) -> None:
-            if name in existing_names:
-                return
-            additions.append(_make_synthetic_entry(name, resolver_name, note))
-            existing_names.add(name)
+    Returns ``{}`` immediately (no-op) if this isn't an EG4 protocol.
+    Otherwise returns model/firmware_version/hardware_kind/is_gridboss/
+    device_type_code for inverters (from read_eg4_device_metadata(), which
+    does a handful of small register reads every call — see that function's
+    docstring), or just hardware_kind for batteries, plus corrected
+    batteryserialnumber_<N> values wherever the inverter's own input
+    registers declare them (see _read_battery_serial_fields()).
 
-        # hardware_kind is meaningful — and cheaply derivable from data
-        # that's already read every cycle — on every EG4 holding map,
-        # battery or inverter alike.
-        add("hardware_kind", "eg4_hardware_kind", "Synthetic: 'battery' or 'inverter', derived from cell_01_voltage presence/range.")
+    ``device_type_code`` is dropped from the result if ``info`` already has
+    it (i.e. the CSV names holding register 19 directly and it decoded
+    normally this cycle) — model/is_gridboss still get computed as usual
+    (they need more than just that one register), but there's no reason to
+    re-expose a value that's already present un-synthesized. See
+    _registry_has_named_entry()'s docstring for why this can't be assumed
+    either way across EG4 variants.
 
-        if not is_battery_map:
-            # device_type_code/model/is_gridboss/firmware_version only make
-            # sense on inverter-schema maps — on a battery map, holding
-            # registers 0-1/7-10/19 mean something else entirely (or nothing).
-            add("device_type_code", "eg4_device_type_code", "Synthetic: raw value of holding register 19.")
-            add("model", "eg4_model", "Synthetic: model name derived from device type code (register 19) and the HOLD_MODEL bitfield (registers 0-1).")
-            add("is_gridboss", "eg4_is_gridboss", "Synthetic: 1 if device type code indicates a GridBOSS/MID device, else 0.")
-            add("firmware_version", "eg4_firmware_version", "Synthetic: assembled from holding registers 7-10.")
+    ``info`` (the already-decoded values for this cycle) is otherwise
+    accepted for signature symmetry with the post_process_data(info) hook
+    and so future resolvers can build on already-decoded values without a
+    redundant register read, but isn't read from further than the above —
+    every other field here still needs its own live register read
+    regardless of what's already in ``info``.
 
-        registry_map.extend(additions)
+    Every field is independently best-effort: if one piece fails (e.g. a
+    register read times out), the rest of this cycle's ``info`` is
+    unaffected — this function logs failures but never raises them out to
+    the caller.
+    """
+    protocol_name: str = getattr(transport.proto, "protocol", "") or ""
+    if not is_eg4_protocol(protocol_name):
+        return {}
 
-    elif registry_type == Registry_Type.INPUT:
-        # batteryserialnumber_<N>: correct the *existing* entries in place —
-        # per the CSV these already declare an 8-register ASCII span, but
-        # protocol_settings' ASCII decoder is single-register-only, so without
-        # this they truncate to the field's first 2 characters. Same fix
-        # (and same underlying protocol_settings limitation) as the inverter's
-        # own serial number — see read_eg4_serial_number()'s docstring.
-        for entry in registry_map:
-            if entry.variable_name and _BATTERY_SERIAL_FIELD_REGEX.match(entry.variable_name):
-                entry.synthetic_resolver = "eg4_battery_serial"
+    derived: dict[str, int | float | str] = {}
+
+    metadata: EG4DeviceMetadata | EG4BatteryMetadata | None = None
+    try:
+        metadata = read_eg4_device_metadata(transport)
+    except Exception:
+        _log.debug(
+            f"compute_eg4_post_process_fields: read_eg4_device_metadata failed for "
+            f"transport '{transport.transport_name}' — skipping this cycle's metadata fields.",
+            exc_info=True,
+        )
+
+    if isinstance(metadata, EG4DeviceMetadata):
+        derived["hardware_kind"] = metadata.hardware_kind
+        derived["model"] = metadata.model
+        derived["firmware_version"] = metadata.firmware_version
+        derived["is_gridboss"] = 1 if metadata.is_gridboss else 0
+        if metadata.device_type_code is not None and "device_type_code" not in info:
+            derived["device_type_code"] = metadata.device_type_code
+    elif isinstance(metadata, EG4BatteryMetadata):
+        derived["hardware_kind"] = metadata.hardware_kind
+        # serial/model/firmware intentionally omitted here too — CANbus-only,
+        # see EG4BatteryMetadata's docstring.
+
+    try:
+        derived.update(_read_battery_serial_fields(transport))
+    except Exception:
+        _log.debug(
+            f"compute_eg4_post_process_fields: _read_battery_serial_fields failed for "
+            f"transport '{transport.transport_name}' — skipping corrected battery serials "
+            f"this cycle.",
+            exc_info=True,
+        )
+
+    return derived
+
+
+def _read_battery_serial_fields(transport: EG4MetadataTransport) -> dict[str, str]:
+    """Live-read and correctly decode every batteryserialnumber_<N> field
+    declared on this protocol's INPUT registry map.
+
+    protocol_settings' ASCII decoder is single-register-only (see
+    read_eg4_serial_number()'s docstring for the full explanation), so the
+    normal per-cycle decode of these fields truncates them to their first 2
+    characters. This reads all 8 registers each field's CSV entry documents
+    ("(8 registers)") directly and decodes the full string, keyed under the
+    same variable_name the truncated value would have used — the caller's
+    ``info.update(...)`` then overwrites that truncated value rather than
+    adding a new key.
+    """
+    fields: dict[str, str] = {}
+    if not transport.send_input_register:
+        return fields
+
+    registry_map: list[registry_map_entry] = []
+    try:
+        registry_map = transport.proto.get_registry_map(Registry_Type.INPUT)
+    except Exception:
+        _log.debug("_read_battery_serial_fields: could not read INPUT registry map", exc_info=True)
+        return fields
+
+    battery_serial_entries: list[registry_map_entry] = [
+        entry for entry in registry_map
+        if entry.variable_name and _BATTERY_SERIAL_FIELD_REGEX.match(entry.variable_name)
+    ]
+    if not battery_serial_entries:
+        return fields
+
+    for entry in battery_serial_entries:
+        start: int = entry.register
+        data: dict[int, int] = {}
+        try:
+            data = transport.read_modbus_registers(start=start, end=start + 7, registry_type=Registry_Type.INPUT)
+        except Exception:
+            _log.debug(
+                f"_read_battery_serial_fields: register read failed for "
+                f"'{entry.variable_name}' (registers {start}-{start + 7})",
+                exc_info=True,
+            )
+            continue
+
+        chars: list[str] = []
+        missing: list[int] = [start + i for i in range(8) if data.get(start + i) is None]
+        if missing:
+            _log.debug(
+                f"_read_battery_serial_fields: registers {missing} missing from the read "
+                f"for '{entry.variable_name}' — leaving this field's value untouched this cycle."
+            )
+            continue
+
+        for i in range(8):
+            raw: int = data[start + i]
+            for b in _decode_register_chars(raw & 0xFFFF):
+                if 0x20 <= b <= 0x7E:
+                    chars.append(chr(b))
+
+        decoded: str = "".join(chars).strip()
+        if decoded:
+            fields[entry.variable_name] = decoded
+            _log.debug(f"_read_battery_serial_fields: '{entry.variable_name}' = '{decoded}'")
+
+    return fields
+
+
+def eg4_synthetic_fields_metadata(transport: EG4MetadataTransport) -> list[tuple[str, str, float, str]]:
+    """Field declarations for compute_eg4_post_process_fields()'s output, in
+    the ``(variable_name, data_type, unit_mod, note)`` format
+    ``modbus_eg4_ll_s_tcp.synthetic_fields_metadata`` documents — used by
+    TimescaleDB's wide-table schema registration so these columns are created
+    ahead of time with the correct type, instead of being reported as
+    unexpected/missing extra_keys.
+
+    Returns ``[]`` if this isn't an EG4 protocol. For battery hardware, only
+    'hardware_kind' is declared (the only field compute_eg4_post_process_fields
+    actually produces for batteries); inverters additionally get model/
+    firmware_version/is_gridboss and one entry per batteryserialnumber_<N>
+    field this protocol's INPUT map declares. device_type_code is included
+    too *unless* this transport's CSV already names holding register 19
+    directly (some EG4 variants document it as a proper 'device_type_code'
+    entry; when that's the case it decodes through the normal path and
+    declaring it here as well would just produce a duplicate "real" +
+    "synthetic" pair for the same field).
+    """
+    protocol_name: str = getattr(transport.proto, "protocol", "") or ""
+    if not is_eg4_protocol(protocol_name):
+        return []
+
+    fields: list[tuple[str, str, float, str]] = [
+        ("hardware_kind", "ASCII", 1.0, "Synthetic: 'battery' or 'inverter'."),
+    ]
+
+    is_battery: bool = False
+    try:
+        is_battery = detect_eg4_hardware_kind(transport) == "battery"
+    except Exception:
+        _log.debug("eg4_synthetic_fields_metadata: detect_eg4_hardware_kind failed", exc_info=True)
+
+    if not is_battery:
+        fields.extend([
+            ("model", "ASCII", 1.0, "Synthetic: model name derived from device type code and the HOLD_MODEL bitfield."),
+            ("firmware_version", "ASCII", 1.0, "Synthetic: assembled from holding registers 7-10."),
+            ("is_gridboss", "USHORT", 1.0, "Synthetic: 1 if device type code indicates a GridBOSS/MID device, else 0."),
+        ])
+        if not _registry_has_named_entry(transport, Registry_Type.HOLDING, "device_type_code"):
+            fields.append(("device_type_code", "USHORT", 1.0, "Synthetic: raw value of holding register 19."))
+
+        try:
+            registry_map: list[registry_map_entry] = transport.proto.get_registry_map(Registry_Type.INPUT)
+            for entry in registry_map:
+                if entry.variable_name and _BATTERY_SERIAL_FIELD_REGEX.match(entry.variable_name):
+                    fields.append((
+                        entry.variable_name,
+                        "ASCII",
+                        1.0,
+                        "Corrected full serial — protocol_settings' ASCII decoder truncates this field to 2 characters.",
+                    ))
+        except Exception:
+            _log.debug(
+                "eg4_synthetic_fields_metadata: could not enumerate batteryserialnumber_<N> entries",
+                exc_info=True,
+            )
+
+    return fields

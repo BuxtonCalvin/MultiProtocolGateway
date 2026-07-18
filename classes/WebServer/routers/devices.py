@@ -135,11 +135,7 @@ def diagnostics(db: Session = Depends(get_session)) -> dict[str, Any]:
 
     # Route self-check — confirm this endpoint resolved correctly
     result["route_resolution_ok"] = True
-    result["note"] = (
-        "If you see this response, /api/devices/diag resolved correctly. "
-        "If /api/devices/state returns a list instead of an object, "
-        "the old devices.py with wrong route order is still deployed."
-    )
+    result["note"] = ("If you see this response, /api/devices/diag resolved correctly. ")
 
     return result
 

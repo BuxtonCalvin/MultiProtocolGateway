@@ -182,13 +182,13 @@ class pace(modbus_base):
 
         # Instance-level serial attributes — no class-level declarations
         # to avoid the invariance conflict with modbus_base.port: int | str
-        self.port = settings.get("port", fallback="/dev/ttyUSB0")
         self.baudrate = settings.getint("baudrate", fallback=9600)
-        self.stopbits: int = settings.getint("stopbits", fallback=1)
         self.bytesize: int = settings.getint("bytesize", fallback=8)
         self.parity: str = settings.get("parity", fallback="N")
+        self.port = settings.get("port", fallback="/dev/ttyUSB0")
         self.serial_timeout: float = settings.getfloat("timeout", fallback=2.0)
         self.slave_id: int = settings.getint("slave_id", fallback=1)
+        self.stopbits: int = settings.getint("stopbits", fallback=1)
 
         # Raw serial connection — managed directly since pymodbus
         # no longer supports the binary framer needed for PACE BMS

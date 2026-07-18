@@ -35,7 +35,7 @@ def pytest_configure(config: pytest.Config) -> None:
     import importlib
     import sys
     import types
-
+    # ugly hack to break circular imports between protocol_settings and eg4_metadata
     # 1. Create a fake empty module for eg4_metadata and put it in Python's cache.
     # This prevents protocol_settings from jumping into the real eg4_metadata too early.
     fake_eg4 = types.ModuleType("classes.eg4_metadata")

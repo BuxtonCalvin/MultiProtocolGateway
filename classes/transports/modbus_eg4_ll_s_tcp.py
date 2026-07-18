@@ -188,7 +188,13 @@ class modbus_eg4_ll_s_tcp(modbus_tcp):
 
         Tuple format: (variable_name, data_type, unit_mod, note)
         data_type strings match Data_Type enum names in protocol_settings.
+
+        Gated by the shared synthetic_metrics_enabled() (the
+        enable_synthetic_metrics transport setting) — returns [] when disabled,
+        same as it would if this transport had no synthetic fields at all.
         """
+        if not self.synthetic_metrics_enabled():
+            return []
         return [
             ("cell_voltage_max_v",   "FLOAT32",  1.0, "Highest individual cell voltage (V)"),
             ("cell_voltage_min_v",   "FLOAT32",  1.0, "Lowest individual cell voltage (V)"),
@@ -316,6 +322,13 @@ class modbus_eg4_ll_s_tcp(modbus_tcp):
           1. cell_stats   — produces cell_voltage_max_v / min_v
           2. balancing    — consumes cell_voltage_max_v / min_v
 
+        Gated by the shared synthetic_metrics_enabled() (the
+        enable_synthetic_metrics transport setting, defined on modbus_base):
+        the deferred cache load still runs even when disabled (it's
+        connection housekeeping, not a synthetic metric, and keeps the cache
+        warm in case synthetic metrics are re-enabled later without a
+        reconnect), but no derived fields are computed or injected.
+
         On the first cycle after connect, emits a one-time INFO log if the
         cell voltage registers needed by _compute_cell_stats are absent from
         the scrape data (e.g. excluded by the variable mask).
@@ -328,9 +341,16 @@ class modbus_eg4_ll_s_tcp(modbus_tcp):
 
         # Deferred cache load — runs on the first successful scrape cycle
         # (and retries on subsequent cycles if the previous load failed).
-        # This keeps on_first_connect_read non-blocking.
+        # This keeps on_first_connect_read non-blocking. Left un-gated by
+        # synthetic_metrics_enabled(): it's connection/cache housekeeping
+        # (nothing derived is computed here), and keeping the cache warm
+        # means synthetic metrics come back with fresh data immediately if
+        # enable_synthetic_metrics is re-enabled later without a reconnect.
         if not self._holding_cache_loaded:
             self._load_holding_cache()
+
+        if not self.synthetic_metrics_enabled():
+            return info
 
         # One-time check on the first cycle: warn if cell voltage registers
         # are absent from the scrape data so the user knows which metrics to
