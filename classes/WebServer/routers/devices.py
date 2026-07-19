@@ -29,21 +29,26 @@ from typing import Any, List
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from classes.WebServer.models import AppState
 from classes.WebServer.services.device_service import DeviceSummary, NavData
 
+from ...transports.modbus_base import modbus_base
 from ..database import get_session, refresh_app_state, session_scope
 from ..models import Setting
 from ..scanner import scan_transport_library
+from ..services.analysis_service import get_transport_connection_status
 from ..services.device_service import (
     delete_orphans_bulk,
     get_app_state,
     get_device_settings,
     get_device_summary,
+    get_nav_data,
     get_orphaned_settings,
 )
+from ..services.protocol_service import get_protocols_for_device
 from ..services.timescale_service import has_staged_deletions, staged_deletion_count
 
 _log: logging.Logger = logging.getLogger(__name__)
@@ -102,7 +107,6 @@ def diagnostics(db: Session = Depends(get_session)) -> dict[str, Any]:
     Self-test endpoint. Visit /api/devices/diag in your browser to verify
     routing, DB connectivity, and app state. Safe — read-only.
     """
-    from sqlalchemy import text
     result: dict[str, Any] = {}
 
     # DB connectivity
@@ -143,8 +147,7 @@ def diagnostics(db: Session = Depends(get_session)) -> dict[str, Any]:
 @router.get("/nav")
 def nav_data(db: Session = Depends(get_session)) -> dict[str, Any]:
     """Returns scraper/bridge lists and protocol groups for nav rendering."""
-    from ..services.device_service import get_nav_data as _nav
-    nav: NavData = _nav(db)
+    nav: NavData = get_nav_data(db)
     return {
         "scrapers": [
             {"name": s.name, "transport_class": s.transport_class,
@@ -206,7 +209,6 @@ def delete_orphans(payload: OrphanDeleteRequest, db: Session = Depends(get_sessi
 @router.get("/connection-status")
 def connection_status(request: Request) -> dict[str, bool]:
     """Returns live connection status for all transports from the gateway instance."""
-    from ..services.analysis_service import get_transport_connection_status
     gateway: str | None = getattr(request.app.state, "gateway", None)
     result: dict[str, bool] = get_transport_connection_status(gateway)
     if result:
@@ -371,7 +373,6 @@ def create_and_activate(
     that has no DB row yet) and immediately marks it active and dirty.
     Called when the user checks a virtual row's checkbox.
     """
-    from ..models import Setting
     section: str = f"transport.{device_name}"
 
     # Check it doesn't already exist (race condition guard)
@@ -422,8 +423,6 @@ def refresh_protocol_tabs(
     Stages the new protocol value and returns the rendered protocol section
     (tabs with W/M/S counts + empty table container) for the new protocol.
     """
-    from ..services.protocol_service import get_protocols_for_device
-
     section: str = f"transport.{device_name}"
 
     # Stage the new protocol_version value
@@ -535,6 +534,39 @@ async def orphan_modal(request: Request):
     )
 
 
+def _failed_register_keys(transport: Any) -> dict[str, str]:
+    """Best-effort {variable_name: "disabled"|"failing"} map for a transport.
+
+    Only modbus_base subclasses track register failures; anything else
+    (bridges, non-modbus scrapers) returns an empty map so the caller can
+    merge this in unconditionally.
+    """
+    if not isinstance(transport, modbus_base):
+        return {}
+    try:
+        return transport.get_failed_register_variables()
+    except Exception as e:
+        _log.debug(f"error retrieving register failure status: {e}")
+        return {}
+
+
+def _clean_last_known_data(raw: dict[str, Any]) -> dict[str, str]:
+    """Stringify a transport's last_known_data for JSON response, dropping
+    the paired "*_desc" text entries. Shared by the immediate and wait
+    variants of /last-values, which otherwise present the same values in
+    the same shape at two different points in the scrape cycle.
+    """
+    clean: dict[str, str] = {}
+    for k, v in raw.items():
+        if k.endswith("_desc"):
+            continue
+        try:
+            clean[k] = str(round(v, 4)) if isinstance(v, float) else str(v)
+        except Exception as e:
+            _log.debug(f"error retrieving last_known_data {e}")
+    return clean
+
+
 @router.get("/{device_name}/last-values")
 async def device_last_values(request: Request, device_name: str) -> JSONResponse:
     """Return the last bridge-confirmed scrape values for a device transport.
@@ -552,17 +584,9 @@ async def device_last_values(request: Request, device_name: str) -> JSONResponse
         return JSONResponse({"values": {}, "status": "not_found"})
 
     raw: dict[str, Any] = getattr(transport, "last_known_data", {})
-    clean: dict[str, str] = {}
-    for k, v in raw.items():
-        if k.endswith("_desc"):
-            continue
-        try:
-            clean[k] = str(round(v, 4)) if isinstance(v, float) else str(v)
-        except Exception as e:
-            _log.debug(f"error retrieving last_known_data {e}")
-            pass
+    clean: dict[str, str] = _clean_last_known_data(raw)
 
-    return JSONResponse({"values": clean, "status": "ok"})
+    return JSONResponse({"values": clean, "status": "ok", "failed_keys": _failed_register_keys(transport)})
 
 
 @router.get("/{device_name}/last-values/wait")
@@ -599,14 +623,6 @@ async def device_last_values_wait(request: Request, device_name: str) -> JSONRes
         return JSONResponse({"values": {}, "status": "timeout"})
 
     raw: dict[str, Any] = getattr(transport, "last_known_data", {})
-    clean: dict[str, str] = {}
-    for k, v in raw.items():
-        if k.endswith("_desc"):
-            continue
-        try:
-            clean[k] = str(round(v, 4)) if isinstance(v, float) else str(v)
-        except Exception as e:
-            _log.debug(f"error retrieving last_known_data {e}")
-            pass
+    clean: dict[str, str] = _clean_last_known_data(raw)
 
-    return JSONResponse({"values": clean, "status": "ok"})
+    return JSONResponse({"values": clean, "status": "ok", "failed_keys": _failed_register_keys(transport)})

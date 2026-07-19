@@ -928,6 +928,42 @@ class modbus_base(transport_base):
 
         return status
 
+    def get_failed_register_variables(self) -> dict[str, str]:
+        """
+        Scheduling path: N/A — diagnostic accessor for the web UI, not part of
+        the read-scheduling loop; usable regardless of read_mode.
+
+        Returns a {variable_name: status} mapping for every registry entry
+        currently sitting inside a register range that has accrued at least
+        one failure, so the device page can highlight the affected rows.
+
+        status is one of:
+            "disabled" — the range has hit max_failures_before_disable and is
+                         currently being skipped on the read path.
+            "failing"  — the range has recorded failures but hasn't crossed
+                         the disable threshold yet.
+
+        A range that has recovered (record_success() has reset its
+        failure_count to 0) is absent from the result entirely, so callers
+        can treat "key missing" as "no highlight" — polling this on an
+        interval and re-applying it wholesale is enough to clear the
+        highlight automatically once the register starts reading again.
+        """
+        result: dict[str, str] = {}
+
+        with self._failure_tracking_lock:
+            trackers: list[RegisterFailureTracker] = list(self.register_failure_trackers.values())
+
+        for tracker in trackers:
+            if tracker.failure_count <= 0:
+                continue
+            status: str = "disabled" if tracker.is_disabled() else "failing"
+            names: list[str] = self._describe_range_metrics(tracker.register_range, tracker.registry_type)
+            for name in names:
+                result[name] = status
+
+        return result
+
     def reset_register_failure_tracking(self, registry_type: Optional[Registry_Type] = None, register_range: Optional[tuple[int, int]] = None) -> None:
         """Scheduling path: N/A — manual/administrative reset, not part of the read-scheduling loop; usable regardless of read_mode.
 

@@ -17,12 +17,33 @@
   limitations under the License.
 -->
 
-{# 
+{#
   settings_rows.html
-  Inner content of #settings-rows. Rendered by the reconcile-settings endpoint
-  and swapped in via hx-swap="innerHTML" on #settings-rows.
+  Inner content of #settings-rows. Used two ways:
+    1. Included directly by scraper_panes.html for the initial page render.
+    2. Rendered standalone by the reconcile-settings endpoint and swapped in
+       via hx-swap="innerHTML" on #settings-rows.
   Context: device (DeviceSummary), settings (list[Setting])
+  Context (optional — only meaningful for the scraper_panes.html include; see
+  the ns_w note below): ns_w.write_enabled (bool)
+
+  is_bool(s) is defined locally (rather than relying on a macro imported by
+  the caller) so this partial renders identically whether it's included from
+  scraper_panes.html or rendered standalone by reconcile_settings() in
+  devices.py, which has no access to scraper_panes.html's macro.
 #}
+{%- macro is_bool(s) -%}
+  {%- set v = (s.value_staged or s.default_value or '') | lower | trim -%}
+  {%- set k = s.key | lower -%}
+  {%- if v in ('true', 'false') -%}true
+  {%- elif k.startswith('enable_') or k.startswith('send_')
+        or k.startswith('include_') or k.startswith('use_')
+        or k in ('write_enabled', 'force_float', 'json', 'console',
+                 'discovery_enabled', 'migrate_data', 'pretty_print',
+                 'append_mode', 'async_mode') -%}true
+  {%- else -%}false
+  {%- endif -%}
+{%- endmacro -%}
 <div class="grid grid-cols-[1.5rem_1fr_7rem_5rem] gap-1 text-mpg-300 text-xs
             uppercase tracking-wide px-1 pb-1 border-b border-mpg-700"
      role="row">
@@ -34,7 +55,12 @@
 </div>
 
 {% for s in settings %}
-{% if s.key not in ("transport", "bridge", "protocol_version", "log_level") and (not s.is_orphan or s.is_active) and not (s.key == "write_type" and not ns_w.write_enabled) %}
+{# ns_w is only set when this partial is included from scraper_panes.html —
+   when rendered standalone by reconcile_settings() it's undefined, which
+   Jinja treats as falsy here, so write_type is hidden by default outside
+   the full device-page context. This matches this template's prior,
+   pre-consolidation behavior. #}
+{% if s.key not in ("transport", "bridge", "protocol_version", "log_level", "analyze_protocol", "analyze_protocol_save_load") and (not s.is_orphan or s.is_active) and not (s.key == "write_type" and not ns_w.write_enabled) %}
 {% set is_virtual = (s.id is none or s.id == None) %}
 <div class="grid grid-cols-[1.5rem_1fr_7rem_5rem] gap-1 items-center px-1 py-0.5
             rounded text-xs
@@ -70,7 +96,7 @@
   </div>
 
   <div role="cell"
-       class="font-mono text-mpg-200 truncate"
+       class="font-mono text-mpg-200 truncate {% if s.is_orphan %}opacity-60{% endif %} {% if not s.is_active %}opacity-70{% endif %}"
        title="{{ s.key }}{% if s.default_value %} (default: {{ s.default_value }}){% endif %}">
     {{ s.key }}
     {% if s.is_orphan %}
@@ -82,13 +108,39 @@
   </div>
 
   <div role="cell">
+    {% if is_bool(s) == 'true' %}
+    {# Boolean: select disabled when row is inactive or virtual — a virtual   #}
+    {# row's checkbox must be checked first (which creates the DB row) before  #}
+    {# its value can be edited.                                               #}
+    <select class="w-full bg-mpg-900 border border-mpg-600 rounded px-1 py-0.5
+                   font-mono text-xs
+                   focus:outline-none focus:ring-1 focus:ring-accent
+                   disabled:opacity-40 disabled:cursor-not-allowed
+                   {% if s.is_active and not is_virtual %}text-mpg-100{% else %}text-mpg-200 opacity-70{% endif %}"
+            {% if not s.is_active or is_virtual %}disabled{% endif %}
+            aria-label="Value for {{ s.key }}"
+            {% if not is_virtual %}
+            hx-patch="/api/devices/{{ device.name }}/settings/{{ s.id }}"
+            hx-ext="json-enc"
+            name="value_staged"
+            hx-swap="none"
+            hx-trigger="change"
+            {% endif %}>
+      {% set cur = (s.value_staged or s.default_value or 'false') | lower | trim %}
+      <option value="true"  {% if cur == 'true'  %}selected{% endif %}>true</option>
+      <option value="false" {% if cur == 'false' %}selected{% endif %}>false</option>
+    </select>
+    {% else %}
+    {# Non-boolean: disabled when inactive or virtual; show default value so  #}
+    {# the cell is never blank — mirrors the DEFAULT column.                  #}
     <input type="text"
            class="w-full bg-mpg-900 border border-mpg-600 rounded px-1 py-0.5
                   text-mpg-100 font-mono text-xs
                   focus:outline-none focus:ring-1 focus:ring-accent
                   disabled:opacity-40 disabled:cursor-not-allowed"
            {% if not s.is_active or is_virtual %}disabled{% endif %}
-           value="{{ s.value_staged or '' }}"
+           value="{{ s.value_staged or (s.default_value if not s.is_active else '') }}"
+           placeholder="{{ s.default_value or '' }}"
            aria-label="Value for {{ s.key }}"
            {% if not is_virtual %}
            hx-patch="/api/devices/{{ device.name }}/settings/{{ s.id }}"
@@ -97,6 +149,7 @@
            hx-swap="none"
            hx-trigger="change delay:400ms"
            {% endif %}>
+    {% endif %}
   </div>
 
   <div role="cell" class="self-center min-w-0">

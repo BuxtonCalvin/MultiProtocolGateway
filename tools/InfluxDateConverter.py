@@ -21,15 +21,15 @@ from pathlib import Path
 from typing import Any, cast
 
 import pandas as pd
-from influxdb import InfluxDBClient
-from influxdb.resultset import InfluxDBClientError, ResultSet
+from influxdb import InfluxDBClient  # type: ignore
+from influxdb.resultset import InfluxDBClientError, ResultSet  # type: ignore
 
 # --- CONFIGURATION ---
 #----------------------------------------------------------------------------------------------------------
 # ***Must*** configure Constants
 
 # Set to 'InfluxDB' to export date range data from InfluxDB to a CSV -- for reinsert, or 'EG4' to insert from EG4 CSV export to influxdb.
-USE_INFLUX_OR_EG4_EXPORT = 'EG4'  # options: 'InfluxDB' or 'EG4'
+USE_INFLUX_OR_EG4_EXPORT: str = 'EG4'  # options: 'InfluxDB' or 'EG4'
 
 # Influxdb connect params
 HOST, PORT, USER, PASSWORD, DATABASE = '10.17.2.42', 8086, 'KevinB', 'SoleSole12', 'openLuup'
@@ -97,7 +97,7 @@ CONFIDENCE_THRESHOLD = 0.85  # Minimum confidence score for auto - inserting a m
 IGNORE_TAGS: set[str] = set(STATIC_TAGS.keys()) | {"time", "Time", "measurement"}
 
 # --- mapping dictionary ---
-FIELD_MAPPER: dict[str, str] = {}
+field_mapper: dict[str, str] = {}
 
 # ----------END CONFIG-----------------------------------------------------------------------------------------------------
 
@@ -193,8 +193,8 @@ def perform_schema_validation(csv_path: Path) -> None:
     csv_cols: set[str] = set(df_sample.columns)
 
     # 2. Get Fields from InfluxDB
-    results: ResultSet = cast(ResultSet, InfluxClient.query(f'SHOW FIELD KEYS FROM "{MEASUREMENT}"'))
-    influx_fields = { point["fieldKey"] : point["fieldType"] for point in results.get_points() if "fieldKey" in point and "fieldType" in point}
+    results: ResultSet = cast(ResultSet, InfluxClient.query(f'SHOW FIELD KEYS FROM "{MEASUREMENT}"'))  # type: ignore
+    influx_fields = { point["fieldKey"] : point["fieldType"] for point in results.get_points() if "fieldKey" in point and "fieldType" in point}  # type: ignore
 
     csv_fields: set[str] = csv_cols - IGNORE_TAGS
 
@@ -205,17 +205,17 @@ def perform_schema_validation(csv_path: Path) -> None:
 
     # CSV fields missing from Influx
     for f in csv_fields:
-        if f not in influx_fields and f not in FIELD_MAPPER:
+        if f not in influx_fields and f not in field_mapper:
             csv_missing.append(f)
 
     # Influx fields missing from CSV
     for f in influx_fields:
-        if f not in csv_fields and f not in FIELD_MAPPER.values():
+        if f not in csv_fields and f not in field_mapper.values():
             influx_missing.append(f)
 
     # Equal names
     for f in csv_fields:
-        if f in influx_fields and f not in FIELD_MAPPER:
+        if f in influx_fields and f not in field_mapper:
             anomalies.append({
                 "source": "CSV0",
                 "import_names": f,
@@ -266,7 +266,7 @@ def perform_schema_validation(csv_path: Path) -> None:
 
 def load_field_mapper(map_file: Path) -> dict[str, str]:
     """
-    Load FIELD_MAPPER from CSV if it exists.
+    Load field_mapper from CSV if it exists.
 
     Dict format:
         import_names: export_names
@@ -427,12 +427,12 @@ def load_influx_field_types() -> None:
 
     results: ResultSet = cast(
         ResultSet,
-        InfluxClient.query(f'SHOW FIELD KEYS FROM "{MEASUREMENT}"')
+        InfluxClient.query(f'SHOW FIELD KEYS FROM "{MEASUREMENT}"')  # type: ignore
     )
 
     influx_fields = {
         p["fieldKey"]: p["fieldType"]
-        for p in results.get_points()
+        for p in results.get_points()  # type: ignore
         if "fieldKey" in p and "fieldType" in p
     }
 def confirm_action(message: str) -> bool:
@@ -473,7 +473,7 @@ def delete_points_in_time_range() -> None:
         print("Deletion cancelled by user.")
         sys.exit()
 
-    InfluxClient.query(query)
+    InfluxClient.query(query)  # type: ignore
     print(f"Deleted points from {MEASUREMENT} between {SOURCE_START_TIME} and {SOURCE_END_TIME} (Local time equivalent).")
 
 def export_influx_data_to_csv() -> None:
@@ -486,13 +486,13 @@ def export_influx_data_to_csv() -> None:
 
     results: ResultSet = cast(
         ResultSet,
-        InfluxClient.query(
+        InfluxClient.query(  # type: ignore
             f'SELECT * FROM "{MEASUREMENT}" '  # noqa: S608
             f'WHERE time >= \'{start_utc}\' '
             f'AND time < \'{end_utc}\''
         )
     )
-    points = list(results.get_points())
+    points: list[dict[str, Any]] = list(results.get_points())  # type: ignore
 
     if not points:
         print("[INFO] No data found in InfluxDB for the specified measurement time window.")
@@ -501,18 +501,18 @@ def export_influx_data_to_csv() -> None:
     # Calculate time delta for shifting the timestamps using naive local times
     time_delta: pd.Timedelta = pd.to_datetime(TARGET_START_TIME) - pd.to_datetime(SOURCE_START_TIME)
 
-    processed_rows = []
+    processed_rows: list[dict[str, Any]] = []
 
     for point in points:
         # InfluxDB returns UTC time. Convert it to user's Local Time first
-        influx_time_utc = pd.to_datetime(point['time']).tz_convert("UTC")
-        influx_time_local = influx_time_utc.tz_convert(LOCAL_TIME_ZONE).tz_localize(None)
+        influx_time_utc: pd.Timestamp = cast(pd.Timestamp, pd.to_datetime(point['time'])).tz_convert("UTC")
+        influx_time_local: pd.Timestamp = influx_time_utc.tz_convert(LOCAL_TIME_ZONE).tz_localize(None)
 
         # Shift local time by the user's delta configuration
-        new_time = influx_time_local + time_delta
+        new_time: pd.Timestamp = influx_time_local + time_delta
 
         # Build a new row with mapped fields
-        new_row = {'time': new_time.isoformat()}
+        new_row: dict[str, Any] = {'time': new_time.isoformat()}
 
         for field, value in point.items():
             if field in IGNORE_TAGS:
@@ -536,7 +536,7 @@ def write_csv_to_influx(export_file_name: Path) -> None:
 
     # Calculate time delta for shifting the timestamps
     time_delta: pd.Timedelta = pd.to_datetime(TARGET_START_TIME) - pd.to_datetime(SOURCE_START_TIME)
-    new_points = []
+    new_points: list[dict[str, Any]] = []
     missing_columns: set[str] = set()
 
     for row in df.to_dict("records"):
@@ -546,17 +546,17 @@ def write_csv_to_influx(export_file_name: Path) -> None:
         if time_val is None:
             raise ValueError("Timestamp column missing (expected 'Time' or 'time')")
 
-        ts = pd.to_datetime(time_val)
+        ts: pd.Timestamp = cast(pd.Timestamp, pd.to_datetime(time_val))
 
         if USE_INFLUX_OR_EG4_EXPORT == "EG4":
             ts = ts.tz_localize(LOCAL_TIME_ZONE, nonexistent="shift_forward").tz_convert("UTC")
         else:
             ts = ts.tz_localize(LOCAL_TIME_ZONE, nonexistent="shift_forward").tz_convert("UTC")
 
-        new_time = (ts + time_delta).tz_localize(None)
+        new_time: pd.Timestamp = (ts + time_delta).tz_localize(None)
 
         # Build Fields and apply Mapping
-        fields = {}
+        fields: dict[str, int | float | str | bool] = {}
 
         for col, raw_val in row.items():
 
@@ -567,7 +567,7 @@ def write_csv_to_influx(export_file_name: Path) -> None:
             if is_influx_source_csv:
                 target_field_name = str(col)
             else:
-                target_field_name = FIELD_MAPPER.get(str(col))
+                target_field_name = field_mapper.get(str(col))
 
             if target_field_name is None:
                 missing_columns.add(str(col))
@@ -627,15 +627,15 @@ def write_csv_to_influx(export_file_name: Path) -> None:
         print(f"[INFO] Attempting to write {len(new_points)} points to InfluxDB...")
         while True:
             try:
-                InfluxClient.write_points(new_points, batch_size=1000)
+                InfluxClient.write_points(new_points, batch_size=1000)  # type: ignore
                 print(f"Successfully updated {len(new_points)} points.")
                 break # Success! Exit the loop.
 
             except InfluxDBClientError as e:
                 # Check if this is a field type conflict error
-                if ALLOW_FLOAT_COERCION and e.code == 400 and "field type conflict" in e.content:
+                if ALLOW_FLOAT_COERCION and e.code == 400 and "field type conflict" in e.content:  # type: ignore
                     import re
-                    match: re.Match[str] | None = re.search(r'input field \\?"([^\\"]+)\\?"', e.content)
+                    match: re.Match[str] | None = re.search(r'input field \\?"([^\\"]+)\\?"', e.content)  # type: ignore
 
                     if match:
                         offending_field: str | Any = match.group(1)
@@ -656,7 +656,7 @@ def write_csv_to_influx(export_file_name: Path) -> None:
 
 # --- start execution ---
 
-if USE_INFLUX_OR_EG4_EXPORT == 'InfluxDB':
+if USE_INFLUX_OR_EG4_EXPORT == 'InfluxDB':  # pyright: ignore[reportUnnecessaryComparison] -- USE_INFLUX_OR_EG4_EXPORT is a hand-edited config toggle; both branches are reachable across different runs, just not within one static analysis pass
     print("[INFO] Using InfluxDB export for data export...")
     # we already know the schemas match since we are exporting from InfluxDB, so we can skip the validation and just export the data for review and correction.
     if not EXPORT_FILE_FROM_INFLUX.exists():
@@ -673,7 +673,7 @@ if USE_INFLUX_OR_EG4_EXPORT == 'InfluxDB':
         write_csv_to_influx(EXPORT_FILE_FROM_INFLUX)
 else:
     # Load mapping file if it exists
-    FIELD_MAPPER = load_field_mapper(IMPORT_MAP)
+    field_mapper = load_field_mapper(IMPORT_MAP)
 
     # If mapping file does not exist → run validation
     if not IMPORT_MAP.exists():
@@ -687,3 +687,4 @@ else:
         # --- Data processing (Continues only if no anomalies) ---
         load_influx_field_types()
         write_csv_to_influx(EXPORT_FILE_FROM_EG4)
+
