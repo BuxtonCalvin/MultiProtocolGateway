@@ -264,10 +264,10 @@ def create_app(
         app.state.project_root   = project_root
         app.state.protocols_dir  = protocols_dir
         app.state.transports_dir = project_root / "classes" / "transports"
-        app.state.config_dir = config_dir or config_path.parent
-        app.state.log_file = log_file
-        app.state.log_dir = log_dir
-        app.state.db_dir = db_dir
+        app.state.config_dir     = config_dir or config_path.parent
+        app.state.log_file       = log_file
+        app.state.log_dir        = log_dir
+        app.state.db_dir         = db_dir
 
         # Seed/update the setting_descriptions table on every startup
         with session_scope() as db:

@@ -719,14 +719,10 @@ class DataAdjustments:
                 expression: str = formula.replace("x", str(raw_value))
                 try:
                     evaluated: int | float = self.safe_eval_expression(expression)
-                    self._log.debug(
-                        f"Successful range formula evaluation {evaluated} for value {raw_value}"
-                    )
+                    self._log.debug(f"Successful range formula evaluation {evaluated} for value {raw_value}")
                     return float(evaluated)
                 except Exception as e:
-                    self._log.warning(
-                        f"Failed range formula evaluation {expression} for value {raw_value}: {e}"
-                    )
+                    self._log.warning(f"Failed range formula evaluation {expression} for value {raw_value}: {e}")
                     return raw_value
 
         return raw_value

@@ -370,12 +370,27 @@ def get_protocol_json(
     return None, False
 
 
-def build_synthetic_rows(transport: Any) -> list[DeviceRegisterView]:
+def build_synthetic_rows(transport: Any, registry_type: str | None = None) -> list[DeviceRegisterView]:
     """Build display-only DeviceRegisterView rows for a transport's synthetic fields.
 
-    Reads ``transport.synthetic_fields_metadata`` (list of
-    ``(variable_name, data_type, unit_mod, note)`` tuples) and constructs
-    one ``DeviceRegisterView`` per field with ``is_synthetic=True``.
+    Reads ``transport.synthetic_fields_metadata`` — a list of
+    ``(variable_name, data_type, unit_mod, note)`` tuples, or
+    ``(variable_name, data_type, unit_mod, note, registry_type)`` tuples
+    where the 5th element is a lowercase registry-type string like
+    "holding"/"input" (see ``transport_base.synthetic_fields_metadata`` and
+    ``eg4_metadata.eg4_synthetic_fields_metadata``) — and constructs one
+    ``DeviceRegisterView`` per field with ``is_synthetic=True``.
+
+    ``registry_type``, when given, filters to only the synthetic fields
+    tagged with that registry (case-insensitive). Fields with no 5th
+    element (older ``synthetic_fields_metadata`` implementations, e.g.
+    ``modbus_eg4_ll_s_tcp``/``modbus_eg4_ll_s_rtu``, which don't yet tag a
+    registry) are treated as registry-agnostic and always included,
+    regardless of the requested ``registry_type`` — that's the same
+    every-tab behavior this function had before registry tagging existed,
+    so those transports' tables are unaffected. Pass ``registry_type=None``
+    (the default) to get every synthetic field regardless of registry, e.g.
+    for a combined/JSON view.
 
     Synthetic rows are display-only:
     - ``id = -1`` so no toggle PATCH endpoint is reachable
@@ -386,14 +401,28 @@ def build_synthetic_rows(transport: Any) -> list[DeviceRegisterView]:
     Returns an empty list when the transport has no synthetic fields or
     ``synthetic_fields_metadata`` is not defined.
     """
-    metadata: list[tuple[str, str, float, str]] = getattr(
+    metadata: list[tuple[Any, ...]] = getattr(
         transport, "synthetic_fields_metadata", []
     )
     if not metadata:
         return []
 
     rows: list[DeviceRegisterView] = []
-    for variable_name, data_type, unit_mod, note in metadata:
+    for field in metadata:
+        variable_name: str = field[0]
+        data_type: str | None = field[1]
+        unit_mod: float = field[2]
+        note: str | None = field[3]
+        rest: tuple[Any, ...] = field[4:]
+        field_registry_type: str | None = str(rest[0]).lower() if rest and rest[0] else None
+
+        if (
+            registry_type is not None
+            and field_registry_type is not None
+            and field_registry_type != registry_type.lower()
+        ):
+            continue
+
         rows.append(
             DeviceRegisterView(
                 id=-1,

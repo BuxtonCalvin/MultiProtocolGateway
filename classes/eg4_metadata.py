@@ -96,14 +96,15 @@ class EG4MetadataTransport(Protocol):
 # one, so this value is available regardless of what the transport's mask
 # includes.
 #
-# Some EG4 variant CSVs still leave register 19 as an unlabeled placeholder
-# entry (historically documented_name "Register 19", data_type ushort) with
-# no meaningful variable_name; others have since been updated to name it
-# 'device_type_code' directly, in which case it decodes through the normal
-# path like any other field. eg4_synthetic_fields_metadata() checks for this
-# per-transport (see _registry_has_named_entry()) so a variant with the
-# proper CSV naming doesn't get a redundant synthetic declaration alongside
-# its real one.
+# This value is used internally (see _read_inverter_metadata()) to compute
+# model/is_gridboss, but is deliberately never exposed as its own synthetic
+# field: on variants whose CSV names register 19 (e.g. as 'device_type_code'
+# or 'Device_Type_Code'), it already decodes under that name through the
+# normal registry_map path, and re-declaring it here would just produce a
+# duplicate "real" register-19 row plus a "synthetic" one with the same
+# name/value in the webUI. On variants that leave register 19 unlabeled, the
+# code is still read (above) and still used to derive model/is_gridboss —
+# it's just not separately surfaced as a field of its own either way.
 EG4_DEVICE_TYPE_CODE_GRIDBOSS: int = 50
 EG4_DEVICE_TYPE_CODE_OFFGRID: int = 54       # 12000XP, 6000XP
 EG4_DEVICE_TYPE_CODE_OFFGRID_ALT: int = 38   # 6000XP variant (field-reported)
@@ -138,11 +139,42 @@ EG4_DEVICE_TYPE_MODEL_MAP: dict[int, tuple[str, bool]] = {
 #     documented *first* character of the example serial "AB12345678", and
 #     that only reproduces correctly if the high byte is read first)
 #   - the other decodes low byte -> first character, high byte -> second
-# Absent a live device to test against, this module follows the first
-# (high-byte-first) convention, since it's the one independently corroborated
-# by the datasheet's own worked example. If serial numbers or firmware
-# strings come out reversed/garbled on real hardware, flip this constant.
-EG4_TEXT_HIGH_BYTE_FIRST: bool = True
+# Absent a live device to test against, this module originally followed the
+# first (high-byte-first) convention, since it's the one independently
+# corroborated by the datasheet's own worked example -- but live hardware
+# testing showed serial numbers coming out with each register's two
+# characters swapped (e.g. 'batteryserialnumber_1' decoded as
+# 'aBttre_yDI0_1', which un-swaps cleanly to 'Battery_ID_01'), so this is
+# now set to the low-byte-first convention instead.
+EG4_TEXT_HIGH_BYTE_FIRST: bool = False
+
+# ----------------------------------------------------------------------------
+# Serial number register addresses
+# ----------------------------------------------------------------------------
+# Fixed addresses, read the same way as the device type code register (19)
+# above: via an explicit start/end transport.read_modbus_registers() call
+# rather than through the registry_map-driven per-cycle path. This
+# deliberately bypasses variable_mask/variable_screen filtering entirely.
+#
+# That bypass matters here specifically because the ten 'SN_0_...'..
+# 'SN_9_...' fields these registers pack are exactly as maskable/screenable
+# as any other named field — protocol_settings.load__registry deletes
+# masked-out/screened-out rows from the loaded registry_map in place (see
+# its "Apply variable mask"/"Apply variable screen" blocks), so a transport
+# whose mask doesn't happen to include the SN_* fields (or whose screen
+# excludes them) ends up with a registry_map that no longer has those
+# entries at all. Deriving the registers to read by scanning that map (the
+# previous approach here) would then silently find nothing, and this
+# function would return "" even though the underlying registers are
+# perfectly readable — matching the previously-reported "serial number does
+# not decode at all" symptom. Reading these fixed addresses directly avoids
+# that dependency altogether, same as register 19.
+#
+# 18kPV holding map: 5 registers starting at 2 (SN_0_Year..SN_9_batch_number,
+# two characters per register). 18kPV/GridBOSS input map: 5 registers
+# starting at 115, same packing.
+EG4_SERIAL_NUMBER_HOLDING_REGISTERS: tuple[int, int] = (2, 6)
+EG4_SERIAL_NUMBER_INPUT_REGISTERS: tuple[int, int] = (115, 119)
 
 
 def _decode_register_chars(value: int) -> tuple[int, int]:
@@ -204,7 +236,6 @@ class EG4ModelInfo:
             return f"LXP-LB-{kw}K" if kw else None
 
         return None
-
 
 # ----------------------------------------------------------------------------
 # Hardware kind detection
@@ -336,14 +367,21 @@ def read_eg4_serial_number(transport: EG4MetadataTransport) -> str:
 
     EG4 registry maps encode the 10-character serial number as ten
     single-character fields named 'SN_0_...' through 'SN_9_...', packed two
-    characters (one register) at a time across five consecutive registers.
-    The exact suffix after 'SN_<n>_' and the exact registers used vary
-    between EG4 variants (18kPV, GridBOSS, LL-S, v58, etc.), so rather than
-    hard-coding register numbers this scans the transport's loaded registry
-    map for any variable matching that naming convention, derives the
-    distinct registers involved from those entries, and reads them directly —
-    sidestepping the single-register limit of protocol_settings' generic
-    ASCII decoder entirely (see this module's docstring).
+    characters (one register) at a time across five consecutive registers —
+    holding registers 2-6, or input registers 115-119 (see
+    EG4_SERIAL_NUMBER_HOLDING_REGISTERS / EG4_SERIAL_NUMBER_INPUT_REGISTERS).
+
+    These fixed addresses are read directly via an explicit start/end
+    transport.read_modbus_registers() call, the same fixed-address pattern
+    used for the device type code (holding register 19) — this both
+    sidesteps the single-register limit of protocol_settings' generic ASCII
+    decoder (see this module's docstring) and, deliberately, bypasses
+    variable_mask/variable_screen filtering entirely, since those filters
+    remove the SN_* entries from the loaded registry_map outright rather
+    than just hiding their values (see the register constants' comments for
+    why that made the previous registry_map-scanning approach here return ""
+    whenever a transport's mask/screen didn't happen to include the SN_*
+    fields).
 
     Character order within each register follows EG4_TEXT_HIGH_BYTE_FIRST.
 
@@ -359,32 +397,28 @@ def read_eg4_serial_number(transport: EG4MetadataTransport) -> str:
         _log.info(msg)
         return ""
 
-    sn_field_regex: re.Pattern[str] = re.compile(r"^sn_\d+_")
+    registers_by_type: list[tuple[Registry_Type, tuple[int, int]]] = [
+        (Registry_Type.HOLDING, EG4_SERIAL_NUMBER_HOLDING_REGISTERS),
+        (Registry_Type.INPUT, EG4_SERIAL_NUMBER_INPUT_REGISTERS),
+    ]
 
-    for r_type in (Registry_Type.HOLDING, Registry_Type.INPUT):
+    for r_type, (start_reg, end_reg) in registers_by_type:
         if r_type == Registry_Type.HOLDING and not transport.send_holding_register:
             continue
         if r_type == Registry_Type.INPUT and not transport.send_input_register:
             continue
 
-        registry_map: list[registry_map_entry] = transport.proto.get_registry_map(r_type)
-        sn_registers: list[int] = sorted({
-            entry.register for entry in registry_map
-            if entry.variable_name and sn_field_regex.match(entry.variable_name)
-        })
-
-        if not sn_registers:
-            continue
         msg: str = (
-            f"Reconstructing EG4 serial number from {r_type.name} registers {sn_registers}")
+            f"Reconstructing EG4 serial number from {r_type.name} registers "
+            f"{start_reg}-{end_reg} (fixed address, bypassing mask/screen).")
         _log.info(msg)
 
         sn_chars: list[str] = []
         read_failed = False
-        for reg in sn_registers:
+        for reg in range(start_reg, end_reg + 1):
             data: Dict[int, int] = transport.read_modbus_registers(start=reg, end=reg, registry_type=r_type)
             if not data or reg not in data:
-                msg: str = (
+                msg = (
                     f"Failed reading EG4 SN register {reg} ({r_type.name}) — "
                     f"treating partial read as total failure for SN integrity.")
                 _log.warning(msg)
@@ -405,7 +439,7 @@ def read_eg4_serial_number(transport: EG4MetadataTransport) -> str:
 
         sn_decoded: str = "".join(sn_chars).strip()
         if sn_decoded and not re.search(r"[^a-zA-Z0-9_]", sn_decoded):
-            msg: str = f"Read EG4 SN from {r_type.name}: {sn_decoded}"
+            msg = f"Read EG4 SN from {r_type.name}: {sn_decoded}"
             _log.info(msg)
             return sn_decoded
 
@@ -616,12 +650,6 @@ def _read_battery_metadata(transport: EG4MetadataTransport) -> EG4BatteryMetadat
 # (synthetic_fields_metadata) use to recognize "synthetic, un-maskable"
 # metrics and treat them differently from ordinary register-backed ones.
 #
-# An earlier version of this module used registry_map_entry.synthetic_resolver
-# + process_registery() to inject these instead (fabricating a
-# registry_map_entry with register=-1 for each synthetic field). That
-# mechanism has been removed: fabricated entries still look like ordinary,
-# maskable, register-backed fields to anything downstream that just inspects
-# the registry map, so it never produced the "synthetic" signal this needs.
 #
 # compute_eg4_post_process_fields() is meant to be called from a transport's
 # post_process_data(info) override:
@@ -641,26 +669,27 @@ def _read_battery_metadata(transport: EG4MetadataTransport) -> EG4BatteryMetadat
 _BATTERY_SERIAL_FIELD_REGEX: re.Pattern[str] = re.compile(r"^batteryserialnumber_\d+$")
 
 
-def _registry_has_named_entry(transport: EG4MetadataTransport, registry_type: Registry_Type, variable_name: str) -> bool:
-    """Whether this transport's CSV already declares ``variable_name`` as an
-    ordinary registry_map entry (i.e. it'll be decoded through the normal
-    process_registery() path and land in ``info`` on its own, mask/screen
-    permitting).
+def _find_named_registry(transport: EG4MetadataTransport, variable_name: str) -> Registry_Type | None:
+    """Which registry (HOLDING or INPUT), if either, already declares
+    ``variable_name`` as an ordinary registry_map entry — i.e. it decodes
+    through the normal process_registery() path and lands in ``info`` on its
+    own, mask/screen permitting.
 
-    Used to avoid re-deriving/re-declaring fields this module would
-    otherwise treat as synthetic when the underlying CSV has since been
-    updated to name the register directly — e.g. some EG4 variants document
-    holding register 19 as a proper ``device_type_code`` entry, in which
-    case there's nothing "synthetic" about it and this module should get out
-    of the way, while others still only have it as an unlabeled placeholder,
-    where this module's own derivation is the only way that value surfaces
-    at all. Checked per-transport rather than assumed either way, since this
-    varies by EG4 variant/CSV revision.
+    Used to decide whether a corrected value should just overwrite that
+    entry's (possibly wrong/truncated) value in place, or — when no CSV
+    variant names the field at all — needs its own synthetic declaration so
+    it's visible anywhere. Checked per-transport since this varies by EG4
+    variant/CSV revision (e.g. not every EG4 map has a single consolidated
+    'serial_number' field; some only split it across ten SN_<n>_... fields).
     """
-    try:
-        return any(e.variable_name == variable_name for e in transport.proto.get_registry_map(registry_type))
-    except Exception:
-        return False
+    for registry_type in (Registry_Type.HOLDING, Registry_Type.INPUT):
+        try:
+            if any(e.variable_name == variable_name for e in transport.proto.get_registry_map(registry_type)):
+                return registry_type
+        except Exception as e:
+            _log.debug(f"registery_type not found {e}" )
+            continue
+    return None
 
 
 def compute_eg4_post_process_fields(
@@ -671,20 +700,20 @@ def compute_eg4_post_process_fields(
     from a transport's ``post_process_data(info)`` override.
 
     Returns ``{}`` immediately (no-op) if this isn't an EG4 protocol.
-    Otherwise returns model/firmware_version/hardware_kind/is_gridboss/
-    device_type_code for inverters (from read_eg4_device_metadata(), which
-    does a handful of small register reads every call — see that function's
-    docstring), or just hardware_kind for batteries, plus corrected
-    batteryserialnumber_<N> values wherever the inverter's own input
-    registers declare them (see _read_battery_serial_fields()).
+    Otherwise returns model/firmware_version/hardware_kind/is_gridboss for
+    inverters (from read_eg4_device_metadata(), which does a handful of
+    small register reads every call — see that function's docstring), or
+    just hardware_kind for batteries, plus corrected batteryserialnumber_<N>
+    values wherever the inverter's own input registers declare them (see
+    _read_battery_serial_fields()).
 
-    ``device_type_code`` is dropped from the result if ``info`` already has
-    it (i.e. the CSV names holding register 19 directly and it decoded
-    normally this cycle) — model/is_gridboss still get computed as usual
-    (they need more than just that one register), but there's no reason to
-    re-expose a value that's already present un-synthesized. See
-    _registry_has_named_entry()'s docstring for why this can't be assumed
-    either way across EG4 variants.
+    ``device_type_code`` (holding register 19) is deliberately never part of
+    the result, even though ``read_eg4_device_metadata()`` reads it and uses
+    it internally to compute model/is_gridboss — that register already
+    decodes under its own name through the normal registry_map path on every
+    EG4 variant this module has seen, so re-exposing it here would produce a
+    duplicate "real" register-19 entry plus a "synthetic" one with the same
+    name and value.
 
     ``info`` (the already-decoded values for this cycle) is otherwise
     accepted for signature symmetry with the post_process_data(info) hook
@@ -719,8 +748,26 @@ def compute_eg4_post_process_fields(
         derived["model"] = metadata.model
         derived["firmware_version"] = metadata.firmware_version
         derived["is_gridboss"] = 1 if metadata.is_gridboss else 0
-        if metadata.device_type_code is not None and "device_type_code" not in info:
-            derived["device_type_code"] = metadata.device_type_code
+        # device_type_code (holding register 19) is deliberately NOT injected
+        # here — it already decodes under its own name through the normal
+        # registry_map path (its CSV documented_name resolves to variable_name
+        # 'device_type_code'), so adding it here would produce a duplicate
+        # "real" register-19 entry plus a "synthetic" one with the same value
+        # and name in the webUI. metadata.device_type_code is still read and
+        # used above/below to compute model/is_gridboss; it's just not
+        # separately exposed as its own synthetic field.
+        if metadata.serial:
+            # Unlike device_type_code, this DOES need injecting even when a
+            # CSV entry already names it ('serial_number' on the INPUT map,
+            # for variants that have one): protocol_settings' generic ASCII
+            # decoder is single-register-only (see read_eg4_serial_number()'s
+            # docstring), so that entry's own per-cycle decode truncates the
+            # 10-character serial to its first 2 characters. This overwrites
+            # that truncated value with the correctly-reassembled one from
+            # read_eg4_device_metadata() (which read_eg4_serial_number() feeds
+            # — see _read_inverter_metadata()), the same truncation-correction
+            # pattern _read_battery_serial_fields() uses for battery serials.
+            derived["serial_number"] = metadata.serial
     elif isinstance(metadata, EG4BatteryMetadata):
         derived["hardware_kind"] = metadata.hardware_kind
         # serial/model/firmware intentionally omitted here too — CANbus-only,
@@ -806,31 +853,46 @@ def _read_battery_serial_fields(transport: EG4MetadataTransport) -> dict[str, st
     return fields
 
 
-def eg4_synthetic_fields_metadata(transport: EG4MetadataTransport) -> list[tuple[str, str, float, str]]:
+def eg4_synthetic_fields_metadata(transport: EG4MetadataTransport) -> list[tuple[str, str, float, str, str]]:
     """Field declarations for compute_eg4_post_process_fields()'s output, in
-    the ``(variable_name, data_type, unit_mod, note)`` format
-    ``modbus_eg4_ll_s_tcp.synthetic_fields_metadata`` documents — used by
+    an ``(variable_name, data_type, unit_mod, note, registry_type)`` format —
+    the same ``(variable_name, data_type, unit_mod, note)`` shape
+    ``modbus_eg4_ll_s_tcp.synthetic_fields_metadata`` documents (used by
     TimescaleDB's wide-table schema registration so these columns are created
     ahead of time with the correct type, instead of being reported as
-    unexpected/missing extra_keys.
+    unexpected/missing extra_keys), plus a trailing ``registry_type`` string
+    ("holding" / "input", lowercase — matching ``DeviceRegisterView.registry_type``,
+    the ``ProtocolRegister.registry_type`` DB column, and the
+    ``/api/protocols/{protocol}/{registry_type}/table`` URL segment, rather
+    than the ``Registry_Type`` enum those consumers don't otherwise deal in)
+    so consumers that render per-registry views (e.g. the webUI's
+    Holding/Input tabs) can show each synthetic field only under the
+    registry it's actually extracted from, instead of duplicating every
+    synthetic field onto every tab. This 5th element is additive — existing
+    4-tuple-returning implementations (e.g. modbus_eg4_ll_s_tcp.py,
+    modbus_eg4_ll_s_rtu.py) remain valid; consumers should treat a missing
+    5th element as "registry-agnostic, show/register everywhere" rather
+    than assuming every synthetic_fields_metadata implementation supplies
+    one. ``registry_type`` reflects where the *source* registers for that
+    field live: HOLDING for model/firmware_version/is_gridboss/hardware_kind
+    (holding registers 0-1, 7-10, 19), INPUT for the corrected
+    batteryserialnumber_<N> fields (they correct an existing INPUT-map entry
+    in place).
 
     Returns ``[]`` if this isn't an EG4 protocol. For battery hardware, only
     'hardware_kind' is declared (the only field compute_eg4_post_process_fields
     actually produces for batteries); inverters additionally get model/
     firmware_version/is_gridboss and one entry per batteryserialnumber_<N>
-    field this protocol's INPUT map declares. device_type_code is included
-    too *unless* this transport's CSV already names holding register 19
-    directly (some EG4 variants document it as a proper 'device_type_code'
-    entry; when that's the case it decodes through the normal path and
-    declaring it here as well would just produce a duplicate "real" +
-    "synthetic" pair for the same field).
+    field this protocol's INPUT map declares. device_type_code (holding
+    register 19) is intentionally never declared here — see
+    compute_eg4_post_process_fields()'s docstring for why.
     """
     protocol_name: str = getattr(transport.proto, "protocol", "") or ""
     if not is_eg4_protocol(protocol_name):
         return []
 
-    fields: list[tuple[str, str, float, str]] = [
-        ("hardware_kind", "ASCII", 1.0, "Synthetic: 'battery' or 'inverter'."),
+    fields: list[tuple[str, str, float, str, str]] = [
+        ("hardware_kind", "ASCII", 1.0, "Synthetic: 'battery' or 'inverter'.", Registry_Type.HOLDING.name.lower()),
     ]
 
     is_battery: bool = False
@@ -841,12 +903,28 @@ def eg4_synthetic_fields_metadata(transport: EG4MetadataTransport) -> list[tuple
 
     if not is_battery:
         fields.extend([
-            ("model", "ASCII", 1.0, "Synthetic: model name derived from device type code and the HOLD_MODEL bitfield."),
-            ("firmware_version", "ASCII", 1.0, "Synthetic: assembled from holding registers 7-10."),
-            ("is_gridboss", "USHORT", 1.0, "Synthetic: 1 if device type code indicates a GridBOSS/MID device, else 0."),
+            ("model", "ASCII", 1.0, "Synthetic: model name derived from device type code and the HOLD_MODEL bitfield.", Registry_Type.HOLDING.name.lower()),
+            ("firmware_version", "ASCII", 1.0, "Synthetic: assembled from holding registers 7-10.", Registry_Type.HOLDING.name.lower()),
+            ("is_gridboss", "USHORT", 1.0, "Synthetic: 1 if device type code indicates a GridBOSS/MID device, else 0.", Registry_Type.HOLDING.name.lower()),
         ])
-        if not _registry_has_named_entry(transport, Registry_Type.HOLDING, "device_type_code"):
-            fields.append(("device_type_code", "USHORT", 1.0, "Synthetic: raw value of holding register 19."))
+
+        # serial_number: only declared here for EG4 variants whose CSV has
+        # no consolidated 'serial_number' field at all (some only split it
+        # across ten SN_<n>_... fields) — where one does exist, the value is
+        # corrected in place instead (see compute_eg4_post_process_fields()),
+        # and declaring it here too would duplicate that row, the same
+        # problem device_type_code had. Left untagged (registry-agnostic,
+        # shows on every tab) rather than guessing HOLDING or INPUT: without
+        # a named CSV entry to anchor it, read_eg4_serial_number() may end up
+        # sourcing it from either depending on which registers this variant
+        # and this cycle actually have available.
+        named_registry: Registry_Type | None = _find_named_registry(transport, "serial_number")
+        if named_registry is None:
+            fields.append((
+                "serial_number", "ASCII", 1.0,
+                "Synthetic: reassembled from the SN_<n>_... registers (see read_eg4_serial_number()).",
+                "",  # registry-agnostic — see comment above
+            ))
 
         try:
             registry_map: list[registry_map_entry] = transport.proto.get_registry_map(Registry_Type.INPUT)
@@ -857,6 +935,7 @@ def eg4_synthetic_fields_metadata(transport: EG4MetadataTransport) -> list[tuple
                         "ASCII",
                         1.0,
                         "Corrected full serial — protocol_settings' ASCII decoder truncates this field to 2 characters.",
+                        Registry_Type.INPUT.name.lower(),
                     ))
         except Exception:
             _log.debug(

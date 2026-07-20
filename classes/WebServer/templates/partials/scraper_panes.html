@@ -34,19 +34,6 @@
   {% if s.key == "protocol_version" %}{% set ns.protocol_setting = s %}{% endif %}
   {% if s.key == "log_level" %}{% set ns.loglevel_setting = s %}{% endif %}
 {% endfor %}
-
-{%- macro is_bool(s) -%}
-  {%- set v = (s.value_staged or s.default_value or '') | lower | trim -%}
-  {%- set k = s.key | lower -%}
-  {%- if v in ('true', 'false') -%}true
-  {%- elif k.startswith('enable_') or k.startswith('send_')
-        or k.startswith('include_') or k.startswith('use_')
-        or k in ('write_enabled', 'force_float', 'json', 'console',
-                 'discovery_enabled', 'migrate_data', 'pretty_print',
-                 'append_mode', 'async_mode') -%}true
-  {%- else -%}false
-  {%- endif -%}
-{%- endmacro -%}
 <div class="col-span-12 flex gap-4" style="height: calc(100vh - 56px); overflow: hidden;">
 
   <aside class="flex-shrink-0 overflow-y-auto
@@ -243,107 +230,7 @@
     </div>
 
     <div class="space-y-0.5" id="settings-rows" role="table" aria-label="Device settings for {{ device.name }}">
-      <div class="grid grid-cols-[1.5rem_1fr_7rem_5rem] gap-1 text-mpg-200 text-xs
-                  uppercase tracking-wide px-1 pb-1 border-b border-mpg-700"
-           role="row">
-        <span role="columnheader" aria-label="Active">A</span>
-        <span role="columnheader">Key</span>
-        <span role="columnheader">Value</span>
-        <span role="columnheader" class="text-accent" title="Default / fallback value from transport module">Default</span>
-      </div>
-
-      {% for s in settings %}
-      {% if s.key not in ("transport", "bridge", "protocol_version", "log_level", "analyze_protocol", "analyze_protocol_save_load") and (not s.is_orphan or s.is_active) and not (s.key == "write_type" and not ns_w.write_enabled) %}
-      <div class="grid grid-cols-[1.5rem_1fr_7rem_5rem] gap-1 items-center px-1 py-0.5
-                  rounded text-xs
-                  {% if s.is_dirty %}bg-dirty/10 border-l-2 border-dirty{% endif %}
-                  {% if s.is_orphan %}bg-red-900/20{% endif %}
-                  hover:bg-mpg-700/50 group"
-           role="row"
-           aria-label="{{ s.key }}">
-
-        <div role="cell" class="{% if not s.is_active %}opacity-40{% endif %}">
-          <input type="checkbox"
-                 class="accent-accent w-3 h-3"
-                 {% if s.is_active %}checked{% endif %}
-                 aria-label="Include {{ s.key }} in config"
-                 hx-patch="/api/devices/{{ device.name }}/settings/{{ s.id }}"
-                 hx-ext="json-enc"
-                 hx-on:htmx:config-request="event.detail.parameters = {is_active: this.checked}"
-                 hx-swap="none"
-                 hx-trigger="change">
-        </div>
-
-        <div role="cell"
-             class="font-mono text-mpg-200 truncate {% if s.is_orphan %}opacity-60{% endif %} {% if not s.is_active %}opacity-70{% endif %}"
-             title="{{ s.key }}{% if s.default_value %} (default: {{ s.default_value }}){% endif %}">
-          {{ s.key }}
-          {% if s.is_orphan %}
-          <span class="text-danger text-xs ml-1" title="Orphaned key">*</span>
-          {% endif %}
-          {% if s.is_dirty %}
-          <span class="dirty-indicator text-dirty text-xs ml-1" title="Unsaved change">*</span>
-          {% endif %}
-        </div>
-
-        <div role="cell">
-          {% if is_bool(s) == 'true' %}
-          {# Boolean: select disabled when row is inactive — checkbox must be  #}
-          {# checked first to enable editing, which then triggers the commit.  #}
-          <select class="w-full bg-mpg-900 border border-mpg-600 rounded px-1 py-0.5
-                         font-mono text-xs
-                         focus:outline-none focus:ring-1 focus:ring-accent
-                         {% if s.is_active %}text-mpg-100{% else %}text-mpg-200 opacity-70{% endif %}"
-                  {% if not s.is_active %}disabled{% endif %}
-                  aria-label="Value for {{ s.key }}"
-                  hx-patch="/api/devices/{{ device.name }}/settings/{{ s.id }}"
-                  hx-ext="json-enc"
-                  name="value_staged"
-                  hx-swap="none"
-                  hx-trigger="change">
-            {% set cur = (s.value_staged or s.default_value or 'false') | lower | trim %}
-            <option value="true"  {% if cur == 'true'  %}selected{% endif %}>true</option>
-            <option value="false" {% if cur == 'false' %}selected{% endif %}>false</option>
-          </select>
-          {% else %}
-          {# Non-boolean: disabled when inactive; show default value so cell   #}
-          {# is never blank — mirrors the DEFAULT column.                      #}
-          <input type="text"
-                 class="w-full bg-mpg-900 border border-mpg-600 rounded px-1 py-0.5
-                        font-mono text-xs
-                        focus:outline-none focus:ring-1 focus:ring-accent
-                        {% if s.is_active %}text-mpg-100{% else %}text-mpg-200 opacity-70{% endif %}"
-                 {% if not s.is_active %}readonly tabindex="-1"{% endif %}
-                 value="{{ s.value_staged or (s.default_value if not s.is_active else '') }}"
-                 placeholder="{{ s.default_value or '' }}"
-                 aria-label="Value for {{ s.key }}"
-                 hx-patch="/api/devices/{{ device.name }}/settings/{{ s.id }}"
-                 hx-ext="json-enc"
-                 name="value_staged"
-                 hx-swap="none"
-                 hx-trigger="change delay:400ms">
-          {% endif %}
-        </div>
-
-        <div role="cell" class="self-center min-w-0">
-          {% if s.default_value and s.default_value.strip() %}
-          <button type="button"
-                  class="setting-help-btn font-mono text-xs text-accent
-                         hover:underline focus:outline-none focus:ring-1
-                         focus:ring-accent rounded truncate max-w-full block
-                         text-left leading-tight"
-                  data-key="{{ s.key }}"
-                  data-default="{{ s.default_value }}"
-                  aria-label="Help for {{ s.key }} (default: {{ s.default_value }})">
-            {{ s.default_value }}
-          </button>
-          {% else %}
-          <span class="font-mono text-xs text-mpg-600 leading-tight select-none">—</span>
-          {% endif %}
-        </div>        
-      </div>
-      {% endif %}
-      {% endfor %}
+      {% include "partials/settings_rows.html" %}
     </div>
   </aside>
 
@@ -589,10 +476,21 @@
   });
 
   // ── Value column population ───────────────────────────────────────────────
-  // populateValues(values) fills every [data-value-key] cell in the visible
-  // table from a {variable_name: value_string} dict.  Used by both the
-  // immediate load path and the Refresh Values wait path.
-  function populateValues(values) {
+  // populateValues(values, failedKeys) fills every [data-value-key] cell in
+  // the visible table from a {variable_name: value_string} dict, and applies
+  // a red (disabled) or amber (failing-but-not-yet-disabled) row highlight
+  // from a {variable_name: "disabled"|"failing"} dict. Used by the immediate
+  // load path, the Refresh Values wait path, and the failure-status poll.
+  //
+  // The highlight classes are removed unconditionally on every row before
+  // being re-applied, so a register that has recovered (missing from
+  // failedKeys on this call) simply loses its highlight — no separate
+  // "clear" codepath needed.
+  const FAIL_ROW_CLASSES = ['bg-red-900/30'];
+  const FAILING_ROW_CLASSES = ['bg-amber-900/20'];
+
+  function populateValues(values, failedKeys) {
+    failedKeys = failedKeys || {};
     let filled = 0;
     document.querySelectorAll('[data-value-key]').forEach(cell => {
       const key = cell.dataset.valueKey;
@@ -608,23 +506,55 @@
         cell.classList.remove('text-green-600');
         cell.classList.add('text-mpg-500');
       }
+
+      // Row-level failure highlight for the associated register.
+      const row = cell.closest('[role=row]') || cell.closest('tr');
+      if (row) {
+        row.classList.remove(...FAIL_ROW_CLASSES, ...FAILING_ROW_CLASSES);
+        row.removeAttribute('data-register-status');
+        const status = key ? failedKeys[key] : undefined;
+        if (status === 'disabled') {
+          row.classList.add(...FAIL_ROW_CLASSES);
+          row.dataset.registerStatus = 'disabled';
+          row.title = 'Register read repeatedly failing — currently disabled';
+        } else if (status === 'failing') {
+          row.classList.add(...FAILING_ROW_CLASSES);
+          row.dataset.registerStatus = 'failing';
+          row.title = 'Register read failing — not yet disabled';
+        } else {
+          row.removeAttribute('title');
+        }
+      }
     });
     return filled;
   }
 
   // Fetch last-known values immediately (non-blocking) and populate cells.
-  // Called on page load and each time the HTMX table swap completes.
+  // Called on page load, each time the HTMX table swap completes, and on
+  // the periodic poll below so recovered registers lose their highlight
+  // without requiring the user to trigger a refresh.
   function loadExistingValues() {
     const deviceName = JSON.parse('{{ device.name | tojson | safe }}');
     fetch(`/api/devices/${encodeURIComponent(deviceName)}/last-values`)
       .then(r => r.json())
       .then(resp => {
         if (resp.status === 'ok' && resp.values) {
-          populateValues(resp.values);
+          populateValues(resp.values, resp.failed_keys);
         }
       })
       .catch(() => {}); // silent — values are cosmetic, never block the UI
   }
+
+  // Poll periodically so the failed/disabled highlight updates on its own —
+  // register failures and recoveries happen on the scrape cycle in the
+  // background, independent of any user action on this page.
+  // This partial is re-rendered wholesale on every HTMX navigation between
+  // device pages (see pages.py:device_page), so a naive setInterval here
+  // would stack a new timer on top of any still-running ones. Stash the
+  // handle on window and clear it first so only one poll is ever active.
+  const REGISTER_STATUS_POLL_MS = 20000;
+  if (window.__mpgRegisterStatusPoll) clearInterval(window.__mpgRegisterStatusPoll);
+  window.__mpgRegisterStatusPoll = setInterval(loadExistingValues, REGISTER_STATUS_POLL_MS);
 
   // Auto-load values when the protocol table HTMX swap completes.
   // The table is loaded into #protocol-table-container via HTMX tab clicks,
@@ -669,7 +599,7 @@
         } else if (resp.status !== 'ok' || !resp.values) {
           if (label) label.textContent = 'No data received';
         } else {
-          const filled = populateValues(resp.values);
+          const filled = populateValues(resp.values, resp.failed_keys);
           if (label) label.textContent = `✓ ${filled} values`;
           // Reset button label after 3s
           setTimeout(() => {

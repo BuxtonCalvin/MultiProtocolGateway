@@ -550,7 +550,7 @@ class transport_base:
         self._last_cycle_result.has_data = bool(data)
 
     @property
-    def synthetic_fields_metadata(self) -> list[tuple[str, str, float, str]]:
+    def synthetic_fields_metadata(self) -> list[tuple[str, str, float, str, str]]:
         """Scheduling path: All (Sequential, Concurrent, Interleaved) — consumed via post_process_data/finish_cycle_tracking regardless of read_mode; also read directly by TimescaleDB's init_bridge (setup, not per-cycle).
 
         Rich metadata for fields injected by ``post_process_data``.
@@ -562,7 +562,7 @@ class transport_base:
         type-inference ambiguity that would arise if columns were created on
         the fly during ``_validate_wide_row``.
 
-        Returns a list of ``(variable_name, data_type, unit_mod, note)``
+        Returns a list of ``(variable_name, data_type, unit_mod, note, Registry_Type)``
         tuples matching the signature of ``_extract_metric_names`` output so
         the two sources can be concatenated directly before being passed to
         ``_ensure_columns_for_metrics``.
@@ -577,13 +577,13 @@ class transport_base:
         Example::
 
             @property
-            def synthetic_fields_metadata(self) -> list[tuple[str, str, float, str]]:
+            def synthetic_fields_metadata(self) -> list[tuple[str, str, float, str, Registry_Type]]:
                 return [
-                    ("cell_voltage_max_v",   "FLOAT",  1.0, "Highest cell voltage V"),
-                    ("cell_voltage_min_v",   "FLOAT",  1.0, "Lowest cell voltage V"),
-                    ("cell_voltage_diff_mv", "FLOAT",  1.0, "Cell voltage spread mV"),
-                    ("balancing_state",      "USHORT", 1.0, "0=Idle 1=Balancing 2=Finished"),
-                    ("balancing_state_text", "TEXT",   1.0, "Balancing state label"),
+                    ("cell_voltage_max_v",   "FLOAT",  1.0, "Highest cell voltage V", "HOLDING"),
+                    ("cell_voltage_min_v",   "FLOAT",  1.0, "Lowest cell voltage V", "HOLDING"),
+                    ("cell_voltage_diff_mv", "FLOAT",  1.0, "Cell voltage spread mV", "HOLDING"),
+                    ("balancing_state",      "USHORT", 1.0, "0=Idle 1=Balancing 2=Finished", "HOLDING"),
+                    ("balancing_state_text", "TEXT",   1.0, "Balancing state label", "HOLDING"),
                 ]
         """
         return []
