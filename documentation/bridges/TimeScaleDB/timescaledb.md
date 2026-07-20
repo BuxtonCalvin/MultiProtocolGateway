@@ -70,6 +70,62 @@ When data becomes stale:
 
 ## 4. Database Schemas
 
+```mermaid
+erDiagram
+    ProtocolRegistry {
+        int protocol_id PK
+        text protocol_name UK
+        text wide_table_name
+        int metric_count
+        text rollup_prefix
+        boolean rollup_enabled
+        boolean rollup_setup_complete
+        datetime last_refresh_at
+    }
+
+    MetricCatalog {
+        int catalog_id PK
+        int protocol_id FK
+        text metric_name
+        text clean_column_name
+        text data_type
+        float unit_mod
+        text notes
+    }
+
+    DeviceInfo {
+        int device_info_id PK
+        int protocol_id FK
+        text device_identifier
+        text device_serial_number
+        text device_name
+        text device_manufacturer
+        text device_model
+        text transport UK
+    }
+
+    DeviceMetricsNarrow {
+        datetime m_time PK, FK
+        int device_info_id PK, FK
+        text metric_name PK
+        float metric_value
+        text metric_ascii
+    }
+
+    DeviceMetricsWide {
+        datetime m_time PK, FK
+        int device_info_id PK, FK
+        float dynamic_metric_columns
+    }
+
+    ProtocolRegistry ||--o{ MetricCatalog : "has metrics"
+    ProtocolRegistry ||--o{ DeviceInfo : "has devices"
+    DeviceInfo ||--o{ DeviceMetricsNarrow : "time-series rows"
+    DeviceInfo ||--o{ DeviceMetricsWide : "wide rows (metric_count &lt;= 200)"
+    ProtocolRegistry ||--o{ DeviceMetricsWide : "creates per-protocol table"
+    Application ||--o{ DeviceMetricsWide : "adds dynamic metric columns"
+```
+
 ### 4.1 Narrow Table
 
 One row per metric per timestamp.

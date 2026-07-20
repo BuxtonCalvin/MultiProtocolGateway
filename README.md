@@ -59,6 +59,8 @@ MPG is purpose-built for solar inverters, battery management systems (BMS), ener
 
 MPG ships with a **FastAPI + Jinja2 web server** on port **1717**. The server is not a simple settings editor — it is the primary interface for managing the entire gateway lifecycle.
 
+[WebUI Architecture](documentation/architecture/mermaid-diagrams.md#sequence-diagram--web-ui-configuration-commit)
+
 ### Dashboard — Device Overview
 
 The index page lists every configured **scraper** (input device) and **bridge** (output transport) in a single panel. Each entry shows its transport class, connection host/port, and real-time connection status. From here you can navigate directly into any device's settings or protocol editor.
@@ -173,6 +175,7 @@ Here are overviews of two database bridges:
 - TimeScale DB [![Timescale DB](https://img.shields.io/badge/Postgres-%23316192.svg?logo=postgresql&logoColor=white)](https://timescale.com)
   - Readme
     [`Timescale DB`](documentation/bridges/TimeScaleDB/timescaledb.md)
+    [Timescale DB Architecture](documentation/architecture/mermaid-diagrams.md#timescaledb-telemetry-schema-created-by-timescaledb-bridge)
 
 Here are the overviews of the MQTT and JSON bridges
 
@@ -242,6 +245,8 @@ Hardware Device
 ```
 
 Each transport is independently configurable with its own scan interval, log level, variable mask, and protocol version. A scraper and bridge sharing the same `device_name` are linked — the scraper reads data, the bridge publishes it.
+
+[Complete Transport Architecture](documentation/architecture/mermaid-diagrams.md#2-sequence-diagram--scrape-cycle--bridge-output)
 
 ### Transport
 
