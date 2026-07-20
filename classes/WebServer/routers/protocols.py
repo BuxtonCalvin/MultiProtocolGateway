@@ -194,7 +194,7 @@ async def protocol_table_partial(
         if gateway is not None:
             transport = gateway.get_transport(f"transport.{device_name}")
             if transport is not None:
-                synthetic: List[DeviceRegisterView] = build_synthetic_rows(transport)
+                synthetic: List[DeviceRegisterView] = build_synthetic_rows(transport, registry_type=registry_type)
                 if synthetic:
                     data["rows"] = list(data.get("rows", [])) + synthetic
 

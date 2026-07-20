@@ -550,7 +550,7 @@ class transport_base:
         self._last_cycle_result.has_data = bool(data)
 
     @property
-    def synthetic_fields_metadata(self) -> list[tuple[str, str, float, str, Registry_Type]]:
+    def synthetic_fields_metadata(self) -> list[tuple[str, str, float, str, str]]:
         """Scheduling path: All (Sequential, Concurrent, Interleaved) — consumed via post_process_data/finish_cycle_tracking regardless of read_mode; also read directly by TimescaleDB's init_bridge (setup, not per-cycle).
 
         Rich metadata for fields injected by ``post_process_data``.

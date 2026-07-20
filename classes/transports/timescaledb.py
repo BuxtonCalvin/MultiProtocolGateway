@@ -1229,7 +1229,9 @@ class timescaledb(transport_base):
                         Keyed by Registry_Type, values are lists of
                         registry_map_entry objects.
             synthetic_fields: Optional list of (variable_name, data_type,
-                        unit_mod, note) tuples from
+                        unit_mod, note) tuples — or (variable_name, data_type,
+                        unit_mod, note, registry_type) tuples, the trailing
+                        registry_type ignored here — from
                         transport_base.synthetic_fields_metadata.  These are
                         appended to the registry-derived metrics so that
                         columns computed by post_process_data are registered
@@ -1275,8 +1277,14 @@ class timescaledb(transport_base):
 
         # Append transport-declared synthetic fields, skipping any that
         # collide with registry-derived names (registry takes precedence).
+        # Tuples may be 4-length (legacy: variable_name, data_type,
+        # unit_mod, note) or 5-length (with a trailing registry_type tag —
+        # see transport_base.synthetic_fields_metadata /
+        # eg4_metadata.eg4_synthetic_fields_metadata); the registry tag
+        # isn't needed for schema registration, so it's simply ignored here
+        # via the `*_` catch-all rather than requiring an exact tuple length.
         if synthetic_fields:
-            for variable_name, data_type, unit_mod, note in synthetic_fields:
+            for variable_name, data_type, unit_mod, note, *_ in synthetic_fields:
                 if variable_name in seen_names:
                     self._log.debug(
                         f"_extract_metric_names: synthetic field '{variable_name}' "

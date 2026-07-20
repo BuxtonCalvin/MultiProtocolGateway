@@ -400,7 +400,7 @@ class modbus_base(transport_base):
         return info
 
     @property
-    def synthetic_fields_metadata(self) -> list[tuple[str, str, float, str, Registry_Type]]:
+    def synthetic_fields_metadata(self) -> list[tuple[str, str, float, str, str]]:
         """
         Scheduling path: All (Sequential, Concurrent, Interleaved).
 
@@ -411,11 +411,15 @@ class modbus_base(transport_base):
         the same ``(variable_name, data_type, unit_mod, note)`` shape
         TimescaleDB's wide-table schema registration expects (see
         ``modbus_eg4_ll_s_tcp.synthetic_fields_metadata`` for the reference
-        this matches), plus a trailing ``registry_type`` so per-registry
-        consumers (e.g. the webUI's Holding/Input tabs) can show each
-        synthetic field only under the registry it's actually extracted
-        from, rather than duplicating it onto every registry's view. Returns
-        ``[]`` for non-EG4 protocols or when disabled.
+        this matches), plus a trailing ``registry_type`` string
+        ("holding" / "input", lowercase) so per-registry consumers (e.g. the
+        webUI's Holding/Input tabs) can show each synthetic field only under
+        the registry it's actually extracted from, rather than duplicating
+        it onto every registry's view. This 5th element is additive —
+        consumers should treat entries without one (plain 4-tuples, as
+        returned by e.g. ``modbus_eg4_ll_s_tcp``/``modbus_eg4_ll_s_rtu``) as
+        registry-agnostic rather than assuming every implementation supplies
+        one. Returns ``[]`` for non-EG4 protocols or when disabled.
 
         Subclasses that override this must call
         ``super().synthetic_fields_metadata`` and merge if they want this

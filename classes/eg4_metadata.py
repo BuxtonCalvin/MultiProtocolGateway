@@ -815,18 +815,27 @@ def _read_battery_serial_fields(transport: EG4MetadataTransport) -> dict[str, st
     return fields
 
 
-def eg4_synthetic_fields_metadata(transport: EG4MetadataTransport) -> list[tuple[str, str, float, str, Registry_Type]]:
+def eg4_synthetic_fields_metadata(transport: EG4MetadataTransport) -> list[tuple[str, str, float, str, str]]:
     """Field declarations for compute_eg4_post_process_fields()'s output, in
     an ``(variable_name, data_type, unit_mod, note, registry_type)`` format —
     the same ``(variable_name, data_type, unit_mod, note)`` shape
     ``modbus_eg4_ll_s_tcp.synthetic_fields_metadata`` documents (used by
     TimescaleDB's wide-table schema registration so these columns are created
     ahead of time with the correct type, instead of being reported as
-    unexpected/missing extra_keys), plus a trailing ``registry_type`` so
-    consumers that render per-registry views (e.g. the webUI's Holding/Input
-    tabs) can show each synthetic field only under the registry it's actually
-    extracted from, instead of duplicating every synthetic field onto every
-    tab. ``registry_type`` reflects where the *source* registers for that
+    unexpected/missing extra_keys), plus a trailing ``registry_type`` string
+    ("holding" / "input", lowercase — matching ``DeviceRegisterView.registry_type``,
+    the ``ProtocolRegister.registry_type`` DB column, and the
+    ``/api/protocols/{protocol}/{registry_type}/table`` URL segment, rather
+    than the ``Registry_Type`` enum those consumers don't otherwise deal in)
+    so consumers that render per-registry views (e.g. the webUI's
+    Holding/Input tabs) can show each synthetic field only under the
+    registry it's actually extracted from, instead of duplicating every
+    synthetic field onto every tab. This 5th element is additive — existing
+    4-tuple-returning implementations (e.g. modbus_eg4_ll_s_tcp.py,
+    modbus_eg4_ll_s_rtu.py) remain valid; consumers should treat a missing
+    5th element as "registry-agnostic, show/register everywhere" rather
+    than assuming every synthetic_fields_metadata implementation supplies
+    one. ``registry_type`` reflects where the *source* registers for that
     field live: HOLDING for model/firmware_version/is_gridboss/hardware_kind
     (holding registers 0-1, 7-10, 19), INPUT for the corrected
     batteryserialnumber_<N> fields (they correct an existing INPUT-map entry
@@ -844,8 +853,8 @@ def eg4_synthetic_fields_metadata(transport: EG4MetadataTransport) -> list[tuple
     if not is_eg4_protocol(protocol_name):
         return []
 
-    fields: list[tuple[str, str, float, str, Registry_Type]] = [
-        ("hardware_kind", "ASCII", 1.0, "Synthetic: 'battery' or 'inverter'.", Registry_Type.HOLDING),
+    fields: list[tuple[str, str, float, str, str]] = [
+        ("hardware_kind", "ASCII", 1.0, "Synthetic: 'battery' or 'inverter'.", Registry_Type.HOLDING.name.lower()),
     ]
 
     is_battery: bool = False
@@ -856,9 +865,9 @@ def eg4_synthetic_fields_metadata(transport: EG4MetadataTransport) -> list[tuple
 
     if not is_battery:
         fields.extend([
-            ("model", "ASCII", 1.0, "Synthetic: model name derived from device type code and the HOLD_MODEL bitfield.", Registry_Type.HOLDING),
-            ("firmware_version", "ASCII", 1.0, "Synthetic: assembled from holding registers 7-10.", Registry_Type.HOLDING),
-            ("is_gridboss", "USHORT", 1.0, "Synthetic: 1 if device type code indicates a GridBOSS/MID device, else 0.", Registry_Type.HOLDING),
+            ("model", "ASCII", 1.0, "Synthetic: model name derived from device type code and the HOLD_MODEL bitfield.", Registry_Type.HOLDING.name.lower()),
+            ("firmware_version", "ASCII", 1.0, "Synthetic: assembled from holding registers 7-10.", Registry_Type.HOLDING.name.lower()),
+            ("is_gridboss", "USHORT", 1.0, "Synthetic: 1 if device type code indicates a GridBOSS/MID device, else 0.", Registry_Type.HOLDING.name.lower()),
         ])
 
         try:
@@ -870,7 +879,7 @@ def eg4_synthetic_fields_metadata(transport: EG4MetadataTransport) -> list[tuple
                         "ASCII",
                         1.0,
                         "Corrected full serial — protocol_settings' ASCII decoder truncates this field to 2 characters.",
-                        Registry_Type.INPUT,
+                        Registry_Type.INPUT.name.lower(),
                     ))
         except Exception:
             _log.debug(
