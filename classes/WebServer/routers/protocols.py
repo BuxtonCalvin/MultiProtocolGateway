@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
 from typing import Any, List, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -38,6 +39,7 @@ from ..services.protocol_service import (
     get_protocol_json,
     get_protocol_registers,
     get_protocols_for_device,
+    register_row_sort_key,
     toggle_register_field,
     update_protocol_register_field,
 )
@@ -162,8 +164,8 @@ async def protocol_table_partial(
                 .filter(ProtocolRegister.protocol_name == protocol_name)
                 .first()
             )
-        protocol_group = row[0] if row else ""
-        config_dir = getattr(request.app.state, "config_dir", None)
+        protocol_group: Any = row[0] if row else ""
+        config_dir: Path = getattr(request.app.state, "config_dir")
         json_data, is_override = get_protocol_json(
             request.app.state.protocols_dir, protocol_group, protocol_name,
             config_dir=config_dir,
@@ -190,13 +192,20 @@ async def protocol_table_partial(
     # endpoints, and are never written to mask/screen files.  The transport
     # is looked up by name via the gateway so the metadata stays live.
     if device_name:
-        gateway = getattr(request.app.state, "gateway", None)
+        gateway: Any = getattr(request.app.state, "gateway", None)
         if gateway is not None:
-            transport = gateway.get_transport(f"transport.{device_name}")
+            transport: Any = gateway.get_transport(f"transport.{device_name}")
             if transport is not None:
                 synthetic: List[DeviceRegisterView] = build_synthetic_rows(transport, registry_type=registry_type)
                 if synthetic:
                     data["rows"] = list(data.get("rows", [])) + synthetic
+
+    # Initial table order: synthetic metrics first, then anything with a
+    # W/M/S checkbox selected, then everything else — alphabetical by
+    # variable_name within each group. get_protocol_registers() itself still
+    # orders by register_address (that's what pagination/offset math above
+    # relies on); this re-sorts only the page actually being displayed.
+    data["rows"] = sorted(data.get("rows", []), key=register_row_sort_key)
 
     return request.app.state.templates.TemplateResponse(
         request=request,
@@ -215,12 +224,12 @@ async def save_protocol_json(request: Request, protocol_group: str, protocol_nam
     """Save updated JSON config for a protocol directly to disk."""
 
     try:
-        body = await request.json()
+        body: Any = await request.json()
     except Exception:
         return JSONResponse({"status": "error", "detail": "Invalid JSON body"}, status_code=400)
-    config_dir = getattr(request.app.state, "config_dir", request.app.state.protocols_dir / protocol_group)
+    config_dir: Path = getattr(request.app.state, "config_dir", request.app.state.protocols_dir / protocol_group)
     config_dir.mkdir(parents=True, exist_ok=True)
-    json_path = config_dir / f"{protocol_name}.json"
+    json_path: Path = config_dir / f"{protocol_name}.json"
     try:
         json_path.write_text(json.dumps(body, indent=2, ensure_ascii=False), encoding="utf-8")
     except Exception as exc:

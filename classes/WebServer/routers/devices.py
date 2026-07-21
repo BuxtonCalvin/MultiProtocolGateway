@@ -209,7 +209,7 @@ def delete_orphans(payload: OrphanDeleteRequest, db: Session = Depends(get_sessi
 @router.get("/connection-status")
 def connection_status(request: Request) -> dict[str, bool]:
     """Returns live connection status for all transports from the gateway instance."""
-    gateway: str | None = getattr(request.app.state, "gateway", None)
+    gateway: Any | None = getattr(request.app.state, "gateway", None)
     result: dict[str, bool] = get_transport_connection_status(gateway)
     if result:
         _log.debug("connection-status keys: %s", list(result.keys()))
@@ -576,10 +576,10 @@ async def device_last_values(request: Request, device_name: str) -> JSONResponse
     ``bridge.write_data()`` call — the authoritative point where a cycle
     is confirmed complete and bridge-bound.
     """
-    gateway = getattr(request.app.state, "gateway", None)
+    gateway: Any | None = getattr(request.app.state, "gateway", None)  # gateway object
     if gateway is None:
         return JSONResponse({"values": {}, "status": "no_gateway"})
-    transport = gateway.get_transport(f"transport.{device_name}")
+    transport: Any = gateway.get_transport(f"transport.{device_name}")  # transport object
     if transport is None:
         return JSONResponse({"values": {}, "status": "not_found"})
 
@@ -605,10 +605,10 @@ async def device_last_values_wait(request: Request, device_name: str) -> JSONRes
     """
 
     timeout: float = 90.0
-    gateway = getattr(request.app.state, "gateway", None)
+    gateway: Any | None = getattr(request.app.state, "gateway", None)  # gateway object
     if gateway is None:
         return JSONResponse({"values": {}, "status": "no_gateway"})
-    transport = gateway.get_transport(f"transport.{device_name}")
+    transport: Any = gateway.get_transport(f"transport.{device_name}")  # transport object
     if transport is None:
         return JSONResponse({"values": {}, "status": "not_found"})
 
