@@ -1,5 +1,5 @@
 {
-  "_comment": "Default values for every known setting key, grouped by transport class name. Edit this file to change defaults shown in the UI. The scanner merges these with live AST-scanned keys on every startup so the file stays in sync automatically.",
+  "_comment": "Default values for every known setting key, grouped by transport class name. Edit this file to change defaults shown in the UI. The scanner merges these with live AST-scanned keys on every startup so the file stays in sync automatically. A transport can opt out of a key it would otherwise inherit via $extends by listing it with a '--' prefix instead of a value, e.g. \"--address\": \"\" removes the inherited 'address' key.",
   "_base": {
     "bridge": "",
     "device_location": "",
@@ -59,14 +59,14 @@
     "telegram_chat_ids": "",
     "telegram_enabled": "false"
   },
-   "transport_base": {
+  "transport_base": {
     "$extends": "_base"
-  },  
+  },
   "modbus_base": {
     "$extends": "_modbus_base"
   },
-   "canbus": {
-    "$extends": "_base",    
+  "canbus": {
+    "$extends": "_base",
     "batch_size": "40",
     "baudrate": "500000",
     "bitrate": "500000",
@@ -95,7 +95,7 @@
   },
   "modbus_eg4_ll_s_tcp": {
     "$extends": "_modbus_base",
-    "--address": "",    
+    "--address": "",
     "host": "",
     "port": "502"
   },
@@ -115,7 +115,7 @@
   },
   "modbus_tls": {
     "$extends": "_modbus_base",
-    "--address": "",    
+    "--address": "",
     "certfile": "",
     "host": "",
     "hostname": "",
@@ -123,7 +123,7 @@
   },
   "modbus_udp": {
     "$extends": "_modbus_base",
-    "--address": "",    
+    "--address": "",
     "host": "",
     "port": "502"
   },
@@ -142,7 +142,7 @@
     "variable_screen": ""
   },
   "serial_pylon": {
-    "$extends": "_base",    
+    "$extends": "_base",
     "address": "0",
     "batch_size": "40",
     "baudrate": "9600",
@@ -152,7 +152,7 @@
     "variable_mask": "",
     "variable_screen": ""
   },
-    "modbus_pace": {
+  "modbus_pace": {
     "$extends": "_modbus_base",
     "baudrate": "9600",
     "bytesize": "8",
@@ -179,7 +179,7 @@
     "transport": "",
     "batch_size": "40"
   },
-    "serial_frame_client": {
+  "serial_frame_client": {
     "batch_size": "40",
     "bridge": "",
     "device_location": "",
@@ -226,7 +226,7 @@
     "use_utc_timestamp": "False",
     "username": "",
     "--write_enabled": "false",
-    "--write_type": ""    
+    "--write_type": ""
   },
   "influxdb3_out": {
     "auto_create_database": "true",
@@ -258,7 +258,7 @@
     "use_utc_timestamp": "",
     "username": "",
     "--write_enabled": "false",
-    "--write_type": ""    
+    "--write_type": ""
   },
   "mqtt": {
     "base_topic": "home/device",
@@ -277,8 +277,8 @@
     "reconnect_delay": "7",
     "username": "",
     "--write_enabled": "false",
-    "--write_type": "" 
-  },  
+    "--write_type": ""
+  },
   "json_out": {
     "append_mode": "False",
     "include_device_info": "True",
@@ -288,7 +288,7 @@
     "use_utc_timestamp": "False",
     "save_file": "True",
     "--write_enabled": "false",
-    "--write_type": ""     
+    "--write_type": ""
   },
   "timescaledb": {
     "auto_refresh_interval": "21600",
@@ -320,6 +320,7 @@
     "username": "",
     "--write_enabled": "false",
     "write_requires_complete_cycle": "true",
-    "--write_type": ""  
+    "--write_type": "",
+    "device_name": "TimescaleDB MPG Bridge"
   }
 }

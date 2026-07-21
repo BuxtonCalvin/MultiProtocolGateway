@@ -166,7 +166,7 @@ class modbus_eg4_ll_s_rtu(modbus_rtu):
     # modbus_base / transport_base hook: post-connection startup read
     # ------------------------------------------------------------------
     @property
-    def synthetic_fields_metadata(self) -> list[tuple[str, str, float, str]]:
+    def synthetic_fields_metadata(self) -> list[tuple[str, str, float, str, str]]:
         """Declare data types for fields injected by post_process_data.
 
         Used by TimescaleDB init_bridge to create wide table columns with
@@ -177,11 +177,11 @@ class modbus_eg4_ll_s_rtu(modbus_rtu):
         data_type strings match Data_Type enum names in protocol_settings.
         """
         return [
-            ("cell_voltage_max_v",   "FLOAT32",  1.0, "Highest individual cell voltage (V)"),
-            ("cell_voltage_min_v",   "FLOAT32",  1.0, "Lowest individual cell voltage (V)"),
-            ("cell_voltage_diff_v",  "FLOAT32",  1.0, "Cell voltage spread max-min (V)"),
-            ("balancing_state",      "USHORT",   1.0, "0=Idle  1=Balancing  2=Finished"),
-            ("balancing_state_text", "ASCII",    1.0, "Human-readable balancing state"),
+            ("cell_voltage_max_v",   "FLOAT32",  1.0, "Highest individual cell voltage (V)", "holding"),
+            ("cell_voltage_min_v",   "FLOAT32",  1.0, "Lowest individual cell voltage (V)", "holding"),
+            ("cell_voltage_diff_v",  "FLOAT32",  1.0, "Cell voltage spread max-min (V)", "holding"),
+            ("balancing_state",      "USHORT",   1.0, "0=Idle  1=Balancing  2=Finished", "holding"),
+            ("balancing_state_text", "ASCII",    1.0, "Human-readable balancing state", "holding"),
         ]
 
     def on_first_connect_read(self) -> None:
