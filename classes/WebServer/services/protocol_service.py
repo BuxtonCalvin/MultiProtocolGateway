@@ -370,6 +370,29 @@ def get_protocol_json(
     return None, False
 
 
+def register_row_sort_key(row: DeviceRegisterView) -> tuple[int, str]:
+    """Sort key for the webUI register table.
+
+    Groups rows, in order:
+      0. Synthetic metrics (row.is_synthetic)
+      1. Any row with at least one W/M/S checkbox selected
+         (user_write_enabled, mask_enabled, or screen_enabled)
+      2. Everything else
+
+    ...and alphabetizes by variable_name (case-insensitive) within each
+    group. Used to set the *initial* order of the table when it's rendered
+    — this doesn't stop a client-side table widget from letting the user
+    re-sort by clicking a column header afterward.
+    """
+    if row.is_synthetic:
+        group = 0
+    elif row.user_write_enabled or row.mask_enabled or row.screen_enabled:
+        group = 1
+    else:
+        group = 2
+    return (group, (row.variable_name or "").lower())
+
+
 def build_synthetic_rows(transport: Any, registry_type: str | None = None) -> list[DeviceRegisterView]:
     """Build display-only DeviceRegisterView rows for a transport's synthetic fields.
 
