@@ -1244,6 +1244,12 @@ class modbus_base(transport_base):
 
     def _read_concatenated_sn(self, r_type: Registry_Type) -> str:
         """Scheduling path: N/A — setup, runs once at connect regardless of read_mode.
+        The _read_concatenated_sn() assumes one character per register, decoded
+        via int.to_bytes(..., "big") + UTF-8 — no configurable byte order,
+        because it doesn't need one for that packing.
+
+        EG4 serial number decodes take a separate path because EG4 packs two ASCII
+        characters per register (high byte + low byte)
 
         Helper to build SN from multiple registers (Serial No 1-5)."""
         sn_decoded: str = ""

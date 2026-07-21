@@ -145,7 +145,9 @@ EG4_DEVICE_TYPE_MODEL_MAP: dict[int, tuple[str, bool]] = {
 # testing showed serial numbers coming out with each register's two
 # characters swapped (e.g. 'batteryserialnumber_1' decoded as
 # 'aBttre_yDI0_1', which un-swaps cleanly to 'Battery_ID_01'), so this is
-# now set to the low-byte-first convention instead.
+# now set to the low-byte-first convention instead. If serial numbers or
+# firmware strings come out reversed/garbled again on different hardware,
+# flip this constant back.
 EG4_TEXT_HIGH_BYTE_FIRST: bool = False
 
 # ----------------------------------------------------------------------------
@@ -687,7 +689,7 @@ def _find_named_registry(transport: EG4MetadataTransport, variable_name: str) ->
             if any(e.variable_name == variable_name for e in transport.proto.get_registry_map(registry_type)):
                 return registry_type
         except Exception as e:
-            _log.debug(f"registery_type not found {e}" )
+            _log.debug(f"registry_type unknown {e}")
             continue
     return None
 
@@ -905,7 +907,11 @@ def eg4_synthetic_fields_metadata(transport: EG4MetadataTransport) -> list[tuple
         fields.extend([
             ("model", "ASCII", 1.0, "Synthetic: model name derived from device type code and the HOLD_MODEL bitfield.", Registry_Type.HOLDING.name.lower()),
             ("firmware_version", "ASCII", 1.0, "Synthetic: assembled from holding registers 7-10.", Registry_Type.HOLDING.name.lower()),
-            ("is_gridboss", "USHORT", 1.0, "Synthetic: 1 if device type code indicates a GridBOSS/MID device, else 0.", Registry_Type.HOLDING.name.lower()),
+            (
+                "is_gridboss", "BOOLEAN", 1.0,
+                "Synthetic: True if device type code indicates a GridBOSS/MID device, else False.",
+                Registry_Type.HOLDING.name.lower(),
+            ),
         ])
 
         # serial_number: only declared here for EG4 variants whose CSV has
