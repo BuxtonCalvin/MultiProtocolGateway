@@ -498,6 +498,7 @@ class timescaledb(transport_base):
         "STRING32": "TEXT",
         "TEXT": "TEXT",
         "_1BIT": "BOOLEAN",
+        "BOOLEAN": "BOOLEAN",
 
         # Unsigned Bit-lengths (_2BIT to _15BIT)
         **{f"_{i}BIT": "SMALLINT" for i in range(2, 16)},
@@ -1400,6 +1401,14 @@ class timescaledb(transport_base):
         Due to the memory limits of postgres, no more than 200 metrics as determined in the calling method.
         Using metric_name to map, return clean_column_name in the metric_catalog to create the SQL column in device_metrics_wide__*.
 
+        For metrics that already have a column, also reconciles metric_catalog's
+        recorded data_type against the column's actual Postgres type, migrating
+        the column (ALTER COLUMN ... TYPE ... USING) when they've drifted apart,
+        so metric_catalog never claims a type the physical column doesn't
+        actually have — see the in-loop comment for why that matters (a stale
+        catalog type let a TEXT column through the "safe for stats_agg()"
+        rollup filter and crashed rollup view creation).
+
         There could potentially be thousands of metrics, which cannot all be ingested as columns. If over 200 metrics we only save metrics to the
         device_metrics_narrow table, so this method is not needed and is bypassed at the calling method connection stage.
         """
@@ -1442,6 +1451,63 @@ class timescaledb(transport_base):
                             d_type: str = self._timescale_type(d,u)
 
                             if clean_value:
+                                # Guard against metric_catalog.data_type drifting away from the
+                                # column's actual Postgres type. The rollup-descriptor query
+                                # (_resolve_rollup_metric_descriptors_helper) trusts
+                                # metric_catalog.data_type alone to decide whether a column is
+                                # safe to pass to stats_agg() — but the UPDATE below only ever
+                                # changed the catalog's *opinion*, never the column itself, so a
+                                # column created under an earlier/incorrect type declaration (or
+                                # changed out-of-band) would keep silently reporting a type it no
+                                # longer has. That produced exactly this failure: catalog said
+                                # 'INTEGER', the physical column was still 'TEXT' from however it
+                                # was first created, and the rollup view crashed trying to run
+                                # stats_agg(text). Detect that here and reconcile it up front.
+                                physical_type: str | None = session.execute(
+                                    text("""
+                                        SELECT data_type FROM information_schema.columns
+                                        WHERE table_name = :tname AND column_name = :col
+                                    """),
+                                    {"tname": table_name, "col": clean_value},
+                                ).scalar()
+
+                                effective_d_type: str = d_type
+                                if physical_type is not None and physical_type.upper() != d_type.upper():
+                                    self._log.warning(
+                                        f"Column '{clean_value}' on {table_name} is physically "
+                                        f"{physical_type.upper()} but metric '{m}' now declares "
+                                        f"{d_type} — attempting to migrate the column."
+                                    )
+                                    try:
+                                        # SAVEPOINT via begin_nested(): if this specific ALTER
+                                        # fails (e.g. existing data won't cast cleanly), only this
+                                        # savepoint rolls back — the outer transaction, and every
+                                        # other metric already processed/pending in this same
+                                        # call, is unaffected.
+                                        with session.begin_nested():
+                                            session.execute(text(
+                                                f"ALTER TABLE {table_name} ALTER COLUMN {clean_value} "
+                                                f"TYPE {d_type} USING {clean_value}::{d_type};"
+                                            ))
+                                        self._log.info(
+                                            f"Migrated column '{clean_value}' on {table_name} from "
+                                            f"{physical_type.upper()} to {d_type}."
+                                        )
+                                    except Exception as migrate_exc:
+                                        # Migration failed — leave the catalog matching physical
+                                        # reality (not the aspirational new type) so the rollup
+                                        # filter keeps excluding/handling it safely (e.g. as TEXT)
+                                        # until this is fixed manually, instead of reproducing the
+                                        # exact crash this check exists to prevent.
+                                        effective_d_type = physical_type.upper()
+                                        self._log.error(
+                                            f"Could not migrate column '{clean_value}' on "
+                                            f"{table_name} from {physical_type.upper()} to "
+                                            f"{d_type}: {migrate_exc}. Leaving "
+                                            f"metric_catalog.data_type as {effective_d_type} until "
+                                            f"this is resolved manually."
+                                        )
+
                                 # Update the data_type, unit_mod and notes fields in metric_catalog for a matching metric
                                 # from the csv files.  All corrections/updates should take place in the CSV or the UI in the webserver.
                                 session.execute(
@@ -1449,10 +1515,10 @@ class timescaledb(transport_base):
                                         UPDATE metric_catalog SET data_type = :d, unit_mod = :u, notes = :n
                                         WHERE metric_name = :m AND protocol_id = :p
                                     """),
-                                    {"d": d_type, "u": u, "m": m, "n": n, "p": protocol_id}
+                                    {"d": effective_d_type, "u": u, "m": m, "n": n, "p": protocol_id}
                                 )
                                 # protocol_metric_mappings is used to process raw metrics data for coercion.
-                                self.protocol_metric_mappings.setdefault(protocol, {})[m] = (clean_value, d_type)
+                                self.protocol_metric_mappings.setdefault(protocol, {})[m] = (clean_value, effective_d_type)
                                 # metric exists so return to the top of the loop.
                                 continue
 
