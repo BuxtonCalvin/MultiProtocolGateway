@@ -68,6 +68,8 @@
             data-sort-protocol_write="{{ row.write_mode_protocol }}"
             data-mask="{{ 1 if row.mask_enabled else 0 }}"
             data-screen="{{ 1 if row.screen_enabled else 0 }}"
+            data-write="{{ 1 if row.user_write_enabled else 0 }}"
+            data-synthetic="{{ 1 if row.is_synthetic | default(false) else 0 }}"
             data-paired-id="pair-{{ row.id }}">
 
           {% if device_name %}
@@ -354,7 +356,9 @@
             data-sort-note="{{ (row.note or '') | lower }}"
             data-sort-protocol_write="{{ row.write_mode_protocol }}"
             data-mask="{{ 1 if row.mask_enabled else 0 }}"
-            data-screen="{{ 1 if row.screen_enabled else 0 }}">
+            data-screen="{{ 1 if row.screen_enabled else 0 }}"
+            data-write="{{ 1 if row.user_write_enabled else 0 }}"
+            data-synthetic="{{ 1 if row.is_synthetic | default(false) else 0 }}">
 
           {% if device_name %}
           {# Synthetic rows are display-only — no toggle endpoints #}
@@ -582,18 +586,29 @@
       return [Number(match[1]), match[2] || ''];
     }
 
+    // Row grouping for the default (initial) sort: synthetic metrics first,
+    // then anything with a W/M/S checkbox selected, then everything else.
+    // Mirrors services/protocol_service.register_row_sort_key() server-side —
+    // duplicated here because the table is always re-sorted client-side on
+    // load (see sortRows('default', 'asc') below), which would otherwise
+    // clobber whatever order the server already sent.
+    function rowGroup(row) {
+      if (Number(row.dataset.synthetic || 0)) return 0;
+      const anyChecked =
+        Number(row.dataset.write || 0) ||
+        Number(row.dataset.mask || 0) ||
+        Number(row.dataset.screen || 0);
+      return anyChecked ? 1 : 2;
+    }
+
     function defaultCompare(a, b) {
       if (!isDeviceView) {
         return compareAddress(a, b);
       }
 
-      const aMask = Number(a.dataset.mask || 0);
-      const bMask = Number(b.dataset.mask || 0);
-      if (aMask !== bMask) return bMask - aMask;
-
-      const aScreen = Number(a.dataset.screen || 0);
-      const bScreen = Number(b.dataset.screen || 0);
-      if (aScreen !== bScreen) return bScreen - aScreen;
+      const aGroup = rowGroup(a);
+      const bGroup = rowGroup(b);
+      if (aGroup !== bGroup) return aGroup - bGroup;
 
       return textFor(a, 'variable').localeCompare(textFor(b, 'variable'));
     }
@@ -732,6 +747,7 @@
 
         // ── W (write-toggle) ──────────────────────────────────────────────
         if (this.classList.contains('write-toggle')) {
+          row.dataset.write = checked ? '1' : '0';
           if (checked) {
             // W on  → auto-enable M, disable S
             row.dataset.mask   = '1';
