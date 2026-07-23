@@ -91,8 +91,9 @@ def do_commit(request: Request, db: Session = Depends(get_session))-> dict[str, 
     state = request.app.state
     try:
         result: dict[str, int | str] = {}
+        config_was_dirty: bool = _has_dirty_config_state(db)
 
-        if _has_dirty_config_state(db):
+        if config_was_dirty:
             result = commit_all(
                 db=db,
                 config_path=state.config_path,
@@ -132,6 +133,30 @@ def do_commit(request: Request, db: Session = Depends(get_session))-> dict[str, 
         # commit response) sees zero dirty items and disables the commit button
         # without requiring a second press.
         refresh_app_state(db)
+
+        # Reload the live gateway from the config.cfg commit_all() just wrote,
+        # so transport/read_mode changes take effect without restarting the
+        # whole process (the webUI keeps running throughout). Only when
+        # config.cfg actually changed — a commit that only touched
+        # descriptions or staged Timescale deletions has nothing for the
+        # gateway to pick up. A reload failure does NOT fail this commit:
+        # commit_all() already succeeded and config.cfg is correctly on disk
+        # either way; gateway_reload.ok communicates whether the *live*
+        # gateway picked it up cleanly, separately from the commit itself
+        # (see gateway_reload_status() / the banner in base.html).
+        gateway_reload: dict[str, Any] | None = None
+        if config_was_dirty:
+            manager = getattr(state, "gateway_manager", None)
+            if manager is not None:
+                reload_status = manager.reload(trigger="manual")
+                state.gateway = manager.current
+                gateway_reload = {
+                    "ok": reload_status.ok,
+                    "message": reload_status.message,
+                    "using_fallback": reload_status.using_fallback,
+                }
+                if not reload_status.ok:
+                    _log.error(f"do_commit: gateway reload did not fully succeed: {reload_status.message}")
     except Exception as exc:
         # Was previously a hardcoded, debug-level "descriptions not
         # committed" message regardless of which step actually failed
@@ -142,7 +167,10 @@ def do_commit(request: Request, db: Session = Depends(get_session))-> dict[str, 
         _log.error(f"do_commit: commit failed: {exc}")
         raise HTTPException(status_code=500, detail=str(exc))
     else:
-        return {"status": "ok", **result, **timescale_summary}
+        response: dict[str, Any] = {"status": "ok", **result, **timescale_summary}
+        if gateway_reload is not None:
+            response["gateway_reload"] = gateway_reload
+        return response
 
 
 @router.get("/diff")

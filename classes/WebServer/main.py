@@ -58,6 +58,7 @@ from .file_watcher import FileWatcher
 from .routers.analysis import router as analysis_router
 from .routers.commit import router as commit_router
 from .routers.devices import router as devices_router
+from .routers.gateway_status import router as gateway_status_router
 from .routers.help import FileResponse
 from .routers.help import router as help_router
 from .routers.pages import router as pages_router
@@ -190,6 +191,7 @@ def create_app(
     project_root: Path,
     config_dir: Path | None = None,
     gateway_instance: Any = None,
+    gateway_manager: Any = None,
 
 ) -> FastAPI:
     """
@@ -275,6 +277,7 @@ def create_app(
             if n:
                 _log.info("Setting descriptions: %d rows seeded/updated", n)
         app.state.gateway        = gateway_instance
+        app.state.gateway_manager = gateway_manager
         app.state.scanner        = scanner
 
         # In-memory staging for the Timescale DB "Delete Columns" screen —
@@ -284,7 +287,23 @@ def create_app(
         app.state.timescale_pending_deletions = {}
         app.state.timescale_pending_lock = threading.RLock()
 
-        watcher: FileWatcher = FileWatcher(scanner, config_path, protocols_dir)
+        def _on_config_changed() -> None:
+            """FileWatcher callback: config.cfg was edited outside the
+            webUI's own commit flow (e.g. hand-edited over SSH). Reload the
+            live gateway from it, same as a commit would, and refresh
+            app.state.gateway afterward since reload() may have fallen back
+            to the last-known-good backup instead of the (broken) edit."""
+            if gateway_manager is None:
+                return
+            status = gateway_manager.reload(trigger="file_watch")
+            app.state.gateway = gateway_manager.current
+            if not status.ok:
+                _log.error(f"Gateway reload (file_watch) did not fully succeed: {status.message}")
+
+        watcher: FileWatcher = FileWatcher(
+            scanner, config_path, protocols_dir,
+            on_config_changed=_on_config_changed if gateway_manager is not None else None,
+        )
         watcher.start()
         app.state.file_watcher = watcher
 
@@ -322,6 +341,15 @@ def create_app(
     templates.env.globals["timescale_bridge_available"] = (  # type: ignore[reportArgumentType]
         lambda: is_timescale_available(getattr(app.state, "gateway", None))
     )
+
+    # Jinja global — base.html's reload-status banner. Returns the
+    # GatewayManager's current ReloadStatus (or None before the gateway has
+    # ever been (re)built), same closure-over-app pattern as
+    # timescale_bridge_available above so it always reads live state rather
+    # than whatever it was when the template was first rendered.
+    templates.env.globals["gateway_reload_status"] = (  # type: ignore[reportArgumentType]
+        lambda: getattr(getattr(app.state, "gateway_manager", None), "status", None)
+    )
     # Routers
     # ------------------------------------------------------------------
 
@@ -333,6 +361,7 @@ def create_app(
     app.include_router(help_router)
     app.include_router(pages_router)
     app.include_router(timescale_router)
+    app.include_router(gateway_status_router)
 
     # ------------------------------------------------------------------
     # Core routes
@@ -388,7 +417,7 @@ _current_port: int = 1717
 # Launcher — called from protocol_gateway.py
 # ---------------------------------------------------------------------------
 
-def start_webserver(config_file_path: Path, log_file: str, log_dir: str, gateway_instance: Any = None, port: int = 1717) -> None:
+def start_webserver(config_file_path: Path, log_file: str, log_dir: str, gateway_instance: Any = None, gateway_manager: Any = None, port: int = 1717) -> None:
     """
     Launch the FastAPI web server in a daemon thread.
     Returns immediately; the server runs in the background.
@@ -405,8 +434,11 @@ def start_webserver(config_file_path: Path, log_file: str, log_dir: str, gateway
     Usage in protocol_gateway.main():
 
         config_path: Path = root / "config" / config_file
-        start_webserver(config_path, gateway_instance=mpg)
-        mpg.run()   # blocks forever on the main thread
+        manager = GatewayManager(config_file, config_path)
+        mpg = manager.start()
+        start_webserver(config_path, log_file, log_dir, gateway_instance=mpg, gateway_manager=manager)
+        # run() lives on its own thread now (started inside manager.start());
+        # this thread just needs to stay alive for the process to keep running.
     """
     global _current_port
     _current_port = port
@@ -426,6 +458,7 @@ def start_webserver(config_file_path: Path, log_file: str, log_dir: str, gateway
         project_root=project_root,
         config_dir=config_dir,
         gateway_instance=gateway_instance,
+        gateway_manager=gateway_manager,
     )
 
     uv_config = uvicorn.Config(
