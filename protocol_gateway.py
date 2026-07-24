@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Description: Main module for Inverters ModBus data to data bridges
+# Description: Main module for Inverters ModBus RTU data to MQTT
 # File: protocol_gateway.py
 #
 # Copyright 2026 Kevin Burke
@@ -1896,6 +1896,26 @@ class GatewayManager:
         )
         return gateway
 
+    def _dynamic_reload_enabled(self) -> bool:
+        """[general] enable_dynamic_configuration, read fresh from disk on
+        every call rather than cached — this setting can itself be flipped
+        by the exact same commit/hand-edit flow that triggers reload() in
+        the first place, so a stale cached value could gate the wrong thing
+        for one cycle right after it's toggled.
+
+        Defaults to False (opt-in) — this is a new, somewhat consequential
+        feature (it disconnects and reconnects every live transport), so an
+        existing deployment upgrading to this code shouldn't have it
+        silently start acting on config.cfg changes until an operator
+        explicitly turns it on in General Settings.
+        """
+        parser = CustomConfigParser()
+        try:
+            parser.read(self._config_path.as_posix())
+        except OSError:
+            return False
+        return parser.getboolean("general", "enable_dynamic_configuration", fallback=False)
+
     def reload(self, trigger: str) -> ReloadStatus:
         """Rebuild the gateway from the current on-disk config file.
 
@@ -1906,6 +1926,22 @@ class GatewayManager:
         """
         with self._lock:
             now: datetime = datetime.now().astimezone()
+
+            if not self._dynamic_reload_enabled():
+                status = ReloadStatus(
+                    ok=True,
+                    message=(
+                        "Dynamic configuration reload is disabled "
+                        "(enable_dynamic_configuration is not set to true "
+                        "in General Settings) — config.cfg was updated but "
+                        "the running gateway was not. Restart the process, "
+                        "or enable it in General Settings, to pick this up."
+                    ),
+                    when=now, trigger=trigger, using_fallback=False,
+                )
+                self._status = status
+                self._log.info(f"reload({trigger}): {status.message}")
+                return status
 
             # Two independent things can both notice the same config.cfg
             # write and each call reload(): a webUI commit calls it directly

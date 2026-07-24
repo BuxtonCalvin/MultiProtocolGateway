@@ -28,6 +28,7 @@
 
   <div class="card space-y-2">
     {% for s in settings %}
+    {% if s.key != "enable_dynamic_configuration" %}
     <div class="grid grid-cols-[1fr_10rem_minmax(0,1fr)] gap-3 items-center py-1
                 border-b border-mpg-700/40 last:border-0
                 {% if s.is_dirty %}bg-dirty/5 rounded px-2{% endif %}">
@@ -40,23 +41,7 @@
         <span class="text-dirty text-xs ml-1">*</span>
         {% endif %}
       </div>
-      {% if s.key == "log_level" %}
-      <select id="gs-{{ s.id }}"
-              class="theme-input rounded px-2 py-1
-                     font-mono text-sm
-                     focus:outline-none focus:ring-1 focus:ring-accent"
-              aria-label="{{ s.key }}"
-              hx-patch="/api/devices/general/general/{{ s.id }}"
-              name="value_staged"
-              hx-swap="none"
-              hx-trigger="change delay:200ms"
-              onchange="updateLogLevelHelpText(this)">
-        {% for level in ["CRITICAL", "FATAL", "ERROR", "WARNING", "INFO", "DEBUG", "EXCEPTION"] %}
-        <option value="{{ level }}" {% if (s.value_staged or "")|upper == level %}selected{% endif %}>{{ level }}</option>
-        {% endfor %}
-      </select>
-      <div id="log-level-help-{{ s.id }}" class="surface-subtle text-xs leading-5"></div>
-      {% elif s.key == "read_mode" %}
+      {% if s.key == "read_mode" %}
       <select id="gs-{{ s.id }}"
               class="theme-input rounded px-2 py-1
                      font-mono text-sm
@@ -87,29 +72,74 @@
       <div></div>
       {% endif %}
     </div>
+    {% endif %}
     {% endfor %}
     {% if not settings %}
     <p class="surface-muted text-sm">No general settings found in config.cfg.</p>
     {% endif %}
   </div>
+
+  <!-- ===== DYNAMIC CONFIGURATION RELOAD =====
+       Deliberately rendered as its own box, outside the settings loop above,
+       and independent of whether a Setting row for it currently exists —
+       per explicit request, this control should never silently disappear
+       just because a fresh install or a purged row hasn't been (re)scanned
+       yet (see scanner.py: general-section Setting rows only exist once
+       their key is actually present in config.cfg and a scan has run).
+       Defaults to Disabled either way, matching
+       GatewayManager._dynamic_reload_enabled()'s own fallback=False in
+       protocol_gateway.py. -->
+  {% set dc_setting = (settings | selectattr("key", "equalto", "enable_dynamic_configuration") | list | first | default(None)) %}
+  <div class="card mt-4 {% if dc_setting and dc_setting.is_dirty %}bg-dirty/5{% endif %}">
+    <div class="grid grid-cols-[1fr_10rem_minmax(0,1fr)] gap-3 items-center">
+      <div>
+        <label class="font-mono surface-text text-sm font-medium"
+               for="{{ 'gs-' ~ dc_setting.id if dc_setting else 'gs-dynamic-config-unset' }}">
+          enable_dynamic_configuration
+        </label>
+        {% if dc_setting and dc_setting.is_dirty %}
+        <span class="text-dirty text-xs ml-1" title="Unsaved change">*</span>
+        {% endif %}
+      </div>
+      {% if dc_setting %}
+      {% set is_enabled = (dc_setting.value_staged or "")|lower in ["1", "yes", "true", "on"] %}
+      <select id="gs-{{ dc_setting.id }}"
+              class="theme-input rounded px-2 py-1
+                     font-mono text-sm
+                     focus:outline-none focus:ring-1 focus:ring-accent"
+              aria-label="enable_dynamic_configuration"
+              hx-patch="/api/devices/general/general/{{ dc_setting.id }}"
+              name="value_staged"
+              hx-swap="none"
+              hx-trigger="change delay:200ms">
+        <option value="false" {% if not is_enabled %}selected{% endif %}>Disabled</option>
+        <option value="true" {% if is_enabled %}selected{% endif %}>Enabled</option>
+      </select>
+      {% else %}
+      <select id="gs-dynamic-config-unset"
+              class="theme-input rounded px-2 py-1
+                     font-mono text-sm opacity-60 cursor-not-allowed"
+              aria-label="enable_dynamic_configuration"
+              disabled
+              title="Not yet present in config.cfg — run a re-scan (or restart) to enable editing here.">
+        <option selected>Disabled</option>
+      </select>
+      {% endif %}
+      <div class="surface-subtle text-xs leading-5">
+        {% if not dc_setting %}
+        <span class="text-warning">Not yet in config.cfg</span> — defaults to
+        Disabled until a scan picks it up.
+        {% endif %}
+        When enabled, committing changes (or hand-editing config.cfg while
+        the app is running) reloads the live gateway automatically —
+        disconnecting and reconnecting every transport. When disabled
+        (default), config.cfg is still updated as usual, but the running
+        gateway won't pick it up until the process is restarted.
+      </div>
+    </div>
+  </div>
 </div>
 <script>
-  function updateLogLevelHelpText(selectEl) {
-    const helpTextByLevel = {
-      CRITICAL: "Critical: severe failure; application may not be able to continue safely.",
-      FATAL: "Fatal: unrecoverable condition requiring immediate shutdown or restart.",
-      ERROR: "Error: operation failed and needs attention, but process can continue.",
-      WARNING: "Warning: unexpected or risky condition; execution continues.",
-      INFO: "Info: normal high-level operational events and state changes.",
-      DEBUG: "Debug: detailed diagnostic data for troubleshooting.",
-      EXCEPTION: "Exception: captured exception traceback and context for failures."
-    };
-
-    const helpEl = document.getElementById(`log-level-help-${selectEl.id.replace("gs-", "")}`);
-    if (!helpEl) return;
-    helpEl.textContent = helpTextByLevel[(selectEl.value || "").toUpperCase()] || "";
-  }
-
   function updateReadModeHelpText(selectEl) {
     const helpTextByMode = {
       concurrent: "Concurrent mode — fully parallel, correct when transports are on separate physical connections (separate IP addresses, separate serial ports).",
@@ -123,7 +153,6 @@
   }
 
   document.addEventListener("DOMContentLoaded", () => {
-    document.querySelectorAll('select[id^="gs-"][aria-label="log_level"]').forEach(updateLogLevelHelpText);
     document.querySelectorAll('select[id^="gs-"][aria-label="read_mode"]').forEach(updateReadModeHelpText);
   });
 </script>

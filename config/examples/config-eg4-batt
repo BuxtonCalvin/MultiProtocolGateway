@@ -1,5 +1,6 @@
 [general]
 read_mode = interleaved   # sequential | concurrent | interleaved
+enable_dynamic_configuration = true
 
 [logging]
 log_dir = logs

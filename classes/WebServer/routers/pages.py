@@ -206,7 +206,7 @@ async def device_page(request: Request, device_name: str):
     )
 
     # Populate live connection status from the gateway instance
-    gateway = getattr(request.app.state, "gateway", None)
+    gateway: Any = getattr(request.app.state, "gateway", None)
     analyze_enabled = False
     if gateway is not None:
         conn_status: dict[str, bool] = get_transport_connection_status(gateway)
@@ -215,7 +215,7 @@ async def device_page(request: Request, device_name: str):
             summary.section,                          # try "transport.mqtt"
             conn_status.get(summary.name, False)      # fall back to "mqtt"
         )
-        live_transport = next(
+        live_transport: Any = next(
             (
                 t for t in getattr(gateway, "_Protocol_Gateway__transports", [])
                 if t.transport_name in (summary.name, summary.section)

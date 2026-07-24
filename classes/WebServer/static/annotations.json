@@ -293,17 +293,6 @@
       "shape_type": "rect"
     }
   ],
-  "read_mode": [
-    {
-      "id": "read-mode-setting",
-      "x_percent": 51,
-      "y_percent": 47.4,
-      "label_x_percent": 1.1,
-      "label_y_percent": 35,
-      "label": "read_mode controls how MPG cycles through multiple transports: Sequential: one full pass per transport in order.  Concurrent: where all transports run in parallel threads. This mode is best for devices that do not share a common bus.  Interleaved: one block per transport in round-robin — best for shared RS485 buses.",
-      "shape_type": "dot"
-    }
-  ],
   "logging-settings": [
     {
       "id": "logging-backup_count",
@@ -654,6 +643,26 @@
       "label_y_percent": 17.9
     }
   ],
+  "general_settings": [
+    {
+      "id": "general_settings-read_mode",
+      "x_percent": 45.65395683453237,
+      "y_percent": 34.44693666011494,
+      "label": "Choose the type of scraper read mode",
+      "shape_type": "dot",
+      "label_x_percent": 5.1,
+      "label_y_percent": 35.4
+    },
+    {
+      "id": "general_settings-dynamic",
+      "x_percent": 45.143884892086334,
+      "y_percent": 68.7625822134866,
+      "label": "Choose to enable or disable dynamic configuration reloads.",
+      "shape_type": "dot",
+      "label_x_percent": 5.6,
+      "label_y_percent": 69.5
+    }
+  ],
   "_aliases": {
     "device__inverter_read": "device__scraper_read_generic",
     "device__inverter_write": "device__scraper_write_generic",
@@ -664,7 +673,6 @@
     "device__influxdb_out": "device__bridge_generic",
     "device__json_out": "device__bridge_generic",
     "protocol-editor__*": "protocols",
-    "pages__global-settings": "read_mode",
     "pages__logging-settings": "logging-settings",
     "pages__messaging-settings": "messages",
     "pages__view-log": "view_log",
@@ -676,6 +684,7 @@
     "device__influxdb3": "device__bridge_generic",
     "pages__create-protocol": "create_protocol",
     "device__device_help": "device__device_help",
-    "pages__timescale-delete-columns": "timescaleDelete"
+    "pages__timescale-delete-columns": "timescaleDelete",
+    "pages__general_settings": "general_settings"
   }
 }
