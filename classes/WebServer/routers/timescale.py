@@ -19,11 +19,10 @@
 routers/timescale.py — TimescaleDB wide-table column administration
 endpoints.
 
-These back the "Timescale DB → Delete Columns" admin screen and the
-rollup rebuild screen. Unlike most routers in this app, these do
-NOT take a `db: Session` — there's nothing in the staging (SQLite)
-DB to read here. Everything comes from the live timescaledb
-bridge transport reached via request.app.state.gateway (see
+These back the "Timescale DB → Delete Columns" admin screen. Unlike most
+routers in this app, these do NOT take a `db: Session` — there's nothing in
+the staging (SQLite) DB to read here. Everything comes from the live
+timescaledb bridge transport reached via request.app.state.gateway (see
 services/timescale_service.py), the same way analysis.py reaches modbus
 transports for the Analyze feature.
 
@@ -174,30 +173,43 @@ class RebuildRollupsRequest(BaseModel):
     # the literal "shared_narrow" for the shared narrow stack — one entry
     # per checked group checkbox on the Rebuild Rollup Views screen.
     protocol_names: list[str]
+    # False = "Rebuild Rollups" (only touches groups that are actually out
+    # of date). True = "Force Rebuild" (purges + re-materializes every
+    # selected group regardless of status).
+    force: bool = False
 
 
 @router.patch("/rollups/rebuild")
 def rebuild_rollups(payload: RebuildRollupsRequest, request: Request) -> dict[str, Any]:
     """
-    Forces an immediate rebuild pass across the admin's selected rollup
-    group(s) — each group is one source table (the shared narrow stack, or
-    one wide-table protocol), never an individual hourly/daily/weekly/
-    monthly view; see RollupManager.rebuild_all_rollups for why selection
-    stops at that granularity. Runs synchronously and returns a per-group
-    result summary; the caller (the Rebuild Rollup Views screen) reports
-    any ok=False entries to the admin rather than treating a partial
-    failure as a 500.
+    Runs a rebuild pass across the admin's selected rollup group(s) — each
+    group is one source table (the shared narrow stack, or one wide-table
+    protocol), never an individual hourly/daily/weekly/monthly view; see
+    RollupManager.rebuild_all_rollups for why selection stops at that
+    granularity. `force` distinguishes "Rebuild Rollups" (only touch groups
+    that are actually out of date) from "Force Rebuild" (always purge +
+    re-materialize every selected group). Runs synchronously and returns a
+    per-group result summary — including each group's `changed` flag — so
+    the caller can tell "verified, already correct" apart from "actually
+    rebuilt"; the caller (the Rebuild Rollup Views screen) also reports any
+    ok=False entries to the admin rather than treating a partial failure as
+    a 500.
     """
     _require_bridge(request)
     if not payload.protocol_names:
         raise HTTPException(status_code=400, detail="Select at least one rollup group to rebuild.")
     try:
         result: dict[str, Any] = rebuild_all_rollups(
-            request.app.state.gateway, protocol_names=set(payload.protocol_names)
+            request.app.state.gateway,
+            protocol_names=set(payload.protocol_names),
+            force=payload.force,
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
-    _log.info(f"Rollup rebuild triggered via admin UI for {len(payload.protocol_names)} group(s).")
+    _log.info(
+        f"Rollup rebuild triggered via admin UI for {len(payload.protocol_names)} group(s) "
+        f"(force={payload.force})."
+    )
     return result

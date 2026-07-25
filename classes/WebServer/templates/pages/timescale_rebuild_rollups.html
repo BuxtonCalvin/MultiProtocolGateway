@@ -71,15 +71,27 @@
       </div>
     </div>
 
-    <button type="button"
-            id="rebuild-rollups-btn"
-            class="flex-shrink-0 px-4 py-2 rounded text-xs font-semibold bg-accent text-white
-                   hover:bg-accent/80 disabled:opacity-50 disabled:cursor-not-allowed
-                   transition-colors"
-            aria-label="Rebuild the checked rollup groups"
-            onclick="triggerRebuildRollups()">
-      <span id="rebuild-btn-label">Rebuild Rollups</span>
-    </button>
+    <div class="flex-shrink-0 flex items-center gap-2">
+      <button type="button"
+              id="rebuild-rollups-btn"
+              class="px-4 py-2 rounded text-xs font-semibold bg-accent text-white
+                     hover:bg-accent/80 disabled:opacity-50 disabled:cursor-not-allowed
+                     transition-colors"
+              aria-label="Rebuild the checked rollup groups if they need it"
+              onclick="triggerRebuildRollups(false)">
+        <span id="rebuild-btn-label">Rebuild Rollups</span>
+      </button>
+      <button type="button"
+              id="force-rebuild-btn"
+              class="px-4 py-2 rounded text-xs font-semibold bg-transparent text-danger
+                     border border-danger/50 hover:bg-danger/10
+                     disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              aria-label="Force-rebuild the checked rollup groups regardless of status"
+              title="Purges and fully re-materializes every checked group, even if it's already OK"
+              onclick="triggerRebuildRollups(true)">
+        <span id="force-rebuild-btn-label">Force Rebuild</span>
+      </button>
+    </div>
   </div>
 
   <!-- ══ STATUS BANNER — filled in by renderRebuildStatus() below ══ -->
@@ -106,11 +118,14 @@
   }
 
   // Collects the checked group checkboxes, PATCHes the selection to
-  // /api/timescale/rollups/rebuild, then refreshes the inventory so it
-  // reflects whatever the rebuild just did.
-  async function triggerRebuildRollups() {
-    const btn = document.getElementById('rebuild-rollups-btn');
-    const label = document.getElementById('rebuild-btn-label');
+  // /api/timescale/rollups/rebuild (force=true for the "Force Rebuild"
+  // button, false for "Rebuild Rollups"), then refreshes the inventory so
+  // it reflects whatever the rebuild just did.
+  async function triggerRebuildRollups(force) {
+    const rebuildBtn = document.getElementById('rebuild-rollups-btn');
+    const forceBtn = document.getElementById('force-rebuild-btn');
+    const rebuildLabel = document.getElementById('rebuild-btn-label');
+    const forceLabel = document.getElementById('force-rebuild-btn-label');
     const statusEl = document.getElementById('rebuild-status');
 
     const checked = document.querySelectorAll('.rollup-group-checkbox:checked');
@@ -125,8 +140,19 @@
       return;
     }
 
-    btn.disabled = true;
-    label.textContent = 'Rebuilding…';
+    if (force) {
+      const groupWord = protocolNames.length === 1 ? 'group' : 'groups';
+      const proceed = window.confirm(
+        'Force Rebuild will purge and fully re-materialize ' + protocolNames.length + ' rollup ' +
+        groupWord + ' from their source data, even where nothing looks out of date. This can take ' +
+        'noticeably longer than a normal rebuild. Continue?'
+      );
+      if (!proceed) { return; }
+    }
+
+    rebuildBtn.disabled = true;
+    forceBtn.disabled = true;
+    (force ? forceLabel : rebuildLabel).textContent = force ? 'Force rebuilding…' : 'Rebuilding…';
 
     let ok = false;
     let payload = null;
@@ -137,7 +163,7 @@
           'Content-Type': 'application/json',
           'Cache-Control': 'no-cache',
         },
-        body: JSON.stringify({ protocol_names: protocolNames }),
+        body: JSON.stringify({ protocol_names: protocolNames, force: force }),
       });
       ok = resp.ok;
       payload = await resp.json();
@@ -145,8 +171,10 @@
       ok = false;
     }
 
-    btn.disabled = false;
-    label.textContent = 'Rebuild Rollups';
+    rebuildBtn.disabled = false;
+    forceBtn.disabled = false;
+    rebuildLabel.textContent = 'Rebuild Rollups';
+    forceLabel.textContent = 'Force Rebuild';
 
     renderRebuildStatus(ok, payload);
 
@@ -159,36 +187,61 @@
     });
   }
 
+  // Three distinct outcomes, per the admin's expectations:
+  //   1. Every selected group was already correct — nothing was purged or
+  //      re-materialized (payload.*.changed all false).
+  //   2. At least one selected group was actually purged + re-materialized,
+  //      and everything selected succeeded.
+  //   3. Something failed — narrow and/or one or more protocols.
   function renderRebuildStatus(ok, payload) {
     const statusEl = document.getElementById('rebuild-status');
 
     if (!ok || !payload) {
       statusEl.innerHTML =
         '<div class="text-xs text-danger px-3 py-2 rounded border border-danger/30 bg-danger/10">' +
-        'Rebuild failed — check the server log for details.</div>';
+        'Rebuild failed — the server did not return a result. Check the server log for details.</div>';
       return;
     }
 
     const protocols = payload.protocols || [];
     const attempted = protocols.filter(function (p) { return !p.skipped; });
     const failed = attempted.filter(function (p) { return !p.ok; });
-    const narrow = payload.narrow || { ok: true, skipped: true };
+    const narrow = payload.narrow || { ok: true, skipped: true, changed: false };
 
-    if (narrow.ok && failed.length === 0) {
-      const parts = [];
-      if (!narrow.skipped) { parts.push('the shared narrow stack'); }
-      if (attempted.length) { parts.push(attempted.length + ' protocol(s)'); }
-      statusEl.innerHTML =
-        '<div class="text-xs text-mpg-100 px-3 py-2 rounded border border-dirty/30 bg-dirty/10">' +
-        'Rebuild complete' + (parts.length ? ' — verified/rebuilt ' + parts.join(' and ') : '') + '.</div>';
-    } else {
-      const names = [];
-      if (!narrow.ok) { names.push('shared narrow stack'); }
-      failed.forEach(function (p) { names.push(p.protocol_name); });
+    if (!narrow.ok || failed.length > 0) {
+      // Outcome 3: failure — name exactly what failed and why.
+      const details = [];
+      if (!narrow.ok) {
+        details.push('shared narrow stack' + (narrow.error ? ' (' + narrow.error + ')' : ''));
+      }
+      failed.forEach(function (p) {
+        details.push(p.protocol_name + (p.error ? ' (' + p.error + ')' : ''));
+      });
       statusEl.innerHTML =
         '<div class="text-xs text-danger px-3 py-2 rounded border border-danger/30 bg-danger/10">' +
-        'Rebuild finished with errors: ' + names.join(', ') + '. Check the server log for details.</div>';
+        'Rebuild failed for: ' + details.join('; ') + '. Check the server log for full details.</div>';
+      return;
     }
+
+    const anyChanged = (!narrow.skipped && narrow.changed) ||
+      attempted.some(function (p) { return p.changed; });
+
+    if (!anyChanged) {
+      // Outcome 1: nothing needed doing — this is the common, fast case.
+      statusEl.innerHTML =
+        '<div class="text-xs text-mpg-500 dark:text-mpg-100 px-3 py-2 rounded border border-mpg-700 bg-mpg-800/5">' +
+        'Rollups were analyzed and do not need a rebuild.</div>';
+      return;
+    }
+
+    // Outcome 2: something was actually purged and re-materialized.
+    const parts = [];
+    if (!narrow.skipped && narrow.changed) { parts.push('the shared narrow stack'); }
+    const changedProtocolCount = attempted.filter(function (p) { return p.changed; }).length;
+    if (changedProtocolCount) { parts.push(changedProtocolCount + ' protocol(s)'); }
+    statusEl.innerHTML =
+      '<div class="text-xs text-green-700 dark:text-green-400 px-3 py-2 rounded border border-green-500/30 bg-green-500/10">' +
+      'Rebuild complete — rebuilt ' + parts.join(' and ') + '.</div>';
   }
 </script>
 {% endblock %}

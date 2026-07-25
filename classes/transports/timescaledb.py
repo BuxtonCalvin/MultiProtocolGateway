@@ -3009,6 +3009,7 @@ class RollupManager:
         protocol_name: str | None,
         wide_table_name: str | None,
         use_shared_rollup_flow: bool,
+        force: bool = False,
     ) -> None:
         """
         Run the common post-table-processing lifecycle for both narrow and wide sources.
@@ -3018,6 +3019,12 @@ class RollupManager:
         retention policy, rollup creation, and initial refresh. This helper
         centralizes that lifecycle while still allowing narrow-specific and
         wide-specific rollup creation to diverge where required.
+
+        force: passed straight through to the rollup-creation step (see
+        ensure_rollups / _ensure_cagg_views_for_protocol) — when True, the
+        stack is purged and fully re-materialized even if its bucket
+        intervals already match config. Used by the admin's "Force Rebuild"
+        button; normal startup/reconnect calls leave this False.
         """
         # 1 Hypertable & Policies
         try:
@@ -3048,7 +3055,7 @@ class RollupManager:
             if use_shared_rollup_flow:
                 # 4a
                 try:
-                    self.setup_with_retry()
+                    self.setup_with_retry(force=force)
                 except Exception as e:
                     self._log.error(f"Aggregate Rollup setup failed: {e}")
                 # 4b
@@ -3059,7 +3066,7 @@ class RollupManager:
             elif protocol_name is not None:
                 # 4a
                 try:
-                    self._ensure_cagg_views_for_protocol(protocol_name, wide_table_name)
+                    self._ensure_cagg_views_for_protocol(protocol_name, wide_table_name, force=force)
                 except Exception as e:
                     self._log.error(f"CAGG view creation failed for protocol '{protocol_name}': {e}")
 
@@ -3219,7 +3226,7 @@ class RollupManager:
                 except SQLAlchemyError as e2:
                     self._log.error(f"_add_compression_policy {source} for {chunk_interval} rollback error: {e2}")
 
-    def setup_with_retry(self) -> None:
+    def setup_with_retry(self, force: bool = False) -> None:
         """_summary_
          This method wraps the ensure_rollups() call with retry Logic to handle potential lock timeouts that can occur if the flush
             thread is actively writing to the source tables while we attempt to set up or refresh continuous aggregates.
@@ -3229,11 +3236,13 @@ class RollupManager:
             If the error is not a lock timeout, it will be raised immediately without retrying, as it likely indicates
             a different issue that needs attention.
 
+        force: passed straight through to ensure_rollups() — see there for
+        what it does.
         """
         max_rollup_retries = 3
         for attempt in range(max_rollup_retries):
             try:
-                self.ensure_rollups()
+                self.ensure_rollups(force=force)
                 break # Success!
             except Exception as e:
                 if "lock_timeout" in str(e):
@@ -3243,7 +3252,7 @@ class RollupManager:
                     raise  # Real error, don't retry
 
 
-    def ensure_rollups(self) -> None:
+    def ensure_rollups(self, force: bool = False) -> None:
         """
         Sets up continuous aggregate rollups based on predefined configurations.
         Uses a Scan-then-Purge approach to handle hierarchical dependencies safely.
@@ -3254,6 +3263,12 @@ class RollupManager:
         bottom up (hourly -> daily -> weekly) to maintain hierarchical integrity.
         The entire process is wrapped in a migration lock to pause the flush thread and prevent conflicts during schema changes.
 
+        force: when True, skips trusting the bucket-interval scan and always
+        purges + fully re-materializes the whole narrow stack, even if every
+        view's bucket already matches config. Used by the admin's "Force
+        Rebuild" button; the default "Rebuild Rollups" button and all
+        startup/reconnect callers leave this False so an already-correct
+        stack is only re-verified, not needlessly re-materialized.
         """
         self.migration_in_progress.set()
         self._log.info("Pausing flush thread for migration...")
@@ -3308,6 +3323,10 @@ class RollupManager:
 
                     if any_rebuild_needed:
                         break
+
+                if force and not any_rebuild_needed:
+                    self._log.info("Force rebuild requested. Purging all rollups regardless of scan result.")
+                    any_rebuild_needed = True
 
                 # 3. Purge Phase: Only purge when an existing rollup stack is mismatched
                 if any_rebuild_needed:
@@ -3569,7 +3588,7 @@ class RollupManager:
             for column_name in column_names
         ]
 
-    def add_wide_rollup(self, protocol_name: str, wide_table_name: str | None) -> None:
+    def add_wide_rollup(self, protocol_name: str, wide_table_name: str | None, force: bool = False) -> None:
         """
         Build the protocol-specific wide-table rollup stack for one protocol.
 
@@ -3577,6 +3596,11 @@ class RollupManager:
         post-processing helper used by the shared narrow stack, while
         preserving protocol-specific metric count caching and completion
         tracking.
+
+        force: passed straight through to setup_rollup() -> _ensure_cagg_
+        views_for_protocol() — when True, this protocol's stack is purged
+        and fully re-materialized even if its bucket intervals already
+        match config. Used by the admin's "Force Rebuild" button.
         """
 
         self.migration_in_progress.set()
@@ -3599,6 +3623,7 @@ class RollupManager:
                 protocol_name=protocol_name,
                 wide_table_name=wide_table_name,
                 use_shared_rollup_flow=False,
+                force=force,
             )
 
             # Retention and Catalog Count
@@ -3659,7 +3684,7 @@ class RollupManager:
                 raise
 
 
-    def _ensure_cagg_views_for_protocol(self, protocol_name: str, wide_table_name: str | None) -> None:
+    def _ensure_cagg_views_for_protocol(self, protocol_name: str, wide_table_name: str | None, force: bool = False) -> None:
         """
         Create or rebuild the four hierarchical CAGG views for a protocol's wide table.
 
@@ -3676,6 +3701,12 @@ class RollupManager:
 
         For narrow-only protocols (wide_table_name=None), creates views
         against device_metrics_narrow scoped by device_info_id instead.
+
+        force: when True, skips trusting the bucket-interval scan and always
+        purges + fully re-materializes this protocol's whole stack, even if
+        every view's bucket already matches config. Used by the admin's
+        "Force Rebuild" button; the default "Rebuild Rollups" button and all
+        startup/reconnect callers leave this False.
         """
         if wide_table_name is None:
             self._log.info(f"Protocol '{protocol_name}' is narrow-only — skipping wide table CAGG views.")
@@ -3733,6 +3764,10 @@ class RollupManager:
 
                     if rollup_state == "missing":
                         any_missing_views = True
+
+                if force and not any_rebuild_needed:
+                    self._log.info(f"Force rebuild requested for protocol '{protocol_name}'. Purging regardless of scan result.")
+                    any_rebuild_needed = True
 
                 if any_rebuild_needed:
                     self._log.info(f"Bucket change detected for protocol '{protocol_name}'. Purging protocol rollups for clean rebuild.")
@@ -4112,19 +4147,19 @@ class RollupManager:
 
         return rows_out
 
-    def rebuild_all_rollups(self, protocol_names: set[str] | None = None) -> dict[str, Any]:
+    def rebuild_all_rollups(self, protocol_names: set[str] | None = None, force: bool = False) -> dict[str, Any]:
         """
-        Forces a rebuild pass across the rollup stacks this bridge manages,
-        for the admin's "Rebuild Rollups" button.
+        Runs a rebuild pass across the rollup stacks this bridge manages, for
+        the admin's "Rebuild Rollups" / "Force Rebuild" buttons.
 
         Args:
-            protocol_names: Which rollup groups to rebuild, keyed the same
+            protocol_names: Which rollup groups to act on, keyed the same
                 way list_rollup_views() groups its rows -- a wide-table
                 protocol_name, plus the literal "shared_narrow" for the
-                shared narrow stack. None (the default) rebuilds every
-                group, matching the startup/reconnect behavior this method
-                mirrors. An empty set rebuilds nothing -- every group comes
-                back in the result with skipped=True.
+                shared narrow stack. None (the default) acts on every group,
+                matching the startup/reconnect behavior this method mirrors.
+                An empty set does nothing -- every group comes back in the
+                result with skipped=True.
 
                 Selection only ever happens at this per-source-table
                 granularity, never per individual hourly/daily/weekly/
@@ -4136,27 +4171,51 @@ class RollupManager:
                 stale or mismatched source. The whole stack is the smallest
                 unit that can be safely rebuilt on its own.
 
+            force: "Rebuild Rollups" (False) vs "Force Rebuild" (True).
+                False only purges + re-materializes a selected group if
+                rollup_needs_rebuild() actually finds a mismatch or missing
+                view -- a group that already matches its configured buckets
+                is left untouched, just re-verified, which is normally very
+                fast. True skips that check for every selected group and
+                always purges + fully re-materializes them, regardless of
+                whether anything looked wrong.
+
         Delegates to the same entry points startup/reconnect already use
         (setup_with_retry for the shared narrow stack, add_wide_rollup per
-        wide-table protocol) instead of duplicating their any_rebuild_needed
-        purge-then-recreate logic -- see ensure_rollups() and
-        _ensure_cagg_views_for_protocol(), both of which only purge and
-        recreate a stack when rollup_needs_rebuild() actually finds a
-        mismatch or missing view. A stack that already matches its
-        configured buckets is left untouched, just re-verified.
+        wide-table protocol) instead of duplicating their purge-then-recreate
+        logic -- see ensure_rollups() and _ensure_cagg_views_for_protocol().
 
-        Never raises: each selected protocol (and the narrow stack, if
-        selected) is attempted independently and its outcome recorded, so
-        one broken wide table doesn't block fixing everyone else's rollups.
-        Callers should still surface any ok=False entries to the admin.
+        Never raises: each selected group is attempted independently and its
+        outcome recorded, so one broken wide table doesn't block fixing
+        everyone else's rollups. Callers should surface any ok=False entries
+        to the admin, and use each group's `changed` flag (computed from a
+        pre-rebuild snapshot, not from force alone) to tell "verified, already
+        correct" apart from "actually rebuilt" when reporting results.
         """
+        # Snapshot status before doing anything, so the result can report
+        # whether a selected group actually needed work -- independent of
+        # `force`, which forces the purge+recreate regardless of status.
+        pre_views: list[dict[str, Any]] = self.list_rollup_views()
+        narrow_pre_ok: bool = all(
+            v["status"] == "OK" for v in pre_views if v["protocol_name"] == "shared_narrow"
+        )
+        protocol_pre_ok: dict[str, bool] = {}
+        for v in pre_views:
+            if v["protocol_name"] == "shared_narrow":
+                continue
+            protocol_pre_ok.setdefault(v["protocol_name"], True)
+            if v["status"] != "OK":
+                protocol_pre_ok[v["protocol_name"]] = False
+
         rebuild_narrow: bool = protocol_names is None or "shared_narrow" in protocol_names
 
         narrow_ok: bool = True
         narrow_error: str | None = None
+        narrow_changed: bool = False
         if rebuild_narrow:
+            narrow_changed = force or not narrow_pre_ok
             try:
-                self.setup_with_retry()
+                self.setup_with_retry(force=force)
             except Exception as e:
                 self._log.error(f"rebuild_all_rollups: shared narrow rollup rebuild failed: {e}")
                 narrow_ok = False
@@ -4179,30 +4238,39 @@ class RollupManager:
             selected: bool = protocol_names is None or protocol_name in protocol_names
             if not selected:
                 protocol_results.append({
-                    "protocol_name": protocol_name, "ok": True, "error": None, "skipped": True,
+                    "protocol_name": protocol_name, "ok": True, "error": None,
+                    "skipped": True, "changed": False,
                 })
                 continue
+
+            changed: bool = force or not protocol_pre_ok.get(protocol_name, True)
             try:
-                self.add_wide_rollup(protocol_name, wide_table_name)
+                self.add_wide_rollup(protocol_name, wide_table_name, force=force)
                 protocol_results.append({
-                    "protocol_name": protocol_name, "ok": True, "error": None, "skipped": False,
+                    "protocol_name": protocol_name, "ok": True, "error": None,
+                    "skipped": False, "changed": changed,
                 })
             except Exception as e:
                 self._log.error(f"rebuild_all_rollups: rebuild failed for protocol '{protocol_name}': {e}")
                 protocol_results.append({
-                    "protocol_name": protocol_name, "ok": False, "error": str(e), "skipped": False,
+                    "protocol_name": protocol_name, "ok": False, "error": str(e),
+                    "skipped": False, "changed": changed,
                 })
 
         ok_count: int = sum(1 for p in protocol_results if p["ok"] and not p["skipped"])
         attempted_count: int = sum(1 for p in protocol_results if not p["skipped"])
         self._log.info(
-            "rebuild_all_rollups: narrow selected=%s ok=%s; %d/%d selected protocol(s) ok.",
-            rebuild_narrow, narrow_ok, ok_count, attempted_count,
+            "rebuild_all_rollups: force=%s narrow selected=%s ok=%s changed=%s; %d/%d selected protocol(s) ok.",
+            force, rebuild_narrow, narrow_ok, narrow_changed, ok_count, attempted_count,
         )
 
         return {
-            "narrow": {"ok": narrow_ok, "error": narrow_error, "skipped": not rebuild_narrow},
+            "narrow": {
+                "ok": narrow_ok, "error": narrow_error,
+                "skipped": not rebuild_narrow, "changed": narrow_changed,
+            },
             "protocols": protocol_results,
+            "force": force,
         }
 
 

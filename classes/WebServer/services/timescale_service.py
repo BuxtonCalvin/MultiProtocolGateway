@@ -320,18 +320,25 @@ def list_rollup_view_groups(gateway: Any) -> list[dict[str, Any]]:
     return groups
 
 
-def rebuild_all_rollups(gateway: Any, protocol_names: set[str] | None = None) -> dict[str, Any]:
+def rebuild_all_rollups(
+    gateway: Any, protocol_names: set[str] | None = None, force: bool = False
+) -> dict[str, Any]:
     """
     Triggers an immediate rebuild pass across the selected rollup stack(s)
-    on the live bridge. Called from the "Rebuild Rollups" button on the
-    Rebuild Rollup Views screen (PATCH /api/timescale/rollups/rebuild).
+    on the live bridge. Called from the "Rebuild Rollups" / "Force Rebuild"
+    buttons on the Rebuild Rollup Views screen (PATCH /api/timescale/
+    rollups/rebuild).
 
     Args:
-        protocol_names: Which groups to rebuild -- protocol_name values as
+        protocol_names: Which groups to act on -- protocol_name values as
             returned by list_rollup_view_groups(), plus "shared_narrow" for
-            the shared narrow stack. None rebuilds every group. See
-            RollupManager.rebuild_all_rollups for the per-group result
-            shape and why selection stops at this granularity.
+            the shared narrow stack. None acts on every group.
+        force: False ("Rebuild Rollups") only purges + re-materializes a
+            group if it's actually out of date. True ("Force Rebuild")
+            always purges + re-materializes every selected group.
+        See RollupManager.rebuild_all_rollups for the per-group result
+        shape (including each group's `changed` flag) and why selection
+        stops at the per-source-table granularity.
 
     Raises RuntimeError if no bridge is attached, or the bridge hasn't
     finished connecting to TimescaleDB yet.
@@ -341,7 +348,7 @@ def rebuild_all_rollups(gateway: Any, protocol_names: set[str] | None = None) ->
         raise RuntimeError("No TimescaleDB bridge is attached to this gateway.")
     if bridge.rollup_mgr is None:
         raise RuntimeError("Rollup manager is not initialized yet — the bridge is not connected to TimescaleDB.")
-    return bridge.rollup_mgr.rebuild_all_rollups(protocol_names=protocol_names)
+    return bridge.rollup_mgr.rebuild_all_rollups(protocol_names=protocol_names, force=force)
 
 
 # ---------------------------------------------------------------------------
