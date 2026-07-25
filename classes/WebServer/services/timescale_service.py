@@ -42,6 +42,7 @@ no longer exists once dropped — there's nothing to roll back to.
 """
 from __future__ import annotations
 
+import itertools
 import logging
 import threading
 from typing import TYPE_CHECKING, Any
@@ -259,6 +260,88 @@ def list_wide_table_fields(
         }
         for f in fields
     ]
+
+
+# ---------------------------------------------------------------------------
+# Rollup views — read-only inventory + on-demand full rebuild.
+#
+# Backs the "Timescale DB -> Rebuild Rollup Views" admin screen. Unlike the
+# column deletions above, there's no staging step here: rollup views are
+# always derived/re-creatable from the wide/narrow tables (never a source of
+# truth themselves), so a rebuild runs immediately on click rather than
+# riding the app's "Commit All Changes" flow.
+# ---------------------------------------------------------------------------
+
+def list_rollup_views(gateway: Any) -> list[dict[str, Any]]:
+    """
+    Returns the rollup-view inventory (shared narrow stack + every wide
+    protocol's hourly/daily/weekly/monthly stack) for the Rebuild Rollup
+    Views screen. See RollupManager.list_rollup_views for the per-row shape.
+
+    Raises RuntimeError if no bridge is attached, or the bridge is attached
+    but hasn't finished connecting to TimescaleDB yet (rollup_mgr is None).
+    """
+    bridge: Any | None = get_timescale_bridge(gateway)
+    if bridge is None:
+        raise RuntimeError("No TimescaleDB bridge is attached to this gateway.")
+    if bridge.rollup_mgr is None:
+        raise RuntimeError("Rollup manager is not initialized yet — the bridge is not connected to TimescaleDB.")
+    return bridge.rollup_mgr.list_rollup_views()
+
+
+def list_rollup_view_groups(gateway: Any) -> list[dict[str, Any]]:
+    """
+    Same inventory as list_rollup_views(), grouped into one entry per
+    source table -- the shared narrow stack, plus one entry per wide-table
+    protocol -- for the Rebuild Rollup Views screen's group checkboxes.
+
+    Rebuilding is only ever offered at this per-source-table granularity,
+    never per individual hourly/daily/weekly/monthly view, because the
+    finer-grained views in a stack are hierarchically dependent on the
+    coarser ones within that same stack -- see
+    RollupManager.rebuild_all_rollups for why.
+
+    Uses itertools.groupby rather than Jinja's `groupby` filter: the latter
+    re-sorts by the grouping key first, which would separate "shared_narrow"
+    from wherever it falls alphabetically among protocol names.
+    itertools.groupby only merges already-consecutive equal keys, which
+    preserves list_rollup_views()'s ordering (shared narrow stack first,
+    then wide protocols alphabetically) instead.
+    """
+    flat: list[dict[str, Any]] = list_rollup_views(gateway)
+    groups: list[dict[str, Any]] = []
+    for protocol_name, rows_iter in itertools.groupby(flat, key=lambda r: r["protocol_name"]):
+        rows: list[dict[str, Any]] = list(rows_iter)
+        groups.append({
+            "protocol_name": protocol_name,
+            "wide_table_name": rows[0]["wide_table_name"],
+            "views": rows,
+        })
+    return groups
+
+
+def rebuild_all_rollups(gateway: Any, protocol_names: set[str] | None = None) -> dict[str, Any]:
+    """
+    Triggers an immediate rebuild pass across the selected rollup stack(s)
+    on the live bridge. Called from the "Rebuild Rollups" button on the
+    Rebuild Rollup Views screen (PATCH /api/timescale/rollups/rebuild).
+
+    Args:
+        protocol_names: Which groups to rebuild -- protocol_name values as
+            returned by list_rollup_view_groups(), plus "shared_narrow" for
+            the shared narrow stack. None rebuilds every group. See
+            RollupManager.rebuild_all_rollups for the per-group result
+            shape and why selection stops at this granularity.
+
+    Raises RuntimeError if no bridge is attached, or the bridge hasn't
+    finished connecting to TimescaleDB yet.
+    """
+    bridge: Any | None = get_timescale_bridge(gateway)
+    if bridge is None:
+        raise RuntimeError("No TimescaleDB bridge is attached to this gateway.")
+    if bridge.rollup_mgr is None:
+        raise RuntimeError("Rollup manager is not initialized yet — the bridge is not connected to TimescaleDB.")
+    return bridge.rollup_mgr.rebuild_all_rollups(protocol_names=protocol_names)
 
 
 # ---------------------------------------------------------------------------

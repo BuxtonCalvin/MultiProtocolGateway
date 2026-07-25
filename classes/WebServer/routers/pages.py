@@ -81,6 +81,7 @@ from ..services.setting_description_service import get_all_setting_descriptions
 from ..services.timescale_service import (
     get_staged_columns,
     is_timescale_available,
+    list_rollup_view_groups,
     list_wide_table_fields,
     list_wide_tables,
     resolve_wide_table_name,
@@ -500,6 +501,68 @@ async def timescale_fields_partial(protocol_name: str, request: Request):
             "wide_table_name": wide_table_name,
             "fields": fields,
         },
+    )
+
+
+@router.get("/pages/timescale-rebuild-rollups", response_class=HTMLResponse, response_model=None)
+async def timescale_rebuild_rollups_page(request: Request):
+    """
+    "Rebuild Rollup Views" screen — a single-pane page (no left-hand picker,
+    unlike Delete Columns: this screen acts on every rollup stack at once,
+    not one wide table at a time). The view inventory itself loads via HTMX
+    (see timescale_rollups_partial below); this route only renders the
+    page shell + "Rebuild Rollups" button.
+    """
+    gateway = getattr(request.app.state, "gateway", None)
+    if not is_timescale_available(gateway):
+        raise HTTPException(
+            status_code=404,
+            detail="No TimescaleDB bridge is attached to this gateway.",
+        )
+
+    with session_scope() as db:
+        nav: NavData = get_nav_data(db)
+
+    return request.app.state.templates.TemplateResponse(
+        request=request,
+        name="pages/timescale_rebuild_rollups.html",
+        context={**_base_context(request, nav)},
+    )
+
+
+@router.get("/pages/timescale/rollups", response_class=HTMLResponse, response_model=None)
+async def timescale_rollups_partial(request: Request):
+    """
+    Rollup-view inventory for the Rebuild Rollup Views screen, grouped one
+    entry per source table — the shared narrow stack, plus every wide-table
+    protocol's own hourly/daily/weekly/monthly stack — each group getting
+    one "include in next rebuild" checkbox (see list_rollup_view_groups for
+    why selection stops at the group level rather than per view). Loaded on
+    page load and again after every "Rebuild Rollups" click (see
+    timescale_rebuild_rollups.html).
+    """
+    gateway = getattr(request.app.state, "gateway", None)
+    if not is_timescale_available(gateway):
+        raise HTTPException(
+            status_code=404,
+            detail="No TimescaleDB bridge is attached to this gateway.",
+        )
+
+    try:
+        groups: list[dict[str, Any]] = list_rollup_view_groups(gateway)
+    except RuntimeError:
+        # Bridge attached but not connected to TimescaleDB yet (rollup_mgr
+        # not initialized) — render an empty inventory rather than a hard
+        # error; the "load" trigger only fires once, so a transient empty
+        # table beats a page that never finishes loading.
+        groups = []
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return request.app.state.templates.TemplateResponse(
+        request=request,
+        name="partials/timescale_rollup_view_list.html",
+        context={"groups": groups},
     )
 
 

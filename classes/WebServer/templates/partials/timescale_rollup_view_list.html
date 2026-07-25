@@ -1,0 +1,129 @@
+<!--
+  Description: partials/timescale_rollup_view_list.html HTMX partial — grouped rollup-view inventory with per-group rebuild checkboxes.
+  File: timescale_rollup_view_list.html
+
+  Copyright 2026 Kevin Burke
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://apache.org
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+
+{#
+  partials/timescale_rollup_view_list.html
+  Swapped into #rollup-views-container on page load and again after every
+  "Rebuild Rollups" click (see timescale_rebuild_rollups.html).
+
+  Context: groups — [{protocol_name, wide_table_name, views: [{view_name,
+  granularity, bucket_interval, status}, ...]}, ...] as returned by
+  services/timescale_service.list_rollup_view_groups. `protocol_name` is
+  "shared_narrow" for the shared narrow-table group; every other group is
+  one wide-table protocol's own hourly/daily/weekly/monthly stack.
+
+  One checkbox per GROUP, not per view: the finer-grained views within a
+  stack are hierarchically dependent on the coarser ones (weekly is built
+  on daily, daily on hourly, ...), so rebuilding is only ever offered at
+  the whole-stack granularity — see RollupManager.rebuild_all_rollups for
+  why. Checkboxes default checked (rebuild everything unless the admin
+  opts a group out) and are read by triggerRebuildRollups() in
+  timescale_rebuild_rollups.html when the button is pressed — this partial
+  itself makes no request and stages nothing.
+
+  Each row's `status` is one of:
+    "OK"      — view exists and its bucket matches current config (green)
+    "rebuild" — view exists but its bucket no longer matches config (red)
+    "missing" — view does not exist yet (red)
+  Only OK is colored distinctly; "rebuild" and "missing" both render red —
+  either way the row needs attention, and the label text (not color) is
+  what tells the two apart.
+
+  Styling notes (mirrors timescale_field_checklist.html):
+  - Row text uses paired light/dark classes for the same reason as the
+    Delete Columns checklist — the app is used in both light and dark
+    mode, and a single shade tuned for one background reads as
+    low-contrast on the other.
+  - `w-auto` on <table> is required (not optional) to override mpg.css's
+    global `table { width: 100%; }` rule — see the equivalent note in
+    timescale_field_checklist.html.
+#}
+<div>
+  <div class="flex items-center justify-between mb-2 px-1">
+    <h2 class="surface-title font-semibold text-sm">Current Rollup Views</h2>
+    <span class="text-mpg-600 dark:text-mpg-400 text-xs font-mono">{{ groups|length }} group(s)</span>
+  </div>
+
+  {% for g in groups %}
+  <div class="mb-3 rounded border border-mpg-700 overflow-hidden"
+       data-rollup-group="{{ g.protocol_name }}">
+
+    <label class="flex items-center gap-2 px-3 py-2 bg-mpg-800 cursor-pointer select-none">
+      <input type="checkbox"
+             class="rollup-group-checkbox accent-accent w-3.5 h-3.5 cursor-pointer flex-shrink-0"
+             data-protocol-name="{{ g.protocol_name }}"
+             checked
+             aria-label="Include {{ g.protocol_name }} in the next rebuild">
+      <span class="text-mpg-50 text-xs font-semibold font-mono">{{ g.protocol_name }}</span>
+      <span class="text-mpg-300 text-xs font-mono truncate">{{ g.wide_table_name }}</span>
+    </label>
+
+    <table class="w-auto text-xs border-collapse" role="table"
+           aria-label="Rollup views for {{ g.protocol_name }}">
+      <thead>
+        <tr class="text-mpg-100 text-xs uppercase tracking-wide bg-mpg-800/60" role="row">
+          <th class="px-3 py-1.5 text-left border-r border-mpg-700/50 font-semibold whitespace-nowrap" scope="col">
+            View
+          </th>
+          <th class="px-3 py-1.5 text-left border-r border-mpg-700/50 font-semibold whitespace-nowrap" scope="col">
+            Granularity
+          </th>
+          <th class="px-3 py-1.5 text-left border-r border-mpg-700/50 font-semibold whitespace-nowrap" scope="col">
+            Bucket
+          </th>
+          <th class="px-3 py-1.5 text-left font-semibold whitespace-nowrap" scope="col">
+            Status
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for v in g.views %}
+        <tr class="border-t border-mpg-700/30
+                   {% if v.status != 'OK' %}bg-danger/5{% endif %}
+                   hover:bg-mpg-800/40 transition-colors"
+            role="row">
+          <td class="px-3 py-1.5 font-mono text-mpg-500 dark:text-mpg-100 whitespace-nowrap border-r border-mpg-700/30" role="cell">
+            {{ v.view_name }}
+          </td>
+          <td class="px-3 py-1.5 text-mpg-500 dark:text-mpg-100 whitespace-nowrap border-r border-mpg-700/30" role="cell">
+            {{ v.granularity }}
+          </td>
+          <td class="px-3 py-1.5 text-mpg-500 dark:text-mpg-100 whitespace-nowrap border-r border-mpg-700/30" role="cell">
+            {{ v.bucket_interval }}
+          </td>
+          <td class="px-3 py-1.5 whitespace-nowrap" role="cell">
+            {% if v.status == 'OK' %}
+            <span class="text-green-600 dark:text-green-400 font-medium">OK</span>
+            {% elif v.status == 'missing' %}
+            <span class="text-danger font-medium">Missing</span>
+            {% else %}
+            <span class="text-danger font-medium">Needs rebuild</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endfor %}
+
+  {% if not groups %}
+  <p class="text-mpg-600 dark:text-mpg-400 text-sm text-center py-8">No rollup views found.</p>
+  {% endif %}
+</div>

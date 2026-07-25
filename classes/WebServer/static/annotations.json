@@ -466,7 +466,7 @@
       "shape_type": "rect"
     }
   ],
-  "pages__help": [
+  "help": [
     {
       "id": "help-screens-list",
       "x_percent": 18.6,
@@ -477,6 +477,15 @@
       "shape_type": "dot"
     },
     {
+      "id": "help-viewer",
+      "x_percent": 56.4,
+      "y_percent": 55.3,
+      "label_x_percent": 45,
+      "label_y_percent": 38,
+      "label": "Right panel renders the selected screenshot (with annotation overlays) or the selected documentation file.",
+      "shape_type": "dot"
+    },
+    {
       "id": "help-docs-list",
       "x_percent": 18.39118903369139,
       "y_percent": 72,
@@ -484,18 +493,9 @@
       "label_y_percent": 67.02421917244416,
       "label": "DOCUMENTATION section lists all files from the documentation/ folder, grouped by subfolder. Click to view markdown files rendered in-page or download other file types.",
       "shape_type": "dot"
-    },
-    {
-      "id": "help-viewer",
-      "x_percent": 56.43821846430022,
-      "y_percent": 55.26816437933313,
-      "label_x_percent": 45,
-      "label_y_percent": 38,
-      "label": "Right panel renders the selected screenshot (with annotation overlays) or the selected documentation file.",
-      "shape_type": "dot"
     }
   ],
-  "pages__about": [
+  "about": [
     {
       "id": "about-description",
       "x_percent": 37.5,
@@ -515,17 +515,19 @@
       "shape_type": "dot"
     }
   ],
-  "pages__faq": [
+  "faq": [
     {
       "id": "faq-list",
       "x_percent": 50,
       "y_percent": 50,
       "label_x_percent": 30,
-      "label_y_percent": 65,
+      "label_y_percent": 62.6,
       "width_percent": 72,
       "height_percent": 92,
       "label": "Expandable FAQ entries cover core concepts (scrapers, bridges, dirty state, orphaned settings), common workflows (adding a device, editing protocol CSVs), and operational details (port number, restart requirement, backup location).",
-      "shape_type": "rect"
+      "shape_type": "rect",
+      "stroke_color": "rgb(14,165,233)",
+      "fill_color": "rgba(14,165,233,0.18)"
     }
   ],
   "view_log": [
@@ -610,9 +612,9 @@
       "label_y_percent": 40
     }
   ],
-  "timescaleDelete": [
+  "timescale_delete": [
     {
-      "id": "timescaleDelete-wide_tables",
+      "id": "timescale_delete-wide_tables",
       "x_percent": 11.1,
       "y_percent": 28.9,
       "label": "Choose the wide table from which you want to delete columns.",
@@ -621,7 +623,7 @@
       "label_y_percent": 43.9
     },
     {
-      "id": "timescaleDelete-columns",
+      "id": "timescale_delete-columns",
       "x_percent": 27.9,
       "y_percent": 55.5,
       "label": "List of all columns in the Timescale DB wide table database.",
@@ -634,7 +636,7 @@
       "fill_color": "rgba(14,165,233,0.18)"
     },
     {
-      "id": "timescaleDelete-commit",
+      "id": "timescale_delete-commit",
       "x_percent": 92.5,
       "y_percent": 9.7,
       "label": "After you check the columns in the wide table, press commit to save your changes.",
@@ -663,6 +665,39 @@
       "label_y_percent": 69.5
     }
   ],
+  "timescale_rebuild_rollups": [
+    {
+      "id": "timescale_rebuild_rollups-checkbox",
+      "x_percent": 2.1,
+      "y_percent": 15.8,
+      "label": "Check off which rollups you want to rebuild.",
+      "shape_type": "dot",
+      "label_x_percent": 26.4,
+      "label_y_percent": 15.1
+    },
+    {
+      "id": "timescale_rebuild_rollups_status",
+      "x_percent": 13.1,
+      "y_percent": 58.8,
+      "label": "Rollup definitions and status",
+      "shape_type": "rect",
+      "label_x_percent": 31.2,
+      "label_y_percent": 54.9,
+      "width_percent": 24,
+      "height_percent": 20.1,
+      "stroke_color": "rgb(14,165,233)",
+      "fill_color": "rgba(14,165,233,0.18)"
+    },
+    {
+      "id": "timescale_rebuild_rollups_rebuild",
+      "x_percent": 95.3,
+      "y_percent": 11.3,
+      "label": "Rebuild the checked rollups.",
+      "shape_type": "dot",
+      "label_x_percent": 74.7,
+      "label_y_percent": 6.6
+    }
+  ],
   "_aliases": {
     "device__inverter_read": "device__scraper_read_generic",
     "device__inverter_write": "device__scraper_write_generic",
@@ -684,7 +719,11 @@
     "device__influxdb3": "device__bridge_generic",
     "pages__create-protocol": "create_protocol",
     "device__device_help": "device__device_help",
-    "pages__timescale-delete-columns": "timescaleDelete",
-    "pages__general_settings": "general_settings"
+    "pages__timescale-delete-columns": "timescale_delete",
+    "pages__general_settings": "general_settings",
+    "pages__about": "about",
+    "pages__help": "help",
+    "pages__faq": "faq",
+    "pages__timescale-rebuild-rollups": "timescale_rebuild_rollups"
   }
 }

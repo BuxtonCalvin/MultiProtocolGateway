@@ -1,0 +1,194 @@
+<!--
+  Description: Defines the Timescale DB "Rebuild Rollup Views" admin screen.
+  File: timescale_rebuild_rollups.html
+
+  Copyright 2026 Kevin Burke
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://apache.org
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+
+{#
+  pages/timescale_rebuild_rollups.html
+  Single-pane screen (no left-hand picker, unlike Delete Columns — this
+  screen operates on every rollup group at once, not one wide table at a
+  time): a header + "Rebuild Rollups" button, "Select all" / "Select none"
+  links, and below them the current rollup-view inventory loaded via HTMX
+  into #rollup-views-container, one checkbox per source-table group (see
+  partials/timescale_rollup_view_list.html).
+
+  Selection is per GROUP, never per individual hourly/daily/weekly/monthly
+  view — the finer-grained views in a stack are hierarchically dependent on
+  the coarser ones, so the whole stack is the smallest unit that can safely
+  be rebuilt on its own (see RollupManager.rebuild_all_rollups).
+
+  Unlike Delete Columns, this screen has no staging step and doesn't touch
+  the header's Commit/Discard buttons — rollup views are always derived
+  from the wide/narrow tables, never a source of truth, so the rebuild runs
+  immediately when the button is pressed. Because the request body needs to
+  carry an arbitrary set of checked checkboxes (PATCH /api/timescale/
+  rollups/rebuild expects {"protocol_names": [...]}), the button is driven
+  by plain fetch() in triggerRebuildRollups() below rather than a bare
+  hx-patch attribute — HTMX has no built-in way to collect multiple
+  independently-named checkboxes into a JSON array body.
+#}
+
+{% extends "base.html" %}
+{% block title %}Timescale DB — Rebuild Rollup Views — MPG Admin{% endblock %}
+{% block content %}
+<div class="col-span-12 flex flex-col gap-2" style="height: calc(100vh - 56px); overflow: hidden;">
+
+  <!-- ══ HEADER + REBUILD BUTTON ══ -->
+  <div class="flex-shrink-0 flex items-start justify-between gap-4 px-1 py-2">
+    <div>
+      <h1 class="surface-title text-xs font-semibold uppercase tracking-widest">Rollup Views</h1>
+      <p class="text-mpg-400 text-xs mt-1 max-w-2xl">
+        Continuous-aggregate rollup views currently on this bridge — the shared narrow stack
+        plus one hourly / daily / weekly / monthly stack per wide-table protocol. Uncheck a
+        group below to leave it out of the next rebuild; a checked group whose views already
+        match their configured buckets is left untouched, only re-verified.
+      </p>
+      <div class="mt-1.5 flex items-center gap-3">
+        <button type="button"
+                class="text-[11px] text-mpg-300 hover:text-white underline underline-offset-2"
+                onclick="setAllRollupGroups(true)">
+          Select all
+        </button>
+        <button type="button"
+                class="text-[11px] text-mpg-300 hover:text-white underline underline-offset-2"
+                onclick="setAllRollupGroups(false)">
+          Select none
+        </button>
+      </div>
+    </div>
+
+    <button type="button"
+            id="rebuild-rollups-btn"
+            class="flex-shrink-0 px-4 py-2 rounded text-xs font-semibold bg-accent text-white
+                   hover:bg-accent/80 disabled:opacity-50 disabled:cursor-not-allowed
+                   transition-colors"
+            aria-label="Rebuild the checked rollup groups"
+            onclick="triggerRebuildRollups()">
+      <span id="rebuild-btn-label">Rebuild Rollups</span>
+    </button>
+  </div>
+
+  <!-- ══ STATUS BANNER — filled in by renderRebuildStatus() below ══ -->
+  <div id="rebuild-status" class="flex-shrink-0 px-1" role="status" aria-live="polite"></div>
+
+  <!-- ══ ROLLUP VIEW GROUPS (one checkbox per source table) ══ -->
+  <section class="flex-1 overflow-y-auto px-1" aria-label="Rollup view inventory">
+    <div id="rollup-views-container"
+         class="overflow-x-auto"
+         hx-get="/pages/timescale/rollups"
+         hx-trigger="load"
+         hx-swap="innerHTML scroll:false">
+      <p class="text-mpg-300 text-xs p-4">Loading rollup views…</p>
+    </div>
+  </section>
+
+</div>
+
+<script>
+  function setAllRollupGroups(checked) {
+    document.querySelectorAll('.rollup-group-checkbox').forEach(function (cb) {
+      cb.checked = checked;
+    });
+  }
+
+  // Collects the checked group checkboxes, PATCHes the selection to
+  // /api/timescale/rollups/rebuild, then refreshes the inventory so it
+  // reflects whatever the rebuild just did.
+  async function triggerRebuildRollups() {
+    const btn = document.getElementById('rebuild-rollups-btn');
+    const label = document.getElementById('rebuild-btn-label');
+    const statusEl = document.getElementById('rebuild-status');
+
+    const checked = document.querySelectorAll('.rollup-group-checkbox:checked');
+    const protocolNames = Array.from(checked).map(function (cb) { return cb.dataset.protocolName; });
+
+    statusEl.innerHTML = '';
+
+    if (protocolNames.length === 0) {
+      statusEl.innerHTML =
+        '<div class="text-xs text-danger px-3 py-2 rounded border border-danger/30 bg-danger/10">' +
+        'Select at least one group to rebuild.</div>';
+      return;
+    }
+
+    btn.disabled = true;
+    label.textContent = 'Rebuilding…';
+
+    let ok = false;
+    let payload = null;
+    try {
+      const resp = await fetch('/api/timescale/rollups/rebuild', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache',
+        },
+        body: JSON.stringify({ protocol_names: protocolNames }),
+      });
+      ok = resp.ok;
+      payload = await resp.json();
+    } catch (e) {
+      ok = false;
+    }
+
+    btn.disabled = false;
+    label.textContent = 'Rebuild Rollups';
+
+    renderRebuildStatus(ok, payload);
+
+    // Refresh the inventory so it reflects the post-rebuild state.
+    // Checkboxes default back to "all checked" on reload — see the
+    // partial's `checked` attribute.
+    htmx.ajax('GET', '/pages/timescale/rollups', {
+      target: '#rollup-views-container',
+      swap: 'innerHTML scroll:false',
+    });
+  }
+
+  function renderRebuildStatus(ok, payload) {
+    const statusEl = document.getElementById('rebuild-status');
+
+    if (!ok || !payload) {
+      statusEl.innerHTML =
+        '<div class="text-xs text-danger px-3 py-2 rounded border border-danger/30 bg-danger/10">' +
+        'Rebuild failed — check the server log for details.</div>';
+      return;
+    }
+
+    const protocols = payload.protocols || [];
+    const attempted = protocols.filter(function (p) { return !p.skipped; });
+    const failed = attempted.filter(function (p) { return !p.ok; });
+    const narrow = payload.narrow || { ok: true, skipped: true };
+
+    if (narrow.ok && failed.length === 0) {
+      const parts = [];
+      if (!narrow.skipped) { parts.push('the shared narrow stack'); }
+      if (attempted.length) { parts.push(attempted.length + ' protocol(s)'); }
+      statusEl.innerHTML =
+        '<div class="text-xs text-mpg-100 px-3 py-2 rounded border border-dirty/30 bg-dirty/10">' +
+        'Rebuild complete' + (parts.length ? ' — verified/rebuilt ' + parts.join(' and ') : '') + '.</div>';
+    } else {
+      const names = [];
+      if (!narrow.ok) { names.push('shared narrow stack'); }
+      failed.forEach(function (p) { names.push(p.protocol_name); });
+      statusEl.innerHTML =
+        '<div class="text-xs text-danger px-3 py-2 rounded border border-danger/30 bg-danger/10">' +
+        'Rebuild finished with errors: ' + names.join(', ') + '. Check the server log for details.</div>';
+    }
+  }
+</script>
+{% endblock %}

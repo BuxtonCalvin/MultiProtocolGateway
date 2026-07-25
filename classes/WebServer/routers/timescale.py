@@ -19,10 +19,11 @@
 routers/timescale.py — TimescaleDB wide-table column administration
 endpoints.
 
-These back the "Timescale DB → Delete Columns" admin screen. Unlike most
-routers in this app, these do NOT take a `db: Session` — there's nothing in
-the staging (SQLite) DB to read here. Everything comes from the live
-timescaledb bridge transport reached via request.app.state.gateway (see
+These back the "Timescale DB → Delete Columns" admin screen and the
+rollup rebuild screen. Unlike most routers in this app, these do
+NOT take a `db: Session` — there's nothing in the staging (SQLite)
+DB to read here. Everything comes from the live timescaledb
+bridge transport reached via request.app.state.gateway (see
 services/timescale_service.py), the same way analysis.py reaches modbus
 transports for the Analyze feature.
 
@@ -44,8 +45,10 @@ from ..services.timescale_service import (
     get_staged_columns,
     get_timescale_bridge,
     has_staged_deletions,
+    list_rollup_views,
     list_wide_table_fields,
     list_wide_tables,
+    rebuild_all_rollups,
     stage_field_deletion,
     staged_deletion_count,
 )
@@ -144,3 +147,57 @@ def get_staged(request: Request) -> dict[str, Any]:
         "count": staged_deletion_count(request.app.state),
         "staged": get_all_staged(request.app.state),
     }
+
+
+# ---------------------------------------------------------------------------
+# Rollup views — back the "Timescale DB -> Rebuild Rollup Views" screen.
+# Unlike the column-deletion endpoints above, there's no staging step here:
+# rollup views are always derived/re-creatable from the wide/narrow tables,
+# never a source of truth, so a rebuild runs immediately on click.
+# ---------------------------------------------------------------------------
+
+@router.get("/rollups")
+def get_rollups(request: Request) -> dict[str, Any]:
+    """Returns the current rollup-view inventory for the Rebuild Rollup Views screen."""
+    _require_bridge(request)
+    try:
+        views: list[dict[str, Any]] = list_rollup_views(request.app.state.gateway)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    return {"views": views}
+
+
+class RebuildRollupsRequest(BaseModel):
+    # protocol_name values as returned by list_rollup_view_groups(), plus
+    # the literal "shared_narrow" for the shared narrow stack — one entry
+    # per checked group checkbox on the Rebuild Rollup Views screen.
+    protocol_names: list[str]
+
+
+@router.patch("/rollups/rebuild")
+def rebuild_rollups(payload: RebuildRollupsRequest, request: Request) -> dict[str, Any]:
+    """
+    Forces an immediate rebuild pass across the admin's selected rollup
+    group(s) — each group is one source table (the shared narrow stack, or
+    one wide-table protocol), never an individual hourly/daily/weekly/
+    monthly view; see RollupManager.rebuild_all_rollups for why selection
+    stops at that granularity. Runs synchronously and returns a per-group
+    result summary; the caller (the Rebuild Rollup Views screen) reports
+    any ok=False entries to the admin rather than treating a partial
+    failure as a 500.
+    """
+    _require_bridge(request)
+    if not payload.protocol_names:
+        raise HTTPException(status_code=400, detail="Select at least one rollup group to rebuild.")
+    try:
+        result: dict[str, Any] = rebuild_all_rollups(
+            request.app.state.gateway, protocol_names=set(payload.protocol_names)
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    _log.info(f"Rollup rebuild triggered via admin UI for {len(payload.protocol_names)} group(s).")
+    return result

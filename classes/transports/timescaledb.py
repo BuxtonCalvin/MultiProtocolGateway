@@ -4025,6 +4025,188 @@ class RollupManager:
 
 
     # -------------------------
+    #  Admin UI support — read-only inventory + on-demand full rebuild.
+    #  Backs the "Timescale DB -> Rebuild Rollup Views" admin screen, the
+    #  same way WideTableFieldManager backs "Delete Columns". Both entry
+    #  points below are thin orchestrators over methods that already exist
+    #  (rollup_needs_rebuild, setup_with_retry/ensure_rollups, add_wide_rollup)
+    #  rather than new rebuild logic, so a manual rebuild behaves identically
+    #  to the automatic one that already runs on connect/reconnect.
+    # -------------------------
+
+    def list_rollup_views(self) -> list[dict[str, Any]]:
+        """
+        Read-only inventory of every rollup view this bridge manages or
+        should manage: the shared narrow stack (hourly/daily/weekly/monthly
+        on device_metrics_narrow) plus each wide-table protocol's own
+        hourly/daily/weekly/monthly stack. Never creates or drops anything.
+
+        Each row's `status` comes straight from rollup_needs_rebuild():
+          - "OK"      view exists and its bucket matches current config
+          - "rebuild" view exists but its bucket no longer matches config
+          - "missing" view does not exist yet
+
+        Used to populate the Rebuild Rollup Views screen before the admin
+        presses "Rebuild Rollups" -- see WebServer.services.timescale_service
+        .list_rollup_views and routers/timescale.py's GET /rollups.
+        """
+        granularities: list[tuple[str, str]] = [
+            ("hourly", self.hourly_rollup_bucket),
+            ("daily", self.daily_rollup_bucket),
+            ("weekly", self.weekly_rollup_bucket),
+            ("monthly", self.monthly_rollup_bucket),
+        ]
+
+        rows_out: list[dict[str, Any]] = []
+
+        with self.SessionFactory() as session:
+            # Shared narrow stack -- fixed view names, not tied to a protocol.
+            narrow_segments: dict[str, str] = {
+                "hourly": "hourly_rollup_narrow",
+                "daily": "daily_rollup_narrow",
+                "weekly": "weekly_rollup_narrow",
+                "monthly": "monthly_rollup_narrow",
+            }
+            for gran, bucket in granularities:
+                view_name: str = narrow_segments[gran]
+                rows_out.append({
+                    "protocol_name": "shared_narrow",
+                    "wide_table_name": "device_metrics_narrow",
+                    "view_name": view_name,
+                    "granularity": gran,
+                    "bucket_interval": bucket,
+                    "status": self.rollup_needs_rebuild(session, view_name, bucket),
+                })
+
+            # One 4-view stack per wide-table protocol. rollup_prefix comes
+            # from protocol_registry (see timescaledb._register_protocol_
+            # schema) and follows the same "rollup_wide__<suffix>" naming
+            # _ensure_cagg_views_for_protocol derives from wide_table_name --
+            # the two must stay in sync.
+            protocol_rows: Sequence[Row[Any]] = session.execute(
+                text("""
+                    SELECT protocol_name, rollup_prefix, wide_table_name
+                    FROM protocol_registry
+                    WHERE rollup_enabled = true AND wide_table_name IS NOT NULL
+                    ORDER BY protocol_name
+                """)
+            ).fetchall()
+
+            for protocol_name, rollup_prefix, wide_table_name in protocol_rows:
+                if not rollup_prefix:
+                    # Registered but rollup setup hasn't run yet (rollup_prefix
+                    # is set alongside wide_table_name at registration time --
+                    # see timescaledb._register_protocol_schema) -- nothing to
+                    # report for this protocol until that happens.
+                    continue
+                for gran, bucket in granularities:
+                    view_name = f"{gran}_{rollup_prefix}"
+                    rows_out.append({
+                        "protocol_name": protocol_name,
+                        "wide_table_name": wide_table_name,
+                        "view_name": view_name,
+                        "granularity": gran,
+                        "bucket_interval": bucket,
+                        "status": self.rollup_needs_rebuild(session, view_name, bucket),
+                    })
+
+        return rows_out
+
+    def rebuild_all_rollups(self, protocol_names: set[str] | None = None) -> dict[str, Any]:
+        """
+        Forces a rebuild pass across the rollup stacks this bridge manages,
+        for the admin's "Rebuild Rollups" button.
+
+        Args:
+            protocol_names: Which rollup groups to rebuild, keyed the same
+                way list_rollup_views() groups its rows -- a wide-table
+                protocol_name, plus the literal "shared_narrow" for the
+                shared narrow stack. None (the default) rebuilds every
+                group, matching the startup/reconnect behavior this method
+                mirrors. An empty set rebuilds nothing -- every group comes
+                back in the result with skipped=True.
+
+                Selection only ever happens at this per-source-table
+                granularity, never per individual hourly/daily/weekly/
+                monthly view: the finer-grained views in a stack are built
+                hierarchically on top of the coarser ones (see
+                _ensure_cagg_views_for_protocol's view_specs chain), so
+                rebuilding one view in isolation while leaving the rest of
+                its own stack untouched would risk building it against a
+                stale or mismatched source. The whole stack is the smallest
+                unit that can be safely rebuilt on its own.
+
+        Delegates to the same entry points startup/reconnect already use
+        (setup_with_retry for the shared narrow stack, add_wide_rollup per
+        wide-table protocol) instead of duplicating their any_rebuild_needed
+        purge-then-recreate logic -- see ensure_rollups() and
+        _ensure_cagg_views_for_protocol(), both of which only purge and
+        recreate a stack when rollup_needs_rebuild() actually finds a
+        mismatch or missing view. A stack that already matches its
+        configured buckets is left untouched, just re-verified.
+
+        Never raises: each selected protocol (and the narrow stack, if
+        selected) is attempted independently and its outcome recorded, so
+        one broken wide table doesn't block fixing everyone else's rollups.
+        Callers should still surface any ok=False entries to the admin.
+        """
+        rebuild_narrow: bool = protocol_names is None or "shared_narrow" in protocol_names
+
+        narrow_ok: bool = True
+        narrow_error: str | None = None
+        if rebuild_narrow:
+            try:
+                self.setup_with_retry()
+            except Exception as e:
+                self._log.error(f"rebuild_all_rollups: shared narrow rollup rebuild failed: {e}")
+                narrow_ok = False
+                narrow_error = str(e)
+        else:
+            self._log.debug("rebuild_all_rollups: shared narrow stack not selected -- skipping.")
+
+        with self.SessionFactory() as session:
+            protocol_rows: Sequence[Row[Any]] = session.execute(
+                text("""
+                    SELECT protocol_name, wide_table_name
+                    FROM protocol_registry
+                    WHERE rollup_enabled = true AND wide_table_name IS NOT NULL
+                    ORDER BY protocol_name
+                """)
+            ).fetchall()
+
+        protocol_results: list[dict[str, Any]] = []
+        for protocol_name, wide_table_name in protocol_rows:
+            selected: bool = protocol_names is None or protocol_name in protocol_names
+            if not selected:
+                protocol_results.append({
+                    "protocol_name": protocol_name, "ok": True, "error": None, "skipped": True,
+                })
+                continue
+            try:
+                self.add_wide_rollup(protocol_name, wide_table_name)
+                protocol_results.append({
+                    "protocol_name": protocol_name, "ok": True, "error": None, "skipped": False,
+                })
+            except Exception as e:
+                self._log.error(f"rebuild_all_rollups: rebuild failed for protocol '{protocol_name}': {e}")
+                protocol_results.append({
+                    "protocol_name": protocol_name, "ok": False, "error": str(e), "skipped": False,
+                })
+
+        ok_count: int = sum(1 for p in protocol_results if p["ok"] and not p["skipped"])
+        attempted_count: int = sum(1 for p in protocol_results if not p["skipped"])
+        self._log.info(
+            "rebuild_all_rollups: narrow selected=%s ok=%s; %d/%d selected protocol(s) ok.",
+            rebuild_narrow, narrow_ok, ok_count, attempted_count,
+        )
+
+        return {
+            "narrow": {"ok": narrow_ok, "error": narrow_error, "skipped": not rebuild_narrow},
+            "protocols": protocol_results,
+        }
+
+
+    # -------------------------
     #  Determine wide vs narrow table usage for resource settings
     # -------------------------
     def _get_dynamic_settings_helper(self) -> dict[str, Any]:
