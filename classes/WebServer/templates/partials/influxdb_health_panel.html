@@ -1,0 +1,90 @@
+<!--
+  Description: partials/influxdb_health_panel.html HTMX partial — Bridge Health card for InfluxDB v1/v3 device pages.
+  File: influxdb_health_panel.html
+
+  Copyright 2026 Kevin Burke
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://apache.org
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+
+{#
+  partials/influxdb_health_panel.html
+  Swapped into #bridge-health-container on an InfluxDB v1 (influxdb_out)
+  or v3 (influxdb3_out) device page (see bridge_panes.html). Context:
+  health — dict from services/influxdb_service.get_influxdb_health().
+
+  Scope note: unlike the TimescaleDB bridge, influxdb_out/influxdb3_out
+  have no rollups, compression policy, or background jobs to report —
+  those are TimescaleDB continuous-aggregate concepts with no InfluxDB
+  analog here — so this is a single Bridge Health card, not a 2x2 grid of
+  panels. See services/influxdb_service module docstring for why a
+  Storage Overview panel isn't built for these bridges (no query support
+  exists to build it from yet).
+
+  Purely observational — nothing on this panel is clickable. Connection
+  status itself is deliberately not repeated here — it's already shown in
+  the device page's own status badge, above this card.
+#}
+<div class="card">
+  <h3 class="label mb-2">Bridge Health</h3>
+
+  {% if not health %}
+  <p class="surface-muted text-xs">Health data isn't available yet.</p>
+  {% else %}
+  <dl class="space-y-2 text-sm">
+
+    <div class="flex items-center justify-between">
+      <dt class="surface-muted text-xs">Write batch pending</dt>
+      <dd class="surface-title text-xs font-mono font-medium">
+        {{ health.batch_pending }} / {{ health.batch_size }} pts
+      </dd>
+    </div>
+
+    <div class="flex items-center justify-between">
+      <dt class="surface-muted text-xs">Backlog buffer</dt>
+      <dd class="surface-title text-xs font-mono font-medium">
+        {% if health.persistent_storage_enabled %}
+        {{ health.backlog_count }} / {{ health.max_backlog_size }} pts
+        {% if health.backlog_count %}<span class="text-dirty">(buffering)</span>{% endif %}
+        {% else %}
+        <span class="surface-muted">Disabled</span>
+        {% endif %}
+      </dd>
+    </div>
+
+    <div class="flex items-center justify-between">
+      <dt class="surface-muted text-xs">Periodic reconnect check</dt>
+      <dd class="surface-title text-xs font-medium">
+        {% if health.periodic_reconnect_interval %}
+        Every {{ (health.periodic_reconnect_interval / 3600) | round(1) }}h
+        <span class="text-mpg-600 dark:text-mpg-500">(last: {{ health.last_periodic_reconnect_display }})</span>
+        {% else %}
+        <span class="surface-muted">Disabled</span>
+        {% endif %}
+      </dd>
+    </div>
+
+    <div class="flex items-center justify-between">
+      <dt class="surface-muted text-xs">Stale transports</dt>
+      <dd class="surface-title text-xs font-mono font-medium">
+        {% if health.stale_transport_count %}
+        <span class="text-danger">{{ health.stale_transport_count }}</span> / {{ health.tracked_transport_count }}
+        {% else %}
+        0 / {{ health.tracked_transport_count }}
+        {% endif %}
+      </dd>
+    </div>
+
+  </dl>
+  {% endif %}
+</div>

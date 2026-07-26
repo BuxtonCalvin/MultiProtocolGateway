@@ -71,6 +71,7 @@ from ..services.device_service import (
     get_nav_data,
     get_transport_library,
 )
+from ..services.influxdb_service import get_influxdb_health, get_influxdb_storage
 from ..services.protocol_service import (
     export_protocol_registers,
     get_protocol_groups,
@@ -79,7 +80,11 @@ from ..services.protocol_service import (
 )
 from ..services.setting_description_service import get_all_setting_descriptions
 from ..services.timescale_service import (
+    get_background_jobs,
+    get_bridge_health,
+    get_compression_retention_summary,
     get_staged_columns,
+    get_storage_overview,
     is_timescale_available,
     list_rollup_view_groups,
     list_wide_table_fields,
@@ -566,6 +571,162 @@ async def timescale_rollups_partial(request: Request):
     )
 
 
+@router.get("/pages/timescale/health", response_class=HTMLResponse, response_model=None)
+async def timescale_health_partial(request: Request):
+    """
+    Bridge Health panel for the TimescaleDB bridge's device page — connection
+    state, backlog buffering, and rollup setup completion. Read-only; lazy-
+    loaded so a slow query here can't block the rest of the page.
+    """
+    gateway = getattr(request.app.state, "gateway", None)
+    if not is_timescale_available(gateway):
+        raise HTTPException(status_code=404, detail="No TimescaleDB bridge is attached to this gateway.")
+
+    try:
+        health: dict[str, Any] = get_bridge_health(gateway)
+    except RuntimeError:
+        health = {}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return request.app.state.templates.TemplateResponse(
+        request=request,
+        name="partials/bridge_health_panel.html",
+        context={"health": health},
+    )
+
+
+@router.get("/pages/timescale/storage", response_class=HTMLResponse, response_model=None)
+async def timescale_storage_partial(request: Request):
+    """
+    Storage Overview panel for the TimescaleDB bridge's device page — row
+    count, size, chunk count, and time range per source table. Read-only;
+    lazy-loaded since this queries every source table individually.
+    """
+    gateway = getattr(request.app.state, "gateway", None)
+    if not is_timescale_available(gateway):
+        raise HTTPException(status_code=404, detail="No TimescaleDB bridge is attached to this gateway.")
+
+    try:
+        tables: list[dict[str, Any]] = get_storage_overview(gateway)
+    except RuntimeError:
+        tables = []
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return request.app.state.templates.TemplateResponse(
+        request=request,
+        name="partials/bridge_storage_panel.html",
+        context={"tables": tables},
+    )
+
+
+@router.get("/pages/timescale/compression-retention", response_class=HTMLResponse, response_model=None)
+async def timescale_compression_retention_partial(request: Request):
+    """
+    Compression & Retention Status panel for the TimescaleDB bridge's
+    device page — the configured compression schedule and raw-data
+    retention interval. Read-only; this is config, not a live query.
+    """
+    gateway = getattr(request.app.state, "gateway", None)
+    if not is_timescale_available(gateway):
+        raise HTTPException(status_code=404, detail="No TimescaleDB bridge is attached to this gateway.")
+
+    try:
+        summary: dict[str, Any] | None = get_compression_retention_summary(gateway)
+    except RuntimeError:
+        summary = None
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return request.app.state.templates.TemplateResponse(
+        request=request,
+        name="partials/bridge_compression_panel.html",
+        context={"summary": summary},
+    )
+
+
+@router.get("/pages/timescale/jobs", response_class=HTMLResponse, response_model=None)
+async def timescale_jobs_partial(request: Request):
+    """
+    Background Job Status panel for the TimescaleDB bridge's device page —
+    TimescaleDB's own compression/retention/refresh scheduler jobs for
+    every hypertable and rollup view this bridge manages. Read-only.
+    """
+    gateway = getattr(request.app.state, "gateway", None)
+    if not is_timescale_available(gateway):
+        raise HTTPException(status_code=404, detail="No TimescaleDB bridge is attached to this gateway.")
+
+    try:
+        jobs: list[dict[str, Any]] = get_background_jobs(gateway)
+    except RuntimeError:
+        jobs = []
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return request.app.state.templates.TemplateResponse(
+        request=request,
+        name="partials/bridge_jobs_panel.html",
+        context={"jobs": jobs},
+    )
+
+
+@router.get("/pages/influxdb/{device_name}/health", response_class=HTMLResponse, response_model=None)
+async def influxdb_health_partial(device_name: str, request: Request):
+    """
+    Bridge Health panel for an InfluxDB v1 (influxdb_out) or v3
+    (influxdb3_out) device page — connection/backlog/staleness state.
+    Read-only; lazy-loaded like the TimescaleDB panels.
+
+    Unlike the TimescaleDB bridge (a singleton), a gateway can have more
+    than one InfluxDB v1/v3 bridge configured, so this is scoped by
+    device_name rather than assuming "the" InfluxDB bridge — see
+    services/influxdb_service.get_influxdb_bridge.
+    """
+    gateway = getattr(request.app.state, "gateway", None)
+    device_section: str = f"transport.{device_name}"
+
+    try:
+        health: dict[str, Any] = get_influxdb_health(gateway, device_section)
+    except RuntimeError:
+        raise HTTPException(status_code=404, detail=f"No InfluxDB bridge named '{device_name}' is attached to this gateway.")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return request.app.state.templates.TemplateResponse(
+        request=request,
+        name="partials/influxdb_health_panel.html",
+        context={"health": health},
+    )
+
+
+@router.get("/pages/influxdb/{device_name}/storage", response_class=HTMLResponse, response_model=None)
+async def influxdb_storage_partial(device_name: str, request: Request):
+    """
+    Storage Overview panel for an InfluxDB v1 (influxdb_out) or v3
+    (influxdb3_out) device page — discovered measurements/tables, a
+    sample row-count estimate, and (v1 only) retention policies and
+    optional on-disk data directory size. Read-only, best-effort; a
+    failed underlying query is reported inline rather than erroring the
+    whole panel — see services/influxdb_service.get_influxdb_storage.
+    """
+    gateway = getattr(request.app.state, "gateway", None)
+    device_section: str = f"transport.{device_name}"
+
+    try:
+        storage: dict[str, Any] = get_influxdb_storage(gateway, device_section)
+    except RuntimeError:
+        raise HTTPException(status_code=404, detail=f"No InfluxDB bridge named '{device_name}' is attached to this gateway.")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return request.app.state.templates.TemplateResponse(
+        request=request,
+        name="partials/influxdb_storage_panel.html",
+        context={"storage": storage},
+    )
+
+
 def _protocol_create_groups(protocols_dir: Path) -> list[dict[str, Any]]:
     groups: list[dict[str, Any]] = []
     if not protocols_dir.exists():
@@ -942,7 +1103,7 @@ class CreateDeviceRequest(BaseModel):
         if not value:
             return value  # empty = None, valid
         for part in value.split(","):
-            part = part.strip()
+            part: str = part.strip()
             if part and not part.startswith("transport."):
                 raise ValueError("Each bridge must be a transport section reference (e.g. transport.mqtt).")
         return value

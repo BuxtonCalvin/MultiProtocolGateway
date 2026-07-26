@@ -41,13 +41,18 @@ from pydantic import BaseModel
 
 from ..services.timescale_service import (
     get_all_staged,
+    get_background_jobs,
+    get_bridge_health,
+    get_compression_retention_summary,
     get_staged_columns,
+    get_storage_overview,
     get_timescale_bridge,
     has_staged_deletions,
     list_rollup_views,
     list_wide_table_fields,
     list_wide_tables,
     rebuild_all_rollups,
+    refresh_selected_rollups,
     stage_field_deletion,
     staged_deletion_count,
 )
@@ -213,3 +218,99 @@ def rebuild_rollups(payload: RebuildRollupsRequest, request: Request) -> dict[st
         f"(force={payload.force})."
     )
     return result
+
+
+class RefreshRollupsRequest(BaseModel):
+    # Same group keys as RebuildRollupsRequest.protocol_names.
+    protocol_names: list[str]
+    # False = normal incremental refresh (each view's configured start_
+    # offset window). True = full refresh of each view's entire time range.
+    force_full: bool = False
+
+
+@router.patch("/rollups/refresh")
+def refresh_rollups(payload: RefreshRollupsRequest, request: Request) -> dict[str, Any]:
+    """
+    Pulls the latest raw data into the admin's selected rollup group(s)'
+    existing views — the lighter, non-structural "Refresh Now" action.
+    Unlike /rollups/rebuild, this never drops or recreates a view; it's the
+    same kind of refresh the background policy already runs on its own
+    schedule, just triggered on demand. A view that doesn't exist yet is
+    skipped, not created — use /rollups/rebuild for that. Runs
+    synchronously and returns a per-view result summary.
+    """
+    _require_bridge(request)
+    if not payload.protocol_names:
+        raise HTTPException(status_code=400, detail="Select at least one rollup group to refresh.")
+    try:
+        result: dict[str, Any] = refresh_selected_rollups(
+            request.app.state.gateway,
+            protocol_names=set(payload.protocol_names),
+            force_full=payload.force_full,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    _log.info(
+        f"Rollup refresh triggered via admin UI for {len(payload.protocol_names)} group(s) "
+        f"(force_full={payload.force_full})."
+    )
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Bridge info panels — back the read-only sections of the TimescaleDB
+# bridge's device page (see partials/bridge_panes.html). Unlike everything
+# above, these never mutate anything; the panels are observed only, never
+# acted on directly — actions live on the Timescale DB menu pads instead.
+# ---------------------------------------------------------------------------
+
+@router.get("/health")
+def get_health(request: Request) -> dict[str, Any]:
+    """Connection/background-worker snapshot for the Bridge Health panel."""
+    _require_bridge(request)
+    try:
+        return get_bridge_health(request.app.state.gateway)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.get("/storage")
+def get_storage(request: Request) -> dict[str, Any]:
+    """Per-source-table storage snapshot for the Storage Overview panel."""
+    _require_bridge(request)
+    try:
+        tables: list[dict[str, Any]] = get_storage_overview(request.app.state.gateway)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    return {"tables": tables}
+
+
+@router.get("/compression-retention")
+def get_compression_retention(request: Request) -> dict[str, Any]:
+    """Compression/retention configuration summary for that panel."""
+    _require_bridge(request)
+    try:
+        return get_compression_retention_summary(request.app.state.gateway)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.get("/jobs")
+def get_jobs(request: Request) -> dict[str, Any]:
+    """TimescaleDB background scheduler job snapshot for that panel."""
+    _require_bridge(request)
+    try:
+        jobs: list[dict[str, Any]] = get_background_jobs(request.app.state.gateway)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    return {"jobs": jobs}

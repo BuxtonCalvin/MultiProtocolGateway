@@ -73,11 +73,22 @@
 
     <div class="flex-shrink-0 flex items-center gap-2">
       <button type="button"
+              id="refresh-rollups-btn"
+              class="px-4 py-2 rounded text-xs font-semibold bg-transparent text-accent
+                     border border-accent/50 hover:bg-accent/10
+                     disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              aria-label="Pull the latest data into the checked rollup groups' existing views"
+              title="Pulls the latest raw data into each checked group's existing views without dropping or recreating them — much faster than a rebuild, but won't fix a missing view or a bucket-interval mismatch"
+              onclick="triggerRefreshRollups(false)">
+        <span id="refresh-btn-label">Refresh Now</span>
+      </button>
+      <button type="button"
               id="rebuild-rollups-btn"
               class="px-4 py-2 rounded text-xs font-semibold bg-accent text-white
                      hover:bg-accent/80 disabled:opacity-50 disabled:cursor-not-allowed
                      transition-colors"
               aria-label="Rebuild the checked rollup groups if they need it"
+              title="Purges and recreates a checked group's views only if their bucket intervals no longer match config or a view is missing — a group that's already correct is just re-verified, not touched"
               onclick="triggerRebuildRollups(false)">
         <span id="rebuild-btn-label">Rebuild Rollups</span>
       </button>
@@ -117,20 +128,40 @@
     });
   }
 
+  // All three actions (Refresh Now, Rebuild Rollups, Force Rebuild) hit the
+  // same underlying rollup stacks, so only one should ever run at a time —
+  // disable all three buttons while any one of them is in flight.
+  function setRollupActionButtonsDisabled(disabled) {
+    ['refresh-rollups-btn', 'rebuild-rollups-btn', 'force-rebuild-btn'].forEach(function (id) {
+      const btn = document.getElementById(id);
+      if (btn) { btn.disabled = disabled; }
+    });
+  }
+
+  function getCheckedRollupGroups() {
+    const checked = document.querySelectorAll('.rollup-group-checkbox:checked');
+    return Array.from(checked).map(function (cb) { return cb.dataset.protocolName; });
+  }
+
+  function refreshRollupViewsContainer() {
+    // Checkboxes default back to "all checked" on reload — see the
+    // partial's `checked` attribute.
+    htmx.ajax('GET', '/pages/timescale/rollups', {
+      target: '#rollup-views-container',
+      swap: 'innerHTML scroll:false',
+    });
+  }
+
   // Collects the checked group checkboxes, PATCHes the selection to
   // /api/timescale/rollups/rebuild (force=true for the "Force Rebuild"
   // button, false for "Rebuild Rollups"), then refreshes the inventory so
   // it reflects whatever the rebuild just did.
   async function triggerRebuildRollups(force) {
-    const rebuildBtn = document.getElementById('rebuild-rollups-btn');
-    const forceBtn = document.getElementById('force-rebuild-btn');
     const rebuildLabel = document.getElementById('rebuild-btn-label');
     const forceLabel = document.getElementById('force-rebuild-btn-label');
     const statusEl = document.getElementById('rebuild-status');
 
-    const checked = document.querySelectorAll('.rollup-group-checkbox:checked');
-    const protocolNames = Array.from(checked).map(function (cb) { return cb.dataset.protocolName; });
-
+    const protocolNames = getCheckedRollupGroups();
     statusEl.innerHTML = '';
 
     if (protocolNames.length === 0) {
@@ -150,8 +181,7 @@
       if (!proceed) { return; }
     }
 
-    rebuildBtn.disabled = true;
-    forceBtn.disabled = true;
+    setRollupActionButtonsDisabled(true);
     (force ? forceLabel : rebuildLabel).textContent = force ? 'Force rebuilding…' : 'Rebuilding…';
 
     let ok = false;
@@ -171,20 +201,12 @@
       ok = false;
     }
 
-    rebuildBtn.disabled = false;
-    forceBtn.disabled = false;
+    setRollupActionButtonsDisabled(false);
     rebuildLabel.textContent = 'Rebuild Rollups';
     forceLabel.textContent = 'Force Rebuild';
 
     renderRebuildStatus(ok, payload);
-
-    // Refresh the inventory so it reflects the post-rebuild state.
-    // Checkboxes default back to "all checked" on reload — see the
-    // partial's `checked` attribute.
-    htmx.ajax('GET', '/pages/timescale/rollups', {
-      target: '#rollup-views-container',
-      swap: 'innerHTML scroll:false',
-    });
+    refreshRollupViewsContainer();
   }
 
   // Three distinct outcomes, per the admin's expectations:
@@ -242,6 +264,79 @@
     statusEl.innerHTML =
       '<div class="text-xs text-green-700 dark:text-green-400 px-3 py-2 rounded border border-green-500/30 bg-green-500/10">' +
       'Rebuild complete — rebuilt ' + parts.join(' and ') + '.</div>';
+  }
+
+  // Collects the checked group checkboxes, PATCHes the selection to
+  // /api/timescale/rollups/refresh, then refreshes the inventory. Unlike
+  // rebuild, this never touches view structure — it only pulls in the
+  // latest raw data for views that already exist.
+  async function triggerRefreshRollups(forceFull) {
+    const refreshLabel = document.getElementById('refresh-btn-label');
+    const statusEl = document.getElementById('rebuild-status');
+
+    const protocolNames = getCheckedRollupGroups();
+    statusEl.innerHTML = '';
+
+    if (protocolNames.length === 0) {
+      statusEl.innerHTML =
+        '<div class="text-xs text-danger px-3 py-2 rounded border border-danger/30 bg-danger/10">' +
+        'Select at least one group to refresh.</div>';
+      return;
+    }
+
+    setRollupActionButtonsDisabled(true);
+    refreshLabel.textContent = 'Refreshing…';
+
+    let ok = false;
+    let payload = null;
+    try {
+      const resp = await fetch('/api/timescale/rollups/refresh', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache',
+        },
+        body: JSON.stringify({ protocol_names: protocolNames, force_full: forceFull }),
+      });
+      ok = resp.ok;
+      payload = await resp.json();
+    } catch (e) {
+      ok = false;
+    }
+
+    setRollupActionButtonsDisabled(false);
+    refreshLabel.textContent = 'Refresh Now';
+
+    renderRefreshStatus(ok, payload);
+    refreshRollupViewsContainer();
+  }
+
+  function renderRefreshStatus(ok, payload) {
+    const statusEl = document.getElementById('rebuild-status');
+
+    if (!ok || !payload) {
+      statusEl.innerHTML =
+        '<div class="text-xs text-danger px-3 py-2 rounded border border-danger/30 bg-danger/10">' +
+        'Refresh failed — the server did not return a result. Check the server log for details.</div>';
+      return;
+    }
+
+    const views = payload.views || [];
+    const failed = views.filter(function (v) { return !v.ok; });
+
+    if (failed.length > 0) {
+      const details = failed.map(function (v) {
+        return v.view_name + (v.error ? ' (' + v.error + ')' : '');
+      });
+      statusEl.innerHTML =
+        '<div class="text-xs text-danger px-3 py-2 rounded border border-danger/30 bg-danger/10">' +
+        'Refresh failed for: ' + details.join('; ') + '. Check the server log for full details.</div>';
+      return;
+    }
+
+    statusEl.innerHTML =
+      '<div class="text-xs text-green-700 dark:text-green-400 px-3 py-2 rounded border border-green-500/30 bg-green-500/10">' +
+      'Refresh complete — pulled the latest data into ' + views.length + ' view(s).</div>';
   }
 </script>
 {% endblock %}

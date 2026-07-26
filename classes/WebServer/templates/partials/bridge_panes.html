@@ -215,24 +215,74 @@
       </div>
     </div>
 
-    <!-- Key settings summary -->
-    <div class="card">
-      <h3 class="label mb-2">Configuration Summary</h3>
-      <dl class="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
-        {% for s in settings %}
-        {% if s.is_active and s.value_staged %}
-        <dt class="surface-muted font-mono text-xs truncate">{{ s.key }}</dt>
-        <dd class="surface-title font-mono text-xs truncate font-medium">
-          {% if 'pass' in s.key.lower() or 'password' in s.key.lower() %}
-            ••••••••
-          {% else %}
-            {{ s.value_staged }}
-          {% endif %}
-        </dd>
-        {% endif %}
-        {% endfor %}
-      </dl>
+    <!-- ══ BRIDGE INFO — observational only, nothing here is acted on.
+         Actions (rebuild, refresh, delete columns, etc.) live on the
+         Timescale DB menu pads; this section only reports state.
+
+         Branches on device.transport_class since each bridge type's
+         panels query state specific to that transport (TimescaleDB
+         rollup views/hypertable sizes/compression policy/background
+         jobs; InfluxDB v1/v3 connection/backlog/staleness state) that
+         doesn't exist for other bridge types. Add another branch below
+         as other bridges grow their own diagnostics; until then they
+         fall through to the generic note instead of showing broken or
+         empty panels. NOTE: never write literal curly-percent Jinja tag
+         syntax as prose inside an HTML comment in this file — Jinja
+         parses its own delimiters regardless of HTML comment boundaries,
+         so a stray example tag here will crash the whole template. -->
+    {% if device.transport_class == "timescaledb" %}
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div id="bridge-health-container"
+           hx-get="/pages/timescale/health"
+           hx-trigger="load"
+           hx-swap="innerHTML">
+        <div class="card"><p class="surface-muted text-xs">Loading bridge health…</p></div>
+      </div>
+
+      <div id="bridge-storage-container"
+           hx-get="/pages/timescale/storage"
+           hx-trigger="load"
+           hx-swap="innerHTML">
+        <div class="card"><p class="surface-muted text-xs">Loading storage overview…</p></div>
+      </div>
+
+      <div id="bridge-compression-container"
+           hx-get="/pages/timescale/compression-retention"
+           hx-trigger="load"
+           hx-swap="innerHTML">
+        <div class="card"><p class="surface-muted text-xs">Loading compression &amp; retention status…</p></div>
+      </div>
+
+      <div id="bridge-jobs-container"
+           hx-get="/pages/timescale/jobs"
+           hx-trigger="load"
+           hx-swap="innerHTML">
+        <div class="card"><p class="surface-muted text-xs">Loading background job status…</p></div>
+      </div>
     </div>
+    {% elif device.transport_class in ("influxdb_out", "influxdb3_out") %}
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div id="bridge-health-container"
+           hx-get="/pages/influxdb/{{ device.name }}/health"
+           hx-trigger="load"
+           hx-swap="innerHTML">
+        <div class="card"><p class="surface-muted text-xs">Loading bridge health…</p></div>
+      </div>
+
+      <div id="bridge-storage-container"
+           hx-get="/pages/influxdb/{{ device.name }}/storage"
+           hx-trigger="load"
+           hx-swap="innerHTML">
+        <div class="card"><p class="surface-muted text-xs">Loading storage overview…</p></div>
+      </div>
+    </div>
+    {% else %}
+    <div class="card">
+      <p class="surface-muted text-xs">
+        No additional diagnostics are available for this bridge type yet.
+      </p>
+    </div>
+    {% endif %}
 
     <!-- Info note: no protocol table for bridges -->
     <div class="rounded border border-mpg-200 dark:border-mpg-600 bg-mpg-200/40 dark:bg-mpg-700/40 px-4 py-3 surface-text text-sm">

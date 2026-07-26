@@ -22,6 +22,7 @@
   "channel": "CAN bus channel or interface name (e.g. can0, vcan0).",
   "coil_register_prefix": "MQTT topic sub-prefix used when publishing coil register values. Full topic: base_topic/coil_register_prefix/variable_name.",
   "connection_timeout": "Timeout in seconds when establishing a new connection to the remote server before raising a connection error.",
+  "data_dir": "",
   "database": "Database name to connect to on the TimescaleDB/PostgreSQL server.",
   "device_location": "Physical or logical location of the device (e.g. home, site-A). Used for tagging metrics.",
   "device_manufacturer": "Manufacturer name of the device (e.g. EG4, Pylontech). Used for tagging metrics.",

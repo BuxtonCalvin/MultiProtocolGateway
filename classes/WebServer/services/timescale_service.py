@@ -351,6 +351,148 @@ def rebuild_all_rollups(
     return bridge.rollup_mgr.rebuild_all_rollups(protocol_names=protocol_names, force=force)
 
 
+def refresh_selected_rollups(
+    gateway: Any, protocol_names: set[str] | None = None, force_full: bool = False
+) -> dict[str, Any]:
+    """
+    Pulls the latest raw data into the selected rollup groups' existing
+    views, without dropping or recreating anything. Called from the
+    "Refresh Now" button on the Rebuild Rollup Views screen (PATCH
+    /api/timescale/rollups/refresh) -- the lighter, non-structural
+    counterpart to rebuild_all_rollups().
+
+    Args:
+        protocol_names: Which groups to refresh -- protocol_name values as
+            returned by list_rollup_view_groups(), plus "shared_narrow" for
+            the shared narrow stack. None refreshes every group.
+        force_full: False performs each view's normal incremental refresh.
+            True refreshes each view's entire time range from scratch.
+        See RollupManager.refresh_selected_rollups for the per-view result
+        shape.
+
+    Raises RuntimeError if no bridge is attached, or the bridge hasn't
+    finished connecting to TimescaleDB yet.
+    """
+    bridge: Any | None = get_timescale_bridge(gateway)
+    if bridge is None:
+        raise RuntimeError("No TimescaleDB bridge is attached to this gateway.")
+    if bridge.rollup_mgr is None:
+        raise RuntimeError("Rollup manager is not initialized yet — the bridge is not connected to TimescaleDB.")
+    return bridge.rollup_mgr.refresh_selected_rollups(protocol_names=protocol_names, force_full=force_full)
+
+
+# ---------------------------------------------------------------------------
+# Bridge info pane — read-only snapshots for the device page's "Bridge
+# Health", "Storage Overview", "Compression & Retention Status", and
+# "Background Job Status" panels (see routers/timescale.py GET /health,
+# /storage, /compression-retention, /jobs). Purely observational: none of
+# these mutate anything, unlike the rollup functions above.
+# ---------------------------------------------------------------------------
+
+def _format_bytes(n: int | None) -> str:
+    """Human-readable byte size, e.g. 1536 -> '1.5 KB'. None/0 -> '0 B'."""
+    if not n:
+        return "0 B"
+    size = float(n)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if size < 1024 or unit == "TB":
+            return f"{size:.1f} {unit}" if unit != "B" else f"{int(size)} {unit}"
+        size /= 1024
+    return f"{size:.1f} TB"  # unreachable, keeps type checkers happy
+
+
+def _format_dt(value: Any) -> str:
+    """
+    Human-readable timestamp for template display, e.g. '2026-07-24 09:15
+    UTC'. Formatted here rather than in the template since this app has no
+    established Jinja datetime filter to rely on. None -> '—'.
+    """
+    if value is None:
+        return "—"
+    try:
+        return value.strftime("%Y-%m-%d %H:%M %Z").strip()
+    except AttributeError:
+        return str(value)
+
+
+def get_bridge_health(gateway: Any) -> dict[str, Any]:
+    """
+    Read-only connection/background-worker snapshot for the "Bridge
+    Health" panel. See timescaledb.get_health_snapshot for the field list.
+
+    Raises RuntimeError if no bridge is attached. Unlike the rollup
+    functions, this does NOT require rollup_mgr to be initialized — a
+    bridge that's still connecting is itself a valid, useful thing to show
+    on a health panel, so this returns whatever it can rather than erroring.
+    """
+    bridge: Any | None = get_timescale_bridge(gateway)
+    if bridge is None:
+        raise RuntimeError("No TimescaleDB bridge is attached to this gateway.")
+    return bridge.get_health_snapshot()
+
+
+def get_storage_overview(gateway: Any) -> list[dict[str, Any]]:
+    """
+    Read-only per-source-table storage snapshot for the "Storage Overview"
+    panel, with a human-readable `size_display` added to each row. See
+    timescaledb.get_storage_overview for the rest of the field list.
+
+    Raises RuntimeError if no bridge is attached. Returns an empty list
+    (rather than raising) if the bridge is attached but not yet connected
+    to TimescaleDB, since there's simply nothing to report yet.
+    """
+    bridge: Any | None = get_timescale_bridge(gateway)
+    if bridge is None:
+        raise RuntimeError("No TimescaleDB bridge is attached to this gateway.")
+    rows: list[dict[str, Any]] = bridge.get_storage_overview()
+    for row in rows:
+        row["size_display"] = _format_bytes(row.get("size_bytes"))
+        row["oldest_display"] = _format_dt(row.get("oldest"))
+        row["newest_display"] = _format_dt(row.get("newest"))
+    return rows
+
+
+def get_compression_retention_summary(gateway: Any) -> dict[str, Any]:
+    """
+    Read-only compression/retention configuration summary for the
+    "Compression & Retention Status" panel. See RollupManager.get_
+    compression_retention_summary for the field list.
+
+    Raises RuntimeError if no bridge is attached, or the bridge hasn't
+    finished connecting to TimescaleDB yet (this is config sourced from
+    the rollup manager's own attributes, not a live query, but the rollup
+    manager itself doesn't exist until connected).
+    """
+    bridge: Any | None = get_timescale_bridge(gateway)
+    if bridge is None:
+        raise RuntimeError("No TimescaleDB bridge is attached to this gateway.")
+    if bridge.rollup_mgr is None:
+        raise RuntimeError("Rollup manager is not initialized yet — the bridge is not connected to TimescaleDB.")
+    return bridge.rollup_mgr.get_compression_retention_summary()
+
+
+def get_background_jobs(gateway: Any) -> list[dict[str, Any]]:
+    """
+    Read-only snapshot of TimescaleDB's background scheduler jobs for
+    every hypertable/view this bridge manages, for the "Background Job
+    Status" panel. See RollupManager.get_background_jobs for the field
+    list.
+
+    Raises RuntimeError if no bridge is attached, or the bridge hasn't
+    finished connecting to TimescaleDB yet.
+    """
+    bridge: Any | None = get_timescale_bridge(gateway)
+    if bridge is None:
+        raise RuntimeError("No TimescaleDB bridge is attached to this gateway.")
+    if bridge.rollup_mgr is None:
+        raise RuntimeError("Rollup manager is not initialized yet — the bridge is not connected to TimescaleDB.")
+    jobs: list[dict[str, Any]] = bridge.rollup_mgr.get_background_jobs()
+    for job in jobs:
+        job["last_successful_finish_display"] = _format_dt(job.get("last_successful_finish"))
+        job["next_start_display"] = _format_dt(job.get("next_start"))
+    return jobs
+
+
 # ---------------------------------------------------------------------------
 # Staging — in-memory, lives on app.state alongside the gateway.
 #

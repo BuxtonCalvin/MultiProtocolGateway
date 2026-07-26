@@ -1,0 +1,72 @@
+<!--
+  Description: partials/bridge_compression_panel.html HTMX partial — Compression & Retention Status card for the TimescaleDB device page.
+  File: bridge_compression_panel.html
+
+  Copyright 2026 Kevin Burke
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://apache.org
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+
+  partials/bridge_compression_panel.html
+  Swapped into #bridge-compression-container on the TimescaleDB device
+  page. Context: summary — dict from services/timescale_service.
+  get_compression_retention_summary(), or None if the bridge isn't
+  connected yet (rollup_mgr doesn't exist until then).
+
+  Everything here is configuration, not live state — no DB query behind
+  this panel, just the rollup manager's own attributes. Purely
+  observational: these values change by editing the bridge's settings on
+  the left-hand settings pane, not from this card.
+-->
+
+<div class="card">
+  <h3 class="label mb-2">Compression &amp; Retention Status</h3>
+
+  {% if not summary %}
+  <p class="surface-muted text-xs">Still connecting to TimescaleDB — this data isn't available yet.</p>
+  {% else %}
+
+  <dl class="grid grid-cols-2 gap-x-4 gap-y-2 text-sm mb-3">
+    <dt class="surface-muted text-xs">Compression</dt>
+    <dd class="surface-title text-xs font-medium">
+      {% if summary.enable_compression %}Enabled{% else %}<span class="surface-muted">Disabled</span>{% endif %}
+    </dd>
+
+    <dt class="surface-muted text-xs">Raw data retention (drop_after)</dt>
+    <dd class="surface-title text-xs font-mono font-medium">{{ summary.retention_interval }}</dd>
+
+    <dt class="surface-muted text-xs">Segment by (narrow)</dt>
+    <dd class="surface-title text-xs font-mono font-medium truncate">{{ summary.segment_by_narrow }}</dd>
+
+    <dt class="surface-muted text-xs">Segment by (wide)</dt>
+    <dd class="surface-title text-xs font-mono font-medium truncate">{{ summary.segment_by_wide }}</dd>
+  </dl>
+
+  <p class="surface-muted text-xs mb-1">Compression schedule (time since a chunk closed)</p>
+  <table class="w-auto text-xs border-collapse" role="table" aria-label="Compression schedule by granularity">
+    <thead>
+      <tr class="text-mpg-100 text-xs uppercase tracking-wide bg-mpg-800" role="row">
+        <th class="px-2 py-1 text-left border-r border-mpg-700 font-semibold whitespace-nowrap" scope="col">Granularity</th>
+        <th class="px-2 py-1 text-left font-semibold whitespace-nowrap" scope="col">Compress After</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in summary.schedule %}
+      <tr class="border-t border-mpg-700/30" role="row">
+        <td class="px-2 py-1 text-mpg-500 dark:text-mpg-100 whitespace-nowrap border-r border-mpg-700/30" role="cell">{{ row.granularity }}</td>
+        <td class="px-2 py-1 font-mono text-mpg-500 dark:text-mpg-100 whitespace-nowrap" role="cell">{{ row.compress_after }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>

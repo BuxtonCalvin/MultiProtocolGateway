@@ -1,0 +1,84 @@
+<!--
+  Description: partials/bridge_health_panel.html HTMX partial — Bridge Health card for the TimescaleDB device page.
+  File: bridge_health_panel.html
+
+  Copyright 2026 Kevin Burke
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://apache.org
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+
+
+  partials/bridge_health_panel.html
+  Swapped into #bridge-health-container on the TimescaleDB device page
+  (see bridge_panes.html). Context: health — dict from services/
+  timescale_service.get_bridge_health(), or {} if the bridge is attached
+  but not yet connected (services.get_bridge_health only requires the
+  bridge to exist, not to be connected, so an empty dict here means
+  "still connecting" rather than an error).
+
+  Purely observational — nothing on this panel is clickable. The
+  connect/reconnect/rebuild ACTIONS this state describes live on the
+  Timescale DB menu pads, not here; this card only reports what's
+  currently true. Connection status itself is deliberately not repeated
+  here — it's already shown in the top-right status badge above.
+-->
+
+<div class="card">
+  <h3 class="label mb-2">Bridge Health</h3>
+
+  {% if not health %}
+  <p class="surface-muted text-xs">Still connecting to TimescaleDB — health data isn't available yet.</p>
+  {% else %}
+  <dl class="space-y-2 text-sm">
+
+    <div class="flex items-center justify-between">
+      <dt class="surface-muted text-xs">Rollup migration</dt>
+      <dd class="surface-title text-xs font-medium">
+        {% if health.migration_in_progress %}
+        <span class="text-dirty">In progress</span>
+        {% elif health.migration_in_progress is none %}
+        <span class="surface-muted">Not initialized</span>
+        {% else %}
+        Idle
+        {% endif %}
+      </dd>
+    </div>
+
+    <div class="flex items-center justify-between">
+      <dt class="surface-muted text-xs">Backlog buffer</dt>
+      <dd class="surface-title text-xs font-mono font-medium">
+        {{ health.backlog_count }} / {{ health.max_backlog_size }} pts
+        {% if health.backlog_count %}<span class="text-dirty">(buffering)</span>{% endif %}
+      </dd>
+    </div>
+
+    <div class="flex items-center justify-between">
+      <dt class="surface-muted text-xs">Auto-refresh Rollups</dt>
+      <dd class="surface-title text-xs font-medium">
+        {% if health.enable_auto_refresh %}
+        Every {{ (health.auto_refresh_interval / 3600) | round(1) }}h
+        {% else %}
+        <span class="surface-muted">Disabled</span>
+        {% endif %}
+      </dd>
+    </div>
+
+    <div class="flex items-center justify-between">
+      <dt class="surface-muted text-xs">Rollup setup</dt>
+      <dd class="surface-title text-xs font-mono font-medium">
+        {{ health.protocols_rollup_complete }} / {{ health.protocols_rollup_total }} protocol(s)
+      </dd>
+    </div>
+
+  </dl>
+  {% endif %}
+</div>

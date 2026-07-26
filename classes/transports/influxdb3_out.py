@@ -489,6 +489,114 @@ class influxdb3_out(transport_base):
         self.last_periodic_reconnect_attempt = 0.0
         return self._check_connection()
 
+    def get_health_snapshot(self) -> dict[str, Any]:
+        """
+        Read-only snapshot of this bridge's live connection/backlog/
+        staleness state, for the device page's "Bridge Health" panel.
+        Pulls together state that's otherwise scattered across connection
+        management, persistent storage, and stale-data detection — nothing
+        here is a fresh query, just this instance's own attributes.
+
+        `connected` is included for completeness but isn't necessarily
+        rendered by the panel — the device page already shows connection
+        status in its own status badge, so the template may choose to
+        skip repeating it here.
+        """
+        stale_count: int = sum(1 for s in self._stale_registry.values() if s.get("is_stale"))
+
+        return {
+            "connected": self.connected,
+            "batch_pending": len(self.batch_points),
+            "batch_size": self.batch_size,
+            "backlog_count": len(self.backlog_points),
+            "max_backlog_size": self.max_backlog_size,
+            "max_backlog_age": self.max_backlog_age,
+            "persistent_storage_enabled": self.enable_persistent_storage,
+            "periodic_reconnect_interval": self.periodic_reconnect_interval,
+            "last_periodic_reconnect_attempt": self.last_periodic_reconnect_attempt,
+            "stale_transport_count": stale_count,
+            "tracked_transport_count": len(self._stale_registry),
+        }
+
+    def get_storage_overview(self) -> dict[str, Any]:
+        """
+        Best-effort, read-only storage snapshot for the device page's
+        Storage Overview panel: discovered tables (via information_
+        schema.tables) and an approximate row count for one sample table
+        (the first one discovered).
+
+        Only samples one table rather than every one — InfluxDB v3
+        exposes no single database-wide row-count function here, so
+        counting every table would mean one COUNT(*) query per table,
+        which doesn't belong in a page-load info panel.
+
+        Uses the same self.client.query(sql, database=..., language="sql")
+        call already used by connect() / _health_check() above, which
+        returns a pyarrow.Table — converted to plain Python via
+        to_pylist().
+
+        NOT implemented: column-level metadata, chunk configuration, or
+        memory footprint via a management API. mgmt_api_url is only ever
+        used here for database creation (see _create_database, a POST) —
+        there's no GET endpoint in this file for that kind of detail, and
+        guessing at one risks calling something that doesn't exist. If
+        that API surface exists, point me at its endpoint and response
+        shape and this panel can be extended to show it.
+
+        Nothing here raises — a failed query is recorded in `error` and
+        the rest of the snapshot still returns.
+        """
+        result: dict[str, Any] = {
+            "connected": self.connected,
+            "database": self.database,
+            "items_label": "Tables",
+            "items": [],
+            "sample_item": None,
+            "sample_item_approx_rows": None,
+            "retention_policies": None,  # not applicable to v3 — see docstring
+            "data_dir": None,            # not applicable to v3 — see docstring
+            "data_dir_size_bytes": None,
+            "error": None,
+        }
+
+        if not self.connected or self.client is None:
+            result["error"] = "Not connected to InfluxDB."
+            return result
+
+        try:
+            tables_result: Any = self.client.query(  # type: ignore[reportUnknownMemberType]
+                "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'",
+                database=self.database,
+                language="sql",
+            )
+            tables_table: pa.Table = cast(pa.Table, tables_result)
+            table_names: list[str] = [
+                row["table_name"] for row in tables_table.to_pylist() if row.get("table_name")
+            ]
+            result["items"] = table_names
+
+            if table_names:
+                first: str = table_names[0]
+                result["sample_item"] = first
+                try:
+                    count_result: Any = self.client.query(  # type: ignore[reportUnknownMemberType]
+                        f'SELECT COUNT(*) AS row_count FROM "{first}"',  # noqa: S608
+                        database=self.database,
+                        language="sql",
+                    )
+                    count_table: pa.Table = cast(pa.Table, count_result)
+                    rows: list[dict[str, Any]] = count_table.to_pylist()
+                    if rows:
+                        result["sample_item_approx_rows"] = int(rows[0].get("row_count", 0))
+                except Exception as e:
+                    self._log.error(f"get_storage_overview: COUNT(*) on '{first}' failed: {e}")
+                    result["error"] = f"Row count query failed for '{first}': {e}"
+        except Exception as e:
+            self._log.error(f"get_storage_overview: information_schema.tables query failed: {e}")
+            result["error"] = f"Table discovery failed: {e}"
+
+        return result
+
     # ------------------------------------------------------------------
     # Data writing
     # ------------------------------------------------------------------

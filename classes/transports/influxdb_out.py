@@ -106,6 +106,12 @@ class influxdb_out(transport_base):
     # Periodic reconnection settings
     periodic_reconnect_interval: float = 14400.0  # 4 hours in seconds
 
+    # Optional local filesystem path to InfluxDB's own data directory (e.g.
+    # "/var/lib/influxdb/data"), used only to report on-disk size in the
+    # Storage Overview panel. Empty by default — MPG and InfluxDB are very
+    # often on different hosts, so this is opt-in, not assumed.
+    data_dir: str = ""
+
     # Runtime state — typed explicitly so mypy / pyright can track them
     client: Optional[InfluxDBClient] = None
     last_batch_time: float = 0.0
@@ -166,6 +172,11 @@ class influxdb_out(transport_base):
 
         # Periodic reconnection settings
         self.periodic_reconnect_interval = settings.getfloat("periodic_reconnect_interval", fallback=self.periodic_reconnect_interval)
+
+        # Optional local filesystem path to InfluxDB's own data directory,
+        # for the Storage Overview panel's on-disk size figure. Left blank
+        # unless explicitly configured — see class-level comment above.
+        self.data_dir = settings.get("data_dir", fallback=self.data_dir)
 
 
         # Instance-level mutable state
@@ -436,6 +447,122 @@ class influxdb_out(transport_base):
         """Manually trigger a periodic reconnection check."""
         self.last_periodic_reconnect_attempt = 0.0
         return self._check_connection()
+
+    def get_health_snapshot(self) -> dict[str, Any]:
+        """
+        Read-only snapshot of this bridge's live connection/backlog/
+        staleness state, for the device page's "Bridge Health" panel.
+        Pulls together state that's otherwise scattered across connection
+        management, persistent storage, and stale-data detection — nothing
+        here is a fresh query, just this instance's own attributes.
+
+        `connected` is included for completeness but isn't necessarily
+        rendered by the panel — the device page already shows connection
+        status in its own status badge, so the template may choose to
+        skip repeating it here.
+        """
+        stale_count: int = sum(1 for s in self._stale_registry.values() if s.get("is_stale"))
+
+        return {
+            "connected": self.connected,
+            "batch_pending": len(self.batch_points),
+            "batch_size": self.batch_size,
+            "backlog_count": len(self.backlog_points),
+            "max_backlog_size": self.max_backlog_size,
+            "max_backlog_age": self.max_backlog_age,
+            "persistent_storage_enabled": self.enable_persistent_storage,
+            "periodic_reconnect_interval": self.periodic_reconnect_interval,
+            "last_periodic_reconnect_attempt": self.last_periodic_reconnect_attempt,
+            "stale_transport_count": stale_count,
+            "tracked_transport_count": len(self._stale_registry),
+        }
+
+    def get_storage_overview(self) -> dict[str, Any]:
+        """
+        Best-effort, read-only storage snapshot for the device page's
+        Storage Overview panel: configured retention policies, discovered
+        measurements, and an approximate row count for one sample
+        measurement (the first one discovered).
+
+        Only samples one measurement rather than every one — InfluxDB v1
+        has no single database-wide row-count function, so counting every
+        measurement would mean one COUNT(*) query per measurement, which
+        doesn't belong in a page-load info panel.
+
+        COUNT(*) on InfluxDB v1 returns one count per field column (e.g.
+        count_vbat, count_soc, ...), not a single row count, since not
+        every point necessarily has every field. The highest of those
+        per-field counts is used as the representative row estimate.
+
+        data_dir sizing is entirely optional (see the data_dir setting)
+        and only attempted if configured AND the path exists on this
+        machine's local filesystem — MPG and InfluxDB are very often on
+        separate hosts, in which case this is silently skipped rather than
+        erroring. Note this does a full recursive stat() walk of the
+        directory, which can be slow on a large data set; it only runs
+        when this panel is loaded, not on a timer.
+
+        Nothing here raises — a failed query is recorded in `error` and
+        the rest of the snapshot still returns.
+        """
+        result: dict[str, Any] = {
+            "connected": self.connected,
+            "database": self.database,
+            "items_label": "Measurements",
+            "items": [],
+            "sample_item": None,
+            "sample_item_approx_rows": None,
+            "retention_policies": [],
+            "data_dir": self.data_dir or None,
+            "data_dir_size_bytes": None,
+            "error": None,
+        }
+
+        if not self.connected or self.client is None:
+            result["error"] = "Not connected to InfluxDB."
+            return result
+
+        try:
+            rp_result = self.client.query(f'SHOW RETENTION POLICIES ON "{self.database}"')  # type: ignore[reportUnknownMemberType]
+            result["retention_policies"] = list(rp_result.get_points()) # type: ignore
+        except Exception as e:
+            self._log.error(f"get_storage_overview: SHOW RETENTION POLICIES failed: {e}")
+            result["error"] = f"Retention policy query failed: {e}"
+
+        try:
+            meas_result = self.client.query(f'SHOW MEASUREMENTS ON "{self.database}"')  # type: ignore[reportUnknownMemberType]
+            measurements: list[str] = [p["name"] for p in meas_result.get_points() if "name" in p] # type: ignore
+            result["items"] = measurements
+
+            if measurements:
+                first: str = measurements[0]
+                result["sample_item"] = first
+                try:
+                    count_result = self.client.query(f'SELECT COUNT(*) FROM "{first}"', database=self.database)  # type: ignore[reportUnknownMemberType]  # noqa: S608
+                    points: list[dict[str, Any]] = list(count_result.get_points()) # type: ignore
+                    if points:
+                        field_counts: list[float] = [
+                            v for k, v in points[0].items() if k != "time" and isinstance(v, (int, float))
+                        ]
+                        result["sample_item_approx_rows"] = int(max(field_counts)) if field_counts else 0
+                except Exception as e:
+                    self._log.error(f"get_storage_overview: COUNT(*) on '{first}' failed: {e}")
+                    result["error"] = f"Row count query failed for '{first}': {e}"
+        except Exception as e:
+            self._log.error(f"get_storage_overview: SHOW MEASUREMENTS failed: {e}")
+            result["error"] = f"Measurement discovery failed: {e}"
+
+        if self.data_dir:
+            try:
+                data_path: Path = Path(self.data_dir)
+                if data_path.exists():
+                    result["data_dir_size_bytes"] = sum(
+                        f.stat().st_size for f in data_path.rglob("*") if f.is_file()
+                    )
+            except Exception as e:
+                self._log.warning(f"get_storage_overview: could not size data_dir '{self.data_dir}': {e}")
+
+        return result
 
     # ------------------------------------------------------------------
     # Data writing

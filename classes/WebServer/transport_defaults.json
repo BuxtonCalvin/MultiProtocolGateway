@@ -226,7 +226,8 @@
     "use_utc_timestamp": "False",
     "username": "",
     "--write_enabled": "false",
-    "--write_type": ""
+    "--write_type": "",
+    "data_dir": ""
   },
   "influxdb3_out": {
     "auto_create_database": "true",

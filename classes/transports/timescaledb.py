@@ -2446,6 +2446,134 @@ class timescaledb(transport_base):
 
 
     # -------------------------
+    # Bridge info pane — read-only snapshots for the admin UI's
+    # "Bridge Health" and "Storage Overview" panels (see routers/timescale
+    # .py GET /health and GET /storage). Both are purely observational:
+    # nothing here creates, drops, or modifies anything.
+    # -------------------------
+
+    def get_health_snapshot(self) -> dict[str, Any]:
+        """
+        Read-only snapshot of this bridge's live connection and background-
+        worker state, for the "Bridge Health" panel. Pulls together state
+        that's otherwise scattered across this class, the backlog manager,
+        and the rollup manager. The only DB round trip is a single cheap
+        COUNT against protocol_registry (skipped entirely if not
+        currently connected).
+        """
+        reconnecting: bool = bool(getattr(self, "_reconnect_thread_running", False))
+        migration_in_progress: bool | None = (
+            self.rollup_mgr.migration_in_progress.is_set() if self.rollup_mgr is not None else None
+        )
+        backlog_count: int = (
+            len(self.backlog.backlog_points) if getattr(self, "backlog", None) is not None else 0
+        )
+
+        protocols_rollup_complete: int = 0
+        protocols_rollup_total: int = 0
+        if self.tsdb_connected:
+            try:
+                with self.SessionFactory() as session:
+                    row: Row[Any] = session.execute(
+                        text("""
+                            SELECT
+                                COUNT(*) FILTER (WHERE rollup_setup_complete = true) AS complete,
+                                COUNT(*) AS total
+                            FROM protocol_registry
+                            WHERE rollup_enabled = true
+                        """)
+                    ).one()
+                protocols_rollup_complete = row.complete or 0
+                protocols_rollup_total = row.total or 0
+            except SQLAlchemyError as e:
+                self._log.error(f"get_health_snapshot: protocol_registry tally failed: {e}")
+
+        return {
+            "tsdb_connected": self.tsdb_connected,
+            "reconnecting": reconnecting,
+            "migration_in_progress": migration_in_progress,
+            "backlog_count": backlog_count,
+            "max_backlog_size": self.max_backlog_size,
+            "max_backlog_age": self.max_backlog_age,
+            "enable_auto_refresh": self.rollup_mgr.enable_auto_refresh if self.rollup_mgr else None,
+            "auto_refresh_interval": self.rollup_mgr.auto_refresh_interval if self.rollup_mgr else None,
+            "protocols_rollup_complete": protocols_rollup_complete,
+            "protocols_rollup_total": protocols_rollup_total,
+        }
+
+    def get_storage_overview(self) -> list[dict[str, Any]]:
+        """
+        Read-only per-source-table storage snapshot for the "Storage
+        Overview" panel: the shared narrow table plus every wide table
+        this bridge has created. Row counts use TimescaleDB's own
+        approximate_row_count(), which sums each chunk's analyzed
+        reltuples rather than an exact COUNT(*) (too slow on a large
+        hypertable purely to populate an info panel). This is NOT the
+        same as querying pg_stat_user_tables directly on the hypertable
+        name -- a hypertable's own catalog row holds no tuples itself
+        (the data lives in its per-chunk child tables), so n_live_tup on
+        the parent is always ~0 regardless of how much data exists.
+
+        Each table is queried independently and failures are recorded
+        per-row rather than aborting the whole snapshot, so one table
+        having a transient issue doesn't blank out the rest.
+        """
+        if not self.tsdb_connected:
+            return []
+
+        tables: list[tuple[str, str]] = [("shared_narrow", "device_metrics_narrow")]
+        try:
+            with self.SessionFactory() as session:
+                wide_rows: Sequence[Row[Any]] = session.execute(
+                    text("""
+                        SELECT protocol_name, wide_table_name
+                        FROM protocol_registry
+                        WHERE wide_table_name IS NOT NULL
+                        ORDER BY protocol_name
+                    """)
+                ).fetchall()
+        except SQLAlchemyError as e:
+            self._log.error(f"get_storage_overview: protocol_registry query failed: {e}")
+            wide_rows = []
+
+        tables.extend((protocol_name, wide_table_name) for protocol_name, wide_table_name in wide_rows)
+
+        results: list[dict[str, Any]] = []
+        for protocol_name, table_name in tables:
+            try:
+                with self.SessionFactory() as session:
+                    row: Row[Any] = session.execute(
+                        text(f"""
+                            SELECT
+                                approximate_row_count('{table_name}') AS approx_rows,
+                                hypertable_size('{table_name}'::regclass) AS size_bytes,
+                                (SELECT count(*) FROM timescaledb_information.chunks
+                                    WHERE hypertable_name = '{table_name}') AS chunk_count,
+                                (SELECT min(m_time) FROM {table_name}) AS oldest,
+                                (SELECT max(m_time) FROM {table_name}) AS newest
+                        """)  # noqa: S608
+                    ).one()
+                results.append({
+                    "protocol_name": protocol_name,
+                    "table_name": table_name,
+                    "approx_rows": row.approx_rows or 0,
+                    "size_bytes": row.size_bytes or 0,
+                    "chunk_count": row.chunk_count or 0,
+                    "oldest": row.oldest,
+                    "newest": row.newest,
+                    "error": None,
+                })
+            except SQLAlchemyError as e:
+                self._log.error(f"get_storage_overview: query failed for '{table_name}': {e}")
+                results.append({
+                    "protocol_name": protocol_name, "table_name": table_name,
+                    "approx_rows": None, "size_bytes": None, "chunk_count": None,
+                    "oldest": None, "newest": None, "error": str(e),
+                })
+
+        return results
+
+    # -------------------------
     # Close / cleanup
     # -------------------------
     def close(self) -> None:
@@ -4272,6 +4400,194 @@ class RollupManager:
             "protocols": protocol_results,
             "force": force,
         }
+
+    def refresh_selected_rollups(
+        self, protocol_names: set[str] | None = None, force_full: bool = False
+    ) -> dict[str, Any]:
+        """
+        Refreshes the selected rollup groups' *existing* views in place --
+        pulls the latest raw data into them via CALL refresh_continuous_
+        aggregate, same as the background refresh policy runs on its own
+        schedule. Never drops or recreates a view (unlike rebuild_all_
+        rollups()), so it's safe to run far more often and normally
+        finishes much faster -- there's no re-materialization of the whole
+        historical range unless force_full=True, and even then it's still a
+        refresh, not a purge+rebuild.
+
+        This does NOT fix a structural problem (a missing view, or one
+        whose bucket interval no longer matches config) -- that's what
+        "Rebuild Rollups" / "Force Rebuild" are for. A view that doesn't
+        exist yet is skipped here, not created.
+
+        Args:
+            protocol_names: Same group keys as rebuild_all_rollups() -- a
+                wide-table protocol_name, plus "shared_narrow". None
+                refreshes every known view. An empty set refreshes nothing.
+            force_full: False performs each view's normal incremental
+                refresh (its configured start_offset window, e.g. the last
+                3 hours for an hourly rollup). True refreshes the view's
+                entire time range from the beginning of time to now --
+                still just a refresh of existing data, but touches far more
+                history and can take meaningfully longer.
+
+        Never raises: each view is refreshed independently and its outcome
+        recorded, so one bad view doesn't block refreshing the rest.
+        """
+        # Map each known view name to the group key it belongs to, using
+        # the same naming rules as list_rollup_views(), so a view's group
+        # here always matches what the admin sees (and checks boxes for)
+        # on the inventory table.
+        view_to_group: dict[str, str] = {
+            "hourly_rollup_narrow": "shared_narrow",
+            "daily_rollup_narrow": "shared_narrow",
+            "weekly_rollup_narrow": "shared_narrow",
+            "monthly_rollup_narrow": "shared_narrow",
+        }
+
+        with self.SessionFactory() as session:
+            protocol_rows: Sequence[Row[Any]] = session.execute(
+                text("""
+                    SELECT protocol_name, rollup_prefix
+                    FROM protocol_registry
+                    WHERE rollup_enabled = true AND wide_table_name IS NOT NULL
+                """)
+            ).fetchall()
+
+        for protocol_name, rollup_prefix in protocol_rows:
+            if not rollup_prefix:
+                continue
+            for gran in ("hourly", "daily", "weekly", "monthly"):
+                view_to_group[f"{gran}_{rollup_prefix}"] = protocol_name
+
+        view_results: list[dict[str, Any]] = []
+        for view_name, start_offset in self._known_rollup_views.items():
+            group: str | None = view_to_group.get(view_name)
+            if group is None:
+                # A view we're tracking that no longer maps to a registered
+                # protocol/the narrow stack -- shouldn't normally happen,
+                # but skip it rather than guess which group it belongs to.
+                continue
+            if protocol_names is not None and group not in protocol_names:
+                continue
+
+            try:
+                with self.SessionFactory() as session:
+                    if not self._view_exists_helper(session, view_name):
+                        self._log.warning(f"refresh_selected_rollups: skipping '{view_name}' -- does not exist.")
+                        continue
+                self._refresh_single_rollup_helper(view_name, start_offset, force_full)
+                view_results.append({
+                    "view_name": view_name, "protocol_name": group, "ok": True, "error": None,
+                })
+            except Exception as e:
+                self._log.error(f"refresh_selected_rollups: refresh failed for '{view_name}': {e}")
+                view_results.append({
+                    "view_name": view_name, "protocol_name": group, "ok": False, "error": str(e),
+                })
+
+        ok_count: int = sum(1 for r in view_results if r["ok"])
+        self._log.info(
+            "refresh_selected_rollups: force_full=%s refreshed %d/%d view(s) ok.",
+            force_full, ok_count, len(view_results),
+        )
+
+        return {"views": view_results, "force_full": force_full}
+
+    # -------------------------
+    #  Bridge info pane — read-only snapshots for the "Compression &
+    #  Retention Status" and "Background Job Status" panels (see
+    #  routers/timescale.py GET /compression-retention and GET /jobs).
+    #  Both are purely observational: nothing here creates, drops, or
+    #  modifies a policy or job.
+    # -------------------------
+
+    def get_compression_retention_summary(self) -> dict[str, Any]:
+        """
+        Read-only summary of this bridge's compression and retention
+        configuration, for the "Compression & Retention Status" panel.
+        Every value here is a plain attribute read (set from rollup_policy
+        / hypertable_defaults in __init__) -- no DB round trip, since this
+        is config, not live state.
+
+        Compression is scheduled per rollup granularity (see
+        hypertable_defaults) — each interval is how long TimescaleDB waits
+        after a chunk's time range closes before compressing it. Retention
+        (drop_after) applies uniformly to raw data across the narrow and
+        wide hypertables.
+        """
+        return {
+            "enable_compression": self.enable_compression,
+            "retention_interval": self.drop_after,
+            "segment_by_narrow": self.compress_segmentby_narrow,
+            "segment_by_wide": self.compress_segmentby_wide,
+            "compress_orderby": self.compress_orderby,
+            "schedule": [
+                {"granularity": "hourly", "compress_after": self.hourly_compress_after_interval},
+                {"granularity": "daily", "compress_after": self.daily_compress_after_interval},
+                {"granularity": "weekly", "compress_after": self.weekly_compress_after_interval},
+                {"granularity": "monthly", "compress_after": self.monthly_compress_after_interval},
+            ],
+        }
+
+    def get_background_jobs(self) -> list[dict[str, Any]]:
+        """
+        Read-only snapshot of TimescaleDB's own background scheduler jobs
+        (compression, retention, and continuous-aggregate refresh
+        policies) for every hypertable/view this bridge manages -- the
+        shared narrow table, every wide table, and every rollup view
+        currently in _known_rollup_views. Lets an admin catch a job that's
+        silently failing or falling behind before it becomes a bigger
+        problem; see _purge_ghost_jobs_helper for the related cleanup path
+        when a job's target no longer exists at all.
+        """
+        try:
+            with self.SessionFactory() as session:
+                wide_table_names: Sequence[str] = session.execute(
+                    text("SELECT wide_table_name FROM protocol_registry WHERE wide_table_name IS NOT NULL")
+                ).scalars().all()
+        except SQLAlchemyError as e:
+            self._log.error(f"get_background_jobs: protocol_registry query failed: {e}")
+            wide_table_names = []
+
+        target_names: list[str] = (
+            ["device_metrics_narrow"] + list(wide_table_names) + list(self._known_rollup_views.keys())
+        )
+        if not target_names:
+            return []
+
+        try:
+            with self.SessionFactory() as session:
+                rows: Sequence[Row[Any]] = session.execute(
+                    text("""
+                        SELECT
+                            j.job_id, j.proc_name, j.hypertable_name, j.schedule_interval,
+                            js.last_run_status, js.last_successful_finish, js.next_start,
+                            js.total_runs, js.total_failures
+                        FROM timescaledb_information.jobs j
+                        LEFT JOIN timescaledb_information.job_stats js ON j.job_id = js.job_id
+                        WHERE j.hypertable_name = ANY(:names)
+                        ORDER BY j.hypertable_name, j.proc_name
+                    """),
+                    {"names": target_names},
+                ).fetchall()
+        except SQLAlchemyError as e:
+            self._log.error(f"get_background_jobs: jobs query failed: {e}")
+            return []
+
+        return [
+            {
+                "job_id": r.job_id,
+                "proc_name": r.proc_name,
+                "hypertable_name": r.hypertable_name,
+                "schedule_interval": str(r.schedule_interval) if r.schedule_interval is not None else None,
+                "last_run_status": r.last_run_status,
+                "last_successful_finish": r.last_successful_finish,
+                "next_start": r.next_start,
+                "total_runs": r.total_runs,
+                "total_failures": r.total_failures,
+            }
+            for r in rows
+        ]
 
 
     # -------------------------
