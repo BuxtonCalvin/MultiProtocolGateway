@@ -222,8 +222,10 @@
          Branches on device.transport_class since each bridge type's
          panels query state specific to that transport (TimescaleDB
          rollup views/hypertable sizes/compression policy/background
-         jobs; InfluxDB v1/v3 connection/backlog/staleness state) that
-         doesn't exist for other bridge types. Add another branch below
+         jobs; InfluxDB v1/v3 connection/backlog/staleness/storage state;
+         MQTT connection/reconnect/write-topic state, no storage panel at
+         all since brokers generally don't persist data) that doesn't
+         exist for other bridge types. Add another branch below
          as other bridges grow their own diagnostics; until then they
          fall through to the generic note instead of showing broken or
          empty panels. NOTE: never write literal curly-percent Jinja tag
@@ -274,6 +276,15 @@
            hx-trigger="load"
            hx-swap="innerHTML">
         <div class="card"><p class="surface-muted text-xs">Loading storage overview…</p></div>
+      </div>
+    </div>
+    {% elif device.transport_class == "mqtt" %}
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div id="bridge-health-container"
+           hx-get="/pages/mqtt/{{ device.name }}/health"
+           hx-trigger="load"
+           hx-swap="innerHTML">
+        <div class="card"><p class="surface-muted text-xs">Loading bridge health…</p></div>
       </div>
     </div>
     {% else %}

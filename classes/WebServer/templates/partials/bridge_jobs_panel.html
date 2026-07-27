@@ -21,7 +21,7 @@
   Context: jobs — [{job_id, proc_name, hypertable_name, schedule_interval,
   last_run_status, last_successful_finish, last_successful_finish_display,
   next_start, next_start_display, total_runs, total_failures}, ...] from
-  services/timescale_service.get_background_jobs().
+  services/bridge_service.get_background_jobs().
 
   These are TimescaleDB's own scheduler jobs (compression / retention /
   continuous-aggregate refresh policies) for every hypertable and rollup

@@ -348,7 +348,7 @@
 
     <!-- TIMESCALE DB dropdown — only shown when a live TimescaleDB bridge
          is attached to this gateway (see timescale_bridge_available() in
-         main.py, backed by services/timescale_service.is_timescale_available). -->
+         main.py, backed by services/bridge_service.is_timescale_available). -->
     {% if timescale_bridge_available() %}
     <div class="relative group dropdown-root" role="none" data-dropdown>
       <button type="button"

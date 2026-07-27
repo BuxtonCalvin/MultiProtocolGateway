@@ -4210,7 +4210,7 @@ class RollupManager:
           - "missing" view does not exist yet
 
         Used to populate the Rebuild Rollup Views screen before the admin
-        presses "Rebuild Rollups" -- see WebServer.services.timescale_service
+        presses "Rebuild Rollups" -- see WebServer.services.bridge_service
         .list_rollup_views and routers/timescale.py's GET /rollups.
         """
         granularities: list[tuple[str, str]] = [
@@ -5361,7 +5361,7 @@ class WideTableFieldManager:
                         from from_transport.registry_map right now, plus
                         any transport-declared synthetic fields. Typically
                         built by the caller (see
-                        timescale_service._active_metric_names_for_protocol)
+                        bridge_service._active_metric_names_for_protocol)
                         rather than by this class, since resolving "the
                         live transport for this protocol" is a gateway
                         concern, not a wide-table-schema concern.

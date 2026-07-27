@@ -24,7 +24,7 @@
   column_name, data_type, checked, stale}, ...] in alphabetical
   column_name order.
 
-  `stale` (services/timescale_service._active_metric_names_for_protocol)
+  `stale` (services/bridge_service._active_metric_names_for_protocol)
   means the column's metric_name is no longer produced by the protocol's
   live variable_mask/variable_screen config — the same "column exists in
   the wide table but the scrape data doesn't have it" condition
@@ -34,7 +34,7 @@
   still has to check the box and commit, nothing is pre-selected.
 
   Checking a box PATCHes /api/timescale/.../stage to add it to the
-  in-memory staged-deletion set (services/timescale_service.py) — no
+  in-memory staged-deletion set (services/bridge_service.py) — no
   ALTER TABLE happens here. hx-swap="none" because the checkbox itself is
   the only thing that needs to reflect the change; the header's Commit /
   Discard buttons pick up the new dirty state via base.html's

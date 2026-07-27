@@ -1,5 +1,5 @@
-# Description: services/timescale_service.py — Runtime helpers for the TimescaleDB "Delete Columns" admin screen.
-# File: timescale_service.py
+# Description: services/bridge_service.py — Consolidated runtime helpers for every bridge-type transport's admin screens and device-page info panels (TimescaleDB, InfluxDB v1/v3, MQTT).
+# File: bridge_service.py
 #
 # Copyright 2026 Kevin Burke
 #
@@ -16,38 +16,79 @@
 # limitations under the License.
 
 """
-services/timescale_service.py — Runtime helpers for the TimescaleDB
-"Delete Columns" admin screen.
+services/bridge_service.py — Consolidated runtime helpers for every bridge-
+type transport's admin screens and device-page info panels.
 
-The gateway instance is accessed via app.state.gateway, passed in at
-startup — same pattern as analysis_service.py. Wide tables and their
-columns are live TimescaleDB/Postgres schema, not config.cfg settings, so
-this module talks to the running timescaledb bridge transport directly via
-WideTableFieldManager (see transports/timescaledb.py) rather than the
-staging (SQLite) DB used by Setting/ProtocolRegister.
+    TIMESCALEDB   — Delete Columns / Rebuild Rollup Views admin screens,
+                    plus Bridge Health / Storage Overview / Compression &
+                    Retention / Background Jobs device-page info panels.
+                    The only bridge type with a staging + commit flow (see
+                    that section's docstring) and the only one treated as
+                    a gateway-wide singleton (get_timescale_bridge) rather
+                    than looked up by name — there's only ever one
+                    TimescaleDB bridge.
 
-Staging model:
-Checking a field's checkbox in the UI does NOT delete the column
-immediately. It stages the deletion in-memory, on app.state alongside the
-gateway, so the change can ride the app's existing "Commit All Changes"
-button exactly like a staged Setting edit does. commit_staged_deletions()
-is what actually calls WideTableFieldManager.delete_fields() against
-Postgres — it's wired into routers/commit.py's do_commit(), and
-clear_staged_deletions() is wired into its discard endpoint.
+    INFLUXDB      — Bridge Health / Storage Overview device-page info
+                    panels for InfluxDB v1 (influxdb_out) and v3
+                    (influxdb3_out). Name-scoped (get_influxdb_bridge),
+                    since a gateway can have more than one v1/v3 bridge
+                    configured at once.
 
-Staging is intentionally in-memory rather than a new DB table: it mirrors
-analysis_service.py's live-gateway-state approach rather than the
-config-staging approach, since there is no "value_disk" for a column that
-no longer exists once dropped — there's nothing to roll back to.
+    MQTT          — Bridge Health device-page info panel only, no Storage
+                    Overview (MQTT brokers generally don't persist
+                    historical data). Also name-scoped, for the same
+                    reason as InfluxDB.
+
+Renamed on merge: the TimescaleDB section's health-panel function was
+previously named get_bridge_health() (a reasonable name when it was the
+only bridge type with one); it's now get_timescale_health() so it reads
+consistently alongside get_influxdb_health() / get_mqtt_health() in the
+same module. All three bridge-lookup/health/storage function names
+otherwise carry their transport's name explicitly (get_timescale_bridge,
+get_influxdb_bridge, get_mqtt_bridge, ...) specifically so it's never
+ambiguous which transport a given call in this file is about.
+
+A single shared _format_bytes() helper (previously defined identically in
+both the TimescaleDB and InfluxDB sections) now lives once, in the shared
+helpers section below, and is used by both. _format_dt() (TimescaleDB
+rollup/job timestamps) and _format_elapsed() (InfluxDB reconnect elapsed
+time) are each used by only one section and stay defined there rather than
+being hoisted up — hoisting a single-use helper out of its only caller's
+section would just make that section harder to read in isolation for no
+sharing benefit.
 """
 from __future__ import annotations
 
 import itertools
 import logging
 import threading
+import time
 from typing import TYPE_CHECKING, Any
 
 _log: logging.Logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Shared formatting helpers — used across more than one bridge type's info
+# panels. See module docstring above for why _format_dt / _format_elapsed
+# are NOT here (each has exactly one caller, in one section).
+# ---------------------------------------------------------------------------
+
+def _format_bytes(n: int | None) -> str:
+    """Human-readable byte size, e.g. 1536 -> '1.5 KB'. None/0 -> '0 B'."""
+    if not n:
+        return "0 B"
+    size = float(n)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if size < 1024 or unit == "TB":
+            return f"{size:.1f} {unit}" if unit != "B" else f"{int(size)} {unit}"
+        size /= 1024
+    return f"{size:.1f} TB"  # unreachable, keeps type checkers happy
+
+
+# ============================================================================
+# TIMESCALEDB
+# ============================================================================
 
 # The timescaledb bridge module is an optional/pluggable transport — a
 # deployment without it configured shouldn't crash the webserver on import.
@@ -90,7 +131,7 @@ try:
     )
     Timescale_Available = True
 except ImportError:
-    _log.debug("timescale_service: transports.timescaledb is not importable — the TimescaleDB admin UI will stay hidden.")
+    _log.debug("bridge_service: transports.timescaledb is not importable — the TimescaleDB admin UI will stay hidden.")
     _WideTableFieldManagerImpl = None
     Timescale_Available = False
 
@@ -267,7 +308,7 @@ def list_wide_table_fields(
 #
 # Backs the "Timescale DB -> Rebuild Rollup Views" admin screen. Unlike the
 # column deletions above, there's no staging step here: rollup views are
-# always derived/re-creatable from the wide/narrow tables (never a source of
+# always derived/recreatable from the wide/narrow tables (never a source of
 # truth themselves), so a rebuild runs immediately on click rather than
 # riding the app's "Commit All Changes" flow.
 # ---------------------------------------------------------------------------
@@ -388,19 +429,6 @@ def refresh_selected_rollups(
 # /storage, /compression-retention, /jobs). Purely observational: none of
 # these mutate anything, unlike the rollup functions above.
 # ---------------------------------------------------------------------------
-
-def _format_bytes(n: int | None) -> str:
-    """Human-readable byte size, e.g. 1536 -> '1.5 KB'. None/0 -> '0 B'."""
-    if not n:
-        return "0 B"
-    size = float(n)
-    for unit in ("B", "KB", "MB", "GB", "TB"):
-        if size < 1024 or unit == "TB":
-            return f"{size:.1f} {unit}" if unit != "B" else f"{int(size)} {unit}"
-        size /= 1024
-    return f"{size:.1f} TB"  # unreachable, keeps type checkers happy
-
-
 def _format_dt(value: Any) -> str:
     """
     Human-readable timestamp for template display, e.g. '2026-07-24 09:15
@@ -415,7 +443,7 @@ def _format_dt(value: Any) -> str:
         return str(value)
 
 
-def get_bridge_health(gateway: Any) -> dict[str, Any]:
+def get_timescale_health(gateway: Any) -> dict[str, Any]:
     """
     Read-only connection/background-worker snapshot for the "Bridge
     Health" panel. See timescaledb.get_health_snapshot for the field list.
@@ -645,3 +673,182 @@ def commit_staged_deletions(gateway: Any, app_state: Any) -> list[dict[str, Any]
         len(results), sum(len(r["deleted"]) for r in results),
     )
     return results
+
+
+# ============================================================================
+# INFLUXDB (v1 / v3)
+# ============================================================================
+
+def get_influxdb_bridge(gateway: Any, device_section: str) -> Any | None:
+    """
+    Finds the live influxdb_out / influxdb3_out bridge transport whose
+    transport_name matches device_section (e.g. "transport.influxdb_out"),
+    if any.
+
+    Returns None if there's no gateway yet (startup race), or no such
+    transport is configured under that name. Duck-typed on the class name
+    (rather than isinstance) so this module never needs a hard import of
+    either transport class, mirroring bridge_service.get_timescale_
+    bridge()'s access pattern.
+    """
+    if gateway is None:
+        return None
+    transports: list[Any] = getattr(gateway, "_Protocol_Gateway__transports", [])
+    for t in transports:
+        if type(t).__name__ in ("influxdb_out", "influxdb3_out") and getattr(t, "transport_name", None) == device_section:
+            return t
+    return None
+
+
+def is_influxdb_bridge(gateway: Any, device_section: str) -> bool:
+    """True when an InfluxDB v1 or v3 bridge with this name is attached to the gateway."""
+    return get_influxdb_bridge(gateway, device_section) is not None
+
+
+def _format_elapsed(seconds: float) -> str:
+    """Human-readable elapsed time, e.g. 125.0 -> '2m ago'. Negative/near-zero -> 'just now'."""
+    if seconds < 5:
+        return "just now"
+    seconds_int: int = int(seconds)
+    if seconds_int < 60:
+        return f"{seconds_int}s ago"
+    minutes: int = seconds_int // 60
+    if minutes < 60:
+        return f"{minutes}m ago"
+    hours: int = minutes // 60
+    if hours < 24:
+        return f"{hours}h ago"
+    days: int = hours // 24
+    return f"{days}d ago"
+
+
+def get_influxdb_health(gateway: Any, device_section: str) -> dict[str, Any]:
+    """
+    Read-only connection/backlog/staleness snapshot for the "Bridge
+    Health" panel, with a human-readable `last_periodic_reconnect_display`
+    added. See influxdb_out.get_health_snapshot (identical on influxdb3_
+    out) for the rest of the field list.
+
+    Raises RuntimeError if no InfluxDB bridge with this name is attached
+    to the gateway.
+    """
+    bridge: Any | None = get_influxdb_bridge(gateway, device_section)
+    if bridge is None:
+        msg: str = f"No InfluxDB bridge named '{device_section}' is attached to this gateway."
+        raise RuntimeError(msg)
+
+    health: dict[str, Any] = bridge.get_health_snapshot()
+
+    last_attempt: float = health.get("last_periodic_reconnect_attempt") or 0.0
+    if last_attempt > 0:
+        health["last_periodic_reconnect_display"] = _format_elapsed(time.time() - last_attempt)
+    else:
+        health["last_periodic_reconnect_display"] = "never"
+
+    return health
+
+def get_influxdb_storage(gateway: Any, device_section: str) -> dict[str, Any]:
+    """
+    Best-effort, read-only storage snapshot for the "Storage Overview"
+    panel. See influxdb_out.get_storage_overview / influxdb3_out.
+    get_storage_overview for the raw field list (the two line up so one
+    template renders both). This adds display-only formatting on top:
+
+    - `data_dir_size_display` — human-readable data_dir/object_store_dir size.
+    - Each `table_stats` row gets `file_size_display` / `memory_display`
+      (v3 only — `table_stats` is always empty on v1).
+    - `columns_by_table` — the flat `columns` list (v3 only) grouped into
+      {table_name: [{column_name, data_type, iox_column_type}, ...]} for
+      per-table display, plus a `column_count` added onto each matching
+      `table_stats` row.
+    - `heap_profile.size_display` — human-readable raw profile size, when
+      the heap-profile probe succeeded. This is still just the size of the
+      undecoded binary profile, not a memory-usage figure — see
+      influxdb3_out._probe_heap_profile for why nothing here decodes it
+      into real allocation numbers.
+
+    Raises RuntimeError if no InfluxDB bridge with this name is attached
+    to the gateway.
+    """
+    bridge: Any | None = get_influxdb_bridge(gateway, device_section)
+    if bridge is None:
+        msg: str = f"No InfluxDB bridge named '{device_section}' is attached to this gateway."
+        raise RuntimeError(msg)
+
+    storage: dict[str, Any] = bridge.get_storage_overview()
+
+    data_dir_size_bytes: int | None = storage.get("data_dir_size_bytes")
+    storage["data_dir_size_display"] = (
+        _format_bytes(data_dir_size_bytes) if data_dir_size_bytes is not None else None
+    )
+
+    # Group the flat schema-map rows by table, and fold a column count
+    # onto each table_stats row so the panel can show it in one place.
+    columns: list[dict[str, Any]] = storage.get("columns") or list[dict[str, Any]]()
+    columns_by_table: dict[str, list[dict[str, Any]]] = {}
+    for col in columns:
+        table_name: str | None = col.get("table_name")
+        if not table_name:
+            continue
+        columns_by_table.setdefault(table_name, list[dict[str, Any]]()).append(col)
+    storage["columns_by_table"] = columns_by_table
+
+    table_stats: list[dict[str, Any]] = storage.get("table_stats") or list[dict[str, Any]]()
+    for row in table_stats:
+        row["file_size_display"] = _format_bytes(row.get("file_size_bytes"))
+        row["memory_display"] = _format_bytes(row.get("memory_bytes"))
+        row_table_name: str | None = row.get("table_name")
+        row["column_count"] = (
+            len(columns_by_table.get(row_table_name, list[dict[str, Any]]())) if row_table_name else 0
+        )
+
+    heap_profile: dict[str, Any] | None = storage.get("heap_profile")
+    if heap_profile is not None:
+        heap_size_bytes: int | None = heap_profile.get("size_bytes")
+        heap_profile["size_display"] = _format_bytes(heap_size_bytes) if heap_size_bytes is not None else None
+
+    return storage
+
+
+# ============================================================================
+# MQTT
+# ============================================================================
+
+def get_mqtt_bridge(gateway: Any, device_section: str) -> Any | None:
+    """
+    Finds the live mqtt bridge transport whose transport_name matches
+    device_section (e.g. "transport.mqtt"), if any.
+
+    Returns None if there's no gateway yet (startup race), or no such
+    transport is configured under that name. Duck-typed on the class name
+    (rather than isinstance) so this module never needs a hard import of
+    the mqtt transport class, mirroring bridge_service.get_timescale_
+    bridge() / bridge_service.get_influxdb_bridge()'s access pattern.
+    """
+    if gateway is None:
+        return None
+    transports: list[Any] = getattr(gateway, "_Protocol_Gateway__transports", [])
+    for t in transports:
+        if type(t).__name__ == "mqtt" and getattr(t, "transport_name", None) == device_section:
+            return t
+    return None
+
+
+def is_mqtt_bridge(gateway: Any, device_section: str) -> bool:
+    """True when an MQTT bridge with this name is attached to the gateway."""
+    return get_mqtt_bridge(gateway, device_section) is not None
+
+
+def get_mqtt_health(gateway: Any, device_section: str) -> dict[str, Any]:
+    """
+    Read-only connection/reconnect/write-topic snapshot for the "Bridge
+    Health" panel. See mqtt.get_health_snapshot for the field list.
+
+    Raises RuntimeError if no MQTT bridge with this name is attached to
+    the gateway.
+    """
+    bridge: Any | None = get_mqtt_bridge(gateway, device_section)
+    if bridge is None:
+        msg: str = f"No MQTT bridge named '{device_section}' is attached to this gateway."
+        raise RuntimeError(msg)
+    return bridge.get_health_snapshot()

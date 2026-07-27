@@ -20,7 +20,7 @@
   partials/bridge_health_panel.html
   Swapped into #bridge-health-container on the TimescaleDB device page
   (see bridge_panes.html). Context: health — dict from services/
-  timescale_service.get_bridge_health(), or {} if the bridge is attached
+  bridge_service.get_bridge_health(), or {} if the bridge is attached
   but not yet connected (services.get_bridge_health only requires the
   bridge to exist, not to be connected, so an empty dict here means
   "still connecting" rather than an error).

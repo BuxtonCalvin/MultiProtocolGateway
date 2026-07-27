@@ -24,7 +24,7 @@
 
   Context: groups — [{protocol_name, wide_table_name, views: [{view_name,
   granularity, bucket_interval, status}, ...]}, ...] as returned by
-  services/timescale_service.list_rollup_view_groups. `protocol_name` is
+  services/bridge_service.list_rollup_view_groups. `protocol_name` is
   "shared_narrow" for the shared narrow-table group; every other group is
   one wide-table protocol's own hourly/daily/weekly/monthly stack.
 

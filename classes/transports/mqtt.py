@@ -643,6 +643,55 @@ class mqtt(transport_base):
             self.mqtt_discovery(from_transport)
 
     # ------------------------------------------------------------------
+    # Bridge info pane
+    # ------------------------------------------------------------------
+
+    def get_health_snapshot(self) -> dict[str, Any]:
+        """
+        Read-only snapshot of this bridge's live connection/reconnect/
+        write-topic state, for the device page's "Bridge Health" panel.
+        Pulls together state that's otherwise scattered across connection
+        management, write-topic tracking, and Home Assistant discovery
+        config — nothing here is a fresh query, just this instance's own
+        attributes.
+
+        Unlike the InfluxDB/TimescaleDB bridges, there's deliberately no
+        backlog/batch figure here: MQTT publishes are fire-and-forget per
+        metric (see write_data()) with no local queue held back on a
+        failed publish, so there's nothing to report there. There's also
+        no Storage Overview panel for this bridge at all (see
+        services/bridge_service module docstring) — MQTT brokers generally
+        don't persist historical data, so there's no measurement/table/
+        row-count concept to introspect the way InfluxDB/TimescaleDB have.
+
+        `connected` is included for completeness but isn't necessarily
+        rendered by the panel — the device page already shows connection
+        status in its own status badge.
+
+        Uses getattr with fallbacks throughout, matching this class's own
+        established convention (tests here commonly construct via
+        mqtt.__new__(mqtt), bypassing __init__ entirely — see e.g.
+        exit_handler / write_data / init_bridge above).
+        """
+        reconnect_thread: threading.Thread | None = getattr(self, "_reconnect_thread", None)
+        reconnecting: bool = bool(reconnect_thread is not None and reconnect_thread.is_alive())
+
+        write_topics: dict[str, registry_map_entry] = getattr(self, "_write_topics", dict[str, registry_map_entry]())
+        known_device_identifiers: set[str] = getattr(self, "_known_device_identifiers", set[str]())
+
+        return {
+            "connected": getattr(self, "connected", False),
+            "reconnecting": reconnecting,
+            "reconnect_delay": getattr(self, "reconnect_delay", None),
+            "reconnect_attempts": getattr(self, "reconnect_attempts", None),
+            "write_topic_count": len(write_topics),
+            "known_device_count": len(known_device_identifiers),
+            "discovery_enabled": getattr(self, "discovery_enabled", False),
+            "json_mode": getattr(self, "json", False),
+            "base_topic": getattr(self, "base_topic", ""),
+        }
+
+    # ------------------------------------------------------------------
     # Home Assistant discovery
     # ------------------------------------------------------------------
 

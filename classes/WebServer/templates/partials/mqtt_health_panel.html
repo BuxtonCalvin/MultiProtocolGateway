@@ -1,0 +1,104 @@
+<!--
+  Description: partials/mqtt_health_panel.html HTMX partial — Bridge Health card for the MQTT device page.
+  File: mqtt_health_panel.html
+
+  Copyright 2026 Kevin Burke
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://apache.org
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+
+{#
+  partials/mqtt_health_panel.html
+  Swapped into #bridge-health-container on the MQTT device page (see
+  bridge_panes.html). Context: health — dict from services/bridge_service.
+  get_mqtt_health() (see mqtt.get_health_snapshot for the field list).
+
+  No Storage Overview panel exists for this bridge — MQTT brokers
+  generally don't persist historical data, so there's no measurement/
+  table/row-count concept to show the way InfluxDB/TimescaleDB have. No
+  backlog/batch figures here either — MQTT publishes are fire-and-forget
+  per metric with no local queue held back on a failed publish.
+
+  Purely observational — nothing on this panel is clickable. Connection
+  status itself is deliberately not repeated here — it's already shown in
+  the device page's own status badge, above this card.
+#}
+<div class="card">
+  <h3 class="label mb-2">Bridge Health</h3>
+
+  {% if not health %}
+  <p class="surface-muted text-xs">Health data isn't available yet.</p>
+  {% else %}
+  <dl class="space-y-2 text-sm">
+
+    <div class="flex items-center justify-between">
+      <dt class="surface-muted text-xs">Reconnect status</dt>
+      <dd class="surface-title text-xs font-medium">
+        {% if health.reconnecting %}
+        <span class="text-dirty">Reconnecting…</span>
+        {% else %}
+        Idle
+        {% endif %}
+      </dd>
+    </div>
+
+    <div class="flex items-center justify-between">
+      <dt class="surface-muted text-xs">Reconnect backoff</dt>
+      <dd class="surface-title text-xs font-mono font-medium">
+        {% if health.reconnect_delay is not none %}
+        {{ health.reconnect_delay }}s base
+        {% if health.reconnect_attempts %}
+        &middot; {{ health.reconnect_attempts }} attempt(s) max
+        {% else %}
+        &middot; unlimited attempts
+        {% endif %}
+        {% else %}
+        <span class="surface-muted">—</span>
+        {% endif %}
+      </dd>
+    </div>
+
+    <div class="flex items-center justify-between">
+      <dt class="surface-muted text-xs">Known devices</dt>
+      <dd class="surface-title text-xs font-mono font-medium">{{ health.known_device_count }}</dd>
+    </div>
+
+    <div class="flex items-center justify-between">
+      <dt class="surface-muted text-xs">Write topics subscribed</dt>
+      <dd class="surface-title text-xs font-mono font-medium">{{ health.write_topic_count }}</dd>
+    </div>
+
+    <div class="flex items-center justify-between">
+      <dt class="surface-muted text-xs">Payload mode</dt>
+      <dd class="surface-title text-xs font-medium">
+        {% if health.json_mode %}JSON (one topic per device){% else %}Flat (one topic per metric){% endif %}
+      </dd>
+    </div>
+
+    <div class="flex items-center justify-between">
+      <dt class="surface-muted text-xs">HA discovery</dt>
+      <dd class="surface-title text-xs font-medium">
+        {% if health.discovery_enabled %}Enabled{% else %}<span class="surface-muted">Disabled</span>{% endif %}
+      </dd>
+    </div>
+
+    <div class="flex items-center justify-between">
+      <dt class="surface-muted text-xs">Base topic</dt>
+      <dd class="surface-title text-xs font-mono font-medium truncate" title="{{ health.base_topic }}">
+        {{ health.base_topic }}
+      </dd>
+    </div>
+
+  </dl>
+  {% endif %}
+</div>

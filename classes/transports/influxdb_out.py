@@ -502,6 +502,14 @@ class influxdb_out(transport_base):
         directory, which can be slow on a large data set; it only runs
         when this panel is loaded, not on a timer.
 
+        has_table_stats/table_stats/columns/heap_profile are always
+        False/empty/None here — InfluxDB v1 has no system.chunks or
+        information_schema.columns equivalent, and no Rust pprof debug
+        endpoint. They're present in this dict anyway (rather than
+        omitted) purely so the shared influxdb_storage_panel.html template
+        can treat v1 and v3 result shapes identically without `is defined`
+        guards — see influxdb3_out.get_storage_overview for the v3 side.
+
         Nothing here raises — a failed query is recorded in `error` and
         the rest of the snapshot still returns.
         """
@@ -509,12 +517,16 @@ class influxdb_out(transport_base):
             "connected": self.connected,
             "database": self.database,
             "items_label": "Measurements",
-            "items": [],
+            "has_table_stats": False,   # v1 has no system.chunks equivalent — see docstring
+            "table_stats": [],
+            "columns": [],              # v1 has no information_schema.columns equivalent
+            "item_names": [],
             "sample_item": None,
             "sample_item_approx_rows": None,
             "retention_policies": [],
             "data_dir": self.data_dir or None,
             "data_dir_size_bytes": None,
+            "heap_profile": None,       # pprof debug endpoint is a v3/Rust-core concept only
             "error": None,
         }
 
@@ -532,7 +544,7 @@ class influxdb_out(transport_base):
         try:
             meas_result = self.client.query(f'SHOW MEASUREMENTS ON "{self.database}"')  # type: ignore[reportUnknownMemberType]
             measurements: list[str] = [p["name"] for p in meas_result.get_points() if "name" in p] # type: ignore
-            result["items"] = measurements
+            result["item_names"] = measurements
 
             if measurements:
                 first: str = measurements[0]

@@ -62,6 +62,21 @@ from ..database import get_session, refresh_app_state, session_scope
 from ..models import AppState, ProtocolRegister, Setting, SettingDescription
 from ..scanner import TRANSPORT_BASE_KEYS, load_config, scan_transport_library
 from ..services.analysis_service import get_transport_connection_status
+from ..services.bridge_service import (
+    get_background_jobs,
+    get_compression_retention_summary,
+    get_influxdb_health,
+    get_influxdb_storage,
+    get_mqtt_health,
+    get_staged_columns,
+    get_storage_overview,
+    get_timescale_health,
+    is_timescale_available,
+    list_rollup_view_groups,
+    list_wide_table_fields,
+    list_wide_tables,
+    resolve_wide_table_name,
+)
 from ..services.device_service import (
     DeviceSummary,
     NavData,
@@ -71,7 +86,6 @@ from ..services.device_service import (
     get_nav_data,
     get_transport_library,
 )
-from ..services.influxdb_service import get_influxdb_health, get_influxdb_storage
 from ..services.protocol_service import (
     export_protocol_registers,
     get_protocol_groups,
@@ -79,18 +93,6 @@ from ..services.protocol_service import (
     get_protocols_for_device,
 )
 from ..services.setting_description_service import get_all_setting_descriptions
-from ..services.timescale_service import (
-    get_background_jobs,
-    get_bridge_health,
-    get_compression_retention_summary,
-    get_staged_columns,
-    get_storage_overview,
-    is_timescale_available,
-    list_rollup_view_groups,
-    list_wide_table_fields,
-    list_wide_tables,
-    resolve_wide_table_name,
-)
 
 router = APIRouter(tags=["pages"])
 _log: logging.Logger = logging.getLogger(__name__)
@@ -583,7 +585,7 @@ async def timescale_health_partial(request: Request):
         raise HTTPException(status_code=404, detail="No TimescaleDB bridge is attached to this gateway.")
 
     try:
-        health: dict[str, Any] = get_bridge_health(gateway)
+        health: dict[str, Any] = get_timescale_health(gateway)
     except RuntimeError:
         health = {}
     except Exception as exc:
@@ -681,7 +683,7 @@ async def influxdb_health_partial(device_name: str, request: Request):
     Unlike the TimescaleDB bridge (a singleton), a gateway can have more
     than one InfluxDB v1/v3 bridge configured, so this is scoped by
     device_name rather than assuming "the" InfluxDB bridge — see
-    services/influxdb_service.get_influxdb_bridge.
+    services/bridge_service.get_influxdb_bridge.
     """
     gateway = getattr(request.app.state, "gateway", None)
     device_section: str = f"transport.{device_name}"
@@ -708,7 +710,7 @@ async def influxdb_storage_partial(device_name: str, request: Request):
     sample row-count estimate, and (v1 only) retention policies and
     optional on-disk data directory size. Read-only, best-effort; a
     failed underlying query is reported inline rather than erroring the
-    whole panel — see services/influxdb_service.get_influxdb_storage.
+    whole panel — see services/bridge_service.get_influxdb_storage.
     """
     gateway = getattr(request.app.state, "gateway", None)
     device_section: str = f"transport.{device_name}"
@@ -724,6 +726,33 @@ async def influxdb_storage_partial(device_name: str, request: Request):
         request=request,
         name="partials/influxdb_storage_panel.html",
         context={"storage": storage},
+    )
+
+
+@router.get("/pages/mqtt/{device_name}/health", response_class=HTMLResponse, response_model=None)
+async def mqtt_health_partial(device_name: str, request: Request):
+    """
+    Bridge Health panel for an MQTT device page — connection/reconnect/
+    write-topic state. Read-only; lazy-loaded like the other bridge panels.
+
+    Scoped by device_name rather than assuming "the" MQTT bridge, since a
+    gateway can have more than one configured — see services/bridge_service
+    .get_mqtt_bridge.
+    """
+    gateway = getattr(request.app.state, "gateway", None)
+    device_section: str = f"transport.{device_name}"
+
+    try:
+        health: dict[str, Any] = get_mqtt_health(gateway, device_section)
+    except RuntimeError:
+        raise HTTPException(status_code=404, detail=f"No MQTT bridge named '{device_name}' is attached to this gateway.")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return request.app.state.templates.TemplateResponse(
+        request=request,
+        name="partials/mqtt_health_panel.html",
+        context={"health": health},
     )
 
 
@@ -1103,7 +1132,7 @@ class CreateDeviceRequest(BaseModel):
         if not value:
             return value  # empty = None, valid
         for part in value.split(","):
-            part: str = part.strip()
+            part = part.strip()
             if part and not part.startswith("transport."):
                 raise ValueError("Each bridge must be a transport section reference (e.g. transport.mqtt).")
         return value

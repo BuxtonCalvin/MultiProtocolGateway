@@ -66,8 +66,8 @@ from .routers.protocols import router as protocols_router
 from .routers.timescale import router as timescale_router
 from .routers.transport_settings import router as transport_settings_router
 from .scanner import Scanner
+from .services.bridge_service import is_timescale_available
 from .services.setting_description_service import seed_setting_descriptions
-from .services.timescale_service import is_timescale_available
 
 _log: logging.Logger = logging.getLogger(__name__)
 
@@ -281,7 +281,7 @@ def create_app(
         app.state.scanner        = scanner
 
         # In-memory staging for the Timescale DB "Delete Columns" screen —
-        # see services/timescale_service.py. Lives alongside the gateway
+        # see services/bridge_service.py. Lives alongside the gateway
         # rather than in the staging DB since wide-table columns are live
         # Postgres schema, not config.cfg settings.
         app.state.timescale_pending_deletions = {}

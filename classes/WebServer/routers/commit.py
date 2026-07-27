@@ -39,11 +39,11 @@ from ..models import (
     SettingDescription,
 )
 from ..services.backup_service import list_backups, rollback_to
+from ..services.bridge_service import clear_staged_deletions, commit_staged_deletions
 from ..services.setting_description_service import (
     commit_descriptions,
     discard_descriptions,
 )
-from ..services.timescale_service import clear_staged_deletions, commit_staged_deletions
 
 _log: logging.Logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/commit", tags=["commit"])

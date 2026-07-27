@@ -95,6 +95,19 @@ class influxdb3_out(transport_base):
     # Periodic reconnection settings
     periodic_reconnect_interval: float = 14400.0  # 4 hours in seconds
 
+    # Optional local filesystem path to InfluxDB v3's object store (e.g.
+    # "/var/lib/influxdb3/object_store"), used only to report on-disk size
+    # in the Storage Overview panel. Empty by default — MPG and InfluxDB
+    # are very often on different hosts, so this is opt-in, not assumed.
+    object_store_dir: str = ""
+
+    # Optional URL to the Rust/pprof heap-profile debug endpoint (e.g.
+    # "http://localhost:8089/debug/pprof/heap"). Empty by default — this
+    # debug endpoint typically isn't enabled or exposed on the same port
+    # as the main API, so it's never assumed, only probed if configured.
+    # See _probe_heap_profile for what "probed" means here.
+    debug_pprof_url: str = ""
+
     # Runtime state — typed explicitly so mypy / pyright can track them
     client: Optional[InfluxDBClient3] = None
     last_batch_time: float = 0.0
@@ -156,6 +169,11 @@ class influxdb3_out(transport_base):
 
         # Periodic reconnection settings
         self.periodic_reconnect_interval = settings.getfloat("periodic_reconnect_interval", fallback=self.periodic_reconnect_interval)
+
+        # Optional local filesystem / debug-endpoint settings for the
+        # Storage Overview panel — see class-level comments above.
+        self.object_store_dir = settings.get("object_store_dir", fallback=self.object_store_dir)
+        self.debug_pprof_url = settings.get("debug_pprof_url", fallback=self.debug_pprof_url)
 
 
         # Instance-level mutable state
@@ -521,27 +539,26 @@ class influxdb3_out(transport_base):
     def get_storage_overview(self) -> dict[str, Any]:
         """
         Best-effort, read-only storage snapshot for the device page's
-        Storage Overview panel: discovered tables (via information_
-        schema.tables) and an approximate row count for one sample table
-        (the first one discovered).
+        Storage Overview panel. Three independent sources, each attempted
+        separately so one failing doesn't blank out the others:
 
-        Only samples one table rather than every one — InfluxDB v3
-        exposes no single database-wide row-count function here, so
-        counting every table would mean one COUNT(*) query per table,
-        which doesn't belong in a page-load info panel.
+        1. system.chunks — table_name/row_count/file_size_bytes/
+           memory_bytes per chunk, aggregated (summed) by table_name here.
+           This replaces the earlier single-sampled-table COUNT(*)
+           estimate with real, per-table figures for every table in one
+           query.
+        2. information_schema.columns — the full schema map (table_name,
+           column_name, data_type, iox::column_type) for every table.
+           Returned flat; services/bridge_service.get_influxdb_storage
+           groups it by table for display.
+        3. object_store_dir sizing and a heap-profile reachability probe
+           — both entirely opt-in (see the object_store_dir / debug_
+           pprof_url settings) and skipped silently if unconfigured.
 
         Uses the same self.client.query(sql, database=..., language="sql")
         call already used by connect() / _health_check() above, which
         returns a pyarrow.Table — converted to plain Python via
         to_pylist().
-
-        NOT implemented: column-level metadata, chunk configuration, or
-        memory footprint via a management API. mgmt_api_url is only ever
-        used here for database creation (see _create_database, a POST) —
-        there's no GET endpoint in this file for that kind of detail, and
-        guessing at one risks calling something that doesn't exist. If
-        that API surface exists, point me at its endpoint and response
-        shape and this panel can be extended to show it.
 
         Nothing here raises — a failed query is recorded in `error` and
         the rest of the snapshot still returns.
@@ -550,12 +567,16 @@ class influxdb3_out(transport_base):
             "connected": self.connected,
             "database": self.database,
             "items_label": "Tables",
-            "items": [],
+            "has_table_stats": True,
+            "table_stats": [],       # [{table_name, row_count, file_size_bytes, memory_bytes}]
+            "columns": [],           # [{table_name, column_name, data_type, iox_column_type}]
+            "item_names": [],         # kept for template compatibility with the v1 panel — table names only
             "sample_item": None,
             "sample_item_approx_rows": None,
-            "retention_policies": None,  # not applicable to v3 — see docstring
-            "data_dir": None,            # not applicable to v3 — see docstring
+            "retention_policies": None,  # not applicable to v3
+            "data_dir": self.object_store_dir or None,
             "data_dir_size_bytes": None,
+            "heap_profile": None,
             "error": None,
         }
 
@@ -564,38 +585,89 @@ class influxdb3_out(transport_base):
             return result
 
         try:
-            tables_result: Any = self.client.query(  # type: ignore[reportUnknownMemberType]
-                "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'",
+            chunks_result: Any = self.client.query(  # type: ignore[reportUnknownMemberType]
+                "SELECT table_name, row_count, file_size_bytes, memory_bytes FROM system.chunks",
                 database=self.database,
                 language="sql",
             )
-            tables_table: pa.Table = cast(pa.Table, tables_result)
-            table_names: list[str] = [
-                row["table_name"] for row in tables_table.to_pylist() if row.get("table_name")
-            ]
-            result["items"] = table_names
+            chunks_table: pa.Table = cast(pa.Table, chunks_result)
+            agg: dict[str, dict[str, int]] = {}
+            for row in chunks_table.to_pylist():
+                name: str | None = row.get("table_name")
+                if not name:
+                    continue
+                bucket: dict[str, int] = agg.setdefault(
+                    name, {"row_count": 0, "file_size_bytes": 0, "memory_bytes": 0}
+                )
+                bucket["row_count"] += int(row.get("row_count") or 0)
+                bucket["file_size_bytes"] += int(row.get("file_size_bytes") or 0)
+                bucket["memory_bytes"] += int(row.get("memory_bytes") or 0)
 
-            if table_names:
-                first: str = table_names[0]
-                result["sample_item"] = first
-                try:
-                    count_result: Any = self.client.query(  # type: ignore[reportUnknownMemberType]
-                        f'SELECT COUNT(*) AS row_count FROM "{first}"',  # noqa: S608
-                        database=self.database,
-                        language="sql",
-                    )
-                    count_table: pa.Table = cast(pa.Table, count_result)
-                    rows: list[dict[str, Any]] = count_table.to_pylist()
-                    if rows:
-                        result["sample_item_approx_rows"] = int(rows[0].get("row_count", 0))
-                except Exception as e:
-                    self._log.error(f"get_storage_overview: COUNT(*) on '{first}' failed: {e}")
-                    result["error"] = f"Row count query failed for '{first}': {e}"
+            result["table_stats"] = [
+                {"table_name": name, **stats} for name, stats in sorted(agg.items())
+            ]
+            result["item_names"] = [row["table_name"] for row in result["table_stats"]]  # type: ignore
         except Exception as e:
-            self._log.error(f"get_storage_overview: information_schema.tables query failed: {e}")
-            result["error"] = f"Table discovery failed: {e}"
+            self._log.error(f"get_storage_overview: system.chunks query failed: {e}")
+            result["error"] = f"Chunk stats query failed: {e}"
+
+        try:
+            cols_result: Any = self.client.query(  # type: ignore[reportUnknownMemberType]
+                'SELECT table_name, column_name, data_type, "iox::column_type" AS iox_column_type '
+                "FROM information_schema.columns WHERE table_schema = 'public'",
+                database=self.database,
+                language="sql",
+            )
+            cols_table: pa.Table = cast(pa.Table, cols_result)
+            result["columns"] = cols_table.to_pylist()
+        except Exception as e:
+            self._log.error(f"get_storage_overview: information_schema.columns query failed: {e}")
+            if not result["error"]:
+                result["error"] = f"Schema query failed: {e}"
+
+        if self.object_store_dir:
+            try:
+                store_path: Path = Path(self.object_store_dir)
+                if store_path.exists():
+                    result["data_dir_size_bytes"] = sum(
+                        f.stat().st_size for f in store_path.rglob("*") if f.is_file()
+                    )
+            except Exception as e:
+                self._log.warning(f"get_storage_overview: could not size object_store_dir '{self.object_store_dir}': {e}")
+
+        if self.debug_pprof_url:
+            result["heap_profile"] = self._probe_heap_profile()
 
         return result
+
+    def _probe_heap_profile(self) -> dict[str, Any]:
+        """
+        Best-effort reachability probe for the Rust/pprof heap-profile
+        debug endpoint (GET .../debug/pprof/heap).
+
+        This deliberately does NOT decode the response. That endpoint
+        returns a binary pprof/protobuf profile meant for `go tool
+        pprof`-style tooling — parsing real per-allocation-site memory
+        figures out of it needs a proper pprof-format decoder, which
+        doesn't exist anywhere in this codebase. Reporting a made-up
+        "memory used" number from an undecoded binary blob would be
+        actively misleading, so this only reports whether the endpoint
+        responded, how large the raw profile was, and how long it took —
+        useful as a liveness/rough-activity signal, not a memory reading.
+        """
+        probe: dict[str, Any] = {"reachable": False, "size_bytes": None, "elapsed_ms": None, "error": None}
+        try:
+            start: float = time.time()
+            resp: requests.Response = requests.get(self.debug_pprof_url, timeout=self.connection_timeout)
+            probe["elapsed_ms"] = int((time.time() - start) * 1000)
+            if resp.status_code == 200:
+                probe["reachable"] = True
+                probe["size_bytes"] = len(resp.content)
+            else:
+                probe["error"] = f"HTTP {resp.status_code}"
+        except Exception as e:
+            probe["error"] = str(e)
+        return probe
 
     # ------------------------------------------------------------------
     # Data writing

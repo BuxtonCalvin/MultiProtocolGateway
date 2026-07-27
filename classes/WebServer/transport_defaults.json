@@ -162,22 +162,22 @@
     "stopbits": "1"
   },
   "pace_5048": {
+    "batch_size": "40",
     "bridge": "",
-    "device_manufacturer": "",
-    "variable_mask": "",
-    "device_name": "",
     "device_location": "",
-    "variable_screen": "",
-    "max_precision": "2",
+    "device_manufacturer": "",
     "device_model": "",
-    "write_type": "",
-    "log_level": "INFO",
-    "protocol_version": "",
-    "write_enabled": "false",
+    "device_name": "",
     "device_serial_number": "",
+    "log_level": "INFO",
+    "max_precision": "2",
+    "protocol_version": "",
     "read_interval": "15",
     "transport": "",
-    "batch_size": "40"
+    "variable_mask": "",
+    "variable_screen": "",
+    "write_enabled": "false",
+    "write_type": ""    
   },
   "serial_frame_client": {
     "batch_size": "40",
@@ -225,8 +225,6 @@
     "use_exponential_backoff": "True",
     "use_utc_timestamp": "False",
     "username": "",
-    "--write_enabled": "false",
-    "--write_type": "",
     "data_dir": ""
   },
   "influxdb3_out": {
@@ -258,8 +256,8 @@
     "use_exponential_backoff": "True",
     "use_utc_timestamp": "",
     "username": "",
-    "--write_enabled": "false",
-    "--write_type": ""
+    "debug_pprof_url": "",
+    "object_store_dir": ""
   },
   "mqtt": {
     "base_topic": "home/device",
@@ -276,9 +274,7 @@
     "port": "1883",
     "reconnect_attempts": "21",
     "reconnect_delay": "7",
-    "username": "",
-    "--write_enabled": "false",
-    "--write_type": ""
+    "username": ""
   },
   "json_out": {
     "append_mode": "False",
@@ -287,9 +283,7 @@
     "output_file": "stdout",
     "pretty_print": "True",
     "use_utc_timestamp": "False",
-    "save_file": "True",
-    "--write_enabled": "false",
-    "--write_type": ""
+    "save_file": "True"
   },
   "timescaledb": {
     "auto_refresh_interval": "21600",
@@ -319,9 +313,7 @@
     "use_exponential_backoff": "true",
     "use_utc_timestamp": "False",
     "username": "",
-    "--write_enabled": "false",
     "write_requires_complete_cycle": "true",
-    "--write_type": "",
     "device_name": "TimescaleDB MPG Bridge"
   }
 }

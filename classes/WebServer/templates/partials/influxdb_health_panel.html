@@ -21,13 +21,13 @@
   partials/influxdb_health_panel.html
   Swapped into #bridge-health-container on an InfluxDB v1 (influxdb_out)
   or v3 (influxdb3_out) device page (see bridge_panes.html). Context:
-  health — dict from services/influxdb_service.get_influxdb_health().
+  health — dict from services/bridge_service.get_influxdb_health().
 
   Scope note: unlike the TimescaleDB bridge, influxdb_out/influxdb3_out
   have no rollups, compression policy, or background jobs to report —
   those are TimescaleDB continuous-aggregate concepts with no InfluxDB
   analog here — so this is a single Bridge Health card, not a 2x2 grid of
-  panels. See services/influxdb_service module docstring for why a
+  panels. See services/bridge_service module docstring for why a
   Storage Overview panel isn't built for these bridges (no query support
   exists to build it from yet).
 

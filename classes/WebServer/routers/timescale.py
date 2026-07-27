@@ -23,7 +23,7 @@ These back the "Timescale DB → Delete Columns" admin screen. Unlike most
 routers in this app, these do NOT take a `db: Session` — there's nothing in
 the staging (SQLite) DB to read here. Everything comes from the live
 timescaledb bridge transport reached via request.app.state.gateway (see
-services/timescale_service.py), the same way analysis.py reaches modbus
+services/bridge_service.py), the same way analysis.py reaches modbus
 transports for the Analyze feature.
 
 Checking/unchecking a column checkbox only stages the change in memory
@@ -39,14 +39,14 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from ..services.timescale_service import (
+from ..services.bridge_service import (
     get_all_staged,
     get_background_jobs,
-    get_bridge_health,
     get_compression_retention_summary,
     get_staged_columns,
     get_storage_overview,
     get_timescale_bridge,
+    get_timescale_health,
     has_staged_deletions,
     list_rollup_views,
     list_wide_table_fields,
@@ -122,7 +122,7 @@ def stage_field(
     Stages or un-stages one column for deletion. This is a checkbox toggle
     only — no ALTER TABLE happens here. The actual delete + rollup rebuild
     happens later, in bulk, when the admin commits (see
-    services/timescale_service.commit_staged_deletions).
+    services/bridge_service.commit_staged_deletions).
     """
     _require_bridge(request)
     stage_field_deletion(
@@ -271,7 +271,7 @@ def get_health(request: Request) -> dict[str, Any]:
     """Connection/background-worker snapshot for the Bridge Health panel."""
     _require_bridge(request)
     try:
-        return get_bridge_health(request.app.state.gateway)
+        return get_timescale_health(request.app.state.gateway)
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     except Exception as exc:
