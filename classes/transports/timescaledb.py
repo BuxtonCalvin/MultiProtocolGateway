@@ -3002,7 +3002,7 @@ class RollupManager:
         Rollup and Compression Timing Defaults comments only:
         Rollup Type
             refresh rollup    start_offset   compress_after   reason
-            1 Hour	          3 hours	     2 days	          Allows a 3-hour window for late data before locking it via compression.
+            1 Hour	          3 hours	     3 days	          Allows a 3-hour window for late data before locking it via compression.
             1 Day	          3 days	     2 weeks	      Ensures daily rollups are finalized before compressing.
             1 Week	          3 weeks	     2 months	      Larger window helps capture any delayed source data updates.
             1 Month	          3 months	     6 months	      Maximum safety for long-term historical accuracy.
@@ -3017,7 +3017,7 @@ class RollupManager:
             "time_column": "m_time",
             "compress_orderby": "m_time DESC",
             "hourly_chunk_time_interval": "1 day",
-            "hourly_compress_after_interval": "2 days",
+            "hourly_compress_after_interval": "3 days",
             "daily_chunk_time_interval": "7 days",
             "daily_compress_after_interval": "2 weeks",
             "weekly_chunk_time_interval": "1 month",
