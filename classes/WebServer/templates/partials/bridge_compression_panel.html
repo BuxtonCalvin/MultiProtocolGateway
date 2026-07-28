@@ -45,8 +45,12 @@
     <dt class="surface-muted text-xs">Raw data retention (drop_after)</dt>
     <dd class="surface-title text-xs font-mono font-medium">{{ summary.retention_interval }}</dd>
 
-    <dt class="surface-muted text-xs">Raw table compress after</dt>
-    <dd class="surface-title text-xs font-mono font-medium">{{ summary.raw_compress_after_interval }}</dd>
+    <div class="col-span-2 grid grid-cols-4 gap-x-3 gap-y-1 items-baseline">
+      <dt class="surface-muted text-xs">Raw table compress after</dt>
+      <dd class="surface-title text-xs font-mono font-medium">{{ summary.raw_compress_after_interval }}</dd>
+      <dt class="surface-muted text-xs">Raw table chunk time</dt>
+      <dd class="surface-title text-xs font-mono font-medium">{{ summary.raw_chunk_time_interval }}</dd>
+    </div>
 
     <dt class="surface-muted text-xs">Segment by (narrow)</dt>
     <dd class="surface-title text-xs font-mono font-medium truncate">{{ summary.segment_by_narrow }}</dd>

@@ -45,6 +45,10 @@ license-files = ["LICENSE"]
 dependencies = {file = ["requirements.txt"]}
 optional-dependencies = {dev = { file = ["requirements-dev.txt"] }}
 
+[tool.ruff]
+line-length = 88
+indent-width = 4
+
 [project.urls]
 Homepage = "https://github.com/BuxtonCalvin/MultiProtocolGateway"
 Repository = "https://github.com/BuxtonCalvin/MultiProtocolGateway"

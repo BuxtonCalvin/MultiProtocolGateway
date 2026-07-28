@@ -538,7 +538,7 @@ class Protocol_Gateway:
         ``read_mode`` is accepted for interface symmetry but not used.
         """
         del read_mode
-        joined_names = ", ".join(
+        joined_names: str = ", ".join(
             self._display_transport_name(name) for name in transport_names
         ) if transport_names else "idle"
         return self._compact_thread_label(joined_names)
@@ -1108,7 +1108,7 @@ class Protocol_Gateway:
         row in the protocol CSV and therefore cannot appear in any mask file.
         Path 3 already forwards everything, so no special handling is needed.
         """
-        ps = getattr(member, 'protocolSettings', None)
+        ps: protocol_settings | None = getattr(member, 'protocolSettings', None)
         synthetic: frozenset[str] = member.synthetic_field_names
 
         # Path 1 — explicit variable mask.
@@ -1207,11 +1207,7 @@ class Protocol_Gateway:
         target.connected = False
         target.last_read_time = 0.0
 
-    def _snapshot_scraper_data(
-        self,
-        scraper: "transport_base",
-        data: dict[str, int | float | str],
-    ) -> None:
+    def _snapshot_scraper_data(self, scraper: "transport_base", data: dict[str, int | float | str]) -> None:
         """Scheduling path: All (Sequential, Concurrent, Interleaved) — called from ``_process_group_read`` and ``_forward_to_bridges``.
 
         Cache the bridge-bound data on the scraper transport.
@@ -1244,10 +1240,7 @@ class Protocol_Gateway:
 
         Returns ``None`` if no transport with that name exists or has connected.
         """
-        return next(
-            (t for t in self.__transports if t.transport_name == transport_name),
-            None,
-        )
+        return next((t for t in self.__transports if t.transport_name == transport_name), None)
 
     # init the variable request_upstream_reconnect in the bridge __init__.  If it goes true during stale
     # detection, reconnect routine triggers.
@@ -2005,7 +1998,7 @@ class GatewayManager:
                 except Exception as exc:
                     # New config didn't even build — fall back to last-known-good.
                     self._log.error(f"Gateway reload failed ({trigger}): {exc}")
-                    status = self._fallback(trigger, now, str(exc))
+                    status: ReloadStatus = self._fallback(trigger, now, str(exc))
                     self._status = status
                     return status
 

@@ -3027,6 +3027,7 @@ class RollupManager:
             # Dedicated setting for the RAW hypertable's own compression
             # policy (device_metrics_narrow / device_metrics_wide__*)
             "raw_compress_after_interval": "2 days",
+            "raw_chunk_time_interval": "7 days",
         }
 
         # rollup defaults, continuous aggregate bucket sizes.
@@ -3070,6 +3071,7 @@ class RollupManager:
         self.weekly_compress_after_interval: str = self.hypertable_defaults["weekly_compress_after_interval"]
         self.monthly_compress_after_interval: str = self.hypertable_defaults["monthly_compress_after_interval"]
         self.raw_compress_after_interval: str = self.hypertable_defaults["raw_compress_after_interval"]
+        self.raw_chunk_time_interval: str = self.hypertable_defaults["raw_chunk_time_interval"]
 
         # Rollup view settings
         self.anchor_start_time_utc: str = self.rollup_defaults["anchor_start_time_utc"]
@@ -3123,6 +3125,7 @@ class RollupManager:
             table_name="device_metrics_narrow",
             segment_by=self.compress_segmentby_narrow,
             compress_after_interval=self.raw_compress_after_interval,
+            chunk_time_interval=self.raw_chunk_time_interval,
             protocol_name=None,
             wide_table_name=None,
             use_shared_rollup_flow=True,
@@ -3133,6 +3136,7 @@ class RollupManager:
         table_name: str,
         segment_by: str,
         compress_after_interval: str,
+        chunk_time_interval: str,
         protocol_name: str | None,
         wide_table_name: str | None,
         use_shared_rollup_flow: bool,
@@ -3147,20 +3151,24 @@ class RollupManager:
         centralizes that lifecycle while still allowing narrow-specific and
         wide-specific rollup creation to diverge where required.
 
-        compress_after_interval: a single interval, not a list. `table_name`
-        is one raw hypertable, which can only ever have one compression
-        policy — TimescaleDB doesn't support "4 different compress_after
-        values" on one object. (An earlier version of this method took a
-        4-item compression_policy_intervals list here, one per rollup
-        granularity, copied from the rollup-view policy pattern where that
-        genuinely makes sense — 4 separate views, each needing its own
-        compress_after. Applied to a single raw table it was structurally
-        wrong: only one of the four ever actually stuck, and which one
-        depended on incidental behavior of add_compression_policy's
-        if_not_exists handling rather than deliberate design.) Callers
-        should pass raw_compress_after_interval — a setting dedicated to
-        the raw table, deliberately separate from the four rollup-view
-        granularity settings (hourly_compress_after_interval etc.)
+        compress_after_interval / chunk_time_interval: both single values,
+        not lists. `table_name` is one raw hypertable, which can only ever
+        have one compression policy and one chunk_time_interval —
+        TimescaleDB doesn't support "4 different values" of either on one
+        object. (An earlier version of this method took a 4-item
+        compression_policy_intervals list here, one per rollup granularity,
+        copied from the rollup-view policy pattern where that genuinely
+        makes sense — 4 separate views, each needing its own compress_
+        after/chunk_time_interval. Applied to a single raw table it was
+        structurally wrong: only one of the four ever actually stuck, and
+        which one depended on incidental behavior of add_compression_
+        policy's if_not_exists handling rather than deliberate design.)
+        Callers should pass raw_compress_after_interval / raw_chunk_time_
+        interval — settings dedicated to the raw table, deliberately
+        separate from the four rollup-view granularity settings
+        (hourly_compress_after_interval, hourly_chunk_time_interval,
+        etc.), since reusing one of those for the raw table would be an
+        undocumented assumption discoverable only by reading this code.
 
         force: passed straight through to the rollup-creation step (see
         ensure_rollups / _ensure_cagg_views_for_protocol) — when True, the
@@ -3170,7 +3178,7 @@ class RollupManager:
         """
         # 1 Hypertable & Policies
         try:
-            self._ensure_hypertables([table_name])
+            self._ensure_hypertables([table_name], chunk_time_interval=chunk_time_interval)
             self._log.info("Hypertable check/creation complete")
         except Exception as e:
             self._log.error(f"Hypertable creation failed: {e}")
@@ -3221,13 +3229,30 @@ class RollupManager:
                         f" — views exist but data may not be pre-aggregated."
                     )
 
-    def _ensure_hypertables(self, tables: list[str]) -> None:
+    def _ensure_hypertables(self, tables: list[str], chunk_time_interval: str | None = None) -> None:
         """
         Ensure the provided source tables are TimescaleDB hypertables.
 
         The helper preserves the original `create_hypertable(... if_not_exists)`
         behavior while letting both narrow and wide orchestration paths pass in
         the tables they need processed.
+
+        chunk_time_interval, if given, is applied two ways:
+        1. Passed to create_hypertable() itself, for the true first-ever
+           creation of a hypertable.
+        2. Also applied via a separate set_chunk_time_interval() call,
+           unconditionally, for every table -- because create_hypertable(
+           if_not_exists => TRUE) against an ALREADY EXISTING hypertable
+           is a no-op: it does not update chunk_time_interval on an
+           existing table, the same class of silent-no-op issue already
+           fixed for compression/retention policies (see ensure_
+           compression_policy's docstring). Without the explicit set_
+           chunk_time_interval() call, changing raw_chunk_time_interval in
+           settings would only ever take effect on a brand-new hypertable.
+
+        set_chunk_time_interval() only affects chunks created AFTER the
+        call -- like every other policy-style setting in this class, it
+        never touches or resizes chunks that already exist.
         """
         params: dict[str, Any] = {
             "time_col": getattr(self, "time_column", "m_time"),
@@ -3239,21 +3264,42 @@ class RollupManager:
             with self.SessionFactory() as session:
                 with session.begin():
                     for table in tables:
-                        session.execute(
-                            text(
-                                f"""
-                                SELECT create_hypertable(
-                                    '{table}',
-                                    :time_col,
-                                    if_not_exists => :if_exists,
-                                    migrate_data => :migrate
-                                )
-                                """
-                            ),
-                            {
-                                **params,
-                            },
-                        )
+                        if chunk_time_interval:
+                            session.execute(
+                                text(
+                                    f"""
+                                    SELECT create_hypertable(
+                                        '{table}',
+                                        :time_col,
+                                        chunk_time_interval => INTERVAL '{chunk_time_interval}',
+                                        if_not_exists => :if_exists,
+                                        migrate_data => :migrate
+                                    )
+                                    """
+                                ),
+                                {
+                                    **params,
+                                },
+                            )
+                            session.execute(
+                                text(f"SELECT set_chunk_time_interval('{table}', INTERVAL '{chunk_time_interval}');")
+                            )
+                        else:
+                            session.execute(
+                                text(
+                                    f"""
+                                    SELECT create_hypertable(
+                                        '{table}',
+                                        :time_col,
+                                        if_not_exists => :if_exists,
+                                        migrate_data => :migrate
+                                    )
+                                    """
+                                ),
+                                {
+                                    **params,
+                                },
+                            )
                 self._log.debug(f"Hypertable creation ensured for: {', '.join(tables)}")
 
         except SQLAlchemyError as e:
@@ -3816,6 +3862,7 @@ class RollupManager:
                 table_name=wide_table_name,
                 segment_by=self.compress_segmentby_wide,
                 compress_after_interval=self.raw_compress_after_interval,
+                chunk_time_interval=self.raw_chunk_time_interval,
                 protocol_name=protocol_name,
                 wide_table_name=wide_table_name,
                 use_shared_rollup_flow=False,
@@ -4601,12 +4648,13 @@ class RollupManager:
         (drop_after) applies uniformly to raw data across the narrow and
         wide hypertables.
 
-        `raw_compress_after_interval` is listed separately, not folded
-        into `schedule`: it governs the RAW hypertable's own compression
-        policy (one object, one policy), while `schedule`'s four rows each
-        govern a distinct ROLLUP VIEW (four separate objects). Conflating
-        them was the source of a real bug — see setup_rollup's docstring
-        for the history — so this panel keeps them visibly distinct too.
+        `raw_compress_after_interval` / `raw_chunk_time_interval` are
+        listed separately, not folded into `schedule`: they govern the RAW
+        hypertable's own compression policy and chunk sizing (one object,
+        one value each), while `schedule`'s four rows each govern a
+        distinct ROLLUP VIEW (four separate objects). Conflating them was
+        the source of a real bug — see setup_rollup's docstring for the
+        history — so this panel keeps them visibly distinct too.
         """
         return {
             "enable_compression": self.enable_compression,
@@ -4615,6 +4663,7 @@ class RollupManager:
             "segment_by_wide": self.compress_segmentby_wide,
             "compress_orderby": self.compress_orderby,
             "raw_compress_after_interval": self.raw_compress_after_interval,
+            "raw_chunk_time_interval": self.raw_chunk_time_interval,
             "schedule": [
                 {"granularity": "hourly", "compress_after": self.hourly_compress_after_interval},
                 {"granularity": "daily", "compress_after": self.daily_compress_after_interval},
