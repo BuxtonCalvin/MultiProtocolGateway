@@ -9,23 +9,23 @@ categories:
     labels:
       - "breaking-change"
       - "major"
-  - title: "✨ New features"
+  - title: "New features"
     labels:
       - "feature"
       - "minor"
-  - title: "🐛 Bug fixes"
+  - title: "Bug fixes"
     labels:
       - "bugfix"
-  - title: "🧰 Maintenance"
+  - title: "Maintenance"
     collapse-after: 3
     labels:
       - "ci"
       - "chore"
       - "l10n"
-  - title: "📚 Documentation"
+  - title: "Documentation"
     labels:
       - "documentation"
-  - title: "🔨 Internal development"
+  - title: "Internal development"
     labels:
       - "dev"
   - title: "⬆️ Dependency updates"
@@ -54,9 +54,9 @@ version-resolver:
   default: patch
 
 template: |
-  # 🍴🍴🍴🍴🍴🍴
+  #
 
-  ## 🎉 Highlights
+  ## Highlights
 
   - Highlight 1
 
@@ -68,7 +68,7 @@ template: |
 
   !!! Need to source this from GitHub's auto generated release notes !!!
 
-  # 🍴🍴🍴🍴🍴🍴
+  #
 
 autolabeler:
   - label: 'feature'
