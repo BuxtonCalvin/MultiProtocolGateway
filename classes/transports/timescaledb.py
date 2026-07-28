@@ -3002,7 +3002,7 @@ class RollupManager:
         Rollup and Compression Timing Defaults comments only:
         Rollup Type
             refresh rollup    start_offset   compress_after   reason
-            1 Hour	          3 hours	     2 days	          Allows a 3-hour window for late data before locking it via compression.
+            1 Hour	          3 hours	     3 days	          Allows a 3-hour window for late data before locking it via compression.
             1 Day	          3 days	     2 weeks	      Ensures daily rollups are finalized before compressing.
             1 Week	          3 weeks	     2 months	      Larger window helps capture any delayed source data updates.
             1 Month	          3 months	     6 months	      Maximum safety for long-term historical accuracy.
@@ -3017,7 +3017,7 @@ class RollupManager:
             "time_column": "m_time",
             "compress_orderby": "m_time DESC",
             "hourly_chunk_time_interval": "1 day",
-            "hourly_compress_after_interval": "2 days",
+            "hourly_compress_after_interval": "3 days",
             "daily_chunk_time_interval": "7 days",
             "daily_compress_after_interval": "2 weeks",
             "weekly_chunk_time_interval": "1 month",
@@ -3025,15 +3025,7 @@ class RollupManager:
             "monthly_chunk_time_interval": "4 months",
             "monthly_compress_after_interval": "6 months",
             # Dedicated setting for the RAW hypertable's own compression
-            # policy (device_metrics_narrow / device_metrics_wide__*) --
-            # deliberately separate from the four hourly/daily/weekly/
-            # monthly_compress_after_interval settings above, which apply
-            # to the four ROLLUP VIEWS, not the raw table. A raw hypertable
-            # is one object with exactly one compression policy; it isn't
-            # "hourly", so reusing hourly_compress_after_interval for it
-            # was an implicit, undocumented assumption that would only be
-            # discoverable by reading this code -- see setup_rollup's
-            # docstring for the full history.
+            # policy (device_metrics_narrow / device_metrics_wide__*)
             "raw_compress_after_interval": "2 days",
         }
 
@@ -3130,10 +3122,6 @@ class RollupManager:
         self.setup_rollup(
             table_name="device_metrics_narrow",
             segment_by=self.compress_segmentby_narrow,
-            # Dedicated raw-table setting -- see hypertable_defaults'
-            # raw_compress_after_interval comment for why this is not
-            # hourly_compress_after_interval (that's for the hourly
-            # ROLLUP VIEW, a separate object).
             compress_after_interval=self.raw_compress_after_interval,
             protocol_name=None,
             wide_table_name=None,
@@ -3172,9 +3160,7 @@ class RollupManager:
         if_not_exists handling rather than deliberate design.) Callers
         should pass raw_compress_after_interval — a setting dedicated to
         the raw table, deliberately separate from the four rollup-view
-        granularity settings (hourly_compress_after_interval etc.), since
-        reusing one of those for the raw table would be an undocumented
-        assumption discoverable only by reading this code.
+        granularity settings (hourly_compress_after_interval etc.)
 
         force: passed straight through to the rollup-creation step (see
         ensure_rollups / _ensure_cagg_views_for_protocol) — when True, the
@@ -3829,8 +3815,6 @@ class RollupManager:
             self.setup_rollup(
                 table_name=wide_table_name,
                 segment_by=self.compress_segmentby_wide,
-                # Dedicated raw-table setting -- see hypertable_defaults'
-                # raw_compress_after_interval comment.
                 compress_after_interval=self.raw_compress_after_interval,
                 protocol_name=protocol_name,
                 wide_table_name=wide_table_name,
