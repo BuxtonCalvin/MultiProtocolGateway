@@ -36,6 +36,7 @@ import requests
 
 # influx db methods are not recognized by type checker
 from influxdb_client_3 import InfluxDBClient3, Point
+from requests.adapters import HTTPAdapter
 from tzlocal import get_localzone_name
 
 from classes.protocol_settings import registry_map_entry
@@ -308,12 +309,43 @@ class influxdb3_out(transport_base):
     # ------------------------------------------------------------------
 
     def connect(self) -> bool:
-        """Initialize the InfluxDB v3 client connection."""
+        """Initialize the InfluxDB v3 client connection and diagnostic HTTP session."""
         self._log.info("influxdb3_out connect")
 
         try:
-            # Cast the client initialization if self._build_client_kwargs returns dict[str, Any]
-            self.client = InfluxDBClient3(**self._build_client_kwargs())
+            # 1. Clean up old diagnostic session if this is a reconnect attempt
+            old_session: Optional[requests.Session] = getattr(self, "session", None)
+            if old_session is not None:
+                try:
+                    old_session.close()
+                except Exception as e:
+                    # Log at debug level so it doesn't clutter normal logs, but isn't hidden
+                    self._log.debug(f"Failed to close old diagnostic session during reconnect: {e}")
+                self.session = None
+
+            client_kwargs: dict[str, Any] = self._build_client_kwargs()
+            self.client = InfluxDBClient3(**client_kwargs)
+
+            # 2. Extract configuration directly from build kwargs to build the companion session
+            token: str = client_kwargs.get("token", "")
+
+            # Initialize persistent session for background pprof diagnostic probes
+            session = requests.Session()
+
+            adapter = HTTPAdapter(
+                pool_connections=2,
+                pool_maxsize=4,
+                max_retries=1
+            )
+            session.mount("https://", adapter)
+            session.mount("http://", adapter)
+
+            # Automatically authenticate background HTTP calls with the Influx token
+            if token:
+                session.headers.update({"Authorization": f"Token {token}"})
+
+            # Save the initialized session to the instance container
+            self.session = session
 
             # Use cast() to resolve the missing type definition on the external .query() method
             raw_table: Any = self.client.query("SELECT database_name FROM system.databases") # type: ignore[reportUnknownMemberType]
@@ -339,6 +371,17 @@ class influxdb3_out(transport_base):
         except Exception as e:
             self._log.error(f"Failed to connect to InfluxDB: {e}")
             self.connected = False
+
+            # Clean up the session immediately if setup fails after session instantiation
+            if getattr(self, "session", None) is not None:
+                try:
+                    if self.session is not None:
+                        self.session.close()
+                except Exception as close_err:
+                    # Log the specific error encountered during the emergency close routine
+                    self._log.debug(f"Failed to close session during connection rollback: {close_err}")
+                self.session = None
+
             return False
         else:
             # This runs only if the try block succeeds perfectly
@@ -351,6 +394,7 @@ class influxdb3_out(transport_base):
                 self._flush_backlog()
 
         return True
+
 
     def _build_client_kwargs(self) -> dict[str, Any]:
         """
@@ -603,10 +647,11 @@ class influxdb3_out(transport_base):
                 bucket["file_size_bytes"] += int(row.get("file_size_bytes") or 0)
                 bucket["memory_bytes"] += int(row.get("memory_bytes") or 0)
 
-            result["table_stats"] = [
+            table_stats: list[dict[str, Any]] = [
                 {"table_name": name, **stats} for name, stats in sorted(agg.items())
             ]
-            result["item_names"] = [row["table_name"] for row in result["table_stats"]]  # type: ignore
+            result["table_stats"] = table_stats
+            result["item_names"] = [row["table_name"] for row in table_stats]
         except Exception as e:
             self._log.error(f"get_storage_overview: system.chunks query failed: {e}")
             result["error"] = f"Chunk stats query failed: {e}"
@@ -640,34 +685,59 @@ class influxdb3_out(transport_base):
 
         return result
 
+
     def _probe_heap_profile(self) -> dict[str, Any]:
         """
         Best-effort reachability probe for the Rust/pprof heap-profile
         debug endpoint (GET .../debug/pprof/heap).
-
-        This deliberately does NOT decode the response. That endpoint
-        returns a binary pprof/protobuf profile meant for `go tool
-        pprof`-style tooling — parsing real per-allocation-site memory
-        figures out of it needs a proper pprof-format decoder, which
-        doesn't exist anywhere in this codebase. Reporting a made-up
-        "memory used" number from an undecoded binary blob would be
-        actively misleading, so this only reports whether the endpoint
-        responded, how large the raw profile was, and how long it took —
-        useful as a liveness/rough-activity signal, not a memory reading.
         """
-        probe: dict[str, Any] = {"reachable": False, "size_bytes": None, "elapsed_ms": None, "error": None}
+        # Explicitly type the return dictionary to satisfy strict type checkers
+        probe: dict[str, Any] = {
+            "reachable": False,
+            "size_bytes": None,
+            "elapsed_ms": None,
+            "error": None
+        }
+
+        # Fall back to requests if a persistent session object isn't attached to self
+        session = getattr(self, "session", requests)
+
         try:
             start: float = time.time()
-            resp: requests.Response = requests.get(self.debug_pprof_url, timeout=self.connection_timeout)
-            probe["elapsed_ms"] = int((time.time() - start) * 1000)
-            if resp.status_code == 200:
-                probe["reachable"] = True
-                probe["size_bytes"] = len(resp.content)
-            else:
-                probe["error"] = f"HTTP {resp.status_code}"
+
+            # Use stream=True to avoid dumping raw binary into system memory immediately
+            with session.get(
+                self.debug_pprof_url,
+                timeout=self.connection_timeout,
+                stream=True
+            ) as resp:
+
+                probe["elapsed_ms"] = int((time.time() - start) * 1000)
+
+                if resp.status_code == 200:
+                    probe["reachable"] = True
+
+                    # Try Content-Length header first for instant estimation
+                    content_length = resp.headers.get("Content-Length")
+                    if content_length is not None and content_length.isdigit():
+                        probe["size_bytes"] = int(content_length)
+                        # Consume the rest without pinning it to memory or leaking connections
+                        resp.close()
+                    else:
+                        # Fallback: stream chunks to count total size safely without memory bloat
+                        bytes_counted = 0
+                        for chunk in resp.iter_content(chunk_size=16384):
+                            if chunk:
+                                bytes_counted += len(chunk)
+                        probe["size_bytes"] = bytes_counted
+                else:
+                    probe["error"] = f"HTTP {resp.status_code}"
+
         except Exception as e:
             probe["error"] = str(e)
+
         return probe
+
 
     # ------------------------------------------------------------------
     # Data writing
@@ -1045,12 +1115,52 @@ class influxdb3_out(transport_base):
         """Initialize bridge — not needed for InfluxDB output."""
         pass
 
-    def __del__(self) -> None:
-        """Cleanup on destruction — flush any remaining points."""
-        if self.batch_points:
-            self._flush_batch()
-        if self.client:
+    def close(self) -> None:
+        """
+        Gracefully terminate the connection.
+        Flushes pending metric batches and closes persistent network sockets.
+        """
+        self._log.info("Closing InfluxDB v3 transport bridge...")
+
+        if getattr(self, "batch_points", None):
             try:
-                self.client.close()
+                self._flush_batch()
             except Exception as e:
-                self._log.warning(f"Cleanup exception {e}")
+                self._log.error(f"Failed to flush batch during explicit close: {e}")
+
+        session: Any = getattr(self, "session", None)
+        if session is not None:
+            try:
+                session.close()
+                self._log.debug("Diagnostic HTTP session closed successfully.")
+            except Exception as e:
+                self._log.debug(f"Error closing diagnostic session: {e}")
+            finally:
+                self.session = None
+
+        client: InfluxDBClient3 | None = getattr(self, "client", None)
+        if client is not None:
+            try:
+                if hasattr(client, "close"):
+                    client.close()
+                    self._log.debug("InfluxDB client connection closed.")
+            except Exception as e:
+                self._log.warning(f"Error during client connection close: {e}")
+            finally:
+                self.client = None
+
+        self.connected = False
+        self._log.info("InfluxDB v3 transport bridge closed cleanly.")
+
+
+    def __del__(self) -> None:
+        try:
+            if hasattr(self, "close") and callable(getattr(self, "close", None)):
+                self.close()
+        except Exception as e:
+            if hasattr(self, '_log'):
+                try:
+                    self._log.error(f"Exception in __del__: {e}")
+                except Exception:
+                    self._log.error(f"Exception in __del__: {e}")
+

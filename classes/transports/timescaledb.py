@@ -3002,7 +3002,7 @@ class RollupManager:
         Rollup and Compression Timing Defaults comments only:
         Rollup Type
             refresh rollup    start_offset   compress_after   reason
-            1 Hour	          3 hours	     3 days	          Allows a 3-hour window for late data before locking it via compression.
+            1 Hour	          3 hours	     2 days	          Allows a 3-hour window for late data before locking it via compression.
             1 Day	          3 days	     2 weeks	      Ensures daily rollups are finalized before compressing.
             1 Week	          3 weeks	     2 months	      Larger window helps capture any delayed source data updates.
             1 Month	          3 months	     6 months	      Maximum safety for long-term historical accuracy.
@@ -3017,13 +3017,24 @@ class RollupManager:
             "time_column": "m_time",
             "compress_orderby": "m_time DESC",
             "hourly_chunk_time_interval": "1 day",
-            "hourly_compress_after_interval": "3 days",
+            "hourly_compress_after_interval": "2 days",
             "daily_chunk_time_interval": "7 days",
             "daily_compress_after_interval": "2 weeks",
             "weekly_chunk_time_interval": "1 month",
             "weekly_compress_after_interval": "2 months",
             "monthly_chunk_time_interval": "4 months",
             "monthly_compress_after_interval": "6 months",
+            # Dedicated setting for the RAW hypertable's own compression
+            # policy (device_metrics_narrow / device_metrics_wide__*) --
+            # deliberately separate from the four hourly/daily/weekly/
+            # monthly_compress_after_interval settings above, which apply
+            # to the four ROLLUP VIEWS, not the raw table. A raw hypertable
+            # is one object with exactly one compression policy; it isn't
+            # "hourly", so reusing hourly_compress_after_interval for it
+            # was an implicit, undocumented assumption that would only be
+            # discoverable by reading this code -- see setup_rollup's
+            # docstring for the full history.
+            "raw_compress_after_interval": "2 days",
         }
 
         # rollup defaults, continuous aggregate bucket sizes.
@@ -3066,6 +3077,7 @@ class RollupManager:
         self.daily_compress_after_interval: str = self.hypertable_defaults["daily_compress_after_interval"]
         self.weekly_compress_after_interval: str = self.hypertable_defaults["weekly_compress_after_interval"]
         self.monthly_compress_after_interval: str = self.hypertable_defaults["monthly_compress_after_interval"]
+        self.raw_compress_after_interval: str = self.hypertable_defaults["raw_compress_after_interval"]
 
         # Rollup view settings
         self.anchor_start_time_utc: str = self.rollup_defaults["anchor_start_time_utc"]
@@ -3118,12 +3130,11 @@ class RollupManager:
         self.setup_rollup(
             table_name="device_metrics_narrow",
             segment_by=self.compress_segmentby_narrow,
-            compression_policy_intervals=[
-                self.hourly_chunk_time_interval,
-                self.daily_chunk_time_interval,
-                self.weekly_chunk_time_interval,
-                self.monthly_chunk_time_interval,
-            ],
+            # Dedicated raw-table setting -- see hypertable_defaults'
+            # raw_compress_after_interval comment for why this is not
+            # hourly_compress_after_interval (that's for the hourly
+            # ROLLUP VIEW, a separate object).
+            compress_after_interval=self.raw_compress_after_interval,
             protocol_name=None,
             wide_table_name=None,
             use_shared_rollup_flow=True,
@@ -3133,7 +3144,7 @@ class RollupManager:
         self,
         table_name: str,
         segment_by: str,
-        compression_policy_intervals: list[str],
+        compress_after_interval: str,
         protocol_name: str | None,
         wide_table_name: str | None,
         use_shared_rollup_flow: bool,
@@ -3147,6 +3158,23 @@ class RollupManager:
         retention policy, rollup creation, and initial refresh. This helper
         centralizes that lifecycle while still allowing narrow-specific and
         wide-specific rollup creation to diverge where required.
+
+        compress_after_interval: a single interval, not a list. `table_name`
+        is one raw hypertable, which can only ever have one compression
+        policy — TimescaleDB doesn't support "4 different compress_after
+        values" on one object. (An earlier version of this method took a
+        4-item compression_policy_intervals list here, one per rollup
+        granularity, copied from the rollup-view policy pattern where that
+        genuinely makes sense — 4 separate views, each needing its own
+        compress_after. Applied to a single raw table it was structurally
+        wrong: only one of the four ever actually stuck, and which one
+        depended on incidental behavior of add_compression_policy's
+        if_not_exists handling rather than deliberate design.) Callers
+        should pass raw_compress_after_interval — a setting dedicated to
+        the raw table, deliberately separate from the four rollup-view
+        granularity settings (hourly_compress_after_interval etc.), since
+        reusing one of those for the raw table would be an undocumented
+        assumption discoverable only by reading this code.
 
         force: passed straight through to the rollup-creation step (see
         ensure_rollups / _ensure_cagg_views_for_protocol) — when True, the
@@ -3167,7 +3195,7 @@ class RollupManager:
                 self._configure_compression(
                     table_name=table_name,
                     segment_by=segment_by,
-                    compression_policy_intervals=compression_policy_intervals,
+                    compress_after_interval=compress_after_interval,
                 )
         except Exception as e:
             self._log.error(f"Enable compression failed: {e}")
@@ -3246,13 +3274,18 @@ class RollupManager:
             self._log.error("Failed to ensure hypertables: %s", e)
             raise
 
-    def _configure_compression(self, table_name: str, segment_by: str, compression_policy_intervals: list[str]) -> None:
+    def _configure_compression(self, table_name: str, segment_by: str, compress_after_interval: str) -> None:
         """
-        Apply compression settings and compression policies to one source table.
+        Apply compression settings and the compression policy to one source table.
 
         The table structure is immutable after creation, but policy scheduling
         remains configurable. This helper keeps those concerns together for
         both shared narrow and protocol-specific wide sources.
+
+        compress_after_interval is a single value: `table_name` is one raw
+        hypertable, which can only ever have one compression policy — see
+        setup_rollup's docstring for why this used to (incorrectly) take a
+        list of 4 granularity-specific intervals instead.
         """
         with self.SessionFactory() as session:
             self._log.info("Setting up compression policy")
@@ -3263,8 +3296,7 @@ class RollupManager:
             self._apply_compression_helper(session, table_name, segment_by)
 
             with session.begin():
-                for interval in compression_policy_intervals:
-                    self.ensure_compression_policy(table_name, interval)
+                self.ensure_compression_policy(table_name, compress_after_interval)
 
                 session.commit()
 
@@ -3330,7 +3362,30 @@ class RollupManager:
                 self._log.error(f"Rollback error for {table_name}: {e2}")
 
     def ensure_compression_policy(self, source: str, chunk_interval: str) -> None:
-        """Automatically compress chunks older than chunk_time_interval.
+        """
+        Automatically compress chunks older than chunk_interval on `source`.
+
+        Removes and re-adds the policy every time, rather than relying on
+        add_compression_policy(..., if_not_exists => TRUE) alone -- that
+        call is a genuine no-op when a policy already exists for `source`:
+        TimescaleDB issues a NOTICE and leaves the existing job's
+        compress_after untouched, it does not update it to the new
+        interval. Without the remove-then-add here, editing e.g.
+        hourly_compress_after_interval in code would silently never reach
+        an already-configured hypertable -- only a brand new one would
+        ever pick up the new value, while the old job kept running (and
+        potentially kept failing) at its original interval forever. This
+        mirrors _apply_retention_policy's own fix for the identical
+        problem -- see that method's docstring.
+
+        Removing and re-adding only affects the *ongoing* job's future
+        schedule -- it does not touch chunks TimescaleDB has already
+        compressed under the previous interval, the same way changing a
+        retention policy doesn't retroactively undo already-dropped data.
+        Both statements run in the same transaction, committed together,
+        so a failure on the add rolls back the remove too -- this never
+        leaves `source` with no compression policy at all.
+
         Parameters:
             source (str): The hypertable to which the compression policy will be applied (e.g. "device_metrics_narrow").
             chunk_interval (str): The time interval after which chunks should be compressed (e.g. "1 day", "7 days").
@@ -3342,17 +3397,21 @@ class RollupManager:
                     return
 
             try:
-                sql: TextClause = text(f"SELECT add_compression_policy('{source}', compress_after => INTERVAL '{chunk_interval}', if_not_exists => TRUE);")
+                # Remove and re-add policy to ensure interval updates apply
+                # -- same reasoning as _apply_retention_policy.
+                session.execute(text(f"SELECT remove_compression_policy('{source}', if_exists => TRUE);"))
+                session.execute(
+                    text(f"SELECT add_compression_policy('{source}', compress_after => INTERVAL '{chunk_interval}');")
+                )
+                session.commit()
 
-                session.execute(sql)
-
-                self._log.debug(f"_add_compression_policy {source} for {chunk_interval} executed")
+                self._log.debug(f"Compression policy on {source} set to compress_after={chunk_interval}")
             except SQLAlchemyError as e:
-                self._log.error(f"_add_compression_policy {source} for {chunk_interval} error: {e}")
+                self._log.error(f"ensure_compression_policy {source} for {chunk_interval} error: {e}")
                 try:
                     session.rollback()
                 except SQLAlchemyError as e2:
-                    self._log.error(f"_add_compression_policy {source} for {chunk_interval} rollback error: {e2}")
+                    self._log.error(f"ensure_compression_policy {source} for {chunk_interval} rollback error: {e2}")
 
     def setup_with_retry(self, force: bool = False) -> None:
         """_summary_
@@ -3582,8 +3641,34 @@ class RollupManager:
 
     def _add_aggregate_policy_helper(self, session: Session, view_name: str, bucket_interval: str, start_offset: str) -> None:
         """
-        Applies refresh, retention, and compression policies to a newly created view
-        using granularity-specific settings from hypertable_policy.
+        Applies (or re-applies) refresh, retention, and compression
+        policies to a continuous aggregate view, using granularity-
+        specific settings from hypertable_policy.
+
+        Every policy here is removed and re-added, not just added with
+        if_not_exists => TRUE. That call is a genuine no-op when a policy
+        already exists for `view_name`: TimescaleDB issues a NOTICE and
+        leaves the existing job's schedule untouched rather than updating
+        it. Without the remove-then-add here, this method would only ever
+        set correct policies at a view's very first creation -- a later
+        settings change (daily_compress_after_interval, drop_after, a
+        rollup start-offset, ...) would silently never reach an already-
+        existing view, since views are only dropped and recreated when
+        their BUCKET interval changes (see rollup_needs_rebuild); policy-
+        only drift was never separately detected or corrected. This
+        mirrors the identical fix already applied to raw-table compression
+        in ensure_compression_policy — see that method's docstring.
+
+        Called from two places: _create_rollup_helper (a freshly created
+        view) AND _ensure_single_cagg_view_helper's already-exists branch
+        (an existing view, on every connect/reconnect/Rebuild-Rollups
+        pass) -- so a policy setting change reaches every view on the very
+        next such pass, with no purge-and-recreate of the view's actual
+        data required. Removing and re-adding a policy only affects its
+        *ongoing* schedule going forward; it never touches data the view
+        already holds, or chunks already compressed/dropped under the
+        previous schedule.
+
         Parameters:
             session: Active database session for executing SQL commands.
             view_name: The name of the continuous aggregate view to which policies will be applied.
@@ -3604,42 +3689,44 @@ class RollupManager:
         compress_after: str = getattr(self, f"{granularity}_compress_after_interval")
         drop_after: str = getattr(self, "drop_after", "1 year")  # Default retention if not specified
 
-
         try:
             session.execute(text("SET LOCAL lock_timeout = '10s';"))
 
-            # 2. Add Continuous Aggregate Refresh Policy
+            # 2. Continuous Aggregate Refresh Policy — remove-then-add so a
+            # start_offset/schedule change reaches an already-existing view.
+            session.execute(text(f"SELECT remove_continuous_aggregate_policy('{view_name}', if_exists => true);"))
             session.execute(text(f"""
                 SELECT add_continuous_aggregate_policy(
                     '{view_name}',
                     start_offset      => INTERVAL '{start_offset}',
                     end_offset        => INTERVAL '{bucket_interval}',
                     initial_start     => '{self.anchor_start_time_utc}'::timestamptz,
-                    schedule_interval => INTERVAL '{bucket_interval}',
-                    if_not_exists     => true
+                    schedule_interval => INTERVAL '{bucket_interval}'
                 );
             """))
 
-            # 3. Add Data Retention Policy (Specific to the view)
+            # 3. Data Retention Policy (specific to the view) — remove-
+            # then-add so a drop_after change reaches an already-existing view.
+            session.execute(text(f"SELECT remove_retention_policy('{view_name}', if_exists => true);"))
             session.execute(text(f"""
                 SELECT add_retention_policy(
                     '{view_name}',
-                    drop_after => INTERVAL '{drop_after}',
-                    if_not_exists => true
+                    drop_after => INTERVAL '{drop_after}'
                 );
             """))
 
-            # 4. Enable and Configure Compression Policy for the view
+            # 4. Compression Policy — remove-then-add so a compress_after
+            # change reaches an already-existing view.
             if self.enable_compression:
-                # For CAGGs, enable compression via ALTER MATERIALIZED VIEW
+                # ALTER ... SET is inherently idempotent (not a "create"
+                # call), safe to repeat on every pass.
                 session.execute(text(f"ALTER MATERIALIZED VIEW {view_name} SET (timescaledb.compress = true);"))
 
-                # Add compression policy using the granularity-matched interval
+                session.execute(text(f"SELECT remove_compression_policy('{view_name}', if_exists => true);"))
                 session.execute(text(f"""
                     SELECT add_compression_policy(
                         '{view_name}',
-                        compress_after => INTERVAL '{compress_after}',
-                        if_not_exists => true
+                        compress_after => INTERVAL '{compress_after}'
                     );
                 """))
 
@@ -3742,12 +3829,9 @@ class RollupManager:
             self.setup_rollup(
                 table_name=wide_table_name,
                 segment_by=self.compress_segmentby_wide,
-                compression_policy_intervals=[
-                    self.hourly_compress_after_interval,
-                    self.daily_compress_after_interval,
-                    self.weekly_compress_after_interval,
-                    self.monthly_compress_after_interval,
-                ],
+                # Dedicated raw-table setting -- see hypertable_defaults'
+                # raw_compress_after_interval comment.
+                compress_after_interval=self.raw_compress_after_interval,
                 protocol_name=protocol_name,
                 wide_table_name=wide_table_name,
                 use_shared_rollup_flow=False,
@@ -4032,11 +4116,19 @@ class RollupManager:
         base_wide_table_name: str | None = None,
     ) -> None:
         """
-        Idempotently creates one CAGG view if it does not already exist,
-        then records it in _known_rollup_views for the refresh loop.
+        Idempotently creates one CAGG view if it does not already exist —
+        AND, either way, ensures its refresh/retention/compression
+        policies match current settings, then records it in
+        _known_rollup_views for the refresh loop.
 
-        Delegates to _create_rollup (which branches wide vs narrow
-        internally based on whether 'wide' appears in source_table).
+        For a brand-new view, delegates to _create_rollup_helper (which
+        branches wide vs narrow internally based on whether 'wide' appears
+        in source_table); that helper applies policies as its final step.
+        For an already-existing view, calls _add_aggregate_policy_helper
+        directly to re-sync its policies without touching the view's data
+        or definition — see that method's docstring for why this matters:
+        without it, a settings change would only ever reach a view at its
+        very first creation.
 
         Args:
             session:          Active session (caller owns the transaction).
@@ -4047,7 +4139,17 @@ class RollupManager:
             protocol_name:    Used for log context only.
         """
         if self._view_exists_helper(session, view_name):
-            self._log.debug(f"CAGG view '{view_name}' already exists for protocol '{protocol_name}' —skipping creation.")
+            self._log.debug(f"CAGG view '{view_name}' already exists for protocol '{protocol_name}' — re-syncing policies to current settings.")
+            # Re-apply (remove-then-add) refresh/retention/compression
+            # policies even though the view itself doesn't need rebuilding
+            # -- this is what lets a settings change (compress_after,
+            # drop_after, start_offset, ...) reach an already-existing view
+            # without a full purge-and-recreate. See _add_aggregate_policy_
+            # helper's docstring for the full reasoning.
+            try:
+                self._add_aggregate_policy_helper(session, view_name, bucket_interval, start_offset)
+            except Exception as e:
+                self._log.error(f"Policy re-sync failed for existing view '{view_name}': {e} — view itself is untouched, will retry next pass.")
         else:
             self._log.info(f"Creating CAGG view '{view_name}' from '{source_table}' during startup.")
             self._create_rollup_helper(session, source_table, view_name, bucket_interval, start_offset, base_wide_table_name=base_wide_table_name)
@@ -4514,6 +4616,13 @@ class RollupManager:
         after a chunk's time range closes before compressing it. Retention
         (drop_after) applies uniformly to raw data across the narrow and
         wide hypertables.
+
+        `raw_compress_after_interval` is listed separately, not folded
+        into `schedule`: it governs the RAW hypertable's own compression
+        policy (one object, one policy), while `schedule`'s four rows each
+        govern a distinct ROLLUP VIEW (four separate objects). Conflating
+        them was the source of a real bug — see setup_rollup's docstring
+        for the history — so this panel keeps them visibly distinct too.
         """
         return {
             "enable_compression": self.enable_compression,
@@ -4521,6 +4630,7 @@ class RollupManager:
             "segment_by_narrow": self.compress_segmentby_narrow,
             "segment_by_wide": self.compress_segmentby_wide,
             "compress_orderby": self.compress_orderby,
+            "raw_compress_after_interval": self.raw_compress_after_interval,
             "schedule": [
                 {"granularity": "hourly", "compress_after": self.hourly_compress_after_interval},
                 {"granularity": "daily", "compress_after": self.daily_compress_after_interval},
@@ -4639,7 +4749,8 @@ class RollupManager:
         """
         if not self._protocol_wide_column_counts:
             return 0
-        return max(self._protocol_wide_column_counts.values(), default=0)
+        max_columns: int = max(self._protocol_wide_column_counts.values(), default=0)
+        return max_columns
 
 
     def _view_exists_helper(self, session: Session, view_name: str) -> bool:
@@ -4653,7 +4764,7 @@ class RollupManager:
         check_sql: TextClause = text("SELECT 1 FROM timescaledb_information.continuous_aggregates WHERE view_name = :name")
 
         try:
-            # Keep ONLY the risky operation in the try block
+            # Keep only the risky operation in the try block
             result = session.execute(check_sql, {"name": view_name}).fetchone()
         except Exception as e:
             # Handle the error and clean up
@@ -4661,7 +4772,7 @@ class RollupManager:
             session.rollback()
             return False
         else:
-            # The 'else' block runs ONLY if the try block succeeded
+            # The 'else' block runs only if the try block succeeded
             session.rollback()  # Resets state for your next AUTOCOMMIT call
             return result is not None
 
@@ -5361,7 +5472,7 @@ class WideTableFieldManager:
                         from from_transport.registry_map right now, plus
                         any transport-declared synthetic fields. Typically
                         built by the caller (see
-                        bridge_service._active_metric_names_for_protocol)
+                        timescale_service._active_metric_names_for_protocol)
                         rather than by this class, since resolving "the
                         live transport for this protocol" is a gateway
                         concern, not a wide-table-schema concern.

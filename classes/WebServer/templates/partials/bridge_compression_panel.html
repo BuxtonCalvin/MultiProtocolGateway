@@ -15,7 +15,9 @@
   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
   See the License for the specific language governing permissions and
   limitations under the License.
+-->
 
+{#
   partials/bridge_compression_panel.html
   Swapped into #bridge-compression-container on the TimescaleDB device
   page. Context: summary — dict from services/bridge_service.
@@ -26,8 +28,7 @@
   this panel, just the rollup manager's own attributes. Purely
   observational: these values change by editing the bridge's settings on
   the left-hand settings pane, not from this card.
--->
-
+#}
 <div class="card">
   <h3 class="label mb-2">Compression &amp; Retention Status</h3>
 
@@ -44,6 +45,9 @@
     <dt class="surface-muted text-xs">Raw data retention (drop_after)</dt>
     <dd class="surface-title text-xs font-mono font-medium">{{ summary.retention_interval }}</dd>
 
+    <dt class="surface-muted text-xs">Raw table compress after</dt>
+    <dd class="surface-title text-xs font-mono font-medium">{{ summary.raw_compress_after_interval }}</dd>
+
     <dt class="surface-muted text-xs">Segment by (narrow)</dt>
     <dd class="surface-title text-xs font-mono font-medium truncate">{{ summary.segment_by_narrow }}</dd>
 
@@ -51,7 +55,7 @@
     <dd class="surface-title text-xs font-mono font-medium truncate">{{ summary.segment_by_wide }}</dd>
   </dl>
 
-  <p class="surface-muted text-xs mb-1">Compression schedule (time since a chunk closed)</p>
+  <p class="surface-muted text-xs mb-1">Rollup view compression schedule (time since a chunk closed)</p>
   <table class="w-auto text-xs border-collapse" role="table" aria-label="Compression schedule by granularity">
     <thead>
       <tr class="text-mpg-100 text-xs uppercase tracking-wide bg-mpg-800" role="row">

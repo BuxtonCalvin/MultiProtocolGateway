@@ -935,12 +935,41 @@ class influxdb_out(transport_base):
         """Initialize bridge — not needed for InfluxDB output."""
         pass
 
-    def __del__(self) -> None:
-        """Cleanup on destruction — flush any remaining points."""
-        if self.batch_points:
-            self._flush_batch()
-        if self.client:
+    def close(self) -> None:
+        """
+        Gracefully terminate the connection.
+        Flushes pending metric batches and closes persistent network sockets.
+        """
+        self._log.info("Closing InfluxDB v3 transport bridge...")
+
+        if getattr(self, "batch_points", None):
             try:
-                self.client.close()
+                self._flush_batch()
             except Exception as e:
-                self._log.warning(f"Cleanup exception {e}")
+                self._log.error(f"Failed to flush batch during explicit close: {e}")
+
+        client: InfluxDBClient | None = getattr(self, "client", None)
+        if client is not None:
+            try:
+                if hasattr(client, "close"):
+                    client.close()
+                    self._log.debug("InfluxDB client connection closed.")
+            except Exception as e:
+                self._log.warning(f"Error during client connection close: {e}")
+            finally:
+                self.client = None
+
+        self.connected = False
+        self._log.info("InfluxDB v3 transport bridge closed cleanly.")
+
+
+    def __del__(self) -> None:
+        try:
+            if hasattr(self, "close") and callable(getattr(self, "close", None)):
+                self.close()
+        except Exception as e:
+            if hasattr(self, '_log'):
+                try:
+                    self._log.error(f"Exception in __del__: {e}")
+                except Exception:
+                    self._log.error(f"Exception in __del__: {e}")
