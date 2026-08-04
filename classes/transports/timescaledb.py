@@ -166,7 +166,7 @@ class ProtocolRegistry(Base):
     protocol_id: Mapped[int] = mapped_column(Integer, Identity(cache=1),primary_key=True, autoincrement=True)
     protocol_name: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     wide_table_name: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    # None = narrow only (>200 metrics)
+    # None = narrow only (>160 metrics)
 
     metric_count: Mapped[int] = mapped_column(Integer, default=0)
 
@@ -1399,7 +1399,7 @@ class timescaledb(transport_base):
             raise ConnectionError(msg)
 
         # Derive rollup_prefix from wide_table_name if provided.
-        # None for narrow-only protocols (metric_count >= 200).
+        # None for narrow-only protocols (metric_count >= 160).
         # e.g. wide_table_name = "device_metrics_wide__eg4_18kpv"
         #      rollup_prefix   = "rollup_wide__eg4_18kpv"
         rollup_prefix: str | None = None
@@ -1475,7 +1475,7 @@ class timescaledb(transport_base):
         """
         Ensure each metric name as defined in the variable_mask/variable_screen filters has a corresponding column in device_metrics_wide__*,
         and an entry in the metric_catalog table-- which describes the wide table field definitions.
-        Due to the memory limits of postgres, no more than 200 metrics as determined in the calling method.
+        Due to the memory limits of postgres, no more than 160 metrics as determined in the calling method.
         Using metric_name to map, return clean_column_name in the metric_catalog to create the SQL column in device_metrics_wide__*.
 
         For metrics that already have a column, also reconciles metric_catalog's
@@ -1486,7 +1486,7 @@ class timescaledb(transport_base):
         catalog type let a TEXT column through the "safe for stats_agg()"
         rollup filter and crashed rollup view creation).
 
-        There could potentially be thousands of metrics, which cannot all be ingested as columns. If over 200 metrics we only save metrics to the
+        There could potentially be thousands of metrics, which cannot all be ingested as columns. If over 160 metrics we only save metrics to the
         device_metrics_narrow table, so this method is not needed and is bypassed at the calling method connection stage.
         """
 
@@ -1914,8 +1914,8 @@ class timescaledb(transport_base):
         #  and anchors the table name before metric_catalog FKs are written
         self._upsert_protocol_registry(protocol, wide_table_name, metric_count)
 
-        if metric_count >= 200:
-            self._log.warning(f"Protocol '{protocol}' has {metric_count} metrics — exceeds 200 column limit, using narrow table only.")
+        if metric_count >= 160:
+            self._log.warning(f"Protocol '{protocol}' has {metric_count} metrics — exceeds 160 column limit, using narrow table only.")
             self._protocol_wide_table_map[protocol] = None
             return
 
@@ -3082,7 +3082,7 @@ class RollupManager:
         Backlog Safety: The _refresh_rollup_loop wraps replay_to_queue() in the _backlog_lock and waits for completion via .join().
         Attribute Persistence: All granular intervals (e.g., hourly_compress_after_interval) are mapped from the rollup_policy in __init__.
         Live State: tsdb_connected and current_metric_count are implemented as @property to track the timescaledb class state in real-time.
-        SQL Execution: The SET LOCAL work_mem uses the single-quote fix to prevent f-string placeholder errors.
+        SQL Execution: The SET work_mem uses the single-quote fix to prevent f-string placeholder errors.
     """
 
     # This dataclass is used to describe the SQL expressions needed to create rollup continuous aggregates for a given metric.
@@ -3138,7 +3138,7 @@ class RollupManager:
         self.performance_tiers: dict[str, dict[str, Any]] = {
         "tier_low":    {"count": 50,  "work_mem": "32MB",  "lock_timeout": "10s", "flush_batch_size": 10},
         "tier_medium": {"count": 100, "work_mem": "64MB",  "lock_timeout": "15s", "flush_batch_size": 20},
-        "tier_high":   {"count": 200, "work_mem": "128MB", "lock_timeout": "30s", "flush_batch_size": 40},
+        "tier_high":   {"count": 160, "work_mem": "128MB", "lock_timeout": "30s", "flush_batch_size": 40},
         }
 
         # Tracks metric_count per protocol, keyed by protocol_name.
@@ -3217,7 +3217,7 @@ class RollupManager:
             # device_metrics_narrow and each device_metrics_wide__* table
             # do NOT have comparable row density for the same time span:
             # every write cycle adds ONE row per device to a wide table,
-            # but up to ~200 rows (one per metric) to the shared narrow
+            # but up to ~160 rows (one per metric) to the shared narrow
             # table — and narrow accumulates that multiplied volume from
             # EVERY protocol's wide table at once, not just one. The same
             # chunk_time_interval applied to both was therefore never
@@ -4026,7 +4026,7 @@ class RollupManager:
             return
 
         # Set local lock timeout to fail fast if blocked by flush thread.  Set dynamically from settings.
-        session.execute(text(f"SET LOCAL lock_timeout = '{r_settings['lock_timeout']}';"))
+        self._set_lock_timeout(session, r_settings['lock_timeout'])
 
         # Determine Aggregation Mode
         # If source is another view, we MUST use rollup(). If it's a hypertable, use stats_agg().
@@ -4170,7 +4170,7 @@ class RollupManager:
         drop_after: str = getattr(self, "drop_after", "1 year")  # Default retention if not specified
 
         try:
-            session.execute(text("SET LOCAL lock_timeout = '10s';"))
+            self._set_lock_timeout(session, "10s")
 
             # 2. View's own chunk sizing — see docstring above for why this
             # is applied unconditionally here rather than only at creation.
@@ -4559,7 +4559,7 @@ class RollupManager:
             self._log.info(f"Purging rollup: {full_name}")
 
             try:
-                session.execute(text(f"SET LOCAL lock_timeout = '{r_settings['lock_timeout']}';"))
+                self._set_lock_timeout(session, r_settings['lock_timeout'])
 
                 # Disable compression first when present.
                 try:
@@ -4570,7 +4570,7 @@ class RollupManager:
                     self._log.info(f"View was already uncompressed: {full_name}")
 
                     # Re-enter a clean transaction for the remaining cleanup
-                    session.execute(text(f"SET LOCAL lock_timeout = '{r_settings['lock_timeout']}';"))
+                    self._set_lock_timeout(session, r_settings['lock_timeout'])
 
                 session.execute(text(f"SELECT remove_continuous_aggregate_policy('{full_name}', if_exists => true);"))
                 session.execute(text(f"SELECT remove_retention_policy('{full_name}', if_exists => true);"))
@@ -5150,7 +5150,7 @@ class RollupManager:
         docstring for the history. Narrow and wide additionally get their
         own values for BOTH settings, not shared ones — a wide table's row
         density (one row per device per write cycle) is far lower than
-        narrow's (up to ~200 rows per write cycle, aggregated across every
+        narrow's (up to ~160 rows per write cycle, aggregated across every
         protocol's wide table into the one shared narrow table), so
         neither the same chunk_time_interval nor the same compress_after
         (which TimescaleDB's own guidance ties to a table's own chunk_
@@ -5386,6 +5386,29 @@ class RollupManager:
     # -------------------------
     #  Determine wide vs narrow table usage for resource settings
     # -------------------------
+    def _set_lock_timeout(self, session: Session, timeout: str) -> None:
+        """
+        Sets a transaction-scoped lock_timeout via SET LOCAL.
+
+        SET LOCAL only takes effect (and only avoids Postgres's "SET LOCAL
+        can only be used in transaction blocks" warning) when an explicit
+        transaction is already open on the connection. Session normally
+        autobegins one lazily on first use, but several callers here issue
+        SET LOCAL right after a mid-function session.commit()/rollback()
+        (e.g. drop_protocol_rollup's compression-disable retry, or the
+        per-view commit loop in _drop_all_continuous_aggregates) -- exactly
+        the gap where that lazy autobegin can lose the race and leave the
+        statement running outside any transaction block.
+
+        session.begin() is a no-op if a transaction is already open (guarded
+        by in_transaction() so it never raises "already begun"), and
+        guarantees one is in place -- with BEGIN actually sent -- before
+        SET LOCAL runs.
+        """
+        if not session.in_transaction():
+            session.begin()
+        session.execute(text(f"SET LOCAL lock_timeout = '{timeout}';"))
+
     def _get_dynamic_settings_helper(self) -> dict[str, Any]:
         """
         Returns performance tier settings based on the actual workload drivers
@@ -5456,7 +5479,7 @@ class RollupManager:
     # column count -- but its BYTE width per row scales with metric_count,
     # so metric_count x writes/day approximates its data-volume rate too.
     #
-    # Boundaries were translated from a 50/100/200/350-metric tiering
+    # Boundaries were translated from a 50/100/160/350-metric tiering
     # example at a 15-second scrape interval (50 x 5760 = 288,000, etc.)
     # into this interval-independent unit, so the same bands apply
     # correctly regardless of a deployment's actual scrape interval(s).
@@ -6111,7 +6134,7 @@ class RollupManager:
                 self._log.info(f"Purging rollup: {full_name}")
 
                 # 3b. Fail-fast if locked by background flush or refresh jobs
-                session.execute(text(f"SET LOCAL lock_timeout = '{r_settings['lock_timeout']}';"))
+                self._set_lock_timeout(session, r_settings['lock_timeout'])
 
                 # 4. Disable Compression (Mandatory for a clean drop of compressed CAGGs)
                 try:
@@ -6200,7 +6223,7 @@ class RollupManager:
 
         # AUTOCOMMIT is mandatory for CALL refresh_continuous_aggregate
         with self.engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
-            conn.execute(text(f"SET LOCAL work_mem = '{r_settings['work_mem']}';"))
+            conn.execute(text(f"SET work_mem = '{r_settings['work_mem']}';"))
             try:
                 if force_full:
                     # Refresh from the beginning of time to now
@@ -6626,7 +6649,7 @@ class WideTableFieldManager:
         Looks up the protocol_id and wide_table_name for protocol_name.
 
         Raises:
-            ValueError: protocol is unknown, or is narrow-only (>200
+            ValueError: protocol is unknown, or is narrow-only (>160
                         metrics) and therefore has no wide table to edit.
         """
         with self.SessionFactory() as session:
@@ -6645,7 +6668,7 @@ class WideTableFieldManager:
 
         protocol_id, wide_table_name = row
         if wide_table_name is None:
-            msg: str = f"Protocol '{protocol_name}' is narrow-only (>200 metrics) and has no wide table to edit."
+            msg: str = f"Protocol '{protocol_name}' is narrow-only (>160 metrics) and has no wide table to edit."
             raise ValueError(msg)
 
         return protocol_id, wide_table_name
