@@ -287,13 +287,15 @@
   },
   "timescaledb": {
     "auto_refresh_interval": "21600",
-    "backlog_file_name": "no_connect_backlog",
+    "backlog_file_name": "no_connect_timescale_backlog",
     "backlog_storage_path": "backlogs",
     "database": "solar1",
     "device_location": "",
+    "device_name": "TimescaleDB MPG Bridge",    
     "drop_after": "1 year",
     "enable_auto_refresh": "true",
     "enable_compression": "true",
+    "enable_dynamic_chunk_sizing": "true",
     "enable_persistent_storage": "true",
     "enable_rollups": "true",
     "force_float": "true",
@@ -313,8 +315,6 @@
     "use_exponential_backoff": "true",
     "use_utc_timestamp": "False",
     "username": "",
-    "write_requires_complete_cycle": "true",
-    "device_name": "TimescaleDB MPG Bridge",
-    "enable_dynamic_chunk_sizing": "True"
+    "write_requires_complete_cycle": "true"
   }
 }

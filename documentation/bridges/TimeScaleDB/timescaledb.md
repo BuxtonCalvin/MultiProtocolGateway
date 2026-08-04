@@ -429,7 +429,7 @@ force_float = true
 # persistent backlog settings
 enable_persistent_storage = true
 backlog_storage_path = backlogs
-backlog_file_name = no_connect_backlog
+backlog_file_name = no_connect_timescale_backlog
 
 # max data points to store in backlog
 max_backlog_size = 10000
@@ -450,6 +450,7 @@ max_reconnect_delay = 300
 # changing rollup settings after data has been written, will result in automatic view deletions and rebuilds
 migrate_data = True
 enable_compression = True
+enable_dynamic_chunk_sizing = True
 enable_rollups = True
 # Seconds between rollup refreshes (6 hours)
 auto_refresh_interval = 21600

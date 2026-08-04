@@ -23,11 +23,7 @@ dist/*
 build/*
 multi_protocol_gateway.egg-info/*
 
-#ignore inflxudb files
-inflxudb_backlog/*
-inflxudb3_backlog/*
-
-timescaledb_backlog/*
+backlogs/*
 
 #ignore dumps for dev
 tools/dumps/*
