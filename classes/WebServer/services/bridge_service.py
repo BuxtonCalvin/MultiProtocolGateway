@@ -47,6 +47,13 @@ next to its code rather than living only in a merge commit message.
                     historical data). Also name-scoped, for the same
                     reason as InfluxDB.
 
+    PROMETHEUS    — Bridge Health (in-memory registry summary) / Target
+                    Health (per-machine scrape_failures_total / last-scrape
+                    table) device-page info panels for the pull-model
+                    prometheus_out bridge. Name-scoped, same reasoning as
+                    InfluxDB/MQTT — a gateway could run more than one
+                    Prometheus bridge on different ports/paths.
+
 Renamed on merge: the TimescaleDB section's health-panel function was
 previously named get_bridge_health() (a reasonable name when it was the
 only bridge type with one); it's now get_timescale_health() so it reads
@@ -882,3 +889,105 @@ def get_mqtt_health(gateway: Any, device_section: str) -> dict[str, Any]:
         msg: str = f"No MQTT bridge named '{device_section}' is attached to this gateway."
         raise RuntimeError(msg)
     return bridge.get_health_snapshot()
+
+
+# ============================================================================
+# PROMETHEUS
+# ============================================================================
+
+def get_prometheus_bridge(gateway: Any, device_section: str) -> Any | None:
+    """
+    Finds the live prometheus_out bridge transport whose transport_name
+    matches device_section (e.g. "transport.prometheus_out"), if any.
+
+    Returns None if there's no gateway yet (startup race), or no such
+    transport is configured under that name. Duck-typed on the class name
+    (rather than isinstance) so this module never needs a hard import of
+    the prometheus_out transport class, mirroring get_influxdb_bridge() /
+    get_mqtt_bridge()'s access pattern.
+    """
+    if gateway is None:
+        return None
+    transports: list[Any] = getattr(gateway, "_Protocol_Gateway__transports", [])
+    for t in transports:
+        if type(t).__name__ == "prometheus_out" and getattr(t, "transport_name", None) == device_section:
+            return t
+    return None
+
+
+def is_prometheus_bridge(gateway: Any, device_section: str) -> bool:
+    """True when a Prometheus bridge with this name is attached to the gateway."""
+    return get_prometheus_bridge(gateway, device_section) is not None
+
+
+def _format_duration(seconds: float | None) -> str:
+    """
+    Human-readable plain duration for the bridge summary's "Uptime" field,
+    e.g. 3725.0 -> '1h 2m'. Deliberately distinct from _format_elapsed
+    above (which appends "ago" and is meant for "time since an event") --
+    an uptime figure reads oddly as "1h 2m ago". None/0/negative -> '—'.
+    """
+    if not seconds or seconds < 0:
+        return "—"
+    total_seconds: int = int(seconds)
+    days, remainder = divmod(total_seconds, 86400)
+    hours, remainder = divmod(remainder, 3600)
+    minutes, _ = divmod(remainder, 60)
+    if days:
+        return f"{days}d {hours}h"
+    if hours:
+        return f"{hours}h {minutes}m"
+    if minutes:
+        return f"{minutes}m"
+    return f"{total_seconds}s"
+
+
+def get_prometheus_health(gateway: Any, device_section: str) -> dict[str, Any]:
+    """
+    Read-only in-memory-registry summary for the "Bridge Health" panel —
+    metrics registered, standalone-server state, and machine counts by
+    connectivity bucket. See prometheus_out.get_bridge_summary for the raw
+    field list; this adds a human-readable `uptime_display`.
+
+    Raises RuntimeError if no Prometheus bridge with this name is attached
+    to the gateway.
+    """
+    bridge: Any | None = get_prometheus_bridge(gateway, device_section)
+    if bridge is None:
+        msg: str = f"No Prometheus bridge named '{device_section}' is attached to this gateway."
+        raise RuntimeError(msg)
+    summary: dict[str, Any] = bridge.get_bridge_summary()
+    summary["uptime_display"] = _format_duration(summary.get("uptime_seconds"))
+    return summary
+
+
+def get_prometheus_targets(gateway: Any, device_section: str) -> list[dict[str, Any]]:
+    """
+    Read-only per-machine scrape-target snapshot for the "Target Health"
+    panel — one row per machine this bridge has ever been wired to or
+    received data from. See prometheus_out.get_target_health for the raw
+    field list; this adds `seconds_since_last_scrape` and a human-readable
+    `last_scrape_display` (reusing _format_elapsed from the INFLUXDB
+    section above — "time since an event" is exactly what it's for, and
+    duplicating it here would just be the same function twice).
+
+    Raises RuntimeError if no Prometheus bridge with this name is attached
+    to the gateway.
+    """
+    bridge: Any | None = get_prometheus_bridge(gateway, device_section)
+    if bridge is None:
+        msg: str = f"No Prometheus bridge named '{device_section}' is attached to this gateway."
+        raise RuntimeError(msg)
+
+    rows: list[dict[str, Any]] = bridge.get_target_health()
+    now: float = time.time()
+    for row in rows:
+        last_ts: float | None = row.get("last_scrape_timestamp")
+        if last_ts:
+            elapsed: float = now - last_ts
+            row["seconds_since_last_scrape"] = elapsed
+            row["last_scrape_display"] = _format_elapsed(elapsed)
+        else:
+            row["seconds_since_last_scrape"] = None
+            row["last_scrape_display"] = "never"
+    return rows

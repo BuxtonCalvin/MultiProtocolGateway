@@ -287,6 +287,22 @@
         <div class="card"><p class="surface-muted text-xs">Loading bridge health…</p></div>
       </div>
     </div>
+    {% elif device.transport_class == "prometheus_out" %}
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div id="bridge-health-container"
+           hx-get="/pages/prometheus/{{ device.name }}/health"
+           hx-trigger="load"
+           hx-swap="innerHTML">
+        <div class="card"><p class="surface-muted text-xs">Loading bridge health…</p></div>
+      </div>
+
+      <div id="bridge-targets-container"
+           hx-get="/pages/prometheus/{{ device.name }}/targets"
+           hx-trigger="load"
+           hx-swap="innerHTML">
+        <div class="card"><p class="surface-muted text-xs">Loading target health…</p></div>
+      </div>
+    </div>
     {% else %}
     <div class="card">
       <p class="surface-muted text-xs">

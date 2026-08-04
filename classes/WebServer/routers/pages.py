@@ -68,6 +68,8 @@ from ..services.bridge_service import (
     get_influxdb_health,
     get_influxdb_storage,
     get_mqtt_health,
+    get_prometheus_health,
+    get_prometheus_targets,
     get_staged_columns,
     get_storage_overview,
     get_timescale_health,
@@ -753,6 +755,62 @@ async def mqtt_health_partial(device_name: str, request: Request):
         request=request,
         name="partials/mqtt_health_panel.html",
         context={"health": health},
+    )
+
+
+@router.get("/pages/prometheus/{device_name}/health", response_class=HTMLResponse, response_model=None)
+async def prometheus_health_partial(device_name: str, request: Request):
+    """
+    Bridge Health panel for a Prometheus device page — in-memory metrics
+    registry summary (metrics registered, standalone-server state, machine
+    counts by connectivity bucket) plus uptime. Read-only; lazy-loaded like
+    the other bridge panels.
+
+    Scoped by device_name rather than assuming "the" Prometheus bridge,
+    since a gateway can have more than one configured (e.g. separate
+    /metrics endpoints on different ports) — see services/bridge_service
+    .get_prometheus_bridge.
+    """
+    gateway = getattr(request.app.state, "gateway", None)
+    device_section: str = f"transport.{device_name}"
+
+    try:
+        health: dict[str, Any] = get_prometheus_health(gateway, device_section)
+    except RuntimeError:
+        raise HTTPException(status_code=404, detail=f"No Prometheus bridge named '{device_name}' is attached to this gateway.")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return request.app.state.templates.TemplateResponse(
+        request=request,
+        name="partials/bridge_prometheus_health_panel.html",
+        context={"health": health},
+    )
+
+
+@router.get("/pages/prometheus/{device_name}/targets", response_class=HTMLResponse, response_model=None)
+async def prometheus_targets_partial(device_name: str, request: Request):
+    """
+    Target Health panel for a Prometheus device page — one row per
+    upstream machine this bridge has ever been wired to or received data
+    from: connectivity status, configured scrape interval, accumulated
+    scrape_failures_total, and time since last_scrape_timestamp_seconds.
+    Read-only.
+    """
+    gateway = getattr(request.app.state, "gateway", None)
+    device_section: str = f"transport.{device_name}"
+
+    try:
+        targets: list[dict[str, Any]] = get_prometheus_targets(gateway, device_section)
+    except RuntimeError:
+        raise HTTPException(status_code=404, detail=f"No Prometheus bridge named '{device_name}' is attached to this gateway.")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return request.app.state.templates.TemplateResponse(
+        request=request,
+        name="partials/bridge_prometheus_targets_panel.html",
+        context={"targets": targets},
     )
 
 
