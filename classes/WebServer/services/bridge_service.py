@@ -19,6 +19,14 @@
 services/bridge_service.py — Consolidated runtime helpers for every bridge-
 type transport's admin screens and device-page info panels.
 
+Merged from three previously separate modules (timescale_service.py,
+influxdb_service.py, mqtt_service.py) into one file, organized into three
+clearly-delineated sections below (search for the "====" banners): each
+section keeps that transport's original module-level docstring inline, so
+the reasoning behind that transport's specific design choices (singleton
+vs. name-scoped bridge lookup, what is/isn't queryable, etc.) stays right
+next to its code rather than living only in a merge commit message.
+
     TIMESCALEDB   — Delete Columns / Rebuild Rollup Views admin screens,
                     plus Bridge Health / Storage Overview / Compression &
                     Retention / Background Jobs device-page info panels.
@@ -131,7 +139,7 @@ try:
     )
     Timescale_Available = True
 except ImportError:
-    _log.debug("bridge_service: transports.timescaledb is not importable — the TimescaleDB admin UI will stay hidden.")
+    _log.debug("timescale_service: transports.timescaledb is not importable — the TimescaleDB admin UI will stay hidden.")
     _WideTableFieldManagerImpl = None
     Timescale_Available = False
 
@@ -483,8 +491,15 @@ def get_storage_overview(gateway: Any) -> list[dict[str, Any]]:
 def get_compression_retention_summary(gateway: Any) -> dict[str, Any]:
     """
     Read-only compression/retention configuration summary for the
-    "Compression & Retention Status" panel. See RollupManager.get_
-    compression_retention_summary for the field list.
+    "Compression & Retention Status" panel, with `dynamic_raw_tables` and
+    `dynamic_views` lists merged in — see RollupManager.get_compression_
+    retention_summary for the static-config field list, RollupManager.
+    get_dynamic_raw_table_overview for the per-raw-table dynamic sizing
+    rows (narrow plus every wide table, each with its own live-computed
+    band), and RollupManager.get_dynamic_view_overview for the per-VIEW
+    rows (narrow's four rollup views plus every wide table's own four,
+    one row per (table, granularity) pair since a view's load is
+    granularity-specific — see that method's docstring).
 
     Raises RuntimeError if no bridge is attached, or the bridge hasn't
     finished connecting to TimescaleDB yet (this is config sourced from
@@ -496,7 +511,22 @@ def get_compression_retention_summary(gateway: Any) -> dict[str, Any]:
         raise RuntimeError("No TimescaleDB bridge is attached to this gateway.")
     if bridge.rollup_mgr is None:
         raise RuntimeError("Rollup manager is not initialized yet — the bridge is not connected to TimescaleDB.")
-    return bridge.rollup_mgr.get_compression_retention_summary()
+    summary: dict[str, Any] = bridge.rollup_mgr.get_compression_retention_summary()
+    summary["dynamic_raw_tables"] = bridge.rollup_mgr.get_dynamic_raw_table_overview()
+
+    # Grouped by protocol for display (4 granularity rows per table) --
+    # itertools.groupby only merges already-consecutive equal keys, not a
+    # re-sort, which matters here the same way it does in list_rollup_
+    # view_groups: it preserves get_dynamic_view_overview()'s narrow-first
+    # ordering instead of alphabetizing "shared_narrow" in among protocol
+    # names.
+    flat_views: list[dict[str, Any]] = bridge.rollup_mgr.get_dynamic_view_overview()
+    view_groups: list[dict[str, Any]] = []
+    for protocol_name, rows_iter in itertools.groupby(flat_views, key=lambda r: r["protocol_name"]):
+        view_groups.append({"protocol_name": protocol_name, "views": list(rows_iter)})
+    summary["dynamic_view_groups"] = view_groups
+
+    return summary
 
 
 def get_background_jobs(gateway: Any) -> list[dict[str, Any]]:
@@ -688,7 +718,7 @@ def get_influxdb_bridge(gateway: Any, device_section: str) -> Any | None:
     Returns None if there's no gateway yet (startup race), or no such
     transport is configured under that name. Duck-typed on the class name
     (rather than isinstance) so this module never needs a hard import of
-    either transport class, mirroring bridge_service.get_timescale_
+    either transport class, mirroring timescale_service.get_timescale_
     bridge()'s access pattern.
     """
     if gateway is None:
@@ -822,8 +852,8 @@ def get_mqtt_bridge(gateway: Any, device_section: str) -> Any | None:
     Returns None if there's no gateway yet (startup race), or no such
     transport is configured under that name. Duck-typed on the class name
     (rather than isinstance) so this module never needs a hard import of
-    the mqtt transport class, mirroring bridge_service.get_timescale_
-    bridge() / bridge_service.get_influxdb_bridge()'s access pattern.
+    the mqtt transport class, mirroring timescale_service.get_timescale_
+    bridge() / influxdb_service.get_influxdb_bridge()'s access pattern.
     """
     if gateway is None:
         return None

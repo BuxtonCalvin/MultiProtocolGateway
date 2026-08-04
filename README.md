@@ -433,8 +433,13 @@ Data produced by any of the MPG bridges can be visualized in Grafana.  This exam
 
 ![Grafana Dashboard](documentation/assets/GrafanaSolar.png)
 
-The code for this dashboard can be found here:
-[Grafana JSON](documentation/dashboards/GrafanaInfluxDBDashboard.json)
+The code for this InfluxDB dashboard can be found here:
+[Grafana InfluxDB JSON](documentation/dashboards/GrafanaInfluxDBDashboard.json)
+
+The code for the exact same style TimescaleDB dashboards can be found here:
+
+[Grafana TimescaleDB Wide Table JSON](documentation/dashboards/GrafanaTimescaleDBWideDashboard.json)
+[Grafana TimescaleDB Narrow Table JSON](documentation/dashboards/GrafanaTimescaleDBNarrowDashboard.json)
 
 ## Protocol Maps & Register Configuration
 

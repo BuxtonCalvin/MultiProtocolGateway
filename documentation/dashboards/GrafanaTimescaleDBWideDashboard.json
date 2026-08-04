@@ -36,47 +36,20 @@
                   "hidden": false,
                   "query": {
                     "datasource": {
-                      "name": "000000001"
+                      "name": "cf1a987bupo1sc"
                     },
-                    "group": "influxdb",
+                    "group": "grafana-postgresql-datasource",
                     "kind": "DataQuery",
                     "spec": {
-                      "alias": "Ch 1",
-                      "groupBy": [
-                        {
-                          "params": [
-                            "$__interval"
-                          ],
-                          "type": "time"
-                        },
-                        {
-                          "params": [
-                            "null"
-                          ],
-                          "type": "fill"
-                        }
-                      ],
-                      "measurement": "device_data",
-                      "orderByTime": "ASC",
-                      "policy": "default",
-                      "query": "SELECT last(\"afci_arcch1\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time($__interval) fill(null)",
+                      "editorMode": "code",
+                      "format": "time_series",
                       "rawQuery": true,
-                      "resultFormat": "time_series",
-                      "select": [
-                        [
-                          {
-                            "params": [
-                              "afci_arcch1"
-                            ],
-                            "type": "field"
-                          },
-                          {
-                            "params": [],
-                            "type": "last"
-                          }
-                        ]
-                      ],
-                      "tags": []
+                      "rawSql": "SELECT\n  $__timeGroup(m_time, $__interval) AS time,\n  last(afci_arcch1, m_time) AS \"Ch 1\"\nFROM ${table_selection:raw}\nWHERE $__timeFilter(m_time)\n    AND device_info_id = $device_info_id\nGROUP BY 1\nORDER BY 1",
+                      "sql": {
+                        "columns": [],
+                        "groupBy": [],
+                        "limit": 50
+                      }
                     },
                     "version": "v0"
                   },
@@ -89,47 +62,20 @@
                   "hidden": false,
                   "query": {
                     "datasource": {
-                      "name": "000000001"
+                      "name": "cf1a987bupo1sc"
                     },
-                    "group": "influxdb",
+                    "group": "grafana-postgresql-datasource",
                     "kind": "DataQuery",
                     "spec": {
-                      "alias": "Ch 2",
-                      "groupBy": [
-                        {
-                          "params": [
-                            "$__interval"
-                          ],
-                          "type": "time"
-                        },
-                        {
-                          "params": [
-                            "null"
-                          ],
-                          "type": "fill"
-                        }
-                      ],
-                      "measurement": "device_data",
-                      "orderByTime": "ASC",
-                      "policy": "default",
-                      "query": "SELECT last(\"afci_arcch2\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/  GROUP BY time($__interval) fill(null)",
+                      "editorMode": "code",
+                      "format": "time_series",
                       "rawQuery": true,
-                      "resultFormat": "time_series",
-                      "select": [
-                        [
-                          {
-                            "params": [
-                              "afci_arcch2"
-                            ],
-                            "type": "field"
-                          },
-                          {
-                            "params": [],
-                            "type": "last"
-                          }
-                        ]
-                      ],
-                      "tags": []
+                      "rawSql": "SELECT\n  $__timeGroup(m_time, $__interval) AS time,\n  last(afci_arcch2, m_time) AS \"Ch 2\"\nFROM ${table_selection:raw}\nWHERE $__timeFilter(m_time)\n    AND device_info_id = $device_info_id\nGROUP BY 1\nORDER BY 1",
+                      "sql": {
+                        "columns": [],
+                        "groupBy": [],
+                        "limit": 50
+                      }
                     },
                     "version": "v0"
                   },
@@ -142,47 +88,20 @@
                   "hidden": false,
                   "query": {
                     "datasource": {
-                      "name": "000000001"
+                      "name": "cf1a987bupo1sc"
                     },
-                    "group": "influxdb",
+                    "group": "grafana-postgresql-datasource",
                     "kind": "DataQuery",
                     "spec": {
-                      "alias": "Ch 3",
-                      "groupBy": [
-                        {
-                          "params": [
-                            "$__interval"
-                          ],
-                          "type": "time"
-                        },
-                        {
-                          "params": [
-                            "null"
-                          ],
-                          "type": "fill"
-                        }
-                      ],
-                      "measurement": "device_data",
-                      "orderByTime": "ASC",
-                      "policy": "default",
-                      "query": "SELECT last(\"afci_arcch3\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time($__interval) fill(null)",
+                      "editorMode": "code",
+                      "format": "time_series",
                       "rawQuery": true,
-                      "resultFormat": "time_series",
-                      "select": [
-                        [
-                          {
-                            "params": [
-                              "afci_arcch3"
-                            ],
-                            "type": "field"
-                          },
-                          {
-                            "params": [],
-                            "type": "last"
-                          }
-                        ]
-                      ],
-                      "tags": []
+                      "rawSql": "SELECT\n  $__timeGroup(m_time, $__interval) AS time,\n  last(afci_arcch3, m_time) AS \"Ch 3\"\nFROM ${table_selection:raw}\nWHERE $__timeFilter(m_time)\n    AND device_info_id = $device_info_id\nGROUP BY 1\nORDER BY 1",
+                      "sql": {
+                        "columns": [],
+                        "groupBy": [],
+                        "limit": 50
+                      }
                     },
                     "version": "v0"
                   },
@@ -195,47 +114,20 @@
                   "hidden": false,
                   "query": {
                     "datasource": {
-                      "name": "000000001"
+                      "name": "cf1a987bupo1sc"
                     },
-                    "group": "influxdb",
+                    "group": "grafana-postgresql-datasource",
                     "kind": "DataQuery",
                     "spec": {
-                      "alias": "Ch 4",
-                      "groupBy": [
-                        {
-                          "params": [
-                            "$__interval"
-                          ],
-                          "type": "time"
-                        },
-                        {
-                          "params": [
-                            "null"
-                          ],
-                          "type": "fill"
-                        }
-                      ],
-                      "measurement": "device_data",
-                      "orderByTime": "ASC",
-                      "policy": "default",
-                      "query": "SELECT last(\"afci_arcch4\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time($__interval) fill(null)",
+                      "editorMode": "code",
+                      "format": "time_series",
                       "rawQuery": true,
-                      "resultFormat": "time_series",
-                      "select": [
-                        [
-                          {
-                            "params": [
-                              "afci_arcch4"
-                            ],
-                            "type": "field"
-                          },
-                          {
-                            "params": [],
-                            "type": "last"
-                          }
-                        ]
-                      ],
-                      "tags": []
+                      "rawSql": "SELECT\n  $__timeGroup(m_time, $__interval) AS time,\n  last(afci_arcch4, m_time) AS \"Ch 4\"\nFROM ${table_selection:raw}\nWHERE $__timeFilter(m_time)\n    AND device_info_id = $device_info_id\nGROUP BY 1\nORDER BY 1",
+                      "sql": {
+                        "columns": [],
+                        "groupBy": [],
+                        "limit": 50
+                      }
                     },
                     "version": "v0"
                   },
@@ -351,47 +243,20 @@
                   "hidden": false,
                   "query": {
                     "datasource": {
-                      "name": "000000001"
+                      "name": "cf1a987bupo1sc"
                     },
-                    "group": "influxdb",
+                    "group": "grafana-postgresql-datasource",
                     "kind": "DataQuery",
                     "spec": {
-                      "alias": "Solar",
-                      "groupBy": [
-                        {
-                          "params": [
-                            "$__interval"
-                          ],
-                          "type": "time"
-                        },
-                        {
-                          "params": [
-                            "null"
-                          ],
-                          "type": "fill"
-                        }
-                      ],
-                      "measurement": "device_data",
-                      "orderByTime": "ASC",
-                      "policy": "default",
-                      "query": "SELECT last(\"epv1_day\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time(1d,$TimeOffset) fill(null)",
+                      "editorMode": "code",
+                      "format": "time_series",
                       "rawQuery": true,
-                      "resultFormat": "time_series",
-                      "select": [
-                        [
-                          {
-                            "params": [
-                              "epv1_day"
-                            ],
-                            "type": "field"
-                          },
-                          {
-                            "params": [],
-                            "type": "last"
-                          }
-                        ]
-                      ],
-                      "tags": []
+                      "rawSql": "SELECT\n  time_bucket('1 day', m_time, INTERVAL '$TimeOffset') AS time,\n  last(epv1_day, m_time) AS \"Solar\"\nFROM ${table_selection:raw}\nWHERE $__timeFilter(m_time)\n    AND device_info_id = $device_info_id\nGROUP BY 1\nORDER BY 1",
+                      "sql": {
+                        "columns": [],
+                        "groupBy": [],
+                        "limit": 50
+                      }
                     },
                     "version": "v0"
                   },
@@ -404,47 +269,20 @@
                   "hidden": false,
                   "query": {
                     "datasource": {
-                      "name": "000000001"
+                      "name": "cf1a987bupo1sc"
                     },
-                    "group": "influxdb",
+                    "group": "grafana-postgresql-datasource",
                     "kind": "DataQuery",
                     "spec": {
-                      "alias": "Consumption",
-                      "groupBy": [
-                        {
-                          "params": [
-                            "$__interval"
-                          ],
-                          "type": "time"
-                        },
-                        {
-                          "params": [
-                            "null"
-                          ],
-                          "type": "fill"
-                        }
-                      ],
-                      "measurement": "device_data",
-                      "orderByTime": "ASC",
-                      "policy": "default",
-                      "query": "SELECT last(\"eload_day\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time(1d,$TimeOffset) fill(null)",
+                      "editorMode": "code",
+                      "format": "time_series",
                       "rawQuery": true,
-                      "resultFormat": "time_series",
-                      "select": [
-                        [
-                          {
-                            "params": [
-                              "eload_day"
-                            ],
-                            "type": "field"
-                          },
-                          {
-                            "params": [],
-                            "type": "last"
-                          }
-                        ]
-                      ],
-                      "tags": []
+                      "rawSql": "SELECT\n  time_bucket('1 day', m_time, INTERVAL '$TimeOffset') AS time,\n  last(eload_day, m_time) AS \"Consumption\"\nFROM ${table_selection:raw}\nWHERE $__timeFilter(m_time)\n    AND device_info_id = $device_info_id\nGROUP BY 1\nORDER BY 1",
+                      "sql": {
+                        "columns": [],
+                        "groupBy": [],
+                        "limit": 50
+                      }
                     },
                     "version": "v0"
                   },
@@ -457,47 +295,20 @@
                   "hidden": false,
                   "query": {
                     "datasource": {
-                      "name": "000000001"
+                      "name": "cf1a987bupo1sc"
                     },
-                    "group": "influxdb",
+                    "group": "grafana-postgresql-datasource",
                     "kind": "DataQuery",
                     "spec": {
-                      "alias": "Import From Grid",
-                      "groupBy": [
-                        {
-                          "params": [
-                            "$__interval"
-                          ],
-                          "type": "time"
-                        },
-                        {
-                          "params": [
-                            "null"
-                          ],
-                          "type": "fill"
-                        }
-                      ],
-                      "measurement": "device_data",
-                      "orderByTime": "ASC",
-                      "policy": "default",
-                      "query": "SELECT last(\"etouser_day\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time(1d,$TimeOffset) fill(null)",
+                      "editorMode": "code",
+                      "format": "time_series",
                       "rawQuery": true,
-                      "resultFormat": "time_series",
-                      "select": [
-                        [
-                          {
-                            "params": [
-                              "etouser_day"
-                            ],
-                            "type": "field"
-                          },
-                          {
-                            "params": [],
-                            "type": "last"
-                          }
-                        ]
-                      ],
-                      "tags": []
+                      "rawSql": "SELECT\n  time_bucket('1 day', m_time, INTERVAL '$TimeOffset') AS time,\n  last(etouser_day, m_time) AS \"Import From Grid\"\nFROM ${table_selection:raw}\nWHERE $__timeFilter(m_time)\n    AND device_info_id = $device_info_id\nGROUP BY 1\nORDER BY 1",
+                      "sql": {
+                        "columns": [],
+                        "groupBy": [],
+                        "limit": 50
+                      }
                     },
                     "version": "v0"
                   },
@@ -510,47 +321,20 @@
                   "hidden": false,
                   "query": {
                     "datasource": {
-                      "name": "000000001"
+                      "name": "cf1a987bupo1sc"
                     },
-                    "group": "influxdb",
+                    "group": "grafana-postgresql-datasource",
                     "kind": "DataQuery",
                     "spec": {
-                      "alias": "Export To Grid",
-                      "groupBy": [
-                        {
-                          "params": [
-                            "$__interval"
-                          ],
-                          "type": "time"
-                        },
-                        {
-                          "params": [
-                            "null"
-                          ],
-                          "type": "fill"
-                        }
-                      ],
-                      "measurement": "device_data",
-                      "orderByTime": "ASC",
-                      "policy": "default",
-                      "query": "SELECT last(\"etogrid_day\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time(1d,$TimeOffset) fill(null)",
+                      "editorMode": "code",
+                      "format": "time_series",
                       "rawQuery": true,
-                      "resultFormat": "time_series",
-                      "select": [
-                        [
-                          {
-                            "params": [
-                              "etogrid_day"
-                            ],
-                            "type": "field"
-                          },
-                          {
-                            "params": [],
-                            "type": "last"
-                          }
-                        ]
-                      ],
-                      "tags": []
+                      "rawSql": "SELECT\n  time_bucket('1 day', m_time, INTERVAL '$TimeOffset') AS time,\n  last(etogrid_day, m_time) AS \"Export To Grid\"\nFROM ${table_selection:raw}\nWHERE $__timeFilter(m_time)\n    AND device_info_id = $device_info_id\nGROUP BY 1\nORDER BY 1",
+                      "sql": {
+                        "columns": [],
+                        "groupBy": [],
+                        "limit": 50
+                      }
                     },
                     "version": "v0"
                   },
@@ -563,47 +347,20 @@
                   "hidden": false,
                   "query": {
                     "datasource": {
-                      "name": "000000001"
+                      "name": "cf1a987bupo1sc"
                     },
-                    "group": "influxdb",
+                    "group": "grafana-postgresql-datasource",
                     "kind": "DataQuery",
                     "spec": {
-                      "alias": "Battery Charge",
-                      "groupBy": [
-                        {
-                          "params": [
-                            "$__interval"
-                          ],
-                          "type": "time"
-                        },
-                        {
-                          "params": [
-                            "null"
-                          ],
-                          "type": "fill"
-                        }
-                      ],
-                      "measurement": "device_data",
-                      "orderByTime": "ASC",
-                      "policy": "default",
-                      "query": "SELECT last(\"echg_day\") FROM \"device_data\" WHERE $timeFilter AND \"device_name\" =~ /^$device_name$/  GROUP BY time(1d,$TimeOffset) fill(null)",
+                      "editorMode": "code",
+                      "format": "time_series",
                       "rawQuery": true,
-                      "resultFormat": "time_series",
-                      "select": [
-                        [
-                          {
-                            "params": [
-                              "echg_day"
-                            ],
-                            "type": "field"
-                          },
-                          {
-                            "params": [],
-                            "type": "last"
-                          }
-                        ]
-                      ],
-                      "tags": []
+                      "rawSql": "SELECT\n  time_bucket('1 day', m_time, INTERVAL '$TimeOffset') AS time,\n  last(echg_day, m_time) AS \"Battery Charge\"\nFROM ${table_selection:raw}\nWHERE $__timeFilter(m_time)\n    AND device_info_id = $device_info_id\nGROUP BY 1\nORDER BY 1",
+                      "sql": {
+                        "columns": [],
+                        "groupBy": [],
+                        "limit": 50
+                      }
                     },
                     "version": "v0"
                   },
@@ -616,47 +373,20 @@
                   "hidden": false,
                   "query": {
                     "datasource": {
-                      "name": "000000001"
+                      "name": "cf1a987bupo1sc"
                     },
-                    "group": "influxdb",
+                    "group": "grafana-postgresql-datasource",
                     "kind": "DataQuery",
                     "spec": {
-                      "alias": "Battery Discharge",
-                      "groupBy": [
-                        {
-                          "params": [
-                            "$__interval"
-                          ],
-                          "type": "time"
-                        },
-                        {
-                          "params": [
-                            "null"
-                          ],
-                          "type": "fill"
-                        }
-                      ],
-                      "measurement": "device_data",
-                      "orderByTime": "ASC",
-                      "policy": "default",
-                      "query": "SELECT last(\"edischg_day\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/  GROUP BY time(1d,$TimeOffset) fill(null)",
+                      "editorMode": "code",
+                      "format": "time_series",
                       "rawQuery": true,
-                      "resultFormat": "time_series",
-                      "select": [
-                        [
-                          {
-                            "params": [
-                              "edischg_day"
-                            ],
-                            "type": "field"
-                          },
-                          {
-                            "params": [],
-                            "type": "last"
-                          }
-                        ]
-                      ],
-                      "tags": []
+                      "rawSql": "SELECT\n  time_bucket('1 day', m_time, INTERVAL '$TimeOffset') AS time,\n  last(edischg_day, m_time) AS \"Battery Discharge\"\nFROM ${table_selection:raw}\nWHERE $__timeFilter(m_time)\n    AND device_info_id = $device_info_id\nGROUP BY 1\nORDER BY 1",
+                      "sql": {
+                        "columns": [],
+                        "groupBy": [],
+                        "limit": 50
+                      }
                     },
                     "version": "v0"
                   },
@@ -669,47 +399,20 @@
                   "hidden": false,
                   "query": {
                     "datasource": {
-                      "name": "000000001"
+                      "name": "cf1a987bupo1sc"
                     },
-                    "group": "influxdb",
+                    "group": "grafana-postgresql-datasource",
                     "kind": "DataQuery",
                     "spec": {
-                      "alias": " Inverter Output",
-                      "groupBy": [
-                        {
-                          "params": [
-                            "$__interval"
-                          ],
-                          "type": "time"
-                        },
-                        {
-                          "params": [
-                            "null"
-                          ],
-                          "type": "fill"
-                        }
-                      ],
-                      "measurement": "device_data",
-                      "orderByTime": "ASC",
-                      "policy": "default",
-                      "query": "SELECT last(\"einv_day\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time(1d,$TimeOffset) fill(null)",
+                      "editorMode": "code",
+                      "format": "time_series",
                       "rawQuery": true,
-                      "resultFormat": "time_series",
-                      "select": [
-                        [
-                          {
-                            "params": [
-                              "einv_day"
-                            ],
-                            "type": "field"
-                          },
-                          {
-                            "params": [],
-                            "type": "last"
-                          }
-                        ]
-                      ],
-                      "tags": []
+                      "rawSql": "SELECT\n  time_bucket('1 day', m_time, INTERVAL '$TimeOffset') AS time,\n  last(einv_day, m_time) AS \" Inverter Output\"\nFROM ${table_selection:raw}\nWHERE $__timeFilter(m_time)\n    AND device_info_id = $device_info_id\nGROUP BY 1\nORDER BY 1",
+                      "sql": {
+                        "columns": [],
+                        "groupBy": [],
+                        "limit": 50
+                      }
                     },
                     "version": "v0"
                   },
@@ -948,47 +651,20 @@
                   "hidden": false,
                   "query": {
                     "datasource": {
-                      "name": "000000001"
+                      "name": "cf1a987bupo1sc"
                     },
-                    "group": "influxdb",
+                    "group": "grafana-postgresql-datasource",
                     "kind": "DataQuery",
                     "spec": {
-                      "alias": "Peak Solar Power",
-                      "groupBy": [
-                        {
-                          "params": [
-                            "$__interval"
-                          ],
-                          "type": "time"
-                        },
-                        {
-                          "params": [
-                            "null"
-                          ],
-                          "type": "fill"
-                        }
-                      ],
-                      "measurement": "device_data",
-                      "orderByTime": "ASC",
-                      "policy": "default",
-                      "query": "SELECT max(\"ppv1\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/  GROUP BY time(1d,$TimeOffset) fill(null)",
+                      "editorMode": "code",
+                      "format": "time_series",
                       "rawQuery": true,
-                      "resultFormat": "time_series",
-                      "select": [
-                        [
-                          {
-                            "params": [
-                              "ppv1"
-                            ],
-                            "type": "field"
-                          },
-                          {
-                            "params": [],
-                            "type": "mean"
-                          }
-                        ]
-                      ],
-                      "tags": []
+                      "rawSql": "SELECT\n  time_bucket('1 day', m_time, INTERVAL '$TimeOffset') AS time,\n  max(ppv1) AS \"Peak Solar Power\"\nFROM ${table_selection:raw}\nWHERE $__timeFilter(m_time)\n    AND device_info_id = $device_info_id\nGROUP BY 1\nORDER BY 1",
+                      "sql": {
+                        "columns": [],
+                        "groupBy": [],
+                        "limit": 50
+                      }
                     },
                     "version": "v0"
                   },
@@ -1059,7 +735,32 @@
                 },
                 "unit": "watt"
               },
-              "overrides": []
+              "overrides": [
+                {
+                  "__systemRef": "hideSeriesFrom",
+                  "matcher": {
+                    "id": "byNames",
+                    "options": {
+                      "mode": "exclude",
+                      "names": [
+                        "Peak Solar Power"
+                      ],
+                      "prefix": "All except:",
+                      "readOnly": true
+                    }
+                  },
+                  "properties": [
+                    {
+                      "id": "custom.hideFrom",
+                      "value": {
+                        "legend": false,
+                        "tooltip": true,
+                        "viz": true
+                      }
+                    }
+                  ]
+                }
+              ]
             },
             "options": {
               "annotations": {
@@ -1098,47 +799,20 @@
                   "hidden": false,
                   "query": {
                     "datasource": {
-                      "name": "000000001"
+                      "name": "cf1a987bupo1sc"
                     },
-                    "group": "influxdb",
+                    "group": "grafana-postgresql-datasource",
                     "kind": "DataQuery",
                     "spec": {
-                      "alias": "SOC %",
-                      "groupBy": [
-                        {
-                          "params": [
-                            "$__interval"
-                          ],
-                          "type": "time"
-                        },
-                        {
-                          "params": [
-                            "null"
-                          ],
-                          "type": "fill"
-                        }
-                      ],
-                      "measurement": "device_data",
-                      "orderByTime": "ASC",
-                      "policy": "default",
-                      "query": "SELECT last(\"soc\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time($__interval) fill(null)",
+                      "editorMode": "code",
+                      "format": "time_series",
                       "rawQuery": true,
-                      "resultFormat": "time_series",
-                      "select": [
-                        [
-                          {
-                            "params": [
-                              "soc"
-                            ],
-                            "type": "field"
-                          },
-                          {
-                            "params": [],
-                            "type": "last"
-                          }
-                        ]
-                      ],
-                      "tags": []
+                      "rawSql": "SELECT\n  $__timeGroup(m_time, $__interval) AS time,\n  last(soc, m_time) AS \"SOC %\"\nFROM ${table_selection:raw}\nWHERE $__timeFilter(m_time)\n    AND device_info_id = $device_info_id\nGROUP BY 1\nORDER BY 1",
+                      "sql": {
+                        "columns": [],
+                        "groupBy": [],
+                        "limit": 50
+                      }
                     },
                     "version": "v0"
                   },
@@ -1151,47 +825,20 @@
                   "hidden": false,
                   "query": {
                     "datasource": {
-                      "name": "000000001"
+                      "name": "cf1a987bupo1sc"
                     },
-                    "group": "influxdb",
+                    "group": "grafana-postgresql-datasource",
                     "kind": "DataQuery",
                     "spec": {
-                      "alias": "Voltage (V)",
-                      "groupBy": [
-                        {
-                          "params": [
-                            "$__interval"
-                          ],
-                          "type": "time"
-                        },
-                        {
-                          "params": [
-                            "null"
-                          ],
-                          "type": "fill"
-                        }
-                      ],
-                      "measurement": "device_data",
-                      "orderByTime": "ASC",
-                      "policy": "default",
-                      "query": "SELECT last(\"vbat\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time($__interval) fill(null)",
+                      "editorMode": "code",
+                      "format": "time_series",
                       "rawQuery": true,
-                      "resultFormat": "time_series",
-                      "select": [
-                        [
-                          {
-                            "params": [
-                              "vbat"
-                            ],
-                            "type": "field"
-                          },
-                          {
-                            "params": [],
-                            "type": "last"
-                          }
-                        ]
-                      ],
-                      "tags": []
+                      "rawSql": "SELECT\n  $__timeGroup(m_time, $__interval) AS time,\n  last(vbat, m_time) AS \"Voltage (V)\"\nFROM ${table_selection:raw}\nWHERE $__timeFilter(m_time)\n    AND device_info_id = $device_info_id\nGROUP BY 1\nORDER BY 1",
+                      "sql": {
+                        "columns": [],
+                        "groupBy": [],
+                        "limit": 50
+                      }
                     },
                     "version": "v0"
                   },
@@ -1204,47 +851,20 @@
                   "hidden": false,
                   "query": {
                     "datasource": {
-                      "name": "000000001"
+                      "name": "cf1a987bupo1sc"
                     },
-                    "group": "influxdb",
+                    "group": "grafana-postgresql-datasource",
                     "kind": "DataQuery",
                     "spec": {
-                      "alias": "Charge (W)",
-                      "groupBy": [
-                        {
-                          "params": [
-                            "$__interval"
-                          ],
-                          "type": "time"
-                        },
-                        {
-                          "params": [
-                            "null"
-                          ],
-                          "type": "fill"
-                        }
-                      ],
-                      "measurement": "device_data",
-                      "orderByTime": "ASC",
-                      "policy": "default",
-                      "query": "SELECT last(\"pcharge\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time($__interval) fill(null)",
+                      "editorMode": "code",
+                      "format": "time_series",
                       "rawQuery": true,
-                      "resultFormat": "time_series",
-                      "select": [
-                        [
-                          {
-                            "params": [
-                              "pcharge"
-                            ],
-                            "type": "field"
-                          },
-                          {
-                            "params": [],
-                            "type": "last"
-                          }
-                        ]
-                      ],
-                      "tags": []
+                      "rawSql": "SELECT\n  $__timeGroup(m_time, $__interval) AS time,\n  last(pcharge, m_time) AS \"Charge (W)\"\nFROM ${table_selection:raw}\nWHERE $__timeFilter(m_time)\n    AND device_info_id = $device_info_id\nGROUP BY 1\nORDER BY 1",
+                      "sql": {
+                        "columns": [],
+                        "groupBy": [],
+                        "limit": 50
+                      }
                     },
                     "version": "v0"
                   },
@@ -1257,47 +877,20 @@
                   "hidden": false,
                   "query": {
                     "datasource": {
-                      "name": "000000001"
+                      "name": "cf1a987bupo1sc"
                     },
-                    "group": "influxdb",
+                    "group": "grafana-postgresql-datasource",
                     "kind": "DataQuery",
                     "spec": {
-                      "alias": "Discharge (W)",
-                      "groupBy": [
-                        {
-                          "params": [
-                            "$__interval"
-                          ],
-                          "type": "time"
-                        },
-                        {
-                          "params": [
-                            "null"
-                          ],
-                          "type": "fill"
-                        }
-                      ],
-                      "measurement": "device_data",
-                      "orderByTime": "ASC",
-                      "policy": "default",
-                      "query": "SELECT last(\"pdischarge\") FROM \"device_data\" WHERE $timeFilter AND \"device_name\" =~ /^$device_name$/  GROUP BY time($__interval) fill(null)",
+                      "editorMode": "code",
+                      "format": "time_series",
                       "rawQuery": true,
-                      "resultFormat": "time_series",
-                      "select": [
-                        [
-                          {
-                            "params": [
-                              "pdischarge"
-                            ],
-                            "type": "field"
-                          },
-                          {
-                            "params": [],
-                            "type": "last"
-                          }
-                        ]
-                      ],
-                      "tags": []
+                      "rawSql": "SELECT\n  $__timeGroup(m_time, $__interval) AS time,\n  last(pdischarge, m_time) AS \"Discharge (W)\"\nFROM ${table_selection:raw}\nWHERE $__timeFilter(m_time)\n    AND device_info_id = $device_info_id\nGROUP BY 1\nORDER BY 1",
+                      "sql": {
+                        "columns": [],
+                        "groupBy": [],
+                        "limit": 50
+                      }
                     },
                     "version": "v0"
                   },
@@ -1391,6 +984,30 @@
                       "value": "volt"
                     }
                   ]
+                },
+                {
+                  "__systemRef": "hideSeriesFrom",
+                  "matcher": {
+                    "id": "byNames",
+                    "options": {
+                      "mode": "exclude",
+                      "names": [
+                        "Discharge (W)"
+                      ],
+                      "prefix": "All except:",
+                      "readOnly": true
+                    }
+                  },
+                  "properties": [
+                    {
+                      "id": "custom.hideFrom",
+                      "value": {
+                        "legend": false,
+                        "tooltip": true,
+                        "viz": true
+                      }
+                    }
+                  ]
                 }
               ]
             },
@@ -1433,47 +1050,20 @@
                   "hidden": false,
                   "query": {
                     "datasource": {
-                      "name": "000000001"
+                      "name": "cf1a987bupo1sc"
                     },
-                    "group": "influxdb",
+                    "group": "grafana-postgresql-datasource",
                     "kind": "DataQuery",
                     "spec": {
-                      "alias": "Line 1 Volts",
-                      "groupBy": [
-                        {
-                          "params": [
-                            "$__interval"
-                          ],
-                          "type": "time"
-                        },
-                        {
-                          "params": [
-                            "null"
-                          ],
-                          "type": "fill"
-                        }
-                      ],
-                      "measurement": "device_data",
-                      "orderByTime": "ASC",
-                      "policy": "default",
-                      "query": "SELECT mean(\"epsvoltl1n\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/  GROUP BY time($__interval) fill(null)",
+                      "editorMode": "code",
+                      "format": "time_series",
                       "rawQuery": true,
-                      "resultFormat": "time_series",
-                      "select": [
-                        [
-                          {
-                            "params": [
-                              "epsvoltl1n"
-                            ],
-                            "type": "field"
-                          },
-                          {
-                            "params": [],
-                            "type": "mean"
-                          }
-                        ]
-                      ],
-                      "tags": []
+                      "rawSql": "SELECT\n  $__timeGroup(m_time, $__interval) AS time,\n  avg(epsvoltl1n) AS \"Line 1 Volts\"\nFROM ${table_selection:raw}\nWHERE $__timeFilter(m_time)\n    AND device_info_id = $device_info_id\nGROUP BY 1\nORDER BY 1",
+                      "sql": {
+                        "columns": [],
+                        "groupBy": [],
+                        "limit": 50
+                      }
                     },
                     "version": "v0"
                   },
@@ -1486,47 +1076,20 @@
                   "hidden": false,
                   "query": {
                     "datasource": {
-                      "name": "000000001"
+                      "name": "cf1a987bupo1sc"
                     },
-                    "group": "influxdb",
+                    "group": "grafana-postgresql-datasource",
                     "kind": "DataQuery",
                     "spec": {
-                      "alias": "Line 2 Volts",
-                      "groupBy": [
-                        {
-                          "params": [
-                            "$__interval"
-                          ],
-                          "type": "time"
-                        },
-                        {
-                          "params": [
-                            "null"
-                          ],
-                          "type": "fill"
-                        }
-                      ],
-                      "measurement": "device_data",
-                      "orderByTime": "ASC",
-                      "policy": "default",
-                      "query": "SELECT mean(\"epsvoltl2n\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/  GROUP BY time($__interval) fill(null)",
+                      "editorMode": "code",
+                      "format": "time_series",
                       "rawQuery": true,
-                      "resultFormat": "time_series",
-                      "select": [
-                        [
-                          {
-                            "params": [
-                              "epsvoltl2n"
-                            ],
-                            "type": "field"
-                          },
-                          {
-                            "params": [],
-                            "type": "mean"
-                          }
-                        ]
-                      ],
-                      "tags": []
+                      "rawSql": "SELECT\n  $__timeGroup(m_time, $__interval) AS time,\n  avg(epsvoltl2n) AS \"Line 2 Volts\"\nFROM ${table_selection:raw}\nWHERE $__timeFilter(m_time)\n    AND device_info_id = $device_info_id\nGROUP BY 1\nORDER BY 1",
+                      "sql": {
+                        "columns": [],
+                        "groupBy": [],
+                        "limit": 50
+                      }
                     },
                     "version": "v0"
                   },
@@ -1539,47 +1102,20 @@
                   "hidden": true,
                   "query": {
                     "datasource": {
-                      "name": "000000001"
+                      "name": "cf1a987bupo1sc"
                     },
-                    "group": "influxdb",
+                    "group": "grafana-postgresql-datasource",
                     "kind": "DataQuery",
                     "spec": {
-                      "alias": "Hertz",
-                      "groupBy": [
-                        {
-                          "params": [
-                            "$__interval"
-                          ],
-                          "type": "time"
-                        },
-                        {
-                          "params": [
-                            "null"
-                          ],
-                          "type": "fill"
-                        }
-                      ],
-                      "measurement": "device_data",
-                      "orderByTime": "ASC",
-                      "policy": "default",
-                      "query": "SELECT mean(\"fac\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time($__interval) fill(null)",
+                      "editorMode": "code",
+                      "format": "time_series",
                       "rawQuery": true,
-                      "resultFormat": "time_series",
-                      "select": [
-                        [
-                          {
-                            "params": [
-                              "fac"
-                            ],
-                            "type": "field"
-                          },
-                          {
-                            "params": [],
-                            "type": "mean"
-                          }
-                        ]
-                      ],
-                      "tags": []
+                      "rawSql": "SELECT\n  $__timeGroup(m_time, $__interval) AS time,\n  avg(fac) AS \"Hertz\"\nFROM ${table_selection:raw}\nWHERE $__timeFilter(m_time)\n    AND device_info_id = $device_info_id\nGROUP BY 1\nORDER BY 1",
+                      "sql": {
+                        "columns": [],
+                        "groupBy": [],
+                        "limit": 50
+                      }
                     },
                     "version": "v0"
                   },
@@ -1703,47 +1239,20 @@
                   "hidden": false,
                   "query": {
                     "datasource": {
-                      "name": "000000001"
+                      "name": "cf1a987bupo1sc"
                     },
-                    "group": "influxdb",
+                    "group": "grafana-postgresql-datasource",
                     "kind": "DataQuery",
                     "spec": {
-                      "alias": "PV 1 Volts",
-                      "groupBy": [
-                        {
-                          "params": [
-                            "$__interval"
-                          ],
-                          "type": "time"
-                        },
-                        {
-                          "params": [
-                            "null"
-                          ],
-                          "type": "fill"
-                        }
-                      ],
-                      "measurement": "device_data",
-                      "orderByTime": "ASC",
-                      "policy": "default",
-                      "query": "SELECT mean(\"vpv1\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time($__interval) fill(null)",
+                      "editorMode": "code",
+                      "format": "time_series",
                       "rawQuery": true,
-                      "resultFormat": "time_series",
-                      "select": [
-                        [
-                          {
-                            "params": [
-                              "vpv1"
-                            ],
-                            "type": "field"
-                          },
-                          {
-                            "params": [],
-                            "type": "mean"
-                          }
-                        ]
-                      ],
-                      "tags": []
+                      "rawSql": "SELECT\n  $__timeGroup(m_time, $__interval) AS time,\n  avg(vpv1) AS \"PV 1 Volts\"\nFROM ${table_selection:raw}\nWHERE $__timeFilter(m_time)\n    AND device_info_id = $device_info_id\nGROUP BY 1\nORDER BY 1",
+                      "sql": {
+                        "columns": [],
+                        "groupBy": [],
+                        "limit": 50
+                      }
                     },
                     "version": "v0"
                   },
@@ -1756,47 +1265,20 @@
                   "hidden": false,
                   "query": {
                     "datasource": {
-                      "name": "000000001"
+                      "name": "cf1a987bupo1sc"
                     },
-                    "group": "influxdb",
+                    "group": "grafana-postgresql-datasource",
                     "kind": "DataQuery",
                     "spec": {
-                      "alias": "PV 1 Watts",
-                      "groupBy": [
-                        {
-                          "params": [
-                            "$__interval"
-                          ],
-                          "type": "time"
-                        },
-                        {
-                          "params": [
-                            "null"
-                          ],
-                          "type": "fill"
-                        }
-                      ],
-                      "measurement": "device_data",
-                      "orderByTime": "ASC",
-                      "policy": "default",
-                      "query": "SELECT mean(\"ppv1\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time($__interval) fill(null)",
+                      "editorMode": "code",
+                      "format": "time_series",
                       "rawQuery": true,
-                      "resultFormat": "time_series",
-                      "select": [
-                        [
-                          {
-                            "params": [
-                              "ppv1"
-                            ],
-                            "type": "field"
-                          },
-                          {
-                            "params": [],
-                            "type": "mean"
-                          }
-                        ]
-                      ],
-                      "tags": []
+                      "rawSql": "SELECT\n  $__timeGroup(m_time, $__interval) AS time,\n  avg(ppv1) AS \"PV 1 Watts\"\nFROM ${table_selection:raw}\nWHERE $__timeFilter(m_time)\n    AND device_info_id = $device_info_id\nGROUP BY 1\nORDER BY 1",
+                      "sql": {
+                        "columns": [],
+                        "groupBy": [],
+                        "limit": 50
+                      }
                     },
                     "version": "v0"
                   },
@@ -1918,47 +1400,20 @@
                   "hidden": false,
                   "query": {
                     "datasource": {
-                      "name": "000000001"
+                      "name": "cf1a987bupo1sc"
                     },
-                    "group": "influxdb",
+                    "group": "grafana-postgresql-datasource",
                     "kind": "DataQuery",
                     "spec": {
-                      "alias": "Total Watts",
-                      "groupBy": [
-                        {
-                          "params": [
-                            "$__interval"
-                          ],
-                          "type": "time"
-                        },
-                        {
-                          "params": [
-                            "null"
-                          ],
-                          "type": "fill"
-                        }
-                      ],
-                      "measurement": "device_data",
-                      "orderByTime": "ASC",
-                      "policy": "default",
-                      "query": "SELECT mean(\"pload\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/  GROUP BY time($__interval) fill(null)",
+                      "editorMode": "code",
+                      "format": "time_series",
                       "rawQuery": true,
-                      "resultFormat": "time_series",
-                      "select": [
-                        [
-                          {
-                            "params": [
-                              "pload"
-                            ],
-                            "type": "field"
-                          },
-                          {
-                            "params": [],
-                            "type": "mean"
-                          }
-                        ]
-                      ],
-                      "tags": []
+                      "rawSql": "SELECT\n  $__timeGroup(m_time, $__interval) AS time,\n  avg(pload) AS \"Total Watts\"\nFROM ${table_selection:raw}\nWHERE $__timeFilter(m_time)\n    AND device_info_id = $device_info_id\nGROUP BY 1\nORDER BY 1",
+                      "sql": {
+                        "columns": [],
+                        "groupBy": [],
+                        "limit": 50
+                      }
                     },
                     "version": "v0"
                   },
@@ -1971,47 +1426,20 @@
                   "hidden": false,
                   "query": {
                     "datasource": {
-                      "name": "000000001"
+                      "name": "cf1a987bupo1sc"
                     },
-                    "group": "influxdb",
+                    "group": "grafana-postgresql-datasource",
                     "kind": "DataQuery",
                     "spec": {
-                      "alias": "Grid To all Loads",
-                      "groupBy": [
-                        {
-                          "params": [
-                            "$__interval"
-                          ],
-                          "type": "time"
-                        },
-                        {
-                          "params": [
-                            "null"
-                          ],
-                          "type": "fill"
-                        }
-                      ],
-                      "measurement": "device_data",
-                      "orderByTime": "ASC",
-                      "policy": "default",
-                      "query": "SELECT mean(\"ptouser\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/  GROUP BY time($__interval) fill(null)",
+                      "editorMode": "code",
+                      "format": "time_series",
                       "rawQuery": true,
-                      "resultFormat": "time_series",
-                      "select": [
-                        [
-                          {
-                            "params": [
-                              "ptouser"
-                            ],
-                            "type": "field"
-                          },
-                          {
-                            "params": [],
-                            "type": "mean"
-                          }
-                        ]
-                      ],
-                      "tags": []
+                      "rawSql": "SELECT\n  $__timeGroup(m_time, $__interval) AS time,\n  avg(ptouser) AS \"Grid To all Loads\"\nFROM ${table_selection:raw}\nWHERE $__timeFilter(m_time)\n    AND device_info_id = $device_info_id\nGROUP BY 1\nORDER BY 1",
+                      "sql": {
+                        "columns": [],
+                        "groupBy": [],
+                        "limit": 50
+                      }
                     },
                     "version": "v0"
                   },
@@ -2024,47 +1452,20 @@
                   "hidden": false,
                   "query": {
                     "datasource": {
-                      "name": "000000001"
+                      "name": "cf1a987bupo1sc"
                     },
-                    "group": "influxdb",
+                    "group": "grafana-postgresql-datasource",
                     "kind": "DataQuery",
                     "spec": {
-                      "alias": "Grid to batteries",
-                      "groupBy": [
-                        {
-                          "params": [
-                            "$__interval"
-                          ],
-                          "type": "time"
-                        },
-                        {
-                          "params": [
-                            "null"
-                          ],
-                          "type": "fill"
-                        }
-                      ],
-                      "measurement": "device_data",
-                      "orderByTime": "ASC",
-                      "policy": "default",
-                      "query": "SELECT mean(\"prec\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/  GROUP BY time($__interval) fill(null)",
+                      "editorMode": "code",
+                      "format": "time_series",
                       "rawQuery": true,
-                      "resultFormat": "time_series",
-                      "select": [
-                        [
-                          {
-                            "params": [
-                              "prec"
-                            ],
-                            "type": "field"
-                          },
-                          {
-                            "params": [],
-                            "type": "mean"
-                          }
-                        ]
-                      ],
-                      "tags": []
+                      "rawSql": "SELECT\n  $__timeGroup(m_time, $__interval) AS time,\n  avg(prec) AS \"Grid to batteries\"\nFROM ${table_selection:raw}\nWHERE $__timeFilter(m_time)\n    AND device_info_id = $device_info_id\nGROUP BY 1\nORDER BY 1",
+                      "sql": {
+                        "columns": [],
+                        "groupBy": [],
+                        "limit": 50
+                      }
                     },
                     "version": "v0"
                   },
@@ -2147,6 +1548,30 @@
                       "value": "watt"
                     }
                   ]
+                },
+                {
+                  "__systemRef": "hideSeriesFrom",
+                  "matcher": {
+                    "id": "byNames",
+                    "options": {
+                      "mode": "exclude",
+                      "names": [
+                        "Total Watts"
+                      ],
+                      "prefix": "All except:",
+                      "readOnly": true
+                    }
+                  },
+                  "properties": [
+                    {
+                      "id": "custom.hideFrom",
+                      "value": {
+                        "legend": false,
+                        "tooltip": true,
+                        "viz": true
+                      }
+                    }
+                  ]
                 }
               ]
             },
@@ -2189,47 +1614,20 @@
                   "hidden": false,
                   "query": {
                     "datasource": {
-                      "name": "000000001"
+                      "name": "cf1a987bupo1sc"
                     },
-                    "group": "influxdb",
+                    "group": "grafana-postgresql-datasource",
                     "kind": "DataQuery",
                     "spec": {
-                      "alias": "Solar To Grid",
-                      "groupBy": [
-                        {
-                          "params": [
-                            "$__interval"
-                          ],
-                          "type": "time"
-                        },
-                        {
-                          "params": [
-                            "null"
-                          ],
-                          "type": "fill"
-                        }
-                      ],
-                      "measurement": "device_data",
-                      "orderByTime": "ASC",
-                      "policy": "default",
-                      "query": "SELECT mean(\"ptogrid\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time($__interval) fill(null)",
+                      "editorMode": "code",
+                      "format": "time_series",
                       "rawQuery": true,
-                      "resultFormat": "time_series",
-                      "select": [
-                        [
-                          {
-                            "params": [
-                              "ptogrid"
-                            ],
-                            "type": "field"
-                          },
-                          {
-                            "params": [],
-                            "type": "mean"
-                          }
-                        ]
-                      ],
-                      "tags": []
+                      "rawSql": "SELECT\n  $__timeGroup(m_time, $__interval) AS time,\n  avg(ptogrid) AS \"Solar To Grid\"\nFROM ${table_selection:raw}\nWHERE $__timeFilter(m_time)\n    AND device_info_id = $device_info_id\nGROUP BY 1\nORDER BY 1",
+                      "sql": {
+                        "columns": [],
+                        "groupBy": [],
+                        "limit": 50
+                      }
                     },
                     "version": "v0"
                   },
@@ -2242,47 +1640,20 @@
                   "hidden": false,
                   "query": {
                     "datasource": {
-                      "name": "000000001"
+                      "name": "cf1a987bupo1sc"
                     },
-                    "group": "influxdb",
+                    "group": "grafana-postgresql-datasource",
                     "kind": "DataQuery",
                     "spec": {
-                      "alias": "Solar/AC To Battery",
-                      "groupBy": [
-                        {
-                          "params": [
-                            "$__interval"
-                          ],
-                          "type": "time"
-                        },
-                        {
-                          "params": [
-                            "null"
-                          ],
-                          "type": "fill"
-                        }
-                      ],
-                      "measurement": "device_data",
-                      "orderByTime": "ASC",
-                      "policy": "default",
-                      "query": "SELECT mean(\"pcharge\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time($__interval) fill(null)",
+                      "editorMode": "code",
+                      "format": "time_series",
                       "rawQuery": true,
-                      "resultFormat": "time_series",
-                      "select": [
-                        [
-                          {
-                            "params": [
-                              "pcharge"
-                            ],
-                            "type": "field"
-                          },
-                          {
-                            "params": [],
-                            "type": "mean"
-                          }
-                        ]
-                      ],
-                      "tags": []
+                      "rawSql": "SELECT\n  $__timeGroup(m_time, $__interval) AS time,\n  avg(pcharge) AS \"Solar/AC To Battery\"\nFROM ${table_selection:raw}\nWHERE $__timeFilter(m_time)\n    AND device_info_id = $device_info_id\nGROUP BY 1\nORDER BY 1",
+                      "sql": {
+                        "columns": [],
+                        "groupBy": [],
+                        "limit": 50
+                      }
                     },
                     "version": "v0"
                   },
@@ -2365,6 +1736,30 @@
                       "value": "watt"
                     }
                   ]
+                },
+                {
+                  "__systemRef": "hideSeriesFrom",
+                  "matcher": {
+                    "id": "byNames",
+                    "options": {
+                      "mode": "exclude",
+                      "names": [
+                        "Solar/AC To Battery"
+                      ],
+                      "prefix": "All except:",
+                      "readOnly": true
+                    }
+                  },
+                  "properties": [
+                    {
+                      "id": "custom.hideFrom",
+                      "value": {
+                        "legend": false,
+                        "tooltip": true,
+                        "viz": true
+                      }
+                    }
+                  ]
                 }
               ]
             },
@@ -2407,47 +1802,20 @@
                   "hidden": false,
                   "query": {
                     "datasource": {
-                      "name": "000000001"
+                      "name": "cf1a987bupo1sc"
                     },
-                    "group": "influxdb",
+                    "group": "grafana-postgresql-datasource",
                     "kind": "DataQuery",
                     "spec": {
-                      "alias": "Temperature of BDC (Low)",
-                      "groupBy": [
-                        {
-                          "params": [
-                            "$__interval"
-                          ],
-                          "type": "time"
-                        },
-                        {
-                          "params": [
-                            "null"
-                          ],
-                          "type": "fill"
-                        }
-                      ],
-                      "measurement": "device_data",
-                      "orderByTime": "ASC",
-                      "policy": "default",
-                      "query": "SELECT ((mean(\"tinner\") *1.8 )+ 32) FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time($__interval) fill(null)",
+                      "editorMode": "code",
+                      "format": "time_series",
                       "rawQuery": true,
-                      "resultFormat": "time_series",
-                      "select": [
-                        [
-                          {
-                            "params": [
-                              "tinner"
-                            ],
-                            "type": "field"
-                          },
-                          {
-                            "params": [],
-                            "type": "mean"
-                          }
-                        ]
-                      ],
-                      "tags": []
+                      "rawSql": "SELECT\n  $__timeGroup(m_time, $__interval) AS time,\n  (avg(tinner) * 1.8 + 32) AS \"Temperature of BDC (Low)\"\nFROM ${table_selection:raw}\nWHERE $__timeFilter(m_time)\n    AND device_info_id = $device_info_id\nGROUP BY 1\nORDER BY 1",
+                      "sql": {
+                        "columns": [],
+                        "groupBy": [],
+                        "limit": 50
+                      }
                     },
                     "version": "v0"
                   },
@@ -2460,47 +1828,20 @@
                   "hidden": false,
                   "query": {
                     "datasource": {
-                      "name": "000000001"
+                      "name": "cf1a987bupo1sc"
                     },
-                    "group": "influxdb",
+                    "group": "grafana-postgresql-datasource",
                     "kind": "DataQuery",
                     "spec": {
-                      "alias": "Temperature of BDC (TF)",
-                      "groupBy": [
-                        {
-                          "params": [
-                            "$__interval"
-                          ],
-                          "type": "time"
-                        },
-                        {
-                          "params": [
-                            "null"
-                          ],
-                          "type": "fill"
-                        }
-                      ],
-                      "measurement": "device_data",
-                      "orderByTime": "ASC",
-                      "policy": "default",
-                      "query": "SELECT ((mean(\"tradiator1\")*1.8 )+ 32) FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time($__interval) fill(null)",
+                      "editorMode": "code",
+                      "format": "time_series",
                       "rawQuery": true,
-                      "resultFormat": "time_series",
-                      "select": [
-                        [
-                          {
-                            "params": [
-                              "tradiator1"
-                            ],
-                            "type": "field"
-                          },
-                          {
-                            "params": [],
-                            "type": "mean"
-                          }
-                        ]
-                      ],
-                      "tags": []
+                      "rawSql": "SELECT\n  $__timeGroup(m_time, $__interval) AS time,\n  (avg(tradiator1) * 1.8 + 32) AS \"Temperature of BDC (TF)\"\nFROM ${table_selection:raw}\nWHERE $__timeFilter(m_time)\n    AND device_info_id = $device_info_id\nGROUP BY 1\nORDER BY 1",
+                      "sql": {
+                        "columns": [],
+                        "groupBy": [],
+                        "limit": 50
+                      }
                     },
                     "version": "v0"
                   },
@@ -2513,47 +1854,20 @@
                   "hidden": false,
                   "query": {
                     "datasource": {
-                      "name": "000000001"
+                      "name": "cf1a987bupo1sc"
                     },
-                    "group": "influxdb",
+                    "group": "grafana-postgresql-datasource",
                     "kind": "DataQuery",
                     "spec": {
-                      "alias": "Temperature of the Inverter",
-                      "groupBy": [
-                        {
-                          "params": [
-                            "$__interval"
-                          ],
-                          "type": "time"
-                        },
-                        {
-                          "params": [
-                            "null"
-                          ],
-                          "type": "fill"
-                        }
-                      ],
-                      "measurement": "device_data",
-                      "orderByTime": "ASC",
-                      "policy": "default",
-                      "query": "SELECT ((mean(\"tradiator2\")*1.8 )+ 32) FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time($__interval) fill(null)",
+                      "editorMode": "code",
+                      "format": "time_series",
                       "rawQuery": true,
-                      "resultFormat": "time_series",
-                      "select": [
-                        [
-                          {
-                            "params": [
-                              "tradiator2"
-                            ],
-                            "type": "field"
-                          },
-                          {
-                            "params": [],
-                            "type": "mean"
-                          }
-                        ]
-                      ],
-                      "tags": []
+                      "rawSql": "SELECT\n  $__timeGroup(m_time, $__interval) AS time,\n  (avg(tradiator2) * 1.8 + 32) AS \"Temperature of the Inverter\"\nFROM ${table_selection:raw}\nWHERE $__timeFilter(m_time)\n    AND device_info_id = $device_info_id\nGROUP BY 1\nORDER BY 1",
+                      "sql": {
+                        "columns": [],
+                        "groupBy": [],
+                        "limit": 50
+                      }
                     },
                     "version": "v0"
                   },
@@ -2566,47 +1880,20 @@
                   "hidden": true,
                   "query": {
                     "datasource": {
-                      "name": "000000001"
+                      "name": "cf1a987bupo1sc"
                     },
-                    "group": "influxdb",
+                    "group": "grafana-postgresql-datasource",
                     "kind": "DataQuery",
                     "spec": {
-                      "alias": "Max Cell",
-                      "groupBy": [
-                        {
-                          "params": [
-                            "$__interval"
-                          ],
-                          "type": "time"
-                        },
-                        {
-                          "params": [
-                            "null"
-                          ],
-                          "type": "fill"
-                        }
-                      ],
-                      "measurement": "device_data",
-                      "orderByTime": "ASC",
-                      "policy": "default",
-                      "query": "SELECT ((mean(\"maxcelltemp_bms\")*1.8 )+ 32) * -1  FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time($__interval) fill(null)",
+                      "editorMode": "code",
+                      "format": "time_series",
                       "rawQuery": true,
-                      "resultFormat": "time_series",
-                      "select": [
-                        [
-                          {
-                            "params": [
-                              "maxcelltemp_bms"
-                            ],
-                            "type": "field"
-                          },
-                          {
-                            "params": [],
-                            "type": "mean"
-                          }
-                        ]
-                      ],
-                      "tags": []
+                      "rawSql": "SELECT\n  $__timeGroup(m_time, $__interval) AS time,\n  ((avg(maxcelltemp_bms) * 1.8 + 32) * -1) AS \"Max Cell\"\nFROM ${table_selection:raw}\nWHERE $__timeFilter(m_time)\n    AND device_info_id = $device_info_id\nGROUP BY 1\nORDER BY 1",
+                      "sql": {
+                        "columns": [],
+                        "groupBy": [],
+                        "limit": 50
+                      }
                     },
                     "version": "v0"
                   },
@@ -2619,47 +1906,20 @@
                   "hidden": true,
                   "query": {
                     "datasource": {
-                      "name": "000000001"
+                      "name": "cf1a987bupo1sc"
                     },
-                    "group": "influxdb",
+                    "group": "grafana-postgresql-datasource",
                     "kind": "DataQuery",
                     "spec": {
-                      "alias": "Min Cell",
-                      "groupBy": [
-                        {
-                          "params": [
-                            "$__interval"
-                          ],
-                          "type": "time"
-                        },
-                        {
-                          "params": [
-                            "null"
-                          ],
-                          "type": "fill"
-                        }
-                      ],
-                      "measurement": "device_data",
-                      "orderByTime": "ASC",
-                      "policy": "default",
-                      "query": "SELECT ((mean(\"mincelltemp_bms\")*1.8 )+ 32) * -1  FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time($__interval) fill(null)",
+                      "editorMode": "code",
+                      "format": "time_series",
                       "rawQuery": true,
-                      "resultFormat": "time_series",
-                      "select": [
-                        [
-                          {
-                            "params": [
-                              "mincelltemp_bms"
-                            ],
-                            "type": "field"
-                          },
-                          {
-                            "params": [],
-                            "type": "mean"
-                          }
-                        ]
-                      ],
-                      "tags": []
+                      "rawSql": "SELECT\n  $__timeGroup(m_time, $__interval) AS time,\n  ((avg(mincelltemp_bms) * 1.8 + 32) * -1) AS \"Min Cell\"\nFROM ${table_selection:raw}\nWHERE $__timeFilter(m_time)\n    AND device_info_id = $device_info_id\nGROUP BY 1\nORDER BY 1",
+                      "sql": {
+                        "columns": [],
+                        "groupBy": [],
+                        "limit": 50
+                      }
                     },
                     "version": "v0"
                   },
@@ -2823,47 +2083,20 @@
                   "hidden": false,
                   "query": {
                     "datasource": {
-                      "name": "000000001"
+                      "name": "cf1a987bupo1sc"
                     },
-                    "group": "influxdb",
+                    "group": "grafana-postgresql-datasource",
                     "kind": "DataQuery",
                     "spec": {
-                      "alias": "Consumption",
-                      "groupBy": [
-                        {
-                          "params": [
-                            "$__interval"
-                          ],
-                          "type": "time"
-                        },
-                        {
-                          "params": [
-                            "null"
-                          ],
-                          "type": "fill"
-                        }
-                      ],
-                      "measurement": "device_data",
-                      "orderByTime": "ASC",
-                      "policy": "default",
-                      "query": "SELECT cumulative_sum(last(\"eload_day\")) FROM \"device_data\" WHERE $timeFilter AND \"device_name\" =~ /^$device_name$/ GROUP BY time(1d,$TimeOffset) fill(null)",
+                      "editorMode": "code",
+                      "format": "time_series",
                       "rawQuery": true,
-                      "resultFormat": "time_series",
-                      "select": [
-                        [
-                          {
-                            "params": [
-                              "eload_day"
-                            ],
-                            "type": "field"
-                          },
-                          {
-                            "params": [],
-                            "type": "last"
-                          }
-                        ]
-                      ],
-                      "tags": []
+                      "rawSql": "SELECT\n  m_time as time,\n  sum(val) OVER (ORDER BY m_time) AS \"Consumption\"\nFROM (\n  SELECT\n    time_bucket('1 day', m_time, INTERVAL '$TimeOffset') AS m_time,\n    last(eload_day, m_time) AS val\n  FROM ${table_selection:raw}\n  WHERE $__timeFilter(m_time)\n    AND device_info_id = $device_info_id\n  GROUP BY 1\n) sub\nORDER BY m_time",
+                      "sql": {
+                        "columns": [],
+                        "groupBy": [],
+                        "limit": 50
+                      }
                     },
                     "version": "v0"
                   },
@@ -2876,47 +2109,20 @@
                   "hidden": false,
                   "query": {
                     "datasource": {
-                      "name": "000000001"
+                      "name": "cf1a987bupo1sc"
                     },
-                    "group": "influxdb",
+                    "group": "grafana-postgresql-datasource",
                     "kind": "DataQuery",
                     "spec": {
-                      "alias": "Import From Grid",
-                      "groupBy": [
-                        {
-                          "params": [
-                            "$__interval"
-                          ],
-                          "type": "time"
-                        },
-                        {
-                          "params": [
-                            "null"
-                          ],
-                          "type": "fill"
-                        }
-                      ],
-                      "measurement": "device_data",
-                      "orderByTime": "ASC",
-                      "policy": "default",
-                      "query": "SELECT cumulative_sum(last(\"etouser_day\")) FROM \"device_data\" WHERE $timeFilter AND \"device_name\" =~ /^$device_name$/ GROUP BY time(1d,$TimeOffset) fill(null)",
+                      "editorMode": "code",
+                      "format": "time_series",
                       "rawQuery": true,
-                      "resultFormat": "time_series",
-                      "select": [
-                        [
-                          {
-                            "params": [
-                              "etouser_day"
-                            ],
-                            "type": "field"
-                          },
-                          {
-                            "params": [],
-                            "type": "last"
-                          }
-                        ]
-                      ],
-                      "tags": []
+                      "rawSql": "SELECT \n    m_time as time, \n    sum(val) OVER (ORDER BY m_time) AS \"Import From Grid\" \nFROM ( \n    SELECT \n        time_bucket('1 day', m_time, INTERVAL '$TimeOffset') AS m_time, \n        last(etouser_day, m_time) AS val \n    FROM ${table_selection:raw} \n    WHERE $__timeFilter(m_time) \n      AND device_info_id = $device_info_id \n    GROUP BY 1 \n) sub \nORDER BY m_time;",
+                      "sql": {
+                        "columns": [],
+                        "groupBy": [],
+                        "limit": 50
+                      }
                     },
                     "version": "v0"
                   },
@@ -2929,47 +2135,20 @@
                   "hidden": false,
                   "query": {
                     "datasource": {
-                      "name": "000000001"
+                      "name": "cf1a987bupo1sc"
                     },
-                    "group": "influxdb",
+                    "group": "grafana-postgresql-datasource",
                     "kind": "DataQuery",
                     "spec": {
-                      "alias": "Export To Grid",
-                      "groupBy": [
-                        {
-                          "params": [
-                            "$__interval"
-                          ],
-                          "type": "time"
-                        },
-                        {
-                          "params": [
-                            "null"
-                          ],
-                          "type": "fill"
-                        }
-                      ],
-                      "measurement": "device_data",
-                      "orderByTime": "ASC",
-                      "policy": "default",
-                      "query": "SELECT cumulative_sum(last(\"etogrid_day\")) FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time(1d,$TimeOffset) fill(null)",
+                      "editorMode": "code",
+                      "format": "time_series",
                       "rawQuery": true,
-                      "resultFormat": "time_series",
-                      "select": [
-                        [
-                          {
-                            "params": [
-                              "etogrid_day"
-                            ],
-                            "type": "field"
-                          },
-                          {
-                            "params": [],
-                            "type": "last"
-                          }
-                        ]
-                      ],
-                      "tags": []
+                      "rawSql": "SELECT\n  m_time as time,\n  sum(val) OVER (ORDER BY m_time) AS \"Export To Grid\"\nFROM (\n  SELECT\n    time_bucket('1 day', m_time, INTERVAL '$TimeOffset') AS m_time,\n    last(etogrid_day, m_time) AS val\n  FROM ${table_selection:raw}\n  WHERE $__timeFilter(m_time)\n    AND device_info_id = $device_info_id\n  GROUP BY 1\n) sub\nORDER BY m_time",
+                      "sql": {
+                        "columns": [],
+                        "groupBy": [],
+                        "limit": 50
+                      }
                     },
                     "version": "v0"
                   },
@@ -2982,47 +2161,20 @@
                   "hidden": false,
                   "query": {
                     "datasource": {
-                      "name": "000000001"
+                      "name": "cf1a987bupo1sc"
                     },
-                    "group": "influxdb",
+                    "group": "grafana-postgresql-datasource",
                     "kind": "DataQuery",
                     "spec": {
-                      "alias": "Solar",
-                      "groupBy": [
-                        {
-                          "params": [
-                            "$__interval"
-                          ],
-                          "type": "time"
-                        },
-                        {
-                          "params": [
-                            "null"
-                          ],
-                          "type": "fill"
-                        }
-                      ],
-                      "measurement": "device_data",
-                      "orderByTime": "ASC",
-                      "policy": "default",
-                      "query": "SELECT cumulative_sum(last(\"epv1_day\")) FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/  GROUP BY time(1d,$TimeOffset) fill(null)",
+                      "editorMode": "code",
+                      "format": "time_series",
                       "rawQuery": true,
-                      "resultFormat": "time_series",
-                      "select": [
-                        [
-                          {
-                            "params": [
-                              "epv1_day"
-                            ],
-                            "type": "field"
-                          },
-                          {
-                            "params": [],
-                            "type": "last"
-                          }
-                        ]
-                      ],
-                      "tags": []
+                      "rawSql": "SELECT\n  m_time as time,\n  sum(val) OVER (ORDER BY m_time) AS \"Solar\"\nFROM (\n  SELECT\n    time_bucket('1 day', m_time, INTERVAL '$TimeOffset') AS m_time,\n    last(epv1_day, m_time) AS val\n  FROM ${table_selection:raw}\n  WHERE $__timeFilter(m_time)\n    AND device_info_id = $device_info_id\n  GROUP BY 1\n) sub\nORDER BY m_time",
+                      "sql": {
+                        "columns": [],
+                        "groupBy": [],
+                        "limit": 50
+                      }
                     },
                     "version": "v0"
                   },
@@ -3035,47 +2187,20 @@
                   "hidden": false,
                   "query": {
                     "datasource": {
-                      "name": "000000001"
+                      "name": "cf1a987bupo1sc"
                     },
-                    "group": "influxdb",
+                    "group": "grafana-postgresql-datasource",
                     "kind": "DataQuery",
                     "spec": {
-                      "alias": "Battery Charge",
-                      "groupBy": [
-                        {
-                          "params": [
-                            "$__interval"
-                          ],
-                          "type": "time"
-                        },
-                        {
-                          "params": [
-                            "null"
-                          ],
-                          "type": "fill"
-                        }
-                      ],
-                      "measurement": "device_data",
-                      "orderByTime": "ASC",
-                      "policy": "default",
-                      "query": "SELECT cumulative_sum(last(\"echg_day\")) FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time(1d,$TimeOffset) fill(null)",
+                      "editorMode": "code",
+                      "format": "time_series",
                       "rawQuery": true,
-                      "resultFormat": "time_series",
-                      "select": [
-                        [
-                          {
-                            "params": [
-                              "echg_day"
-                            ],
-                            "type": "field"
-                          },
-                          {
-                            "params": [],
-                            "type": "last"
-                          }
-                        ]
-                      ],
-                      "tags": []
+                      "rawSql": "SELECT\n  m_time as time,\n  sum(val) OVER (ORDER BY m_time) AS \"Battery Charge\"\nFROM (\n  SELECT\n    time_bucket('1 day', m_time, INTERVAL '$TimeOffset') AS m_time,\n    last(echg_day, m_time) AS val\n  FROM ${table_selection:raw}\n  WHERE $__timeFilter(m_time)\n    AND device_info_id = $device_info_id\n  GROUP BY 1\n) sub\nORDER BY m_time",
+                      "sql": {
+                        "columns": [],
+                        "groupBy": [],
+                        "limit": 50
+                      }
                     },
                     "version": "v0"
                   },
@@ -3088,47 +2213,20 @@
                   "hidden": false,
                   "query": {
                     "datasource": {
-                      "name": "000000001"
+                      "name": "cf1a987bupo1sc"
                     },
-                    "group": "influxdb",
+                    "group": "grafana-postgresql-datasource",
                     "kind": "DataQuery",
                     "spec": {
-                      "alias": "Battery Discharge",
-                      "groupBy": [
-                        {
-                          "params": [
-                            "$__interval"
-                          ],
-                          "type": "time"
-                        },
-                        {
-                          "params": [
-                            "null"
-                          ],
-                          "type": "fill"
-                        }
-                      ],
-                      "measurement": "device_data",
-                      "orderByTime": "ASC",
-                      "policy": "default",
-                      "query": "SELECT cumulative_sum(last(\"edischg_day\")) FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time(1d,$TimeOffset) fill(null)",
+                      "editorMode": "code",
+                      "format": "time_series",
                       "rawQuery": true,
-                      "resultFormat": "time_series",
-                      "select": [
-                        [
-                          {
-                            "params": [
-                              "edischg_day"
-                            ],
-                            "type": "field"
-                          },
-                          {
-                            "params": [],
-                            "type": "last"
-                          }
-                        ]
-                      ],
-                      "tags": []
+                      "rawSql": "SELECT\n  m_time as time,\n  sum(val) OVER (ORDER BY m_time) AS \"Battery Discharge\"\nFROM (\n  SELECT\n    time_bucket('1 day', m_time, INTERVAL '$TimeOffset') AS m_time,\n    last(edischg_day, m_time) AS val\n  FROM ${table_selection:raw}\n  WHERE $__timeFilter(m_time)\n    AND device_info_id = $device_info_id\n  GROUP BY 1\n) sub\nORDER BY m_time",
+                      "sql": {
+                        "columns": [],
+                        "groupBy": [],
+                        "limit": 50
+                      }
                     },
                     "version": "v0"
                   },
@@ -3141,47 +2239,20 @@
                   "hidden": false,
                   "query": {
                     "datasource": {
-                      "name": "000000001"
+                      "name": "cf1a987bupo1sc"
                     },
-                    "group": "influxdb",
+                    "group": "grafana-postgresql-datasource",
                     "kind": "DataQuery",
                     "spec": {
-                      "alias": " Inverter Output",
-                      "groupBy": [
-                        {
-                          "params": [
-                            "$__interval"
-                          ],
-                          "type": "time"
-                        },
-                        {
-                          "params": [
-                            "null"
-                          ],
-                          "type": "fill"
-                        }
-                      ],
-                      "measurement": "device_data",
-                      "orderByTime": "ASC",
-                      "policy": "default",
-                      "query": "SELECT cumulative_sum(last(\"einv_day\")) FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time(1d,$TimeOffset) fill(null)",
+                      "editorMode": "code",
+                      "format": "time_series",
                       "rawQuery": true,
-                      "resultFormat": "time_series",
-                      "select": [
-                        [
-                          {
-                            "params": [
-                              "einv_day"
-                            ],
-                            "type": "field"
-                          },
-                          {
-                            "params": [],
-                            "type": "last"
-                          }
-                        ]
-                      ],
-                      "tags": []
+                      "rawSql": "SELECT\n  m_time as time,\n  sum(val) OVER (ORDER BY m_time) AS \" Inverter Output\"\nFROM (\n  SELECT\n    time_bucket('1 day', m_time, INTERVAL '$TimeOffset') AS m_time,\n    last(einv_day, m_time) AS val\n  FROM ${table_selection:raw}\n  WHERE $__timeFilter(m_time)\n    AND device_info_id = $device_info_id\n  GROUP BY 1\n) sub\nORDER BY m_time",
+                      "sql": {
+                        "columns": [],
+                        "groupBy": [],
+                        "limit": 50
+                      }
                     },
                     "version": "v0"
                   },
@@ -3194,15 +2265,20 @@
                   "hidden": false,
                   "query": {
                     "datasource": {
-                      "name": "000000001"
+                      "name": "cf1a987bupo1sc"
                     },
-                    "group": "influxdb",
+                    "group": "grafana-postgresql-datasource",
                     "kind": "DataQuery",
                     "spec": {
-                      "alias": "Number of Days",
-                      "query": "SELECT COUNT(\"daily_count\") FROM (  SELECT COUNT(\"einv_day\") AS \"daily_count\"  FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/  GROUP BY time(1d,$TimeOffset) fill(null))\n\n",
+                      "editorMode": "code",
+                      "format": "table",
                       "rawQuery": true,
-                      "resultFormat": "time_series"
+                      "rawSql": "SELECT COUNT(daily_count) AS \"Number of Days\"\nFROM (\n  SELECT\n    time_bucket('1 day', m_time, INTERVAL '$TimeOffset') AS m_time,\n    COUNT(einv_day) AS daily_count\n  FROM ${table_selection:raw}\n  WHERE $__timeFilter(m_time)\n    AND device_info_id = $device_info_id\n  GROUP BY 1\n) sub",
+                      "sql": {
+                        "columns": [],
+                        "groupBy": [],
+                        "limit": 50
+                      }
                     },
                     "version": "v0"
                   },
@@ -3638,47 +2714,20 @@
                   "hidden": false,
                   "query": {
                     "datasource": {
-                      "name": "000000001"
+                      "name": "cf1a987bupo1sc"
                     },
-                    "group": "influxdb",
+                    "group": "grafana-postgresql-datasource",
                     "kind": "DataQuery",
                     "spec": {
-                      "alias": "Import From Grid",
-                      "groupBy": [
-                        {
-                          "params": [
-                            "$__interval"
-                          ],
-                          "type": "time"
-                        },
-                        {
-                          "params": [
-                            "null"
-                          ],
-                          "type": "fill"
-                        }
-                      ],
-                      "measurement": "device_data",
-                      "orderByTime": "ASC",
-                      "policy": "default",
-                      "query": "SELECT cumulative_sum(last(\"etouser_day\")) FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/  GROUP BY time(1d,$TimeOffset) fill(null)",
+                      "editorMode": "code",
+                      "format": "time_series",
                       "rawQuery": true,
-                      "resultFormat": "time_series",
-                      "select": [
-                        [
-                          {
-                            "params": [
-                              "etouser_day"
-                            ],
-                            "type": "field"
-                          },
-                          {
-                            "params": [],
-                            "type": "last"
-                          }
-                        ]
-                      ],
-                      "tags": []
+                      "rawSql": "SELECT\n  m_time as time,\n  sum(val) OVER (ORDER BY m_time) AS \"Import From Grid\"\nFROM (\n  SELECT\n    time_bucket('1 day', m_time, INTERVAL '$TimeOffset') AS m_time,\n    last(etouser_day, m_time) AS val\n  FROM ${table_selection:raw}\n  WHERE $__timeFilter(m_time)\n    AND device_info_id = $device_info_id\n  GROUP BY 1\n) sub\nORDER BY m_time",
+                      "sql": {
+                        "columns": [],
+                        "groupBy": [],
+                        "limit": 50
+                      }
                     },
                     "version": "v0"
                   },
@@ -3691,47 +2740,20 @@
                   "hidden": false,
                   "query": {
                     "datasource": {
-                      "name": "000000001"
+                      "name": "cf1a987bupo1sc"
                     },
-                    "group": "influxdb",
+                    "group": "grafana-postgresql-datasource",
                     "kind": "DataQuery",
                     "spec": {
-                      "alias": "Export To Grid",
-                      "groupBy": [
-                        {
-                          "params": [
-                            "$__interval"
-                          ],
-                          "type": "time"
-                        },
-                        {
-                          "params": [
-                            "null"
-                          ],
-                          "type": "fill"
-                        }
-                      ],
-                      "measurement": "device_data",
-                      "orderByTime": "ASC",
-                      "policy": "default",
-                      "query": "SELECT cumulative_sum(last(\"etogrid_day\")) FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time(1d,$TimeOffset) fill(null)",
+                      "editorMode": "code",
+                      "format": "time_series",
                       "rawQuery": true,
-                      "resultFormat": "time_series",
-                      "select": [
-                        [
-                          {
-                            "params": [
-                              "etogrid_day"
-                            ],
-                            "type": "field"
-                          },
-                          {
-                            "params": [],
-                            "type": "last"
-                          }
-                        ]
-                      ],
-                      "tags": []
+                      "rawSql": "SELECT\n  m_time as time,\n  sum(val) OVER (ORDER BY m_time) AS \"Export To Grid\"\nFROM (\n  SELECT\n    time_bucket('1 day', m_time, INTERVAL '$TimeOffset') AS m_time,\n    last(etogrid_day, m_time) AS val\n  FROM ${table_selection:raw}\n  WHERE $__timeFilter(m_time)\n    AND device_info_id = $device_info_id\n  GROUP BY 1\n) sub\nORDER BY m_time",
+                      "sql": {
+                        "columns": [],
+                        "groupBy": [],
+                        "limit": 50
+                      }
                     },
                     "version": "v0"
                   },
@@ -4186,8 +3208,41 @@
     "timezone": "browser",
     "to": "now"
   },
-  "title": "Solar metrics InfluxDB",
+  "title": "Solar metrics TSDB",
   "variables": [
+    {
+      "kind": "QueryVariable",
+      "spec": {
+        "allowCustomValue": true,
+        "current": {
+          "text": "2026-07-31",
+          "value": "1785456000"
+        },
+        "definition": "SELECT \n  TO_CHAR(CURRENT_TIMESTAMP AT TIME ZONE '$__timezone', 'YYYY-MM-DD') AS \"__text\",\n  EXTRACT(epoch FROM date_trunc('day', CURRENT_TIMESTAMP AT TIME ZONE '$__timezone'))::int AS \"__value\";",
+        "hide": "dontHide",
+        "includeAll": false,
+        "label": "Today's Date",
+        "multi": false,
+        "name": "Today",
+        "options": [],
+        "query": {
+          "datasource": {
+            "name": "cf1a987bupo1sc"
+          },
+          "group": "grafana-postgresql-datasource",
+          "kind": "DataQuery",
+          "spec": {
+            "__legacyStringValue": "SELECT \n  TO_CHAR(CURRENT_TIMESTAMP AT TIME ZONE '$__timezone', 'YYYY-MM-DD') AS \"__text\",\n  EXTRACT(epoch FROM date_trunc('day', CURRENT_TIMESTAMP AT TIME ZONE '$__timezone'))::int AS \"__value\";"
+          },
+          "version": "v0"
+        },
+        "refresh": "onDashboardLoad",
+        "regex": "",
+        "regexApplyTo": "value",
+        "skipUrlSync": false,
+        "sort": "disabled"
+      }
+    },
     {
       "kind": "CustomVariable",
       "spec": {
@@ -4202,7 +3257,7 @@
         "multi": false,
         "name": "TimeOffset",
         "options": [],
-        "query": "7h,8h",
+        "query": "0h,7h,8h",
         "skipUrlSync": false,
         "valuesFormat": "csv"
       }
@@ -4227,39 +3282,6 @@
       }
     },
     {
-      "kind": "QueryVariable",
-      "spec": {
-        "allowCustomValue": true,
-        "current": {
-          "text": "2026-07-31",
-          "value": "1785456000"
-        },
-        "definition": "SELECT \n  TO_CHAR(CURRENT_TIMESTAMP AT TIME ZONE '$__timezone', 'YYYY-MM-DD') AS \"__text\",\n  EXTRACT(epoch FROM date_trunc('day', CURRENT_TIMESTAMP AT TIME ZONE '$__timezone'))::int AS \"__value\";",
-        "hide": "dontHide",
-        "includeAll": false,
-        "label": "Today's Date",
-        "multi": false,
-        "name": "Today",
-        "options": [],
-        "query": {
-          "datasource": {
-            "name": "df0zllqxih69sc"
-          },
-          "group": "grafana-postgresql-datasource",
-          "kind": "DataQuery",
-          "spec": {
-            "__legacyStringValue": "SELECT \n  TO_CHAR(CURRENT_TIMESTAMP AT TIME ZONE '$__timezone', 'YYYY-MM-DD') AS \"__text\",\n  EXTRACT(epoch FROM date_trunc('day', CURRENT_TIMESTAMP AT TIME ZONE '$__timezone'))::int AS \"__value\";"
-          },
-          "version": "v0"
-        },
-        "refresh": "onDashboardLoad",
-        "regex": "",
-        "regexApplyTo": "value",
-        "skipUrlSync": false,
-        "sort": "disabled"
-      }
-    },
-    {
       "kind": "ConstantVariable",
       "spec": {
         "current": {
@@ -4276,35 +3298,49 @@
     {
       "kind": "QueryVariable",
       "spec": {
-        "allowCustomValue": true,
+        "allowCustomValue": false,
         "current": {
-          "text": [
-            "EG4 18kpv",
-            "EG4 18kpv1",
-            "EG4_4066670074"
-          ],
-          "value": [
-            "EG4 18kpv",
-            "EG4 18kpv1",
-            "EG4_4066670074"
-          ]
+          "text": "eg4_18kpv",
+          "value": "device_metrics_wide__eg4_18kpv"
         },
-        "definition": "SHOW TAG VALUES FROM \"device_data\" WITH KEY = \"device_name\"",
+        "definition": "SELECT \r\n    REPLACE(table_name, 'device_metrics_wide__', '') AS __text, \r\n    table_name AS __value \r\nFROM information_schema.tables \r\nWHERE table_schema = 'public' \r\n  AND table_name LIKE 'device_metrics_wide__%';",
         "hide": "dontHide",
         "includeAll": false,
-        "label": "",
-        "multi": true,
-        "name": "device_name",
+        "label": "Table",
+        "multi": false,
+        "name": "table_selection",
         "options": [],
         "query": {
           "datasource": {
-            "name": "000000001"
+            "name": "cf1a987bupo1sc"
           },
-          "group": "influxdb",
+          "group": "grafana-postgresql-datasource",
           "kind": "DataQuery",
           "spec": {
-            "query": "SHOW TAG VALUES FROM \"device_data\" WITH KEY = \"device_name\"",
-            "refId": "InfluxVariableQueryEditor-VariableQuery"
+            "dataset": "solar1",
+            "editorMode": "code",
+            "format": "table",
+            "query": "SELECT \r\n    REPLACE(table_name, 'device_metrics_wide__', '') AS __text, \r\n    table_name AS __value \r\nFROM information_schema.tables \r\nWHERE table_schema = 'public' \r\n  AND table_name LIKE 'device_metrics_wide__%';",
+            "rawQuery": true,
+            "rawSql": "SELECT \r\n    REPLACE(table_name, 'device_metrics_wide__', '') AS __text, \r\n    table_name AS __value \r\nFROM information_schema.tables \r\nWHERE table_schema = 'public' \r\n  AND table_name LIKE 'device_metrics_wide__%';",
+            "refId": "SQLVariableQueryEditor-VariableQuery",
+            "sql": {
+              "columns": [
+                {
+                  "parameters": [],
+                  "type": "function"
+                }
+              ],
+              "groupBy": [
+                {
+                  "property": {
+                    "type": "string"
+                  },
+                  "type": "groupBy"
+                }
+              ],
+              "limit": 50
+            }
           },
           "version": "v0"
         },
@@ -4313,6 +3349,53 @@
         "regexApplyTo": "value",
         "skipUrlSync": false,
         "sort": "disabled"
+      }
+    },
+    {
+      "kind": "QueryVariable",
+      "spec": {
+        "allowCustomValue": false,
+        "current": {
+          "text": [
+            "EG4 18kpv1"
+          ],
+          "value": [
+            "1"
+          ]
+        },
+        "definition": "SELECT \r\n    device_name AS __text, \r\n    device_info_id AS __value \r\nFROM device_info\r\nGROUP BY device_info_id, device_name\r\nORDER BY device_name ASC;",
+        "hide": "dontHide",
+        "includeAll": false,
+        "label": "Device",
+        "multi": true,
+        "name": "device_info_id",
+        "options": [],
+        "query": {
+          "datasource": {
+            "name": "cf1a987bupo1sc"
+          },
+          "group": "grafana-postgresql-datasource",
+          "kind": "DataQuery",
+          "spec": {
+            "editorMode": "code",
+            "format": "table",
+            "query": "SELECT \r\n    device_name AS __text, \r\n    device_info_id AS __value \r\nFROM device_info\r\nGROUP BY device_info_id, device_name\r\nORDER BY device_name ASC;",
+            "rawQuery": true,
+            "rawSql": "SELECT \r\n    device_name AS __text, \r\n    device_info_id AS __value \r\nFROM device_info\r\nGROUP BY device_info_id, device_name\r\nORDER BY device_name ASC;",
+            "refId": "SQLVariableQueryEditor-VariableQuery",
+            "sql": {
+              "columns": [],
+              "groupBy": [],
+              "limit": 50
+            }
+          },
+          "version": "v0"
+        },
+        "refresh": "onDashboardLoad",
+        "regex": "",
+        "regexApplyTo": "value",
+        "skipUrlSync": false,
+        "sort": "alphabeticalAsc"
       }
     }
   ]

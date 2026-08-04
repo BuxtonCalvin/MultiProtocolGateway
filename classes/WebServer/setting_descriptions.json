@@ -37,6 +37,7 @@
   "drop_after": "TimescaleDB retention policy — data older than this interval is automatically dropped.",
   "enable_auto_refresh": "Enable automatic refresh of TimescaleDB continuous aggregates on a schedule.",
   "enable_compression": "Enable TimescaleDB native compression on hypertables to reduce storage.",
+  "enable_dynamic_chunk_sizing": "",
   "enable_persistent_storage": "Enable local disk backlog storage for data collected during bridge outages.",
   "enable_register_failure_tracking": "Track and log individual register read failures for diagnostic purposes.",
   "enable_rollups": "Enable TimescaleDB continuous aggregate rollup materialization.",

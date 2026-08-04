@@ -259,6 +259,7 @@ class mqtt(transport_base):
                     f"{self.base_topic}/{device_identifier}/availability",
                     "offline",
                 )
+            # update the bridge-level connectivity status topic too, so a crash or kill is reflected in the broker
             bridge_status_topic: str | None = getattr(self, "_bridge_status_topic", None)
             if bridge_status_topic:
                 self.client.publish(bridge_status_topic, "offline", qos=1, retain=True)
@@ -430,6 +431,10 @@ class mqtt(transport_base):
             if info.rc == MQTT_ERR_NO_CONN:
                 self._log.error("MQTT Publish failed: No connection to broker.")
             return
+        # update the bridge status to reflect that the bridge is online, so a crash or kill is reflected in the broker
+        bridge_status_topic: str | None = getattr(self, "_bridge_status_topic", None)
+        if bridge_status_topic:
+            self.client.publish(bridge_status_topic, "online", qos=1, retain=True)
 
         if self.json:
             json_object: str = json.dumps(data, indent=4)

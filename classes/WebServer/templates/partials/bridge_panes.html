@@ -40,7 +40,7 @@
   <!-- ══ LEFT: SETTINGS PANE ══ -->
   <aside class="flex-shrink-0 overflow-y-auto
                 bg-mpg-800 rounded border border-mpg-700 p-3"
-         style="width: calc(28% - 1.5in); min-width: calc(268px - 1.5in); max-width: calc(368px - 1.5in);">
+         style="width: 28%; min-width: 268px; max-width: 368px;">
 
     <div class="flex items-center justify-between mb-3">
       <h2 class="text-mpg-100 font-semibold text-sm">
@@ -233,7 +233,7 @@
          parses its own delimiters regardless of HTML comment boundaries,
          so a stray example tag here will crash the whole template. -->
     {% if device.transport_class == "timescaledb" %}
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+    <div class="grid grid-cols-1 lg:grid-cols-[calc(50%_-_1.5in)_calc(50%_+_1.5in)] gap-4">
       <div id="bridge-health-container"
            hx-get="/pages/timescale/health"
            hx-trigger="load"

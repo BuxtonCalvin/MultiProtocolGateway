@@ -177,7 +177,7 @@
     "variable_mask": "",
     "variable_screen": "",
     "write_enabled": "false",
-    "write_type": ""    
+    "write_type": ""
   },
   "serial_frame_client": {
     "batch_size": "40",
@@ -314,6 +314,7 @@
     "use_utc_timestamp": "False",
     "username": "",
     "write_requires_complete_cycle": "true",
-    "device_name": "TimescaleDB MPG Bridge"
+    "device_name": "TimescaleDB MPG Bridge",
+    "enable_dynamic_chunk_sizing": "True"
   }
 }
