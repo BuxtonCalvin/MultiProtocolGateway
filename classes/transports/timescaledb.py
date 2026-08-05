@@ -166,7 +166,7 @@ class ProtocolRegistry(Base):
     protocol_id: Mapped[int] = mapped_column(Integer, Identity(cache=1),primary_key=True, autoincrement=True)
     protocol_name: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     wide_table_name: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    # None = narrow only (>160 metrics)
+    # None = narrow only (> WIDE_TABLE_COLUMN_LIMIT 160 metrics)
 
     metric_count: Mapped[int] = mapped_column(Integer, default=0)
 
@@ -316,7 +316,6 @@ class TimescaleDBConnectionManager:
         self._lock: threading.RLock = threading.RLock()
         self._ref_count: int = 0  # tracks how many protocol instances are using this manager
         self._connected: bool = False
-
 
     @classmethod
     def from_settings(cls, settings: TransportSettings, log: logging.Logger | None = None ) -> "TimescaleDBConnectionManager":
@@ -539,6 +538,7 @@ class timescaledb(transport_base):
     # data is coerced to improve compression in metrics' tables.
     INT_TYPES: set[str] = {"SMALLINT", "INTEGER", "BIGINT"}
     FLOAT_TYPES: set[str] = {"REAL", "DOUBLE PRECISION", "NUMERIC", "FLOAT"}
+    WIDE_TABLE_COLUMN_LIMIT = 160  # Max columns in a wide table before falling back to narrow table
 
     # persistent storage/backlog settings. Default folder name and file name are the same but can be user configured.
     enable_persistent_storage: bool = True
@@ -1399,7 +1399,7 @@ class timescaledb(transport_base):
             raise ConnectionError(msg)
 
         # Derive rollup_prefix from wide_table_name if provided.
-        # None for narrow-only protocols (metric_count >= 160).
+        # None for narrow-only protocols (metric_count >= WIDE_TABLE_COLUMN_LIMIT 160).
         # e.g. wide_table_name = "device_metrics_wide__eg4_18kpv"
         #      rollup_prefix   = "rollup_wide__eg4_18kpv"
         rollup_prefix: str | None = None
@@ -1475,7 +1475,7 @@ class timescaledb(transport_base):
         """
         Ensure each metric name as defined in the variable_mask/variable_screen filters has a corresponding column in device_metrics_wide__*,
         and an entry in the metric_catalog table-- which describes the wide table field definitions.
-        Due to the memory limits of postgres, no more than 160 metrics as determined in the calling method.
+        Due to the memory limits of postgres, no more than WIDE_TABLE_COLUMN_LIMIT 160 metrics as determined in the calling method.
         Using metric_name to map, return clean_column_name in the metric_catalog to create the SQL column in device_metrics_wide__*.
 
         For metrics that already have a column, also reconciles metric_catalog's
@@ -1486,7 +1486,7 @@ class timescaledb(transport_base):
         catalog type let a TEXT column through the "safe for stats_agg()"
         rollup filter and crashed rollup view creation).
 
-        There could potentially be thousands of metrics, which cannot all be ingested as columns. If over 160 metrics we only save metrics to the
+        There could potentially be thousands of metrics, which cannot all be ingested as columns. If over WIDE_TABLE_COLUMN_LIMIT 160 metrics we only save metrics to the
         device_metrics_narrow table, so this method is not needed and is bypassed at the calling method connection stage.
         """
 
@@ -1914,8 +1914,8 @@ class timescaledb(transport_base):
         #  and anchors the table name before metric_catalog FKs are written
         self._upsert_protocol_registry(protocol, wide_table_name, metric_count)
 
-        if metric_count >= 160:
-            self._log.warning(f"Protocol '{protocol}' has {metric_count} metrics — exceeds 160 column limit, using narrow table only.")
+        if metric_count >= self.WIDE_TABLE_COLUMN_LIMIT:
+            self._log.warning(f"Protocol '{protocol}' has {metric_count} metrics — exceeds {self.WIDE_TABLE_COLUMN_LIMIT} column limit, using narrow table only.")
             self._protocol_wide_table_map[protocol] = None
             return
 
@@ -6649,7 +6649,7 @@ class WideTableFieldManager:
         Looks up the protocol_id and wide_table_name for protocol_name.
 
         Raises:
-            ValueError: protocol is unknown, or is narrow-only (>160
+            ValueError: protocol is unknown, or is narrow-only (>WIDE_TABLE_COLUMN_LIMIT 160
                         metrics) and therefore has no wide table to edit.
         """
         with self.SessionFactory() as session:
@@ -6668,7 +6668,7 @@ class WideTableFieldManager:
 
         protocol_id, wide_table_name = row
         if wide_table_name is None:
-            msg: str = f"Protocol '{protocol_name}' is narrow-only (>160 metrics) and has no wide table to edit."
+            msg: str = f"Protocol '{protocol_name}' is narrow-only (>WIDE_TABLE_COLUMN_LIMIT 160 metrics) and has no wide table to edit."
             raise ValueError(msg)
 
         return protocol_id, wide_table_name

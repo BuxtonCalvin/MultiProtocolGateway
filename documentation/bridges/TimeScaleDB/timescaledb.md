@@ -143,7 +143,7 @@ One row per metric per timestamp.
 - Flexible schema
 - Efficient aggregation
 
-### 4.2 Wide Table (If Less than 200 metrics chosen via the MPG variable filters)
+### 4.2 Wide Table (If Less than 160 metrics chosen via the MPG variable filters)
 
 One row per timestamp with multiple metric columns.
 

@@ -291,7 +291,7 @@
     "backlog_storage_path": "backlogs",
     "database": "solar1",
     "device_location": "",
-    "device_name": "TimescaleDB MPG Bridge",    
+    "device_name": "TimescaleDB MPG Bridge",
     "drop_after": "1 year",
     "enable_auto_refresh": "true",
     "enable_compression": "true",
@@ -316,5 +316,20 @@
     "use_utc_timestamp": "False",
     "username": "",
     "write_requires_complete_cycle": "true"
+  },
+  "prometheus_out": {
+    "standalone_host": "0.0.0.0",
+    "stale_check_interval": "5.0",
+    "histogram_fields": "",
+    "include_protocol_label": "True",
+    "counter_metric_suffixes": "_total",
+    "histogram_buckets": "",
+    "enable_standalone_server": "False",
+    "metric_prefix": "device_",
+    "device_name": "Prometheus MPG Bridge",
+    "metrics_path": "/metrics",
+    "standalone_port": "9110",
+    "staleness_multiplier": "3.0",
+    "max_label_value_length": "128"
   }
 }

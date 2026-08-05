@@ -263,13 +263,17 @@
     </div>
 
     {% if proto_tabs %}
-    <div class="flex gap-1 mb-3 border-b border-mpg-700" role="tablist">
+    <div class="flex items-center gap-1 mb-3 border-b border-mpg-700" role="tablist">
+      {% set active_map_tab = proto_tabs | selectattr('registry_type', 'ne', 'json') | list | first %}
       {% for tab in proto_tabs %}
+      {% set tab_stats = metric_summary.by_registry_type.get(tab.registry_type) if metric_summary else None %}
       <button class="tab-btn px-4 py-1.5 text-xs font-medium rounded-t
                      {% if loop.first %}tab-active{% else %}tab-inactive{% endif %}"
               role="tab"
               data-protocol="{{ tab.protocol_name }}"
               data-registry="{{ tab.registry_type }}"
+              data-metric-total="{{ tab_stats.total if tab_stats else '' }}"
+              data-metric-chosen="{{ tab_stats.chosen if tab_stats else '' }}"
               aria-selected="{{ 'true' if loop.first else 'false' }}"
               hx-get="/api/protocols/{{ tab.protocol_name }}/{{ tab.registry_type }}/table?device_name={{ device.name }}"
               hx-target="#protocol-table-container"
@@ -279,12 +283,38 @@
         {{ tab.registry_type | title }}
         <span class="text-mpg-100 ml-1">({{ tab.protocol_name }})</span>
         {% if tab.registry_type != "json" %}
-        <span class="tab-counts ml-1.5 text-mpg-400 text-xs">
+        <span class="tab-counts ml-1.5 text-green-600 font-semibold text-xs">
           W:{{ tab.write_count }} M:{{ tab.mask_count }} S:{{ tab.screen_count }}
         </span>
         {% endif %}
       </button>
       {% endfor %}
+
+      {% if metric_summary %}
+      {% set active_map_stats = metric_summary.by_registry_type.get(active_map_tab.registry_type) if active_map_tab else None %}
+      <div id="metric-summary" class="ml-auto flex items-center gap-3 text-xs pb-1.5 pl-2">
+        <span class="surface-muted">
+          Total Available: <span id="metric-total-available" class="text-green-600 font-semibold">{{ metric_summary.total_available }}</span>
+        </span>
+        <span class="surface-muted">
+          Total Selected: <span id="metric-chosen-count" class="text-green-600 font-semibold">{{ metric_summary.chosen_count }}</span>
+        </span>
+        <span id="metric-tab-available-wrap" class="surface-muted {% if not active_map_tab %}hidden{% endif %}">
+          <span id="metric-tab-available-label">{{ active_map_tab.registry_type | title if active_map_tab else '' }} Available</span>:
+          <span id="metric-tab-available" class="text-green-600 font-semibold">{{ active_map_stats.total if active_map_stats else 0 }}</span>
+        </span>
+        <span id="metric-tab-chosen-wrap" class="surface-muted {% if not active_map_tab %}hidden{% endif %}">
+          <span id="metric-tab-chosen-label">{{ active_map_tab.registry_type | title if active_map_tab else '' }} Selected</span>:
+          <span id="metric-tab-chosen" class="text-green-600 font-semibold">{{ active_map_stats.chosen if active_map_stats else 0 }}</span>
+        </span>
+        {% if timescale_bridge_available() %}
+        <span id="metric-summary-warning"
+              class="text-red-500 font-semibold {% if not metric_summary.over_limit %}hidden{% endif %}">
+          Metric selection from register maps is over {{ metric_summary.wide_table_limit }}: no wide table formation
+        </span>
+        {% endif %}
+      </div>
+      {% endif %}
     </div>
     {% endif %}
 
@@ -362,6 +392,37 @@
     }
   });
 
+  // Shared by every tab-click binder (this file's own, and
+  // protocol_section.html's rebind after a protocol-version swap) and by
+  // the toggle-refresh handler below, so the "<Registry Map> Available /
+  // Selected" badges always reflect whichever tab is currently active.
+  // Defined on window since protocol_section.html's script re-runs fresh
+  // on every swap but this one (scraper_panes.html's) does not.
+  window.mpgUpdateTabMetricBadges = function(btn) {
+    const availWrap  = document.getElementById('metric-tab-available-wrap');
+    const chosenWrap = document.getElementById('metric-tab-chosen-wrap');
+    const availLabel = document.getElementById('metric-tab-available-label');
+    const chosenLabel = document.getElementById('metric-tab-chosen-label');
+    const availVal   = document.getElementById('metric-tab-available');
+    const chosenVal  = document.getElementById('metric-tab-chosen');
+    if (!availWrap || !chosenWrap) return;
+
+    const registry = btn && btn.dataset.registry;
+    const hasStats = btn && registry && registry !== 'json' && btn.dataset.metricTotal !== '';
+    if (!hasStats) {
+      availWrap.classList.add('hidden');
+      chosenWrap.classList.add('hidden');
+      return;
+    }
+    const label = registry.charAt(0).toUpperCase() + registry.slice(1);
+    if (availLabel)  availLabel.textContent  = `${label} Available`;
+    if (chosenLabel) chosenLabel.textContent = `${label} Selected`;
+    if (availVal)  availVal.textContent  = btn.dataset.metricTotal;
+    if (chosenVal) chosenVal.textContent = btn.dataset.metricChosen;
+    availWrap.classList.remove('hidden');
+    chosenWrap.classList.remove('hidden');
+  };
+
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', function() {
       document.querySelectorAll('.tab-btn').forEach(b => {
@@ -372,6 +433,7 @@
       this.classList.add('tab-active');
       this.classList.remove('tab-inactive');
       this.setAttribute('aria-selected', 'true');
+      window.mpgUpdateTabMetricBadges(this);
     });
   });
 
@@ -402,6 +464,35 @@
         if (span && tab) {
           span.textContent = `W:${tab.write_count} M:${tab.mask_count} S:${tab.screen_count}`;
         }
+      })
+      .catch(() => {});
+
+    // A mask/screen toggle on any tab can change every summary badge (the
+    // active tab's own numbers, the device-wide totals, and every other
+    // tab's cached data-metric-* values used the next time it's clicked),
+    // so refresh from the same source of truth used at page render time.
+    fetch(`/api/protocols/device/${encodeURIComponent(protocolVersion)}/metric-summary?device_name=${encodeURIComponent(deviceName)}`)
+      .then(r => r.json())
+      .then(summary => {
+        const avail  = document.getElementById('metric-total-available');
+        const chosen = document.getElementById('metric-chosen-count');
+        const warn   = document.getElementById('metric-summary-warning');
+        if (avail)  avail.textContent  = summary.total_available;
+        if (chosen) chosen.textContent = summary.chosen_count;
+        if (warn) {
+          warn.textContent = `Metric selection from register maps is over ${summary.wide_table_limit}: no wide table formation`;
+          warn.classList.toggle('hidden', !summary.over_limit);
+        }
+
+        const byType = summary.by_registry_type || {};
+        document.querySelectorAll('#protocol-section .tab-btn[data-registry]').forEach(b => {
+          const stats = byType[b.dataset.registry];
+          if (stats) {
+            b.dataset.metricTotal  = stats.total;
+            b.dataset.metricChosen = stats.chosen;
+          }
+        });
+        window.mpgUpdateTabMetricBadges(document.querySelector('#protocol-section .tab-btn.tab-active'));
       })
       .catch(() => {});
   });

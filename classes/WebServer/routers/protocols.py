@@ -36,6 +36,7 @@ from ..database import get_session, session_scope
 from ..services.protocol_service import (
     DeviceRegisterView,
     build_synthetic_rows,
+    get_device_metric_summary,
     get_protocol_json,
     get_protocol_registers,
     get_protocols_for_device,
@@ -75,6 +76,24 @@ def device_protocol_tabs(
     never disagree.
     """
     return get_protocols_for_device(db, protocol_version, device_name=device_name)
+
+
+@router.get("/device/{protocol_version}/metric-summary")
+def device_metric_summary(
+    protocol_version: str,
+    device_name: str,
+    request: Request,
+    db: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """
+    Returns the Available / Selected / Register-map-total counts shown next
+    to the protocol tab strip (see get_device_metric_summary()). The client
+    re-fetches this after every mask/screen toggle to keep the badges in
+    sync — same source of truth used for the initial page render.
+    """
+    gateway: Any = getattr(request.app.state, "gateway", None)
+    transport: Any = gateway.get_transport(f"transport.{device_name}") if gateway is not None else None
+    return get_device_metric_summary(db, protocol_version, device_name, transport=transport)
 
 
 class ToggleRequest(BaseModel):

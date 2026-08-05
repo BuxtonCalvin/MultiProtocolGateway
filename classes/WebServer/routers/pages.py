@@ -90,6 +90,7 @@ from ..services.device_service import (
 )
 from ..services.protocol_service import (
     export_protocol_registers,
+    get_device_metric_summary,
     get_protocol_groups,
     get_protocol_json,
     get_protocols_for_device,
@@ -154,6 +155,20 @@ async def dashboard(request: Request):
 async def device_page(request: Request, device_name: str):
     section: str = f"transport.{device_name}"
 
+    # Resolved up front (doesn't need a db session) so both the connection
+    # status below and the metric summary computed inside the session block
+    # can use the same live transport instance.
+    gateway: Any = getattr(request.app.state, "gateway", None)
+    live_transport: Any = None
+    if gateway is not None:
+        live_transport = next(
+            (
+                t for t in getattr(gateway, "_Protocol_Gateway__transports", [])
+                if t.transport_name in (f"transport.{device_name}", device_name)
+            ),
+            None,
+        )
+
     with session_scope() as db:
         nav:      NavData                  = get_nav_data(db)
         summary:  DeviceSummary | None     = get_device_summary(db, device_name)
@@ -185,6 +200,11 @@ async def device_page(request: Request, device_name: str):
             t.get("mask_count", 0) or t.get("screen_count", 0) or t.get("write_count", 0)
             for t in proto_tabs
         ) if proto_tabs else False
+        metric_summary: dict[str, Any] | None = (
+            get_device_metric_summary(db, summary.protocol_version, device_name, transport=live_transport)
+            if summary and summary.protocol_version and summary.transport_type == "scraper"
+            else None
+        )
         protocol_match = None
         if summary is None:
             protocol_match: Row[Tuple[str, str]] | None = (
@@ -216,7 +236,8 @@ async def device_page(request: Request, device_name: str):
     )
 
     # Populate live connection status from the gateway instance
-    gateway: Any = getattr(request.app.state, "gateway", None)
+    # (gateway / live_transport were already resolved above the session
+    # block so get_device_metric_summary could use the same transport.)
     analyze_enabled = False
     if gateway is not None:
         conn_status: dict[str, bool] = get_transport_connection_status(gateway)
@@ -224,13 +245,6 @@ async def device_page(request: Request, device_name: str):
         summary.is_connected = conn_status.get(
             summary.section,                          # try "transport.mqtt"
             conn_status.get(summary.name, False)      # fall back to "mqtt"
-        )
-        live_transport: Any = next(
-            (
-                t for t in getattr(gateway, "_Protocol_Gateway__transports", [])
-                if t.transport_name in (summary.name, summary.section)
-            ),
-            None,
         )
         analyze_enabled = bool(
             summary.transport_type == "scraper"
@@ -246,6 +260,7 @@ async def device_page(request: Request, device_name: str):
             "settings":     settings,
             "proto_tabs":   proto_tabs,
             "has_no_selections": has_no_selections,
+            "metric_summary": metric_summary,
             "proto_groups": proto_groups,
             "transport_library": get_transport_library(request.app.state.transports_dir),
             "device_partial_template": partial_template_name,
