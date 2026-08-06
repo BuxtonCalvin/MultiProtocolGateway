@@ -517,16 +517,18 @@ class influxdb_out(transport_base):
             "connected": self.connected,
             "database": self.database,
             "items_label": "Measurements",
-            "has_table_stats": False,   # v1 has no system.chunks equivalent — see docstring
+            "has_table_stats": False,
             "table_stats": [],
-            "columns": [],              # v1 has no information_schema.columns equivalent
+            "columns": [],
             "item_names": [],
             "sample_item": None,
             "sample_item_approx_rows": None,
             "retention_policies": [],
             "data_dir": self.data_dir or None,
             "data_dir_size_bytes": None,
-            "heap_profile": None,       # pprof debug endpoint is a v3/Rust-core concept only
+            "data_dir_size_display": None,
+            "heap_profile": None,
+            "v1_diagnostics": {},
             "error": None,
         }
 
@@ -534,45 +536,106 @@ class influxdb_out(transport_base):
             result["error"] = "Not connected to InfluxDB."
             return result
 
+        errors: list[str] = []
+
+        # 1. Fetch and Format Retention Policies
         try:
-            rp_result = self.client.query(f'SHOW RETENTION POLICIES ON "{self.database}"')  # type: ignore[reportUnknownMemberType]
-            result["retention_policies"] = list(rp_result.get_points()) # type: ignore
+            rp_result = self.client.query(f'SHOW RETENTION POLICIES ON "{self.database}"')  # type: ignore
+            result["retention_policies"] = [
+                {
+                    "name": p.get("name"), # type: ignore
+                    "duration": p.get("duration"), # type: ignore
+                    "shardGroupDuration": p.get("shardGroupDuration"), # type: ignore
+                    "default": p.get("default", False) # type: ignore
+                }
+                for p in rp_result.get_points()  # type: ignore
+            ]
         except Exception as e:
             self._log.error(f"get_storage_overview: SHOW RETENTION POLICIES failed: {e}")
-            result["error"] = f"Retention policy query failed: {e}"
+            errors.append(f"Retention policy query failed: {e}")
 
+        # 2. Extract Specific Stats Safely (Bypassing the global parsing issue)
+        v1_diag: dict[str, Any] = {}
+
+        # Safely query Runtime stats separately via SHOW STATS
         try:
-            meas_result = self.client.query(f'SHOW MEASUREMENTS ON "{self.database}"')  # type: ignore[reportUnknownMemberType]
-            measurements: list[str] = [p["name"] for p in meas_result.get_points() if "name" in p] # type: ignore
+            runtime_res = self.client.query("SHOW STATS FOR 'runtime'")  # type: ignore
+            if runtime_res and hasattr(runtime_res, 'raw') and "series" in runtime_res.raw: # type: ignore
+                for series in runtime_res.raw.get("series", []): # type: ignore
+                    if "columns" in series and "values" in series and series["values"]:
+                        v1_diag["runtime"] = dict(zip(series["columns"], series["values"][0])) # type: ignore
+        except Exception as e:
+            self._log.warning(f"get_storage_overview: Isolated runtime diagnostics skipped: {e}")
+
+        # Query Engine Database metric tags safely
+        try:
+            stats_res = self.client.query("SHOW STATS FOR 'database'")  # type: ignore
+            if stats_res and hasattr(stats_res, 'raw') and "series" in stats_res.raw: # type: ignore
+                for series in stats_res.raw.get("series", []): # type: ignore
+                    if series.get("tags", {}).get("database") == self.database: # type: ignore
+                        if "columns" in series and "values" in series and series["values"]:
+                            v1_diag["database"] = dict(zip(series["columns"], series["values"][0])) # type: ignore
+        except Exception as e:
+            self._log.warning(f"get_storage_overview: Isolated database stats skipped: {e}")
+
+        # Query WAL Engine properties safely
+        try:
+            engine_res = self.client.query("SHOW STATS FOR 'engine'")  # type: ignore
+            if engine_res and hasattr(engine_res, 'raw') and "series" in engine_res.raw: # type: ignore
+                for series in engine_res.raw.get("series", []): # type: ignore
+                    if series.get("tags", {}).get("database") == self.database: # type: ignore
+                        if "columns" in series and "values" in series and series["values"]:
+                            v1_diag["engine"] = dict(zip(series["columns"], series["values"][0])) # type: ignore
+        except Exception as e:
+            self._log.warning(f"get_storage_overview: Isolated engine stats skipped: {e}")
+
+        result["v1_diagnostics"] = v1_diag
+
+        # 3. Fetch Measurements & Fast Row Approximation
+        try:
+            meas_result = self.client.query(f'SHOW MEASUREMENTS ON "{self.database}"')  # type: ignore
+            measurements: list[str] = [p["name"] for p in meas_result.get_points() if "name" in p]  # type: ignore
             result["item_names"] = measurements
 
             if measurements:
                 first: str = measurements[0]
                 result["sample_item"] = first
+
                 try:
-                    count_result = self.client.query(f'SELECT COUNT(*) FROM "{first}"', database=self.database)  # type: ignore[reportUnknownMemberType]  # noqa: S608
-                    points: list[dict[str, Any]] = list(count_result.get_points()) # type: ignore
+                    count_result = self.client.query( # type: ignore
+                        f'SELECT COUNT(*) FROM "{first}" ORDER BY time DESC LIMIT 1',  # noqa: S608
+                        database=self.database
+                    )  # type: ignore
+                    points = list(count_result.get_points())  # type: ignore
                     if points:
-                        field_counts: list[float] = [
-                            v for k, v in points[0].items() if k != "time" and isinstance(v, (int, float))
-                        ]
+                        field_counts: list[int | float] = [v for k, v in points[0].items() if k != "time" and isinstance(v, (int, float))] # type: ignore
                         result["sample_item_approx_rows"] = int(max(field_counts)) if field_counts else 0
                 except Exception as e:
-                    self._log.error(f"get_storage_overview: COUNT(*) on '{first}' failed: {e}")
-                    result["error"] = f"Row count query failed for '{first}': {e}"
+                    self._log.error(f"get_storage_overview: COUNT(*) failed: {e}")
+                    errors.append(f"Row count query failed for '{first}': {e}")
         except Exception as e:
             self._log.error(f"get_storage_overview: SHOW MEASUREMENTS failed: {e}")
-            result["error"] = f"Measurement discovery failed: {e}"
+            errors.append(f"Measurement discovery failed: {e}")
 
+        # 4. Local File System Sizing
         if self.data_dir:
             try:
-                data_path: Path = Path(self.data_dir)
-                if data_path.exists():
-                    result["data_dir_size_bytes"] = sum(
-                        f.stat().st_size for f in data_path.rglob("*") if f.is_file()
-                    )
+                data_path = Path(self.data_dir)
+                if data_path.is_dir():
+                    total_bytes = sum(f.stat().st_size for f in data_path.rglob("*") if f.is_file() and not f.is_symlink())
+                    result["data_dir_size_bytes"] = total_bytes
+
+                    if total_bytes < 1024**2:
+                        result["data_dir_size_display"] = f"{total_bytes / 1024:.1f} KB"
+                    elif total_bytes < 1024**3:
+                        result["data_dir_size_display"] = f"{total_bytes / 1024**2:.1f} MB"
+                    else:
+                        result["data_dir_size_display"] = f"{total_bytes / 1024**3:.1f} GB"
             except Exception as e:
-                self._log.warning(f"get_storage_overview: could not size data_dir '{self.data_dir}': {e}")
+                self._log.warning(f"get_storage_overview: directory walk failed: {e}")
+
+        if errors:
+            result["error"] = " | ".join(errors)
 
         return result
 

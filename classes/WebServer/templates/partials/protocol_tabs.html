@@ -1,0 +1,85 @@
+<!--
+  Description: Shared protocol tab strip + metric-summary badges.
+  File: partials/protocol_tabs.html
+
+  Copyright 2026 Kevin Burke
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://apache.org
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+
+{#
+  partials/protocol_tabs.html
+  The protocol tab strip (Holding / Input / Json / ...) plus the
+  Total Available / Total Selected / <Registry Map> Available / Selected
+  badges to its right. Included by both scraper_panes.html (initial device
+  page render) and protocol_section.html (the fragment swapped in when the
+  Protocol Version dropdown changes) so there's a single copy of this
+  markup to maintain.
+
+  Expects in context: device, proto_tabs, metric_summary (may be None).
+#}
+{% if proto_tabs %}
+<div class="flex items-center gap-1 mb-3 border-b border-mpg-700" role="tablist">
+  {% set active_map_tab = proto_tabs | selectattr('registry_type', 'ne', 'json') | list | first %}
+  {% for tab in proto_tabs %}
+  {% set tab_stats = metric_summary.by_registry_type.get(tab.registry_type) if metric_summary else None %}
+  <button class="tab-btn px-4 py-1.5 text-xs font-medium rounded-t
+                 {% if loop.first %}tab-active{% else %}tab-inactive{% endif %}"
+          role="tab"
+          data-protocol="{{ tab.protocol_name }}"
+          data-registry="{{ tab.registry_type }}"
+          data-metric-total="{{ tab_stats.total if tab_stats else '' }}"
+          data-metric-chosen="{{ tab_stats.chosen if tab_stats else '' }}"
+          aria-selected="{{ 'true' if loop.first else 'false' }}"
+          hx-get="/api/protocols/{{ tab.protocol_name }}/{{ tab.registry_type }}/table?device_name={{ device.name }}"
+          hx-target="#protocol-table-container"
+          hx-swap="innerHTML scroll:false"
+          hx-headers='{"Cache-Control": "no-cache"}'
+          {% if loop.first %}hx-trigger="load, click"{% else %}hx-trigger="click"{% endif %}>
+    {{ tab.registry_type | title }}
+    <span class="text-mpg-100 ml-1">({{ tab.protocol_name }})</span>
+    {% if tab.registry_type != "json" %}
+    <span class="tab-counts ml-1.5 text-green-600 font-semibold text-xs">
+      W:{{ tab.write_count }} M:{{ tab.mask_count }} S:{{ tab.screen_count }}
+    </span>
+    {% endif %}
+  </button>
+  {% endfor %}
+
+  {% if metric_summary %}
+  {% set active_map_stats = metric_summary.by_registry_type.get(active_map_tab.registry_type) if active_map_tab else None %}
+  <div id="metric-summary" class="ml-auto flex items-center gap-3 text-xs pb-1.5 pl-2 pr-3">
+    <span class="surface-muted">
+      Total Available: <span id="metric-total-available" class="text-green-600 font-semibold">{{ metric_summary.total_available }}</span>
+    </span>
+    <span class="surface-muted">
+      Total Selected: <span id="metric-chosen-count" class="text-green-600 font-semibold">{{ metric_summary.chosen_count }}</span>
+    </span>
+    <span id="metric-tab-available-wrap" class="surface-muted {% if not active_map_tab %}hidden{% endif %}">
+      <span id="metric-tab-available-label">{{ active_map_tab.registry_type | title if active_map_tab else '' }} Available</span>:
+      <span id="metric-tab-available" class="text-green-600 font-semibold">{{ active_map_stats.total if active_map_stats else 0 }}</span>
+    </span>
+    <span id="metric-tab-chosen-wrap" class="surface-muted {% if not active_map_tab %}hidden{% endif %}">
+      <span id="metric-tab-chosen-label">{{ active_map_tab.registry_type | title if active_map_tab else '' }} Selected</span>:
+      <span id="metric-tab-chosen" class="text-green-600 font-semibold">{{ active_map_stats.chosen if active_map_stats else 0 }}</span>
+    </span>
+    {% if timescale_bridge_available() %}
+    <span id="metric-summary-warning"
+          class="text-red-500 font-semibold {% if not metric_summary.over_limit %}hidden{% endif %}">
+      Metric selection from register maps is over {{ metric_summary.wide_table_limit }}: no wide table formation
+    </span>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+{% endif %}

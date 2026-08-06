@@ -1,4 +1,4 @@
-# Description: Bridge module for a Prometheus scraping (pull-model) output transport with an in-memory metric registry, dynamic per-field Gauge/Counter/Histogram metrics, and per-machine target health tracking.
+# bridge transport module for a Prometheus scraping (pull-model) output transport with an in-memory metric registry, dynamic per-field Gauge/Counter/Histogram metrics, and per-machine target health tracking.
 # File: prometheus_out.py
 #
 # Copyright 2026 Kevin Burke
