@@ -126,12 +126,12 @@ def toggle_register(
     db: Session = Depends(get_session),
 )-> dict[str, Any]:
 
-    result: ProtocolRegister | DeviceProtocolSelection | None = toggle_register_field(db, register_id, payload.field, payload.value, device_name)
+    result: DeviceProtocolSelection | None = toggle_register_field(db, register_id, payload.field, payload.value, device_name)
     if result is None:
         raise HTTPException(
             status_code=403,
-            detail="Toggle not allowed — protocol write_mode is read-only, "
-                   "or register not found."
+            detail="Toggle not allowed — no device_name given, protocol "
+                   "write_mode is read-only, or register not found."
         )
     db.commit()
     return {

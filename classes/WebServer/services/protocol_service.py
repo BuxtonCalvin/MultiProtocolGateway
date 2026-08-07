@@ -264,8 +264,8 @@ def get_device_metric_summary(
     """
     Device-wide metric-selection summary across every non-JSON registry-type
     tab (register map) for a protocol_version. Used to render the
-    Available / Selected / Register-map-total badges next to the protocol
-    tab strip.
+    Available / Selected / <Registry Map> Available/Selected badges next to
+    the protocol tab strip.
 
     Returns a dict with:
 
@@ -438,51 +438,50 @@ def toggle_register_field(
     field: str,   # "user_write_enabled" | "mask_enabled" | "screen_enabled"
     value: bool,
     device_name: str | None = None,
-) -> ProtocolRegister | DeviceProtocolSelection | None:
+) -> DeviceProtocolSelection | None:
     """
-    Toggle a single field on a ProtocolRegister row.
+    Toggle a single write/mask/screen field for one device's selection of a
+    register. These are device-scoped choices (see DeviceProtocolSelection),
+    not part of the shared ProtocolRegister definition, so a device_name is
+    required — there's no protocol-wide toggle to fall back to.
     Enforces the two-gate rule: user_write_enabled can only be True
     if the protocol permits writing.
     Returns the updated row, or None if not found / not allowed.
     """
     allowed_fields: set[str] = {"user_write_enabled", "mask_enabled", "screen_enabled"}
-    if field not in allowed_fields:
+    if field not in allowed_fields or not device_name:
         return None
 
     row: ProtocolRegister | None = db.get(ProtocolRegister, register_id)
     if row is None:
         return None
 
-    target: ProtocolRegister | DeviceProtocolSelection = row
-
-    if device_name:
-        existing: DeviceProtocolSelection | None = (
-            db.query(DeviceProtocolSelection)
-            .filter(
-                DeviceProtocolSelection.device_name == device_name,
-                DeviceProtocolSelection.protocol_name == row.protocol_name,
-                DeviceProtocolSelection.registry_type == row.registry_type,
-                DeviceProtocolSelection.register_address == row.register_address,
-            )
-            .first()
+    target: DeviceProtocolSelection | None = (
+        db.query(DeviceProtocolSelection)
+        .filter(
+            DeviceProtocolSelection.device_name == device_name,
+            DeviceProtocolSelection.protocol_name == row.protocol_name,
+            DeviceProtocolSelection.registry_type == row.registry_type,
+            DeviceProtocolSelection.register_address == row.register_address,
         )
-        if existing is None:
-            existing = DeviceProtocolSelection(
-                device_name=device_name,
-                protocol_name=row.protocol_name,
-                registry_type=row.registry_type,
-                register_address=row.register_address,
-                user_write_enabled=False,
-                mask_enabled=False,
-                screen_enabled=False,
-                user_write_enabled_disk=False,
-                mask_enabled_disk=False,
-                screen_enabled_disk=False,
-                is_dirty=False,
-            )
-            db.add(existing)
-            db.flush()
-        target = existing
+        .first()
+    )
+    if target is None:
+        target = DeviceProtocolSelection(
+            device_name=device_name,
+            protocol_name=row.protocol_name,
+            registry_type=row.registry_type,
+            register_address=row.register_address,
+            user_write_enabled=False,
+            mask_enabled=False,
+            screen_enabled=False,
+            user_write_enabled_disk=False,
+            mask_enabled_disk=False,
+            screen_enabled_disk=False,
+            is_dirty=False,
+        )
+        db.add(target)
+        db.flush()
 
     if field == "user_write_enabled" and value and not row.is_writable_by_protocol:
         return None

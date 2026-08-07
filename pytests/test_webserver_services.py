@@ -68,7 +68,11 @@ def test_diff_result_summary_counts_changes() -> None:
 
 
 def test_build_diff_uses_mocked_database_rows() -> None:
-    """Mocks database session: build_diff returns staged setting and protocol changes."""
+    """Mocks database session: build_diff returns staged setting changes.
+    (Protocol-level diffing was removed along with ProtocolRegister's dead
+    mask/screen/write columns — see diff_engine.py — so build_diff() now
+    only queries Setting; result.protocols is always empty.)
+    """
     dirty_setting = SimpleNamespace(
         section="transport.inv", key="host", value_disk="old", value_staged="new",
         is_dirty=True, is_active=True, is_orphan=False,
@@ -77,19 +81,13 @@ def test_build_diff_uses_mocked_database_rows() -> None:
         section="transport.inv", key="unused", value_disk="x", value_staged="x",
         is_dirty=False, is_active=True, is_orphan=True,
     )
-    dirty_protocol = SimpleNamespace(
-        protocol_name="eg4", registry_type="input", register_address="1", variable_name="soc",
-        user_write_enabled_disk=False, user_write_enabled=True,
-        mask_enabled_disk=False, mask_enabled=False,
-        screen_enabled_disk=True, screen_enabled=True,
-    )
     db = MagicMock()
-    db.query.side_effect = [QueryStub([dirty_setting, orphan]), QueryStub([dirty_protocol])]
+    db.query.side_effect = [QueryStub([dirty_setting, orphan])]
 
     result: DiffResult = build_diff(db)
 
     assert [d.change_type for d in result.settings] == ["modified", "orphan"]
-    assert result.protocols[0].field == "user_write_enabled"
+    assert result.protocols == []
 
 
 def test_analysis_service_handles_missing_gateway_and_live_transports() -> None:

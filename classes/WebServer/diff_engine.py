@@ -35,7 +35,7 @@ from enum import Enum
 
 from sqlalchemy.orm import Session
 
-from .models import ProtocolRegister, Setting
+from .models import Setting
 
 
 class ChangeType(str, Enum):
@@ -139,23 +139,5 @@ def build_diff(db: Session) -> DiffResult:
             change_type=change_type,
         ))
 
-    # ---- Protocol diff ----
-    for row in db.query(ProtocolRegister).filter(ProtocolRegister.is_dirty == True).all():  # noqa: E712
-        for field_name, disk_field, staged_field in (
-            ("user_write_enabled", row.user_write_enabled_disk, row.user_write_enabled),
-            ("mask_enabled", row.mask_enabled_disk, row.mask_enabled),
-            ("screen_enabled", row.screen_enabled_disk, row.screen_enabled),
-        ):
-            if disk_field != staged_field:
-                result.protocols.append(ProtocolDiff(
-                    protocol_name=row.protocol_name,
-                    registry_type=row.registry_type,
-                    register_address=row.register_address,
-                    variable_name=row.variable_name,
-                    field=field_name,
-                    old_value=disk_field,
-                    new_value=staged_field,
-                    change_type=ChangeType.MODIFIED,
-                ))
 
     return result
