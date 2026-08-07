@@ -5178,6 +5178,550 @@ class RollupManager:
             ],
         }
 
+    # -------------------------
+    # Rebuild Compression — backs the "Timescale DB -> Rebuild Compression"
+    # admin screen. Sibling to the Rebuild Rollup Views screen above and
+    # reuses its exact grouping (shared narrow stack, plus one entry per
+    # wide-table protocol) and JSON-body-via-fetch() convention, but is a
+    # fundamentally heavier, different kind of operation: rather than
+    # dropping/recreating a view's *definition*, this rewrites the on-disk
+    # storage format of chunks that are ALREADY compressed, via
+    # decompress_chunk() -> compress_chunk() on each one independently.
+    #
+    # Why this is ever needed: compress_segmentby / compress_orderby (see
+    # hypertable_defaults) and a wide table's column set (after Delete
+    # Columns) only affect chunks compressed AFTER the change -- chunks
+    # compressed under the old settings keep their old physical layout
+    # until something re-compresses them. This screen is that "something",
+    # run on demand rather than waiting for those chunks to naturally
+    # cycle out via retention. decompress_table_chunks_best_effort() below
+    # is also this class's single source of truth for a plain "decompress
+    # everything on this table, best-effort" step -- WideTableFieldManager
+    # .delete_fields calls it before its ALTER TABLE DROP COLUMN instead
+    # of keeping its own private copy of the same logic.
+    # -------------------------
+
+    def _compression_group_tables(self, protocol_names: set[str] | None = None) -> list[dict[str, Any]]:
+        """
+        Resolves each compression group's member tables -- the group's raw
+        hypertable plus its hourly/daily/weekly/monthly rollup views (all
+        five are independently compressible hypertables in TimescaleDB;
+        continuous aggregates materialize into their own hypertable).
+
+        Uses the same group keys as rebuild_all_rollups() /
+        refresh_selected_rollups() above (a wide-table protocol_name, plus
+        the literal "shared_narrow" for the shared narrow stack) and the
+        same ordering (shared narrow stack first, then wide protocols
+        alphabetically) list_rollup_views() produces, so a group's
+        position/selection here always lines up with what the admin sees
+        on the Rebuild Rollup Views screen's checkboxes.
+
+        protocol_names=None resolves every group with selected=True. An
+        empty set resolves every group with selected=False -- callers use
+        `selected` to decide whether to act on a group, not whether to
+        include it in the returned list, so a group always has a result
+        row even when it's skipped.
+        """
+        groups: list[dict[str, Any]] = [{
+            "protocol_name": "shared_narrow",
+            "wide_table_name": "device_metrics_narrow",
+            "selected": protocol_names is None or "shared_narrow" in protocol_names,
+            "tables": [
+                "device_metrics_narrow",
+                "hourly_rollup_narrow",
+                "daily_rollup_narrow",
+                "weekly_rollup_narrow",
+                "monthly_rollup_narrow",
+            ],
+        }]
+
+        with self.SessionFactory() as session:
+            protocol_rows: Sequence[Row[Any]] = session.execute(
+                text("""
+                    SELECT protocol_name, rollup_prefix, wide_table_name
+                    FROM protocol_registry
+                    WHERE wide_table_name IS NOT NULL
+                    ORDER BY protocol_name
+                """)
+            ).fetchall()
+
+        for protocol_name, rollup_prefix, wide_table_name in protocol_rows:
+            tables: list[str] = [wide_table_name]
+            if rollup_prefix:
+                # Registered but rollup setup hasn't finished yet -- the
+                # wide table itself is still a valid compression target,
+                # it just doesn't have rollup views to add yet.
+                tables.extend(f"{gran}_{rollup_prefix}" for gran in ("hourly", "daily", "weekly", "monthly"))
+            groups.append({
+                "protocol_name": protocol_name,
+                "wide_table_name": wide_table_name,
+                "selected": protocol_names is None or protocol_name in protocol_names,
+                "tables": tables,
+            })
+
+        return groups
+
+    # Every group's tables follow the same [raw, hourly, daily, weekly,
+    # monthly] shape (see _compression_group_tables) -- this is just the
+    # granularity label for a table at a given position in that list, used
+    # to annotate each inventory row for the UI.
+    _GRANULARITY_BY_POSITION: tuple[str, ...] = ("raw", "hourly", "daily", "weekly", "monthly")
+
+    def list_compression_groups(self) -> list[dict[str, Any]]:
+        """
+        Read-only compression inventory for the Rebuild Compression screen
+        -- one row per group (shared narrow stack, plus each wide-table
+        protocol), each carrying a per-table breakdown (raw table + all
+        four rollup views) of chunk counts and on-disk size, so the admin
+        can see the actual cost of a rebuild before committing to it
+        rather than clicking blind.
+
+        Answered with a SINGLE query across every group's tables at once,
+        rather than the 2-queries-per-table loop this replaced. Two
+        reasons that's the better trade here, not just a micro-
+        optimization:
+          1. Round trips dominate: with ~5-10 groups x 5 tables each, the
+             old loop was 50-100 sequential round trips to Postgres before
+             the page could render. One batched query is one round trip,
+             and GROUP BY lets Postgres answer it off a single scan of
+             timescaledb_information.chunks instead of one scan per table.
+          2. Simpler error handling: to_regclass()/hypertable_size() on a
+             table that doesn't exist yet (rollups mid-setup for a
+             protocol) just yields NULL/0 inline, so there's no per-table
+             try/except -- one missing view no longer needs special-casing
+             to avoid blanking out an otherwise-valid group.
+
+        A view-vs-hypertable subtlety the single query has to account for:
+        a rollup view's NAME (e.g. "hourly_rollup_wide_eg4_18kpv") is not
+        the name TimescaleDB's chunk/size catalogs index by -- continuous
+        aggregates materialize into a separate, internally-named
+        hypertable, and that's what timescaledb_information.chunks and
+        hypertable_size() need. The query below resolves that via
+        timescaledb_information.continuous_aggregates (the public,
+        version-stable catalog view) before joining chunks/computing size,
+        falling back to the table's own name unchanged for the raw wide/
+        narrow tables, which aren't continuous aggregates and don't need
+        resolving.
+
+        (There's also a lower-level variant of this same query that joins
+        _timescaledb_catalog.* system tables directly by OID instead of
+        timescaledb_information.* -- probably marginally faster, but those
+        catalog tables are TimescaleDB's internal implementation detail,
+        not its supported public API, and can change shape across
+        versions without notice. This inventory isn't a hot path -- it
+        loads once per page view and once after a rebuild -- so the public
+        catalog views are the safer choice here.)
+        """
+        groups: list[dict[str, Any]] = self._compression_group_tables(protocol_names=None)
+
+        granularity_by_table: dict[str, str] = {}
+        all_table_names: list[str] = []
+        for group in groups:
+            for i, table_name in enumerate(group["tables"]):
+                granularity_by_table[table_name] = self._GRANULARITY_BY_POSITION[i]
+                all_table_names.append(table_name)
+
+        with self.SessionFactory() as session:
+            stat_rows: Sequence[Row[Any]] = session.execute(
+                text("""
+                    WITH target_tables AS (
+                        SELECT unnest(CAST(:table_names AS text[])) AS view_name
+                    ),
+                    resolved AS (
+                        SELECT
+                            t.view_name,
+                            coalesce(
+                                ca.materialization_hypertable_schema || '.' || ca.materialization_hypertable_name,
+                                t.view_name
+                            ) AS qualified_relation_name,
+                            coalesce(ca.materialization_hypertable_name, t.view_name) AS hypertable_name
+                        FROM target_tables t
+                        LEFT JOIN timescaledb_information.continuous_aggregates ca
+                            ON ca.view_name = t.view_name
+                    ),
+                    chunk_counts AS (
+                        SELECT
+                            r.view_name,
+                            r.qualified_relation_name,
+                            count(ch.chunk_name) AS total_chunks,
+                            count(ch.chunk_name) FILTER (WHERE ch.is_compressed) AS compressed_chunks
+                        FROM resolved r
+                        LEFT JOIN timescaledb_information.chunks ch
+                            ON ch.hypertable_name = r.hypertable_name
+                        GROUP BY r.view_name, r.qualified_relation_name
+                    )
+                    SELECT
+                        c.view_name,
+                        c.total_chunks,
+                        c.compressed_chunks,
+                        coalesce(hypertable_size(to_regclass(c.qualified_relation_name)), 0) AS size_bytes
+                    FROM chunk_counts c
+                """),
+                {"table_names": all_table_names},
+            ).fetchall()
+
+        stats_by_table: dict[str, dict[str, int]] = {
+            row.view_name: {
+                "total_chunks": row.total_chunks or 0,
+                "compressed_chunks": row.compressed_chunks or 0,
+                "size_bytes": row.size_bytes or 0,
+            }
+            for row in stat_rows
+        }
+
+        rows_out: list[dict[str, Any]] = []
+        for group in groups:
+            table_rows: list[dict[str, Any]] = []
+            total_chunks = 0
+            compressed_chunks = 0
+            size_bytes = 0
+            for table_name in group["tables"]:
+                stats: dict[str, int] = stats_by_table.get(
+                    table_name, {"total_chunks": 0, "compressed_chunks": 0, "size_bytes": 0}
+                )
+                table_rows.append({
+                    "table_name": table_name,
+                    "granularity": granularity_by_table[table_name],
+                    "total_chunks": stats["total_chunks"],
+                    "compressed_chunks": stats["compressed_chunks"],
+                    "size_bytes": stats["size_bytes"],
+                })
+                total_chunks += stats["total_chunks"]
+                compressed_chunks += stats["compressed_chunks"]
+                size_bytes += stats["size_bytes"]
+
+            rows_out.append({
+                "protocol_name": group["protocol_name"],
+                "wide_table_name": group["wide_table_name"],
+                "tables": table_rows,
+                "total_chunks": total_chunks,
+                "compressed_chunks": compressed_chunks,
+                "size_bytes": size_bytes,
+            })
+
+        return rows_out
+
+    def _pause_compression_job_for_table(self, session: Session, table_name: str) -> list[int]:
+        """
+        Same job-pause pattern as WideTableFieldManager._pause_compression_
+        job (see the Delete Columns flow, further down in this file) --
+        duplicated here in a couple of lines rather than shared across the
+        two classes, since neither holds a reference to the other and this
+        is a small, self-contained query. Returns the job_id(s) paused, so
+        _resume_compression_job_for_table can re-enable them afterward.
+        """
+        try:
+            rows: Sequence[Row[Any]] = session.execute(
+                text("""
+                    SELECT job_id FROM timescaledb_information.jobs
+                    WHERE hypertable_name = :table_name
+                      AND proc_name ILIKE :search_term
+                      AND scheduled = true
+                """),
+                {"table_name": table_name, "search_term": "%compress%"}
+            ).fetchall()
+            job_ids: list[int] = [r[0] for r in rows]
+            for job_id in job_ids:
+                session.execute(text("SELECT alter_job(:job_id, scheduled := false)"), {"job_id": job_id})
+            if job_ids:
+                self._log.info(f"_pause_compression_job_for_table: paused job(s) {job_ids} for '{table_name}'")
+        except Exception as e:
+            self._log.warning(
+                f"_pause_compression_job_for_table: could not pause compression job for '{table_name}': {e}"
+            )
+            return []
+        else:
+            return job_ids
+
+    def _resume_compression_job_for_table(self, session: Session, job_ids: list[int]) -> None:
+        """Re-enables (scheduled => true) job_ids previously paused by _pause_compression_job_for_table."""
+        for job_id in job_ids:
+            try:
+                session.execute(text("SELECT alter_job(:job_id, scheduled => true)"), {"job_id": job_id})
+            except Exception as e:
+                self._log.warning(f"_resume_compression_job_for_table: could not resume job {job_id}: {e}")
+        if job_ids:
+            self._log.info(f"_resume_compression_job_for_table: resumed job(s) {job_ids}")
+
+    def decompress_table_chunks_best_effort(self, session: Session, table_name: str) -> None:
+        """
+        Decompresses every currently-compressed chunk of table_name,
+        best-effort. This is the one place that kind of decompress lives
+        now -- it used to be a private copy
+        (WideTableFieldManager._decompress_chunks_best_effort) kept next
+        to the Delete Columns flow, but decompressing a table's chunks is
+        exactly what this class's Rebuild Compression machinery already
+        does as half of its decompress -> compress cycle, so
+        WideTableFieldManager.delete_fields now calls this instead of
+        keeping its own copy of the same logic. Support for dropping
+        columns directly on compressed hypertable chunks is inconsistent
+        across TimescaleDB versions, so delete_fields calls this
+        proactively, ahead of its ALTER TABLE ... DROP COLUMN. Newly
+        written data is recompressed on the normal compression policy
+        schedule; running the full "Rebuild Compression" screen
+        afterward is what re-compresses these particular chunks under
+        the now-smaller column set (see rebuild_compression's docstring).
+
+        Best-effort: a table with no compressed chunks (or not yet a
+        hypertable) simply no-ops here rather than failing the caller's
+        edit.
+
+        Runs inside a SAVEPOINT (session.begin_nested()), not directly in
+        the caller's transaction. Postgres aborts an entire transaction --
+        not just the one failing statement -- the moment any statement in
+        it errors, and that abort can only be cleared by a ROLLBACK (or
+        ROLLBACK TO SAVEPOINT), never by simply catching the Python
+        exception. Without the SAVEPOINT here, a failure in this
+        best-effort step would silently poison the caller's transaction:
+        the except block below would swallow the Python-level exception,
+        but every statement after it -- including the ALTER TABLE DROP
+        COLUMN this is meant to prepare for -- would then fail with
+        "current transaction is aborted, commands ignored until end of
+        transaction block", surfacing as a confusing failure far from its
+        real cause. begin_nested() ensures only the SAVEPOINT is rolled
+        back on failure, leaving the rest of the caller's transaction
+        (including the DROP COLUMN that follows) usable.
+
+        Deliberately takes and reuses the CALLER's session/transaction
+        (unlike list_compression_groups/rebuild_compression above, which
+        each open their own short-lived sessions) -- delete_fields needs
+        this decompress step and its subsequent DROP COLUMN to be atomic
+        with each other, inside the single advisory-locked transaction it
+        already holds.
+
+        Applies the same dynamic lock_timeout (_get_dynamic_settings_
+        helper -> _set_lock_timeout) every other lock-risky operation in
+        this class applies before touching a hypertable/CAGG (see
+        _create_rollup_helper, drop_protocol_rollup,
+        _drop_all_continuous_aggregates) -- decompress_chunk() takes an
+        exclusive lock same as those, and can be blocked by the same
+        sources (the flush thread, an in-flight refresh). Without it this
+        step would hang on that lock indefinitely instead of failing fast
+        like everything else here does; it was inconsistent for this
+        decompress to be the one exception.
+        """
+        r_settings: dict[str, Any] = self._get_dynamic_settings_helper()
+        try:
+            with session.begin_nested():
+                self._set_lock_timeout(session, r_settings["lock_timeout"])
+                session.execute(
+                    text("""
+                        SELECT decompress_chunk(c, true)
+                        FROM show_chunks(:tname) AS c;
+                    """),
+                    {"tname": table_name}
+                )
+        except Exception as e:
+            # the common case -- no compressed chunks yet
+            # -- is entirely expected, but logged at warning so an
+            # unexpected failure here is never silent again.
+            self._log.warning(
+                f"decompress_table_chunks_best_effort: could not decompress chunks for '{table_name}' "
+                f"(continuing -- this step is best-effort): {e}"
+            )
+
+    def rebuild_compression(self, protocol_names: set[str] | None = None) -> dict[str, Any]:
+        """
+        Full decompress -> recompress pass across every already-compressed
+        chunk of the selected group(s)' raw table and all four rollup
+        views, for the admin's "Rebuild Compression" button.
+
+        Unlike rebuild_all_rollups() / refresh_selected_rollups(), this
+        never drops or recreates a view or a chunk -- it only rewrites
+        each already-compressed chunk's on-disk storage format in place
+        (decompress_chunk() followed by compress_chunk() against the
+        hypertable's CURRENT compress_segmentby/compress_orderby/column
+        set). No row data is touched or lost. This is what actually
+        applies a compress_segmentby/compress_orderby change, or cleans
+        up the physical layout after Delete Columns has dropped wide-
+        table columns, to data that was compressed under the old
+        settings -- editing hypertable_defaults or dropping a column only
+        changes what NEW compression uses; it does nothing to chunks
+        already on disk until something like this rewrites them.
+
+        Args:
+            protocol_names: Same group keys as rebuild_all_rollups() -- a
+                wide-table protocol_name, plus "shared_narrow". None acts
+                on every group. An empty set does nothing -- every group
+                comes back in the result with skipped=True.
+
+        Only touches chunks TimescaleDB already reports as compressed
+        (is_compressed=true in timescaledb_information.chunks) -- an
+        uncompressed chunk (typically the newest one, still inside its
+        compress_after window) is left alone, so this never fights the
+        compression policy schedule or compresses data early.
+
+        Each table's scheduled compression job is paused for the duration
+        of that table's chunk loop (mirrors WideTableFieldManager.
+        delete_fields' pause-around-DDL pattern) so the background
+        scheduler can't race a chunk this is already mid-rewrite on, and
+        is always resumed afterward even if a chunk failed.
+
+        Every chunk gets its own try/except: one chunk failing to
+        decompress or recompress (e.g. a concurrent lock) does not abort
+        the rest of that table, the rest of the group, or any other
+        selected group. Runs synchronously and returns a per-group result
+        with a per-chunk breakdown and before/after byte totals, so the
+        caller can show the actual size change rather than a single pass/
+        fail flag.
+
+        chunk_name values come back from timescaledb_information.chunks
+        unqualified (e.g. "_hyper_3_42_chunk", no schema prefix) -- fine
+        for the chunk_compression_stats()/WHERE chunk_name = comparisons
+        below, but decompress_chunk()/compress_chunk() need a regclass
+        that actually resolves, which means schema-qualifying it against
+        _timescaledb_internal (where TimescaleDB always creates chunks)
+        before passing it to either call.
+
+        Applies the same dynamic work_mem/lock_timeout tier
+        (_get_dynamic_settings_helper) every other lock-risky operation
+        in this class applies before touching a hypertable/CAGG (see
+        _create_rollup_helper, drop_protocol_rollup,
+        _refresh_single_rollup_helper) -- decompress_chunk()/
+        compress_chunk() take the same kind of exclusive chunk lock as
+        those and decompression is memory-heavy, so this was the one
+        compression-adjacent operation in the class NOT getting that
+        tuning. Computed once up front (cheap -- reads in-memory counts,
+        no DB hit) and applied per chunk transaction below, rather than
+        per table, since it doesn't change over the course of one run.
+        """
+        r_settings: dict[str, Any] = self._get_dynamic_settings_helper()
+        all_groups: list[dict[str, Any]] = self._compression_group_tables(protocol_names=protocol_names)
+        group_results: list[dict[str, Any]] = []
+
+        for group in all_groups:
+            if not group["selected"]:
+                group_results.append({
+                    "protocol_name": group["protocol_name"],
+                    "skipped": True,
+                    "ok": True,
+                    "chunks_attempted": 0,
+                    "chunks_ok": 0,
+                    "chunks_failed": 0,
+                    "size_before_bytes": 0,
+                    "size_after_bytes": 0,
+                    "chunks": [],
+                })
+                continue
+
+            chunk_results: list[dict[str, Any]] = []
+            chunks_ok = 0
+            chunks_failed = 0
+            size_before_total = 0
+            size_after_total = 0
+
+            for table_name in group["tables"]:
+                try:
+                    with self.SessionFactory() as session:
+                        with session.begin():
+                            self._set_lock_timeout(session, r_settings["lock_timeout"])
+                            chunk_rows: Sequence[Row[Any]] = session.execute(
+                                text("""
+                                    SELECT c.chunk_name, s.before_compression_total_bytes
+                                    FROM timescaledb_information.chunks c
+                                    JOIN chunk_compression_stats(:tname) s
+                                        ON s.chunk_name = c.chunk_name
+                                    WHERE c.hypertable_name = :tname AND c.is_compressed = true
+                                """),
+                                {"tname": table_name},
+                            ).fetchall()
+                except SQLAlchemyError as e:
+                    # Table/view doesn't exist yet (rollups not set up for
+                    # this protocol), or has no compressed chunks at all --
+                    # nothing to rebuild here, but don't fail the rest of
+                    # the group over it.
+                    self._log.debug(f"rebuild_compression: skipping '{table_name}': {e}")
+                    continue
+
+                if not chunk_rows:
+                    continue
+
+                paused_job_ids: list[int] = []
+                try:
+                    with self.SessionFactory() as session:
+                        with session.begin():
+                            paused_job_ids = self._pause_compression_job_for_table(session, table_name)
+
+                    for chunk_name, before_bytes in chunk_rows:
+                        # Ensure the chunk name is fully qualified with its internal schema
+                        if not chunk_name.startswith("_timescaledb_internal."):
+                            qualified_chunk: str = f"_timescaledb_internal.{chunk_name}"
+                        else:
+                            qualified_chunk = chunk_name
+
+                        try:
+                            with self.SessionFactory() as session:
+                                with session.begin():
+                                    self._set_lock_timeout(session, r_settings["lock_timeout"])
+                                    session.execute(
+                                        text(f"SET LOCAL work_mem = '{r_settings['work_mem']}';")
+                                    )
+                                    session.execute(text("SELECT decompress_chunk(:c, true)"), {"c": qualified_chunk})
+                                    session.execute(text("SELECT compress_chunk(:c, true)"), {"c": qualified_chunk})
+
+                                # For chunk_compression_stats, we pass the base table/view,
+                                # but keep the un-prefixed chunk name for the string comparison in the WHERE filter
+                                after_row: Row[Any] | None = session.execute(
+                                    text("""
+                                        SELECT after_compression_total_bytes
+                                        FROM chunk_compression_stats(:tname)
+                                        WHERE chunk_name = :c
+                                    """),
+                                    {"tname": table_name, "c": chunk_name},
+                                ).one_or_none()
+
+                            after_bytes = after_row.after_compression_total_bytes if after_row else None
+                            chunks_ok += 1
+                            size_before_total += before_bytes or 0
+                            size_after_total += after_bytes or 0
+                            chunk_results.append({
+                                "table_name": table_name, "chunk_name": chunk_name,
+                                "ok": True, "error": None,
+                            })
+                        except Exception as e:
+                            chunks_failed += 1
+                            self._log.error(
+                                f"rebuild_compression: chunk '{chunk_name}' on '{table_name}' failed: {e}"
+                            )
+                            chunk_results.append({
+                                "table_name": table_name, "chunk_name": chunk_name,
+                                "ok": False, "error": str(e),
+                            })
+                finally:
+                    if paused_job_ids:
+                        try:
+                            with self.SessionFactory() as session:
+                                with session.begin():
+                                    self._resume_compression_job_for_table(session, paused_job_ids)
+                        except Exception as e:
+                            # Never let a resume failure mask chunk results
+                            # already recorded above -- logged so a human
+                            # notices and re-enables the job manually.
+                            self._log.warning(
+                                f"rebuild_compression: could not resume compression job(s) "
+                                f"{paused_job_ids} for '{table_name}': {e}"
+                            )
+
+            group_results.append({
+                "protocol_name": group["protocol_name"],
+                "skipped": False,
+                "ok": chunks_failed == 0,
+                "chunks_attempted": chunks_ok + chunks_failed,
+                "chunks_ok": chunks_ok,
+                "chunks_failed": chunks_failed,
+                "size_before_bytes": size_before_total,
+                "size_after_bytes": size_after_total,
+                "chunks": chunk_results,
+            })
+
+        ok_count: int = sum(1 for g in group_results if g["ok"] and not g["skipped"])
+        attempted_count: int = sum(1 for g in group_results if not g["skipped"])
+        self._log.info(
+            "rebuild_compression: %d/%d selected group(s) fully ok.", ok_count, attempted_count,
+        )
+
+        return {"groups": group_results}
+
     def get_dynamic_raw_table_overview(self) -> list[dict[str, Any]]:
         """
         Read-only, per-raw-table snapshot of the values get_dynamic_raw_
@@ -6930,7 +7474,7 @@ class WideTableFieldManager:
                     with session.begin():
                         self._bridge.schema_advisory_lock(session)
 
-                        self._decompress_chunks_best_effort(session, wide_table_name)
+                        rollup_mgr.decompress_table_chunks_best_effort(session, wide_table_name)
 
                         # table_name/col come from _safe_table_name() /
                         # _clean_column_name() at creation time and are
@@ -7059,48 +7603,3 @@ class WideTableFieldManager:
         if job_ids:
             self._log.info(f"_resume_compression_job: resumed job(s) {job_ids}")
 
-    def _decompress_chunks_best_effort(self, session: Session, table_name: str) -> None:
-        """
-        Decompresses any compressed chunks of table_name before an
-        ALTER TABLE ... DROP COLUMN. Support for dropping columns directly
-        on compressed hypertable chunks is inconsistent across TimescaleDB
-        versions, so this proactively decompresses first. Newly written
-        data is recompressed on the normal compression policy schedule --
-        this only affects already-compressed historical chunks.
-
-        Best-effort: a table with no compressed chunks (or not yet a
-        hypertable) simply no-ops here rather than failing the edit.
-
-        Runs inside a SAVEPOINT (session.begin_nested()), not directly in
-        the caller's transaction. Postgres aborts an entire transaction --
-        not just the one failing statement -- the moment any statement in
-        it errors, and that abort can only be cleared by a ROLLBACK (or
-        ROLLBACK TO SAVEPOINT), never by simply catching the Python
-        exception. Without the SAVEPOINT here, a failure in this
-        best-effort step would silently poison the caller's transaction:
-        the except block below would swallow the Python-level exception,
-        but every statement after it -- including the ALTER TABLE DROP
-        COLUMN this is meant to prepare for -- would then fail with
-        "current transaction is aborted, commands ignored until end of
-        transaction block", surfacing as a confusing failure far from its
-        real cause. begin_nested() ensures only the SAVEPOINT is rolled
-        back on failure, leaving the rest of the caller's transaction
-        (including the DROP COLUMN that follows) usable.
-        """
-        try:
-            with session.begin_nested():
-                session.execute(
-                    text("""
-                        SELECT decompress_chunk(c, true)
-                        FROM show_chunks(:tname) AS c;
-                    """),
-                    {"tname": table_name}
-                )
-        except Exception as e:
-            # the common case -- no compressed chunks yet
-            # -- is entirely expected, but logged at warning so an
-            # unexpected failure here is never silent again.
-            self._log.warning(
-                f"_decompress_chunks_best_effort: could not decompress chunks for '{table_name}' "
-                f"(continuing -- this step is best-effort): {e}"
-            )

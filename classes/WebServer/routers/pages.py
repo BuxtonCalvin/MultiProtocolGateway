@@ -74,6 +74,7 @@ from ..services.bridge_service import (
     get_storage_overview,
     get_timescale_health,
     is_timescale_available,
+    list_compression_groups,
     list_rollup_view_groups,
     list_wide_table_fields,
     list_wide_tables,
@@ -586,6 +587,67 @@ async def timescale_rollups_partial(request: Request):
     return request.app.state.templates.TemplateResponse(
         request=request,
         name="partials/timescale_rollup_view_list.html",
+        context={"groups": groups},
+    )
+
+
+@router.get("/pages/timescale-rebuild-compression", response_class=HTMLResponse, response_model=None)
+async def timescale_rebuild_compression_page(request: Request):
+    """
+    "Rebuild Compression" screen — sibling of Rebuild Rollup Views: a
+    single-pane page (no left-hand picker) that acts on every compression
+    group at once. The inventory itself loads via HTMX (see
+    timescale_compression_partial below); this route only renders the
+    page shell + action buttons.
+    """
+    gateway = getattr(request.app.state, "gateway", None)
+    if not is_timescale_available(gateway):
+        raise HTTPException(
+            status_code=404,
+            detail="No TimescaleDB bridge is attached to this gateway.",
+        )
+
+    with session_scope() as db:
+        nav: NavData = get_nav_data(db)
+
+    return request.app.state.templates.TemplateResponse(
+        request=request,
+        name="pages/timescale_rebuild_compression.html",
+        context={**_base_context(request, nav)},
+    )
+
+
+@router.get("/pages/timescale/compression", response_class=HTMLResponse, response_model=None)
+async def timescale_compression_partial(request: Request):
+    """
+    Compression inventory for the Rebuild Compression screen, grouped one
+    entry per source table — the shared narrow stack, plus every wide-
+    table protocol's own raw table + rollup-view stack — each group
+    getting one "include in next rebuild" checkbox, same grouping as
+    timescale_rollups_partial above. Loaded on page load and again after
+    every "Rebuild Compression" click (see timescale_rebuild_compression
+    .html).
+    """
+    gateway = getattr(request.app.state, "gateway", None)
+    if not is_timescale_available(gateway):
+        raise HTTPException(
+            status_code=404,
+            detail="No TimescaleDB bridge is attached to this gateway.",
+        )
+
+    try:
+        groups: list[dict[str, Any]] = list_compression_groups(gateway)
+    except RuntimeError:
+        # Bridge attached but not connected to TimescaleDB yet — render an
+        # empty inventory rather than a hard error, same reasoning as
+        # timescale_rollups_partial.
+        groups = []
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return request.app.state.templates.TemplateResponse(
+        request=request,
+        name="partials/timescale_compression_group_list.html",
         context={"groups": groups},
     )
 

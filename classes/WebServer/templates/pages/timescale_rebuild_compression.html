@@ -1,0 +1,251 @@
+<!--
+  Description: Defines the Timescale DB "Rebuild Compression" admin screen.
+  File: timescale_rebuild_compression.html
+
+  Copyright 2026 Kevin Burke
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://apache.org
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+
+{#
+  pages/timescale_rebuild_compression.html
+  Single-pane screen (no left-hand picker), sibling to Rebuild Rollup
+  Views: a header + "Rebuild Compression" button, "Select all" / "Select
+  none" links, and below them the current compression inventory loaded via
+  HTMX into #compression-groups-container, one checkbox per source-table
+  group -- the shared narrow stack, or one wide-table protocol -- (see
+  partials/timescale_compression_group_list.html). Reuses that exact
+  grouping and the JSON-body-via-fetch() convention Rebuild Rollup Views
+  established, rather than inventing a new one, since the request body
+  here needs the same {"protocol_names": [...]} shape.
+
+  Unlike Rebuild Rollup Views, this is NOT a "only touch what's out of
+  date" operation with a separate Force variant -- every already-
+  compressed chunk in a checked group is unconditionally decompressed and
+  recompressed, since there's no cheap way to tell whether a given chunk
+  already reflects the current compress_segmentby/compress_orderby/column
+  settings short of decompressing it. Because that makes this a heavier
+  operation than a rollup rebuild even in the common case, EVERY run asks
+  for confirmation (not just a "force" variant), and the inventory table
+  shows total/compressed chunk counts and current size up front so the
+  admin can see the actual cost before committing rather than clicking
+  blind. No row data is touched or lost -- only the on-disk storage format
+  is rewritten -- but decompressing a chunk temporarily uses more disk and
+  the whole pass can take a while on a large compressed range, which is
+  exactly what the confirmation dialog calls out.
+
+  Also unlike Rebuild Rollup Views, there's no "Refresh Now" sibling
+  action here -- compression has no lighter, non-structural counterpart;
+  the only lighter option is not selecting a group at all.
+#}
+
+{% extends "base.html" %}
+{% block title %}Timescale DB — Rebuild Compression — MPG Admin{% endblock %}
+{% block content %}
+<div class="col-span-12 flex flex-col gap-2" style="height: calc(100vh - 56px); overflow: hidden;">
+
+  <!-- ══ HEADER + REBUILD BUTTON ══ -->
+  <div class="flex-shrink-0 flex items-start justify-between gap-4 px-1 py-2">
+    <div>
+      <h1 class="surface-title text-xs font-semibold uppercase tracking-widest">Rebuild Compression</h1>
+      <p class="text-mpg-400 text-xs mt-1 max-w-2xl">
+        Decompresses and recompresses every already-compressed chunk of the checked group(s) —
+        the raw table plus its hourly / daily / weekly / monthly rollup views. Use this after
+        changing compress segment-by / order-by settings, or after Delete Columns, to apply the
+        new layout to data that was already compressed under the old settings. No row data is
+        touched or lost; only the on-disk storage format is rewritten. An uncompressed chunk
+        (usually the newest one, still inside its compress-after window) is left alone.
+      </p>
+      <div class="mt-1.5 flex items-center gap-3">
+        <button type="button"
+                class="text-[11px] text-mpg-300 hover:text-white underline underline-offset-2"
+                onclick="setAllCompressionGroups(true)">
+          Select all
+        </button>
+        <button type="button"
+                class="text-[11px] text-mpg-300 hover:text-white underline underline-offset-2"
+                onclick="setAllCompressionGroups(false)">
+          Select none
+        </button>
+      </div>
+    </div>
+
+    <div class="flex-shrink-0 flex items-center gap-2">
+      <button type="button"
+              id="rebuild-compression-btn"
+              class="px-4 py-2 rounded text-xs font-semibold bg-accent text-white
+                     hover:bg-accent/80 disabled:opacity-50 disabled:cursor-not-allowed
+                     transition-colors"
+              aria-label="Decompress and recompress every already-compressed chunk in the checked groups"
+              title="Decompresses then recompresses every already-compressed chunk of each checked group's raw table and rollup views — always confirmed before running"
+              onclick="triggerRebuildCompression()">
+        <span id="rebuild-compression-btn-label">Rebuild Compression</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- ══ STATUS BANNER — filled in by renderCompressionStatus() below ══ -->
+  <div id="compression-status" class="flex-shrink-0 px-1" role="status" aria-live="polite"></div>
+
+  <!-- ══ COMPRESSION GROUPS (one checkbox per source table) ══ -->
+  <section class="flex-1 overflow-y-auto px-1" aria-label="Compression inventory">
+    <div id="compression-groups-container"
+         class="overflow-x-auto"
+         hx-get="/pages/timescale/compression"
+         hx-trigger="load"
+         hx-swap="innerHTML scroll:false">
+      <p class="text-mpg-300 text-xs p-4">Loading compression inventory…</p>
+    </div>
+  </section>
+
+</div>
+
+<script>
+  function setAllCompressionGroups(checked) {
+    document.querySelectorAll('.compression-group-checkbox').forEach(function (cb) {
+      cb.checked = checked;
+    });
+  }
+
+  function getCheckedCompressionGroups() {
+    const checked = document.querySelectorAll('.compression-group-checkbox:checked');
+    return Array.from(checked).map(function (cb) { return cb.dataset.protocolName; });
+  }
+
+  function refreshCompressionGroupsContainer() {
+    // Checkboxes default back to "all checked" on reload — see the
+    // partial's `checked` attribute.
+    htmx.ajax('GET', '/pages/timescale/compression', {
+      target: '#compression-groups-container',
+      swap: 'innerHTML scroll:false',
+    });
+  }
+
+  // Collects the checked group checkboxes, confirms (always — this is a
+  // heavier operation than a rollup rebuild even in the common case),
+  // PATCHes the selection to /api/timescale/compression/rebuild, then
+  // refreshes the inventory so it reflects whatever the rebuild just did.
+  async function triggerRebuildCompression() {
+    const btnLabel = document.getElementById('rebuild-compression-btn-label');
+    const btn = document.getElementById('rebuild-compression-btn');
+    const statusEl = document.getElementById('compression-status');
+
+    const protocolNames = getCheckedCompressionGroups();
+    statusEl.innerHTML = '';
+
+    if (protocolNames.length === 0) {
+      statusEl.innerHTML =
+        '<div class="text-xs text-danger px-3 py-2 rounded border border-danger/30 bg-danger/10">' +
+        'Select at least one group to rebuild.</div>';
+      return;
+    }
+
+    const groupWord = protocolNames.length === 1 ? 'group' : 'groups';
+    const proceed = window.confirm(
+      'Rebuild Compression will decompress and recompress every already-compressed chunk in ' +
+      protocolNames.length + ' rollup ' + groupWord + ' (raw table + rollup views), even where ' +
+      'nothing looks out of date. This rewrites data on disk and can take noticeably longer than ' +
+      'a rollup rebuild. No rows are touched or lost. Continue?'
+    );
+    if (!proceed) { return; }
+
+    btn.disabled = true;
+    btnLabel.textContent = 'Rebuilding compression…';
+
+    let ok = false;
+    let payload = null;
+    try {
+      const resp = await fetch('/api/timescale/compression/rebuild', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache',
+        },
+        body: JSON.stringify({ protocol_names: protocolNames }),
+      });
+      ok = resp.ok;
+      payload = await resp.json();
+    } catch (e) {
+      ok = false;
+    }
+
+    btn.disabled = false;
+    btnLabel.textContent = 'Rebuild Compression';
+
+    renderCompressionStatus(ok, payload);
+    refreshCompressionGroupsContainer();
+  }
+
+  function formatBytes(n) {
+    if (!n) { return '0 B'; }
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let size = n;
+    let i = 0;
+    while (size >= 1024 && i < units.length - 1) {
+      size /= 1024;
+      i++;
+    }
+    return (i === 0 ? Math.round(size) : size.toFixed(1)) + ' ' + units[i];
+  }
+
+  // Three distinct outcomes, per the admin's expectations:
+  //   1. Nothing selected had any compressed chunks — nothing to do.
+  //   2. Every selected group's chunks were rewritten successfully —
+  //      show the size change.
+  //   3. At least one chunk failed — name exactly which table/chunk and
+  //      why, without blocking the chunks that did succeed.
+  function renderCompressionStatus(ok, payload) {
+    const statusEl = document.getElementById('compression-status');
+
+    if (!ok || !payload) {
+      statusEl.innerHTML =
+        '<div class="text-xs text-danger px-3 py-2 rounded border border-danger/30 bg-danger/10">' +
+        'Rebuild failed — the server did not return a result. Check the server log for details.</div>';
+      return;
+    }
+
+    const groups = payload.groups || [];
+    const attempted = groups.filter(function (g) { return !g.skipped; });
+    const failed = attempted.filter(function (g) { return !g.ok; });
+
+    if (failed.length > 0) {
+      // Outcome 3: at least one chunk in at least one group failed.
+      const details = failed.map(function (g) {
+        return g.protocol_name + ' (' + g.chunks_failed + ' of ' + g.chunks_attempted + ' chunk(s) failed)';
+      });
+      statusEl.innerHTML =
+        '<div class="text-xs text-danger px-3 py-2 rounded border border-danger/30 bg-danger/10">' +
+        'Rebuild failed for: ' + details.join('; ') + '. Check the server log for full details.</div>';
+      return;
+    }
+
+    const totalChunks = attempted.reduce(function (n, g) { return n + g.chunks_ok; }, 0);
+
+    if (totalChunks === 0) {
+      // Outcome 1: nothing to do — no compressed chunks in the selection.
+      statusEl.innerHTML =
+        '<div class="text-xs text-mpg-500 dark:text-mpg-100 px-3 py-2 rounded border border-mpg-700 bg-mpg-800/5">' +
+        'No compressed chunks found in the selected group(s) — nothing to rebuild.</div>';
+      return;
+    }
+
+    // Outcome 2: success — report the size change.
+    const beforeTotal = attempted.reduce(function (n, g) { return n + (g.size_before_bytes || 0); }, 0);
+    const afterTotal = attempted.reduce(function (n, g) { return n + (g.size_after_bytes || 0); }, 0);
+    statusEl.innerHTML =
+      '<div class="text-xs text-green-700 dark:text-green-400 px-3 py-2 rounded border border-green-500/30 bg-green-500/10">' +
+      'Rebuild complete — rewrote ' + totalChunks + ' chunk(s) across ' + attempted.length + ' group(s): ' +
+      formatBytes(beforeTotal) + ' → ' + formatBytes(afterTotal) + '.</div>';
+  }
+</script>
+{% endblock %}

@@ -438,6 +438,66 @@ def refresh_selected_rollups(
 
 
 # ---------------------------------------------------------------------------
+# Rebuild Compression — backs the "Timescale DB -> Rebuild Compression"
+# admin screen, a sibling of Rebuild Rollup Views above using the exact
+# same group keys (a wide-table protocol_name, plus "shared_narrow"). Unlike
+# the rollup functions, this doesn't touch view definitions at all -- it
+# decompresses and recompresses already-compressed chunks in place, so a
+# compress_segmentby/compress_orderby change (or a Delete Columns edit)
+# actually takes effect on historical data instead of only new chunks.
+# ---------------------------------------------------------------------------
+
+def list_compression_groups(gateway: Any) -> list[dict[str, Any]]:
+    """
+    Read-only compression inventory (one row per group, each carrying a
+    `tables` breakdown of that group's raw table + all four rollup views'
+    chunk counts and size) for the Rebuild Compression screen's group
+    checkboxes, with a human-readable `size_display` added to each group
+    row AND each of its per-table rows.
+
+    Raises RuntimeError if no bridge is attached, or the bridge is
+    attached but hasn't finished connecting to TimescaleDB yet.
+    """
+    bridge: Any | None = get_timescale_bridge(gateway)
+    if bridge is None:
+        raise RuntimeError("No TimescaleDB bridge is attached to this gateway.")
+    if bridge.rollup_mgr is None:
+        raise RuntimeError("Rollup manager is not initialized yet — the bridge is not connected to TimescaleDB.")
+    rows: list[dict[str, Any]] = bridge.rollup_mgr.list_compression_groups()
+    for row in rows:
+        row["size_display"] = _format_bytes(row.get("size_bytes"))
+        for table_row in row.get("tables", []):
+            table_row["size_display"] = _format_bytes(table_row.get("size_bytes"))
+    return rows
+
+
+def rebuild_compression(gateway: Any, protocol_names: set[str] | None = None) -> dict[str, Any]:
+    """
+    Triggers an immediate decompress -> recompress pass across every
+    already-compressed chunk of the selected group(s)' raw table and all
+    four rollup views. Called from the "Rebuild Compression" button (PATCH
+    /api/timescale/compression/rebuild).
+
+    Args:
+        protocol_names: Which groups to act on -- protocol_name values as
+            returned by list_compression_groups(), plus "shared_narrow"
+            for the shared narrow stack. None acts on every group.
+        See RollupManager.rebuild_compression for the per-group/per-chunk
+        result shape and why this never touches a chunk that isn't
+        already compressed.
+
+    Raises RuntimeError if no bridge is attached, or the bridge hasn't
+    finished connecting to TimescaleDB yet.
+    """
+    bridge: Any | None = get_timescale_bridge(gateway)
+    if bridge is None:
+        raise RuntimeError("No TimescaleDB bridge is attached to this gateway.")
+    if bridge.rollup_mgr is None:
+        raise RuntimeError("Rollup manager is not initialized yet — the bridge is not connected to TimescaleDB.")
+    return bridge.rollup_mgr.rebuild_compression(protocol_names=protocol_names)
+
+
+# ---------------------------------------------------------------------------
 # Bridge info pane — read-only snapshots for the device page's "Bridge
 # Health", "Storage Overview", "Compression & Retention Status", and
 # "Background Job Status" panels (see routers/timescale.py GET /health,

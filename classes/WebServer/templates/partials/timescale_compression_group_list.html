@@ -1,0 +1,138 @@
+<!--
+  Description: partials/timescale_compression_group_list.html HTMX partial — grouped compression inventory with per-group rebuild checkboxes.
+  File: timescale_compression_group_list.html
+
+  Copyright 2026 Kevin Burke
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://apache.org
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+
+{#
+  partials/timescale_compression_group_list.html
+  Swapped into #compression-groups-container on page load and again after
+  every "Rebuild Compression" click (see timescale_rebuild_compression
+  .html). Sibling of partials/timescale_rollup_view_list.html and
+  deliberately styled to match it line-for-line rather than inventing a
+  new visual language for this screen.
+
+  Context: groups — [{protocol_name, wide_table_name, total_chunks,
+  compressed_chunks, size_bytes, size_display, tables: [{table_name,
+  granularity, total_chunks, compressed_chunks, size_bytes,
+  size_display}, ...]}, ...] as returned by services/bridge_service
+  .list_compression_groups. `protocol_name` is "shared_narrow" for the
+  shared narrow-table group; every other group is one wide-table
+  protocol's own raw table + hourly/daily/weekly/monthly rollup stack.
+
+  One checkbox per GROUP, not per table — same reasoning as the rollup
+  view list: a compression rebuild always acts on a whole group's tables
+  together (see RollupManager.rebuild_compression), so there's nothing
+  finer-grained to select. Checkboxes default checked (rebuild everything
+  unless the admin opts a group out) and are read by
+  triggerRebuildCompression() in timescale_rebuild_compression.html when
+  the button is pressed — this partial itself makes no request and stages
+  nothing.
+
+  Unlike the rollup view list's per-view `status` (OK / needs rebuild /
+  missing), a table here doesn't have a pass/fail state to color — being
+  compressed isn't right or wrong, it's just a number. So each row is
+  neutral, and only the group header line calls out the compressed/total
+  ratio and total size up front.
+
+  Styling notes (mirrors timescale_rollup_view_list.html /
+  timescale_field_checklist.html):
+  - Row text uses paired light/dark classes (text-mpg-500
+    dark:text-mpg-100, etc.) for the same reason as those two partials —
+    the app is used in both light and dark mode, and a single shade tuned
+    for one background reads as low-contrast (or outright unreadable) on
+    the other. This partial previously used single-shade classes
+    (text-mpg-200 / text-mpg-400) that only had contrast against a dark
+    background; on light mode those rendered as pale gray on white,
+    effectively unreadable. Fixed here by adopting the same paired
+    classes as the rollup partial throughout.
+  - `w-auto` on <table> is required (not optional) to override mpg.css's
+    global `table { width: 100%; }` rule — see the equivalent note in
+    timescale_field_checklist.html / timescale_rollup_view_list.html.
+#}
+<div>
+  <div class="flex items-center justify-between mb-2 px-1">
+    <h2 class="surface-title font-semibold text-sm">Current Compression Inventory</h2>
+    <span class="text-mpg-600 dark:text-mpg-400 text-xs font-mono">{{ groups|length }} group(s)</span>
+  </div>
+
+  {% for g in groups %}
+  <div class="mb-3 rounded border border-mpg-700 overflow-hidden"
+       data-compression-group="{{ g.protocol_name }}">
+
+    <label class="flex items-center gap-2 px-3 py-2 bg-mpg-800 cursor-pointer select-none">
+      <input type="checkbox"
+             class="compression-group-checkbox accent-accent w-3.5 h-3.5 cursor-pointer flex-shrink-0"
+             data-protocol-name="{{ g.protocol_name }}"
+             checked
+             aria-label="Include {{ g.protocol_name }} in the next compression rebuild">
+      <span class="text-mpg-50 text-xs font-semibold font-mono">{{ g.protocol_name }}</span>
+      <span class="text-mpg-300 text-xs font-mono truncate">{{ g.wide_table_name }}</span>
+      <span class="ml-auto text-mpg-300 text-xs font-mono whitespace-nowrap">
+        {{ g.compressed_chunks }}/{{ g.total_chunks }} chunk(s) compressed · {{ g.size_display }}
+      </span>
+    </label>
+
+    <table class="w-auto text-xs border-collapse" role="table"
+           aria-label="Compression inventory for {{ g.protocol_name }}">
+      <thead>
+        <tr class="text-mpg-100 text-xs uppercase tracking-wide bg-mpg-800/60" role="row">
+          <th class="px-3 py-1.5 text-left border-r border-mpg-700/50 font-semibold whitespace-nowrap" scope="col">
+            Table
+          </th>
+          <th class="px-3 py-1.5 text-left border-r border-mpg-700/50 font-semibold whitespace-nowrap" scope="col">
+            Granularity
+          </th>
+          <th class="px-3 py-1.5 text-right border-r border-mpg-700/50 font-semibold whitespace-nowrap" scope="col">
+            Total chunks
+          </th>
+          <th class="px-3 py-1.5 text-right border-r border-mpg-700/50 font-semibold whitespace-nowrap" scope="col">
+            Compressed chunks
+          </th>
+          <th class="px-3 py-1.5 text-right border-r border-mpg-700/50 font-semibold whitespace-nowrap" scope="col">
+            Size
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in g.tables %}
+        <tr class="border-t border-mpg-700/30 hover:bg-mpg-800/40 transition-colors" role="row">
+          <td class="px-3 py-1.5 font-mono text-mpg-500 dark:text-mpg-100 whitespace-nowrap border-r border-mpg-700/30" role="cell">
+            {{ t.table_name }}
+          </td>
+          <td class="px-3 py-1.5 text-mpg-500 dark:text-mpg-100 whitespace-nowrap border-r border-mpg-700/30" role="cell">
+            {{ t.granularity }}
+          </td>
+          <td class="px-3 py-1.5 text-right text-mpg-500 dark:text-mpg-100 whitespace-nowrap border-r border-mpg-700/30" role="cell">
+            {{ t.total_chunks }}
+          </td>
+          <td class="px-3 py-1.5 text-right text-mpg-500 dark:text-mpg-100 whitespace-nowrap border-r border-mpg-700/30" role="cell">
+            {{ t.compressed_chunks }}
+          </td>
+          <td class="px-3 py-1.5 text-right text-mpg-500 dark:text-mpg-100 whitespace-nowrap border-r border-mpg-700/30" role="cell">
+            {{ t.size_display }}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endfor %}
+
+  {% if not groups %}
+  <p class="text-mpg-600 dark:text-mpg-400 text-sm text-center py-8">No compression groups found.</p>
+  {% endif %}
+</div>

@@ -48,10 +48,12 @@ from ..services.bridge_service import (
     get_timescale_bridge,
     get_timescale_health,
     has_staged_deletions,
+    list_compression_groups,
     list_rollup_views,
     list_wide_table_fields,
     list_wide_tables,
     rebuild_all_rollups,
+    rebuild_compression,
     refresh_selected_rollups,
     stage_field_deletion,
     staged_deletion_count,
@@ -255,6 +257,70 @@ def refresh_rollups(payload: RefreshRollupsRequest, request: Request) -> dict[st
     _log.info(
         f"Rollup refresh triggered via admin UI for {len(payload.protocol_names)} group(s) "
         f"(force_full={payload.force_full})."
+    )
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Rebuild Compression — back the "Timescale DB -> Rebuild Compression"
+# admin screen. Sibling of the Rollup Views endpoints above, using the same
+# group keys and no-staging, run-immediately-on-click pattern. Fundamentally
+# heavier than a rollup rebuild, though: rather than dropping/recreating a
+# view's definition, this decompresses and recompresses every already-
+# compressed chunk of a group's raw table and rollup views in place, so a
+# compress_segmentby/compress_orderby change (or a Delete Columns edit)
+# actually takes effect on historical data instead of only new chunks.
+# ---------------------------------------------------------------------------
+
+@router.get("/compression/groups")
+def get_compression_groups(request: Request) -> dict[str, Any]:
+    """Returns the current per-group compression inventory for the Rebuild Compression screen."""
+    _require_bridge(request)
+    try:
+        groups: list[dict[str, Any]] = list_compression_groups(request.app.state.gateway)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    return {"groups": groups}
+
+
+class RebuildCompressionRequest(BaseModel):
+    # protocol_name values as returned by list_compression_groups(), plus
+    # the literal "shared_narrow" for the shared narrow stack — one entry
+    # per checked group checkbox on the Rebuild Compression screen.
+    protocol_names: list[str]
+
+
+@router.patch("/compression/rebuild")
+def rebuild_compression_endpoint(payload: RebuildCompressionRequest, request: Request) -> dict[str, Any]:
+    """
+    Runs a full decompress -> recompress pass across every already-
+    compressed chunk of the admin's selected group(s) — the raw table plus
+    all four rollup views per group. Unlike /rollups/rebuild, there is no
+    lighter "only touch what's out of date" variant here: every already-
+    compressed chunk in a selected group is rewritten every time, since
+    there's no cheap way to tell whether a given chunk already reflects
+    the current compress_segmentby/compress_orderby/column settings short
+    of decompressing it. Runs synchronously and returns a per-group result
+    with a per-chunk breakdown and before/after byte totals; the caller
+    (the Rebuild Compression screen) reports any ok=False groups to the
+    admin rather than treating a partial failure as a 500.
+    """
+    _require_bridge(request)
+    if not payload.protocol_names:
+        raise HTTPException(status_code=400, detail="Select at least one group to rebuild.")
+    try:
+        result: dict[str, Any] = rebuild_compression(
+            request.app.state.gateway,
+            protocol_names=set(payload.protocol_names),
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    _log.info(
+        f"Compression rebuild triggered via admin UI for {len(payload.protocol_names)} group(s)."
     )
     return result
 
