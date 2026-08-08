@@ -1,6 +1,6 @@
 <!--
-  Description: partials/bridge_storage_panel.html HTMX partial — Storage Overview card for the TimescaleDB device page.
-  File: bridge_storage_panel.html
+  Description: partials/bridge_timescale_storage_panel.html HTMX partial — Storage Overview card for the TimescaleDB device page.
+  File: bridge_timescale_storage_panel.html
 
   Copyright 2026 Kevin Burke
 
@@ -16,7 +16,7 @@
   See the License for the specific language governing permissions and
   limitations under the License.
 
-  partials/bridge_storage_panel.html
+  partials/bridge_timescale_storage_panel.html
   Swapped into #bridge-storage-container on the TimescaleDB device page.
   Context: tables — [{protocol_name, table_name, approx_rows, size_bytes,
   size_display, chunk_count, oldest, newest, oldest_display,
@@ -41,34 +41,34 @@
   <div class="overflow-x-auto">
     <table class="w-auto text-xs border-collapse" role="table" aria-label="Per-table storage overview">
       <thead>
-        <tr class="text-mpg-100 text-xs uppercase tracking-wide bg-mpg-800" role="row">
-          <th class="px-2 py-1.5 text-left border-r border-mpg-700 font-semibold whitespace-nowrap" scope="col">Table</th>
-          <th class="px-2 py-1.5 text-right border-r border-mpg-700 font-semibold whitespace-nowrap" scope="col">~Rows</th>
-          <th class="px-2 py-1.5 text-right border-r border-mpg-700 font-semibold whitespace-nowrap" scope="col">Size</th>
-          <th class="px-2 py-1.5 text-right border-r border-mpg-700 font-semibold whitespace-nowrap" scope="col">Chunks</th>
+        <tr class="mini-table-header text-xs uppercase tracking-wide" role="row">
+          <th class="px-2 py-1.5 text-left font-semibold whitespace-nowrap" scope="col">Table</th>
+          <th class="px-2 py-1.5 text-right font-semibold whitespace-nowrap" scope="col">~Rows</th>
+          <th class="px-2 py-1.5 text-right font-semibold whitespace-nowrap" scope="col">Size</th>
+          <th class="px-2 py-1.5 text-right font-semibold whitespace-nowrap" scope="col">Chunks</th>
           <th class="px-2 py-1.5 text-left font-semibold whitespace-nowrap" scope="col">Time Range</th>
         </tr>
       </thead>
       <tbody>
         {% for t in tables %}
-        <tr class="border-t border-mpg-700/30 hover:bg-mpg-800/40 transition-colors" role="row">
-          <td class="px-2 py-1.5 font-mono text-mpg-500 dark:text-mpg-100 whitespace-nowrap border-r border-mpg-700/30" role="cell">
+        <tr class="mini-table-row transition-colors" role="row">
+          <td class="px-2 py-1.5 font-mono mini-table-value whitespace-nowrap mini-table-col-divider" role="cell">
             {{ t.protocol_name }}
-            <span class="text-mpg-600 dark:text-mpg-500 text-[10px] block">{{ t.table_name }}</span>
+            <span class="mini-table-subtext text-[10px] block">{{ t.table_name }}</span>
           </td>
           {% if t.error %}
           <td colspan="4" class="px-2 py-1.5 text-danger text-xs" role="cell">Query failed: {{ t.error }}</td>
           {% else %}
-          <td class="px-2 py-1.5 text-right font-mono text-mpg-500 dark:text-mpg-100 whitespace-nowrap border-r border-mpg-700/30" role="cell">
+          <td class="px-2 py-1.5 text-right font-mono mini-table-value whitespace-nowrap mini-table-col-divider" role="cell">
             ~{{ "{:,}".format(t.approx_rows) }}
           </td>
-          <td class="px-2 py-1.5 text-right font-mono text-mpg-500 dark:text-mpg-100 whitespace-nowrap border-r border-mpg-700/30" role="cell">
+          <td class="px-2 py-1.5 text-right font-mono mini-table-value whitespace-nowrap mini-table-col-divider" role="cell">
             {{ t.size_display }}
           </td>
-          <td class="px-2 py-1.5 text-right font-mono text-mpg-500 dark:text-mpg-100 whitespace-nowrap border-r border-mpg-700/30" role="cell">
+          <td class="px-2 py-1.5 text-right font-mono mini-table-value whitespace-nowrap mini-table-col-divider" role="cell">
             {{ t.chunk_count }}
           </td>
-          <td class="px-2 py-1.5 font-mono text-mpg-500 dark:text-mpg-100 whitespace-nowrap text-[11px]" role="cell">
+          <td class="px-2 py-1.5 font-mono mini-table-value whitespace-nowrap text-[11px]" role="cell">
             {{ t.oldest_display }} → {{ t.newest_display }}
           </td>
           {% endif %}

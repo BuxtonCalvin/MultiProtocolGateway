@@ -64,28 +64,6 @@
 {% endblock %}
 
 {% block scripts %}
-<style>
-  /* Log level badge colors — only the [LEVEL] token is colored */
-  .log-level-error    { color: #f87171; font-weight: 700; } /* red-400    */
-  .log-level-critical { color: #ef4444; font-weight: 700; } /* red-500    */
-  .log-level-warning  { color: #facc15; font-weight: 600; } /* yellow-400 */
-  .log-level-info     { color: #34d399; }                   /* emerald-400 */
-  .log-level-debug    { color: #94a3b8; }                   /* slate-400  */
-  .log-level-trace    { color: #c084fc; }                   /* purple-400 */
-
-  /* HTTP status code colors */
-  .log-http-2xx { color: #34d399; } /* green  — success       */
-  .log-http-3xx { color: #60a5fa; } /* blue   — redirect      */
-  .log-http-4xx { color: #fb923c; } /* orange — client error  */
-  .log-http-5xx { color: #f87171; } /* red    — server error  */
-
-  /* Timestamp dimming — de-emphasizes the noise */
-  .log-timestamp { color: #64748b; } /* slate-500 */
-
-  /* Logger/module name */
-  .log-logger { color: #7dd3fc; } /* sky-300 */
-</style>
-
 <script>
 (function () {
   /* ── Colorize a single plain-text log line ── */

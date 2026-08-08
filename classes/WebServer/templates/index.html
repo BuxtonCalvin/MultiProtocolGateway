@@ -101,15 +101,15 @@
 
 <!-- ── Rollback modal ──────────────────────────────────────────────────── -->
 <div id="rollback-modal"
-     class="fixed inset-0 z-50 hidden items-center justify-center bg-black/60"
+     class="modal-overlay hidden"
      role="dialog" aria-modal="true" aria-labelledby="rollback-modal-title">
-  <div class="card rounded-lg shadow-2xl border border-mpg-700 w-[480px] max-h-[70vh] flex flex-col bg-white dark:bg-mpg-800">
+  <div class="modal-panel w-[480px] max-h-[70vh]">
 
-    <div class="flex items-center justify-between px-5 py-4 border-b border-mpg-200 dark:border-mpg-700">
+    <div class="modal-header">
       <h3 id="rollback-modal-title" class="surface-text font-semibold text-sm">
         Rollback Configuration
       </h3>
-      <button id="rollback-close" class="surface-muted hover:text-white text-lg leading-none">✕</button>
+      <button id="rollback-close" class="modal-close-btn">✕</button>
     </div>
 
     <p class="px-5 pt-3 text-xs surface-muted">
@@ -118,7 +118,7 @@
     </p>
 
     <div id="rollback-list" class="overflow-y-auto flex-1 px-5 py-3 space-y-1.5">
-      <p class="text-mpg-400 text-xs">Loading backups…</p>
+      <p class="surface-subtle text-xs">Loading backups…</p>
     </div>
 
     <div class="px-5 py-3 border-t border-mpg-200 dark:border-mpg-700 text-xs surface-muted">

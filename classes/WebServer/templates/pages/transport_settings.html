@@ -150,14 +150,14 @@ Complete lifecycle
 
 <!-- Transport expand modal -->
 <div id="transport-modal"
-     class="fixed inset-0 z-50 hidden items-center justify-center bg-black/60"
+     class="modal-overlay hidden"
      role="dialog" aria-modal="true" aria-labelledby="modal-title">
-  <div class="bg-mpg-800 rounded-lg shadow-2xl border border-mpg-600 w-80 max-h-[70vh] flex flex-col">
-    <div class="flex items-center justify-between px-5 py-4 border-b border-mpg-700">
+  <div class="modal-panel w-80 max-h-[70vh]">
+    <div class="modal-header">
       <h3 id="modal-title" class="surface-text font-semibold text-sm">All Transports</h3>
-      <button id="modal-close" class="surface-muted hover:text-white text-lg leading-none">✕</button>
+      <button id="modal-close" class="modal-close-btn">✕</button>
     </div>
-    <ul id="modal-list" class="overflow-y-auto px-5 py-3 space-y-1.5 flex-1 bg-white dark:bg-mpg-800"></ul>
+    <ul id="modal-list" class="overflow-y-auto px-5 py-3 space-y-1.5 flex-1"></ul>
   </div>
 </div>
 

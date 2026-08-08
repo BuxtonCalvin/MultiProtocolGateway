@@ -1,6 +1,6 @@
 <!--
-  Description: partials/bridge_jobs_panel.html HTMX partial — Background Job Status card for the TimescaleDB device page.
-  File: bridge_jobs_panel.html
+  Description: partials/bridge_timescale_jobs_panel.html HTMX partial — Background Job Status card for the TimescaleDB device page.
+  File: bridge_timescale_jobs_panel.html
 
   Copyright 2026 Kevin Burke
 
@@ -16,7 +16,7 @@
   See the License for the specific language governing permissions and
   limitations under the License.
 
-  partials/bridge_jobs_panel.html
+  partials/bridge_timescale_jobs_panel.html
   Swapped into #bridge-jobs-container on the TimescaleDB device page.
   Context: jobs — [{job_id, proc_name, hypertable_name, schedule_interval,
   last_run_status, last_successful_finish, last_successful_finish_display,
@@ -39,27 +39,27 @@
   <div class="overflow-x-auto">
     <table class="w-auto text-xs border-collapse" role="table" aria-label="TimescaleDB background jobs">
       <thead>
-        <tr class="text-mpg-100 text-xs uppercase tracking-wide bg-mpg-800" role="row">
-          <th class="px-2 py-1.5 text-left border-r border-mpg-700 font-semibold whitespace-nowrap" scope="col">Job</th>
-          <th class="px-2 py-1.5 text-left border-r border-mpg-700 font-semibold whitespace-nowrap" scope="col">Target</th>
-          <th class="px-2 py-1.5 text-left border-r border-mpg-700 font-semibold whitespace-nowrap" scope="col">Last Run</th>
-          <th class="px-2 py-1.5 text-left border-r border-mpg-700 font-semibold whitespace-nowrap" scope="col">Next Run</th>
+        <tr class="mini-table-header text-xs uppercase tracking-wide" role="row">
+          <th class="px-2 py-1.5 text-left font-semibold whitespace-nowrap" scope="col">Job</th>
+          <th class="px-2 py-1.5 text-left font-semibold whitespace-nowrap" scope="col">Target</th>
+          <th class="px-2 py-1.5 text-left font-semibold whitespace-nowrap" scope="col">Last Run</th>
+          <th class="px-2 py-1.5 text-left font-semibold whitespace-nowrap" scope="col">Next Run</th>
           <th class="px-2 py-1.5 text-right font-semibold whitespace-nowrap" scope="col">Failures</th>
         </tr>
       </thead>
       <tbody>
         {% for j in jobs %}
-        <tr class="border-t border-mpg-700/30
+        <tr class="mini-table-row
                    {% if j.last_run_status and j.last_run_status != 'Success' %}bg-danger/5{% endif %}
-                   hover:bg-mpg-800/40 transition-colors" role="row">
-          <td class="px-2 py-1.5 font-mono text-mpg-500 dark:text-mpg-100 whitespace-nowrap border-r border-mpg-700/30" role="cell">
+                   transition-colors" role="row">
+          <td class="px-2 py-1.5 font-mono mini-table-value whitespace-nowrap mini-table-col-divider" role="cell">
             {{ j.proc_name }}
-            <span class="text-mpg-600 dark:text-mpg-500 text-[10px] block">#{{ j.job_id }}</span>
+            <span class="mini-table-subtext text-[10px] block">#{{ j.job_id }}</span>
           </td>
-          <td class="px-2 py-1.5 font-mono text-mpg-500 dark:text-mpg-100 whitespace-nowrap border-r border-mpg-700/30" role="cell">
+          <td class="px-2 py-1.5 font-mono mini-table-value whitespace-nowrap mini-table-col-divider" role="cell">
             {{ j.hypertable_name }}
           </td>
-          <td class="px-2 py-1.5 whitespace-nowrap border-r border-mpg-700/30 text-[11px]" role="cell">
+          <td class="px-2 py-1.5 whitespace-nowrap mini-table-col-divider text-[11px]" role="cell">
             {% if j.last_run_status == 'Success' %}
             <span class="text-green-600 dark:text-green-400 font-medium">{{ j.last_run_status }}</span>
             {% elif j.last_run_status %}
@@ -67,13 +67,13 @@
             {% else %}
             <span class="surface-muted">Never run</span>
             {% endif %}
-            <span class="text-mpg-600 dark:text-mpg-500 block">{{ j.last_successful_finish_display }}</span>
+            <span class="mini-table-subtext block">{{ j.last_successful_finish_display }}</span>
           </td>
-          <td class="px-2 py-1.5 font-mono text-mpg-500 dark:text-mpg-100 whitespace-nowrap border-r border-mpg-700/30 text-[11px]" role="cell">
+          <td class="px-2 py-1.5 font-mono mini-table-value whitespace-nowrap mini-table-col-divider text-[11px]" role="cell">
             {{ j.next_start_display }}
           </td>
           <td class="px-2 py-1.5 text-right font-mono whitespace-nowrap
-                     {% if j.total_failures %}text-danger{% else %}text-mpg-500 dark:text-mpg-100{% endif %}" role="cell">
+                     {% if j.total_failures %}text-danger{% else %}mini-table-value{% endif %}" role="cell">
             {{ j.total_failures or 0 }}
           </td>
         </tr>

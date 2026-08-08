@@ -54,7 +54,7 @@
   {% if proto_tabs %}
   <!-- Export bar — links update when a tab is clicked -->
   <div class="flex items-center gap-2 mb-2">
-    <span class="text-mpg-500 text-xs">Export:</span>
+    <span class="surface-subtle text-xs">Export:</span>
     <a id="export-csv-link"
        href="#"
        class="btn-secondary text-xs pointer-events-none opacity-40"
@@ -63,7 +63,7 @@
        href="#"
        class="btn-secondary text-xs pointer-events-none opacity-40"
        download>↓ JSON</a>
-    <span class="text-mpg-600 text-xs">(select a tab to enable)</span>
+    <span class="surface-subtle text-xs">(select a tab to enable)</span>
   </div>
 
   {% include "partials/protocol_tabs.html" %}
@@ -86,7 +86,7 @@
       const qs    = deviceName ? `?device_name=${encodeURIComponent(deviceName)}` : '';
       const csv   = document.getElementById('export-csv-link');
       const json  = document.getElementById('export-json-link');
-      const hint  = csv?.closest('.flex')?.querySelector('span.text-mpg-600');
+      const hint  = csv?.closest('.flex')?.querySelector('span.surface-subtle:last-child');
       if (!csv || !json) return;
       csv.href  = `${base}/export.csv${qs}`;
       json.href = `${base}/export.json${qs}`;

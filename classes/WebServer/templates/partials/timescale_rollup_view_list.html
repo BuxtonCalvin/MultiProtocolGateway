@@ -57,7 +57,7 @@
 <div>
   <div class="flex items-center justify-between mb-2 px-1">
     <h2 class="surface-title font-semibold text-sm">Current Rollup Views</h2>
-    <span class="text-mpg-600 dark:text-mpg-400 text-xs font-mono">{{ groups|length }} group(s)</span>
+    <span class="mini-table-meta text-xs font-mono">{{ groups|length }} group(s)</span>
   </div>
 
   {% for g in groups %}
@@ -77,14 +77,14 @@
     <table class="w-auto text-xs border-collapse" role="table"
            aria-label="Rollup views for {{ g.protocol_name }}">
       <thead>
-        <tr class="text-mpg-100 text-xs uppercase tracking-wide bg-mpg-800/60" role="row">
-          <th class="px-3 py-1.5 text-left border-r border-mpg-700/50 font-semibold whitespace-nowrap" scope="col">
+        <tr class="mini-table-header--sub text-xs uppercase tracking-wide" role="row">
+          <th class="px-3 py-1.5 text-left font-semibold whitespace-nowrap" scope="col">
             View
           </th>
-          <th class="px-3 py-1.5 text-left border-r border-mpg-700/50 font-semibold whitespace-nowrap" scope="col">
+          <th class="px-3 py-1.5 text-left font-semibold whitespace-nowrap" scope="col">
             Granularity
           </th>
-          <th class="px-3 py-1.5 text-left border-r border-mpg-700/50 font-semibold whitespace-nowrap" scope="col">
+          <th class="px-3 py-1.5 text-left font-semibold whitespace-nowrap" scope="col">
             Bucket
           </th>
           <th class="px-3 py-1.5 text-left font-semibold whitespace-nowrap" scope="col">
@@ -94,17 +94,17 @@
       </thead>
       <tbody>
         {% for v in g.views %}
-        <tr class="border-t border-mpg-700/30
+        <tr class="mini-table-row
                    {% if v.status != 'OK' %}bg-danger/5{% endif %}
-                   hover:bg-mpg-800/40 transition-colors"
+                   transition-colors"
             role="row">
-          <td class="px-3 py-1.5 font-mono text-mpg-500 dark:text-mpg-100 whitespace-nowrap border-r border-mpg-700/30" role="cell">
+          <td class="px-3 py-1.5 font-mono mini-table-value whitespace-nowrap mini-table-col-divider" role="cell">
             {{ v.view_name }}
           </td>
-          <td class="px-3 py-1.5 text-mpg-500 dark:text-mpg-100 whitespace-nowrap border-r border-mpg-700/30" role="cell">
+          <td class="px-3 py-1.5 mini-table-value whitespace-nowrap mini-table-col-divider" role="cell">
             {{ v.granularity }}
           </td>
-          <td class="px-3 py-1.5 text-mpg-500 dark:text-mpg-100 whitespace-nowrap border-r border-mpg-700/30" role="cell">
+          <td class="px-3 py-1.5 mini-table-value whitespace-nowrap mini-table-col-divider" role="cell">
             {{ v.bucket_interval }}
           </td>
           <td class="px-3 py-1.5 whitespace-nowrap" role="cell">
@@ -124,6 +124,6 @@
   {% endfor %}
 
   {% if not groups %}
-  <p class="text-mpg-600 dark:text-mpg-400 text-sm text-center py-8">No rollup views found.</p>
+  <p class="mini-table-meta text-sm text-center py-8">No rollup views found.</p>
   {% endif %}
 </div>

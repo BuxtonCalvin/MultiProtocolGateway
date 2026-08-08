@@ -672,7 +672,7 @@ async def timescale_health_partial(request: Request):
 
     return request.app.state.templates.TemplateResponse(
         request=request,
-        name="partials/bridge_health_panel.html",
+        name="partials/bridge_timescale_health_panel.html",
         context={"health": health},
     )
 
@@ -697,7 +697,7 @@ async def timescale_storage_partial(request: Request):
 
     return request.app.state.templates.TemplateResponse(
         request=request,
-        name="partials/bridge_storage_panel.html",
+        name="partials/bridge_timescale_storage_panel.html",
         context={"tables": tables},
     )
 
@@ -747,7 +747,7 @@ async def timescale_jobs_partial(request: Request):
 
     return request.app.state.templates.TemplateResponse(
         request=request,
-        name="partials/bridge_jobs_panel.html",
+        name="partials/bridge_timescale_jobs_panel.html",
         context={"jobs": jobs},
     )
 
@@ -776,7 +776,7 @@ async def influxdb_health_partial(device_name: str, request: Request):
 
     return request.app.state.templates.TemplateResponse(
         request=request,
-        name="partials/influxdb_health_panel.html",
+        name="partials/bridge_influxdb_health_panel.html",
         context={"health": health},
     )
 
@@ -803,7 +803,7 @@ async def influxdb_storage_partial(device_name: str, request: Request):
 
     return request.app.state.templates.TemplateResponse(
         request=request,
-        name="partials/influxdb_storage_panel.html",
+        name="partials/bridge_influxdb_storage_panel.html",
         context={"storage": storage},
     )
 

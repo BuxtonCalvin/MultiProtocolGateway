@@ -506,7 +506,7 @@ class influxdb_out(transport_base):
         False/empty/None here — InfluxDB v1 has no system.chunks or
         information_schema.columns equivalent, and no Rust pprof debug
         endpoint. They're present in this dict anyway (rather than
-        omitted) purely so the shared influxdb_storage_panel.html template
+        omitted) purely so the shared bridge_influxdb_storage_panel.html template
         can treat v1 and v3 result shapes identically without `is defined`
         guards — see influxdb3_out.get_storage_overview for the v3 side.
 

@@ -22,19 +22,13 @@
   HTMX partial — replaces #main-panes when a bridge is selected.
   Left  (cols 1-3):  Settings pane (same structure as scraper)
   Right (cols 4-12): Connection health pane (no protocol table)
+
+  is_bool(s) is imported from partials/settings_macros.html — the same
+  macro settings_rows.html uses — rather than defined here, so the
+  scraper and bridge settings panes can't drift apart on which keys they
+  treat as booleans.
 -->
-{%- macro is_bool(s) -%}
-  {%- set v = (s.value_staged or s.default_value or '') | lower | trim -%}
-  {%- set k = s.key | lower -%}
-  {%- if v in ('true', 'false') -%}true
-  {%- elif k.startswith('enable_') or k.startswith('send_')
-        or k.startswith('include_') or k.startswith('use_')
-        or k in ('write_enabled', 'force_float', 'json', 'console',
-                 'discovery_enabled', 'migrate_data', 'pretty_print',
-                 'append_mode', 'async_mode') -%}true
-  {%- else -%}false
-  {%- endif -%}
-{%- endmacro -%}
+{%- import "partials/settings_macros.html" as settings_macros -%}
 <div class="col-span-12 flex gap-4" style="height: calc(100vh - 56px); overflow: hidden;">
 
   <!-- ══ LEFT: SETTINGS PANE ══ -->
@@ -119,7 +113,7 @@
         </div>
 
         <div role="cell">
-          {% if is_bool(s) == 'true' %}
+          {% if settings_macros.is_bool(s) == 'true' %}
           <select class="w-full bg-mpg-900 border border-mpg-600 rounded px-1 py-0.5
                          font-mono text-xs
                          focus:outline-none focus:ring-1 focus:ring-accent
@@ -228,10 +222,7 @@
          exist for other bridge types. Add another branch below
          as other bridges grow their own diagnostics; until then they
          fall through to the generic note instead of showing broken or
-         empty panels. NOTE: never write literal curly-percent Jinja tag
-         syntax as prose inside an HTML comment in this file — Jinja
-         parses its own delimiters regardless of HTML comment boundaries,
-         so a stray example tag here will crash the whole template. -->
+         empty panels. -->
     {% if device.transport_class == "timescaledb" %}
     <div class="grid grid-cols-1 lg:grid-cols-[calc(50%_-_1.5in)_calc(50%_+_1.5in)] gap-4">
       <div id="bridge-health-container"

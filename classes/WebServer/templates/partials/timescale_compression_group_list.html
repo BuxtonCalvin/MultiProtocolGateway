@@ -26,9 +26,10 @@
   new visual language for this screen.
 
   Context: groups — [{protocol_name, wide_table_name, total_chunks,
-  compressed_chunks, size_bytes, size_display, tables: [{table_name,
-  granularity, total_chunks, compressed_chunks, size_bytes,
-  size_display}, ...]}, ...] as returned by services/bridge_service
+  compressed_chunks, size_bytes, size_display, raw_size_bytes,
+  raw_size_display, tables: [{table_name, granularity, total_chunks,
+  compressed_chunks, size_bytes, size_display, raw_size_bytes,
+  raw_size_display}, ...]}, ...] as returned by services/bridge_service
   .list_compression_groups. `protocol_name` is "shared_narrow" for the
   shared narrow-table group; every other group is one wide-table
   protocol's own raw table + hourly/daily/weekly/monthly rollup stack.
@@ -66,7 +67,7 @@
 <div>
   <div class="flex items-center justify-between mb-2 px-1">
     <h2 class="surface-title font-semibold text-sm">Current Compression Inventory</h2>
-    <span class="text-mpg-600 dark:text-mpg-400 text-xs font-mono">{{ groups|length }} group(s)</span>
+    <span class="mini-table-meta text-xs font-mono">{{ groups|length }} group(s)</span>
   </div>
 
   {% for g in groups %}
@@ -89,40 +90,47 @@
     <table class="w-auto text-xs border-collapse" role="table"
            aria-label="Compression inventory for {{ g.protocol_name }}">
       <thead>
-        <tr class="text-mpg-100 text-xs uppercase tracking-wide bg-mpg-800/60" role="row">
-          <th class="px-3 py-1.5 text-left border-r border-mpg-700/50 font-semibold whitespace-nowrap" scope="col">
+        <tr class="mini-table-header--sub text-xs uppercase tracking-wide" role="row">
+          <th class="px-3 py-1.5 text-left font-semibold whitespace-nowrap" scope="col">
             Table
           </th>
-          <th class="px-3 py-1.5 text-left border-r border-mpg-700/50 font-semibold whitespace-nowrap" scope="col">
+          <th class="px-3 py-1.5 text-left font-semibold whitespace-nowrap" scope="col">
             Granularity
           </th>
-          <th class="px-3 py-1.5 text-right border-r border-mpg-700/50 font-semibold whitespace-nowrap" scope="col">
+          <th class="px-3 py-1.5 text-right font-semibold whitespace-nowrap" scope="col">
+            Raw Size
+          </th>
+          <th class="px-3 py-1.5 text-right font-semibold whitespace-nowrap" scope="col">
             Total chunks
           </th>
-          <th class="px-3 py-1.5 text-right border-r border-mpg-700/50 font-semibold whitespace-nowrap" scope="col">
+          <th class="px-3 py-1.5 text-right font-semibold whitespace-nowrap" scope="col">
             Compressed chunks
           </th>
-          <th class="px-3 py-1.5 text-right border-r border-mpg-700/50 font-semibold whitespace-nowrap" scope="col">
+          <th class="px-3 py-1.5 text-right font-semibold whitespace-nowrap" scope="col">
             Size
           </th>
         </tr>
       </thead>
       <tbody>
         {% for t in g.tables %}
-        <tr class="border-t border-mpg-700/30 hover:bg-mpg-800/40 transition-colors" role="row">
-          <td class="px-3 py-1.5 font-mono text-mpg-500 dark:text-mpg-100 whitespace-nowrap border-r border-mpg-700/30" role="cell">
+        <tr class="mini-table-row transition-colors" role="row"
+            data-table-name="{{ t.table_name }}">
+          <td class="px-3 py-1.5 font-mono mini-table-value whitespace-nowrap mini-table-col-divider" role="cell">
             {{ t.table_name }}
           </td>
-          <td class="px-3 py-1.5 text-mpg-500 dark:text-mpg-100 whitespace-nowrap border-r border-mpg-700/30" role="cell">
+          <td class="px-3 py-1.5 mini-table-value whitespace-nowrap mini-table-col-divider" role="cell">
             {{ t.granularity }}
           </td>
-          <td class="px-3 py-1.5 text-right text-mpg-500 dark:text-mpg-100 whitespace-nowrap border-r border-mpg-700/30" role="cell">
+          <td class="px-3 py-1.5 text-right mini-table-value whitespace-nowrap mini-table-col-divider" role="cell">
+            {{ t.raw_size_display }}
+          </td>
+          <td class="px-3 py-1.5 text-right mini-table-value whitespace-nowrap mini-table-col-divider" role="cell">
             {{ t.total_chunks }}
           </td>
-          <td class="px-3 py-1.5 text-right text-mpg-500 dark:text-mpg-100 whitespace-nowrap border-r border-mpg-700/30" role="cell">
+          <td class="px-3 py-1.5 text-right mini-table-value whitespace-nowrap mini-table-col-divider" role="cell">
             {{ t.compressed_chunks }}
           </td>
-          <td class="px-3 py-1.5 text-right text-mpg-500 dark:text-mpg-100 whitespace-nowrap border-r border-mpg-700/30" role="cell">
+          <td class="px-3 py-1.5 text-right mini-table-value whitespace-nowrap mini-table-col-divider size-cell" role="cell">
             {{ t.size_display }}
           </td>
         </tr>
@@ -133,6 +141,6 @@
   {% endfor %}
 
   {% if not groups %}
-  <p class="text-mpg-600 dark:text-mpg-400 text-sm text-center py-8">No compression groups found.</p>
+  <p class="mini-table-meta text-sm text-center py-8">No compression groups found.</p>
   {% endif %}
 </div>

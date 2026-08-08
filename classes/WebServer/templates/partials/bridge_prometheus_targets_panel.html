@@ -46,25 +46,25 @@
   <div class="overflow-x-auto">
     <table class="w-auto text-xs border-collapse" role="table" aria-label="Prometheus scrape target health">
       <thead>
-        <tr class="text-mpg-100 text-xs uppercase tracking-wide bg-mpg-800" role="row">
-          <th class="px-2 py-1.5 text-left border-r border-mpg-700 font-semibold whitespace-nowrap" scope="col">Machine</th>
-          <th class="px-2 py-1.5 text-left border-r border-mpg-700 font-semibold whitespace-nowrap" scope="col">Status</th>
-          <th class="px-2 py-1.5 text-right border-r border-mpg-700 font-semibold whitespace-nowrap" scope="col">Interval</th>
-          <th class="px-2 py-1.5 text-right border-r border-mpg-700 font-semibold whitespace-nowrap" scope="col">Failures</th>
-          <th class="px-2 py-1.5 text-left border-r border-mpg-700 font-semibold whitespace-nowrap" scope="col">Last Data</th>
+        <tr class="mini-table-header text-xs uppercase tracking-wide" role="row">
+          <th class="px-2 py-1.5 text-left font-semibold whitespace-nowrap" scope="col">Machine</th>
+          <th class="px-2 py-1.5 text-left font-semibold whitespace-nowrap" scope="col">Status</th>
+          <th class="px-2 py-1.5 text-right font-semibold whitespace-nowrap" scope="col">Interval</th>
+          <th class="px-2 py-1.5 text-right font-semibold whitespace-nowrap" scope="col">Failures</th>
+          <th class="px-2 py-1.5 text-left font-semibold whitespace-nowrap" scope="col">Last Data</th>
           <th class="px-2 py-1.5 text-right font-semibold whitespace-nowrap" scope="col">Metrics</th>
         </tr>
       </thead>
       <tbody>
         {% for t in targets %}
-        <tr class="border-t border-mpg-700/30
+        <tr class="mini-table-row
                    {% if t.scrape_failures_total %}bg-danger/5{% endif %}
-                   hover:bg-mpg-800/40 transition-colors" role="row">
-          <td class="px-2 py-1.5 font-mono text-mpg-500 dark:text-mpg-100 whitespace-nowrap border-r border-mpg-700/30" role="cell">
+                   transition-colors" role="row">
+          <td class="px-2 py-1.5 font-mono mini-table-value whitespace-nowrap mini-table-col-divider" role="cell">
             {{ t.device_name }}
-            <span class="text-mpg-600 dark:text-mpg-500 text-[10px] block">{{ t.machine_id }}{% if t.protocol_name %} · {{ t.protocol_name }}{% endif %}</span>
+            <span class="mini-table-subtext text-[10px] block">{{ t.machine_id }}{% if t.protocol_name %} · {{ t.protocol_name }}{% endif %}</span>
           </td>
-          <td class="px-2 py-1.5 whitespace-nowrap border-r border-mpg-700/30" role="cell">
+          <td class="px-2 py-1.5 whitespace-nowrap mini-table-col-divider" role="cell">
             {% if t.connected %}
             <span class="text-green-600 dark:text-green-400 font-medium">Connected</span>
             {% elif t.last_scrape_timestamp %}
@@ -73,17 +73,17 @@
             <span class="surface-muted">Never reported</span>
             {% endif %}
           </td>
-          <td class="px-2 py-1.5 text-right font-mono text-mpg-500 dark:text-mpg-100 whitespace-nowrap border-r border-mpg-700/30" role="cell">
+          <td class="px-2 py-1.5 text-right font-mono mini-table-value whitespace-nowrap mini-table-col-divider" role="cell">
             {% if t.interval %}{{ "{:,.0f}".format(t.interval) }}s{% else %}<span class="surface-muted">—</span>{% endif %}
           </td>
-          <td class="px-2 py-1.5 text-right font-mono whitespace-nowrap border-r border-mpg-700/30
-                     {% if t.scrape_failures_total %}text-danger{% else %}text-mpg-500 dark:text-mpg-100{% endif %}" role="cell">
+          <td class="px-2 py-1.5 text-right font-mono whitespace-nowrap mini-table-col-divider
+                     {% if t.scrape_failures_total %}text-danger{% else %}mini-table-value{% endif %}" role="cell">
             {{ t.scrape_failures_total or 0 }}
           </td>
-          <td class="px-2 py-1.5 font-mono text-mpg-500 dark:text-mpg-100 whitespace-nowrap border-r border-mpg-700/30 text-[11px]" role="cell">
+          <td class="px-2 py-1.5 font-mono mini-table-value whitespace-nowrap mini-table-col-divider text-[11px]" role="cell">
             {{ t.last_scrape_display }}
           </td>
-          <td class="px-2 py-1.5 text-right font-mono text-mpg-500 dark:text-mpg-100 whitespace-nowrap" role="cell">
+          <td class="px-2 py-1.5 text-right font-mono mini-table-value whitespace-nowrap" role="cell">
             {% if t.last_metric_count or t.last_skipped_count %}
             {{ t.last_metric_count }}{% if t.last_skipped_count %}<span class="surface-muted">/{{ t.last_skipped_count }} skipped</span>{% endif %}
             {% else %}

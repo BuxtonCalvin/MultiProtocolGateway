@@ -27,23 +27,16 @@
   Context (optional — only meaningful for the scraper_panes.html include; see
   the ns_w note below): ns_w.write_enabled (bool)
 
-  is_bool(s) is defined locally (rather than relying on a macro imported by
-  the caller) so this partial renders identically whether it's included from
+  is_bool(s) is imported from partials/settings_macros.html (a macro-only
+  partial with no context dependency of its own) rather than defined here,
+  so bridge_panes.html can share the exact same implementation instead of
+  keeping a second copy in sync by hand. The import is context-free by
+  design — settings_macros.html never references `settings`/`device`/
+  `ns_w`, so this still renders identically whether included from
   scraper_panes.html or rendered standalone by reconcile_settings() in
-  devices.py, which has no access to scraper_panes.html's macro.
+  devices.py, which has no access to any macro scraper_panes.html defines.
 #}
-{%- macro is_bool(s) -%}
-  {%- set v = (s.value_staged or s.default_value or '') | lower | trim -%}
-  {%- set k = s.key | lower -%}
-  {%- if v in ('true', 'false') -%}true
-  {%- elif k.startswith('enable_') or k.startswith('send_')
-        or k.startswith('include_') or k.startswith('use_')
-        or k in ('write_enabled', 'force_float', 'json', 'console',
-                 'discovery_enabled', 'migrate_data', 'pretty_print',
-                 'append_mode', 'async_mode') -%}true
-  {%- else -%}false
-  {%- endif -%}
-{%- endmacro -%}
+{%- import "partials/settings_macros.html" as settings_macros -%}
 <div class="grid grid-cols-[1.5rem_1fr_7rem_5rem] gap-1 text-mpg-300 text-xs
             uppercase tracking-wide px-1 pb-1 border-b border-mpg-700"
      role="row">
@@ -108,7 +101,7 @@
   </div>
 
   <div role="cell">
-    {% if is_bool(s) == 'true' %}
+    {% if settings_macros.is_bool(s) == 'true' %}
     {# Boolean: select disabled when row is inactive or virtual — a virtual   #}
     {# row's checkbox must be checked first (which creates the DB row) before  #}
     {# its value can be edited.                                               #}

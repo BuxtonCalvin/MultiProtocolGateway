@@ -68,43 +68,43 @@
 
   <p class="surface-muted text-xs mb-1">
     Raw tables — each table's own chunk_time_interval / compress_after,
-    modeled from live scrape load (metric count × write frequency) rather
-    than one shared value, since a wide table's row width and narrow's
-    row count both scale with metric count while write frequency varies
-    per protocol. "Static" rows are using the raw_narrow_*/raw_wide_*
-    settings directly — either dynamic sizing is off, or there's no live
+    modeled from live scrape load (metric count × write frequency)
+    since a wide table's row width and narrow's row count both scale
+    with metric count while write frequency varies per protocol.
+    "Static" rows are using the raw_narrow_*/raw_wide_* settings directly
+    because either dynamic sizing is off, or there's no live
     scrape data through this table yet to classify it from.
   </p>
   <div class="overflow-x-auto">
     <table class="w-auto text-xs border-collapse mb-3" role="table" aria-label="Per-table dynamic chunk and compression sizing">
       <thead>
-        <tr class="text-mpg-100 text-xs uppercase tracking-wide bg-mpg-800" role="row">
-          <th class="px-2 py-1 text-left border-r border-mpg-700 font-semibold whitespace-nowrap" scope="col">Table</th>
-          <th class="px-2 py-1 text-right border-r border-mpg-700 font-semibold whitespace-nowrap" scope="col">Load (writes/day)</th>
-          <th class="px-2 py-1 text-left border-r border-mpg-700 font-semibold whitespace-nowrap" scope="col">Band</th>
-          <th class="px-2 py-1 text-left border-r border-mpg-700 font-semibold whitespace-nowrap" scope="col">Compress After</th>
+        <tr class="mini-table-header text-xs uppercase tracking-wide" role="row">
+          <th class="px-2 py-1 text-left font-semibold whitespace-nowrap" scope="col">Table</th>
+          <th class="px-2 py-1 text-right font-semibold whitespace-nowrap" scope="col">Load (writes/day)</th>
+          <th class="px-2 py-1 text-left font-semibold whitespace-nowrap" scope="col">Band</th>
+          <th class="px-2 py-1 text-left font-semibold whitespace-nowrap" scope="col">Compress After</th>
           <th class="px-2 py-1 text-left font-semibold whitespace-nowrap" scope="col">Chunk Time</th>
         </tr>
       </thead>
       <tbody>
         {% for t in summary.dynamic_raw_tables %}
-        <tr class="border-t border-mpg-700/30 hover:bg-mpg-800/40 transition-colors" role="row">
-          <td class="px-2 py-1 font-mono text-mpg-500 dark:text-mpg-100 whitespace-nowrap border-r border-mpg-700/30" role="cell">
+        <tr class="mini-table-row transition-colors" role="row">
+          <td class="px-2 py-1 font-mono mini-table-value whitespace-nowrap mini-table-col-divider" role="cell">
             {{ t.protocol_name }}
-            <span class="text-mpg-600 dark:text-mpg-500 text-[10px] block">{{ t.table_name }}</span>
+            <span class="mini-table-subtext text-[10px] block">{{ t.table_name }}</span>
           </td>
-          <td class="px-2 py-1 text-right font-mono text-mpg-500 dark:text-mpg-100 whitespace-nowrap border-r border-mpg-700/30" role="cell">
+          <td class="px-2 py-1 text-right font-mono mini-table-value whitespace-nowrap mini-table-col-divider" role="cell">
             {% if t.load_score %}~{{ "{:,.0f}".format(t.load_score) }}{% else %}<span class="surface-muted">—</span>{% endif %}
           </td>
-          <td class="px-2 py-1 whitespace-nowrap border-r border-mpg-700/30" role="cell">
+          <td class="px-2 py-1 whitespace-nowrap mini-table-col-divider" role="cell">
             {% if 'Static' in t.band_name %}
             <span class="surface-muted">{{ t.band_name }}</span>
             {% else %}
             {{ t.band_name }}
             {% endif %}
           </td>
-          <td class="px-2 py-1 font-mono text-mpg-500 dark:text-mpg-100 whitespace-nowrap border-r border-mpg-700/30" role="cell">{{ t.compress_after_interval }}</td>
-          <td class="px-2 py-1 font-mono text-mpg-500 dark:text-mpg-100 whitespace-nowrap" role="cell">{{ t.chunk_time_interval }}</td>
+          <td class="px-2 py-1 font-mono mini-table-value whitespace-nowrap mini-table-col-divider" role="cell">{{ t.compress_after_interval }}</td>
+          <td class="px-2 py-1 font-mono mini-table-value whitespace-nowrap" role="cell">{{ t.chunk_time_interval }}</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -115,10 +115,7 @@
     Rollup views — each view's own chunk_time_interval / compress_after,
     modeled from cardinality (distinct device × metric series) rather
     than scrape frequency, since aggregation already normalizes away how
-    often the raw data was scraped. "Static" rows are using this
-    granularity's own hourly/daily/weekly/monthly_* setting directly —
-    either dynamic sizing is off, or there's no live series data yet to
-    classify from.
+    often the raw data was scraped.
   </p>
   {% for g in summary.dynamic_view_groups %}
   <div class="mb-3 rounded border border-mpg-700 overflow-hidden">
@@ -128,30 +125,30 @@
     <div class="overflow-x-auto">
       <table class="w-auto text-xs border-collapse" role="table" aria-label="Dynamic view sizing for {{ g.protocol_name }}">
         <thead>
-          <tr class="text-mpg-100 text-xs uppercase tracking-wide bg-mpg-800/60" role="row">
-            <th class="px-2 py-1 text-left border-r border-mpg-700 font-semibold whitespace-nowrap" scope="col">View</th>
-            <th class="px-2 py-1 text-right border-r border-mpg-700 font-semibold whitespace-nowrap" scope="col">Load (rows/day)</th>
-            <th class="px-2 py-1 text-left border-r border-mpg-700 font-semibold whitespace-nowrap" scope="col">Band</th>
-            <th class="px-2 py-1 text-left border-r border-mpg-700 font-semibold whitespace-nowrap" scope="col">Compress After</th>
+          <tr class="mini-table-header--sub text-xs uppercase tracking-wide" role="row">
+            <th class="px-2 py-1 text-left font-semibold whitespace-nowrap" scope="col">View</th>
+            <th class="px-2 py-1 text-right font-semibold whitespace-nowrap" scope="col">Load (rows/day)</th>
+            <th class="px-2 py-1 text-left font-semibold whitespace-nowrap" scope="col">Band</th>
+            <th class="px-2 py-1 text-left font-semibold whitespace-nowrap" scope="col">Compress After</th>
             <th class="px-2 py-1 text-left font-semibold whitespace-nowrap" scope="col">Chunk Time</th>
           </tr>
         </thead>
         <tbody>
           {% for v in g.views %}
-          <tr class="border-t border-mpg-700/30 hover:bg-mpg-800/40 transition-colors" role="row">
-            <td class="px-2 py-1 font-mono text-mpg-500 dark:text-mpg-100 whitespace-nowrap border-r border-mpg-700/30" role="cell">{{ v.view_name }}</td>
-            <td class="px-2 py-1 text-right font-mono text-mpg-500 dark:text-mpg-100 whitespace-nowrap border-r border-mpg-700/30" role="cell">
+          <tr class="mini-table-row transition-colors" role="row">
+            <td class="px-2 py-1 font-mono mini-table-value whitespace-nowrap mini-table-col-divider" role="cell">{{ v.view_name }}</td>
+            <td class="px-2 py-1 text-right font-mono mini-table-value whitespace-nowrap mini-table-col-divider" role="cell">
               {% if v.load_score %}~{{ "{:,.0f}".format(v.load_score) }}{% else %}<span class="surface-muted">—</span>{% endif %}
             </td>
-            <td class="px-2 py-1 whitespace-nowrap border-r border-mpg-700/30" role="cell">
+            <td class="px-2 py-1 whitespace-nowrap mini-table-col-divider" role="cell">
               {% if 'Static' in v.band_name %}
               <span class="surface-muted">{{ v.band_name }}</span>
               {% else %}
               {{ v.band_name }}
               {% endif %}
             </td>
-            <td class="px-2 py-1 font-mono text-mpg-500 dark:text-mpg-100 whitespace-nowrap border-r border-mpg-700/30" role="cell">{{ v.compress_after_interval }}</td>
-            <td class="px-2 py-1 font-mono text-mpg-500 dark:text-mpg-100 whitespace-nowrap" role="cell">{{ v.chunk_time_interval }}</td>
+            <td class="px-2 py-1 font-mono mini-table-value whitespace-nowrap mini-table-col-divider" role="cell">{{ v.compress_after_interval }}</td>
+            <td class="px-2 py-1 font-mono mini-table-value whitespace-nowrap" role="cell">{{ v.chunk_time_interval }}</td>
           </tr>
           {% endfor %}
         </tbody>

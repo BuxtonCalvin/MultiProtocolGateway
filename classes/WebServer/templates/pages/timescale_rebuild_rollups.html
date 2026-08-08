@@ -51,7 +51,7 @@
   <div class="flex-shrink-0 flex items-start justify-between gap-4 px-1 py-2">
     <div>
       <h1 class="surface-title text-xs font-semibold uppercase tracking-widest">Rollup Views</h1>
-      <p class="text-mpg-400 text-xs mt-1 max-w-2xl">
+      <p class="surface-muted text-xs mt-1 max-w-2xl">
         Continuous-aggregate rollup views currently on this bridge — the shared narrow stack
         plus one hourly / daily / weekly / monthly stack per wide-table protocol. Uncheck a
         group below to leave it out of the next rebuild; a checked group whose views already
@@ -59,12 +59,12 @@
       </p>
       <div class="mt-1.5 flex items-center gap-3">
         <button type="button"
-                class="text-[11px] text-mpg-300 hover:text-white underline underline-offset-2"
+                class="text-[11px] surface-muted hover:text-accent underline underline-offset-2"
                 onclick="setAllRollupGroups(true)">
           Select all
         </button>
         <button type="button"
-                class="text-[11px] text-mpg-300 hover:text-white underline underline-offset-2"
+                class="text-[11px] surface-muted hover:text-accent underline underline-offset-2"
                 onclick="setAllRollupGroups(false)">
           Select none
         </button>
@@ -115,7 +115,7 @@
          hx-get="/pages/timescale/rollups"
          hx-trigger="load"
          hx-swap="innerHTML scroll:false">
-      <p class="text-mpg-300 text-xs p-4">Loading rollup views…</p>
+      <p class="surface-subtle text-xs p-4">Loading rollup views…</p>
     </div>
   </section>
 
@@ -251,7 +251,7 @@
     if (!anyChanged) {
       // Outcome 1: nothing needed doing — this is the common, fast case.
       statusEl.innerHTML =
-        '<div class="text-xs text-mpg-500 dark:text-mpg-100 px-3 py-2 rounded border border-mpg-700 bg-mpg-800/5">' +
+        '<div class="text-xs mini-table-value px-3 py-2 rounded border border-mpg-700 bg-mpg-800/5">' +
         'Rollups were analyzed and do not need a rebuild.</div>';
       return;
     }

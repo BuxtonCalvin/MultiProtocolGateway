@@ -451,9 +451,10 @@ def list_compression_groups(gateway: Any) -> list[dict[str, Any]]:
     """
     Read-only compression inventory (one row per group, each carrying a
     `tables` breakdown of that group's raw table + all four rollup views'
-    chunk counts and size) for the Rebuild Compression screen's group
-    checkboxes, with a human-readable `size_display` added to each group
-    row AND each of its per-table rows.
+    chunk counts, size, and raw/uncompressed size) for the Rebuild
+    Compression screen's group checkboxes, with human-readable
+    `size_display` / `raw_size_display` added to each group row AND each
+    of its per-table rows.
 
     Raises RuntimeError if no bridge is attached, or the bridge is
     attached but hasn't finished connecting to TimescaleDB yet.
@@ -466,9 +467,29 @@ def list_compression_groups(gateway: Any) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = bridge.rollup_mgr.list_compression_groups()
     for row in rows:
         row["size_display"] = _format_bytes(row.get("size_bytes"))
+        row["raw_size_display"] = _format_bytes(row.get("raw_size_bytes"))
         for table_row in row.get("tables", []):
             table_row["size_display"] = _format_bytes(table_row.get("size_bytes"))
+            table_row["raw_size_display"] = _format_bytes(table_row.get("raw_size_bytes"))
     return rows
+
+
+def _annotate_compression_change(entry: dict[str, Any]) -> None:
+    """
+    Adds human-readable display fields to one before/after-size entry --
+    either a group result or one of its `tables` rows from
+    RollupManager.rebuild_compression -- in place: `size_before_display`,
+    `size_after_display`, and `percent_reduced` (float, None when there's
+    no size_before to compute a ratio against, e.g. a skipped group or an
+    untouched table). Mirrors the size_display convention used elsewhere
+    in this module (e.g. list_compression_groups) -- this is where display
+    formatting belongs, not the transport layer or the frontend.
+    """
+    size_before: int = entry.get("size_before_bytes") or 0
+    size_after: int = entry.get("size_after_bytes") or 0
+    entry["size_before_display"] = _format_bytes(size_before)
+    entry["size_after_display"] = _format_bytes(size_after)
+    entry["percent_reduced"] = round((1 - (size_after / size_before)) * 100, 1) if size_before else None
 
 
 def rebuild_compression(gateway: Any, protocol_names: set[str] | None = None) -> dict[str, Any]:
@@ -482,9 +503,14 @@ def rebuild_compression(gateway: Any, protocol_names: set[str] | None = None) ->
         protocol_names: Which groups to act on -- protocol_name values as
             returned by list_compression_groups(), plus "shared_narrow"
             for the shared narrow stack. None acts on every group.
-        See RollupManager.rebuild_compression for the per-group/per-chunk
-        result shape and why this never touches a chunk that isn't
-        already compressed.
+        See RollupManager.rebuild_compression for the per-group/per-table/
+        per-chunk result shape and why this never touches a chunk that
+        isn't already compressed.
+
+    Adds `size_before_display` / `size_after_display` / `percent_reduced`
+    to each group AND to each of its per-table entries, for the Rebuild
+    Compression screen's post-rebuild "New Size" / "Percent Reduced"
+    columns (see timescale_rebuild_compression.html).
 
     Raises RuntimeError if no bridge is attached, or the bridge hasn't
     finished connecting to TimescaleDB yet.
@@ -494,7 +520,12 @@ def rebuild_compression(gateway: Any, protocol_names: set[str] | None = None) ->
         raise RuntimeError("No TimescaleDB bridge is attached to this gateway.")
     if bridge.rollup_mgr is None:
         raise RuntimeError("Rollup manager is not initialized yet — the bridge is not connected to TimescaleDB.")
-    return bridge.rollup_mgr.rebuild_compression(protocol_names=protocol_names)
+    result: dict[str, Any] = bridge.rollup_mgr.rebuild_compression(protocol_names=protocol_names)
+    for group in result.get("groups", []):
+        _annotate_compression_change(group)
+        for table_row in group.get("tables", []):
+            _annotate_compression_change(table_row)
+    return result
 
 
 # ---------------------------------------------------------------------------
