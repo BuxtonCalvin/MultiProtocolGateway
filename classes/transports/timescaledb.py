@@ -70,6 +70,7 @@ from threading import Lock, RLock
 from typing import (
     Any,
     Callable,
+    Generator,
     List,
     Literal,
     Optional,
@@ -5590,11 +5591,51 @@ class RollupManager:
             ).fetchall()
         return {row.view_name: row.size_bytes or 0 for row in rows}
 
-    def rebuild_compression(self, protocol_names: set[str] | None = None) -> dict[str, Any]:
+    def rebuild_compression(self, protocol_names: set[str] | None = None) -> Generator[dict[str, Any], None, None]:
         """
         Full decompress -> recompress pass across every already-compressed
         chunk of the selected group(s)' raw table and all four rollup
         views, for the admin's "Rebuild Compression" button.
+
+        This is a GENERATOR, not a plain method -- see routers/timescale
+        .py's PATCH /compression/rebuild, which streams each yielded
+        event straight to the browser as one line of newline-delimited
+        JSON per event, over the single request/response connection
+        already open for the rebuild itself. No background job, no
+        second polling endpoint: the request just stays open and the
+        browser reads it incrementally (see triggerRebuildCompression in
+        timescale_rebuild_compression.html). Trade-off worth knowing:
+        if that connection drops mid-run (tab closed, laptop sleeps),
+        the rebuild keeps going server-side same as always, but nothing
+        is watching it anymore -- there's no job ID to reattach to.
+
+        Yields:
+            {"type": "progress", "protocol_name", "table_name",
+             "bytes_processed", "bytes_total"} once per chunk (success or
+             failure) -- bytes_total is fixed for the whole run, computed
+             during the planning pass below from the pre-rebuild size of
+             every table that actually has compressed chunks to touch
+             (tables with nothing compressed contribute nothing to the
+             denominator, so progress reaches 100% exactly when the last
+             real chunk finishes, not before). bytes_processed is
+             cumulative and WEIGHTED BY EACH TABLE'S BYTE SIZE, split
+             evenly across that table's own chunks. This matters because
+             chunk counts are wildly incomparable across a group's own
+             members -- an hourly rollup view routinely has 4-5x the raw
+             table's chunk count for the same wall-clock span, while the
+             raw table's chunks are individually far heavier -- so a
+             naive chunks-done/chunks-total fraction would race through
+             a big rollup view and then appear to stall on the raw
+             table, or the reverse, depending on iteration order. There's
+             no cheaper way to get a single chunk's actual individual
+             byte size without yet another query per chunk; splitting a
+             table's already-known total evenly across its own chunks is
+             a much better proxy than treating every chunk everywhere as
+             equal, since within ONE table chunks are far more
+             comparable to each other than they are across tables/views.
+            {"type": "done", "result": {"groups": [...]}} exactly once,
+             at the end -- the same per-group/per-table/per-chunk result
+             shape this method used to simply return, unchanged.
 
         Unlike rebuild_all_rollups() / refresh_selected_rollups(), this
         never drops or recreates a view or a chunk -- it only rewrites
@@ -5621,29 +5662,35 @@ class RollupManager:
         compress_after window) is left alone, so this never fights the
         compression policy schedule or compresses data early.
 
-        Each table's scheduled compression job is paused for the duration
-        of that table's chunk loop (mirrors WideTableFieldManager.
-        delete_fields' pause-around-DDL pattern) so the background
-        scheduler can't race a chunk this is already mid-rewrite on, and
-        is always resumed afterward even if a chunk failed.
-
-        Every chunk gets its own try/except: one chunk failing to
+        Runs in two passes rather than one combined loop:
+          1. PLANNING -- for every table in a selected group, look up
+             which chunks are currently compressed (a read-only query,
+             nothing mutated yet). This is what makes bytes_total known
+             BEFORE the first progress event, instead of discovering it
+             incrementally as tables happen to get visited.
+          2. WORK -- decompress/recompress each planned chunk, in the
+             same order the plan was built (group order, then each
+             group's [raw, hourly, daily, weekly, monthly] order),
+             yielding a progress event after every chunk.
+        Each table's scheduled compression job is paused for the
+        duration of that table's chunk loop in the work pass (mirrors
+        WideTableFieldManager.delete_fields' pause-around-DDL pattern) so
+        the background scheduler can't race a chunk this is already
+        mid-rewrite on, and is always resumed afterward even if a chunk
+        failed. Every chunk gets its own try/except: one chunk failing to
         decompress or recompress (e.g. a concurrent lock) does not abort
         the rest of that table, the rest of the group, or any other
-        selected group. Runs synchronously and returns a per-group result
-        with a per-table AND per-chunk breakdown, so the caller can show
-        the actual size change per table (not just per group) rather
-        than a single pass/fail flag.
+        selected group.
 
-        size_before_bytes/size_after_bytes (at both the table and group
-        level) are the TABLE's/GROUP's total on-disk size -- via
-        _get_hypertable_total_sizes(), i.e. the exact same
-        hypertable_size() metric list_compression_groups' "Size" column
-        already shows -- snapshotted once for every table this run will
-        touch right before the first chunk anywhere is decompressed, and
-        again once for every touched table right after the last chunk
-        anywhere finishes. Two round trips total (not per-table, not per-
-        chunk), regardless of how many groups/tables/chunks are involved.
+        size_before_bytes/size_after_bytes on the final "done" result (at
+        both the table and group level) are the TABLE's/GROUP's total
+        on-disk size -- via _get_hypertable_total_sizes(), i.e. the exact
+        same hypertable_size() metric list_compression_groups' "Size"
+        column already shows -- snapshotted once for every table the
+        planning pass found work for, right before the work pass starts,
+        and again once for all of them right after the work pass
+        finishes. Two round trips total (not per-table, not per-chunk),
+        regardless of how many groups/tables/chunks are involved.
 
         This is deliberately NOT a sum of chunk_compression_stats() before/
         after figures per chunk (an earlier version of this method did
@@ -5687,30 +5734,15 @@ class RollupManager:
         ]
         old_total_sizes: dict[str, int] = self._get_hypertable_total_sizes(selected_table_names)
 
-        group_results: list[dict[str, Any]] = []
-        touched_table_names: list[str] = []
+        # -------- Planning pass: find out what actually needs doing, and
+        # its total byte weight, before touching anything. This is what
+        # lets the very first progress event already know a real,
+        # correct bytes_total instead of discovering it incrementally.
+        plan: list[dict[str, Any]] = []  # [{protocol_name, table_name, chunk_names}, ...]
 
         for group in all_groups:
             if not group["selected"]:
-                group_results.append({
-                    "protocol_name": group["protocol_name"],
-                    "skipped": True,
-                    "ok": True,
-                    "chunks_attempted": 0,
-                    "chunks_ok": 0,
-                    "chunks_failed": 0,
-                    "size_before_bytes": 0,
-                    "size_after_bytes": 0,
-                    "tables": [],
-                    "chunks": [],
-                })
                 continue
-
-            chunk_results: list[dict[str, Any]] = []
-            table_results: list[dict[str, Any]] = []
-            chunks_ok = 0
-            chunks_failed = 0
-
             for table_name in group["tables"]:
                 try:
                     with self.SessionFactory() as session:
@@ -5735,106 +5767,157 @@ class RollupManager:
                 if not chunk_rows:
                     continue
 
-                touched_table_names.append(table_name)
-                table_chunks_ok = 0
-                table_chunks_failed = 0
-
-                paused_job_ids: list[int] = []
-                try:
-                    with self.SessionFactory() as session:
-                        with session.begin():
-                            paused_job_ids = self._pause_compression_job_for_table(session, table_name)
-
-                    for (chunk_name,) in chunk_rows:
-                        # Ensure the chunk name is fully qualified with its internal schema
-                        if not chunk_name.startswith("_timescaledb_internal."):
-                            qualified_chunk: str = f"_timescaledb_internal.{chunk_name}"
-                        else:
-                            qualified_chunk = chunk_name
-
-                        try:
-                            with self.SessionFactory() as session:
-                                with session.begin():
-                                    self._set_lock_timeout(session, r_settings["lock_timeout"])
-                                    session.execute(
-                                        text(f"SET LOCAL work_mem = '{r_settings['work_mem']}';")
-                                    )
-                                    session.execute(text("SELECT decompress_chunk(:c, true)"), {"c": qualified_chunk})
-                                    session.execute(text("SELECT compress_chunk(:c, true)"), {"c": qualified_chunk})
-
-                            chunks_ok += 1
-                            table_chunks_ok += 1
-                            chunk_results.append({
-                                "table_name": table_name, "chunk_name": chunk_name,
-                                "ok": True, "error": None,
-                            })
-                        except Exception as e:
-                            chunks_failed += 1
-                            table_chunks_failed += 1
-                            self._log.error(
-                                f"rebuild_compression: chunk '{chunk_name}' on '{table_name}' failed: {e}"
-                            )
-                            chunk_results.append({
-                                "table_name": table_name, "chunk_name": chunk_name,
-                                "ok": False, "error": str(e),
-                            })
-                finally:
-                    if paused_job_ids:
-                        try:
-                            with self.SessionFactory() as session:
-                                with session.begin():
-                                    self._resume_compression_job_for_table(session, paused_job_ids)
-                        except Exception as e:
-                            # Never let a resume failure mask chunk results
-                            # already recorded above -- logged so a human
-                            # notices and re-enables the job manually.
-                            self._log.warning(
-                                f"rebuild_compression: could not resume compression job(s) "
-                                f"{paused_job_ids} for '{table_name}': {e}"
-                            )
-
-                table_results.append({
+                plan.append({
+                    "protocol_name": group["protocol_name"],
                     "table_name": table_name,
-                    "ok": table_chunks_failed == 0,
-                    "chunks_ok": table_chunks_ok,
-                    "chunks_failed": table_chunks_failed,
-                    "size_before_bytes": old_total_sizes.get(table_name, 0),
-                    # size_after_bytes filled in below, once every group's
-                    # tables have finished -- see the batched "after"
-                    # snapshot after this loop.
+                    "chunk_names": [row.chunk_name for row in chunk_rows],
                 })
 
-            group_results.append({
-                "protocol_name": group["protocol_name"],
-                "skipped": False,
-                "ok": chunks_failed == 0,
-                "chunks_attempted": chunks_ok + chunks_failed,
-                "chunks_ok": chunks_ok,
-                "chunks_failed": chunks_failed,
-                "tables": table_results,
-                "chunks": chunk_results,
-                # size_before_bytes/size_after_bytes filled in below too,
-                # as the sum of this group's table entries.
+        touched_table_names: list[str] = [item["table_name"] for item in plan]
+        bytes_total: int = sum(old_total_sizes.get(t, 0) for t in touched_table_names)
+        bytes_processed: float = 0.0
+
+        # -------- Per-group accumulators for the eventual "done" event,
+        # seeded for every group up front so a selected group that ends
+        # up with nothing to do (every table had zero compressed chunks)
+        # still reports cleanly rather than being absent.
+        group_acc: dict[str, dict[str, Any]] = {
+            group["protocol_name"]: {"chunk_results": [], "table_results": [], "chunks_ok": 0, "chunks_failed": 0}
+            for group in all_groups
+            if group["selected"]
+        }
+
+        # -------- Work pass: actually decompress/recompress, in plan
+        # order, yielding one progress event per chunk.
+        for item in plan:
+            protocol_name: str = item["protocol_name"]
+            table_name: str = item["table_name"]
+            chunk_names: list[str] = item["chunk_names"]
+            acc: dict[str, Any] = group_acc[protocol_name]
+
+            table_weight: int = old_total_sizes.get(table_name, 0)
+            per_chunk_weight: float = (table_weight / len(chunk_names)) if chunk_names else 0.0
+
+            table_chunks_ok = 0
+            table_chunks_failed = 0
+
+            paused_job_ids: list[int] = []
+            try:
+                with self.SessionFactory() as session:
+                    with session.begin():
+                        paused_job_ids = self._pause_compression_job_for_table(session, table_name)
+
+                for chunk_name in chunk_names:
+                    # Ensure the chunk name is fully qualified with its internal schema
+                    if not chunk_name.startswith("_timescaledb_internal."):
+                        qualified_chunk: str = f"_timescaledb_internal.{chunk_name}"
+                    else:
+                        qualified_chunk = chunk_name
+
+                    try:
+                        with self.SessionFactory() as session:
+                            with session.begin():
+                                self._set_lock_timeout(session, r_settings["lock_timeout"])
+                                session.execute(
+                                    text(f"SET LOCAL work_mem = '{r_settings['work_mem']}';")
+                                )
+                                session.execute(text("SELECT decompress_chunk(:c, true)"), {"c": qualified_chunk})
+                                session.execute(text("SELECT compress_chunk(:c, true)"), {"c": qualified_chunk})
+
+                        acc["chunks_ok"] += 1
+                        table_chunks_ok += 1
+                        acc["chunk_results"].append({
+                            "table_name": table_name, "chunk_name": chunk_name,
+                            "ok": True, "error": None,
+                        })
+                    except Exception as e:
+                        acc["chunks_failed"] += 1
+                        table_chunks_failed += 1
+                        self._log.error(
+                            f"rebuild_compression: chunk '{chunk_name}' on '{table_name}' failed: {e}"
+                        )
+                        acc["chunk_results"].append({
+                            "table_name": table_name, "chunk_name": chunk_name,
+                            "ok": False, "error": str(e),
+                        })
+
+                    bytes_processed += per_chunk_weight
+                    yield {
+                        "type": "progress",
+                        "protocol_name": protocol_name,
+                        "table_name": table_name,
+                        "bytes_processed": int(min(bytes_processed, bytes_total)),
+                        "bytes_total": bytes_total,
+                    }
+            finally:
+                if paused_job_ids:
+                    try:
+                        with self.SessionFactory() as session:
+                            with session.begin():
+                                self._resume_compression_job_for_table(session, paused_job_ids)
+                    except Exception as e:
+                        # Never let a resume failure mask chunk results
+                        # already recorded above -- logged so a human
+                        # notices and re-enables the job manually.
+                        self._log.warning(
+                            f"rebuild_compression: could not resume compression job(s) "
+                            f"{paused_job_ids} for '{table_name}': {e}"
+                        )
+
+            acc["table_results"].append({
+                "table_name": table_name,
+                "ok": table_chunks_failed == 0,
+                "chunks_ok": table_chunks_ok,
+                "chunks_failed": table_chunks_failed,
+                "size_before_bytes": old_total_sizes.get(table_name, 0),
+                # size_after_bytes filled in below, once every table has
+                # finished -- see the batched "after" snapshot below.
             })
 
-        # Single batched "after" snapshot covering every table this run
-        # actually touched (a table with nothing compressed never made it
-        # into touched_table_names) -- one round trip for everything,
+        # Single batched "after" snapshot covering every table the
+        # planning pass found work for -- one round trip for everything,
         # same reasoning as old_total_sizes above.
         new_total_sizes: dict[str, int] = self._get_hypertable_total_sizes(touched_table_names)
 
-        for group in group_results:
-            if group["skipped"]:
+        group_results: list[dict[str, Any]] = []
+        for group in all_groups:
+            protocol_name = group["protocol_name"]
+            if not group["selected"]:
+                group_results.append({
+                    "protocol_name": protocol_name,
+                    "skipped": True,
+                    "ok": True,
+                    "chunks_attempted": 0,
+                    "chunks_ok": 0,
+                    "chunks_failed": 0,
+                    "size_before_bytes": 0,
+                    "size_after_bytes": 0,
+                    "tables": [],
+                    "chunks": [],
+                })
                 continue
+
+            acc = group_acc[protocol_name]
             group_before = 0
             group_after = 0
-            for table_entry in group["tables"]:
+            for table_entry in acc["table_results"]:
                 after: int = new_total_sizes.get(table_entry["table_name"], 0)
                 table_entry["size_after_bytes"] = after
                 group_before += table_entry["size_before_bytes"]
                 group_after += after
-            group["size_before_bytes"] = group_before
-            group["size_after_bytes"] = group_after
+
+            group_results.append({
+                "protocol_name": protocol_name,
+                "skipped": False,
+                "ok": acc["chunks_failed"] == 0,
+                "chunks_attempted": acc["chunks_ok"] + acc["chunks_failed"],
+                "chunks_ok": acc["chunks_ok"],
+                "chunks_failed": acc["chunks_failed"],
+                "tables": acc["table_results"],
+                "chunks": acc["chunk_results"],
+                "size_before_bytes": group_before,
+                "size_after_bytes": group_after,
+            })
 
         ok_count: int = sum(1 for g in group_results if g["ok"] and not g["skipped"])
         attempted_count: int = sum(1 for g in group_results if not g["skipped"])
@@ -5842,7 +5925,7 @@ class RollupManager:
             "rebuild_compression: %d/%d selected group(s) fully ok.", ok_count, attempted_count,
         )
 
-        return {"groups": group_results}
+        yield {"type": "done", "result": {"groups": group_results}}
 
     def get_dynamic_raw_table_overview(self) -> list[dict[str, Any]]:
         """

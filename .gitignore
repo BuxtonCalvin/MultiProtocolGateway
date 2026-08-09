@@ -45,4 +45,6 @@ config/data-db/*.*
 tools/mapped_columns.csv
 classes/WebServer/static/annotation-editor.html
 scripts/*.*
+.stylelintignore.txt
+stylelint.config.mjs
 

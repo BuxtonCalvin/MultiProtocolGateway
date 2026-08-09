@@ -66,7 +66,31 @@
 #}
 <div>
   <div class="flex items-center justify-between mb-2 px-1">
-    <h2 class="surface-title font-semibold text-sm">Current Compression Inventory</h2>
+    <div class="flex items-center gap-3">
+      <h2 class="surface-title font-semibold text-sm">Current Compression Inventory</h2>
+      <!--
+        Real progress thermometer for an in-flight Rebuild Compression
+        run. Hidden by default; shown and updated entirely client-side by
+        showCompressionProgress()/updateCompressionProgress()/
+        hideCompressionProgress() in timescale_rebuild_compression.html,
+        driven by "progress" events streamed from PATCH /api/timescale/
+        compression/rebuild (newline-delimited JSON over one long-lived
+        response, not a single blocking request) as each chunk finishes.
+        bytes_processed/bytes_total in those events are weighted by each
+        table's actual pre-rebuild size, not a flat chunk count -- see
+        RollupManager.rebuild_compression for why (a rollup view
+        routinely has several times its own raw table's chunk count for
+        the same wall-clock span, so a chunk-count-based bar would
+        visibly race through one and stall on the other).
+      -->
+      <div id="compression-progress-track"
+           class="hidden w-40 h-1.5 rounded-full bg-mpg-700 overflow-hidden"
+           role="progressbar" aria-label="Compression rebuild in progress">
+        <div id="compression-progress-fill"
+             class="h-full bg-accent rounded-full transition-all duration-300 ease-out"
+             style="width: 0%;"></div>
+      </div>
+    </div>
     <span class="mini-table-meta text-xs font-mono">{{ groups|length }} group(s)</span>
   </div>
 

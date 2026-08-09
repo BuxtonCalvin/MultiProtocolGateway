@@ -1297,7 +1297,7 @@ class modbus_base(transport_base):
             score_percent: float = self.validate_protocol(Registry_Type.HOLDING)
             if(score_percent > 90):
                 self.write_enabled = True
-                self._log.warning("enable write - validation passed")
+                self._log.info("enable write - validation passed")
             elif self.write_mode == TransportWriteMode.RELAXED:
                 self.write_enabled = True
                 self._log.warning("enable write - WARNING - RELAXED MODE")

@@ -78,7 +78,7 @@ import itertools
 import logging
 import threading
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Generator
 
 _log: logging.Logger = logging.getLogger(__name__)
 
@@ -492,40 +492,54 @@ def _annotate_compression_change(entry: dict[str, Any]) -> None:
     entry["percent_reduced"] = round((1 - (size_after / size_before)) * 100, 1) if size_before else None
 
 
-def rebuild_compression(gateway: Any, protocol_names: set[str] | None = None) -> dict[str, Any]:
+def rebuild_compression(
+    gateway: Any, protocol_names: set[str] | None = None
+) -> Generator[dict[str, Any], None, None]:
     """
     Triggers an immediate decompress -> recompress pass across every
     already-compressed chunk of the selected group(s)' raw table and all
     four rollup views. Called from the "Rebuild Compression" button (PATCH
-    /api/timescale/compression/rebuild).
+    /api/timescale/compression/rebuild), which streams every yielded
+    event straight to the browser as it happens rather than waiting for
+    the whole rebuild to finish.
+
+    This is a GENERATOR wrapping RollupManager.rebuild_compression --
+    forwards every event through UNCHANGED except the terminal
+    {"type": "done"} event, whose result dict gets the same
+    size_before_display/size_after_display/percent_reduced annotation
+    (per group AND per table) this used to apply to the whole return
+    value back when it returned once instead of streaming. See
+    RollupManager.rebuild_compression for the full set of event shapes
+    and the weighted-by-bytes reasoning behind "progress" events.
 
     Args:
         protocol_names: Which groups to act on -- protocol_name values as
             returned by list_compression_groups(), plus "shared_narrow"
             for the shared narrow stack. None acts on every group.
-        See RollupManager.rebuild_compression for the per-group/per-table/
-        per-chunk result shape and why this never touches a chunk that
-        isn't already compressed.
-
-    Adds `size_before_display` / `size_after_display` / `percent_reduced`
-    to each group AND to each of its per-table entries, for the Rebuild
-    Compression screen's post-rebuild "New Size" / "Percent Reduced"
-    columns (see timescale_rebuild_compression.html).
 
     Raises RuntimeError if no bridge is attached, or the bridge hasn't
-    finished connecting to TimescaleDB yet.
+    finished connecting to TimescaleDB yet. Because this function is
+    itself a generator (it has a yield below), that RuntimeError is only
+    actually raised once the caller starts iterating it (Python doesn't
+    run any of a generator function's body, including this check, until
+    the first `next()`) -- routers/timescale.py's endpoint iterates this
+    inside a try/except specifically so that first iteration is where
+    the error surfaces, before the streaming response has sent anything.
     """
     bridge: Any | None = get_timescale_bridge(gateway)
     if bridge is None:
         raise RuntimeError("No TimescaleDB bridge is attached to this gateway.")
     if bridge.rollup_mgr is None:
         raise RuntimeError("Rollup manager is not initialized yet — the bridge is not connected to TimescaleDB.")
-    result: dict[str, Any] = bridge.rollup_mgr.rebuild_compression(protocol_names=protocol_names)
-    for group in result.get("groups", []):
-        _annotate_compression_change(group)
-        for table_row in group.get("tables", []):
-            _annotate_compression_change(table_row)
-    return result
+
+    for event in bridge.rollup_mgr.rebuild_compression(protocol_names=protocol_names):
+        if event.get("type") == "done":
+            result: dict[str, Any] = event.get("result", {})
+            for group in result.get("groups", []):
+                _annotate_compression_change(group)
+                for table_row in group.get("tables", []):
+                    _annotate_compression_change(table_row)
+        yield event
 
 
 # ---------------------------------------------------------------------------

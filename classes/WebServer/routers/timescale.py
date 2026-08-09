@@ -33,10 +33,12 @@ routers/commit.py.
 """
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from ..services.bridge_service import (
@@ -293,7 +295,7 @@ class RebuildCompressionRequest(BaseModel):
 
 
 @router.patch("/compression/rebuild")
-def rebuild_compression_endpoint(payload: RebuildCompressionRequest, request: Request) -> dict[str, Any]:
+def rebuild_compression_endpoint(payload: RebuildCompressionRequest, request: Request) -> StreamingResponse:
     """
     Runs a full decompress -> recompress pass across every already-
     compressed chunk of the admin's selected group(s) — the raw table plus
@@ -302,27 +304,60 @@ def rebuild_compression_endpoint(payload: RebuildCompressionRequest, request: Re
     compressed chunk in a selected group is rewritten every time, since
     there's no cheap way to tell whether a given chunk already reflects
     the current compress_segmentby/compress_orderby/column settings short
-    of decompressing it. Runs synchronously and returns a per-group result
-    with a per-chunk breakdown and before/after byte totals; the caller
-    (the Rebuild Compression screen) reports any ok=False groups to the
-    admin rather than treating a partial failure as a 500.
+    of decompressing it.
+
+    STREAMS its result as newline-delimited JSON (one JSON object per
+    line, media type application/x-ndjson) over a single long-lived
+    response, rather than blocking silently until the whole rebuild
+    finishes and returning one dict. Every line is one event from
+    services/bridge_service.rebuild_compression: a "progress" event after
+    each chunk (weighted by each table's pre-rebuild byte size — see
+    RollupManager.rebuild_compression for why chunk COUNT alone would be
+    misleading here, given how differently sized a raw table's chunks are
+    from its own rollup views' chunks), and exactly one "done" event at
+    the end carrying the same per-group/per-table/per-chunk result shape
+    this endpoint used to return directly. The browser
+    (triggerRebuildCompression in timescale_rebuild_compression.html)
+    reads this incrementally to drive a real progress meter instead of
+    the fixed-duration guess it used before — no background job or
+    second polling endpoint needed, since the request just stays open for
+    the duration of the rebuild.
+
+    The one thing this trades away versus a background-job-plus-polling
+    design: if the connection drops mid-run (tab closed, laptop sleeps),
+    the rebuild keeps going server-side same as always, but there's no
+    job ID to reattach to and watch it finish — nothing is an option here
+    that a plain admin screen reasonably needs.
+
+    Bridge/rollup-manager errors raised before the first chunk (no bridge
+    attached, bridge not yet connected) are caught on the FIRST iteration
+    of the underlying generator and surfaced as an {"type": "error"} line
+    rather than an HTTP error status, since by the time any content has
+    streamed the response's status code is already committed. A caller
+    (the Rebuild Compression screen) checks for that line before treating
+    the stream as if a "done" event is still coming.
     """
     _require_bridge(request)
     if not payload.protocol_names:
         raise HTTPException(status_code=400, detail="Select at least one group to rebuild.")
-    try:
-        result: dict[str, Any] = rebuild_compression(
-            request.app.state.gateway,
-            protocol_names=set(payload.protocol_names),
-        )
-    except RuntimeError as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+
+    protocol_names: set[str] = set(payload.protocol_names)
+    gateway: Any = request.app.state.gateway
+
+    def event_stream():
+        try:
+            for event in rebuild_compression(gateway, protocol_names=protocol_names):
+                yield json.dumps(event) + "\n"
+        except RuntimeError as exc:
+            yield json.dumps({"type": "error", "detail": str(exc)}) + "\n"
+        except Exception as exc:
+            _log.error(f"Compression rebuild stream failed: {exc}")
+            yield json.dumps({"type": "error", "detail": str(exc)}) + "\n"
+
     _log.info(
         f"Compression rebuild triggered via admin UI for {len(payload.protocol_names)} group(s)."
     )
-    return result
+    return StreamingResponse(event_stream(), media_type="application/x-ndjson")
 
 
 # ---------------------------------------------------------------------------

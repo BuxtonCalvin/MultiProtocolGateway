@@ -167,9 +167,18 @@
 
     btn.disabled = true;
     btnLabel.textContent = 'Rebuilding compression…';
+    showCompressionProgress();
 
     let ok = false;
     let payload = null;
+    let streamError = null;
+
+    // The endpoint streams newline-delimited JSON over one long-lived
+    // response instead of returning a single JSON body — read it
+    // incrementally so "progress" events can drive the thermometer with
+    // real numbers as they arrive, rather than waiting for the whole
+    // rebuild to finish. See PATCH /api/timescale/compression/rebuild's
+    // docstring for the event shapes.
     try {
       const resp = await fetch('/api/timescale/compression/rebuild', {
         method: 'PATCH',
@@ -179,14 +188,59 @@
         },
         body: JSON.stringify({ protocol_names: protocolNames }),
       });
-      ok = resp.ok;
-      payload = await resp.json();
+
+      if (!resp.ok || !resp.body) {
+        ok = false;
+      } else {
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) { break; }
+          buffer += decoder.decode(value, { stream: true });
+
+          let newlineIndex;
+          while ((newlineIndex = buffer.indexOf('\n')) >= 0) {
+            const line = buffer.slice(0, newlineIndex).trim();
+            buffer = buffer.slice(newlineIndex + 1);
+            if (!line) { continue; }
+
+            let event;
+            try {
+              event = JSON.parse(line);
+            } catch (e) {
+              continue; // a partial/garbled line — skip rather than abort the whole stream
+            }
+
+            if (event.type === 'progress') {
+              updateCompressionProgress(event.bytes_processed, event.bytes_total);
+            } else if (event.type === 'done') {
+              payload = event.result;
+              ok = true;
+            } else if (event.type === 'error') {
+              streamError = event.detail;
+              ok = false;
+            }
+          }
+        }
+      }
     } catch (e) {
       ok = false;
     }
 
+    hideCompressionProgress(ok);
     btn.disabled = false;
     btnLabel.textContent = 'Rebuild Compression';
+
+    if (streamError) {
+      statusEl.innerHTML =
+        '<div class="text-xs text-danger px-3 py-2 rounded border border-danger/30 bg-danger/10">' +
+        'Rebuild failed: ' + streamError + '</div>';
+      refreshCompressionGroupsContainer();
+      return;
+    }
 
     const outcome = renderCompressionStatus(ok, payload);
     if (outcome === 'success') {
@@ -194,6 +248,52 @@
     } else {
       refreshCompressionGroupsContainer();
     }
+  }
+
+  // Real progress thermometer for the #compression-progress-track/-fill
+  // elements next to "Current Compression Inventory" (see
+  // timescale_compression_group_list.html), driven by the "progress"
+  // events streamed from PATCH /api/timescale/compression/rebuild.
+  // bytes_processed/bytes_total there are weighted by each table's
+  // actual pre-rebuild byte size (see RollupManager.rebuild_compression)
+  // rather than a flat chunk count, since a rollup view routinely has
+  // several times its own raw table's chunk count for the same
+  // wall-clock span — a chunk-count-based bar would visibly race through
+  // one and stall on the other.
+  function showCompressionProgress() {
+    const track = document.getElementById('compression-progress-track');
+    const fill = document.getElementById('compression-progress-fill');
+    if (!track || !fill) { return; }
+    fill.classList.remove('bg-danger');
+    fill.classList.add('bg-accent');
+    fill.style.width = '0%';
+    track.classList.remove('hidden');
+  }
+
+  function updateCompressionProgress(bytesProcessed, bytesTotal) {
+    const fill = document.getElementById('compression-progress-fill');
+    if (!fill) { return; }
+    const pct = bytesTotal > 0 ? Math.min(100, (bytesProcessed / bytesTotal) * 100) : 100;
+    fill.style.width = pct + '%';
+  }
+
+  function hideCompressionProgress(success) {
+    const track = document.getElementById('compression-progress-track');
+    const fill = document.getElementById('compression-progress-fill');
+    if (!track || !fill) { return; }
+
+    fill.classList.toggle('bg-danger', !success);
+    fill.classList.toggle('bg-accent', success);
+    fill.style.width = '100%';
+
+    // Let the "complete" fill be visible for a beat before resetting,
+    // rather than snapping straight back to hidden/0%.
+    setTimeout(function () {
+      track.classList.add('hidden');
+      fill.classList.remove('bg-danger');
+      fill.classList.add('bg-accent');
+      fill.style.width = '0%';
+    }, 500);
   }
 
   function formatBytes(n) {
