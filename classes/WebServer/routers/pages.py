@@ -65,6 +65,7 @@ from ..services.analysis_service import get_transport_connection_status
 from ..services.bridge_service import (
     get_background_jobs,
     get_compression_retention_summary,
+    get_index_overview,
     get_influxdb_health,
     get_influxdb_storage,
     get_mqtt_health,
@@ -699,6 +700,32 @@ async def timescale_storage_partial(request: Request):
         request=request,
         name="partials/bridge_timescale_storage_panel.html",
         context={"tables": tables},
+    )
+
+
+@router.get("/pages/timescale/indexes", response_class=HTMLResponse, response_model=None)
+async def timescale_indexes_partial(request: Request):
+    """
+    Indexes panel for the TimescaleDB bridge's device page — every index
+    on the shared narrow table and each wide table, with size and scan
+    counts. Read-only; lazy-loaded since this queries every source table
+    individually, same as the Storage Overview panel.
+    """
+    gateway = getattr(request.app.state, "gateway", None)
+    if not is_timescale_available(gateway):
+        raise HTTPException(status_code=404, detail="No TimescaleDB bridge is attached to this gateway.")
+
+    try:
+        indexes: list[dict[str, Any]] = get_index_overview(gateway)
+    except RuntimeError:
+        indexes = []
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return request.app.state.templates.TemplateResponse(
+        request=request,
+        name="partials/bridge_timescale_indexes_panel.html",
+        context={"indexes": indexes},
     )
 
 

@@ -47,4 +47,6 @@ classes/WebServer/static/annotation-editor.html
 scripts/*.*
 .stylelintignore.txt
 stylelint.config.mjs
-
+lint-css.yml
+package.json
+stylelintrc.json

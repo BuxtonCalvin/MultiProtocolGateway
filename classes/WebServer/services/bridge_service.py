@@ -600,6 +600,25 @@ def get_storage_overview(gateway: Any) -> list[dict[str, Any]]:
     return rows
 
 
+def get_index_overview(gateway: Any) -> list[dict[str, Any]]:
+    """
+    Read-only per-index snapshot for the "Indexes" panel, with a human-
+    readable `size_display` added to each row. See timescaledb.
+    get_index_overview for the rest of the field list.
+
+    Raises RuntimeError if no bridge is attached. Returns an empty list
+    (rather than raising) if the bridge is attached but not yet connected
+    to TimescaleDB, since there's simply nothing to report yet.
+    """
+    bridge: Any | None = get_timescale_bridge(gateway)
+    if bridge is None:
+        raise RuntimeError("No TimescaleDB bridge is attached to this gateway.")
+    rows: list[dict[str, Any]] = bridge.get_index_overview()
+    for row in rows:
+        row["size_display"] = _format_bytes(row.get("size_bytes"))
+    return rows
+
+
 def get_compression_retention_summary(gateway: Any) -> dict[str, Any]:
     """
     Read-only compression/retention configuration summary for the

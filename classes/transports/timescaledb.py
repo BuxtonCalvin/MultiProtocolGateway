@@ -2722,6 +2722,261 @@ class timescaledb(transport_base):
 
         return results
 
+    # Plain (non-hypertable) validation/lookup tables to include in the
+    # Indexes panel alongside the hypertables below -- these back the
+    # protocol/metric/device registries every write path validates
+    # against, so their indexes matter for the same "is this table
+    # healthy" question the panel is answering, even though they're not
+    # time-series data. Queried the same way regardless of which bridge
+    # instance is asking, so this is safe as a module-level constant.
+    _LOOKUP_TABLE_NAMES: tuple[str, ...] = ("protocol_registry", "metric_catalog", "device_info")
+
+    # SQL shared by both branches of get_index_overview() for pulling an
+    # index's ordered key column list out of pg_index.indkey (a raw int2
+    # vector of attnums, one entry per key column in index order --
+    # WITH ORDINALITY over unnest() is what keeps that order, since a
+    # plain join would give Postgres no reason to preserve it). Returns
+    # NULL for an expression index (attnum 0 has no pg_attribute row),
+    # which the panel falls back to displaying the raw index definition
+    # for instead.
+    _INDEX_KEY_COLUMNS_SQL: str = """
+        (
+            SELECT array_agg(a.attname ORDER BY k.ord)
+            FROM unnest(idx.indkey) WITH ORDINALITY AS k(attnum, ord)
+            JOIN pg_attribute a ON a.attrelid = idx.indrelid AND a.attnum = k.attnum
+        ) AS key_columns
+    """
+
+    def get_index_overview(self) -> list[dict[str, Any]]:
+        """
+        Read-only per-index snapshot for the "Indexes" panel: every index
+        on the shared narrow table, every wide table (the same source-
+        table scope as get_storage_overview -- not the rollup views
+        themselves), and the plain validation/lookup tables in
+        _LOOKUP_TABLE_NAMES (protocol_registry, metric_catalog,
+        device_info).
+
+        Hypertables (narrow/wide) and plain tables need different queries
+        here, not one -- an index defined on a hypertable is real DDL on
+        the parent relation, but the parent itself never holds rows (data
+        lives in per-chunk child tables, same point get_storage_overview's
+        docstring makes about hypertable_size() vs n_live_tup), so a
+        naive pg_relation_size()/pg_stat_user_indexes lookup keyed off the
+        parent index only ever sees an almost-empty catalog entry --
+        every hypertable index reporting the same ~8kB minimum-page size
+        regardless of table size, and idx_scan permanently stuck at 0
+        since Postgres always executes the actual scan against a chunk's
+        own copy of the index, never the parent's. For the hypertable
+        branch below:
+          - size_bytes uses hypertable_index_size(), TimescaleDB's own
+            public sizing function, which sums the index across every
+            chunk instead of reading the parent's near-empty entry.
+          - idx_scan/idx_tup_read/idx_tup_fetch are summed from pg_stat_
+            user_indexes across every chunk's own copy of the index (chunk
+            list from timescaledb_information.chunks, a public, version-
+            stable view -- NOT from TimescaleDB's internal
+            _timescaledb_catalog schema, which an earlier version of this
+            method used to map a chunk-local index back to its parent by
+            name; that schema is TimescaleDB's own private implementation
+            detail, not a supported API, and turned out not to have the
+            expected shape in practice, exactly the risk flagged for a
+            similar shortcut in list_compression_groups' docstring).
+            Lacking that name-based mapping, chunk-level index rows are
+            matched back to the parent index by key-column signature
+            instead (same ordered column list computed for key_columns
+            below) -- reliable here since a chunk's indexes are always
+            struct-for-struct copies of the parent's, propagated
+            automatically when an index is created on the hypertable.
+          - This scan-stats query is best-effort and kept separate from
+            the metadata query below: if it fails for any reason (e.g. a
+            restricted role, or a chunk mid-creation), that table's rows
+            still get real names/sizes/key columns, just with idx_scan
+            etc. left as None ("not available") rather than blanking the
+            whole table out the way one shared query would.
+        Plain lookup tables need neither workaround -- pg_relation_size()
+        and pg_stat_user_indexes already read the real (only) copy of
+        the table/index directly, in one query.
+
+        Each table's metadata query is independent and failures are
+        recorded via a single synthetic error row for that table rather
+        than aborting the whole snapshot, so one table having a
+        transient issue doesn't blank out the rest — same pattern as
+        get_storage_overview.
+        """
+        if not self.tsdb_connected:
+            return []
+
+        tables: list[tuple[str, bool]] = [("device_metrics_narrow", True)]
+        try:
+            with self.SessionFactory() as session:
+                wide_table_names: Sequence[str] = session.execute(
+                    text("""
+                        SELECT wide_table_name
+                        FROM protocol_registry
+                        WHERE wide_table_name IS NOT NULL
+                        ORDER BY protocol_name
+                    """)
+                ).scalars().all()
+        except SQLAlchemyError as e:
+            self._log.error(f"get_index_overview: protocol_registry query failed: {e}")
+            wide_table_names = []
+
+        tables.extend((name, True) for name in wide_table_names)
+        tables.extend((name, False) for name in self._LOOKUP_TABLE_NAMES)
+
+        hypertable_metadata_sql: TextClause = text(f"""
+            SELECT
+                pi.indexname AS index_name,
+                pi.indexdef,
+                hypertable_index_size(quote_ident(pi.indexname)::regclass) AS size_bytes,
+                idx.indisunique AS is_unique,
+                idx.indisprimary AS is_primary,
+                {self._INDEX_KEY_COLUMNS_SQL}
+            FROM pg_indexes pi
+            JOIN pg_index idx ON idx.indexrelid = quote_ident(pi.indexname)::regclass
+            WHERE pi.tablename = :table_name
+            ORDER BY pi.indexname
+        """)  # noqa: S608
+
+        # Best-effort only -- see docstring. Sums pg_stat_user_indexes
+        # across every chunk of the hypertable (chunk list from the
+        # public timescaledb_information.chunks view) and groups by each
+        # chunk-local index's own key-column signature, so the result can
+        # be matched back to the parent index of the same signature in
+        # Python without needing any TimescaleDB-internal name mapping.
+        hypertable_scan_stats_sql: TextClause = text(f"""
+            WITH chunk_list AS (
+                SELECT chunk_schema, chunk_name
+                FROM timescaledb_information.chunks
+                WHERE hypertable_name = :table_name
+            ),
+            chunk_idx AS (
+                SELECT
+                    {self._INDEX_KEY_COLUMNS_SQL},
+                    psui.idx_scan,
+                    psui.idx_tup_read,
+                    psui.idx_tup_fetch
+                FROM chunk_list cl
+                JOIN pg_indexes pi ON pi.schemaname = cl.chunk_schema AND pi.tablename = cl.chunk_name
+                JOIN pg_index idx
+                    ON idx.indexrelid = (quote_ident(pi.schemaname) || '.' || quote_ident(pi.indexname))::regclass
+                LEFT JOIN pg_stat_user_indexes psui
+                    ON psui.schemaname = pi.schemaname AND psui.indexrelname = pi.indexname
+            )
+            SELECT
+                key_columns,
+                coalesce(sum(idx_scan), 0) AS idx_scan,
+                coalesce(sum(idx_tup_read), 0) AS idx_tup_read,
+                coalesce(sum(idx_tup_fetch), 0) AS idx_tup_fetch
+            FROM chunk_idx
+            GROUP BY key_columns
+        """)  # noqa: S608
+
+        plain_table_sql: TextClause = text(f"""
+            SELECT
+                pi.indexname AS index_name,
+                pi.indexdef,
+                pg_relation_size(quote_ident(pi.indexname)::regclass) AS size_bytes,
+                idx.indisunique AS is_unique,
+                idx.indisprimary AS is_primary,
+                {self._INDEX_KEY_COLUMNS_SQL},
+                coalesce(psui.idx_scan, 0) AS idx_scan,
+                coalesce(psui.idx_tup_read, 0) AS idx_tup_read,
+                coalesce(psui.idx_tup_fetch, 0) AS idx_tup_fetch
+            FROM pg_indexes pi
+            JOIN pg_index idx ON idx.indexrelid = quote_ident(pi.indexname)::regclass
+            LEFT JOIN pg_stat_user_indexes psui
+                ON psui.indexrelname = pi.indexname AND psui.schemaname = pi.schemaname
+            WHERE pi.tablename = :table_name
+            ORDER BY pi.indexname
+        """)  # noqa: S608
+
+        results: list[dict[str, Any]] = []
+        for table_name, is_hypertable in tables:
+            if not is_hypertable:
+                try:
+                    with self.SessionFactory() as session:
+                        rows: Sequence[Row[Any]] = session.execute(
+                            plain_table_sql, {"table_name": table_name}
+                        ).fetchall()
+                    for r in rows:
+                        results.append({
+                            "table_name": table_name,
+                            "is_hypertable": False,
+                            "index_name": r.index_name,
+                            "size_bytes": r.size_bytes or 0,
+                            "idx_scan": r.idx_scan or 0,
+                            "idx_tup_read": r.idx_tup_read or 0,
+                            "idx_tup_fetch": r.idx_tup_fetch or 0,
+                            "is_unique": bool(r.is_unique),
+                            "is_primary": bool(r.is_primary),
+                            "key_columns": list(r.key_columns) if r.key_columns else [],
+                            "indexdef": r.indexdef,
+                            "error": None,
+                        })
+                except SQLAlchemyError as e:
+                    self._log.error(f"get_index_overview: query failed for '{table_name}': {e}")
+                    results.append({
+                        "table_name": table_name, "is_hypertable": False,
+                        "index_name": None, "size_bytes": None, "idx_scan": None,
+                        "idx_tup_read": None, "idx_tup_fetch": None,
+                        "is_unique": None, "is_primary": None, "key_columns": [],
+                        "indexdef": None, "error": str(e),
+                    })
+                continue
+
+            try:
+                with self.SessionFactory() as session:
+                    meta_rows: Sequence[Row[Any]] = session.execute(
+                        hypertable_metadata_sql, {"table_name": table_name}
+                    ).fetchall()
+            except SQLAlchemyError as e:
+                self._log.error(f"get_index_overview: metadata query failed for '{table_name}': {e}")
+                results.append({
+                    "table_name": table_name, "is_hypertable": True,
+                    "index_name": None, "size_bytes": None, "idx_scan": None,
+                    "idx_tup_read": None, "idx_tup_fetch": None,
+                    "is_unique": None, "is_primary": None, "key_columns": [],
+                    "indexdef": None, "error": str(e),
+                })
+                continue
+
+            scan_stats_by_key: dict[tuple[str, ...], Row[Any]] = {}
+            try:
+                with self.SessionFactory() as session:
+                    scan_rows: Sequence[Row[Any]] = session.execute(
+                        hypertable_scan_stats_sql, {"table_name": table_name}
+                    ).fetchall()
+                scan_stats_by_key = {
+                    tuple(r.key_columns) if r.key_columns else (): r for r in scan_rows
+                }
+            except SQLAlchemyError as e:
+                # Degrade gracefully -- names/sizes/key columns from the
+                # metadata query above are still good, just without scan
+                # counts for this table. Logged at warning, not error:
+                # this is an expected fallback path, not a broken bridge.
+                self._log.warning(f"get_index_overview: scan-stats query failed for '{table_name}': {e}")
+
+            for r in meta_rows:
+                key_columns: list[str] = list(r.key_columns) if r.key_columns else []
+                scan_row: Row[Any] | None = scan_stats_by_key.get(tuple(key_columns))
+                results.append({
+                    "table_name": table_name,
+                    "is_hypertable": True,
+                    "index_name": r.index_name,
+                    "size_bytes": r.size_bytes or 0,
+                    "idx_scan": scan_row.idx_scan if scan_row is not None else None,
+                    "idx_tup_read": scan_row.idx_tup_read if scan_row is not None else None,
+                    "idx_tup_fetch": scan_row.idx_tup_fetch if scan_row is not None else None,
+                    "is_unique": bool(r.is_unique),
+                    "is_primary": bool(r.is_primary),
+                    "key_columns": key_columns,
+                    "indexdef": r.indexdef,
+                    "error": None,
+                })
+
+        return results
+
     # -------------------------
     # Close / cleanup
     # -------------------------

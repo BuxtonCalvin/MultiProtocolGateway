@@ -1,0 +1,113 @@
+<!--
+  Description: partials/bridge_timescale_indexes_panel.html HTMX partial — Indexes card for the TimescaleDB device page.
+  File: bridge_timescale_indexes_panel.html
+
+  Copyright 2026 Kevin Burke
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://apache.org
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+
+  partials/bridge_timescale_indexes_panel.html
+  Swapped into #bridge-indexes-container on the TimescaleDB device page
+  (see bridge_panes.html). Context: indexes — [{table_name, is_hypertable,
+  index_name, key_columns, size_bytes, size_display, idx_scan,
+  idx_tup_read, idx_tup_fetch, is_unique, is_primary, indexdef, error},
+  ...] from services/bridge_service.get_index_overview().
+
+  Covers the shared narrow table, every wide table, and the plain
+  validation/lookup tables (protocol_registry, metric_catalog,
+  device_info) — not the rollup views themselves. See timescaledb.
+  get_index_overview for why size_bytes is computed differently for
+  hypertables (summed across chunks via hypertable_index_size()) vs the
+  plain lookup tables (read directly), and why idx_scan can come back
+  None ("n/a") for a hypertable index specifically — that's a best-
+  effort chunk-level query that can fail independently of the rest of
+  the row without blanking it out.
+
+  idx_scan is a cumulative count of how many times the planner has used
+  that index to answer a query (including ones from Grafana or any other
+  reader hitting these tables) since Postgres's stats were last reset —
+  not a live rate. A low/zero count means the index hasn't been picked
+  for a query yet, not that it never will be.
+
+  key_columns lists the index's key columns in index order; it's empty
+  for an expression index, which falls back to showing the raw
+  definition instead. A row with `error` set means that one table's
+  index query failed; the rest of the snapshot still renders.
+
+  Purely observational — nothing here is clickable.
+-->
+
+<div class="card">
+  <h3 class="label mb-2">Indexes</h3>
+
+  {% if not indexes %}
+  <p class="surface-muted text-xs">Still connecting to TimescaleDB — index data isn't available yet.</p>
+  {% else %}
+  <div class="overflow-x-auto">
+    <table class="w-auto text-xs border-collapse" role="table" aria-label="Per-table index overview">
+      <thead>
+        <tr class="mini-table-header text-xs uppercase tracking-wide" role="row">
+          <th class="px-2 py-1.5 text-left font-semibold whitespace-nowrap" scope="col">Index / Keys</th>
+          <th class="px-2 py-1.5 text-left font-semibold whitespace-nowrap" scope="col">Table</th>
+          <th class="px-2 py-1.5 text-left font-semibold whitespace-nowrap" scope="col">Type</th>
+          <th class="px-2 py-1.5 text-right font-semibold whitespace-nowrap" scope="col">Size</th>
+          <th class="px-2 py-1.5 text-right font-semibold whitespace-nowrap" scope="col">Scans</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for idx in indexes %}
+        <tr class="mini-table-row transition-colors" role="row">
+          {% if idx.error %}
+          <td class="px-2 py-1.5 font-mono mini-table-value whitespace-nowrap mini-table-col-divider" role="cell">
+            {{ idx.table_name }}
+          </td>
+          <td colspan="4" class="px-2 py-1.5 text-danger text-xs" role="cell">Query failed: {{ idx.error }}</td>
+          {% else %}
+          <td class="px-2 py-1.5 font-mono mini-table-value whitespace-nowrap mini-table-col-divider" role="cell"
+              title="{{ idx.indexdef }}">
+            {{ idx.index_name }}
+            <span class="mini-table-subtext text-[10px] block">
+              {% if idx.key_columns %}{{ idx.key_columns | join(", ") }}{% else %}expression{% endif %}
+            </span>
+          </td>
+          <td class="px-2 py-1.5 font-mono mini-table-value whitespace-nowrap mini-table-col-divider" role="cell">
+            {{ idx.table_name }}
+          </td>
+          <td class="px-2 py-1.5 whitespace-nowrap mini-table-col-divider text-[11px]" role="cell">
+            {% if idx.is_primary %}
+            <span class="text-accent font-medium">Primary</span>
+            {% elif idx.is_unique %}
+            Unique
+            {% else %}
+            <span class="surface-muted">Index</span>
+            {% endif %}
+          </td>
+          <td class="px-2 py-1.5 text-right font-mono mini-table-value whitespace-nowrap mini-table-col-divider" role="cell">
+            {{ idx.size_display }}
+          </td>
+          <td class="px-2 py-1.5 text-right font-mono whitespace-nowrap
+                     {% if not idx.idx_scan %}surface-muted{% else %}mini-table-value{% endif %}" role="cell">
+            {% if idx.idx_scan is none %}
+            <span class="surface-muted" title="Scan counts weren't available for this table.">n/a</span>
+            {% else %}
+            {{ "{:,}".format(idx.idx_scan) }}
+            {% endif %}
+          </td>
+          {% endif %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
