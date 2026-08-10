@@ -5148,10 +5148,41 @@ class RollupManager:
 
         return rows_out
 
-    def rebuild_all_rollups(self, protocol_names: set[str] | None = None, force: bool = False) -> dict[str, Any]:
+    def rebuild_all_rollups(
+        self, protocol_names: set[str] | None = None, force: bool = False
+    ) -> Generator[dict[str, Any], None, None]:
         """
         Runs a rebuild pass across the rollup stacks this bridge manages, for
         the admin's "Rebuild Rollups" / "Force Rebuild" buttons.
+
+        This is a GENERATOR, not a plain method -- mirrors rebuild_compression's
+        streaming shape below, so routers/timescale.py's PATCH /rollups/rebuild
+        can stream progress to the browser the same way PATCH /compression/
+        rebuild already does (see triggerRebuildRollups in
+        timescale_rebuild_rollups.html). The granularity is coarser than
+        compression's per-chunk events, though: setup_with_retry() and
+        add_wide_rollup() each rebuild their whole stack as one internal call
+        this class doesn't get to peek inside mid-flight, so the finest
+        progress available here is "one whole group (the shared narrow stack,
+        or one wide-table protocol) just finished" -- there's no cheaper way
+        to get a partial view within a single group without instrumenting
+        those two methods directly, which is out of scope for what's just a
+        progress indicator.
+
+        Yields:
+            {"type": "progress", "group", "groups_processed", "groups_total"}
+             once per selected group as it finishes (success or failure).
+             groups_total is fixed up front at the number of selected groups
+             (the shared narrow stack counts as one, same as any one
+             protocol) -- deliberately NOT weighted by each group's view
+             count the way rebuild_compression weights by byte size, since
+             every group here is a single opaque unit of work rather than a
+             set of independently-measurable chunks; weighting by view count
+             would imply a granularity of progress this method can't
+             actually observe.
+            {"type": "done", "result": {...}} exactly once, at the end -- the
+             same "narrow" + "protocols" + "force" shape this method used to
+             simply return, unchanged.
 
         Args:
             protocol_names: Which rollup groups to act on, keyed the same
@@ -5210,6 +5241,27 @@ class RollupManager:
 
         rebuild_narrow: bool = protocol_names is None or "shared_narrow" in protocol_names
 
+        with self.SessionFactory() as session:
+            protocol_rows: Sequence[Row[Any]] = session.execute(
+                text("""
+                    SELECT protocol_name, wide_table_name
+                    FROM protocol_registry
+                    WHERE rollup_enabled = true AND wide_table_name IS NOT NULL
+                    ORDER BY protocol_name
+                """)
+            ).fetchall()
+
+        # groups_total is fixed before any work starts (narrow, plus every
+        # SELECTED protocol row) so the very first progress event already
+        # carries a correct denominator -- same reasoning as bytes_total in
+        # rebuild_compression, just counted in groups instead of bytes.
+        selected_protocol_count: int = sum(
+            1 for protocol_name, _ in protocol_rows
+            if protocol_names is None or protocol_name in protocol_names
+        )
+        groups_total: int = (1 if rebuild_narrow else 0) + selected_protocol_count
+        groups_processed: int = 0
+
         narrow_ok: bool = True
         narrow_error: str | None = None
         narrow_changed: bool = False
@@ -5221,18 +5273,13 @@ class RollupManager:
                 self._log.error(f"rebuild_all_rollups: shared narrow rollup rebuild failed: {e}")
                 narrow_ok = False
                 narrow_error = str(e)
+            groups_processed += 1
+            yield {
+                "type": "progress", "group": "shared_narrow",
+                "groups_processed": groups_processed, "groups_total": groups_total,
+            }
         else:
             self._log.debug("rebuild_all_rollups: shared narrow stack not selected -- skipping.")
-
-        with self.SessionFactory() as session:
-            protocol_rows: Sequence[Row[Any]] = session.execute(
-                text("""
-                    SELECT protocol_name, wide_table_name
-                    FROM protocol_registry
-                    WHERE rollup_enabled = true AND wide_table_name IS NOT NULL
-                    ORDER BY protocol_name
-                """)
-            ).fetchall()
 
         protocol_results: list[dict[str, Any]] = []
         for protocol_name, wide_table_name in protocol_rows:
@@ -5258,6 +5305,12 @@ class RollupManager:
                     "skipped": False, "changed": changed,
                 })
 
+            groups_processed += 1
+            yield {
+                "type": "progress", "group": protocol_name,
+                "groups_processed": groups_processed, "groups_total": groups_total,
+            }
+
         ok_count: int = sum(1 for p in protocol_results if p["ok"] and not p["skipped"])
         attempted_count: int = sum(1 for p in protocol_results if not p["skipped"])
         self._log.info(
@@ -5265,7 +5318,7 @@ class RollupManager:
             force, rebuild_narrow, narrow_ok, narrow_changed, ok_count, attempted_count,
         )
 
-        return {
+        result: dict[str, Any] = {
             "narrow": {
                 "ok": narrow_ok, "error": narrow_error,
                 "skipped": not rebuild_narrow, "changed": narrow_changed,
@@ -5273,10 +5326,11 @@ class RollupManager:
             "protocols": protocol_results,
             "force": force,
         }
+        yield {"type": "done", "result": result}
 
     def refresh_selected_rollups(
         self, protocol_names: set[str] | None = None, force_full: bool = False
-    ) -> dict[str, Any]:
+    ) -> Generator[dict[str, Any], None, None]:
         """
         Refreshes the selected rollup groups' *existing* views in place --
         pulls the latest raw data into them via CALL refresh_continuous_
@@ -5305,6 +5359,26 @@ class RollupManager:
 
         Never raises: each view is refreshed independently and its outcome
         recorded, so one bad view doesn't block refreshing the rest.
+
+        This is a GENERATOR, not a plain method -- mirrors rebuild_all_
+        rollups() above so routers/timescale.py's PATCH /rollups/refresh
+        can stream progress the same way. Unlike that method, this one
+        already loops over individual views, so progress here is
+        naturally per-view rather than per-group -- the finest
+        granularity this screen's thermometer gets anywhere.
+
+        Yields:
+            {"type": "progress", "view_name", "protocol_name",
+             "views_processed", "views_total"} once per candidate view
+             (every known view whose group passes the protocol_names
+             filter) as it's handled -- including a view that turns out
+             not to exist yet and gets skipped, since that's still one
+             candidate "handled" for progress purposes, not work still
+             pending. views_total is fixed up front, before the loop
+             starts, from that same candidate list.
+            {"type": "done", "result": {"views": [...], "force_full": ...}}
+             exactly once, at the end -- the same shape this method used
+             to simply return, unchanged.
         """
         # Map each known view name to the group key it belongs to, using
         # the same naming rules as list_rollup_views(), so a view's group
@@ -5332,7 +5406,11 @@ class RollupManager:
             for gran in ("hourly", "daily", "weekly", "monthly"):
                 view_to_group[f"{gran}_{rollup_prefix}"] = protocol_name
 
-        view_results: list[dict[str, Any]] = []
+        # Resolve the candidate list (and therefore views_total) up front,
+        # before touching anything, same reasoning as bytes_total in
+        # rebuild_compression -- the first progress event should already
+        # know a correct denominator.
+        candidates: list[tuple[str, str, Any]] = []
         for view_name, start_offset in self._known_rollup_views.items():
             group: str | None = view_to_group.get(view_name)
             if group is None:
@@ -5342,11 +5420,22 @@ class RollupManager:
                 continue
             if protocol_names is not None and group not in protocol_names:
                 continue
+            candidates.append((view_name, group, start_offset))
 
+        views_total: int = len(candidates)
+        views_processed: int = 0
+
+        view_results: list[dict[str, Any]] = []
+        for view_name, group, start_offset in candidates:
             try:
                 with self.SessionFactory() as session:
                     if not self._view_exists_helper(session, view_name):
                         self._log.warning(f"refresh_selected_rollups: skipping '{view_name}' -- does not exist.")
+                        views_processed += 1
+                        yield {
+                            "type": "progress", "view_name": view_name, "protocol_name": group,
+                            "views_processed": views_processed, "views_total": views_total,
+                        }
                         continue
                 self._refresh_single_rollup_helper(view_name, start_offset, force_full)
                 view_results.append({
@@ -5358,13 +5447,19 @@ class RollupManager:
                     "view_name": view_name, "protocol_name": group, "ok": False, "error": str(e),
                 })
 
+            views_processed += 1
+            yield {
+                "type": "progress", "view_name": view_name, "protocol_name": group,
+                "views_processed": views_processed, "views_total": views_total,
+            }
+
         ok_count: int = sum(1 for r in view_results if r["ok"])
         self._log.info(
             "refresh_selected_rollups: force_full=%s refreshed %d/%d view(s) ok.",
             force_full, ok_count, len(view_results),
         )
 
-        return {"views": view_results, "force_full": force_full}
+        yield {"type": "done", "result": {"views": view_results, "force_full": force_full}}
 
     # -------------------------
     #  Bridge info pane — read-only snapshots for the "Compression &
@@ -8062,4 +8157,3 @@ class WideTableFieldManager:
             session.execute(text("SELECT alter_job(:job_id, scheduled => true)"), {"job_id": job_id})
         if job_ids:
             self._log.info(f"_resume_compression_job: resumed job(s) {job_ids}")
-

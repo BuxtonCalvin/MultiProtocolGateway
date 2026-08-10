@@ -54,23 +54,6 @@ next to its code rather than living only in a merge commit message.
                     InfluxDB/MQTT — a gateway could run more than one
                     Prometheus bridge on different ports/paths.
 
-Renamed on merge: the TimescaleDB section's health-panel function was
-previously named get_bridge_health() (a reasonable name when it was the
-only bridge type with one); it's now get_timescale_health() so it reads
-consistently alongside get_influxdb_health() / get_mqtt_health() in the
-same module. All three bridge-lookup/health/storage function names
-otherwise carry their transport's name explicitly (get_timescale_bridge,
-get_influxdb_bridge, get_mqtt_bridge, ...) specifically so it's never
-ambiguous which transport a given call in this file is about.
-
-A single shared _format_bytes() helper (previously defined identically in
-both the TimescaleDB and InfluxDB sections) now lives once, in the shared
-helpers section below, and is used by both. _format_dt() (TimescaleDB
-rollup/job timestamps) and _format_elapsed() (InfluxDB reconnect elapsed
-time) are each used by only one section and stay defined there rather than
-being hoisted up — hoisting a single-use helper out of its only caller's
-section would just make that section harder to read in isolation for no
-sharing benefit.
 """
 from __future__ import annotations
 
@@ -285,7 +268,7 @@ def list_wide_table_fields(
     gateway: Any,
     protocol_name: str,
     staged_columns: set[str] | None = None,
-) -> list[dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
     """
     Returns the alpha-ordered field list (step 5 of the Delete Columns
     flow) for one protocol's wide table, each row annotated with:
@@ -377,13 +360,23 @@ def list_rollup_view_groups(gateway: Any) -> list[dict[str, Any]]:
 
 
 def rebuild_all_rollups(
-    gateway: Any, protocol_names: set[str] | None = None, force: bool = False
-) -> dict[str, Any]:
+    gateway: Any,
+    protocol_names: set[str] | None = None,
+    force: bool = False
+    ) -> Generator[dict[str, Any], None, None]:
     """
     Triggers an immediate rebuild pass across the selected rollup stack(s)
     on the live bridge. Called from the "Rebuild Rollups" / "Force Rebuild"
     buttons on the Rebuild Rollup Views screen (PATCH /api/timescale/
     rollups/rebuild).
+
+    This is a GENERATOR wrapping RollupManager.rebuild_all_rollups -- same
+    shape as rebuild_compression below, forwarding every event through
+    UNCHANGED. There's no per-event annotation to add here the way
+    rebuild_compression annotates its "done" event with size deltas; a
+    rollup rebuild has nothing analogous to report per group beyond what
+    RollupManager already includes (ok/error/skipped/changed), so this is
+    a plain passthrough.
 
     Args:
         protocol_names: Which groups to act on -- protocol_name values as
@@ -392,24 +385,30 @@ def rebuild_all_rollups(
         force: False ("Rebuild Rollups") only purges + re-materializes a
             group if it's actually out of date. True ("Force Rebuild")
             always purges + re-materializes every selected group.
-        See RollupManager.rebuild_all_rollups for the per-group result
-        shape (including each group's `changed` flag) and why selection
+        See RollupManager.rebuild_all_rollups for the full set of event
+        shapes (including each group's `changed` flag) and why selection
         stops at the per-source-table granularity.
 
     Raises RuntimeError if no bridge is attached, or the bridge hasn't
-    finished connecting to TimescaleDB yet.
+    finished connecting to TimescaleDB yet. Because this function is
+    itself a generator, that RuntimeError is only actually raised once the
+    caller starts iterating it -- see rebuild_compression's docstring
+    below for why routers/timescale.py's endpoint relies on that.
     """
     bridge: Any | None = get_timescale_bridge(gateway)
     if bridge is None:
         raise RuntimeError("No TimescaleDB bridge is attached to this gateway.")
     if bridge.rollup_mgr is None:
         raise RuntimeError("Rollup manager is not initialized yet — the bridge is not connected to TimescaleDB.")
-    return bridge.rollup_mgr.rebuild_all_rollups(protocol_names=protocol_names, force=force)
+    for event in bridge.rollup_mgr.rebuild_all_rollups(protocol_names=protocol_names, force=force):
+        yield event
 
 
 def refresh_selected_rollups(
-    gateway: Any, protocol_names: set[str] | None = None, force_full: bool = False
-) -> dict[str, Any]:
+    gateway: Any,
+    protocol_names: set[str] | None = None,
+    force_full: bool = False
+    ) -> Generator[dict[str, Any], None, None]:
     """
     Pulls the latest raw data into the selected rollup groups' existing
     views, without dropping or recreating anything. Called from the
@@ -417,24 +416,29 @@ def refresh_selected_rollups(
     /api/timescale/rollups/refresh) -- the lighter, non-structural
     counterpart to rebuild_all_rollups().
 
+    This is a GENERATOR wrapping RollupManager.refresh_selected_rollups --
+    same passthrough shape as rebuild_all_rollups() above.
+
     Args:
         protocol_names: Which groups to refresh -- protocol_name values as
             returned by list_rollup_view_groups(), plus "shared_narrow" for
             the shared narrow stack. None refreshes every group.
         force_full: False performs each view's normal incremental refresh.
             True refreshes each view's entire time range from scratch.
-        See RollupManager.refresh_selected_rollups for the per-view result
-        shape.
+        See RollupManager.refresh_selected_rollups for the full set of
+        event shapes.
 
     Raises RuntimeError if no bridge is attached, or the bridge hasn't
-    finished connecting to TimescaleDB yet.
+    finished connecting to TimescaleDB yet (surfaced on first iteration --
+    see rebuild_all_rollups above).
     """
     bridge: Any | None = get_timescale_bridge(gateway)
     if bridge is None:
         raise RuntimeError("No TimescaleDB bridge is attached to this gateway.")
     if bridge.rollup_mgr is None:
         raise RuntimeError("Rollup manager is not initialized yet — the bridge is not connected to TimescaleDB.")
-    return bridge.rollup_mgr.refresh_selected_rollups(protocol_names=protocol_names, force_full=force_full)
+    for event in bridge.rollup_mgr.refresh_selected_rollups(protocol_names=protocol_names, force_full=force_full):
+        yield event
 
 
 # ---------------------------------------------------------------------------
@@ -493,8 +497,9 @@ def _annotate_compression_change(entry: dict[str, Any]) -> None:
 
 
 def rebuild_compression(
-    gateway: Any, protocol_names: set[str] | None = None
-) -> Generator[dict[str, Any], None, None]:
+    gateway: Any,
+    protocol_names: set[str] | None = None
+    ) -> Generator[dict[str, Any], None, None]:
     """
     Triggers an immediate decompress -> recompress pass across every
     already-compressed chunk of the selected group(s)' raw table and all
