@@ -502,7 +502,7 @@ aside .theme-input {
   color: rgb(var(--mpg-600));        /* mpg-600 */
 }
 .dark .mini-table-subtext {
-  color: rgb(var(--mpg-400));       /* mpg-400 — matches .surface-subtle in dark mode */
+  color: rgb(var(--mpg-300));       /* mpg-300 */
 }
 /* Page-level muted meta text next to a mini-table's heading (group       */
 /* counts, "No X found" placeholders, table-name badges) — distinct from  */
