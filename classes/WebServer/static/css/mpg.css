@@ -502,7 +502,7 @@ aside .theme-input {
   color: rgb(var(--mpg-600));        /* mpg-600 */
 }
 .dark .mini-table-subtext {
-  color: rgb(var(--mpg-500));       /* mpg-500 */
+  color: rgb(var(--mpg-400));       /* mpg-400 — matches .surface-subtle in dark mode */
 }
 /* Page-level muted meta text next to a mini-table's heading (group       */
 /* counts, "No X found" placeholders, table-name badges) — distinct from  */
@@ -1015,4 +1015,3 @@ aside .theme-input {
 .docs-article .codehilite .w { color: #cbd5e1 !important; }
 .docs-article .codehilite .err { color: #fca5a5 !important; }
 /* stylelint-enable color-no-hex, declaration-property-value-disallowed-list */
-
