@@ -40,6 +40,20 @@
   by plain fetch() in triggerRebuildRollups() below rather than a bare
   hx-patch attribute — HTMX has no built-in way to collect multiple
   independently-named checkboxes into a JSON array body.
+
+  All three actions (Refresh Now, Rebuild Rollups, Force Rebuild) stream
+  their result as newline-delimited JSON rather than returning one JSON
+  body — see PATCH /api/timescale/rollups/rebuild and /rollups/refresh —
+  so the #rollup-progress-track/-fill thermometer below the header can be
+  driven with real numbers as "progress" events arrive, the same pattern
+  Rebuild Compression established for its own thermometer. The unit
+  differs per action, though: rebuild's progress is per GROUP (the
+  shared narrow stack, or one wide-table protocol — RollupManager.
+  rebuild_all_rollups has no way to observe finer-grained progress within
+  a single group), while refresh's is per VIEW (RollupManager.
+  refresh_selected_rollups already loops one view at a time). Both feed
+  the same generic updateRollupProgress(processed, total) function, since
+  the thermometer itself doesn't care what unit it's counting.
 #}
 
 {% extends "base.html" %}
@@ -105,7 +119,18 @@
     </div>
   </div>
 
-  <!-- ══ STATUS BANNER — filled in by renderRebuildStatus() below ══ -->
+  <!-- ══ PROGRESS THERMOMETER — filled in by show/update/hideRollupProgress()
+       below. Shared by all three actions since only one ever runs at a
+       time (see setRollupActionButtonsDisabled). ══ -->
+  <div id="rollup-progress-track" class="flex-shrink-0 px-1 hidden">
+    <div class="h-1.5 w-full rounded-full bg-mpg-800/10 overflow-hidden">
+      <div id="rollup-progress-fill"
+           class="h-full bg-accent transition-all duration-150 ease-out"
+           style="width: 0%;"></div>
+    </div>
+  </div>
+
+  <!-- ══ STATUS BANNER — filled in by renderRebuildStatus() / renderRefreshStatus() below ══ -->
   <div id="rebuild-status" class="flex-shrink-0 px-1" role="status" aria-live="polite"></div>
 
   <!-- ══ ROLLUP VIEW GROUPS (one checkbox per source table) ══ -->
@@ -156,6 +181,13 @@
   // /api/timescale/rollups/rebuild (force=true for the "Force Rebuild"
   // button, false for "Rebuild Rollups"), then refreshes the inventory so
   // it reflects whatever the rebuild just did.
+  //
+  // The endpoint streams newline-delimited JSON over one long-lived
+  // response instead of returning a single JSON body — read it
+  // incrementally so "progress" events (one per GROUP finished — see
+  // RollupManager.rebuild_all_rollups for why that's the finest unit
+  // observable here) can drive the thermometer with real numbers as they
+  // arrive, rather than waiting for the whole rebuild to finish.
   async function triggerRebuildRollups(force) {
     const rebuildLabel = document.getElementById('rebuild-btn-label');
     const forceLabel = document.getElementById('force-rebuild-btn-label');
@@ -183,9 +215,12 @@
 
     setRollupActionButtonsDisabled(true);
     (force ? forceLabel : rebuildLabel).textContent = force ? 'Force rebuilding…' : 'Rebuilding…';
+    showRollupProgress();
 
     let ok = false;
     let payload = null;
+    let streamError = null;
+
     try {
       const resp = await fetch('/api/timescale/rollups/rebuild', {
         method: 'PATCH',
@@ -195,18 +230,105 @@
         },
         body: JSON.stringify({ protocol_names: protocolNames, force: force }),
       });
-      ok = resp.ok;
-      payload = await resp.json();
+
+      if (!resp.ok || !resp.body) {
+        ok = false;
+      } else {
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) { break; }
+          buffer += decoder.decode(value, { stream: true });
+
+          let newlineIndex;
+          while ((newlineIndex = buffer.indexOf('\n')) >= 0) {
+            const line = buffer.slice(0, newlineIndex).trim();
+            buffer = buffer.slice(newlineIndex + 1);
+            if (!line) { continue; }
+
+            let event;
+            try {
+              event = JSON.parse(line);
+            } catch (e) {
+              continue; // a partial/garbled line — skip rather than abort the whole stream
+            }
+
+            if (event.type === 'progress') {
+              updateRollupProgress(event.groups_processed, event.groups_total);
+            } else if (event.type === 'done') {
+              payload = event.result;
+              ok = true;
+            } else if (event.type === 'error') {
+              streamError = event.detail;
+              ok = false;
+            }
+          }
+        }
+      }
     } catch (e) {
       ok = false;
     }
 
+    hideRollupProgress(ok);
     setRollupActionButtonsDisabled(false);
     rebuildLabel.textContent = 'Rebuild Rollups';
     forceLabel.textContent = 'Force Rebuild';
 
+    if (streamError) {
+      statusEl.innerHTML =
+        '<div class="text-xs text-danger px-3 py-2 rounded border border-danger/30 bg-danger/10">' +
+        'Rebuild failed: ' + streamError + '</div>';
+      refreshRollupViewsContainer();
+      return;
+    }
+
     renderRebuildStatus(ok, payload);
     refreshRollupViewsContainer();
+  }
+
+  // Real progress thermometer for #rollup-progress-track/-fill, shared by
+  // all three actions on this screen (only one ever runs at a time — see
+  // setRollupActionButtonsDisabled). Deliberately unit-agnostic:
+  // triggerRebuildRollups feeds it groups_processed/groups_total, while
+  // triggerRefreshRollups feeds it views_processed/views_total — the bar
+  // itself doesn't need to know which.
+  function showRollupProgress() {
+    const track = document.getElementById('rollup-progress-track');
+    const fill = document.getElementById('rollup-progress-fill');
+    if (!track || !fill) { return; }
+    fill.classList.remove('bg-danger');
+    fill.classList.add('bg-accent');
+    fill.style.width = '0%';
+    track.classList.remove('hidden');
+  }
+
+  function updateRollupProgress(processed, total) {
+    const fill = document.getElementById('rollup-progress-fill');
+    if (!fill) { return; }
+    const pct = total > 0 ? Math.min(100, (processed / total) * 100) : 100;
+    fill.style.width = pct + '%';
+  }
+
+  function hideRollupProgress(success) {
+    const track = document.getElementById('rollup-progress-track');
+    const fill = document.getElementById('rollup-progress-fill');
+    if (!track || !fill) { return; }
+
+    fill.classList.toggle('bg-danger', !success);
+    fill.classList.toggle('bg-accent', success);
+    fill.style.width = '100%';
+
+    // Let the "complete" fill be visible for a beat before resetting,
+    // rather than snapping straight back to hidden/0%.
+    setTimeout(function () {
+      track.classList.add('hidden');
+      fill.classList.remove('bg-danger');
+      fill.classList.add('bg-accent');
+      fill.style.width = '0%';
+    }, 500);
   }
 
   // Three distinct outcomes, per the admin's expectations:
@@ -270,6 +392,11 @@
   // /api/timescale/rollups/refresh, then refreshes the inventory. Unlike
   // rebuild, this never touches view structure — it only pulls in the
   // latest raw data for views that already exist.
+  //
+  // Streams newline-delimited JSON the same way triggerRebuildRollups
+  // does, but at a finer grain: one "progress" event per VIEW (see
+  // RollupManager.refresh_selected_rollups, which already loops one view
+  // at a time), rather than per group.
   async function triggerRefreshRollups(forceFull) {
     const refreshLabel = document.getElementById('refresh-btn-label');
     const statusEl = document.getElementById('rebuild-status');
@@ -286,9 +413,12 @@
 
     setRollupActionButtonsDisabled(true);
     refreshLabel.textContent = 'Refreshing…';
+    showRollupProgress();
 
     let ok = false;
     let payload = null;
+    let streamError = null;
+
     try {
       const resp = await fetch('/api/timescale/rollups/refresh', {
         method: 'PATCH',
@@ -298,14 +428,59 @@
         },
         body: JSON.stringify({ protocol_names: protocolNames, force_full: forceFull }),
       });
-      ok = resp.ok;
-      payload = await resp.json();
+
+      if (!resp.ok || !resp.body) {
+        ok = false;
+      } else {
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) { break; }
+          buffer += decoder.decode(value, { stream: true });
+
+          let newlineIndex;
+          while ((newlineIndex = buffer.indexOf('\n')) >= 0) {
+            const line = buffer.slice(0, newlineIndex).trim();
+            buffer = buffer.slice(newlineIndex + 1);
+            if (!line) { continue; }
+
+            let event;
+            try {
+              event = JSON.parse(line);
+            } catch (e) {
+              continue; // a partial/garbled line — skip rather than abort the whole stream
+            }
+
+            if (event.type === 'progress') {
+              updateRollupProgress(event.views_processed, event.views_total);
+            } else if (event.type === 'done') {
+              payload = event.result;
+              ok = true;
+            } else if (event.type === 'error') {
+              streamError = event.detail;
+              ok = false;
+            }
+          }
+        }
+      }
     } catch (e) {
       ok = false;
     }
 
+    hideRollupProgress(ok);
     setRollupActionButtonsDisabled(false);
     refreshLabel.textContent = 'Refresh Now';
+
+    if (streamError) {
+      statusEl.innerHTML =
+        '<div class="text-xs text-danger px-3 py-2 rounded border border-danger/30 bg-danger/10">' +
+        'Refresh failed: ' + streamError + '</div>';
+      refreshRollupViewsContainer();
+      return;
+    }
 
     renderRefreshStatus(ok, payload);
     refreshRollupViewsContainer();

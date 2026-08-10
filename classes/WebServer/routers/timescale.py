@@ -121,7 +121,7 @@ def stage_field(
     column_name: str,
     payload: StageFieldRequest,
     request: Request,
-) -> dict[str, Any]:
+    ) -> dict[str, Any]:
     """
     Stages or un-stages one column for deletion. This is a checkbox toggle
     only — no ALTER TABLE happens here. The actual delete + rollup rebuild
@@ -189,7 +189,7 @@ class RebuildRollupsRequest(BaseModel):
 
 
 @router.patch("/rollups/rebuild")
-def rebuild_rollups(payload: RebuildRollupsRequest, request: Request) -> dict[str, Any]:
+def rebuild_rollups(payload: RebuildRollupsRequest, request: Request) -> StreamingResponse:
     """
     Runs a rebuild pass across the admin's selected rollup group(s) — each
     group is one source table (the shared narrow stack, or one wide-table
@@ -197,31 +197,48 @@ def rebuild_rollups(payload: RebuildRollupsRequest, request: Request) -> dict[st
     RollupManager.rebuild_all_rollups for why selection stops at that
     granularity. `force` distinguishes "Rebuild Rollups" (only touch groups
     that are actually out of date) from "Force Rebuild" (always purge +
-    re-materialize every selected group). Runs synchronously and returns a
-    per-group result summary — including each group's `changed` flag — so
-    the caller can tell "verified, already correct" apart from "actually
-    rebuilt"; the caller (the Rebuild Rollup Views screen) also reports any
-    ok=False entries to the admin rather than treating a partial failure as
-    a 500.
+    re-materialize every selected group).
+
+    STREAMS its result as newline-delimited JSON (media type
+    application/x-ndjson), same convention as PATCH /compression/rebuild
+    below: a "progress" event after each group finishes (coarser than
+    compression's per-chunk events — see RollupManager.rebuild_all_rollups
+    for why a whole group is the finest unit observable here), then one
+    "done" event carrying the per-group result summary — including each
+    group's `changed` flag, so the caller can tell "verified, already
+    correct" apart from "actually rebuilt". The caller (the Rebuild Rollup
+    Views screen) reports any ok=False entries in that summary to the
+    admin rather than treating a partial failure as a 500.
+
+    Bridge/rollup-manager errors raised before the first group are caught
+    on the first iteration of the underlying generator and surfaced as an
+    {"type": "error"} line rather than an HTTP error status, for the same
+    reason PATCH /compression/rebuild does below — by the time any content
+    has streamed, the response's status code is already committed.
     """
     _require_bridge(request)
     if not payload.protocol_names:
         raise HTTPException(status_code=400, detail="Select at least one rollup group to rebuild.")
-    try:
-        result: dict[str, Any] = rebuild_all_rollups(
-            request.app.state.gateway,
-            protocol_names=set(payload.protocol_names),
-            force=payload.force,
-        )
-    except RuntimeError as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+
+    protocol_names: set[str] = set(payload.protocol_names)
+    force: bool = payload.force
+    gateway: Any = request.app.state.gateway
+
+    def event_stream():
+        try:
+            for event in rebuild_all_rollups(gateway, protocol_names=protocol_names, force=force):
+                yield json.dumps(event) + "\n"
+        except RuntimeError as exc:
+            yield json.dumps({"type": "error", "detail": str(exc)}) + "\n"
+        except Exception as exc:
+            _log.error(f"Rollup rebuild stream failed: {exc}")
+            yield json.dumps({"type": "error", "detail": str(exc)}) + "\n"
+
     _log.info(
         f"Rollup rebuild triggered via admin UI for {len(payload.protocol_names)} group(s) "
-        f"(force={payload.force})."
+        f"(force={force})."
     )
-    return result
+    return StreamingResponse(event_stream(), media_type="application/x-ndjson")
 
 
 class RefreshRollupsRequest(BaseModel):
@@ -233,34 +250,48 @@ class RefreshRollupsRequest(BaseModel):
 
 
 @router.patch("/rollups/refresh")
-def refresh_rollups(payload: RefreshRollupsRequest, request: Request) -> dict[str, Any]:
+def refresh_rollups(payload: RefreshRollupsRequest, request: Request) -> StreamingResponse:
     """
     Pulls the latest raw data into the admin's selected rollup group(s)'
     existing views — the lighter, non-structural "Refresh Now" action.
     Unlike /rollups/rebuild, this never drops or recreates a view; it's the
     same kind of refresh the background policy already runs on its own
     schedule, just triggered on demand. A view that doesn't exist yet is
-    skipped, not created — use /rollups/rebuild for that. Runs
-    synchronously and returns a per-view result summary.
+    skipped, not created — use /rollups/rebuild for that.
+
+    STREAMS its result as newline-delimited JSON, same convention as
+    /rollups/rebuild above — a "progress" event per view (the finest
+    granularity this screen's thermometer gets anywhere, since
+    RollupManager.refresh_selected_rollups already loops one view at a
+    time), then one "done" event with the per-view result summary.
+
+    Bridge/rollup-manager errors raised before the first view are surfaced
+    as an {"type": "error"} line rather than an HTTP error status, for the
+    same reason /rollups/rebuild and /compression/rebuild do.
     """
     _require_bridge(request)
     if not payload.protocol_names:
         raise HTTPException(status_code=400, detail="Select at least one rollup group to refresh.")
-    try:
-        result: dict[str, Any] = refresh_selected_rollups(
-            request.app.state.gateway,
-            protocol_names=set(payload.protocol_names),
-            force_full=payload.force_full,
-        )
-    except RuntimeError as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+
+    protocol_names: set[str] = set(payload.protocol_names)
+    force_full: bool = payload.force_full
+    gateway: Any = request.app.state.gateway
+
+    def event_stream():
+        try:
+            for event in refresh_selected_rollups(gateway, protocol_names=protocol_names, force_full=force_full):
+                yield json.dumps(event) + "\n"
+        except RuntimeError as exc:
+            yield json.dumps({"type": "error", "detail": str(exc)}) + "\n"
+        except Exception as exc:
+            _log.error(f"Rollup refresh stream failed: {exc}")
+            yield json.dumps({"type": "error", "detail": str(exc)}) + "\n"
+
     _log.info(
         f"Rollup refresh triggered via admin UI for {len(payload.protocol_names)} group(s) "
-        f"(force_full={payload.force_full})."
+        f"(force_full={force_full})."
     )
-    return result
+    return StreamingResponse(event_stream(), media_type="application/x-ndjson")
 
 
 # ---------------------------------------------------------------------------
