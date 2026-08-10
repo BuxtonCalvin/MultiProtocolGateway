@@ -159,8 +159,40 @@ class transport_base:
                     priority=1,
                 )
     _log : logging.Logger
+
     transport_type: ClassVar[Literal["scraper", "bridge", "base class", "general"]] = "base class"
 
+    def prepare_for_reload(self) -> None:
+        """
+        Scheduling path: N/A — called once, before connect(), by
+        Protocol_Gateway.__init__ when constructing a replacement for a
+        previously-stopped gateway (see GatewayManager.reload() /
+        Protocol_Gateway's is_reload parameter).
+
+        A gateway reload constructs entirely new transport objects, so
+        every per-instance "have I connected before" flag on a fresh object
+        starts back at its cold-boot default — even though, physically, the
+        hardware this transport talks to really was just connected moments
+        ago, before the old gateway's stop() disconnected it. Left alone,
+        that makes two independent things behave as if this were a first
+        connect rather than a reconnect:
+
+        - The connected setter above suppresses the "Connection restored"
+          push notification on a first-ever connect (expected/non-actionable
+          at startup) — call this first so was_previously_connected reads
+          True instead, and a genuine reconnect notification fires.
+        - Subclasses that branch on first_connect (see modbus_base.connect())
+          log a plain "Connecting" message instead of "Reconnecting
+          transport X" — the same text operators already monitor/alert on.
+
+        Priming both here, once, at the transport_base level means every
+        subclass gets correct reload behavior automatically — scrapers
+        built on modbus_base, scrapers built directly on transport_base
+        (e.g. serial_frame_transport), and bridges — without each needing
+        its own copy of this logic.
+        """
+        self._ever_connected = True
+        self.first_connect = False
 
     def __init__(self, settings : "TransportSettings") -> None:
         """Scheduling path: N/A — setup, runs once regardless of read_mode."""
@@ -170,6 +202,16 @@ class transport_base:
         self.transport_name: str = ""
         self._connected: bool = False
         self._ever_connected: bool = False
+        # Whether connect() has ever been called on THIS object before.
+        # Originally modbus_base-only; generalized up here since "first
+        # connect vs. reconnect" isn't a modbus-specific distinction — any
+        # transport_base subclass's connect() may want to branch on it (see
+        # modbus_base.connect() for the reference usage: a different log
+        # message, and skipping some connect()-only setup on reconnect).
+        # See also prepare_for_reload() below, which primes this (and
+        # _ever_connected) for the specific case of a freshly-constructed
+        # object standing in for a previously-running one.
+        self.first_connect: bool = True
         # Flag to indicate if the bridge transport needs reconnection; set to True in cleanup() and checked by the gateway to trigger a reconnect.
         self._needs_reconnection: bool = False
         self._connection_reported: bool = False  # suppresses duplicate messages on first connect

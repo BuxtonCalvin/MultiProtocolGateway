@@ -24,7 +24,7 @@
   column_name, data_type, checked, stale}, ...] in alphabetical
   column_name order.
 
-  `stale` (services/timescale_service._active_metric_names_for_protocol)
+  `stale` (services/bridge_service._active_metric_names_for_protocol)
   means the column's metric_name is no longer produced by the protocol's
   live variable_mask/variable_screen config — the same "column exists in
   the wide table but the scrape data doesn't have it" condition
@@ -34,7 +34,7 @@
   still has to check the box and commit, nothing is pre-selected.
 
   Checking a box PATCHes /api/timescale/.../stage to add it to the
-  in-memory staged-deletion set (services/timescale_service.py) — no
+  in-memory staged-deletion set (services/bridge_service.py) — no
   ALTER TABLE happens here. hx-swap="none" because the checkbox itself is
   the only thing that needs to reflect the change; the header's Commit /
   Discard buttons pick up the new dirty state via base.html's
@@ -62,7 +62,7 @@
       Columns
       <span class="surface-muted font-normal">[{{ protocol_name }}]</span>
     </h2>
-    <span class="text-mpg-600 dark:text-mpg-400 text-xs font-mono">{{ wide_table_name }}</span>
+    <span class="mini-table-meta text-xs font-mono">{{ wide_table_name }}</span>
   </div>
 
   <table id="timescale-field-table"
@@ -71,15 +71,15 @@
          aria-label="Deletable columns for {{ protocol_name }}">
 
     <thead class="sticky top-0 bg-mpg-800 z-10">
-      <tr class="text-mpg-100 text-xs uppercase tracking-wide" role="row">
-        <th class="px-2 py-2 text-center w-10 border-r border-mpg-700 font-semibold text-mpg-50"
+      <tr class="mini-table-header text-xs uppercase tracking-wide" role="row">
+        <th class="px-2 py-2 text-center w-10 font-semibold"
             scope="col" title="Mark this column for deletion on next commit">
           Del
         </th>
-        <th class="px-3 py-2 text-left border-r border-mpg-700 font-semibold text-mpg-50 whitespace-nowrap" scope="col">
+        <th class="px-3 py-2 text-left font-semibold whitespace-nowrap" scope="col">
           Column
         </th>
-        <th class="px-3 py-2 text-left font-semibold text-mpg-50 whitespace-nowrap border-r border-mpg-700" scope="col">
+        <th class="px-3 py-2 text-left font-semibold whitespace-nowrap" scope="col">
           Data Type
         </th>
       </tr>
@@ -95,7 +95,7 @@
           data-column="{{ f.column_name }}"
           data-stale="{{ 'true' if f.stale else 'false' }}">
 
-        <td class="px-2 py-1.5 text-center border-r border-mpg-700/30" role="cell">
+        <td class="px-2 py-1.5 text-center mini-table-col-divider" role="cell">
           <input type="checkbox"
                  class="accent-danger w-3 h-3 cursor-pointer timescale-field-toggle"
                  {% if f.checked %}checked{% endif %}
@@ -113,12 +113,12 @@
                    }
                  ">
         </td>
-        <td class="px-3 py-1.5 font-mono border-r border-mpg-700/30 whitespace-nowrap
-                   {% if f.stale %}text-danger dark:text-danger{% else %}text-mpg-500 dark:text-mpg-100{% endif %}"
+        <td class="px-3 py-1.5 font-mono mini-table-col-divider whitespace-nowrap
+                   {% if f.stale %}text-danger{% else %}mini-table-value{% endif %}"
             role="cell">
           {{ f.column_name }}
           {% if f.metric_name != f.column_name %}
-          <span class="{% if f.stale %}text-danger/70{% else %}text-mpg-600 dark:text-mpg-500{% endif %} text-[10px] block">{{ f.metric_name }}</span>
+          <span class="{% if f.stale %}text-danger/70{% else %}mini-table-subtext{% endif %} text-[10px] block">{{ f.metric_name }}</span>
           {% endif %}
           {% if f.stale %}
           <span class="text-danger/80 text-[10px] block italic"
@@ -127,13 +127,13 @@
           </span>
           {% endif %}
         </td>
-        <td class="px-3 py-1.5 text-mpg-500 dark:text-mpg-100 whitespace-nowrap border-r border-mpg-700/30" role="cell">{{ f.data_type }}</td>
+        <td class="px-3 py-1.5 mini-table-value whitespace-nowrap mini-table-col-divider" role="cell">{{ f.data_type }}</td>
       </tr>
       {% endfor %}
 
       {% if not fields %}
       <tr>
-        <td colspan="3" class="px-4 py-8 text-center text-mpg-600 dark:text-mpg-400 text-sm whitespace-normal">
+        <td colspan="3" class="px-4 py-8 text-center mini-table-meta text-sm whitespace-normal">
           No deletable columns found for <strong class="font-mono">{{ protocol_name }}</strong>.
         </td>
       </tr>

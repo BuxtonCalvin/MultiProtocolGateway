@@ -22,7 +22,7 @@
   HTMX partial — visual side-by-side diff of staged vs disk state.
   Loaded into #diff-overlay.
 -->
-<div class="fixed inset-0 z-50 flex items-start justify-center pt-16 px-4"
+<div class="modal-overlay-dark px-4"
      role="dialog" aria-modal="true" aria-labelledby="diff-title"
      x-data>
 
@@ -32,12 +32,10 @@
        aria-hidden="true"></div>
 
   <!-- Panel -->
-  <div class="relative w-full max-w-5xl max-h-[80vh] overflow-y-auto
-              bg-mpg-800 border border-mpg-600 rounded-lg shadow-2xl">
+  <div class="modal-panel-dark relative w-full max-w-5xl max-h-[80vh] overflow-y-auto">
 
     <!-- Header -->
-    <div class="flex items-center justify-between px-5 py-3
-                border-b border-mpg-700 sticky top-0 bg-mpg-800 z-10">
+    <div class="modal-header-dark">
       <div>
         <h2 id="diff-title" class="text-mpg-100 font-semibold">Pending Changes</h2>
         <p class="text-mpg-400 text-xs mt-0.5">
@@ -49,8 +47,7 @@
         </p>
       </div>
       <button onclick="this.closest('[role=dialog]').remove()"
-              class="text-mpg-400 hover:text-mpg-100 p-1.5 rounded
-                     focus:outline-none focus:ring-2 focus:ring-accent"
+              class="modal-close-btn-dark focus:outline-none focus:ring-2 focus:ring-accent"
               aria-label="Close diff panel">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
@@ -69,7 +66,7 @@
         <div class="overflow-x-auto rounded border border-mpg-700">
           <table class="w-full text-xs" role="table" aria-label="Settings diff">
             <thead>
-              <tr class="bg-mpg-900 text-mpg-400 text-left uppercase tracking-wide" role="row">
+              <tr class="diff-table-header" role="row">
                 <th class="px-3 py-2 w-8" scope="col">Type</th>
                 <th class="px-3 py-2" scope="col">Section</th>
                 <th class="px-3 py-2" scope="col">Key</th>
@@ -79,7 +76,7 @@
             </thead>
             <tbody>
               {% for d in diff.settings %}
-              <tr class="border-t border-mpg-700/50
+              <tr class="diff-table-row
                          {% if d.change_type == 'modified' %}bg-warning/5
                          {% elif d.change_type == 'added' %}bg-success/5
                          {% elif d.change_type == 'removed' %}bg-danger/5
@@ -118,7 +115,7 @@
         <div class="overflow-x-auto rounded border border-mpg-700">
           <table class="w-full text-xs" role="table" aria-label="Protocol toggles diff">
             <thead>
-              <tr class="bg-mpg-900 text-mpg-400 text-left uppercase tracking-wide" role="row">
+              <tr class="diff-table-header" role="row">
                 <th class="px-3 py-2" scope="col">Protocol</th>
                 <th class="px-3 py-2" scope="col">Type</th>
                 <th class="px-3 py-2 w-16" scope="col">Addr</th>
@@ -129,7 +126,7 @@
             </thead>
             <tbody>
               {% for d in diff.protocols %}
-              <tr class="border-t border-mpg-700/50 bg-warning/5" role="row">
+              <tr class="diff-table-row bg-warning/5" role="row">
                 <td class="px-3 py-1.5 font-mono text-mpg-400 text-xs">{{ d.protocol_name }}</td>
                 <td class="px-3 py-1.5 text-mpg-300">{{ d.registry_type }}</td>
                 <td class="px-3 py-1.5 font-mono text-mpg-400">{{ d.register_address }}</td>

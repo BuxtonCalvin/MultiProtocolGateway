@@ -33,7 +33,7 @@ AppState         — single-row global flags (dirty, orphan counts, last commit)
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Protocol, Tuple, runtime_checkable
+from typing import Any, Tuple
 
 from sqlalchemy import (
     Boolean,
@@ -55,34 +55,6 @@ from sqlalchemy.orm import (
 
 class Base(DeclarativeBase):
     pass
-
-
-# ---------------------------------------------------------------------------
-# RegisterToggleTarget
-# ---------------------------------------------------------------------------
-
-@runtime_checkable
-class RegisterToggleTarget(Protocol):
-    """
-    Structural protocol satisfied by both ProtocolRegister and
-    DeviceProtocolSelection.  Allows toggle_register_field in
-    protocol_service.py to type ``target`` as a single non-union type,
-    giving checkers full attribute visibility without a cast.
-
-    Attributes are declared as Mapped[bool] — not plain bool — because
-    pyright resolves protocol conformance against class-level annotations,
-    where SQLAlchemy's descriptor appears as Mapped[bool].  At runtime the
-    descriptor transparently returns a plain bool on instances, but the
-    structural check happens at the annotation level, so the protocol must
-    mirror that exact type to satisfy invariant mutable-attribute matching.
-    """
-
-    user_write_enabled: Mapped[bool]
-    mask_enabled: Mapped[bool]
-    screen_enabled: Mapped[bool]
-    is_dirty: Mapped[bool]
-
-    def mark_dirty(self) -> None: ...
 
 
 # ---------------------------------------------------------------------------
@@ -143,13 +115,17 @@ class Setting(Base):
 
 class ProtocolRegister(Base):
     """
-    One row per register entry per protocol CSV file.
+    One row per register entry per protocol CSV file. This is the shared
+    protocol *definition* — one row per protocol, not per device.
 
     write_mode_protocol — the R/RW/RD/WO value from the CSV (never changed by UI)
-    user_write_enabled  — toggled by user in the UI (fed into .writable.csv on commit)
-    mask_enabled        — drives the variable_mask_*.txt file on commit
-    screen_enabled      — drives the variable_screen_*.txt file on commit
-    is_dirty            — any of the three toggles differs from what is on disk
+    is_dirty             — a metadata field below (variable_name, documented_name,
+                            unit, etc.) was edited in the protocol editor and the
+                            underlying CSV needs to be rewritten on commit
+                            (see config_writer._write_protocol_csvs).
+
+    Per-device write/mask/screen selection state lives on DeviceProtocolSelection,
+    not here — two devices sharing this protocol can make different choices.
     """
     __tablename__: str = "protocol_registers"
     __table_args__: Tuple[Any, ...] = (
@@ -181,19 +157,12 @@ class ProtocolRegister(Base):
     write_mode_protocol: Mapped[str] = mapped_column(String(8), default="R")
     # "R" | "RW" | "RD" | "WO"
 
-    # User-controlled toggles (these drive the override/mask/screen files)
-    user_write_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
-    mask_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    screen_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
-
-    # Disk-state snapshots (set on scan, compared on dirty check)
-    user_write_enabled_disk: Mapped[bool] = mapped_column(Boolean, default=False)
-    mask_enabled_disk: Mapped[bool] = mapped_column(Boolean, default=True)
-    screen_enabled_disk: Mapped[bool] = mapped_column(Boolean, default=False)
-
     # 32 bit register joins
     paired_high_address: Mapped[str | None] = mapped_column(String, nullable=True, default=None)
 
+    # Set directly (not via mark_dirty()) by update_protocol_register_field()
+    # whenever a metadata field above is edited in the protocol editor —
+    # triggers a CSV rewrite for this protocol on the next commit.
     is_dirty: Mapped[bool] = mapped_column(Boolean, default=False)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
@@ -203,13 +172,6 @@ class ProtocolRegister(Base):
         return (
             f"<ProtocolRegister {self.protocol_name}/{self.registry_type} "
             f"@{self.register_address} {self.variable_name!r}>"
-        )
-
-    def mark_dirty(self) -> None:
-        self.is_dirty = (
-            self.user_write_enabled != self.user_write_enabled_disk
-            or self.mask_enabled != self.mask_enabled_disk
-            or self.screen_enabled != self.screen_enabled_disk
         )
 
     @property

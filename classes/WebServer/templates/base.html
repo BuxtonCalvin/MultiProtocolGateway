@@ -348,7 +348,7 @@
 
     <!-- TIMESCALE DB dropdown — only shown when a live TimescaleDB bridge
          is attached to this gateway (see timescale_bridge_available() in
-         main.py, backed by services/timescale_service.is_timescale_available). -->
+         main.py, backed by services/bridge_service.is_timescale_available). -->
     {% if timescale_bridge_available() %}
     <div class="relative group dropdown-root" role="none" data-dropdown>
       <button type="button"
@@ -372,6 +372,18 @@
           <a href="/pages/timescale-delete-columns" role="menuitem"
              class="dropdown-item block px-4 py-2 text-mpg-200 hover:bg-mpg-600 hover:text-white">
             Delete Columns
+          </a>
+        </li>
+        <li role="none">
+          <a href="/pages/timescale-rebuild-rollups" role="menuitem"
+             class="dropdown-item block px-4 py-2 text-mpg-200 hover:bg-mpg-600 hover:text-white">
+            Rebuild Rollup Views
+          </a>
+        </li>
+        <li role="none">
+          <a href="/pages/timescale-rebuild-compression" role="menuitem"
+             class="dropdown-item block px-4 py-2 text-mpg-200 hover:bg-mpg-600 hover:text-white">
+            Rebuild Compression
           </a>
         </li>
       </ul>
@@ -462,6 +474,20 @@
 </header>
 <!-- /header -->
 
+<!-- ===== GATEWAY RELOAD PROGRESS BANNER (live, polled) =====
+     Empty/hidden on initial render — populated client-side by
+     pollGatewayStatus() (see SCRIPTS below), which polls GET
+     /api/gateway/status every 2s. Covers both reload triggers: a webUI
+     commit (which blocks for the whole reload — this shows "please wait"
+     for that entire window) and a FileWatcher-detected manual edit to
+     config.cfg (which has no request/response of its own to hang a
+     one-off toast off of at all — polling is the only way any open tab
+     ever finds out about that one). -->
+<div id="gateway-reload-progress-banner"
+     role="status"
+     aria-live="polite"
+     class="hidden px-4 py-2 text-sm border-b"></div>
+
 <!-- ===== ORPHAN BANNER ===== -->
 {% if app_state and app_state.has_orphans %}
 <div role="alert"
@@ -477,6 +503,30 @@
           class="underline hover:no-underline font-medium focus:outline-none focus:ring-2 focus:ring-warning">
     Review &amp; Prune
   </button>
+</div>
+{% endif %}
+
+<!-- ===== GATEWAY RELOAD BANNER (settled, server-rendered) =====
+     gateway_reload_status() is a Jinja global (see main.py) reading the
+     GatewayManager's current ReloadStatus. Only rendered when something's
+     actually wrong — a successful reload doesn't leave a persistent banner,
+     just the transient "Reload complete" from the poll above. Two
+     severities: `fatal` (gateway offline entirely — no working config could
+     be loaded, including the last-known-good backup) uses the same danger
+     styling as a failed commit; a non-fatal fallback (new config broke,
+     reverted to backup) uses the same warning styling as the orphan banner
+     above, since the gateway IS running, just not on the config that was
+     just applied. -->
+{% set gw_status = gateway_reload_status() %}
+{% if gw_status and not gw_status.ok %}
+<div role="alert"
+     class="{{ 'bg-danger/10 border-b border-danger/40 text-danger' if gw_status.fatal
+               else 'bg-warning/10 border-b border-warning/40 text-warning' }}
+            px-4 py-2 flex items-center justify-between text-sm">
+  <span>
+    {{ '⛔ Gateway offline' if gw_status.fatal else '⚠ Gateway running on last-known-good config' }}
+    — {{ gw_status.message }}
+  </span>
 </div>
 {% endif %}
 
@@ -537,6 +587,52 @@
   refreshState();
   setInterval(refreshState, 10000);
 
+  // Poll gateway reload status every 2s — drives the "System is reloading,
+  // please be patient" / "Reload complete" banner. Deliberately independent
+  // of the /api/commit request/response cycle: a commit's own POST blocks
+  // for the whole reload (see commit.py), so this poll catches "reloading"
+  // WHILE that request is still in flight, and it's the ONLY way any open
+  // tab finds out about a FileWatcher-triggered reload at all, since that
+  // one has no request/response of its own.
+  let _gatewayWasReloading = false;
+  function pollGatewayStatus() {
+    fetch('/api/gateway/status')
+      .then(r => r.json())
+      .then(data => {
+        const banner = document.getElementById('gateway-reload-progress-banner');
+        if (!banner) return;
+
+        if (data.reloading) {
+          _gatewayWasReloading = true;
+          banner.className = 'px-4 py-2 text-sm border-b flex items-center gap-2 ' +
+                              'bg-accent/10 border-accent/40 text-accent';
+          banner.innerHTML = '<span aria-hidden="true">⏳</span>' +
+                              '<span>System is reloading and will resume in 60 seconds, please be patient…</span>';
+          banner.classList.remove('hidden');
+          return;
+        }
+
+        if (_gatewayWasReloading) {
+          // Just transitioned from reloading -> not reloading: show a brief
+          // "complete" message, then let it fade — the settled-state banner
+          // below (server-rendered from gateway_reload_status()) takes over
+          // for anything that's still actually wrong after this clears.
+          _gatewayWasReloading = false;
+          const ok = data.ok !== false;
+          banner.className = 'px-4 py-2 text-sm border-b flex items-center gap-2 ' +
+                              (ok ? 'bg-success/10 border-success/40 text-success'
+                                  : 'bg-warning/10 border-warning/40 text-warning');
+          banner.innerHTML = '<span aria-hidden="true">' + (ok ? '✔' : '⚠') + '</span>' +
+                              '<span>Reload complete' + (ok ? '' : ' — ' + data.message) + '</span>';
+          banner.classList.remove('hidden');
+          setTimeout(() => banner.classList.add('hidden'), 5000);
+        }
+      })
+      .catch(() => {});
+  }
+  pollGatewayStatus();
+  setInterval(pollGatewayStatus, 2000);
+
   // HTMX optimistic UI rollback on 4xx/5xx
   document.body.addEventListener('htmx:responseError', function(evt) {
     const el = evt.detail.elt;
@@ -573,9 +669,13 @@
           if (data.override_files_written != null) parts.push(`${data.override_files_written} override file(s)`);
           if (data.protocol_csvs_written != null) parts.push(`${data.protocol_csvs_written} protocol CSV(s)`);
           const summary = parts.length ? parts.join(', ') : 'No changes written';
+          const gw = data.gateway_reload;
+          const gwWarning = (gw && !gw.ok)
+            ? `<div class="mt-1 text-warning">⚠ ${gw.message}</div>`
+            : '';
           html = `<div class="flex items-center justify-between gap-4 px-4 py-2 rounded
                              bg-success/10 border border-success/40 text-success text-sm">
-                    <span>✔ Commit successful — ${summary}. Refreshing…</span>
+                    <span>✔ Commit successful — ${summary}. Refreshing…${gwWarning}</span>
                   </div>`;
           // Reload after short delay so user sees the success message
           setTimeout(() => window.location.reload(), 1200);

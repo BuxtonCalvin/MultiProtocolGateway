@@ -1,0 +1,342 @@
+<!--
+  Description: Defines the Timescale DB "Rebuild Rollup Views" admin screen.
+  File: timescale_rebuild_rollups.html
+
+  Copyright 2026 Kevin Burke
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://apache.org
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+
+{#
+  pages/timescale_rebuild_rollups.html
+  Single-pane screen (no left-hand picker, unlike Delete Columns — this
+  screen operates on every rollup group at once, not one wide table at a
+  time): a header + "Rebuild Rollups" button, "Select all" / "Select none"
+  links, and below them the current rollup-view inventory loaded via HTMX
+  into #rollup-views-container, one checkbox per source-table group (see
+  partials/timescale_rollup_view_list.html).
+
+  Selection is per GROUP, never per individual hourly/daily/weekly/monthly
+  view — the finer-grained views in a stack are hierarchically dependent on
+  the coarser ones, so the whole stack is the smallest unit that can safely
+  be rebuilt on its own (see RollupManager.rebuild_all_rollups).
+
+  Unlike Delete Columns, this screen has no staging step and doesn't touch
+  the header's Commit/Discard buttons — rollup views are always derived
+  from the wide/narrow tables, never a source of truth, so the rebuild runs
+  immediately when the button is pressed. Because the request body needs to
+  carry an arbitrary set of checked checkboxes (PATCH /api/timescale/
+  rollups/rebuild expects {"protocol_names": [...]}), the button is driven
+  by plain fetch() in triggerRebuildRollups() below rather than a bare
+  hx-patch attribute — HTMX has no built-in way to collect multiple
+  independently-named checkboxes into a JSON array body.
+#}
+
+{% extends "base.html" %}
+{% block title %}Timescale DB — Rebuild Rollup Views — MPG Admin{% endblock %}
+{% block content %}
+<div class="col-span-12 flex flex-col gap-2" style="height: calc(100vh - 56px); overflow: hidden;">
+
+  <!-- ══ HEADER + REBUILD BUTTON ══ -->
+  <div class="flex-shrink-0 flex items-start justify-between gap-4 px-1 py-2">
+    <div>
+      <h1 class="surface-title text-xs font-semibold uppercase tracking-widest">Rollup Views</h1>
+      <p class="surface-muted text-xs mt-1 max-w-2xl">
+        Continuous-aggregate rollup views currently on this bridge — the shared narrow stack
+        plus one hourly / daily / weekly / monthly stack per wide-table protocol. Uncheck a
+        group below to leave it out of the next rebuild; a checked group whose views already
+        match their configured buckets is left untouched, only re-verified.
+      </p>
+      <div class="mt-1.5 flex items-center gap-3">
+        <button type="button"
+                class="text-[11px] surface-muted hover:text-accent underline underline-offset-2"
+                onclick="setAllRollupGroups(true)">
+          Select all
+        </button>
+        <button type="button"
+                class="text-[11px] surface-muted hover:text-accent underline underline-offset-2"
+                onclick="setAllRollupGroups(false)">
+          Select none
+        </button>
+      </div>
+    </div>
+
+    <div class="flex-shrink-0 flex items-center gap-2">
+      <button type="button"
+              id="refresh-rollups-btn"
+              class="px-4 py-2 rounded text-xs font-semibold bg-transparent text-accent
+                     border border-accent/50 hover:bg-accent/10
+                     disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              aria-label="Pull the latest data into the checked rollup groups' existing views"
+              title="Pulls the latest raw data into each checked group's existing views without dropping or recreating them — much faster than a rebuild, but won't fix a missing view or a bucket-interval mismatch"
+              onclick="triggerRefreshRollups(false)">
+        <span id="refresh-btn-label">Refresh Now</span>
+      </button>
+      <button type="button"
+              id="rebuild-rollups-btn"
+              class="px-4 py-2 rounded text-xs font-semibold bg-accent text-white
+                     hover:bg-accent/80 disabled:opacity-50 disabled:cursor-not-allowed
+                     transition-colors"
+              aria-label="Rebuild the checked rollup groups if they need it"
+              title="Purges and recreates a checked group's views only if their bucket intervals no longer match config or a view is missing — a group that's already correct is just re-verified, not touched"
+              onclick="triggerRebuildRollups(false)">
+        <span id="rebuild-btn-label">Rebuild Rollups</span>
+      </button>
+      <button type="button"
+              id="force-rebuild-btn"
+              class="px-4 py-2 rounded text-xs font-semibold bg-transparent text-danger
+                     border border-danger/50 hover:bg-danger/10
+                     disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              aria-label="Force-rebuild the checked rollup groups regardless of status"
+              title="Purges and fully re-materializes every checked group, even if it's already OK"
+              onclick="triggerRebuildRollups(true)">
+        <span id="force-rebuild-btn-label">Force Rebuild</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- ══ STATUS BANNER — filled in by renderRebuildStatus() below ══ -->
+  <div id="rebuild-status" class="flex-shrink-0 px-1" role="status" aria-live="polite"></div>
+
+  <!-- ══ ROLLUP VIEW GROUPS (one checkbox per source table) ══ -->
+  <section class="flex-1 overflow-y-auto px-1" aria-label="Rollup view inventory">
+    <div id="rollup-views-container"
+         class="overflow-x-auto"
+         hx-get="/pages/timescale/rollups"
+         hx-trigger="load"
+         hx-swap="innerHTML scroll:false">
+      <p class="surface-subtle text-xs p-4">Loading rollup views…</p>
+    </div>
+  </section>
+
+</div>
+
+<script>
+  function setAllRollupGroups(checked) {
+    document.querySelectorAll('.rollup-group-checkbox').forEach(function (cb) {
+      cb.checked = checked;
+    });
+  }
+
+  // All three actions (Refresh Now, Rebuild Rollups, Force Rebuild) hit the
+  // same underlying rollup stacks, so only one should ever run at a time —
+  // disable all three buttons while any one of them is in flight.
+  function setRollupActionButtonsDisabled(disabled) {
+    ['refresh-rollups-btn', 'rebuild-rollups-btn', 'force-rebuild-btn'].forEach(function (id) {
+      const btn = document.getElementById(id);
+      if (btn) { btn.disabled = disabled; }
+    });
+  }
+
+  function getCheckedRollupGroups() {
+    const checked = document.querySelectorAll('.rollup-group-checkbox:checked');
+    return Array.from(checked).map(function (cb) { return cb.dataset.protocolName; });
+  }
+
+  function refreshRollupViewsContainer() {
+    // Checkboxes default back to "all checked" on reload — see the
+    // partial's `checked` attribute.
+    htmx.ajax('GET', '/pages/timescale/rollups', {
+      target: '#rollup-views-container',
+      swap: 'innerHTML scroll:false',
+    });
+  }
+
+  // Collects the checked group checkboxes, PATCHes the selection to
+  // /api/timescale/rollups/rebuild (force=true for the "Force Rebuild"
+  // button, false for "Rebuild Rollups"), then refreshes the inventory so
+  // it reflects whatever the rebuild just did.
+  async function triggerRebuildRollups(force) {
+    const rebuildLabel = document.getElementById('rebuild-btn-label');
+    const forceLabel = document.getElementById('force-rebuild-btn-label');
+    const statusEl = document.getElementById('rebuild-status');
+
+    const protocolNames = getCheckedRollupGroups();
+    statusEl.innerHTML = '';
+
+    if (protocolNames.length === 0) {
+      statusEl.innerHTML =
+        '<div class="text-xs text-danger px-3 py-2 rounded border border-danger/30 bg-danger/10">' +
+        'Select at least one group to rebuild.</div>';
+      return;
+    }
+
+    if (force) {
+      const groupWord = protocolNames.length === 1 ? 'group' : 'groups';
+      const proceed = window.confirm(
+        'Force Rebuild will purge and fully re-materialize ' + protocolNames.length + ' rollup ' +
+        groupWord + ' from their source data, even where nothing looks out of date. This can take ' +
+        'noticeably longer than a normal rebuild. Continue?'
+      );
+      if (!proceed) { return; }
+    }
+
+    setRollupActionButtonsDisabled(true);
+    (force ? forceLabel : rebuildLabel).textContent = force ? 'Force rebuilding…' : 'Rebuilding…';
+
+    let ok = false;
+    let payload = null;
+    try {
+      const resp = await fetch('/api/timescale/rollups/rebuild', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache',
+        },
+        body: JSON.stringify({ protocol_names: protocolNames, force: force }),
+      });
+      ok = resp.ok;
+      payload = await resp.json();
+    } catch (e) {
+      ok = false;
+    }
+
+    setRollupActionButtonsDisabled(false);
+    rebuildLabel.textContent = 'Rebuild Rollups';
+    forceLabel.textContent = 'Force Rebuild';
+
+    renderRebuildStatus(ok, payload);
+    refreshRollupViewsContainer();
+  }
+
+  // Three distinct outcomes, per the admin's expectations:
+  //   1. Every selected group was already correct — nothing was purged or
+  //      re-materialized (payload.*.changed all false).
+  //   2. At least one selected group was actually purged + re-materialized,
+  //      and everything selected succeeded.
+  //   3. Something failed — narrow and/or one or more protocols.
+  function renderRebuildStatus(ok, payload) {
+    const statusEl = document.getElementById('rebuild-status');
+
+    if (!ok || !payload) {
+      statusEl.innerHTML =
+        '<div class="text-xs text-danger px-3 py-2 rounded border border-danger/30 bg-danger/10">' +
+        'Rebuild failed — the server did not return a result. Check the server log for details.</div>';
+      return;
+    }
+
+    const protocols = payload.protocols || [];
+    const attempted = protocols.filter(function (p) { return !p.skipped; });
+    const failed = attempted.filter(function (p) { return !p.ok; });
+    const narrow = payload.narrow || { ok: true, skipped: true, changed: false };
+
+    if (!narrow.ok || failed.length > 0) {
+      // Outcome 3: failure — name exactly what failed and why.
+      const details = [];
+      if (!narrow.ok) {
+        details.push('shared narrow stack' + (narrow.error ? ' (' + narrow.error + ')' : ''));
+      }
+      failed.forEach(function (p) {
+        details.push(p.protocol_name + (p.error ? ' (' + p.error + ')' : ''));
+      });
+      statusEl.innerHTML =
+        '<div class="text-xs text-danger px-3 py-2 rounded border border-danger/30 bg-danger/10">' +
+        'Rebuild failed for: ' + details.join('; ') + '. Check the server log for full details.</div>';
+      return;
+    }
+
+    const anyChanged = (!narrow.skipped && narrow.changed) ||
+      attempted.some(function (p) { return p.changed; });
+
+    if (!anyChanged) {
+      // Outcome 1: nothing needed doing — this is the common, fast case.
+      statusEl.innerHTML =
+        '<div class="text-xs mini-table-value px-3 py-2 rounded border border-mpg-700 bg-mpg-800/5">' +
+        'Rollups were analyzed and do not need a rebuild.</div>';
+      return;
+    }
+
+    // Outcome 2: something was actually purged and re-materialized.
+    const parts = [];
+    if (!narrow.skipped && narrow.changed) { parts.push('the shared narrow stack'); }
+    const changedProtocolCount = attempted.filter(function (p) { return p.changed; }).length;
+    if (changedProtocolCount) { parts.push(changedProtocolCount + ' protocol(s)'); }
+    statusEl.innerHTML =
+      '<div class="text-xs text-green-700 dark:text-green-400 px-3 py-2 rounded border border-green-500/30 bg-green-500/10">' +
+      'Rebuild complete — rebuilt ' + parts.join(' and ') + '.</div>';
+  }
+
+  // Collects the checked group checkboxes, PATCHes the selection to
+  // /api/timescale/rollups/refresh, then refreshes the inventory. Unlike
+  // rebuild, this never touches view structure — it only pulls in the
+  // latest raw data for views that already exist.
+  async function triggerRefreshRollups(forceFull) {
+    const refreshLabel = document.getElementById('refresh-btn-label');
+    const statusEl = document.getElementById('rebuild-status');
+
+    const protocolNames = getCheckedRollupGroups();
+    statusEl.innerHTML = '';
+
+    if (protocolNames.length === 0) {
+      statusEl.innerHTML =
+        '<div class="text-xs text-danger px-3 py-2 rounded border border-danger/30 bg-danger/10">' +
+        'Select at least one group to refresh.</div>';
+      return;
+    }
+
+    setRollupActionButtonsDisabled(true);
+    refreshLabel.textContent = 'Refreshing…';
+
+    let ok = false;
+    let payload = null;
+    try {
+      const resp = await fetch('/api/timescale/rollups/refresh', {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache',
+        },
+        body: JSON.stringify({ protocol_names: protocolNames, force_full: forceFull }),
+      });
+      ok = resp.ok;
+      payload = await resp.json();
+    } catch (e) {
+      ok = false;
+    }
+
+    setRollupActionButtonsDisabled(false);
+    refreshLabel.textContent = 'Refresh Now';
+
+    renderRefreshStatus(ok, payload);
+    refreshRollupViewsContainer();
+  }
+
+  function renderRefreshStatus(ok, payload) {
+    const statusEl = document.getElementById('rebuild-status');
+
+    if (!ok || !payload) {
+      statusEl.innerHTML =
+        '<div class="text-xs text-danger px-3 py-2 rounded border border-danger/30 bg-danger/10">' +
+        'Refresh failed — the server did not return a result. Check the server log for details.</div>';
+      return;
+    }
+
+    const views = payload.views || [];
+    const failed = views.filter(function (v) { return !v.ok; });
+
+    if (failed.length > 0) {
+      const details = failed.map(function (v) {
+        return v.view_name + (v.error ? ' (' + v.error + ')' : '');
+      });
+      statusEl.innerHTML =
+        '<div class="text-xs text-danger px-3 py-2 rounded border border-danger/30 bg-danger/10">' +
+        'Refresh failed for: ' + details.join('; ') + '. Check the server log for full details.</div>';
+      return;
+    }
+
+    statusEl.innerHTML =
+      '<div class="text-xs text-green-700 dark:text-green-400 px-3 py-2 rounded border border-green-500/30 bg-green-500/10">' +
+      'Refresh complete — pulled the latest data into ' + views.length + ' view(s).</div>';
+  }
+</script>
+{% endblock %}

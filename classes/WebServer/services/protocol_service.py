@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, List, Literal, Sequence, Tuple
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.engine.row import Row
 from sqlalchemy.orm import Query, Session
 
@@ -242,57 +242,246 @@ def get_protocols_for_device(db: Session, protocol_version: str, device_name: st
     return tabs
 
 
+# The TimescaleDB wide-table writer builds one column per selected metric
+# across a device's register maps. Past this many columns it refuses to
+# form the table, so the UI warns the user before they hit that wall.
+WIDE_TABLE_COLUMN_LIMIT: int = 160
+
+# The registry types that actually feed the wide table. A protocol can, in
+# principle, expose other registry types (e.g. "coil", "discrete") that
+# don't participate in that table — those are excluded from
+# register_map_chosen even though they're included in total_available /
+# chosen_count.
+_REGISTER_MAP_TYPES: set[str] = {"holding", "input"}
+
+
+def get_device_metric_summary(
+    db: Session,
+    protocol_version: str,
+    device_name: str,
+    transport: Any = None,
+) -> dict[str, Any]:
+    """
+    Device-wide metric-selection summary across every non-JSON registry-type
+    tab (register map) for a protocol_version. Used to render the
+    Available / Selected / <Registry Map> Available/Selected badges next to
+    the protocol tab strip.
+
+    Returns a dict with:
+
+      - total_available: every metric available to the device — the sum of
+        each register-map tab's row count, plus every distinct synthetic
+        field.
+
+      - chosen_count: metrics that will actually be forwarded to a bridge,
+        summed across every non-JSON tab. Per tab, mask acts as a whitelist
+        (only mask_enabled rows are kept) and screen acts as a blacklist
+        (every row *except* the screen_enabled ones is kept). Mask and
+        screen are mutually exclusive per register (enforced in
+        toggle_register_field), so a given tab is never counted both ways.
+        A tab with no selections of its own contributes its full total only
+        if NO tab anywhere in the protocol has any selections (matching the
+        "No chosen metrics: all metrics will write to bridges" notice shown
+        elsewhere) — as soon as any other tab has a mask or screen
+        selection, an empty tab contributes nothing rather than being
+        assumed fully forwarded. Tabs that do have their own selections
+        always apply their own whitelist/blacklist rule independently of
+        what any other tab is doing. Synthetic fields have no toggle and
+        are always forwarded, so they're added in once at the end
+        regardless of any tab's selection state, the same as in
+        total_available.
+
+      - register_map_chosen: chosen_count restricted to registry_type in
+        {"holding", "input"} — the register maps that feed the TimescaleDB
+        wide table — even when a protocol also exposes other registry types
+        that don't participate in that table.
+
+      - over_limit: True when register_map_chosen exceeds
+        WIDE_TABLE_COLUMN_LIMIT.
+
+      - by_registry_type: {registry_type: {"total": int, "chosen": int}}
+        for every non-JSON tab, so the UI can show an "<Active Tab>
+        Available / Selected" pair that follows whichever tab the user has
+        open. Unlike total_available/chosen_count (which dedupe a
+        registry-agnostic synthetic field so it's only counted once
+        overall), each tab's own total/chosen here includes every synthetic
+        field that actually renders on that tab — a tab-specific field only
+        on its tab, an agnostic field on every tab — since that's what the
+        person actually sees when that tab is open, even though it means
+        an agnostic field is reflected in more than one tab's numbers.
+
+    `transport` should be the live gateway transport for this device (see
+    build_synthetic_rows) so synthetic metrics are included in every count.
+    Pass None to compute registers-only counts, e.g. for a device that
+    isn't currently connected.
+    """
+    rows: Sequence[Row[Tuple[str, str, int]]] = (
+        db.execute(
+            select(
+                ProtocolRegister.protocol_name,
+                ProtocolRegister.registry_type,
+                func.count(ProtocolRegister.id),
+            )
+            .where(ProtocolRegister.protocol_name.like(f"{protocol_version}%"))
+            .group_by(ProtocolRegister.protocol_name, ProtocolRegister.registry_type)
+        )
+        .all()
+    )
+
+    total_available: int = 0
+    chosen_count: int = 0
+    register_map_chosen: int = 0
+    existing_registry_types: set[str] = {
+        registry_type for _, registry_type, _ in rows if registry_type != "json"
+    }
+
+    # Gather each register-map tab's own mask/screen counts first. Whether
+    # an *empty* tab (no mask or screen selections of its own) counts as
+    # "everything forwarded" or "nothing forwarded" depends on whether any
+    # OTHER tab in the protocol has selections — so that has to be known
+    # before any tab's contribution can be decided.
+    tab_data: List[Tuple[str, int, int, int]] = []  # (registry_type, tab_total, mask_count, screen_count)
+    for protocol_name, registry_type, tab_total in rows:
+        if registry_type == "json":
+            continue
+
+        sels: List[DeviceProtocolSelection] = (
+            db.query(DeviceProtocolSelection)
+            .filter(
+                DeviceProtocolSelection.device_name == device_name,
+                DeviceProtocolSelection.protocol_name == protocol_name,
+                DeviceProtocolSelection.registry_type == registry_type,
+            )
+            .all()
+        )
+        mask_count: int = sum(1 for s in sels if s.mask_enabled)
+        screen_count: int = sum(1 for s in sels if s.screen_enabled)
+        tab_data.append((registry_type, tab_total, mask_count, screen_count))
+        total_available += tab_total
+
+    # True as soon as ANY register-map tab has a mask or screen selection.
+    # When that's the case, a tab with no selections of its own contributes
+    # nothing — its metrics are left out entirely rather than assumed
+    # forwarded. Only when nothing is selected anywhere does the "no
+    # selections = everything forwarded" fallback apply, matching the
+    # "No chosen metrics: all metrics will write to bridges" notice.
+    any_selections: bool = any(mask_count or screen_count for _, _, mask_count, screen_count in tab_data)
+
+    # Synthetic fields have no per-register toggle — they're always
+    # forwarded — and build_synthetic_rows() attaches each one to every tab
+    # it applies to (a tab-specific field to just that tab, an
+    # registry-agnostic field to every tab). Track which tabs each distinct
+    # field actually appears on, so total_available/chosen_count can count
+    # it once overall while by_registry_type can still reflect it on every
+    # tab it's visible on. Skip a field tagged to a registry_type this
+    # protocol doesn't actually expose as a tab (matches the filtering
+    # build_synthetic_rows() itself applies when rendering a specific tab).
+    synthetic_names_by_type: dict[str, set[str]] = {rt: set() for rt in existing_registry_types}
+    all_synthetic_names: set[str] = set()
+    if transport is not None:
+        for field in getattr(transport, "synthetic_fields_metadata", []):
+            rest: tuple[Any, ...] = field[4:]
+            field_registry_type: str | None = str(rest[0]).lower() if rest and rest[0] else None
+            if field_registry_type is not None and field_registry_type not in existing_registry_types:
+                continue
+            name: str = field[0]
+            all_synthetic_names.add(name)
+            if field_registry_type is None:
+                for rt in existing_registry_types:
+                    synthetic_names_by_type[rt].add(name)
+            else:
+                synthetic_names_by_type[field_registry_type].add(name)
+    synthetic_total: int = len(all_synthetic_names)
+    register_map_synthetic_names: set[str] = set()
+    for rt in _REGISTER_MAP_TYPES & existing_registry_types:
+        register_map_synthetic_names |= synthetic_names_by_type[rt]
+    register_map_synthetic_total: int = len(register_map_synthetic_names)
+
+    by_registry_type: dict[str, dict[str, int]] = {}
+    for registry_type, tab_total, mask_count, screen_count in tab_data:
+        if mask_count:
+            tab_chosen: int = mask_count
+        elif screen_count:
+            tab_chosen = tab_total - screen_count
+        elif not any_selections:
+            tab_chosen = tab_total
+        else:
+            tab_chosen = 0
+
+        chosen_count += tab_chosen
+        if registry_type in _REGISTER_MAP_TYPES:
+            register_map_chosen += tab_chosen
+
+        tab_synthetic: int = len(synthetic_names_by_type.get(registry_type, set()))
+        by_registry_type[registry_type] = {
+            "total":  tab_total + tab_synthetic,
+            "chosen": tab_chosen + tab_synthetic,
+        }
+
+    total_available += synthetic_total
+    chosen_count += synthetic_total
+    register_map_chosen += register_map_synthetic_total
+
+    return {
+        "total_available":     total_available,
+        "chosen_count":        chosen_count,
+        "register_map_chosen": register_map_chosen,
+        "over_limit":          register_map_chosen > WIDE_TABLE_COLUMN_LIMIT,
+        "wide_table_limit":    WIDE_TABLE_COLUMN_LIMIT,
+        "by_registry_type":    by_registry_type,
+    }
+
+
 def toggle_register_field(
     db: Session,
     register_id: int,
     field: str,   # "user_write_enabled" | "mask_enabled" | "screen_enabled"
     value: bool,
     device_name: str | None = None,
-) -> ProtocolRegister | DeviceProtocolSelection | None:
+) -> DeviceProtocolSelection | None:
     """
-    Toggle a single field on a ProtocolRegister row.
+    Toggle a single write/mask/screen field for one device's selection of a
+    register. These are device-scoped choices (see DeviceProtocolSelection),
+    not part of the shared ProtocolRegister definition, so a device_name is
+    required — there's no protocol-wide toggle to fall back to.
     Enforces the two-gate rule: user_write_enabled can only be True
     if the protocol permits writing.
     Returns the updated row, or None if not found / not allowed.
     """
     allowed_fields: set[str] = {"user_write_enabled", "mask_enabled", "screen_enabled"}
-    if field not in allowed_fields:
+    if field not in allowed_fields or not device_name:
         return None
 
     row: ProtocolRegister | None = db.get(ProtocolRegister, register_id)
     if row is None:
         return None
 
-    target: ProtocolRegister | DeviceProtocolSelection = row
-
-    if device_name:
-        existing: DeviceProtocolSelection | None = (
-            db.query(DeviceProtocolSelection)
-            .filter(
-                DeviceProtocolSelection.device_name == device_name,
-                DeviceProtocolSelection.protocol_name == row.protocol_name,
-                DeviceProtocolSelection.registry_type == row.registry_type,
-                DeviceProtocolSelection.register_address == row.register_address,
-            )
-            .first()
+    target: DeviceProtocolSelection | None = (
+        db.query(DeviceProtocolSelection)
+        .filter(
+            DeviceProtocolSelection.device_name == device_name,
+            DeviceProtocolSelection.protocol_name == row.protocol_name,
+            DeviceProtocolSelection.registry_type == row.registry_type,
+            DeviceProtocolSelection.register_address == row.register_address,
         )
-        if existing is None:
-            existing = DeviceProtocolSelection(
-                device_name=device_name,
-                protocol_name=row.protocol_name,
-                registry_type=row.registry_type,
-                register_address=row.register_address,
-                user_write_enabled=False,
-                mask_enabled=False,
-                screen_enabled=False,
-                user_write_enabled_disk=False,
-                mask_enabled_disk=False,
-                screen_enabled_disk=False,
-                is_dirty=False,
-            )
-            db.add(existing)
-            db.flush()
-        target = existing
+        .first()
+    )
+    if target is None:
+        target = DeviceProtocolSelection(
+            device_name=device_name,
+            protocol_name=row.protocol_name,
+            registry_type=row.registry_type,
+            register_address=row.register_address,
+            user_write_enabled=False,
+            mask_enabled=False,
+            screen_enabled=False,
+            user_write_enabled_disk=False,
+            mask_enabled_disk=False,
+            screen_enabled_disk=False,
+            is_dirty=False,
+        )
+        db.add(target)
+        db.flush()
 
     if field == "user_write_enabled" and value and not row.is_writable_by_protocol:
         return None

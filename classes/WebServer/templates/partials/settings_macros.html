@@ -1,0 +1,46 @@
+<!--
+  Description: Shared Jinja macros for rendering device/bridge setting rows.
+  File: settings_macros.html
+
+  Copyright 2026 Kevin Burke
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://apache.org
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+
+{#
+  partials/settings_macros.html
+  Macro-only partial — no page markup, no context dependency. Exists so
+  is_bool(s) has exactly one definition, importable by anything that
+  renders a settings row:
+    - settings_rows.html (included by scraper_panes.html, and rendered
+      standalone by reconcile_settings() in devices.py)
+    - bridge_panes.html (renders its own bridge settings pane)
+
+  Because this file only defines macros and never references outer
+  context (device, settings, ns_w, ...), it's safe to {% import %}
+  without passing context — Jinja imports are context-free by default,
+  and a macro-only module has nothing that needs one. Add any other
+  setting-row helper macros here rather than redefining them per caller.
+#}
+{%- macro is_bool(s) -%}
+  {%- set v = (s.value_staged or s.default_value or '') | lower | trim -%}
+  {%- set k = s.key | lower -%}
+  {%- if v in ('true', 'false') -%}true
+  {%- elif k.startswith('enable_') or k.startswith('send_')
+        or k.startswith('include_') or k.startswith('use_')
+        or k in ('write_enabled', 'force_float', 'json', 'console',
+                 'discovery_enabled', 'migrate_data', 'pretty_print',
+                 'append_mode', 'async_mode') -%}true
+  {%- else -%}false
+  {%- endif -%}
+{%- endmacro -%}

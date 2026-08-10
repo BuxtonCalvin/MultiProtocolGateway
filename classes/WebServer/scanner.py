@@ -803,8 +803,6 @@ def _upsert_protocol_register(db: Session, reg: dict[str, Any]) -> ProtocolRegis
             existing.note                = reg.get("note", "")
             existing.read_interval       = reg.get("read_interval", "")
             existing.write_mode_protocol = reg["write_mode_protocol"]
-        # Note: user_write_enabled / mask_enabled / screen_enabled intentionally
-        # not touched here — they are user-controlled toggles.
         # paired_high_address is structural metadata — always keep current from CSV.
         existing.paired_high_address = reg.get("paired_high_address")
         return existing
@@ -828,13 +826,6 @@ def _upsert_protocol_register(db: Session, reg: dict[str, Any]) -> ProtocolRegis
                 read_interval          = reg.get("read_interval", ""),
                 write_mode_protocol    = reg["write_mode_protocol"],
                 paired_high_address    = reg.get("paired_high_address"),
-                # User-controlled toggle defaults
-                user_write_enabled       = False,
-                mask_enabled             = True,
-                screen_enabled           = False,
-                user_write_enabled_disk  = False,
-                mask_enabled_disk        = True,
-                screen_enabled_disk      = False,
                 is_dirty                 = False,
             )
             db.add(new_row)

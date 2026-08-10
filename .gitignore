@@ -23,11 +23,7 @@ dist/*
 build/*
 multi_protocol_gateway.egg-info/*
 
-#ignore inflxudb files
-inflxudb_backlog/*
-inflxudb3_backlog/*
-
-timescaledb_backlog/*
+backlogs/*
 
 #ignore dumps for dev
 tools/dumps/*
@@ -49,4 +45,8 @@ config/data-db/*.*
 tools/mapped_columns.csv
 classes/WebServer/static/annotation-editor.html
 scripts/*.*
-
+.stylelintignore.txt
+stylelint.config.mjs
+lint-css.yml
+package.json
+stylelintrc.json

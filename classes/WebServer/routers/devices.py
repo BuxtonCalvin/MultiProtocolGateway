@@ -40,6 +40,7 @@ from ..database import get_session, refresh_app_state, session_scope
 from ..models import Setting
 from ..scanner import scan_transport_library
 from ..services.analysis_service import get_transport_connection_status
+from ..services.bridge_service import has_staged_deletions, staged_deletion_count
 from ..services.device_service import (
     delete_orphans_bulk,
     get_app_state,
@@ -48,8 +49,10 @@ from ..services.device_service import (
     get_nav_data,
     get_orphaned_settings,
 )
-from ..services.protocol_service import get_protocols_for_device
-from ..services.timescale_service import has_staged_deletions, staged_deletion_count
+from ..services.protocol_service import (
+    get_device_metric_summary,
+    get_protocols_for_device,
+)
 
 _log: logging.Logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/devices", tags=["devices"])
@@ -169,7 +172,7 @@ def app_state(request: Request, db: Session = Depends(get_session)) -> dict[str,
         "has_dirty_settings": state.has_dirty_settings,
         "has_dirty_protocols": state.has_dirty_protocols,
         # Timescale column deletions are staged in-memory on app.state
-        # (see services/timescale_service.py), not in the staging DB, since
+        # (see services/bridge_service.py), not in the staging DB, since
         # they're live Postgres schema rather than config.cfg settings.
         "has_dirty_timescale": has_staged_deletions(request.app.state),
         "has_orphans": state.has_orphans,
@@ -443,10 +446,24 @@ def refresh_protocol_tabs(
     if summary:
         summary.protocol_version = payload.new_protocol
 
+    has_no_selections: bool = not any(
+        t.get("mask_count", 0) or t.get("screen_count", 0) or t.get("write_count", 0)
+        for t in proto_tabs
+    ) if proto_tabs else False
+
+    gateway: Any = getattr(request.app.state, "gateway", None)
+    live_transport: Any = gateway.get_transport(f"transport.{device_name}") if gateway is not None else None
+    metric_summary: dict[str, Any] | None = (
+        get_device_metric_summary(db, payload.new_protocol, device_name, transport=live_transport)
+        if payload.new_protocol else None
+    )
+
     templates = request.app.state.templates
     html = templates.get_template("partials/protocol_section.html").render({
         "device": summary,
         "proto_tabs": proto_tabs,
+        "has_no_selections": has_no_selections,
+        "metric_summary": metric_summary,
         "request": request,
     })
     return HTMLResponse(content=html)

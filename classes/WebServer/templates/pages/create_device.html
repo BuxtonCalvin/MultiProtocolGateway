@@ -36,17 +36,17 @@
   </div>
 
   <div class="card space-y-4">
-    <div class="grid grid-cols-[12rem_minmax(0,1fr)_2.5rem_minmax(0,1fr)] gap-3 items-center">
+    <div class="wizard-field-row wizard-field-row--preview">
       <label for="device-name-input" class="label mb-0">Transport Name</label>
       <input id="device-name-input"
              type="text"
              placeholder="Inverter1"
              class="theme-input w-full border rounded px-3 py-2 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-accent">
       <button id="confirm-name-btn" type="button" class="btn-secondary px-0 text-sm h-9 w-9 create-add-btn">+</button>
-      <div id="device-section-preview" class="font-mono text-sm text-mpg-300"></div>
+      <div id="device-section-preview" class="wizard-preview-text"></div>
     </div>
 
-    <div id="scraper-row" class="grid grid-cols-[12rem_minmax(0,1fr)_2.5rem] gap-3 items-center">
+    <div id="scraper-row" class="wizard-field-row">
       <label for="scraper-select" class="label mb-0">Scraper Transport</label>
       <select id="scraper-select"
               class="theme-input w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
@@ -56,7 +56,7 @@
       <button id="confirm-scraper-btn" type="button" class="btn-secondary px-0 text-sm h-9 w-9 create-add-btn" disabled>+</button>
     </div>
 
-    <div id="bridge-row" class="grid grid-cols-[12rem_minmax(0,1fr)_2.5rem] gap-3 items-center">
+    <div id="bridge-row" class="wizard-field-row">
       <label class="label mb-0">Bridge</label>
       <div id="bridge-multiselect" class="relative">
         <button type="button"
@@ -80,7 +80,7 @@
       <button id="confirm-bridge-btn" type="button" class="btn-secondary px-0 text-sm h-9 w-9 create-add-btn" disabled>+</button>
     </div>
 
-    <div id="protocol-row" class="grid grid-cols-[12rem_minmax(0,1fr)_2.5rem] gap-3 items-center">
+    <div id="protocol-row" class="wizard-field-row">
       <label for="protocol-select" class="label mb-0">Protocol Version</label>
       <select id="protocol-select"
               class="theme-input w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
@@ -90,7 +90,7 @@
       <button id="confirm-protocol-btn" type="button" class="btn-secondary px-0 text-sm h-9 w-9 create-add-btn" disabled>+</button>
     </div>
 
-    <div id="log-row" class="grid grid-cols-[12rem_minmax(0,1fr)_2.5rem] gap-3 items-center">
+    <div id="log-row" class="wizard-field-row">
       <label for="log-level-select" class="label mb-0">Log Level</label>
       <select id="log-level-select"
               class="theme-input w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
@@ -111,7 +111,7 @@
       </div>
     </div>
 
-    <div class="grid grid-cols-[1.75rem_16rem_minmax(0,1fr)_12rem] gap-2 text-mpg-400 text-xs uppercase tracking-wide px-1 pb-2 border-b border-mpg-700">
+    <div class="wizard-col-header grid grid-cols-[1.75rem_16rem_minmax(0,1fr)_12rem] gap-2 px-1 pb-2">
       <span>A</span>
       <span>Key</span>
       <span>Value</span>
@@ -366,7 +366,7 @@ const protoGroups = JSON.parse('{{ proto_groups | tojson | safe }}');
 
   function createSettingRow(key, defaultValue, checked) {
     const row = document.createElement('div');
-    row.className = 'grid grid-cols-[1.75rem_16rem_minmax(0,1fr)_12rem] gap-2 items-center px-1 py-1 rounded text-xs hover:bg-mpg-700/40';
+    row.className = 'wizard-row-hover grid grid-cols-[1.75rem_16rem_minmax(0,1fr)_12rem] gap-2 items-center px-1 py-1 rounded text-xs';
     row.dataset.key = key;
 
     const active = document.createElement('input');
@@ -389,7 +389,7 @@ const protoGroups = JSON.parse('{{ proto_groups | tojson | safe }}');
     value.disabled = !checked;
 
     const defaultCell = document.createElement('div');
-    defaultCell.className = 'font-mono text-mpg-400 text-xs truncate';
+    defaultCell.className = 'font-mono surface-subtle text-xs truncate';
     defaultCell.title = defaultValue || '-';
     defaultCell.textContent = defaultValue || '-';
 
@@ -435,7 +435,7 @@ const protoGroups = JSON.parse('{{ proto_groups | tojson | safe }}');
     groups.forEach((group, index) => {
       if (index > 0) {
         const divider = document.createElement('div');
-        divider.className = 'border-t border-mpg-700 pt-3';
+        divider.className = 'wizard-table-row pt-3';
         settingsEditor.appendChild(divider);
       }
 
@@ -443,7 +443,7 @@ const protoGroups = JSON.parse('{{ proto_groups | tojson | safe }}');
       wrapper.className = 'space-y-1.5';
 
       const heading = document.createElement('div');
-      heading.className = 'text-mpg-300 text-xs uppercase tracking-wide';
+      heading.className = 'surface-subtle text-xs uppercase tracking-wide font-semibold';
       heading.textContent = group.label;
       wrapper.appendChild(heading);
 
@@ -589,23 +589,4 @@ const protoGroups = JSON.parse('{{ proto_groups | tojson | safe }}');
   enableStepsThrough(0);
 })();
 </script>
-<style>
-.create-add-btn {
-  color: rgb(46 61 82);
-  border-color: rgb(140 174 200);
-  background-color: rgb(158, 166, 175);
-  font-weight: 700;
-}
-
-.create-add-btn:hover:not(:disabled) {
-  background-color: rgb(185 208 228);
-  border-color: rgb(100 140 180);
-}
-
-.create-add-btn:disabled {
-  color: rgb(91 122 153);
-  background-color: rgb(226 235 244);
-  border-color: rgb(185 208 228);
-}
-</style>
 {% endblock %}

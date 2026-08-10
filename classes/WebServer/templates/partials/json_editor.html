@@ -78,30 +78,26 @@
             data-key="{{ key }}">
           <td class="px-2 py-1.5 border-r border-mpg-700/40">
             <input type="text"
-                   class="json-key w-full bg-mpg-900 border border-mpg-600 rounded px-2 py-1
-                          text-mpg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent"
+                   class="json-key w-full chrome-input rounded px-2 py-1 font-mono text-xs focus:ring-1"
                    value="{{ key }}"
                    aria-label="Key name">
           </td>
           <td class="px-2 py-1.5 border-r border-mpg-700/40">
             {% if vtype in ('object', 'array') %}
-            <textarea class="json-value w-full bg-mpg-900 border border-mpg-600 rounded px-2 py-1
-                             text-mpg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent
+            <textarea class="json-value w-full chrome-input rounded px-2 py-1 font-mono text-xs focus:ring-1
                              min-h-[4rem] resize-y"
                       aria-label="Value for {{ key }}"
                       data-type="{{ vtype }}">{{ value | tojson(indent=2) }}</textarea>
             {% else %}
             <input type="text"
-                   class="json-value w-full bg-mpg-900 border border-mpg-600 rounded px-2 py-1
-                          text-mpg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent"
+                   class="json-value w-full chrome-input rounded px-2 py-1 font-mono text-xs focus:ring-1"
                    value="{{ value if vtype == 'string' else value | tojson }}"
                    aria-label="Value for {{ key }}"
                    data-type="{{ vtype }}">
             {% endif %}
           </td>
           <td class="px-2 py-1.5 border-r border-mpg-700/40">
-            <select class="json-type w-full bg-mpg-900 border border-mpg-600 rounded px-1 py-1
-                           text-mpg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent"
+            <select class="json-type w-full chrome-input rounded px-1 py-1 font-mono text-xs focus:ring-1"
                     aria-label="Type for {{ key }}"
                     onchange="jsonEditorTypeChange(this)">
               <option value="string"  {% if vtype == 'string'  %}selected{% endif %}>string</option>
@@ -139,8 +135,7 @@
     </button>
     <div id="json-raw-panel" class="hidden mt-2">
       <textarea id="json-raw-textarea"
-                class="w-full bg-mpg-900 border border-mpg-600 rounded px-3 py-2
-                       text-mpg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent
+                class="w-full chrome-input rounded px-3 py-2 font-mono text-xs focus:ring-1
                        min-h-[12rem] resize-y"
                 spellcheck="false"
                 aria-label="Raw JSON editor">{{ json_data | tojson(indent=2) }}</textarea>
@@ -204,19 +199,16 @@
     tr.innerHTML = `
       <td class="px-2 py-1.5 border-r border-mpg-700/40">
         <input type="text"
-               class="json-key w-full bg-mpg-900 border border-mpg-600 rounded px-2 py-1
-                      text-mpg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent"
+               class="json-key w-full chrome-input rounded px-2 py-1 font-mono text-xs focus:ring-1"
                placeholder="key_name" aria-label="Key name">
       </td>
       <td class="px-2 py-1.5 border-r border-mpg-700/40">
         <input type="text"
-               class="json-value w-full bg-mpg-900 border border-mpg-600 rounded px-2 py-1
-                      text-mpg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent"
+               class="json-value w-full chrome-input rounded px-2 py-1 font-mono text-xs focus:ring-1"
                placeholder="value" aria-label="Value" data-type="string">
       </td>
       <td class="px-2 py-1.5 border-r border-mpg-700/40">
-        <select class="json-type w-full bg-mpg-900 border border-mpg-600 rounded px-1 py-1
-                       text-mpg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent"
+        <select class="json-type w-full chrome-input rounded px-1 py-1 font-mono text-xs focus:ring-1"
                 aria-label="Type" onchange="jsonEditorTypeChange(this)">
           <option value="string" selected>string</option>
           <option value="number">number</option>
@@ -368,25 +360,21 @@
       tr.innerHTML = `
         <td class="px-2 py-1.5 border-r border-mpg-700/40">
           <input type="text"
-                 class="json-key w-full bg-mpg-900 border border-mpg-600 rounded px-2 py-1
-                        text-mpg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent"
+                 class="json-key w-full chrome-input rounded px-2 py-1 font-mono text-xs focus:ring-1"
                  value="${escHtml(k)}" aria-label="Key name">
         </td>
         <td class="px-2 py-1.5 border-r border-mpg-700/40">
           ${needsTextarea
-            ? `<textarea class="json-value w-full bg-mpg-900 border border-mpg-600 rounded px-2 py-1
-                                text-mpg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent
+            ? `<textarea class="json-value w-full chrome-input rounded px-2 py-1 font-mono text-xs focus:ring-1
                                 min-h-[4rem] resize-y"
                           data-type="${type}" aria-label="Value for ${escHtml(k)}">${dv}</textarea>`
             : `<input type="text"
-                      class="json-value w-full bg-mpg-900 border border-mpg-600 rounded px-2 py-1
-                             text-mpg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent"
+                      class="json-value w-full chrome-input rounded px-2 py-1 font-mono text-xs focus:ring-1"
                       value="${dv}" data-type="${type}" aria-label="Value for ${escHtml(k)}">`
           }
         </td>
         <td class="px-2 py-1.5 border-r border-mpg-700/40">
-          <select class="json-type w-full bg-mpg-900 border border-mpg-600 rounded px-1 py-1
-                         text-mpg-100 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent"
+          <select class="json-type w-full chrome-input rounded px-1 py-1 font-mono text-xs focus:ring-1"
                   aria-label="Type" onchange="jsonEditorTypeChange(this)">
             ${['string','number','boolean','object','array','null'].map(t =>
               `<option value="${t}"${t === type ? ' selected' : ''}>${t}</option>`

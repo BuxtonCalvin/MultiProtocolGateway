@@ -123,7 +123,9 @@ def _build_config_text(settings_rows: list[Setting]) -> str:
 def _write_mask_screen_files(db: Session, project_root: Path) -> dict[str, int]:
     """
     For each transport section, rewrite its variable_mask_*.txt and
-    variable_screen_*.txt files based on the ProtocolRegister toggles.
+    variable_screen_*.txt files based on that device's DeviceProtocolSelection
+    toggles (write/mask/screen selection is per-device, not part of the
+    shared ProtocolRegister protocol definition).
 
     Returns counts of files written.
     """

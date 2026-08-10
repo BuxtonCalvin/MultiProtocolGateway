@@ -117,8 +117,8 @@
       "id": "bridge-left-panel",
       "x_percent": 10.9,
       "y_percent": 14.6,
-      "label_x_percent": 7.7,
-      "label_y_percent": 72.8,
+      "label_x_percent": 7.543014128728417,
+      "label_y_percent": 72.63155531178049,
       "label": "Left panel lists every config key for this bridge transport. Checked rows are actively set; unchecked rows fall back to the transport default shown in the DEFAULT column.",
       "shape_type": "dot"
     },
@@ -126,8 +126,8 @@
       "id": "bridge-connection-header",
       "x_percent": 59.8,
       "y_percent": 15,
-      "label_x_percent": 70.7,
-      "label_y_percent": 16.8,
+      "label_x_percent": 70.46452119309264,
+      "label_y_percent": 7.1986527714877795,
       "width_percent": 80.9,
       "height_percent": 11.5,
       "label": "Connection summary shows transport type, endpoint (host:port), and live connection status (green = Connected).",
@@ -137,14 +137,55 @@
     },
     {
       "id": "bridge-config-summary",
-      "x_percent": 43.7519747235387,
-      "y_percent": 54.42667855331982,
-      "label_x_percent": 66.80252764612955,
-      "label_y_percent": 53.284749535208604,
-      "width_percent": 49.786729857819886,
-      "height_percent": 63.43992868008107,
-      "label": "Configuration summary lists all resolved key/value pairs that will be written to config.cfg on the next Commit.",
-      "shape_type": "rect"
+      "x_percent": 35.7,
+      "y_percent": 28.5,
+      "label_x_percent": 27.31805337519623,
+      "label_y_percent": 32.24441397256091,
+      "width_percent": 32.2,
+      "height_percent": 16.6,
+      "label": "Bridge Health shows the running status of the Bridge.",
+      "shape_type": "rect",
+      "stroke_color": "rgb(14,165,233)",
+      "fill_color": "rgba(14,165,233,0.18)"
+    },
+    {
+      "id": "device__bridge_generic-storage",
+      "x_percent": 74.8,
+      "y_percent": 33.3,
+      "label": "Describes table storage stats.",
+      "shape_type": "rect",
+      "label_x_percent": 74.8,
+      "label_y_percent": 33.3,
+      "width_percent": 43.6,
+      "height_percent": 23.4,
+      "stroke_color": "rgb(14,165,233)",
+      "fill_color": "rgba(14,165,233,0.18)"
+    },
+    {
+      "id": "device__bridge_generic-indexes",
+      "x_percent": 36.2,
+      "y_percent": 66.4,
+      "label": "Describes the MPG system indexes.",
+      "shape_type": "rect",
+      "label_x_percent": 34.9,
+      "label_y_percent": 84.9,
+      "width_percent": 32.8,
+      "height_percent": 56.9,
+      "stroke_color": "rgb(14,165,233)",
+      "fill_color": "rgba(14,165,233,0.18)"
+    },
+    {
+      "id": "device__bridge_generic-jobs",
+      "x_percent": 75.7,
+      "y_percent": 70.5,
+      "label": "Describes the currently running compression jobs.",
+      "shape_type": "rect",
+      "label_x_percent": 72.2,
+      "label_y_percent": 90.2,
+      "width_percent": 44.7,
+      "height_percent": 44.6,
+      "stroke_color": "rgb(14,165,233)",
+      "fill_color": "rgba(14,165,233,0.18)"
     }
   ],
   "create_device": [
@@ -291,17 +332,6 @@
       "height_percent": 75,
       "label": "JSON Config Editor — add, edit, or delete key/value pairs (string, number, boolean, or object). Save JSON writes the override file to the config folder; MPG loads it on next start.",
       "shape_type": "rect"
-    }
-  ],
-  "read_mode": [
-    {
-      "id": "read-mode-setting",
-      "x_percent": 51,
-      "y_percent": 47.4,
-      "label_x_percent": 1.1,
-      "label_y_percent": 35,
-      "label": "read_mode controls how MPG cycles through multiple transports: Sequential: one full pass per transport in order.  Concurrent: where all transports run in parallel threads. This mode is best for devices that do not share a common bus.  Interleaved: one block per transport in round-robin — best for shared RS485 buses.",
-      "shape_type": "dot"
     }
   ],
   "logging-settings": [
@@ -477,7 +507,7 @@
       "shape_type": "rect"
     }
   ],
-  "pages__help": [
+  "help": [
     {
       "id": "help-screens-list",
       "x_percent": 18.6,
@@ -488,6 +518,15 @@
       "shape_type": "dot"
     },
     {
+      "id": "help-viewer",
+      "x_percent": 56.4,
+      "y_percent": 55.3,
+      "label_x_percent": 45,
+      "label_y_percent": 38,
+      "label": "Right panel renders the selected screenshot (with annotation overlays) or the selected documentation file.",
+      "shape_type": "dot"
+    },
+    {
       "id": "help-docs-list",
       "x_percent": 18.39118903369139,
       "y_percent": 72,
@@ -495,18 +534,9 @@
       "label_y_percent": 67.02421917244416,
       "label": "DOCUMENTATION section lists all files from the documentation/ folder, grouped by subfolder. Click to view markdown files rendered in-page or download other file types.",
       "shape_type": "dot"
-    },
-    {
-      "id": "help-viewer",
-      "x_percent": 56.43821846430022,
-      "y_percent": 55.26816437933313,
-      "label_x_percent": 45,
-      "label_y_percent": 38,
-      "label": "Right panel renders the selected screenshot (with annotation overlays) or the selected documentation file.",
-      "shape_type": "dot"
     }
   ],
-  "pages__about": [
+  "about": [
     {
       "id": "about-description",
       "x_percent": 37.5,
@@ -526,17 +556,19 @@
       "shape_type": "dot"
     }
   ],
-  "pages__faq": [
+  "faq": [
     {
       "id": "faq-list",
       "x_percent": 50,
       "y_percent": 50,
       "label_x_percent": 30,
-      "label_y_percent": 65,
+      "label_y_percent": 62.6,
       "width_percent": 72,
       "height_percent": 92,
       "label": "Expandable FAQ entries cover core concepts (scrapers, bridges, dirty state, orphaned settings), common workflows (adding a device, editing protocol CSVs), and operational details (port number, restart requirement, backup location).",
-      "shape_type": "rect"
+      "shape_type": "rect",
+      "stroke_color": "rgb(14,165,233)",
+      "fill_color": "rgba(14,165,233,0.18)"
     }
   ],
   "view_log": [
@@ -621,9 +653,9 @@
       "label_y_percent": 40
     }
   ],
-  "timescaleDelete": [
+  "timescale_delete": [
     {
-      "id": "timescaleDelete-wide_tables",
+      "id": "timescale_delete-wide_tables",
       "x_percent": 11.1,
       "y_percent": 28.9,
       "label": "Choose the wide table from which you want to delete columns.",
@@ -632,7 +664,7 @@
       "label_y_percent": 43.9
     },
     {
-      "id": "timescaleDelete-columns",
+      "id": "timescale_delete-columns",
       "x_percent": 27.9,
       "y_percent": 55.5,
       "label": "List of all columns in the Timescale DB wide table database.",
@@ -645,13 +677,99 @@
       "fill_color": "rgba(14,165,233,0.18)"
     },
     {
-      "id": "timescaleDelete-commit",
+      "id": "timescale_delete-commit",
       "x_percent": 92.5,
       "y_percent": 9.7,
       "label": "After you check the columns in the wide table, press commit to save your changes.",
       "shape_type": "dot",
       "label_x_percent": 82.4,
       "label_y_percent": 17.9
+    }
+  ],
+  "general_settings": [
+    {
+      "id": "general_settings-read_mode",
+      "x_percent": 45.65395683453237,
+      "y_percent": 34.44693666011494,
+      "label": "Choose the type of scraper read mode",
+      "shape_type": "dot",
+      "label_x_percent": 5.1,
+      "label_y_percent": 35.4
+    },
+    {
+      "id": "general_settings-dynamic",
+      "x_percent": 45.143884892086334,
+      "y_percent": 68.7625822134866,
+      "label": "Choose to enable or disable dynamic configuration reloads.",
+      "shape_type": "dot",
+      "label_x_percent": 5.6,
+      "label_y_percent": 69.5
+    }
+  ],
+  "timescale_rebuild_rollups": [
+    {
+      "id": "timescale_rebuild_rollups-checkbox",
+      "x_percent": 2.1,
+      "y_percent": 15.8,
+      "label": "Check off which rollups you want to rebuild.",
+      "shape_type": "dot",
+      "label_x_percent": 26.4,
+      "label_y_percent": 15.1
+    },
+    {
+      "id": "timescale_rebuild_rollups_status",
+      "x_percent": 13.1,
+      "y_percent": 58.8,
+      "label": "Rollup definitions and status",
+      "shape_type": "rect",
+      "label_x_percent": 31.2,
+      "label_y_percent": 54.9,
+      "width_percent": 24,
+      "height_percent": 20.1,
+      "stroke_color": "rgb(14,165,233)",
+      "fill_color": "rgba(14,165,233,0.18)"
+    },
+    {
+      "id": "timescale_rebuild_rollups_rebuild",
+      "x_percent": 95.3,
+      "y_percent": 11.3,
+      "label": "Rebuild the checked rollups.",
+      "shape_type": "dot",
+      "label_x_percent": 74.7,
+      "label_y_percent": 6.6
+    }
+  ],
+  "compression": [
+    {
+      "id": "compression-statistics",
+      "x_percent": 17.121507064364206,
+      "y_percent": 40.22470787118007,
+      "label": "The Hyper-table and its views showing the compression specs.",
+      "shape_type": "rect",
+      "label_x_percent": 38.46232339089482,
+      "label_y_percent": 30.2,
+      "width_percent": 36.38273155416014,
+      "height_percent": 22.129230498212017,
+      "stroke_color": "rgb(14,165,233)",
+      "fill_color": "rgba(14,165,233,0.18)"
+    },
+    {
+      "id": "compression-check-box",
+      "x_percent": 2.0215070643642075,
+      "y_percent": 57.478646240572154,
+      "label": "Check Off which tables and its views that you would like to re-compress.",
+      "shape_type": "dot",
+      "label_x_percent": 40.354788069073784,
+      "label_y_percent": 55.7
+    },
+    {
+      "id": "compression-rebuild-button",
+      "x_percent": 88.6,
+      "y_percent": 7.4,
+      "label": "Click the Rebuild Compression button to start the re-compression process.  Usually takes about a minute to complete.",
+      "shape_type": "dot",
+      "label_x_percent": 82.9,
+      "label_y_percent": 12
     }
   ],
   "_aliases": {
@@ -664,7 +782,6 @@
     "device__influxdb_out": "device__bridge_generic",
     "device__json_out": "device__bridge_generic",
     "protocol-editor__*": "protocols",
-    "pages__global-settings": "read_mode",
     "pages__logging-settings": "logging-settings",
     "pages__messaging-settings": "messages",
     "pages__view-log": "view_log",
@@ -676,6 +793,13 @@
     "device__influxdb3": "device__bridge_generic",
     "pages__create-protocol": "create_protocol",
     "device__device_help": "device__device_help",
-    "pages__timescale-delete-columns": "timescaleDelete"
+    "pages__timescale-delete-columns": "timescale_delete",
+    "pages__general_settings": "general_settings",
+    "pages__about": "about",
+    "pages__help": "help",
+    "pages__faq": "faq",
+    "pages__timescale-rebuild-rollups": "timescale_rebuild_rollups",
+    "pages__timescale_compression_group_list": "compression",
+    "pages__timescale-rebuild-compression": "compression"
   }
 }

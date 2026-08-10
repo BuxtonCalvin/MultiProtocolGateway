@@ -468,10 +468,10 @@ Both gates must be satisfied. A register that is read-only per the protocol cann
 ``` ini
 config_writer.commit_all():
 ├── Writes config.cfg
-├── Writes config/{protocol}.holding_registry_map.override.csv
+├── Writes config/{device_name}.writable.csv
 │     documented name,write
 │     charge_voltage_limit,W
-└── Writes variable_mask / variable_screen files
+└── Writes variable_mask_{transport_name}.txt / variable_screen_{transport_name}.txt files
 ```
 
 A gateway restart is required after commit for write-back to take effect.

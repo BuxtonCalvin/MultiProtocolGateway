@@ -36,7 +36,7 @@
   </div>
 
   <div class="card space-y-4">
-    <div class="grid grid-cols-[12rem_minmax(0,1fr)_2.5rem_minmax(0,1fr)] gap-3 items-center">
+    <div class="wizard-field-row wizard-field-row--preview">
       <label for="manufacturer-select" class="label mb-0">Manufacturer</label>
       <select id="manufacturer-select"
               class="theme-input w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent">
@@ -50,7 +50,7 @@
              class="theme-input hidden w-full border rounded px-3 py-2 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-accent">
     </div>
 
-    <div id="protocol-row" class="grid grid-cols-[12rem_minmax(0,1fr)_2.5rem_minmax(0,1fr)] gap-3 items-center">
+    <div id="protocol-row" class="wizard-field-row wizard-field-row--preview">
       <label for="protocol-select" class="label mb-0">Protocol</label>
       <select id="protocol-select"
               class="theme-input w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
@@ -65,7 +65,7 @@
              class="theme-input hidden w-full border rounded px-3 py-2 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-accent">
     </div>
 
-    <div id="type-row" class="grid grid-cols-[12rem_minmax(0,1fr)_2.5rem_minmax(0,1fr)] gap-3 items-center">
+    <div id="type-row" class="wizard-field-row wizard-field-row--preview">
       <label for="protocol-type-select" class="label mb-0">Protocol Type</label>
       <select id="protocol-type-select"
               class="theme-input w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
@@ -73,7 +73,7 @@
         <option value="">Select type</option>
       </select>
       <button id="confirm-type-btn" type="button" class="btn-secondary px-0 text-sm h-9 w-9 create-add-btn" disabled>+</button>
-      <div id="file-preview" class="font-mono text-sm text-mpg-300"></div>
+      <div id="file-preview" class="wizard-preview-text"></div>
     </div>
   </div>
 
@@ -86,10 +86,10 @@
       <button id="add-row-btn" type="button" class="btn-secondary text-xs">Add Row</button>
     </div>
 
-    <div class="overflow-x-auto rounded border border-mpg-700">
+    <div class="overflow-x-auto rounded">
       <table class="w-full min-w-[100rem] text-xs border-collapse">
-        <thead class="bg-mpg-800">
-          <tr id="csv-header-row" class="text-mpg-100 uppercase tracking-wide"></tr>
+        <thead>
+          <tr id="csv-header-row" class="wizard-col-header"></tr>
         </thead>
         <tbody id="csv-body"></tbody>
       </table>
@@ -190,7 +190,7 @@
     csvHeaderRow.innerHTML = '';
     headers.forEach(header => {
       const th = document.createElement('th');
-      th.className = 'px-2 py-2 text-left border-r border-mpg-700 last:border-r-0';
+      th.className = 'px-2 py-2 text-left border-r border-mpg-200 dark:border-mpg-700 last:border-r-0';
       th.textContent = header;
       csvHeaderRow.appendChild(th);
     });
@@ -202,10 +202,10 @@
 
   function addRow(values = {}) {
     const tr = document.createElement('tr');
-    tr.className = 'border-t border-mpg-700/50 hover:bg-mpg-800/60';
+    tr.className = 'wizard-table-row wizard-row-hover';
     headers.forEach(header => {
       const td = document.createElement('td');
-      td.className = 'px-2 py-1.5 border-r border-mpg-700/30';
+      td.className = 'px-2 py-1.5 border-r border-mpg-200/60 dark:border-mpg-700/30';
       const input = document.createElement('input');
       input.type = 'text';
       input.dataset.field = header;
@@ -378,23 +378,4 @@
   resetForm();
 })();
 </script>
-<style>
-.create-add-btn {
-  color: rgb(46 61 82);
-  border-color: rgb(140 174 200);
-  background-color: rgb(158, 166, 175);
-  font-weight: 700;
-}
-
-.create-add-btn:hover:not(:disabled) {
-  background-color: rgb(185 208 228);
-  border-color: rgb(100 140 180);
-}
-
-.create-add-btn:disabled {
-  color: rgb(91 122 153);
-  background-color: rgb(226 235 244);
-  border-color: rgb(185 208 228);
-}
-</style>
 {% endblock %}

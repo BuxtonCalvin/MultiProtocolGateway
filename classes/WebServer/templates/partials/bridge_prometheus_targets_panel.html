@@ -1,0 +1,99 @@
+<!--
+  Description: partials/bridge_prometheus_targets_panel.html HTMX partial — Target Health card for the Prometheus device page.
+  File: bridge_prometheus_targets_panel.html
+
+  Copyright 2026 Kevin Burke
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://apache.org
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+
+
+  partials/bridge_prometheus_targets_panel.html
+  Swapped into #bridge-targets-container on the Prometheus device page.
+  Context: targets — [{machine_id, device_name, protocol_name, connected,
+  interval, scrape_failures_total, last_scrape_timestamp,
+  seconds_since_last_scrape, last_scrape_display, last_metric_count,
+  last_skipped_count, total_writes}, ...] from services/bridge_service.
+  get_prometheus_targets().
+
+  One row per machine this bridge has ever been wired to (via init_bridge)
+  or received data from (via write_data) — a machine that has never
+  completed a single successful scrape still shows up here, with
+  `connected: false` and "never" in the Last Data column, since a target
+  that can't get a single reading through is exactly what this table
+  exists to surface. `interval` may be 0 for a machine whose scraper
+  hasn't loaded a read_interval yet — that row is safe to render (no
+  staleness math is attempted for it), matching the "gracefully degrade
+  when partially initialized" contract the rest of these panels follow.
+
+  Purely observational — nothing here is clickable.
+-->
+<div class="card">
+  <h3 class="label mb-2">Target Health</h3>
+
+  {% if not targets %}
+  <p class="surface-muted text-xs">No machines have been wired to this bridge yet.</p>
+  {% else %}
+  <div class="overflow-x-auto">
+    <table class="w-auto text-xs border-collapse" role="table" aria-label="Prometheus scrape target health">
+      <thead>
+        <tr class="mini-table-header text-xs uppercase tracking-wide" role="row">
+          <th class="px-2 py-1.5 text-left font-semibold whitespace-nowrap" scope="col">Machine</th>
+          <th class="px-2 py-1.5 text-left font-semibold whitespace-nowrap" scope="col">Status</th>
+          <th class="px-2 py-1.5 text-right font-semibold whitespace-nowrap" scope="col">Interval</th>
+          <th class="px-2 py-1.5 text-right font-semibold whitespace-nowrap" scope="col">Failures</th>
+          <th class="px-2 py-1.5 text-left font-semibold whitespace-nowrap" scope="col">Last Data</th>
+          <th class="px-2 py-1.5 text-right font-semibold whitespace-nowrap" scope="col">Metrics</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in targets %}
+        <tr class="mini-table-row
+                   {% if t.scrape_failures_total %}bg-danger/5{% endif %}
+                   transition-colors" role="row">
+          <td class="px-2 py-1.5 font-mono mini-table-value whitespace-nowrap mini-table-col-divider" role="cell">
+            {{ t.device_name }}
+            <span class="mini-table-subtext text-[10px] block">{{ t.machine_id }}{% if t.protocol_name %} · {{ t.protocol_name }}{% endif %}</span>
+          </td>
+          <td class="px-2 py-1.5 whitespace-nowrap mini-table-col-divider" role="cell">
+            {% if t.connected %}
+            <span class="text-green-600 dark:text-green-400 font-medium">Connected</span>
+            {% elif t.last_scrape_timestamp %}
+            <span class="text-dirty font-medium">Stale</span>
+            {% else %}
+            <span class="surface-muted">Never reported</span>
+            {% endif %}
+          </td>
+          <td class="px-2 py-1.5 text-right font-mono mini-table-value whitespace-nowrap mini-table-col-divider" role="cell">
+            {% if t.interval %}{{ "{:,.0f}".format(t.interval) }}s{% else %}<span class="surface-muted">—</span>{% endif %}
+          </td>
+          <td class="px-2 py-1.5 text-right font-mono whitespace-nowrap mini-table-col-divider
+                     {% if t.scrape_failures_total %}text-danger{% else %}mini-table-value{% endif %}" role="cell">
+            {{ t.scrape_failures_total or 0 }}
+          </td>
+          <td class="px-2 py-1.5 font-mono mini-table-value whitespace-nowrap mini-table-col-divider text-[11px]" role="cell">
+            {{ t.last_scrape_display }}
+          </td>
+          <td class="px-2 py-1.5 text-right font-mono mini-table-value whitespace-nowrap" role="cell">
+            {% if t.last_metric_count or t.last_skipped_count %}
+            {{ t.last_metric_count }}{% if t.last_skipped_count %}<span class="surface-muted">/{{ t.last_skipped_count }} skipped</span>{% endif %}
+            {% else %}
+            <span class="surface-muted">—</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>

@@ -106,6 +106,12 @@ class influxdb_out(transport_base):
     # Periodic reconnection settings
     periodic_reconnect_interval: float = 14400.0  # 4 hours in seconds
 
+    # Optional local filesystem path to InfluxDB's own data directory (e.g.
+    # "/var/lib/influxdb/data"), used only to report on-disk size in the
+    # Storage Overview panel. Empty by default — MPG and InfluxDB are very
+    # often on different hosts, so this is opt-in, not assumed.
+    data_dir: str = ""
+
     # Runtime state — typed explicitly so mypy / pyright can track them
     client: Optional[InfluxDBClient] = None
     last_batch_time: float = 0.0
@@ -166,6 +172,11 @@ class influxdb_out(transport_base):
 
         # Periodic reconnection settings
         self.periodic_reconnect_interval = settings.getfloat("periodic_reconnect_interval", fallback=self.periodic_reconnect_interval)
+
+        # Optional local filesystem path to InfluxDB's own data directory,
+        # for the Storage Overview panel's on-disk size figure. Left blank
+        # unless explicitly configured — see class-level comment above.
+        self.data_dir = settings.get("data_dir", fallback=self.data_dir)
 
 
         # Instance-level mutable state
@@ -436,6 +447,197 @@ class influxdb_out(transport_base):
         """Manually trigger a periodic reconnection check."""
         self.last_periodic_reconnect_attempt = 0.0
         return self._check_connection()
+
+    def get_health_snapshot(self) -> dict[str, Any]:
+        """
+        Read-only snapshot of this bridge's live connection/backlog/
+        staleness state, for the device page's "Bridge Health" panel.
+        Pulls together state that's otherwise scattered across connection
+        management, persistent storage, and stale-data detection — nothing
+        here is a fresh query, just this instance's own attributes.
+
+        `connected` is included for completeness but isn't necessarily
+        rendered by the panel — the device page already shows connection
+        status in its own status badge, so the template may choose to
+        skip repeating it here.
+        """
+        stale_count: int = sum(1 for s in self._stale_registry.values() if s.get("is_stale"))
+
+        return {
+            "connected": self.connected,
+            "batch_pending": len(self.batch_points),
+            "batch_size": self.batch_size,
+            "backlog_count": len(self.backlog_points),
+            "max_backlog_size": self.max_backlog_size,
+            "max_backlog_age": self.max_backlog_age,
+            "persistent_storage_enabled": self.enable_persistent_storage,
+            "periodic_reconnect_interval": self.periodic_reconnect_interval,
+            "last_periodic_reconnect_attempt": self.last_periodic_reconnect_attempt,
+            "stale_transport_count": stale_count,
+            "tracked_transport_count": len(self._stale_registry),
+        }
+
+    def get_storage_overview(self) -> dict[str, Any]:
+        """
+        Best-effort, read-only storage snapshot for the device page's
+        Storage Overview panel: configured retention policies, discovered
+        measurements, and an approximate row count for one sample
+        measurement (the first one discovered).
+
+        Only samples one measurement rather than every one — InfluxDB v1
+        has no single database-wide row-count function, so counting every
+        measurement would mean one COUNT(*) query per measurement, which
+        doesn't belong in a page-load info panel.
+
+        COUNT(*) on InfluxDB v1 returns one count per field column (e.g.
+        count_vbat, count_soc, ...), not a single row count, since not
+        every point necessarily has every field. The highest of those
+        per-field counts is used as the representative row estimate.
+
+        data_dir sizing is entirely optional (see the data_dir setting)
+        and only attempted if configured AND the path exists on this
+        machine's local filesystem — MPG and InfluxDB are very often on
+        separate hosts, in which case this is silently skipped rather than
+        erroring. Note this does a full recursive stat() walk of the
+        directory, which can be slow on a large data set; it only runs
+        when this panel is loaded, not on a timer.
+
+        has_table_stats/table_stats/columns/heap_profile are always
+        False/empty/None here — InfluxDB v1 has no system.chunks or
+        information_schema.columns equivalent, and no Rust pprof debug
+        endpoint. They're present in this dict anyway (rather than
+        omitted) purely so the shared bridge_influxdb_storage_panel.html template
+        can treat v1 and v3 result shapes identically without `is defined`
+        guards — see influxdb3_out.get_storage_overview for the v3 side.
+
+        Nothing here raises — a failed query is recorded in `error` and
+        the rest of the snapshot still returns.
+        """
+        result: dict[str, Any] = {
+            "connected": self.connected,
+            "database": self.database,
+            "items_label": "Measurements",
+            "has_table_stats": False,
+            "table_stats": [],
+            "columns": [],
+            "item_names": [],
+            "sample_item": None,
+            "sample_item_approx_rows": None,
+            "retention_policies": [],
+            "data_dir": self.data_dir or None,
+            "data_dir_size_bytes": None,
+            "data_dir_size_display": None,
+            "heap_profile": None,
+            "v1_diagnostics": {},
+            "error": None,
+        }
+
+        if not self.connected or self.client is None:
+            result["error"] = "Not connected to InfluxDB."
+            return result
+
+        errors: list[str] = []
+
+        # 1. Fetch and Format Retention Policies
+        try:
+            rp_result = self.client.query(f'SHOW RETENTION POLICIES ON "{self.database}"')  # type: ignore
+            result["retention_policies"] = [
+                {
+                    "name": p.get("name"), # type: ignore
+                    "duration": p.get("duration"), # type: ignore
+                    "shardGroupDuration": p.get("shardGroupDuration"), # type: ignore
+                    "default": p.get("default", False) # type: ignore
+                }
+                for p in rp_result.get_points()  # type: ignore
+            ]
+        except Exception as e:
+            self._log.error(f"get_storage_overview: SHOW RETENTION POLICIES failed: {e}")
+            errors.append(f"Retention policy query failed: {e}")
+
+        # 2. Extract Specific Stats Safely (Bypassing the global parsing issue)
+        v1_diag: dict[str, Any] = {}
+
+        # Safely query Runtime stats separately via SHOW STATS
+        try:
+            runtime_res = self.client.query("SHOW STATS FOR 'runtime'")  # type: ignore
+            if runtime_res and hasattr(runtime_res, 'raw') and "series" in runtime_res.raw: # type: ignore
+                for series in runtime_res.raw.get("series", []): # type: ignore
+                    if "columns" in series and "values" in series and series["values"]:
+                        v1_diag["runtime"] = dict(zip(series["columns"], series["values"][0])) # type: ignore
+        except Exception as e:
+            self._log.warning(f"get_storage_overview: Isolated runtime diagnostics skipped: {e}")
+
+        # Query Engine Database metric tags safely
+        try:
+            stats_res = self.client.query("SHOW STATS FOR 'database'")  # type: ignore
+            if stats_res and hasattr(stats_res, 'raw') and "series" in stats_res.raw: # type: ignore
+                for series in stats_res.raw.get("series", []): # type: ignore
+                    if series.get("tags", {}).get("database") == self.database: # type: ignore
+                        if "columns" in series and "values" in series and series["values"]:
+                            v1_diag["database"] = dict(zip(series["columns"], series["values"][0])) # type: ignore
+        except Exception as e:
+            self._log.warning(f"get_storage_overview: Isolated database stats skipped: {e}")
+
+        # Query WAL Engine properties safely
+        try:
+            engine_res = self.client.query("SHOW STATS FOR 'engine'")  # type: ignore
+            if engine_res and hasattr(engine_res, 'raw') and "series" in engine_res.raw: # type: ignore
+                for series in engine_res.raw.get("series", []): # type: ignore
+                    if series.get("tags", {}).get("database") == self.database: # type: ignore
+                        if "columns" in series and "values" in series and series["values"]:
+                            v1_diag["engine"] = dict(zip(series["columns"], series["values"][0])) # type: ignore
+        except Exception as e:
+            self._log.warning(f"get_storage_overview: Isolated engine stats skipped: {e}")
+
+        result["v1_diagnostics"] = v1_diag
+
+        # 3. Fetch Measurements & Fast Row Approximation
+        try:
+            meas_result = self.client.query(f'SHOW MEASUREMENTS ON "{self.database}"')  # type: ignore
+            measurements: list[str] = [p["name"] for p in meas_result.get_points() if "name" in p]  # type: ignore
+            result["item_names"] = measurements
+
+            if measurements:
+                first: str = measurements[0]
+                result["sample_item"] = first
+
+                try:
+                    count_result = self.client.query( # type: ignore
+                        f'SELECT COUNT(*) FROM "{first}" ORDER BY time DESC LIMIT 1',  # noqa: S608
+                        database=self.database
+                    )  # type: ignore
+                    points = list(count_result.get_points())  # type: ignore
+                    if points:
+                        field_counts: list[int | float] = [v for k, v in points[0].items() if k != "time" and isinstance(v, (int, float))] # type: ignore
+                        result["sample_item_approx_rows"] = int(max(field_counts)) if field_counts else 0
+                except Exception as e:
+                    self._log.error(f"get_storage_overview: COUNT(*) failed: {e}")
+                    errors.append(f"Row count query failed for '{first}': {e}")
+        except Exception as e:
+            self._log.error(f"get_storage_overview: SHOW MEASUREMENTS failed: {e}")
+            errors.append(f"Measurement discovery failed: {e}")
+
+        # 4. Local File System Sizing
+        if self.data_dir:
+            try:
+                data_path = Path(self.data_dir)
+                if data_path.is_dir():
+                    total_bytes = sum(f.stat().st_size for f in data_path.rglob("*") if f.is_file() and not f.is_symlink())
+                    result["data_dir_size_bytes"] = total_bytes
+
+                    if total_bytes < 1024**2:
+                        result["data_dir_size_display"] = f"{total_bytes / 1024:.1f} KB"
+                    elif total_bytes < 1024**3:
+                        result["data_dir_size_display"] = f"{total_bytes / 1024**2:.1f} MB"
+                    else:
+                        result["data_dir_size_display"] = f"{total_bytes / 1024**3:.1f} GB"
+            except Exception as e:
+                self._log.warning(f"get_storage_overview: directory walk failed: {e}")
+
+        if errors:
+            result["error"] = " | ".join(errors)
+
+        return result
 
     # ------------------------------------------------------------------
     # Data writing
@@ -796,12 +998,41 @@ class influxdb_out(transport_base):
         """Initialize bridge — not needed for InfluxDB output."""
         pass
 
-    def __del__(self) -> None:
-        """Cleanup on destruction — flush any remaining points."""
-        if self.batch_points:
-            self._flush_batch()
-        if self.client:
+    def close(self) -> None:
+        """
+        Gracefully terminate the connection.
+        Flushes pending metric batches and closes persistent network sockets.
+        """
+        self._log.info("Closing InfluxDB v3 transport bridge...")
+
+        if getattr(self, "batch_points", None):
             try:
-                self.client.close()
+                self._flush_batch()
             except Exception as e:
-                self._log.warning(f"Cleanup exception {e}")
+                self._log.error(f"Failed to flush batch during explicit close: {e}")
+
+        client: InfluxDBClient | None = getattr(self, "client", None)
+        if client is not None:
+            try:
+                if hasattr(client, "close"):
+                    client.close()
+                    self._log.debug("InfluxDB client connection closed.")
+            except Exception as e:
+                self._log.warning(f"Error during client connection close: {e}")
+            finally:
+                self.client = None
+
+        self.connected = False
+        self._log.info("InfluxDB v3 transport bridge closed cleanly.")
+
+
+    def __del__(self) -> None:
+        try:
+            if hasattr(self, "close") and callable(getattr(self, "close", None)):
+                self.close()
+        except Exception as e:
+            if hasattr(self, '_log'):
+                try:
+                    self._log.error(f"Exception in __del__: {e}")
+                except Exception:
+                    self._log.error(f"Exception in __del__: {e}")

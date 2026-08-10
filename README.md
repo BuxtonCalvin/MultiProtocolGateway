@@ -131,9 +131,9 @@ Analysis results stream back to the browser in real time via **Server-Sent Event
 
 ### Global & Logging Settings
 
-Separate pages manage gateway-wide settings: Read mode, logging configuration (log level per transport, log rotation), messages. Pages write through the same staging/commit pipeline as device settings.
+Separate pages manage gateway-wide settings: Read mode and dynamic configuration enable, logging configuration (log level per transport, log rotation), messages. These top level pages write through the same staging/commit pipeline as device settings.
 
-![Read Mode](classes/WebServer/static/screenshots/read_mode.png)
+![Read Mode/ Dynamic Configuration](classes/WebServer/static/screenshots/general_settings.png)
 
 ![Logging](classes/WebServer/static/screenshots/logging-settings.png)
 
@@ -433,8 +433,13 @@ Data produced by any of the MPG bridges can be visualized in Grafana.  This exam
 
 ![Grafana Dashboard](documentation/assets/GrafanaSolar.png)
 
-The code for this dashboard can be found here:
-[Grafana JSON](documentation/dashboards/GrafanaInfluxDBDashboard.json)
+The code for this InfluxDB dashboard can be found here:
+[Grafana InfluxDB JSON](documentation/dashboards/GrafanaInfluxDBDashboard.json)
+
+The code for the exact same style TimescaleDB dashboards can be found here:
+
+[Grafana TimescaleDB Wide Table JSON](documentation/dashboards/GrafanaTimescaleDBWideDashboard.json)
+[Grafana TimescaleDB Narrow Table JSON](documentation/dashboards/GrafanaTimescaleDBNarrowDashboard.json)
 
 ## Protocol Maps & Register Configuration
 

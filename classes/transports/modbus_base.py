@@ -225,7 +225,9 @@ class modbus_base(transport_base):
         '''default time in between requests'''
         self.slave_id: int = 1
 
-        self.first_connect : bool = True
+        # first_connect is set by transport_base.__init__ (super().__init__()
+        # above already ran) — generalized there since "first connect vs.
+        # reconnect" isn't modbus-specific. See transport_base.prepare_for_reload().
         self._needs_reconnection : bool = False
 
         self.device_metadata: eg4_metadata.EG4DeviceMetadata | eg4_metadata.EG4BatteryMetadata | None = None
@@ -1244,12 +1246,6 @@ class modbus_base(transport_base):
 
     def _read_concatenated_sn(self, r_type: Registry_Type) -> str:
         """Scheduling path: N/A — setup, runs once at connect regardless of read_mode.
-        The _read_concatenated_sn() assumes one character per register, decoded
-        via int.to_bytes(..., "big") + UTF-8 — no configurable byte order,
-        because it doesn't need one for that packing.
-
-        EG4 serial number decodes take a separate path because EG4 packs two ASCII
-        characters per register (high byte + low byte)
 
         Helper to build SN from multiple registers (Serial No 1-5)."""
         sn_decoded: str = ""
@@ -1301,7 +1297,7 @@ class modbus_base(transport_base):
             score_percent: float = self.validate_protocol(Registry_Type.HOLDING)
             if(score_percent > 90):
                 self.write_enabled = True
-                self._log.warning("enable write - validation passed")
+                self._log.info("enable write - validation passed")
             elif self.write_mode == TransportWriteMode.RELAXED:
                 self.write_enabled = True
                 self._log.warning("enable write - WARNING - RELAXED MODE")

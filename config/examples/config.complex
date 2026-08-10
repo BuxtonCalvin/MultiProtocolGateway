@@ -1,5 +1,6 @@
 [general]
 read_mode = interleaved
+enable_dynamic_configuration = true
 
 [logging]
 log_dir = logs
@@ -129,7 +130,7 @@ password = yourpassword
 force_float = true
 enable_persistent_storage = true
 backlog_storage_path = timescaledb_backlog
-backlog_file_name = no_connect_backlog
+backlog_file_name = no_connect_timescale_backlog
 max_backlog_size = 10000
 max_backlog_age = 86400
 reconnect_attempts = 5
@@ -138,6 +139,7 @@ use_exponential_backoff = true
 max_reconnect_delay = 300
 migrate_data = true
 enable_compression = true
+enable_dynamic_chunk_sizing = true
 enable_rollups = true
 auto_refresh_interval = 21600
 enable_auto_refresh = true

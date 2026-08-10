@@ -36,6 +36,7 @@ import requests
 
 # influx db methods are not recognized by type checker
 from influxdb_client_3 import InfluxDBClient3, Point
+from requests.adapters import HTTPAdapter
 from tzlocal import get_localzone_name
 
 from classes.protocol_settings import registry_map_entry
@@ -94,6 +95,19 @@ class influxdb3_out(transport_base):
 
     # Periodic reconnection settings
     periodic_reconnect_interval: float = 14400.0  # 4 hours in seconds
+
+    # Optional local filesystem path to InfluxDB v3's object store (e.g.
+    # "/var/lib/influxdb3/object_store"), used only to report on-disk size
+    # in the Storage Overview panel. Empty by default — MPG and InfluxDB
+    # are very often on different hosts, so this is opt-in, not assumed.
+    object_store_dir: str = ""
+
+    # Optional URL to the Rust/pprof heap-profile debug endpoint (e.g.
+    # "http://localhost:8089/debug/pprof/heap"). Empty by default — this
+    # debug endpoint typically isn't enabled or exposed on the same port
+    # as the main API, so it's never assumed, only probed if configured.
+    # See _probe_heap_profile for what "probed" means here.
+    debug_pprof_url: str = ""
 
     # Runtime state — typed explicitly so mypy / pyright can track them
     client: Optional[InfluxDBClient3] = None
@@ -156,6 +170,11 @@ class influxdb3_out(transport_base):
 
         # Periodic reconnection settings
         self.periodic_reconnect_interval = settings.getfloat("periodic_reconnect_interval", fallback=self.periodic_reconnect_interval)
+
+        # Optional local filesystem / debug-endpoint settings for the
+        # Storage Overview panel — see class-level comments above.
+        self.object_store_dir = settings.get("object_store_dir", fallback=self.object_store_dir)
+        self.debug_pprof_url = settings.get("debug_pprof_url", fallback=self.debug_pprof_url)
 
 
         # Instance-level mutable state
@@ -290,12 +309,43 @@ class influxdb3_out(transport_base):
     # ------------------------------------------------------------------
 
     def connect(self) -> bool:
-        """Initialize the InfluxDB v3 client connection."""
+        """Initialize the InfluxDB v3 client connection and diagnostic HTTP session."""
         self._log.info("influxdb3_out connect")
 
         try:
-            # Cast the client initialization if self._build_client_kwargs returns dict[str, Any]
-            self.client = InfluxDBClient3(**self._build_client_kwargs())
+            # 1. Clean up old diagnostic session if this is a reconnect attempt
+            old_session: Optional[requests.Session] = getattr(self, "session", None)
+            if old_session is not None:
+                try:
+                    old_session.close()
+                except Exception as e:
+                    # Log at debug level so it doesn't clutter normal logs, but isn't hidden
+                    self._log.debug(f"Failed to close old diagnostic session during reconnect: {e}")
+                self.session = None
+
+            client_kwargs: dict[str, Any] = self._build_client_kwargs()
+            self.client = InfluxDBClient3(**client_kwargs)
+
+            # 2. Extract configuration directly from build kwargs to build the companion session
+            token: str = client_kwargs.get("token", "")
+
+            # Initialize persistent session for background pprof diagnostic probes
+            session = requests.Session()
+
+            adapter = HTTPAdapter(
+                pool_connections=2,
+                pool_maxsize=4,
+                max_retries=1
+            )
+            session.mount("https://", adapter)
+            session.mount("http://", adapter)
+
+            # Automatically authenticate background HTTP calls with the Influx token
+            if token:
+                session.headers.update({"Authorization": f"Token {token}"})
+
+            # Save the initialized session to the instance container
+            self.session = session
 
             # Use cast() to resolve the missing type definition on the external .query() method
             raw_table: Any = self.client.query("SELECT database_name FROM system.databases") # type: ignore[reportUnknownMemberType]
@@ -321,6 +371,17 @@ class influxdb3_out(transport_base):
         except Exception as e:
             self._log.error(f"Failed to connect to InfluxDB: {e}")
             self.connected = False
+
+            # Clean up the session immediately if setup fails after session instantiation
+            if getattr(self, "session", None) is not None:
+                try:
+                    if self.session is not None:
+                        self.session.close()
+                except Exception as close_err:
+                    # Log the specific error encountered during the emergency close routine
+                    self._log.debug(f"Failed to close session during connection rollback: {close_err}")
+                self.session = None
+
             return False
         else:
             # This runs only if the try block succeeds perfectly
@@ -333,6 +394,7 @@ class influxdb3_out(transport_base):
                 self._flush_backlog()
 
         return True
+
 
     def _build_client_kwargs(self) -> dict[str, Any]:
         """
@@ -488,6 +550,194 @@ class influxdb3_out(transport_base):
         """Manually trigger a periodic reconnection check."""
         self.last_periodic_reconnect_attempt = 0.0
         return self._check_connection()
+
+    def get_health_snapshot(self) -> dict[str, Any]:
+        """
+        Read-only snapshot of this bridge's live connection/backlog/
+        staleness state, for the device page's "Bridge Health" panel.
+        Pulls together state that's otherwise scattered across connection
+        management, persistent storage, and stale-data detection — nothing
+        here is a fresh query, just this instance's own attributes.
+
+        `connected` is included for completeness but isn't necessarily
+        rendered by the panel — the device page already shows connection
+        status in its own status badge, so the template may choose to
+        skip repeating it here.
+        """
+        stale_count: int = sum(1 for s in self._stale_registry.values() if s.get("is_stale"))
+
+        return {
+            "connected": self.connected,
+            "batch_pending": len(self.batch_points),
+            "batch_size": self.batch_size,
+            "backlog_count": len(self.backlog_points),
+            "max_backlog_size": self.max_backlog_size,
+            "max_backlog_age": self.max_backlog_age,
+            "persistent_storage_enabled": self.enable_persistent_storage,
+            "periodic_reconnect_interval": self.periodic_reconnect_interval,
+            "last_periodic_reconnect_attempt": self.last_periodic_reconnect_attempt,
+            "stale_transport_count": stale_count,
+            "tracked_transport_count": len(self._stale_registry),
+        }
+
+    def get_storage_overview(self) -> dict[str, Any]:
+        """
+        Best-effort, read-only storage snapshot for the device page's
+        Storage Overview panel. Three independent sources, each attempted
+        separately so one failing doesn't blank out the others:
+
+        1. system.chunks — table_name/row_count/file_size_bytes/
+           memory_bytes per chunk, aggregated (summed) by table_name here.
+           This replaces the earlier single-sampled-table COUNT(*)
+           estimate with real, per-table figures for every table in one
+           query.
+        2. information_schema.columns — the full schema map (table_name,
+           column_name, data_type, iox::column_type) for every table.
+           Returned flat; services/bridge_service.get_influxdb_storage
+           groups it by table for display.
+        3. object_store_dir sizing and a heap-profile reachability probe
+           — both entirely opt-in (see the object_store_dir / debug_
+           pprof_url settings) and skipped silently if unconfigured.
+
+        Uses the same self.client.query(sql, database=..., language="sql")
+        call already used by connect() / _health_check() above, which
+        returns a pyarrow.Table — converted to plain Python via
+        to_pylist().
+
+        Nothing here raises — a failed query is recorded in `error` and
+        the rest of the snapshot still returns.
+        """
+        result: dict[str, Any] = {
+            "connected": self.connected,
+            "database": self.database,
+            "items_label": "Tables",
+            "has_table_stats": True,
+            "table_stats": [],       # [{table_name, row_count, file_size_bytes, memory_bytes}]
+            "columns": [],           # [{table_name, column_name, data_type, iox_column_type}]
+            "item_names": [],         # kept for template compatibility with the v1 panel — table names only
+            "sample_item": None,
+            "sample_item_approx_rows": None,
+            "retention_policies": None,  # not applicable to v3
+            "data_dir": self.object_store_dir or None,
+            "data_dir_size_bytes": None,
+            "heap_profile": None,
+            "error": None,
+        }
+
+        if not self.connected or self.client is None:
+            result["error"] = "Not connected to InfluxDB."
+            return result
+
+        try:
+            chunks_result: Any = self.client.query(  # type: ignore[reportUnknownMemberType]
+                "SELECT table_name, row_count, file_size_bytes, memory_bytes FROM system.chunks",
+                database=self.database,
+                language="sql",
+            )
+            chunks_table: pa.Table = cast(pa.Table, chunks_result)
+            agg: dict[str, dict[str, int]] = {}
+            for row in chunks_table.to_pylist():
+                name: str | None = row.get("table_name")
+                if not name:
+                    continue
+                bucket: dict[str, int] = agg.setdefault(
+                    name, {"row_count": 0, "file_size_bytes": 0, "memory_bytes": 0}
+                )
+                bucket["row_count"] += int(row.get("row_count") or 0)
+                bucket["file_size_bytes"] += int(row.get("file_size_bytes") or 0)
+                bucket["memory_bytes"] += int(row.get("memory_bytes") or 0)
+
+            table_stats: list[dict[str, Any]] = [
+                {"table_name": name, **stats} for name, stats in sorted(agg.items())
+            ]
+            result["table_stats"] = table_stats
+            result["item_names"] = [row["table_name"] for row in table_stats]
+        except Exception as e:
+            self._log.error(f"get_storage_overview: system.chunks query failed: {e}")
+            result["error"] = f"Chunk stats query failed: {e}"
+
+        try:
+            cols_result: Any = self.client.query(  # type: ignore[reportUnknownMemberType]
+                'SELECT table_name, column_name, data_type, "iox::column_type" AS iox_column_type '
+                "FROM information_schema.columns WHERE table_schema = 'public'",
+                database=self.database,
+                language="sql",
+            )
+            cols_table: pa.Table = cast(pa.Table, cols_result)
+            result["columns"] = cols_table.to_pylist()
+        except Exception as e:
+            self._log.error(f"get_storage_overview: information_schema.columns query failed: {e}")
+            if not result["error"]:
+                result["error"] = f"Schema query failed: {e}"
+
+        if self.object_store_dir:
+            try:
+                store_path: Path = Path(self.object_store_dir)
+                if store_path.exists():
+                    result["data_dir_size_bytes"] = sum(
+                        f.stat().st_size for f in store_path.rglob("*") if f.is_file()
+                    )
+            except Exception as e:
+                self._log.warning(f"get_storage_overview: could not size object_store_dir '{self.object_store_dir}': {e}")
+
+        if self.debug_pprof_url:
+            result["heap_profile"] = self._probe_heap_profile()
+
+        return result
+
+
+    def _probe_heap_profile(self) -> dict[str, Any]:
+        """
+        Best-effort reachability probe for the Rust/pprof heap-profile
+        debug endpoint (GET .../debug/pprof/heap).
+        """
+        # Explicitly type the return dictionary to satisfy strict type checkers
+        probe: dict[str, Any] = {
+            "reachable": False,
+            "size_bytes": None,
+            "elapsed_ms": None,
+            "error": None
+        }
+
+        # Fall back to requests if a persistent session object isn't attached to self
+        session = getattr(self, "session", requests)
+
+        try:
+            start: float = time.time()
+
+            # Use stream=True to avoid dumping raw binary into system memory immediately
+            with session.get(
+                self.debug_pprof_url,
+                timeout=self.connection_timeout,
+                stream=True
+            ) as resp:
+
+                probe["elapsed_ms"] = int((time.time() - start) * 1000)
+
+                if resp.status_code == 200:
+                    probe["reachable"] = True
+
+                    # Try Content-Length header first for instant estimation
+                    content_length = resp.headers.get("Content-Length")
+                    if content_length is not None and content_length.isdigit():
+                        probe["size_bytes"] = int(content_length)
+                        # Consume the rest without pinning it to memory or leaking connections
+                        resp.close()
+                    else:
+                        # Fallback: stream chunks to count total size safely without memory bloat
+                        bytes_counted = 0
+                        for chunk in resp.iter_content(chunk_size=16384):
+                            if chunk:
+                                bytes_counted += len(chunk)
+                        probe["size_bytes"] = bytes_counted
+                else:
+                    probe["error"] = f"HTTP {resp.status_code}"
+
+        except Exception as e:
+            probe["error"] = str(e)
+
+        return probe
+
 
     # ------------------------------------------------------------------
     # Data writing
@@ -865,12 +1115,52 @@ class influxdb3_out(transport_base):
         """Initialize bridge — not needed for InfluxDB output."""
         pass
 
-    def __del__(self) -> None:
-        """Cleanup on destruction — flush any remaining points."""
-        if self.batch_points:
-            self._flush_batch()
-        if self.client:
+    def close(self) -> None:
+        """
+        Gracefully terminate the connection.
+        Flushes pending metric batches and closes persistent network sockets.
+        """
+        self._log.info("Closing InfluxDB v3 transport bridge...")
+
+        if getattr(self, "batch_points", None):
             try:
-                self.client.close()
+                self._flush_batch()
             except Exception as e:
-                self._log.warning(f"Cleanup exception {e}")
+                self._log.error(f"Failed to flush batch during explicit close: {e}")
+
+        session: Any = getattr(self, "session", None)
+        if session is not None:
+            try:
+                session.close()
+                self._log.debug("Diagnostic HTTP session closed successfully.")
+            except Exception as e:
+                self._log.debug(f"Error closing diagnostic session: {e}")
+            finally:
+                self.session = None
+
+        client: InfluxDBClient3 | None = getattr(self, "client", None)
+        if client is not None:
+            try:
+                if hasattr(client, "close"):
+                    client.close()
+                    self._log.debug("InfluxDB client connection closed.")
+            except Exception as e:
+                self._log.warning(f"Error during client connection close: {e}")
+            finally:
+                self.client = None
+
+        self.connected = False
+        self._log.info("InfluxDB v3 transport bridge closed cleanly.")
+
+
+    def __del__(self) -> None:
+        try:
+            if hasattr(self, "close") and callable(getattr(self, "close", None)):
+                self.close()
+        except Exception as e:
+            if hasattr(self, '_log'):
+                try:
+                    self._log.error(f"Exception in __del__: {e}")
+                except Exception:
+                    self._log.error(f"Exception in __del__: {e}")
+

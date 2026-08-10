@@ -409,6 +409,7 @@ New registers added to the protocol map are automatically added as new columns o
 | Setting | Default | Description |
 | --- | --- | --- |
 | `enable_compression` | `true` | Enable TimescaleDB native compression on the hypertable. |
+| `enable_dynamic_chunk_sizing` | `true` | Enable dynamic compression to calculate exact compression settings. |
 | `enable_rollups` | `true` | Create continuous aggregate rollup views. |
 | `enable_auto_refresh` | `true` | Automatically refresh rollup aggregates on a schedule. |
 | `auto_refresh_interval` | `21600` | Seconds between rollup refreshes (default: 6 hours). |
@@ -423,7 +424,7 @@ If the database is unavailable, MPG buffers data points to disk and replays them
 | --- | --- | --- |
 | `enable_persistent_storage` | `true` | Enable disk backlog on DB disconnect. |
 | `backlog_storage_path` | `timescaledb_backlog` | Directory for backlog files, relative to the working directory. |
-| `backlog_file_name` | `no_connect_backlog` | Backlog filename prefix. |
+| `backlog_file_name` | `no_connect_timescale_backlog` | Backlog filename prefix. |
 | `max_backlog_size` | `10000` | Maximum data points to store in the backlog before dropping oldest. |
 | `max_backlog_age` | `86400` | Maximum backlog age in seconds (default: 24 hours). Older points are discarded on reconnect. |
 

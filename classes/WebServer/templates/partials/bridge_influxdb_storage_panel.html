@@ -1,0 +1,233 @@
+<!--
+  Description: partials/bridge_influxdb_storage_panel.html HTMX partial — Storage Overview card for InfluxDB v1/v3 device pages.
+  File: bridge_influxdb_storage_panel.html
+
+  Copyright 2026 Kevin Burke
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://apache.org
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+
+{#
+  partials/bridge_influxdb_storage_panel.html
+  Swapped into #bridge-storage-container on an InfluxDB v1 (influxdb_out)
+  or v3 (influxdb3_out) device page. Context: storage — dict from
+  services/bridge_service.get_influxdb_storage(). One template serves
+  both transports, which return the same field names but populate
+  different subsets:
+
+  - v1 (influxdb_out): items_label="Measurements", sample_item /
+    sample_item_approx_rows (one sampled measurement's approximate row
+    count), retention_policies, optional data_dir size. has_table_stats
+    is always False and table_stats/columns/heap_profile are always
+    empty/None — v1 has no equivalent to v3's system.chunks or
+    information_schema.columns.
+  - v3 (influxdb3_out): items_label="Tables", has_table_stats=True with a
+    real per-table row_count/file_size/memory breakdown from system.
+    chunks (table_stats), a column count per table folded in from
+    information_schema.columns (columns_by_table), optional object_store_
+    dir size (also surfaced via data_dir/data_dir_size_display, same
+    field names as v1's data_dir), and an optional heap_profile probe.
+    sample_item / retention_policies are always None/empty on v3.
+
+  heap_profile, when present, is a reachability probe only — see
+  influxdb3_out._probe_heap_profile for why the raw pprof/protobuf
+  response is never decoded into an actual memory-usage figure here.
+
+  `error`, if set, is shown inline rather than blanking the whole card,
+  since e.g. a schema query failing shouldn't hide chunk stats that
+  already succeeded.
+
+  Purely observational — nothing here is clickable, and none of these
+  values can be edited from this card.
+
+Description: partials/bridge_influxdb_storage_panel.html HTMX partial — Storage Overview card for InfluxDB v1/v3 device pages. File: bridge_influxdb_storage_panel.html Copyright 2026 Kevin Burke Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License. You may obtain a copy of the License at http://apache.org Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License. --> 
+partials/bridge_influxdb_storage_panel.html Swapped into #bridge-storage-container on an InfluxDB v1 (influxdb_out) or v3 (influxdb3_out) device page.
+#} 
+
+<div class="card">
+  <h3 class="label mb-2">Storage Overview</h3>
+  {% if not storage or not storage.connected %}
+    <p class="surface-muted text-xs">Not connected to InfluxDB — storage data isn't available yet.</p>
+  {% else %}
+    {% if storage.error %}
+      <p class="text-danger text-xs mb-2">{{ storage.error }}</p>
+    {% endif %}
+    
+    <dl class="grid grid-cols-2 gap-x-4 gap-y-2 text-sm mb-3">
+      <div class="contents">
+        <dt class="surface-muted text-xs">Database</dt>
+        <dd class="surface-title text-xs font-mono font-medium truncate">{{ storage.database }}</dd>
+      </div>
+      <div class="contents">
+        <dt class="surface-muted text-xs">{{ storage.items_label }}</dt>
+        <dd class="surface-title text-xs font-mono font-medium">{{ storage.item_names|length }}</dd>
+      </div>
+      
+      {% if not storage.has_table_stats and storage.sample_item %}
+        <div class="contents">
+          <dt class="surface-muted text-xs">Sample ~rows</dt>
+          <dd class="surface-title text-xs font-mono font-medium truncate" title="{{ storage.sample_item }}">
+            {% if storage.sample_item_approx_rows is not none %}
+              ~{{ "{:,}".format(storage.sample_item_approx_rows) }}
+            {% else %}
+              <span class="surface-muted">—</span>
+            {% endif %}
+            <span class="mini-table-subtext text-[10px] block truncate">{{ storage.sample_item }}</span>
+          </dd>
+        </div>
+      {% endif %}
+
+      {% if storage.data_dir %}
+        <div class="contents">
+          <dt class="surface-muted text-xs">{% if storage.has_table_stats %}Object store size{% else %}Data dir size{% endif %}</dt>
+          <dd class="surface-title text-xs font-mono font-medium truncate" title="{{ storage.data_dir }}">
+            {% if storage.data_dir_size_display %}
+              {{ storage.data_dir_size_display }}
+            {% else %}
+              <span class="surface-muted">Not found on this host</span>
+            {% endif %}
+          </dd>
+        </div>
+      {% endif %}
+
+      {% if storage.heap_profile %}
+        <div class="contents">
+          <dt class="surface-muted text-xs">Heap profile endpoint</dt>
+          <dd class="surface-title text-xs font-mono font-medium">
+            {% if storage.heap_profile.reachable %}
+              <span class="text-green-600 dark:text-green-400">Reachable</span> ({{ storage.heap_profile.size_display }}, {{ storage.heap_profile.elapsed_ms }}ms)
+            {% else %}
+              <span class="text-danger">Unreachable{% if storage.heap_profile.error %} ({{ storage.heap_profile.error }}){% endif %}</span>
+            {% endif %}
+          </dd>
+        </div>
+      {% endif %}
+    </dl>
+
+    <!-- V1 Diagnostics Engine Block -->
+    {% if not storage.has_table_stats and storage.v1_diagnostics %}
+      <div class="border-t border-mpg-700/30 pt-2 mt-2 mb-3">
+        <p class="surface-muted text-[11px] uppercase tracking-wider mb-2 font-semibold">InfluxDB v1 Runtime &amp; Engine Stats</p>
+        <dl class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs font-mono">
+          {% if storage.v1_diagnostics.runtime %}
+            <div class="contents">
+              <dt class="surface-subtle">Go Heap Allocated</dt>
+              <dd class="text-right surface-title font-medium">
+                {% if storage.v1_diagnostics.runtime.HeapAlloc %}
+                  {{ (storage.v1_diagnostics.runtime.HeapAlloc | int / 1024 / 1024) | round(1) }} MB
+                {% else %}
+                  <span class="surface-muted">—</span>
+                {% endif %}
+              </dd>
+            </div>
+            <div class="contents">
+              <dt class="surface-subtle">Active Goroutines</dt>
+              <dd class="text-right surface-title font-medium">{{ storage.v1_diagnostics.runtime.NumGoroutine or '—' }}</dd>
+            </div>
+          {% endif %}
+          
+          {% if storage.v1_diagnostics.database %}
+            <div class="contents">
+              <dt class="surface-subtle">Indexed Series</dt>
+              <dd class="text-right surface-title font-medium">
+                {% if storage.v1_diagnostics.database.numSeries %}
+                  {{ "{:,}".format(storage.v1_diagnostics.database.numSeries | int) }}
+                {% else %}
+                  <span class="surface-muted">—</span>
+                {% endif %}
+              </dd>
+            </div>
+          {% endif %}
+          
+          {% if storage.v1_diagnostics.engine %}
+            <div class="contents">
+              <dt class="surface-subtle">Active WAL Files</dt>
+              <dd class="text-right surface-title font-medium">{{ storage.v1_diagnostics.engine.walFileSize or '—' }}</dd>
+            </div>
+          {% endif %}
+        </dl>
+      </div>
+    {% endif %}
+
+    {% if storage.has_table_stats and storage.table_stats %}
+      <p class="surface-muted text-xs mb-1">Per-table stats (from system.chunks)</p>
+      <div class="overflow-x-auto">
+        <table class="w-auto text-xs border-collapse" role="table" aria-label="Per-table chunk stats">
+          <thead>
+            <tr class="mini-table-header text-xs uppercase tracking-wide" role="row">
+              <th class="px-2 py-1.5 text-left font-semibold whitespace-nowrap" scope="col">Table</th>
+              <th class="px-2 py-1.5 text-right font-semibold whitespace-nowrap" scope="col">Columns</th>
+              <th class="px-2 py-1.5 text-right font-semibold whitespace-nowrap" scope="col">Rows</th>
+              <th class="px-2 py-1.5 text-right font-semibold whitespace-nowrap" scope="col">File Size</th>
+              <th class="px-2 py-1.5 text-right font-semibold whitespace-nowrap" scope="col">Memory</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for t in storage.table_stats %}
+              <tr class="mini-table-row transition-colors" role="row">
+                <td class="px-2 py-1.5 font-mono mini-table-value whitespace-nowrap mini-table-col-divider" role="cell">
+                  {{ t.table_name }}
+                </td>
+                <td class="px-2 py-1.5 text-right font-mono mini-table-value whitespace-nowrap mini-table-col-divider" role="cell">
+                  {{ t.column_count }}
+                </td>
+                <td class="px-2 py-1.5 text-right font-mono mini-table-value whitespace-nowrap mini-table-col-divider" role="cell">
+                  {{ "{:,}".format(t.row_count) }}
+                </td>
+                <td class="px-2 py-1.5 text-right font-mono mini-table-value whitespace-nowrap mini-table-col-divider" role="cell">
+                  {{ t.file_size_display }}
+                </td>
+                <td class="px-2 py-1.5 text-right font-mono mini-table-value whitespace-nowrap" role="cell">
+                  {{ t.memory_display }}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+
+    {% if storage.retention_policies %}
+      <p class="surface-muted text-xs mb-1 mt-2">Retention policies</p>
+      <div class="overflow-x-auto">
+        <table class="w-auto text-xs border-collapse" role="table" aria-label="InfluxDB retention policies">
+          <thead>
+            <tr class="mini-table-header text-xs uppercase tracking-wide" role="row">
+              <th class="px-2 py-1 text-left font-semibold whitespace-nowrap" scope="col">Name</th>
+              <th class="px-2 py-1 text-left font-semibold whitespace-nowrap" scope="col">Duration</th>
+              <th class="px-2 py-1 text-left font-semibold whitespace-nowrap" scope="col">Shard Group</th>
+              <th class="px-2 py-1 text-left font-semibold whitespace-nowrap" scope="col">Default</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for rp in storage.retention_policies %}
+              <tr class="border-t border-mpg-700/30" role="row">
+                <td class="px-2 py-1 font-mono mini-table-value whitespace-nowrap mini-table-col-divider" role="cell">{{ rp.name }}</td>
+                <td class="px-2 py-1 font-mono mini-table-value whitespace-nowrap mini-table-col-divider" role="cell">{{ rp.duration }}</td>
+                <td class="px-2 py-1 font-mono mini-table-value whitespace-nowrap mini-table-col-divider" role="cell">{{ rp.shardGroupDuration }}</td>
+                <td class="px-2 py-1 whitespace-nowrap" role="cell">
+                  {% if rp.default %}
+                    <span class="text-green-600 dark:text-green-400 font-medium">Yes</span>
+                  {% else %}
+                    <span class="surface-muted">No</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  {% endif %}
+</div>
+

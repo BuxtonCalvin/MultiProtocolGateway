@@ -254,7 +254,7 @@
       </span>
       {% endif %}
       <button id="refresh-values-btn"
-              class="ml-auto btn-secondary text-xs px-2 py-1 flex items-center gap-1"
+              class="ml-auto btn-secondary text-xs px-2 py-1 flex items-center gap-1 text-gray-800 font-medium"
               title="Wait for the next scrape cycle then populate the Value column"
               onclick="refreshProtocolValues()">
         <span id="refresh-btn-icon">↺</span>
@@ -262,31 +262,7 @@
       </button>
     </div>
 
-    {% if proto_tabs %}
-    <div class="flex gap-1 mb-3 border-b border-mpg-700" role="tablist">
-      {% for tab in proto_tabs %}
-      <button class="tab-btn px-4 py-1.5 text-xs font-medium rounded-t
-                     {% if loop.first %}tab-active{% else %}tab-inactive{% endif %}"
-              role="tab"
-              data-protocol="{{ tab.protocol_name }}"
-              data-registry="{{ tab.registry_type }}"
-              aria-selected="{{ 'true' if loop.first else 'false' }}"
-              hx-get="/api/protocols/{{ tab.protocol_name }}/{{ tab.registry_type }}/table?device_name={{ device.name }}"
-              hx-target="#protocol-table-container"
-              hx-swap="innerHTML"
-              hx-headers='{"Cache-Control": "no-cache"}'
-              {% if loop.first %}hx-trigger="load, click"{% else %}hx-trigger="click"{% endif %}>
-        {{ tab.registry_type | title }}
-        <span class="text-mpg-100 ml-1">({{ tab.protocol_name }})</span>
-        {% if tab.registry_type != "json" %}
-        <span class="tab-counts ml-1.5 text-mpg-400 text-xs">
-          W:{{ tab.write_count }} M:{{ tab.mask_count }} S:{{ tab.screen_count }}
-        </span>
-        {% endif %}
-      </button>
-      {% endfor %}
-    </div>
-    {% endif %}
+    {% include "partials/protocol_tabs.html" %}
 
     <div id="protocol-table-container"
          class="overflow-x-auto rounded border border-mpg-700">
@@ -301,7 +277,15 @@
   // ── Re-enable/disable value fields when checkbox is toggled ──────────────
   // hx-swap="none" means the DOM isn't updated by HTMX after a checkbox patch,
   // so we manually sync the select/input enabled state from the JSON response.
-  document.addEventListener('htmx:afterRequest', function (evt) {
+  //
+  // This whole <script> block re-runs on every HTMX navigation between device
+  // pages (see pages.py:device_page swapping #main-panes), but this listener
+  // is bound to `document`, which is never replaced — so without a dedup
+  // guard, visiting N devices in one session would leave N copies of it
+  // firing on every future checkbox toggle. Stash the bound function on
+  // window and remove it first, same idea as the setInterval guard below.
+  if (window.__mpgValueFieldAfterRequest) document.removeEventListener('htmx:afterRequest', window.__mpgValueFieldAfterRequest);
+  window.__mpgValueFieldAfterRequest = function (evt) {
     const el = evt.detail.elt;
     if (!el || el.type !== 'checkbox') return;
     const row = el.closest('[role=row]');
@@ -360,7 +344,39 @@
     } else {
       row.classList.remove('bg-dirty/10', 'border-l-2', 'border-dirty');
     }
-  });
+  };
+  document.addEventListener('htmx:afterRequest', window.__mpgValueFieldAfterRequest);
+
+  // Shared by every tab-click binder (this file's own, and
+  // protocol_section.html's rebind after a protocol-version swap) and by
+  // the toggle-refresh handler below, so the "<Registry Map> Available /
+  // Selected" badges always reflect whichever tab is currently active.
+  // Defined on window since protocol_section.html's script re-runs fresh
+  // on every swap but this one (scraper_panes.html's) does not.
+  window.mpgUpdateTabMetricBadges = function(btn) {
+    const availWrap  = document.getElementById('metric-tab-available-wrap');
+    const chosenWrap = document.getElementById('metric-tab-chosen-wrap');
+    const availLabel = document.getElementById('metric-tab-available-label');
+    const chosenLabel = document.getElementById('metric-tab-chosen-label');
+    const availVal   = document.getElementById('metric-tab-available');
+    const chosenVal  = document.getElementById('metric-tab-chosen');
+    if (!availWrap || !chosenWrap) return;
+
+    const registry = btn && btn.dataset.registry;
+    const hasStats = btn && registry && registry !== 'json' && btn.dataset.metricTotal !== '';
+    if (!hasStats) {
+      availWrap.classList.add('hidden');
+      chosenWrap.classList.add('hidden');
+      return;
+    }
+    const label = registry.charAt(0).toUpperCase() + registry.slice(1);
+    if (availLabel)  availLabel.textContent  = `${label} Available`;
+    if (chosenLabel) chosenLabel.textContent = `${label} Selected`;
+    if (availVal)  availVal.textContent  = btn.dataset.metricTotal;
+    if (chosenVal) chosenVal.textContent = btn.dataset.metricChosen;
+    availWrap.classList.remove('hidden');
+    chosenWrap.classList.remove('hidden');
+  };
 
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', function() {
@@ -372,6 +388,7 @@
       this.classList.add('tab-active');
       this.classList.remove('tab-inactive');
       this.setAttribute('aria-selected', 'true');
+      window.mpgUpdateTabMetricBadges(this);
     });
   });
 
@@ -380,7 +397,12 @@
   // — the same endpoint, calling the same get_protocols_for_device(), that
   // renders the initial tab strip — so a refresh can never disagree with
   // what was shown on page load.
-  document.addEventListener('htmx:afterRequest', function(evt) {
+  // Same dedup-guard reasoning as __mpgValueFieldAfterRequest above — this
+  // is a `document`-level listener in a script block that re-runs on every
+  // device navigation, so it has to remove its previous copy of itself
+  // before adding a new one.
+  if (window.__mpgProtocolTabsAfterRequest) document.removeEventListener('htmx:afterRequest', window.__mpgProtocolTabsAfterRequest);
+  window.__mpgProtocolTabsAfterRequest = function (evt) {
     const path = evt.detail?.requestConfig?.path || '';
     if (!path.includes('/toggle') && !path.includes('/field')) return;
     if (evt.detail.xhr.status < 200 || evt.detail.xhr.status >= 300) return;
@@ -404,7 +426,37 @@
         }
       })
       .catch(() => {});
-  });
+
+    // A mask/screen toggle on any tab can change every summary badge (the
+    // active tab's own numbers, the device-wide totals, and every other
+    // tab's cached data-metric-* values used the next time it's clicked),
+    // so refresh from the same source of truth used at page render time.
+    fetch(`/api/protocols/device/${encodeURIComponent(protocolVersion)}/metric-summary?device_name=${encodeURIComponent(deviceName)}`)
+      .then(r => r.json())
+      .then(summary => {
+        const avail  = document.getElementById('metric-total-available');
+        const chosen = document.getElementById('metric-chosen-count');
+        const warn   = document.getElementById('metric-summary-warning');
+        if (avail)  avail.textContent  = summary.total_available;
+        if (chosen) chosen.textContent = summary.chosen_count;
+        if (warn) {
+          warn.textContent = `Metric selection from register maps is over ${summary.wide_table_limit}: no wide table formation`;
+          warn.classList.toggle('hidden', !summary.over_limit);
+        }
+
+        const byType = summary.by_registry_type || {};
+        document.querySelectorAll('#protocol-section .tab-btn[data-registry]').forEach(b => {
+          const stats = byType[b.dataset.registry];
+          if (stats) {
+            b.dataset.metricTotal  = stats.total;
+            b.dataset.metricChosen = stats.chosen;
+          }
+        });
+        window.mpgUpdateTabMetricBadges(document.querySelector('#protocol-section .tab-btn.tab-active'));
+      })
+      .catch(() => {});
+  };
+  document.addEventListener('htmx:afterRequest', window.__mpgProtocolTabsAfterRequest);
 
   // Wire the global Analyze button in the nav bar to navigate to the
   // analyze page for the currently selected scraper device.
@@ -622,7 +674,10 @@
   }
 
   // After any settings PATCH in this pane, update the row DOM without a full re-render.
-  document.addEventListener('htmx:afterRequest', function(evt) {
+  // Same dedup-guard reasoning as the other two `document`-level listeners
+  // in this file — see __mpgValueFieldAfterRequest above.
+  if (window.__mpgSettingsRowAfterRequest) document.removeEventListener('htmx:afterRequest', window.__mpgSettingsRowAfterRequest);
+  window.__mpgSettingsRowAfterRequest = function (evt) {
     const el = evt.detail.elt;
     if (!el) return;
     const row = el.closest('[role=row]');
@@ -675,5 +730,6 @@
       const dirtyMark = row.querySelector('.dirty-indicator');
       if (dirtyMark) dirtyMark.remove();
     }
-  });
+  };
+  document.addEventListener('htmx:afterRequest', window.__mpgSettingsRowAfterRequest);
 </script>

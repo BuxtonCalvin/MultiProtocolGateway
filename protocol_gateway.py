@@ -28,7 +28,10 @@ import time
 from concurrent.futures import CancelledError, Future, ThreadPoolExecutor
 from enum import Enum
 
+from classes.WebServer.config_writer import create_backup
+from classes.WebServer.database import session_scope
 from classes.WebServer.main import start_webserver
+from classes.WebServer.models import ConfigBackup
 
 # Check if Python version is greater than 3.10
 if sys.version_info < (3, 10):
@@ -41,10 +44,12 @@ if sys.version_info < (3, 10):
 
 
 import argparse
+import hashlib
 import logging
 import logging.handlers
 from configparser import ConfigParser, NoOptionError, NoSectionError
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, TextIO, cast
 
@@ -533,7 +538,7 @@ class Protocol_Gateway:
         ``read_mode`` is accepted for interface symmetry but not used.
         """
         del read_mode
-        joined_names = ", ".join(
+        joined_names: str = ", ".join(
             self._display_transport_name(name) for name in transport_names
         ) if transport_names else "idle"
         return self._compact_thread_label(joined_names)
@@ -560,7 +565,7 @@ class Protocol_Gateway:
     __log : logging.Logger
     config_file : Path
 
-    def __init__(self, config_file : str) -> None:
+    def __init__(self, config_file : str, is_reload: bool = False) -> None:
         """Scheduling path: N/A — setup, runs once regardless of read_mode (this is what decides read_mode).
 
         Initialise the gateway: load config, set up logging and messaging, instantiate and connect all transports.
@@ -575,6 +580,21 @@ class Protocol_Gateway:
         bidirectionally, reconnect hooks are attached, and scrape groups are
         built.  Thread-pool executors are created for ``concurrent`` and
         ``interleaved`` modes; ``sequential`` mode uses no executor.
+
+        ``is_reload`` — set by GatewayManager when this instance replaces a
+        previously-stopped gateway (see GatewayManager.reload()), as opposed
+        to a fresh process boot. Every transport constructed here is a brand
+        new object, so any per-instance "have I connected before" state —
+        which is what decides whether a reconnect is logged/notified as such
+        — would otherwise start back at its cold-boot default, even though
+        the underlying hardware really was just connected moments ago,
+        before the old gateway's stop() disconnected it. When True, calls
+        transport.prepare_for_reload() on every transport before connect()
+        — see transport_base.prepare_for_reload() for what that primes and
+        why; it's a single generic hook so this covers modbus_base scrapers,
+        transport_base-direct scrapers (e.g. serial_frame_transport), and
+        bridges uniformly, without each transport family needing its own
+        copy of this logic.
         """
         self.__log: logging.Logger = logging.getLogger(__name__)
 
@@ -643,6 +663,13 @@ class Protocol_Gateway:
         self.__running : bool = False
         ''' controls main loop'''
 
+        self.__stopped_event: threading.Event = threading.Event()
+        ''' set whenever the run() loop is NOT executing — starts set (no
+        loop running yet); cleared at the top of run(), set again in its
+        finally block. stop() waits on this so it never tears down transport
+        connections while a read might still be in flight on this thread. '''
+        self.__stopped_event.set()
+
         for section in self.__settings.sections():
             transport_cfg: TransportSettings = cast(TransportSettings, self.__settings[section])
             transport_type: str      = transport_cfg.get("transport", fallback="")
@@ -675,6 +702,10 @@ class Protocol_Gateway:
                 self.__transports.append(transport)
 
         #connect first
+        if is_reload:
+            for transport in self.__transports:
+                transport.prepare_for_reload()
+
         for transport in self.__transports:
             self.__log.info("Connecting to "+str(transport.type)+":" +str(transport.transport_name)+"...")
             transport.connect()
@@ -1077,7 +1108,7 @@ class Protocol_Gateway:
         row in the protocol CSV and therefore cannot appear in any mask file.
         Path 3 already forwards everything, so no special handling is needed.
         """
-        ps = getattr(member, 'protocolSettings', None)
+        ps: protocol_settings | None = getattr(member, 'protocolSettings', None)
         synthetic: frozenset[str] = member.synthetic_field_names
 
         # Path 1 — explicit variable mask.
@@ -1176,11 +1207,7 @@ class Protocol_Gateway:
         target.connected = False
         target.last_read_time = 0.0
 
-    def _snapshot_scraper_data(
-        self,
-        scraper: "transport_base",
-        data: dict[str, int | float | str],
-    ) -> None:
+    def _snapshot_scraper_data(self, scraper: "transport_base", data: dict[str, int | float | str]) -> None:
         """Scheduling path: All (Sequential, Concurrent, Interleaved) — called from ``_process_group_read`` and ``_forward_to_bridges``.
 
         Cache the bridge-bound data on the scraper transport.
@@ -1213,10 +1240,7 @@ class Protocol_Gateway:
 
         Returns ``None`` if no transport with that name exists or has connected.
         """
-        return next(
-            (t for t in self.__transports if t.transport_name == transport_name),
-            None,
-        )
+        return next((t for t in self.__transports if t.transport_name == transport_name), None)
 
     # init the variable request_upstream_reconnect in the bridge __init__.  If it goes true during stale
     # detection, reconnect routine triggers.
@@ -1667,6 +1691,7 @@ class Protocol_Gateway:
         pending futures.
         """
         self.__running = True
+        self.__stopped_event.clear()
 
         try:
             while self.__running:
@@ -1715,6 +1740,372 @@ class Protocol_Gateway:
                 self.__concurrent_executor.shutdown(wait=False, cancel_futures=True)
             if self.__interleaved_executor is not None:
                 self.__interleaved_executor.shutdown(wait=False, cancel_futures=True)
+            self.__stopped_event.set()
+
+    def stop(self, timeout: float = 10.0) -> bool:
+        """Scheduling path: N/A — shutdown, runs once regardless of read_mode.
+
+        Signal run()'s loop to exit, wait for it to actually stop, then
+        disconnect every transport and release its underlying socket/serial
+        port.
+
+        This is the piece run() alone doesn't provide: run()'s own finally
+        block shuts the executors down with wait=False — fine when the whole
+        process is exiting anyway, but not enough on its own when the plan is
+        to immediately construct a *new* Protocol_Gateway against the same
+        hardware (RTU/serial buses and some Modbus TCP-to-RTU bridges only
+        tolerate one open connection at a time — see modbus_rtu.py/
+        modbus_tcp.py). stop() waits for confirmation the loop has actually
+        exited before touching any transport, then calls transport.cleanup()
+        on each one — which, for modbus_base subclasses, closes the shared
+        pymodbus client AND evicts it from the class-level `clients` cache
+        (see modbus_base.cleanup()). That eviction matters: without it, a
+        freshly-constructed transport for the same port would find the old
+        (now-closed) client still sitting in the cache and reuse it instead
+        of opening a new one.
+
+        Returns True if the loop exited within `timeout` seconds and
+        transports were cleaned up. Returns False if it didn't — in that
+        case transport cleanup is deliberately skipped (a read may still be
+        mid-flight on the run() thread), and the caller should NOT attempt
+        to start a replacement gateway against the same hardware, since the
+        old connections are still live and unaccounted for.
+        """
+        self.__log.info(f"Stopping gateway '{self.config_file.name}'...")
+        self.__running = False
+
+        if not self.__stopped_event.wait(timeout=timeout):
+            self.__log.error(
+                f"Gateway did not stop within {timeout}s — a read may still "
+                f"be in flight on the run() thread. Skipping transport "
+                f"cleanup rather than closing a socket out from under it."
+            )
+            return False
+
+        for transport in self.__transports:
+            try:
+                transport.cleanup()
+            except Exception:
+                self.__log.exception(f"Error cleaning up transport {transport.transport_name}")
+
+        self.__log.info("Gateway stopped and all transports cleaned up.")
+        return True
+
+
+@dataclass
+class ReloadStatus:
+    """Outcome of the most recent gateway (re)build — what the webUI shows
+    as its banner (see gateway_reload_status() / base.html)."""
+    ok: bool
+    message: str
+    when: datetime
+    trigger: str          # "startup" | "manual" (commit) | "file_watch"
+    using_fallback: bool  # True if currently running the last-known-good
+                           # backup because the newest config failed to load
+    fatal: bool = False   # True if even the fallback failed — gateway is offline
+
+
+class GatewayManager:
+    """Owns the currently-running Protocol_Gateway and orchestrates
+    stop-old -> build-new -> (fallback on failure) -> start-new.
+
+    Physical constraint driving the ordering here: RTU/serial buses and some
+    Modbus TCP-to-RTU bridges only tolerate one open connection at a time
+    (see modbus_rtu.py / modbus_tcp.py), so this deliberately stops and
+    fully disconnects the old gateway (Protocol_Gateway.stop()) *before*
+    constructing the new one — there is a brief window with no gateway
+    running, rather than the usual "build new, then tear down old" pattern.
+
+    Failure handling: if the new config fails to build a working gateway,
+    falls back to the most recent classes.WebServer.models.ConfigBackup —
+    which config_writer.commit_all() already writes before every commit
+    overwrites config.cfg, so it's always the last config known to have
+    worked. reload() also writes a fresh backup itself (trigger="file_watch")
+    after a successful file-watcher-triggered reload, since manual edits to
+    config.cfg bypass commit_all() entirely and would otherwise leave no
+    record of a hand-edit that turned out fine — without that, a second bad
+    hand-edit would roll all the way back to the last webUI commit instead
+    of the last good hand-edit.
+    """
+
+    def __init__(self, config_file: str, config_path: Path, stop_timeout: float = 10.0) -> None:
+        self._config_file: str = config_file      # e.g. "config.cfg" — what Protocol_Gateway(...) expects
+        self._config_path: Path = config_path      # fully-resolved Path, for reading/backing up
+        self._stop_timeout: float = stop_timeout
+        self._lock: threading.Lock = threading.Lock()
+        self._current: Protocol_Gateway | None = None
+        self._thread: threading.Thread | None = None
+        self._status: ReloadStatus | None = None
+        self._reloading: bool = False
+        self._loaded_config_hash: str | None = None
+        self._log: logging.Logger = logging.getLogger(__name__ + ".GatewayManager")
+
+    @staticmethod
+    def _hash_file(path: Path) -> str | None:
+        """MD5 of a config file's contents — same convention main.py already
+        uses to compare config.cfg against the latest ConfigBackup. Returns
+        None if the file can't be read (caller should treat that as 'unknown,
+        don't de-dupe against it')."""
+        try:
+            return hashlib.md5(path.read_bytes()).hexdigest()  # noqa: S324
+        except OSError:
+            return None
+
+    @property
+    def current(self) -> "Protocol_Gateway | None":
+        return self._current
+
+    @property
+    def status(self) -> ReloadStatus | None:
+        return self._status
+
+    @property
+    def reloading(self) -> bool:
+        """True for the duration of an in-progress reload() call — from the
+        moment the old gateway is told to stop until the replacement (or
+        fallback) has started. Distinct from `status`, which only reflects
+        the outcome of the *last completed* reload. Read by GET
+        /api/gateway/status for the webUI's "reloading, please wait" banner
+        — see base.html's pollGatewayStatus()."""
+        return self._reloading
+
+    def _start_thread(self, gateway: "Protocol_Gateway") -> threading.Thread:
+        thread = threading.Thread(target=gateway.run, name="MPGGatewayRun", daemon=True)
+        thread.start()
+        return thread
+
+    def start(self) -> "Protocol_Gateway":
+        """Initial boot — no previous gateway to stop. Not thread-safe against
+        concurrent reload() calls by design: this should only ever be called
+        once, from main(), before the web server (and therefore any reload
+        trigger) exists."""
+        gateway = Protocol_Gateway(self._config_file)
+        self._thread = self._start_thread(gateway)
+        self._current = gateway
+        self._loaded_config_hash = self._hash_file(self._config_path)
+        self._status = ReloadStatus(
+            ok=True, message="Gateway started.", when=datetime.now().astimezone(),
+            trigger="startup", using_fallback=False,
+        )
+        return gateway
+
+    def _dynamic_reload_enabled(self) -> bool:
+        """[general] enable_dynamic_configuration, read fresh from disk on
+        every call rather than cached — this setting can itself be flipped
+        by the exact same commit/hand-edit flow that triggers reload() in
+        the first place, so a stale cached value could gate the wrong thing
+        for one cycle right after it's toggled.
+
+        Defaults to False (opt-in) — this is a new, somewhat consequential
+        feature (it disconnects and reconnects every live transport), so an
+        existing deployment upgrading to this code shouldn't have it
+        silently start acting on config.cfg changes until an operator
+        explicitly turns it on in General Settings.
+        """
+        parser = CustomConfigParser()
+        try:
+            parser.read(self._config_path.as_posix())
+        except OSError:
+            return False
+        return parser.getboolean("general", "enable_dynamic_configuration", fallback=False)
+
+    def reload(self, trigger: str) -> ReloadStatus:
+        """Rebuild the gateway from the current on-disk config file.
+
+        Always returns a ReloadStatus rather than raising — callers (a
+        commit-route handler, or the FileWatcher's on_config_changed
+        callback) should read .ok / .using_fallback / .message and decide
+        what to show, not need a try/except around this call.
+        """
+        with self._lock:
+            now: datetime = datetime.now().astimezone()
+
+            if not self._dynamic_reload_enabled():
+                status = ReloadStatus(
+                    ok=True,
+                    message=(
+                        "Dynamic configuration reload is disabled "
+                        "(enable_dynamic_configuration is not set to true "
+                        "in General Settings) — config.cfg was updated but "
+                        "the running gateway was not. Restart the process, "
+                        "or enable it in General Settings, to pick this up."
+                    ),
+                    when=now, trigger=trigger, using_fallback=False,
+                )
+                self._status = status
+                self._log.info(f"reload({trigger}): {status.message}")
+                return status
+
+            # Two independent things can both notice the same config.cfg
+            # write and each call reload(): a webUI commit calls it directly
+            # (see commit.py), and commit_all() writing that same file is
+            # ALSO what the FileWatcher sees on disk half a second later
+            # (see file_watcher.py). Whichever call loses the race for
+            # self._lock would otherwise blindly tear down and rebuild a
+            # gateway that's already running the exact content it was asked
+            # to load — this is what fixes that: if the file on disk hashes
+            # the same as what's already loaded, there's nothing to do.
+            current_hash: str | None = self._hash_file(self._config_path)
+            if (
+                self._current is not None
+                and current_hash is not None
+                and current_hash == self._loaded_config_hash
+            ):
+                status = ReloadStatus(
+                    ok=True,
+                    message="Config unchanged since last reload — skipped.",
+                    when=now, trigger=trigger, using_fallback=False,
+                )
+                self._status = status
+                self._log.debug(
+                    f"reload({trigger}): config.cfg matches what's already "
+                    f"loaded — skipping redundant reload."
+                )
+                return status
+
+            self._reloading = True
+            try:
+                old: Protocol_Gateway | None = self._current
+
+                if old is not None:
+                    stopped: bool = old.stop(timeout=self._stop_timeout)
+                    if not stopped:
+                        # Deliberately don't touch self._current/_thread here — the
+                        # old gateway (and its live transport connections) is still
+                        # the thing actually running; starting a replacement against
+                        # the same hardware risks a dual-connection conflict on
+                        # shared buses. Surface this loudly and leave it alone.
+                        status = ReloadStatus(
+                            ok=False,
+                            message=(
+                                "Reload aborted: the previous gateway did not stop "
+                                f"within {self._stop_timeout}s (a read may still be "
+                                "in flight). Still running the previous config — "
+                                "try again shortly."
+                            ),
+                            when=now, trigger=trigger, using_fallback=False,
+                        )
+                        self._status = status
+                        self._log.error(status.message)
+                        return status
+
+                try:
+                    # is_reload=True: these are brand-new transport objects, so
+                    # without this they'd log as a fresh "first connect" rather
+                    # than the standard "Reconnecting transport X" message —
+                    # see Protocol_Gateway.__init__'s is_reload docstring.
+                    new_gateway = Protocol_Gateway(self._config_file, is_reload=True)
+                except Exception as exc:
+                    # New config didn't even build — fall back to last-known-good.
+                    self._log.error(f"Gateway reload failed ({trigger}): {exc}")
+                    status: ReloadStatus = self._fallback(trigger, now, str(exc))
+                    self._status = status
+                    return status
+
+                self._thread = self._start_thread(new_gateway)
+                self._current = new_gateway
+                self._loaded_config_hash = current_hash
+
+                if trigger == "file_watch":
+                    # Manual edits bypass commit_all()'s own create_backup() call,
+                    # so this is the only record that this particular hand-edit
+                    # was ever proven to load successfully.
+                    try:
+                        with session_scope() as db:
+                            create_backup(self._config_path, db, trigger="file_watch")
+                    except Exception:
+                        self._log.exception("Post-reload backup failed (reload itself succeeded)")
+
+                status = ReloadStatus(
+                    ok=True, message="Gateway reloaded successfully.", when=now,
+                    trigger=trigger, using_fallback=False,
+                )
+                self._status = status
+                self._log.info(status.message)
+                return status
+            finally:
+                self._reloading = False
+
+    def _fallback(self, trigger: str, when: datetime, error_message: str) -> ReloadStatus:
+        """Attempt to restore the most recent ConfigBackup. Caller already
+        holds self._lock."""
+        try:
+            with session_scope() as db:
+                latest: ConfigBackup | None = (
+                    db.query(ConfigBackup).order_by(ConfigBackup.created_at.desc()).first()
+                )
+                backup_filepath: str | None = latest.filepath if latest else None
+                backup_created_at: datetime | None = latest.created_at if latest else None
+        except Exception as db_exc:
+            backup_filepath = None
+            backup_created_at = None
+            self._log.error(f"Could not query ConfigBackup for fallback: {db_exc}")
+
+        if backup_filepath is None:
+            self._log.critical("No backup available to fall back to — gateway is OFFLINE.")
+            return ReloadStatus(
+                ok=False, fatal=True, using_fallback=False, trigger=trigger, when=when,
+                message=(
+                    f"Config reload failed ({error_message}) and no backup "
+                    f"exists to fall back to. Gateway is OFFLINE."
+                ),
+            )
+
+        # Backups live at <project_root>/config/backups/<name>.cfg;
+        # Protocol_Gateway resolves config_file as <project_root>/config/<config_file>,
+        # so "backups/<name>.cfg" resolves to exactly that path.
+        backup_config_file: str = f"backups/{Path(backup_filepath).name}"
+
+        # Protocol_Gateway.__init__ does NOT raise when the requested file is
+        # missing — it silently falls back to config/config.cfg (the exact
+        # file that just failed to load). Check existence ourselves first, or
+        # a missing/moved backup file would look like a successful fallback
+        # while actually just reloading the broken config a second time.
+        if not Path(backup_filepath).is_file():
+            self._log.critical(
+                f"Backup file recorded in ConfigBackup is missing on disk: {backup_filepath}"
+            )
+            return ReloadStatus(
+                ok=False, fatal=True, using_fallback=False, trigger=trigger, when=when,
+                message=(
+                    f"Config reload failed ({error_message}); the last-known-good "
+                    f"backup ({backup_filepath}, from {backup_created_at}) is "
+                    f"missing from disk. Gateway is OFFLINE."
+                ),
+            )
+
+        try:
+            fallback_gateway = Protocol_Gateway(backup_config_file, is_reload=True)
+        except Exception as fallback_exc:
+            self._log.critical(
+                f"Fallback to backup from {backup_created_at} ALSO failed: {fallback_exc}"
+            )
+            return ReloadStatus(
+                ok=False, fatal=True, using_fallback=False, trigger=trigger, when=when,
+                message=(
+                    f"Config reload failed ({error_message}); fallback to the "
+                    f"backup from {backup_created_at} ALSO failed ({fallback_exc}). "
+                    f"Gateway is OFFLINE."
+                ),
+            )
+
+        self._thread = self._start_thread(fallback_gateway)
+        self._current = fallback_gateway
+        self._loaded_config_hash = self._hash_file(Path(backup_filepath))
+        when_str: str = backup_created_at.isoformat() if backup_created_at else "unknown time"
+        return ReloadStatus(
+            ok=False, fatal=False, using_fallback=True, trigger=trigger, when=when,
+            message=(
+                f"New config failed to load ({error_message}) — reverted to "
+                f"the last-known-good config from {when_str}."
+            ),
+        )
+
+    def stop(self) -> None:
+        """Full shutdown, for process exit."""
+        with self._lock:
+            if self._current is not None:
+                self._current.stop(timeout=self._stop_timeout)
 
 
 def main(args: list[str] | None = None) -> None:
@@ -1747,8 +2138,6 @@ def main(args: list[str] | None = None) -> None:
 
     print(__logo)
 
-    mpg = Protocol_Gateway(config_file)
-
     current_path: Path = Path(__file__).resolve()
     root: Path = current_path
     # Walk up the directory tree until we find a folder containing protocol_gateway.py, which we consider the project root
@@ -1765,8 +2154,23 @@ def main(args: list[str] | None = None) -> None:
     log_file: str = config_parser.get("logging", "log_file", fallback="MPG.log")
     log_dir: str = config_parser.get("logging", "log_dir", fallback="logs")
 
-    start_webserver(config_path, log_file, log_dir, gateway_instance=mpg)
-    mpg.run()
+    manager = GatewayManager(config_file, config_path)
+    mpg: Protocol_Gateway = manager.start()
+
+    start_webserver(config_path, log_file, log_dir, gateway_instance=mpg, gateway_manager=manager)
+
+    # run() now executes on its own thread (started inside manager.start()),
+    # not this one — that's what lets a reload triggered from the webUI
+    # thread (a commit, or FileWatcher noticing a hand-edited config.cfg)
+    # call manager.reload() and swap in a new gateway without contending
+    # with this thread for the loop. This thread just needs to stay alive
+    # for the process to keep running, and to still catch Ctrl+C cleanly.
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        logging.getLogger(__name__).info("Shutting down (KeyboardInterrupt)...")
+        manager.stop()
 
 
 if __name__ == "__main__":

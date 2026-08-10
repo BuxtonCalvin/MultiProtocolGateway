@@ -54,7 +54,7 @@
   {% if proto_tabs %}
   <!-- Export bar — links update when a tab is clicked -->
   <div class="flex items-center gap-2 mb-2">
-    <span class="text-mpg-500 text-xs">Export:</span>
+    <span class="surface-subtle text-xs">Export:</span>
     <a id="export-csv-link"
        href="#"
        class="btn-secondary text-xs pointer-events-none opacity-40"
@@ -63,32 +63,10 @@
        href="#"
        class="btn-secondary text-xs pointer-events-none opacity-40"
        download>↓ JSON</a>
-    <span class="text-mpg-600 text-xs">(select a tab to enable)</span>
+    <span class="surface-subtle text-xs">(select a tab to enable)</span>
   </div>
 
-  <div class="flex gap-1 mb-3 border-b border-mpg-700" role="tablist">
-    {% for tab in proto_tabs %}
-    <button class="tab-btn px-4 py-1.5 text-xs font-medium rounded-t
-                   {% if loop.first %}tab-active{% else %}tab-inactive{% endif %}"
-            role="tab"
-            data-protocol="{{ tab.protocol_name }}"
-            data-registry="{{ tab.registry_type }}"
-            aria-selected="{{ 'true' if loop.first else 'false' }}"
-            hx-get="/api/protocols/{{ tab.protocol_name }}/{{ tab.registry_type }}/table?device_name={{ device.name }}"
-            hx-target="#protocol-table-container"
-            hx-swap="innerHTML scroll:false"
-            hx-headers='{"Cache-Control": "no-cache"}'
-            {% if loop.first %}hx-trigger="load, click"{% else %}hx-trigger="click"{% endif %}>
-      {{ tab.registry_type | title }}
-      <span class="text-mpg-100 ml-1">({{ tab.protocol_name }})</span>
-      {% if tab.registry_type != "json" %}
-      <span class="tab-counts ml-1.5 text-mpg-400 text-xs">
-        W:{{ tab.write_count }} M:{{ tab.mask_count }} S:{{ tab.screen_count }}
-      </span>
-      {% endif %}
-    </button>
-    {% endfor %}
-  </div>
+  {% include "partials/protocol_tabs.html" %}
   {% endif %}
 
   <div id="protocol-table-container"
@@ -108,7 +86,7 @@
       const qs    = deviceName ? `?device_name=${encodeURIComponent(deviceName)}` : '';
       const csv   = document.getElementById('export-csv-link');
       const json  = document.getElementById('export-json-link');
-      const hint  = csv?.closest('.flex')?.querySelector('span.text-mpg-600');
+      const hint  = csv?.closest('.flex')?.querySelector('span.surface-subtle:last-child');
       if (!csv || !json) return;
       csv.href  = `${base}/export.csv${qs}`;
       json.href = `${base}/export.json${qs}`;
@@ -130,6 +108,10 @@
         this.setAttribute('aria-selected', 'true');
         // Export links
         updateExportLinks(this.dataset.protocol, this.dataset.registry);
+        // "<Registry Map> Available / Selected" badges — defined in
+        // scraper_panes.html's persistent script, which is still loaded
+        // since only #protocol-section itself gets swapped.
+        if (window.mpgUpdateTabMetricBadges) window.mpgUpdateTabMetricBadges(this);
       });
     });
 
