@@ -446,8 +446,8 @@ class prometheus_out(transport_base):
     include_protocol_label: bool = True
     max_label_value_length: int = 128
     counter_metric_suffixes: str = "_total"      # comma-separated
-    histogram_fields: str = ""                    # comma-separated, opt-in
-    histogram_buckets: str = ""                    # comma-separated floats, optional override
+    histogram_fields: str = ""                   # comma-separated, opt-in
+    histogram_buckets: str = ""                  # comma-separated floats, optional override
 
     # FastAPI mount-in-existing-app path
     metrics_path: str = "/metrics"
