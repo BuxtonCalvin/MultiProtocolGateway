@@ -14,11 +14,13 @@
 #   pgadmin        - pgAdmin 4 web UI (:5050)
 #   chronograf     - InfluxDB web dashboard (:8888)
 #   grafana        - Grafana visualization (:3000)
+#   prometheus      - Prometheus monitoring (:9090)
 #   portainer       - Portainer Docker management (:9000)
 #
 # Usage:
 #   1. Copy this file and the companion configs to your docker compose deployment directory:
 #        cp docker-compose.yml /opt/mpg/docker-compose.yml
+#        Then edit the file to suit your needs (Needed apps, ports, volumes, etc.)
 #
 #   2. Create the .env file from the example and set your passwords:
 #        cp .env.example .env && nano .env
@@ -170,44 +172,53 @@ services:
       start_period: 20s
 
   # ---------------------------------------------------------------------------
-  # InfluxDB  (v3.x — compatible with MPG's influxdb_out transport)
+  # InfluxDB  (v3.x — compatible with MPG's influxdb3_out transport)
   # ---------------------------------------------------------------------------
   influxdb3:
     image: influxdb:3-core
-    container_name: influxdb_v3
+    container_name: influxdb_v3-core
     <<: [*restart-policy, *default-logging]
+    user: root
+    environment:
+    # This env tells the engine process which token string matches the operational layer. Generate the key per above.
+      - INFLUXDB3_AUTH_TOKEN=apiv3_CiLCKXAAbiCBxSzqvjT09Ev1ZK5DBDFo1I-Z11ALvJm-oh9XqoFQmZ_99im0D4r2xkm6toTX3XzSspaKj1XB4A
     ports:
-      - "8181:8181" # Native v3 API port
+      - "8100:8181" # Native v3 API port
     volumes:
-      - mpg/influxdb3/influxdb3_data:/var/lib/influxdb3/data
-    networks:
-      - mpg_internal      
+      - mpg/influxdb3/data:/var/lib/influxdb3/data:z
+      - mpg/influxdb3/influxdb3_plugins:/var/lib/influxdb3/plugins
+      #- mpg/influxdb3/certs:/etc/ssl/influxdb:ro    # Mounts your host certs folder into the container
     command:
       - influxdb3
       - serve
       - --node-id=node0
-      - --cluster-id=cluster0
       - --object-store=file
       - --data-dir=/var/lib/influxdb3/data
+      - --plugin-dir=/var/lib/influxdb3/plugins
+      - --disable-authz=health,ping
+      - --admin-token-file=/var/lib/influxdb3/data/admin_token.json
+      #- --tls-cert=/etc/ssl/influxdb/server-cert.pem
+      #- --tls-key=/etc/ssl/influxdb/server-key.key
+    networks:
+      - mpg_internal
   
   # Only if using influxdb3 -- influxdb3 configuration ui tool
-  explorer:
-    # explicit consistent stable version is 1.8.0
-    image: influxdata/influxdb3-ui:1.8.0
+  influxdb3-explorer:
+    image: influxdata/influxdb3-ui:latest
     container_name: influxdb3-explorer
-    <<: [*restart-policy, *default-logging]
+    <<: [*restart-policy, *default-logging]    
+    user: root
     ports:
-      - "8888:8080"
-    volumes:
-      - mpg/influxdb3/db:/db:rw
-      # set the params for influxdb3 in the config.json file
-      - mpg/influxdb3/config:/app-root/config:ro
+      - "8889:80"
+      - "8887:443"
+      - "8886:8080"
     environment:
-      - SESSION_SECRET_KEY=${INFLUXDB_SESSION_SECRET_KEY:?INFLUXDB_SESSION_SECRET_KEY must be set in .env}
-    command:
-      - --mode=admin      
+      - SESSION_SECRET_KEY=${SESSION_SECRET_KEY:-}
+    command: ["--mode=admin"]
+    restart: unless-stopped 
     networks:
-      - mpg_internal            
+      - mpg_internal
+                 
 
 
   # ---------------------------------------------------------------------------
@@ -320,6 +331,30 @@ services:
       influxdb:
         condition: service_healthy
 
+  prometheus:
+    container_name: prometheus
+    image: prom/prometheus:latest
+    <<: [*restart-policy, *default-logging]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - mpg/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - mpg/prometheus/prometheus_data:/prometheus
+    user: root   
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+      - '--web.enable-remote-write-receiver'
+      - '--enable-feature=promql-experimental-functions'
+      - '--storage.tsdb.retention.time=30d'
+    ports:
+      - 9090:9090
+    expose:
+      - 9090
+    networks:
+      - mpg_internal
   portainer:
     image: portainer/portainer-ce:latest
     container_name: portainer
