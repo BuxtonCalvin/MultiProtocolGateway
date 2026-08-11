@@ -17,7 +17,7 @@ This application was inspired by and built upon the excellent work by [@HotNoob]
 
 ## What MPG does
 
-MPG reads live register data from Modbus RTU/TCP, CAN bus, and proprietary serial protocols, then fans that data out to any combination of MQTT brokers, Timescale DB, InfluxDB, and JSON outputs — all managed through a built-in web administration UI.  Using the MQTT bridge, you can write back to your inverter allowing automation routines.  It is planned to extend hardware reads to include REST apis as well as proprietary protocols that do not rely on serial data.
+MPG reads live register data from Modbus RTU/TCP, CAN bus, and proprietary serial protocols, then fans that data out to any combination of MQTT brokers, Timescale DB, InfluxDB, Prometheus, and JSON outputs — all managed through a built-in web administration UI.  Using the MQTT bridge, you can write back to your inverter allowing automation routines.  It is planned to extend hardware reads to include REST apis as well as proprietary protocols that do not rely on serial data.
 
 MPG is purpose-built for solar inverters, battery management systems (BMS), energy meters, and any device that speaks Modbus, but its protocol-map architecture means it can be adapted to virtually any register-based hardware.
 
@@ -46,7 +46,7 @@ MPG is purpose-built for solar inverters, battery management systems (BMS), ener
 | Capability | Details |
 | --- | --- |
 | **Input protocols** (scrapers) | Modbus RTU, Modbus TCP, Modbus TLS, Modbus UDP, CAN bus, PACE BMS serial, Pylon serial, EG4 LL-S RS-485 |
-| **Output transports** (bridges) | MQTT, Timescale DB (PostgreSQL hypertable), InfluxDB, JSON file |
+| **Output transports** (bridges) | MQTT, Timescale DB (PostgreSQL hypertable), InfluxDB, InfluxDB3, Prometheus, JSON file |
 | **Web UI** | Full browser-based configuration and live management on port **1717** |
 | **Protocol library** | 50+ pre-built device protocol maps; live register analysis tool to build new ones |
 | **Config management** | SQLite staging database; changes are previewed and committed — no raw file editing required |
@@ -147,7 +147,7 @@ A dedicated page streams the live gateway log to the browser, making it easy to 
 
 ### Transport Library
 
-A reference page listing all available transport classes — scraper types (Modbus variants, CAN bus, serial) and bridge types (MQTT, TimescaleDB, InfluxDB, JSON) — with their configurable parameters.
+A reference page listing all available transport classes — scraper types (Modbus variants, CAN bus, serial) and bridge types (MQTT, TimescaleDB, InfluxDB, InfluxDB3, Prometheus, JSON) — with their configurable parameters.
 
 ![Transport Library](classes/WebServer/static/screenshots/transport_library.png)
 
@@ -171,6 +171,9 @@ Here are overviews of two database bridges:
 
   - Troubleshooting
     [`troubleshooting_influxdb.md`](documentation/bridges/InfluxDB/troubleshooting_influxdb.md)
+  
+  - InfluxDB3 Special setup
+    [`influxDB3.md`](documentation/bridges/InfluxDB/InfluxDB3.md)
 
 - TimeScale DB [![Timescale DB](https://img.shields.io/badge/Postgres-%23316192.svg?logo=postgresql&logoColor=white)](https://timescale.com)
   - Readme
@@ -178,11 +181,16 @@ Here are overviews of two database bridges:
   - Mermaid schema
     [Timescale DB Architecture](documentation/architecture/mermaid-diagrams.md#timescaledb-telemetry-schema-created-by-timescaledb-bridge)
 
-Here are the overviews of the MQTT and JSON bridges
+Here are the overviews of the MQTT, Prometheus and JSON bridges
 
 - MQTT [![Mosquitto](https://img.shields.io/badge/Eclipse-FE7A16.svg?logo=Eclipse&logoColor=white)](https://mosquitto.org)
   - Readme
     [`MQTT`](documentation/bridges/MQTT/MQTT_bridge.md)
+
+- Prometheus [![Prometheus](https://img.shields.io/badge/Prometheus-E6522C?style=for-the-badge&logo=prometheus&logoColor=white)](https://prometheus.io/)
+
+  - Readme
+    [`Prometheus`](documentation/bridges/JSON/prometheus_out.md)
 
 - JSON
   - Readme
@@ -241,7 +249,7 @@ Hardware Device
         │  parsed register values
         ▼
  ┌─────────────┐
- │   Bridge    │  mqtt · timescaledb · influxdb_out · json_out
+ │   Bridge    │  mqtt · timescaledb · influxdb_out · influxdb3_out · prometheus_out · json_out
  └─────────────┘
 ```
 
@@ -356,7 +364,7 @@ docker run \
 
 ## Full Docker Compose Stack
 
-For a complete monitoring stack — MPG + Timescale DB + InfluxDB + MQTT + pgAdmin + Chronograf + Grafana — see the included [`docker-compose.yml`](documentation/docker/docker-compose.yml) in this repository.
+For a complete monitoring stack — MPG + Timescale DB + InfluxDB + InfluxDB3 + MQTT + Prometheus + pgAdmin + Chronograf + Grafana — see the included [`docker-compose.yml`](documentation/docker/docker-compose.yml) in this repository.
 
 The stack provides:
 
@@ -368,6 +376,7 @@ The stack provides:
 | **InfluxDB3** | 8181 | Alternative time-series database |
 | **influxdb3-explorer** | 8888 | Influx3 administration |
 | **Mosquitto MQTT** | 1883 / 9001 | MQTT broker for Home Assistant and other subscribers |
+| **Prometheus** | 9090 | Prometheus metrics |
 | **pgAdmin** | 5050 | PostgreSQL/Timescale DB web management UI |
 | **Chronograf** | 8888 | InfluxDB web dashboard |
 | **Grafana** | 3000 | Unified visualization for all data sources |
@@ -439,6 +448,7 @@ The code for this InfluxDB dashboard can be found here:
 The code for the exact same style TimescaleDB dashboards can be found here:
 
 [Grafana TimescaleDB Wide Table JSON](documentation/dashboards/GrafanaTimescaleDBWideDashboard.json)
+
 [Grafana TimescaleDB Narrow Table JSON](documentation/dashboards/GrafanaTimescaleDBNarrowDashboard.json)
 
 ## Protocol Maps & Register Configuration

@@ -29,7 +29,7 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Callable, Literal, Optional, cast
+from typing import Any, Callable, Optional, cast
 
 import pyarrow as pa
 import requests
@@ -309,82 +309,69 @@ class influxdb3_out(transport_base):
     # ------------------------------------------------------------------
 
     def connect(self) -> bool:
-        """Initialize the InfluxDB v3 client connection and diagnostic HTTP session."""
-        self._log.info("influxdb3_out connect")
-
+        """Initialize the InfluxDB v3 client connection and handle lifecycle states."""
+        self._log.info("influxdb3_out connecting to server...")
         try:
-            # 1. Clean up old diagnostic session if this is a reconnect attempt
+            # Clean up old diagnostic session if this is a reconnect attempt
             old_session: Optional[requests.Session] = getattr(self, "session", None)
             if old_session is not None:
                 try:
                     old_session.close()
                 except Exception as e:
-                    # Log at debug level so it doesn't clutter normal logs, but isn't hidden
-                    self._log.debug(f"Failed to close old diagnostic session during reconnect: {e}")
+                    self._log.debug(f"Failed to close old diagnostic session: {e}")
                 self.session = None
 
+            # Initialize the official gRPC engine client
             client_kwargs: dict[str, Any] = self._build_client_kwargs()
             self.client = InfluxDBClient3(**client_kwargs)
 
-            # 2. Extract configuration directly from build kwargs to build the companion session
+            # Establish companion HTTP session for diagnostics
             token: str = client_kwargs.get("token", "")
-
-            # Initialize persistent session for background pprof diagnostic probes
             session = requests.Session()
-
-            adapter = HTTPAdapter(
-                pool_connections=2,
-                pool_maxsize=4,
-                max_retries=1
-            )
+            adapter = HTTPAdapter(pool_connections=2, pool_maxsize=4, max_retries=1)
             session.mount("https://", adapter)
             session.mount("http://", adapter)
-
-            # Automatically authenticate background HTTP calls with the Influx token
             if token:
                 session.headers.update({"Authorization": f"Token {token}"})
+            self.session: requests.Session | None= session
 
-            # Save the initialized session to the instance container
-            self.session = session
+            # Attempt a read probe against the targeted database context
+            try:
+                self._health_check()  # Runs: SHOW TABLES LIMIT 1
+                self._log.debug(f"Database '{self.database}' verified online.")
+            except Exception as health_err:
+                err_msg = str(health_err).lower()
 
-            # Use cast() to resolve the missing type definition on the external .query() method
-            raw_table: Any = self.client.query("SELECT database_name FROM system.databases") # type: ignore[reportUnknownMemberType]
-            databases_table = cast(pa.Table, raw_table)
+                # Intercept the exact error indicating the database is not initialized
+                if "database not found" in err_msg or "cannot retrieve database" in err_msg:
+                    if not self.auto_create_database:
+                        self._log.warning(
+                            f"Database '{self.database}' does not exist on the server "
+                            f"and auto_create_database=false. Aborting connection setup."
+                        )
+                        return False
 
-            # Handle chunk indexing strictly if PyArrow's __getitem__ returns an untyped ChunkedArray
-            column_data: Any = databases_table["database_name"]
-            existing_databases: list[str] = cast(list[str], column_data.to_pylist())
-
-            if self.database not in existing_databases:
-                if not self.auto_create_database:
-                    self._log.warning(
-                        f"Database '{self.database}' not found and auto_create_database=false. "
-                        f"Create it manually or set auto_create_database=true."
+                    # SELF-HEALING ACTION: Bypass the query block.
+                    # InfluxDB 3 auto-provisions namespaces on the first write payload.
+                    self._log.info(
+                        f"Database '{self.database}' is missing from the catalog. "
+                        f"The server will automatically create it upon your module's first write batch."
                     )
                 else:
-                    self._create_database()
-
-            # InfluxDB v3 has no ping(); perform a lightweight health check via a
-            # no-op query so we surface auth / connectivity problems early.
-            self._health_check()
+                    # Immediately re-raise real issues like networking or bad credentials
+                    raise health_err  # noqa: TRY201
 
         except Exception as e:
             self._log.error(f"Failed to connect to InfluxDB: {e}")
             self.connected = False
-
-            # Clean up the session immediately if setup fails after session instantiation
             if getattr(self, "session", None) is not None:
                 try:
-                    if self.session is not None:
-                        self.session.close()
-                except Exception as close_err:
-                    # Log the specific error encountered during the emergency close routine
-                    self._log.debug(f"Failed to close session during connection rollback: {close_err}")
+                    self.session.close() # type: ignore
+                except Exception:  # noqa: S110
+                    pass
                 self.session = None
-
             return False
         else:
-            # This runs only if the try block succeeds perfectly
             self.connected = True
             self.last_connection_check = time.time()
             self.last_periodic_reconnect_attempt = time.time()
@@ -392,8 +379,7 @@ class influxdb3_out(transport_base):
 
             if self.enable_persistent_storage:
                 self._flush_backlog()
-
-        return True
+            return True
 
 
     def _build_client_kwargs(self) -> dict[str, Any]:
@@ -404,8 +390,14 @@ class influxdb3_out(transport_base):
         Only included when explicitly set in config for Cloud Dedicated
         or Cloud Serverless deployments that require it.
         """
+
+        # Clean host URLs: InfluxDB v3 client strictly expects a protocol prefix (http:// or https://)
+        # For your local Docker Compose environment, ensure settings file passes: "http://localhost:8100"
+        host_url = self.host.strip()
+        if not (host_url.startswith("http://") or host_url.startswith("https://")):
+            host_url: str = f"http://{host_url}"
         kwargs: dict[str, Any] = {
-            "host":     self.host,
+            "host":     host_url,
             "token":    self.token,
             "database": self.database,
         }
@@ -414,37 +406,26 @@ class influxdb3_out(transport_base):
         return kwargs
 
     def _create_database(self) -> None:
-        headers: dict[str, str] = {
-            "Authorization": f"Bearer {self.token}",
-            "Content-Type": "application/json",
-        }
+        """Programmatically provisions the database target using the native gRPC management client."""
+        self._log.info(f"Database '{self.database}' missing. Programmatically creating it via SDK...")
 
-        payload: dict[str, str] = {"db": self.database}
-        response: requests.Response | None = None  # Explicitly bind the variable first
+        if self.client is None:
+            raise RuntimeError("Cannot create database: InfluxDBClient3 client is not initialized.")
 
         try:
-            response = requests.post(
-                self.mgmt_api_url,
-                json=payload,
-                headers=headers,
-                timeout=(self.connection_timeout, self.connection_timeout * 3),
-            )
+            # The official v3 client provides a native management method
+            # that bypasses the SQL planning engine entirely
+            self.client.create_database(database=self.database) # type: ignore
+            self._log.info(f"Database '{self.database}' created successfully from code.")
 
-            if response.status_code == 409:
-                self._log.info(f"Database {self.database} already exists.")
+        except Exception as e:
+            error_msg: str = str(e).lower()
+            if "already exists" in error_msg or "409" in error_msg:
+                self._log.info(f"Database {self.database} already exists on the server.")
                 return
 
-            response.raise_for_status()
-            self._log.info(f"Database {self.database} created successfully.")
-
-        except requests.exceptions.HTTPError as e:
-            # Check response to satisfy type-checkers that it isn't None
-            status: int | Literal['Unknown'] = response.status_code if response else "Unknown"
-            msg: str = f"Failed to create database {self.database}. Status: {status}. Error: {e}"
-            raise RuntimeError(msg) from e
-
-        except requests.exceptions.ConnectionError as e:
-            msg: str = f"Could not connect to InfluxDB management API at {self.mgmt_api_url}. Check mgmt_api_url. Error: {e}"
+            msg: str = f"Failed to programmatically create database {self.database}. Error: {e}"
+            self._log.error(msg)
             raise RuntimeError(msg) from e
 
 
