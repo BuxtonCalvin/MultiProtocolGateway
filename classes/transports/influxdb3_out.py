@@ -30,7 +30,7 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Callable, NotRequired, Optional, TypedDict, cast
+from typing import Callable, Optional, TypedDict, cast
 from urllib.parse import urlsplit
 
 import pyarrow as pa
