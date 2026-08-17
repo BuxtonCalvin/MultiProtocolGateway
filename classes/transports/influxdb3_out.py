@@ -25,11 +25,12 @@ from __future__ import annotations
 import logging
 import math
 import pickle
+import sys
 import threading
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Callable, NotRequired, Optional, TypedDict, cast
+from typing import Callable, Optional, TypedDict, cast
 from urllib.parse import urlsplit
 
 import pyarrow as pa
@@ -55,6 +56,10 @@ from .transport_base import (
     transport_base,
 )
 
+if sys.version_info >= (3, 11):
+    from typing import NotRequired
+else:
+    from typing_extensions import NotRequired
 # Type alias for a serializable InfluxDB point dict (including the optional
 # internal '_backlog_time' sentinel used for age-based eviction)
 InfluxPoint = dict[str, object]
