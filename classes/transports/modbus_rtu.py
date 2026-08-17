@@ -22,10 +22,10 @@
 from __future__ import annotations
 
 from threading import Lock
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
 from pymodbus.client import ModbusSerialClient
-from pymodbus.client.base import ModbusBaseClient, ModbusBaseSyncClient
+from pymodbus.client.base import ModbusBaseSyncClient
 from pymodbus.exceptions import ConnectionException, ModbusException, ModbusIOException
 from pymodbus.pdu import ExceptionResponse, ModbusPDU
 
@@ -47,7 +47,6 @@ class modbus_rtu(modbus_base):
     transport_type: str = "scraper"
     def __init__(self, settings : TransportSettings) -> None:
         super().__init__(settings)
-        self.client: ModbusBaseClient | None = None
 
         self.port = settings.get("port", fallback="/dev/ttyUSB0")
         if not self.port:
@@ -74,43 +73,38 @@ class modbus_rtu(modbus_base):
         self._log.debug(f"Creating new client with baud rate: {self.baudrate}")
 
 
-        client_args: dict[str, Any] = {
-            "port": self.port,
-            "baudrate": int(self.baudrate),
-            "stopbits": settings.getint("stopbits", fallback=1),
-            "parity": settings.get("parity", fallback="N"),
-            "bytesize": settings.getint("bytesize", fallback=8),
-            "timeout": settings.getfloat("timeout", fallback=2.0),
-        }
-
-        self.client = cast(ModbusBaseClient, ModbusSerialClient(**client_args))
+        self.client = ModbusSerialClient(
+            port=self.port,
+            baudrate=int(self.baudrate),
+            stopbits=settings.getint("stopbits", fallback=1),
+            parity=settings.get("parity", fallback="N"),
+            bytesize=settings.getint("bytesize", fallback=8),
+            timeout=settings.getfloat("timeout", fallback=2.0),
+        )
 
         #add to clients (thread-safe)
         with self._clients_lock:
             modbus_base.clients[client_str] = self.client
 
-    def read_registers(self, start: int, count: int = 1, registry_type: Registry_Type = Registry_Type.INPUT, **kwargs: Any) -> Any:
+    def read_registers(self, start: int, count: int = 1, registry_type: Registry_Type = Registry_Type.INPUT, device_id: int | None = None) -> ModbusPDU | None:
         if self.client is None:
             self._log.error("read_registers called before client was initialized")
             return None
 
-        # Cast to ModbusBaseSyncClient (ModbusClientMixin[ModbusPDU]) so the type
-        # checker resolves T -> ModbusPDU and types result as ModbusPDU, not
-        # Awaitable[ModbusPDU] (which is the async specialization).
-        sync_client: ModbusBaseSyncClient = cast(ModbusBaseSyncClient, self.client)
-        call_kwargs: dict[str, Any] = self._get_correct_device_arg(kwargs)
+        sync_client: ModbusBaseSyncClient = self.client
+        resolved_device_id: int = self._get_device_id(device_id)
         port_lock: Lock = self._get_port_lock()
         result: ModbusPDU | None = None
         with port_lock:
             try:
                 if registry_type == Registry_Type.INPUT:
-                    result = sync_client.read_input_registers(start, count=count, **call_kwargs)
+                    result = sync_client.read_input_registers(start, count=count, device_id=resolved_device_id)
                 elif registry_type == Registry_Type.HOLDING:
-                    result = sync_client.read_holding_registers(start, count=count, **call_kwargs)
+                    result = sync_client.read_holding_registers(start, count=count, device_id=resolved_device_id)
                 elif registry_type == Registry_Type.COIL:
-                    result = sync_client.read_coils(start, count=count, **call_kwargs)
+                    result = sync_client.read_coils(start, count=count, device_id=resolved_device_id)
                 elif registry_type == Registry_Type.DISCRETE:
-                    result = sync_client.read_discrete_inputs(start, count=count, **call_kwargs)
+                    result = sync_client.read_discrete_inputs(start, count=count, device_id=resolved_device_id)
                 else:
                     self._log.warning(
                         f"read_registers: unsupported registry_type '{registry_type.name}' for RTU transport — returning None")
@@ -136,7 +130,7 @@ class modbus_rtu(modbus_base):
             return None
 
         # Use hasattr to safely check for the error attribute/method
-        is_error: bool | Any = result.isError() if hasattr(result, "isError") else getattr(result, "is_error", False)
+        is_error: bool = result.isError() if hasattr(result, "isError") else bool(getattr(result, "is_error", False))
 
         if is_error:
             self._log.error(f"Modbus Error: {result}")

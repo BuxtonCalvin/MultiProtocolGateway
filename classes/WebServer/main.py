@@ -43,7 +43,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, List
+from typing import List, Protocol
 
 import uvicorn
 from fastapi import FastAPI, Request
@@ -71,12 +71,30 @@ from .services.setting_description_service import seed_setting_descriptions
 
 _log: logging.Logger = logging.getLogger(__name__)
 
+JsonValue = str | int | float | bool | None
+
+
+class GatewayManagerLike(Protocol):
+    @property
+    def current(self) -> object | None: ...
+
+    def reload(self, trigger: str) -> "ReloadStatusLike": ...
+
+
+class ReloadStatusLike(Protocol):
+    ok: bool
+    message: str
+
+
+class GatewayInstanceLike(Protocol):
+    web_server: "NoSignalServer | None"
+
 
 # ---------------------------------------------------------------------------
 # Logging — attach a dedicated rotating file handler to the "classes.WebServer"
 # logger subtree only.  We never touch the root logger or the gateway's
 # handlers.  All webserver loggers inherit from "classes.WebServer.*" so they
-# naturally pick up this handler without stealing anything from the gateway.
+# naturally pick up this handler without taking anything from the gateway.
 #
 # A QueueHandler + QueueListener pair is still used so the uvicorn event-loop
 # thread never blocks on file I/O (the listener drains on its own thread).
@@ -118,7 +136,7 @@ def _install_webserver_logging() -> None:
         return
 
     # ── Non-Blocking Queue Setup ───────────────────────────────────────────
-    log_queue: _queue.SimpleQueue[Any] = _queue.SimpleQueue()
+    log_queue: _queue.SimpleQueue[logging.LogRecord] = _queue.SimpleQueue()
     queue_handler = logging.handlers.QueueHandler(log_queue)  # type: ignore
 
     # Attach the filter to the queue_handler here
@@ -190,10 +208,10 @@ def create_app(
     log_dir: str,
     project_root: Path,
     config_dir: Path | None = None,
-    gateway_instance: Any = None,
-    gateway_manager: Any = None,
+    gateway_instance: object | None = None,
+    gateway_manager: GatewayManagerLike | None = None,
 
-) -> FastAPI:
+    ) -> FastAPI:
     """
     Build and return the FastAPI application.
 
@@ -295,7 +313,7 @@ def create_app(
             to the last-known-good backup instead of the (broken) edit."""
             if gateway_manager is None:
                 return
-            status = gateway_manager.reload(trigger="file_watch")
+            status: ReloadStatusLike = gateway_manager.reload(trigger="file_watch")
             app.state.gateway = gateway_manager.current
             if not status.ok:
                 _log.error(f"Gateway reload (file_watch) did not fully succeed: {status.message}")
@@ -387,7 +405,7 @@ def create_app(
         return FileResponse(favicon_path)
 
     @app.get("/api/scan", tags=["admin"])
-    async def trigger_scan(request: Request) -> dict[str, Any]:  # pyright: ignore[reportUnusedFunction]
+    async def trigger_scan(request: Request) -> dict[str, JsonValue]:  # pyright: ignore[reportUnusedFunction]
         """Manually trigger a re-scan of config + protocols."""
         # from classes.WebServer.debug_defaults import check_stale_db_rows, run_debug
         # run_debug(project_root=request.app.state.project_root, config_path=request.app.state.config_path)
@@ -417,7 +435,14 @@ _current_port: int = 1717
 # Launcher — called from protocol_gateway.py
 # ---------------------------------------------------------------------------
 
-def start_webserver(config_file_path: Path, log_file: str, log_dir: str, gateway_instance: Any = None, gateway_manager: Any = None, port: int = 1717) -> None:
+def start_webserver(
+    config_file_path: Path,
+    log_file: str,
+    log_dir: str,
+    gateway_instance: GatewayInstanceLike | None = None,
+    gateway_manager: GatewayManagerLike | None = None,
+    port: int = 1717,
+) -> None:
     """
     Launch the FastAPI web server in a daemon thread.
     Returns immediately; the server runs in the background.

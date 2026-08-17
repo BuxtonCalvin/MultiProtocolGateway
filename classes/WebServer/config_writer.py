@@ -33,7 +33,7 @@ import logging
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import Any, List, Tuple
+from typing import List, Tuple
 
 from sqlalchemy.engine.row import Row
 from sqlalchemy.orm import Session
@@ -147,7 +147,18 @@ def _write_mask_screen_files(db: Session, project_root: Path) -> dict[str, int]:
         if not protocol_version:
             continue
 
-        # Find all registers for this protocol
+        # Find all registers for this protocol. Synthetic and JSON
+        # code-description rows are excluded here — "Synthetic and JSON
+        # metric descriptions should not be written to a mask or screen
+        # file." Their selection still reaches these files correctly: the
+        # mask/screen cascade in protocol_service.toggle_register_field /
+        # materialize_and_toggle_virtual_metric keeps a description's
+        # DeviceProtocolSelection in lockstep with its underlying CODE
+        # register's (a real, non-excluded CSV row), so selecting a
+        # description writes its code's name here, never the description's
+        # own name — same for a synthetic field's code (there isn't one, so
+        # a synthetic selection has no file representation at all; it can
+        # only reach the data stream via its own always-forwarded path).
         registers: List[Row[Tuple[DeviceProtocolSelection, ProtocolRegister]]] = (
             db.query(DeviceProtocolSelection, ProtocolRegister)
             .join(
@@ -159,6 +170,8 @@ def _write_mask_screen_files(db: Session, project_root: Path) -> dict[str, int]:
             .filter(
                 DeviceProtocolSelection.device_name == transport_name,
                 DeviceProtocolSelection.protocol_name.like(f"{protocol_version}%"),
+                ProtocolRegister.is_synthetic == False,   # noqa: E712
+                ProtocolRegister.is_json_desc == False,   # noqa: E712
             )
             .all()
         )
@@ -231,7 +244,7 @@ def _write_writable_csv(db: Session, protocols_dir: Path, config_dir: Path) -> i
     Returns count of writable files written.
     """
     config_dir.mkdir(parents=True, exist_ok=True)
-    device_names: list[Any] = [
+    device_names: list[str] = [
         row[0]
         for row in (
             db.query(DeviceProtocolSelection.device_name)
@@ -247,7 +260,7 @@ def _write_writable_csv(db: Session, protocols_dir: Path, config_dir: Path) -> i
         # confirm the underlying CSV(s) still exist, so a missing/renamed
         # protocol file surfaces as a warning here instead of silently
         # writing a writable file with no protocol behind it.
-        protocol_names_for_device: list[Any] = [
+        protocol_names_for_device: list[str] = [
             row[0]
             for row in (
                 db.query(DeviceProtocolSelection.protocol_name)
@@ -329,7 +342,7 @@ def _find_protocol_csv(protocols_dir: Path, protocol_name: str) -> Path | None:
 
 
 def _write_protocol_csvs(db: Session, protocols_dir: Path) -> int:
-    dirty_protocols: List[Any] = [
+    dirty_protocols: List[str] = [
         row[0]
         for row in (
             db.query(ProtocolRegister.protocol_name)
@@ -347,7 +360,19 @@ def _write_protocol_csvs(db: Session, protocols_dir: Path) -> int:
 
         rows: List[ProtocolRegister] = (
             db.query(ProtocolRegister)
-            .filter(ProtocolRegister.protocol_name == protocol_name)
+            .filter(
+                ProtocolRegister.protocol_name == protocol_name,
+                # is_synthetic / is_json_desc rows are materialized on-demand
+                # for the webUI's selectable synthetic/JSON metrics (see
+                # services.protocol_service.materialize_and_toggle_virtual_metric)
+                # — never real CSV rows, so they must never be written back
+                # into one. Their register_address is a "~"-prefixed virtual
+                # token, not a real register address, so writing them out
+                # would corrupt the CSV even if is_dirty tripped for an
+                # unrelated real row in the same protocol.
+                ProtocolRegister.is_synthetic == False,   # noqa: E712
+                ProtocolRegister.is_json_desc == False,   # noqa: E712
+            )
             .order_by(ProtocolRegister.register_address)
             .all()
         )

@@ -29,7 +29,8 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Callable, Optional, cast
+from typing import Callable, NotRequired, Optional, TypedDict, cast
+from urllib.parse import urlsplit
 
 import pyarrow as pa
 import requests
@@ -43,14 +44,32 @@ from classes.protocol_settings import registry_map_entry
 from defs.common import TransportSettings, strtobool
 
 from ..protocol_settings import Data_Type, Registry_Type
-from .transport_base import transport_base
-
-# Type alias for the data payload shared across all write methods
-DataPayload = dict[str, int | float | str]
+from .transport_base import (
+    BridgeHealthSnapshot,
+    ColumnInfo,
+    DataPayload,
+    HeapProfile,
+    StaleRegistryState,
+    StorageOverview,
+    TableStat,
+    transport_base,
+)
 
 # Type alias for a serializable InfluxDB point dict (including the optional
 # internal '_backlog_time' sentinel used for age-based eviction)
 InfluxPoint = dict[str, object]
+
+
+class InfluxDB3ClientKwargs(TypedDict):
+    """Keyword arguments for InfluxDBClient3 construction (see
+    _build_client_kwargs). org is NotRequired — it's omitted entirely for
+    self-hosted IOx deployments since some client versions reject a None
+    value, and only included when explicitly set in config for Cloud
+    Dedicated / Cloud Serverless deployments that require it."""
+    host: str
+    token: str
+    database: str
+    org: NotRequired[str]
 
 
 class influxdb3_out(transport_base):
@@ -61,6 +80,12 @@ class influxdb3_out(transport_base):
     # Class-level attribute declarations (overridden in __init__)
     # ------------------------------------------------------------------
     host: str = "https://us-east-1-1.aws.cloud2.influxdata.com"
+
+    # Optional. If set, overrides any port embedded directly in the `host`
+    # setting (legacy "myhost:8181" style config). Left empty, an embedded
+    # host port is kept as-is — so existing configs written before this
+    # setting existed keep working unchanged. See _normalize_host.
+    port: str = ""
     database: str = "solar"       # In v3 this is the "bucket" / database name
     token: str = ""               # v3 uses token-based auth (replaces username/password)
     org: str = ""                 # Organization name (required for InfluxDB Cloud)
@@ -125,7 +150,9 @@ class influxdb3_out(transport_base):
         super().__init__(settings)
 
         self.host = settings.get("host", fallback=self.host)
-        self.mgmt_api_url: str = settings.get("mgmt_api_url", fallback=f"{self.host}/api/v3/databases")
+        self.port = settings.get("port", fallback=self.port)
+        self.host, self.port = self._normalize_host(self.host, self.port)
+        self.mgmt_api_url: str = settings.get("mgmt_api_url", fallback=f"{self._endpoint_url}/api/v3/databases")
         self.database = settings.get("database", fallback=self.database)
         self.auto_create_database: bool = strtobool(settings.get("auto_create_database", fallback="true"))
         self.token = settings.get("token", fallback=self.token)
@@ -148,7 +175,7 @@ class influxdb3_out(transport_base):
         self.retry_delay_mins: int = settings.getint("retry_delay_mins", fallback=self.retry_delay_mins)
 
         # Stale data runtime state — keyed by transport_name, tracks last seen data and timestamps for stale detection logic
-        self._stale_registry: dict[str, dict[str, Any]] = {}
+        self._stale_registry: dict[str, StaleRegistryState] = {}
 
         # Timestamp timezone setting — mirrors timescaledb.use_utc_timestamp
         self.use_utc_timestamp: bool = strtobool(settings.get("use_utc_timestamp", fallback=str(self.use_utc_timestamp)))
@@ -322,7 +349,7 @@ class influxdb3_out(transport_base):
                 self.session = None
 
             # Initialize the official gRPC engine client
-            client_kwargs: dict[str, Any] = self._build_client_kwargs()
+            client_kwargs: InfluxDB3ClientKwargs = self._build_client_kwargs()
             self.client = InfluxDBClient3(**client_kwargs)
 
             # Establish companion HTTP session for diagnostics
@@ -375,14 +402,57 @@ class influxdb3_out(transport_base):
             self.connected = True
             self.last_connection_check = time.time()
             self.last_periodic_reconnect_attempt = time.time()
-            self._log.info(f"Connected to InfluxDB v3 at {self.host}, database={self.database}")
+            self._log.info(f"Connected to InfluxDB v3 at {self._endpoint_url}, database={self.database}")
 
             if self.enable_persistent_storage:
                 self._flush_backlog()
             return True
 
 
-    def _build_client_kwargs(self) -> dict[str, Any]:
+    @property
+    def _endpoint_url(self) -> str:
+        """self.host + self.port combined into one URL, for logging and
+        client construction — the one place these two separate attributes
+        (see _normalize_host) are joined back together."""
+        return f"{self.host}:{self.port}" if self.port else self.host
+
+    @staticmethod
+    def _normalize_host(host: str, port: str) -> tuple[str, str]:
+        """
+        Split `host` and `port` into two clean, separate values — this is
+        the actual "separation" of host and port: `self.host` and
+        `self.port` stay independent attributes afterward, each holding
+        exactly one thing, rather than `self.host` silently becoming a
+        combined "host:port" string. Downstream consumers (the endpoint
+        display, log messages, _build_client_kwargs) can each use host and
+        port however they need — concatenated for a URL, shown separately
+        in a UI, etc. — without either one being wrong.
+
+        Returns (host, port) — host includes the scheme, never a port;
+        port is "" when none is configured or embedded.
+        """
+        host = host.strip()
+
+        scheme = "http"
+        for candidate in ("http", "https"):
+            prefix: str = f"{candidate}://"
+            if host.startswith(prefix):
+                scheme = candidate
+                host = host[len(prefix):]
+                break
+
+        # Parsed via urlsplit (rather than a hand-rolled rsplit on ":") so
+        # IPv6 literals like "[::1]:8181" are split into hostname/port
+        # correctly instead of on every colon.
+        parsed = urlsplit(f"//{host}")
+        hostname: str = parsed.hostname or host
+        if ":" in hostname:  # bare (unbracketed) IPv6 literal — needs brackets in a URL
+            hostname = f"[{hostname}]"
+
+        resolved_port: str = port.strip() or (str(parsed.port) if parsed.port else "")
+        return f"{scheme}://{hostname}{parsed.path}", resolved_port
+
+    def _build_client_kwargs(self) -> InfluxDB3ClientKwargs:
         """
         Builds the keyword arguments for InfluxDBClient3 construction.
         org is omitted entirely for self-hosted IOx deployments since it
@@ -390,13 +460,10 @@ class influxdb3_out(transport_base):
         Only included when explicitly set in config for Cloud Dedicated
         or Cloud Serverless deployments that require it.
         """
-
-        # Clean host URLs: InfluxDB v3 client strictly expects a protocol prefix (http:// or https://)
-        # For your local Docker Compose environment, ensure settings file passes: "http://localhost:8100"
-        host_url = self.host.strip()
-        if not (host_url.startswith("http://") or host_url.startswith("https://")):
-            host_url: str = f"http://{host_url}"
-        kwargs: dict[str, Any] = {
+        # self.host and self.port are kept separate (see _normalize_host) —
+        # combined into one URL only here, where the client actually needs it.
+        host_url: str = self._endpoint_url
+        kwargs: InfluxDB3ClientKwargs = {
             "host":     host_url,
             "token":    self.token,
             "database": self.database,
@@ -428,7 +495,6 @@ class influxdb3_out(transport_base):
             self._log.error(msg)
             raise RuntimeError(msg) from e
 
-
     def _health_check(self) -> None:
         """Perform a lightweight query to verify connectivity and credentials.
 
@@ -438,8 +504,11 @@ class influxdb3_out(transport_base):
         """
         if self.client is None:
             raise RuntimeError("Client not initialized")
-        # This query returns nothing but validates auth + network reachability.
-        self.client.query("SHOW TABLES LIMIT 1", database=self.database,language="sql") # type: ignore[reportUnknownMemberType]
+
+        # Validates auth, network, and database existence using a supported system query.
+        query_str = "SELECT 1 FROM information_schema.tables LIMIT 1"
+        self.client.query(query_str, database=self.database, language="sql") # type: ignore[reportUnknownMemberType]
+
 
     def _check_connection(self) -> bool:
         """Check if the connection is still alive and reconnect if necessary."""
@@ -482,7 +551,7 @@ class influxdb3_out(transport_base):
 
     def _attempt_reconnect(self) -> bool:
         """Attempt to reconnect to InfluxDB v3 with exponential backoff."""
-        self._log.info(f"Attempting to reconnect to InfluxDB v3 at {self.host}")
+        self._log.info(f"Attempting to reconnect to InfluxDB v3 at {self._endpoint_url}")
 
         for attempt in range(self.reconnect_attempts):
             try:
@@ -532,7 +601,7 @@ class influxdb3_out(transport_base):
         self.last_periodic_reconnect_attempt = 0.0
         return self._check_connection()
 
-    def get_health_snapshot(self) -> dict[str, Any]:
+    def get_health_snapshot(self) -> BridgeHealthSnapshot:
         """
         Read-only snapshot of this bridge's live connection/backlog/
         staleness state, for the device page's "Bridge Health" panel.
@@ -561,41 +630,34 @@ class influxdb3_out(transport_base):
             "tracked_transport_count": len(self._stale_registry),
         }
 
-    def get_storage_overview(self) -> dict[str, Any]:
+    def get_storage_overview(self) -> StorageOverview:
         """
         Best-effort, read-only storage snapshot for the device page's
-        Storage Overview panel. Three independent sources, each attempted
-        separately so one failing doesn't blank out the others:
+        Storage Overview panel. Tailored for influxdb3-core.
 
-        1. system.chunks — table_name/row_count/file_size_bytes/
-           memory_bytes per chunk, aggregated (summed) by table_name here.
-           This replaces the earlier single-sampled-table COUNT(*)
-           estimate with real, per-table figures for every table in one
-           query.
-        2. information_schema.columns — the full schema map (table_name,
-           column_name, data_type, iox::column_type) for every table.
-           Returned flat; services/bridge_service.get_influxdb_storage
-           groups it by table for display.
-        3. object_store_dir sizing and a heap-profile reachability probe
-           — both entirely opt-in (see the object_store_dir / debug_
-           pprof_url settings) and skipped silently if unconfigured.
+        Three independent sources, each attempted separately:
+        1. information_schema.columns (table names) + system.parquet_files
+           (row_count, size_bytes per file, summed per table) — Core has no
+           'system.chunks' table (that's Enterprise/Cloud-only), but it does
+           persist real per-file size and row count in system.parquet_files,
+           which this aggregates by table_name. See the inline comment below
+           for the accuracy trade-off this implies vs. a live COUNT(*).
+        2. information_schema.columns — Flat schema map of all columns,
+           types, and iox designations.
+        3. object_store_dir — Local directory size calculation. Crucial
+           for 3-core instances to capture true disk footprints.
 
-        Uses the same self.client.query(sql, database=..., language="sql")
-        call already used by connect() / _health_check() above, which
-        returns a pyarrow.Table — converted to plain Python via
-        to_pylist().
-
-        Nothing here raises — a failed query is recorded in `error` and
-        the rest of the snapshot still returns.
+        Nothing here raises — errors are logged and the remaining functional
+        metrics still return to populate the UI panel.
         """
-        result: dict[str, Any] = {
+        result: StorageOverview = {
             "connected": self.connected,
             "database": self.database,
             "items_label": "Tables",
             "has_table_stats": True,
             "table_stats": [],       # [{table_name, row_count, file_size_bytes, memory_bytes}]
             "columns": [],           # [{table_name, column_name, data_type, iox_column_type}]
-            "item_names": [],         # kept for template compatibility with the v1 panel — table names only
+            "item_names": [],         # table names only, for template compatibility
             "sample_item": None,
             "sample_item_approx_rows": None,
             "retention_policies": None,  # not applicable to v3
@@ -609,48 +671,117 @@ class influxdb3_out(transport_base):
             result["error"] = "Not connected to InfluxDB."
             return result
 
+        # 1. Gather Table Metric Fallbacks
         try:
-            chunks_result: Any = self.client.query(  # type: ignore[reportUnknownMemberType]
-                "SELECT table_name, row_count, file_size_bytes, memory_bytes FROM system.chunks",
+            # Drop the 'public' filter and explicitly filter out system tables instead
+            tables_query: pa.Table = cast(pa.Table, self.client.query( # type: ignore
+                "SELECT DISTINCT table_name FROM information_schema.columns "
+                "WHERE table_schema NOT IN ('information_schema', 'system')",
                 database=self.database,
                 language="sql",
+            ))
+            table_names: list[str] = sorted(
+                row["table_name"] for row in tables_query.to_pylist() if row.get("table_name")
             )
-            chunks_table: pa.Table = cast(pa.Table, chunks_result)
-            agg: dict[str, dict[str, int]] = {}
-            for row in chunks_table.to_pylist():
-                name: str | None = row.get("table_name")
-                if not name:
-                    continue
-                bucket: dict[str, int] = agg.setdefault(
-                    name, {"row_count": 0, "file_size_bytes": 0, "memory_bytes": 0}
-                )
-                bucket["row_count"] += int(row.get("row_count") or 0)
-                bucket["file_size_bytes"] += int(row.get("file_size_bytes") or 0)
-                bucket["memory_bytes"] += int(row.get("memory_bytes") or 0)
 
-            table_stats: list[dict[str, Any]] = [
-                {"table_name": name, **stats} for name, stats in sorted(agg.items())
+            # Real per-table row counts and on-disk sizes, aggregated from
+            # system.parquet_files — InfluxDB 3's actual persisted-storage
+            # system table (system.chunks, which the previous version of
+            # this method targeted, is Enterprise/Cloud-only and doesn't
+            # exist on Core). One query total, rather than a COUNT(*) per
+            # table: COUNT(*) against a table backed by many parquet files
+            # can fail outright once a table has enough of them ("Query
+            # would exceed file limit of N parquet files"), which this
+            # avoids entirely, and it's the only way to get a real
+            # file_size_bytes at all — COUNT(*) never could.
+            #
+            # Trade-off: parquet_files only reflects data already flushed
+            # to disk, so a table with very recent, not-yet-persisted
+            # writes may show a slightly lower row_count here than a live
+            # COUNT(*) would. Tables enumerated above but with no persisted
+            # files yet still appear, at 0 rows / 0 bytes, rather than
+            # being silently absent.
+            parquet_stats: dict[str, dict[str, int]] = {}
+            try:
+                parquet_table: pa.Table = cast(pa.Table, self.client.query(  # type: ignore[reportUnknownMemberType]
+                    "SELECT table_name, size_bytes, row_count FROM system.parquet_files",
+                    database=self.database,
+                    language="sql",
+                ))
+                for row in parquet_table.to_pylist():
+                    table_name: str | None = row.get("table_name")
+                    if not table_name:
+                        continue
+                    bucket: dict[str, int] = parquet_stats.setdefault(
+                        table_name, {"row_count": 0, "file_size_bytes": 0}
+                    )
+                    bucket["row_count"] += int(row.get("row_count") or 0)
+                    bucket["file_size_bytes"] += int(row.get("size_bytes") or 0)
+            except Exception as parquet_err:
+                self._log.debug(f"get_storage_overview: system.parquet_files query failed: {parquet_err}")
+
+            table_stats: list[TableStat] = [
+                {
+                    "table_name": name,
+                    "row_count": parquet_stats.get(name, {}).get("row_count", 0),
+                    "file_size_bytes": parquet_stats.get(name, {}).get("file_size_bytes", 0),
+                    # Not exposed by any Core system table — system.compactor,
+                    # which would have this, is Enterprise Pro-only.
+                    "memory_bytes": 0,
+                }
+                for name in table_names
             ]
-            result["table_stats"] = table_stats
-            result["item_names"] = [row["table_name"] for row in table_stats]
-        except Exception as e:
-            self._log.error(f"get_storage_overview: system.chunks query failed: {e}")
-            result["error"] = f"Chunk stats query failed: {e}"
 
+            result["table_stats"] = table_stats
+            result["item_names"] = table_names
+
+        except Exception as e:
+            self._log.warning(f"get_storage_overview: fallback table metrics failed: {e}")
+            result["has_table_stats"] = False
+
+        # 2. Gather Complete Schema Maps
         try:
-            cols_result: Any = self.client.query(  # type: ignore[reportUnknownMemberType]
-                'SELECT table_name, column_name, data_type, "iox::column_type" AS iox_column_type '
-                "FROM information_schema.columns WHERE table_schema = 'public'",
+            # Apply the same robust system exclusion rule here
+            cols_table: pa.Table = cast(pa.Table, self.client.query(   # type: ignore
+                "SELECT table_name, column_name, data_type "
+                "FROM information_schema.columns "
+                "WHERE table_schema NOT IN ('information_schema', 'system')",
                 database=self.database,
                 language="sql",
-            )
-            cols_table: pa.Table = cast(pa.Table, cols_result)
-            result["columns"] = cols_table.to_pylist()
+            ))
+
+            raw_columns = cols_table.to_pylist()
+            processed_columns: list[ColumnInfo] = []
+
+            for row in raw_columns:
+                t_name = row.get("table_name")
+                c_name = row.get("column_name")
+                d_type = row.get("data_type")
+
+                if c_name == "time":
+                    iox_type = "timestamp"
+                elif d_type in ("Utf8", "Dictionary(Int32, Utf8)"):
+                    iox_type = "tag"
+                else:
+                    iox_type = "field"
+
+                processed_columns.append({
+                    "table_name": t_name,
+                    "column_name": c_name,
+                    "data_type": d_type,
+                    "iox_column_type": iox_type,
+                })
+
+            result["columns"] = processed_columns
+
+            if not result["item_names"] and result["columns"]:
+                result["item_names"] = sorted(list({row["table_name"] for row in result["columns"]}))  # noqa: C414
         except Exception as e:
             self._log.error(f"get_storage_overview: information_schema.columns query failed: {e}")
-            if not result["error"]:
-                result["error"] = f"Schema query failed: {e}"
+            result["error"] = f"Schema query failed: {e}"
 
+
+        # 3. Object Store Directory Disk Footprint
         if self.object_store_dir:
             try:
                 store_path: Path = Path(self.object_store_dir)
@@ -659,34 +790,39 @@ class influxdb3_out(transport_base):
                         f.stat().st_size for f in store_path.rglob("*") if f.is_file()
                     )
             except Exception as e:
-                self._log.warning(f"get_storage_overview: could not size object_store_dir '{self.object_store_dir}': {e}")
+                self._log.warning(
+                    f"get_storage_overview: could not size object_store_dir '{self.object_store_dir}': {e}"
+                )
 
+        # 4. Heap Profile Reachability Probe
         if self.debug_pprof_url:
             result["heap_profile"] = self._probe_heap_profile()
 
         return result
 
 
-    def _probe_heap_profile(self) -> dict[str, Any]:
+    def _probe_heap_profile(self) -> HeapProfile:
         """
         Best-effort reachability probe for the Rust/pprof heap-profile
         debug endpoint (GET .../debug/pprof/heap).
         """
-        # Explicitly type the return dictionary to satisfy strict type checkers
-        probe: dict[str, Any] = {
+        probe: HeapProfile = {
             "reachable": False,
             "size_bytes": None,
             "elapsed_ms": None,
             "error": None
         }
 
-        # Fall back to requests if a persistent session object isn't attached to self
+        # Safe verification check for the target configuration
+        if not self.debug_pprof_url:
+            return probe
+
         session = getattr(self, "session", requests)
 
         try:
             start: float = time.time()
 
-            # Use stream=True to avoid dumping raw binary into system memory immediately
+            # stream=True prevents massive binary profiles from hitting RAM all at once
             with session.get(
                 self.debug_pprof_url,
                 timeout=self.connection_timeout,
@@ -698,22 +834,19 @@ class influxdb3_out(transport_base):
                 if resp.status_code == 200:
                     probe["reachable"] = True
 
-                    # Try Content-Length header first for instant estimation
-                    content_length = resp.headers.get("Content-Length")
-                    if content_length is not None and content_length.isdigit():
-                        probe["size_bytes"] = int(content_length)
-                        # Consume the rest without pinning it to memory or leaking connections
-                        resp.close()
-                    else:
-                        # Fallback: stream chunks to count total size safely without memory bloat
-                        bytes_counted = 0
-                        for chunk in resp.iter_content(chunk_size=16384):
-                            if chunk:
-                                bytes_counted += len(chunk)
-                        probe["size_bytes"] = bytes_counted
+                    # Profiles are gzipped on the fly; manual stream reading is always required
+                    bytes_counted = 0
+                    for chunk in resp.iter_content(chunk_size=16384):
+                        if chunk:
+                            bytes_counted += len(chunk)
+                    probe["size_bytes"] = bytes_counted
                 else:
-                    probe["error"] = f"HTTP {resp.status_code}"
+                    # Capture 404 errors elegantly if endpoints are absent in 3-core
+                    probe["error"] = f"HTTP {resp.status_code} - Endpoint Unavailable"
 
+        except requests.exceptions.RequestException as e:
+            # Isolate network transport drops safely
+            probe["error"] = f"Connection Failed: {e}"
         except Exception as e:
             probe["error"] = str(e)
 
@@ -832,12 +965,12 @@ class influxdb3_out(transport_base):
         than stale_data_timeout seconds. Numeric comparisons use math.isclose
         to avoid false positives from floating point noise.
         """
-        state: dict[str, Any] | None = self._stale_registry.get(transport_id)
-        if not state or state["last_row"] is None:
+        state: StaleRegistryState | None = self._stale_registry.get(transport_id)
+        if not state:
             return False
 
         for key, val in row.items():
-            prev = state["last_row"].get(key)
+            prev: int | float | str | None = state["last_row"].get(key)
             if isinstance(val, (int, float)) and isinstance(prev, (int, float)):
                 if not math.isclose(val, prev, rel_tol=1e-4, abs_tol=1e-6):
                     return False
@@ -874,7 +1007,7 @@ class influxdb3_out(transport_base):
                 "last_seen": timestamp, "stale_event_count": 0, "last_event_ts": None,
             }
 
-        state: dict[str, Any] = self._stale_registry[transport_id]
+        state: StaleRegistryState = self._stale_registry[transport_id]
         state["last_seen"] = timestamp
 
         self._log.debug(
@@ -905,7 +1038,7 @@ class influxdb3_out(transport_base):
         times, with a minimum of retry_delay_mins between attempts.
         Sends a push notification on each attempt.
         """
-        state: dict[str, Any] | None = self._stale_registry.get(transport_id)
+        state: StaleRegistryState | None = self._stale_registry.get(transport_id)
         if not state:
             return
 
@@ -1109,7 +1242,7 @@ class influxdb3_out(transport_base):
             except Exception as e:
                 self._log.error(f"Failed to flush batch during explicit close: {e}")
 
-        session: Any = getattr(self, "session", None)
+        session: requests.Session | None = getattr(self, "session", None)
         if session is not None:
             try:
                 session.close()
@@ -1144,4 +1277,3 @@ class influxdb3_out(transport_base):
                     self._log.error(f"Exception in __del__: {e}")
                 except Exception:
                     self._log.error(f"Exception in __del__: {e}")
-

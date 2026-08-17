@@ -21,7 +21,7 @@ import os
 import re
 
 # classes/transport_types.py
-from typing import Any, Optional, Protocol, runtime_checkable
+from typing import Optional, Protocol, runtime_checkable
 
 from serial.tools import list_ports
 
@@ -38,13 +38,13 @@ class TransportSettings(Protocol):
     @property
     def name(self) -> str: ...
 
-    def get(self, option: str | list[str], fallback: Any = None, **kwargs: Any) -> str: ...
+    def get(self, option: str | list[str], fallback: object = None, **kwargs: object) -> str: ...
 
-    def getint(self, option: str | list[str], fallback: Any = None, **kwargs: Any) -> int: ...
+    def getint(self, option: str | list[str], fallback: object = None, **kwargs: object) -> int: ...
 
-    def getfloat(self, option: str | list[str], fallback: Any = None, **kwargs: Any) -> float: ...
+    def getfloat(self, option: str | list[str], fallback: object = None, **kwargs: object) -> float: ...
 
-    def getboolean(self, option: str | list[str], fallback: Any = None, **kwargs: Any) -> bool: ...
+    def getboolean(self, option: str | list[str], fallback: object = None, **kwargs: object) -> bool: ...
 
     def __contains__(self, key: object) -> bool: ...
 
@@ -60,7 +60,7 @@ def strtobool(val: str | bool) -> bool:
         return True
     if val in ("n", "no", "f", "false", "off", "0", ""):
         return False
-    msg = f"Invalid truth value: {val}"
+    msg: str = f"Invalid truth value: {val}"
     raise ValueError(msg)
 
 def strtoint(val: str | int) -> int | str:
@@ -108,10 +108,10 @@ def get_usb_serial_port_info(port : str = "") -> str:
 
     for p in list_ports.comports(): #from serial.tools
         if str(p.device).upper() == port.upper():
-            vid = hex(p.vid) if p.vid is not None else ""
-            pid = hex(p.pid) if p.pid is not None else ""
-            serial = str(p.serial_number) if p.serial_number is not None else ""
-            location = str(p.location) if p.location is not None else ""
+            vid: str = hex(p.vid) if p.vid is not None else ""
+            pid: str = hex(p.pid) if p.pid is not None else ""
+            serial: str = str(p.serial_number) if p.serial_number is not None else ""
+            location: str = str(p.location) if p.location is not None else ""
             return "["+vid+":"+pid+":"+serial+":"+location+"]"
 
     return ""
@@ -132,14 +132,14 @@ def find_usb_serial_port(port: str = "", vendor_id: str = "", product_id: str = 
 
     if match:
         # Use values from string if they exist, otherwise keep function arguments
-        v_match: str | Any = match.group("vendor")
-        p_match: str | Any = match.group("product")
+        v_match: str = match.group("vendor")
+        p_match: str = match.group("product")
 
         # Convert hex strings to int only if they exist in the pattern
         v_id: int | None = int(v_match, 16) if v_match else (int(vendor_id, 16) if vendor_id else None)
         p_id: int | None = int(p_match, 16) if p_match else (int(product_id, 16) if product_id else None)
-        s_num: str | Any = match.group("serial") or serial_number
-        loc: str | Any = match.group("location") or location
+        s_num: str = match.group("serial") or serial_number
+        loc: str = match.group("location") or location
 
         # 3. Search based on the merged criteria
         for p in list_ports.comports():

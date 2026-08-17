@@ -88,6 +88,7 @@ def do_commit(request: Request, db: Session = Depends(get_session))-> dict[str, 
     also rewrites config.cfg and every mask/screen/override/description
     file along with it.
     """
+    from protocol_gateway import GatewayManager, ReloadStatus
     state = request.app.state
     try:
         result: dict[str, int | str] = {}
@@ -146,9 +147,9 @@ def do_commit(request: Request, db: Session = Depends(get_session))-> dict[str, 
         # (see gateway_reload_status() / the banner in base.html).
         gateway_reload: dict[str, Any] | None = None
         if config_was_dirty:
-            manager = getattr(state, "gateway_manager", None)
+            manager: GatewayManager | None = getattr(state, "gateway_manager", None)
             if manager is not None:
-                reload_status = manager.reload(trigger="manual")
+                reload_status: ReloadStatus = manager.reload(trigger="manual")
                 state.gateway = manager.current
                 gateway_reload = {
                     "ok": reload_status.ok,

@@ -358,29 +358,45 @@
             data-mask="{{ 1 if row.mask_enabled else 0 }}"
             data-screen="{{ 1 if row.screen_enabled else 0 }}"
             data-write="{{ 1 if row.user_write_enabled else 0 }}"
-            data-synthetic="{{ 1 if row.is_synthetic | default(false) else 0 }}">
+            data-synthetic="{{ 1 if row.is_synthetic | default(false) else 0 }}"
+            data-json-desc="{{ 1 if row.is_json_desc | default(false) else 0 }}">
 
+          {% set is_virtual = row.id == -1 %}
+          {% set virtual_kind = 'synthetic' if row.is_synthetic | default(false) else 'json_desc' %}
+          {# Virtual rows (a not-yet-selected synthetic or JSON code-desc
+             metric) POST to create-and-toggle, which materializes a real
+             ProtocolRegister row on first use and hands off to the normal
+             toggle from then on (see materialize_and_toggle_virtual_metric).
+             Safe to keep pointing every checkbox on this row at the same
+             endpoint even after one has already materialized it — it's a
+             find-or-create, not just a create. Once this row is fetched
+             fresh from the DB (next tab load), row.id is real and it flows
+             through the exact same branch as any standard register below. #}
+          {% set virtual_vals = {
+               'kind': virtual_kind,
+               'variable_name': row.variable_name,
+               'documented_name': row.documented_name or '',
+               'unit': row.unit or '',
+               'data_type': row.data_type or '',
+               'note': row.note,
+               'read_interval': row.read_interval,
+               'source_variable_name': row.source_variable_name,
+             } %}
           {% if device_name %}
-          {# Synthetic rows are display-only — no toggle endpoints #}
-          {% if row.is_synthetic | default(false) %}
-          <td class="px-2 py-1.5 text-center border-r border-mpg-700/30" role="cell">
-            <span class="text-mpg-600 select-none" title="Synthetic metric — not saved to mask/screen">—</span>
-          </td>
-          <td class="px-2 py-1.5 text-center border-r border-mpg-700/30" role="cell">
-            <span class="text-mpg-600 select-none" title="Synthetic metric — not saved to mask/screen">—</span>
-          </td>
-          <td class="px-2 py-1.5 text-center border-r border-mpg-700/30" role="cell">
-            <span class="text-mpg-600 select-none" title="Synthetic metric — not saved to mask/screen">—</span>
-          </td>
-          {% else %}
           <td class="px-2 py-1.5 text-center border-r border-mpg-700/30" role="cell">
             {% if row.is_writable_by_protocol %}
             <input type="checkbox"
                    class="accent-accent w-3 h-3 cursor-pointer protocol-toggle write-toggle"
                    {% if row.user_write_enabled %}checked{% endif %}
                    aria-label="Enable write-back for {{ row.variable_name }}"
+                   {% if is_virtual %}
+                   hx-post="/api/protocols/{{ protocol_name }}/{{ registry_type }}/virtual-register/create-and-toggle?device_name={{ device_name }}"
+                   hx-vals='{{ virtual_vals | tojson }}'
+                   hx-on:htmx:config-request="event.detail.parameters.field = 'user_write_enabled'; event.detail.parameters.value = this.checked;"
+                   {% else %}
                    hx-patch="/api/protocols/{{ row.id }}/toggle?device_name={{ device_name }}"
                    hx-on:htmx:config-request="event.detail.parameters = {field: 'user_write_enabled', value: this.checked}"
+                   {% endif %}
                    hx-swap="none"
                    hx-trigger="change">
             {% else %}
@@ -395,8 +411,14 @@
                    class="accent-accent w-3 h-3 cursor-pointer protocol-toggle mask-toggle"
                    {% if row.mask_enabled %}checked{% endif %}
                    aria-label="Include {{ row.variable_name }} in mask"
+                   {% if is_virtual %}
+                   hx-post="/api/protocols/{{ protocol_name }}/{{ registry_type }}/virtual-register/create-and-toggle?device_name={{ device_name }}"
+                   hx-vals='{{ virtual_vals | tojson }}'
+                   hx-on:htmx:config-request="event.detail.parameters.field = 'mask_enabled'; event.detail.parameters.value = this.checked;"
+                   {% else %}
                    hx-patch="/api/protocols/{{ row.id }}/toggle?device_name={{ device_name }}"
                    hx-on:htmx:config-request="event.detail.parameters = {field: 'mask_enabled', value: this.checked}"
+                   {% endif %}
                    hx-swap="none"
                    hx-trigger="change">
             {% endif %}
@@ -409,13 +431,18 @@
                    class="accent-accent w-3 h-3 cursor-pointer protocol-toggle screen-toggle"
                    {% if row.screen_enabled %}checked{% endif %}
                    aria-label="Include {{ row.variable_name }} in screen"
+                   {% if is_virtual %}
+                   hx-post="/api/protocols/{{ protocol_name }}/{{ registry_type }}/virtual-register/create-and-toggle?device_name={{ device_name }}"
+                   hx-vals='{{ virtual_vals | tojson }}'
+                   hx-on:htmx:config-request="event.detail.parameters.field = 'screen_enabled'; event.detail.parameters.value = this.checked;"
+                   {% else %}
                    hx-patch="/api/protocols/{{ row.id }}/toggle?device_name={{ device_name }}"
                    hx-on:htmx:config-request="event.detail.parameters = {field: 'screen_enabled', value: this.checked}"
+                   {% endif %}
                    hx-swap="none"
                    hx-trigger="change">
             {% endif %}
           </td>
-          {% endif %}{# end is_synthetic toggle gate #}
           {% endif %}
 
           {# Value cell — last known value, populated on table load and by Refresh Values #}
@@ -437,6 +464,9 @@
           <td class="px-2 py-1.5 font-mono text-mpg-500 dark:text-mpg-100" title="{{ row.variable_name }}" role="cell">
             {% if row.is_synthetic | default(false) %}
             <span class="text-green-400">{{ row.variable_name }}</span>
+            {% elif row.is_json_desc | default(false) %}
+            <span class="text-blue-400">{{ row.variable_name }}</span>
+            <span class="text-blue-400/70 text-[10px] block italic">json code</span>
             {% elif device_name %}
             {{ row.variable_name }}
             {% else %}

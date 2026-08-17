@@ -38,7 +38,11 @@ from classes.WebServer.services.device_service import DeviceSummary, NavData
 from ...transports.modbus_base import modbus_base
 from ..database import get_session, refresh_app_state, session_scope
 from ..models import Setting
-from ..scanner import scan_transport_library
+from ..scanner import (
+    EMPTY_TRANSPORT_ENTRY,
+    TransportLibraryEntry,
+    scan_transport_library,
+)
 from ..services.analysis_service import get_transport_connection_status
 from ..services.bridge_service import has_staged_deletions, staged_deletion_count
 from ..services.device_service import (
@@ -299,15 +303,19 @@ def reconcile_settings(
     ).first()
     current_transport: str | None = transport_row.value_staged if transport_row else ""
 
-    library: dict[str, dict[str, Any]] = scan_transport_library(transports_dir)
-    transport_info: dict[str, Any] = {}
+    library: dict[str, TransportLibraryEntry] = scan_transport_library(transports_dir)
+    transport_info: TransportLibraryEntry = EMPTY_TRANSPORT_ENTRY
     if current_transport is not None:
-        transport_info = library.get(current_transport, {})
-    expected_keys: dict[str, str] = transport_info.get("keys", {})
+        transport_info = library.get(current_transport, EMPTY_TRANSPORT_ENTRY)
+    expected_keys: dict[str, str | None] = transport_info.get("keys", {})
 
 
-    FIXED_KEYS: set[str] = {"transport", "bridge", "protocol_version", "log_level",
-                  "transport_type_cached"}
+    FIXED_KEYS: set[str] = {
+        "transport",
+        "bridge",
+        "protocol_version",
+        "log_level",
+        "transport_type_cached"}
 
     # Build the display list without touching the DB
     existing_rows: list[Setting] = get_device_settings(db, section)

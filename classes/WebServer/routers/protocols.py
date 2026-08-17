@@ -35,11 +35,13 @@ from classes.WebServer.models import DeviceProtocolSelection, ProtocolRegister
 from ..database import get_session, session_scope
 from ..services.protocol_service import (
     DeviceRegisterView,
+    build_json_desc_rows,
     build_synthetic_rows,
     get_device_metric_summary,
     get_protocol_json,
     get_protocol_registers,
     get_protocols_for_device,
+    materialize_and_toggle_virtual_metric,
     register_row_sort_key,
     toggle_register_field,
     update_protocol_register_field,
@@ -120,6 +122,7 @@ class ProtocolRegisterResponse(BaseModel):
 
 @router.patch("/{register_id}/toggle", response_model=ProtocolRegisterResponse)
 def toggle_register(
+    request: Request,
     register_id: int,
     payload: ToggleRequest,
     device_name: str | None = None,
@@ -133,6 +136,32 @@ def toggle_register(
             detail="Toggle not allowed — no device_name given, protocol "
                    "write_mode is read-only, or register not found."
         )
+
+    # toggle_register_field's own cascade only covers the code -> desc
+    # direction when the desc has *already* been materialized (it's
+    # DB-only, so it can't discover a desc row that doesn't exist yet).
+    # The reverse case — a plain CSV register being mask/screen-toggled for
+    # the first time, whose JSON code-description companion has never been
+    # selected before — needs the live transport (build_json_desc_rows) to
+    # even know a desc companion exists, so it's resolved here rather than
+    # in the DB-only service layer. Mirrors materialize_and_toggle_virtual_metric.
+    if payload.field in ("mask_enabled", "screen_enabled") and device_name:
+        source_row: ProtocolRegister | None = db.get(ProtocolRegister, register_id)
+        if source_row is not None and not source_row.is_synthetic and not source_row.is_json_desc:
+            gateway: Any = getattr(request.app.state, "gateway", None)
+            transport: Any = gateway.get_transport(f"transport.{device_name}") if gateway is not None else None
+            if transport is not None:
+                for desc_row in build_json_desc_rows(transport, registry_type=source_row.registry_type):
+                    if desc_row.source_variable_name == source_row.variable_name:
+                        materialize_and_toggle_virtual_metric(
+                            db, source_row.protocol_name, source_row.registry_type, device_name,
+                            "json_desc", desc_row.variable_name, desc_row.documented_name,
+                            desc_row.unit, desc_row.data_type, desc_row.note, desc_row.read_interval,
+                            payload.field, payload.value,
+                            source_variable_name=source_row.variable_name,
+                        )
+                        break  # a code register decodes to exactly one desc companion
+
     db.commit()
     return {
         "id": result.id,
@@ -142,6 +171,63 @@ def toggle_register(
         "is_dirty": result.is_dirty,
         "is_writable_by_protocol": getattr(result, "is_writable_by_protocol", False),
     }
+
+class VirtualToggleRequest(BaseModel):
+    field: str
+    value: bool
+    source_variable_name: str | None = None
+    kind: str                       # "synthetic" | "json_desc"
+    variable_name: str
+    documented_name: str = ""
+    unit: str = ""
+    data_type: str = ""
+    note: str | None = None
+    read_interval: str | None = None
+
+
+@router.post("/{protocol_name}/{registry_type}/virtual-register/create-and-toggle", response_model=ProtocolRegisterResponse)
+def create_and_toggle_virtual_register(
+    protocol_name: str,
+    registry_type: str,
+    payload: VirtualToggleRequest,
+    device_name: str | None = None,
+    db: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """
+    First-selection endpoint for a synthetic or JSON code-description
+    metric — the register-row equivalent of POST .../settings/create-and-
+    activate. Only used the first time a device selects a given virtual
+    metric (DeviceRegisterView.id == -1 in the table); every toggle after
+    that goes through PATCH /{register_id}/toggle like any other register,
+    once that register has a real id. Safe to call repeatedly for the same
+    metric/device (materialize_and_toggle_virtual_metric finds-or-creates
+    by register_address), so a still-virtual-rendered row's other W/M/S
+    checkboxes can keep posting here without needing to know a sibling
+    checkbox already materialized the row.
+    """
+    result: DeviceProtocolSelection | None = materialize_and_toggle_virtual_metric(
+        db, protocol_name, registry_type, device_name or "",
+        payload.kind, payload.variable_name, payload.documented_name,
+        payload.unit, payload.data_type, payload.note, payload.read_interval,
+        payload.field, payload.value,
+        source_variable_name=payload.source_variable_name,
+    )
+    if result is None:
+        raise HTTPException(
+            status_code=403,
+            detail="Toggle not allowed — no device_name given, invalid kind/field, "
+                   "or protocol write_mode is read-only."
+        )
+    db.commit()
+    return {
+        "id": result.id,
+        "user_write_enabled": result.user_write_enabled,
+        "mask_enabled": result.mask_enabled,
+        "screen_enabled": result.screen_enabled,
+        "is_dirty": result.is_dirty,
+        "is_writable_by_protocol": getattr(result, "is_writable_by_protocol", False),
+    }
+
 
 @router.patch("/{register_id}/field")
 def update_register_field(register_id: int, payload: FieldUpdateRequest, db: Session = Depends(get_session))-> dict[str, Any]:
@@ -206,24 +292,49 @@ async def protocol_table_partial(
             db, protocol_name, registry_type, page, page_size=5000, device_name=device_name
         )
 
-    # Append synthetic metric rows when rendering a device (scraper) view.
-    # Synthetic rows are display-only — they have no DB row, no toggle
-    # endpoints, and are never written to mask/screen files.  The transport
-    # is looked up by name via the gateway so the metadata stays live.
+    # Append synthetic metric rows and JSON code-description ("<name>_desc")
+    # rows when rendering a device (scraper) view, for whichever of them
+    # this device hasn't already selected — a materialized one comes back
+    # from get_protocol_registers() above (real ProtocolRegister row, real
+    # id, real toggle state) and would otherwise be duplicated by the live
+    # builders below, which always return the *full* live set regardless of
+    # DB state. The transport is looked up by name via the gateway so
+    # anything not yet materialized stays live.
     if device_name:
         gateway: Any = getattr(request.app.state, "gateway", None)
         if gateway is not None:
             transport: Any = gateway.get_transport(f"transport.{device_name}")
             if transport is not None:
-                synthetic: List[DeviceRegisterView] = build_synthetic_rows(transport, registry_type=registry_type)
+                already_materialized: set[str] = {
+                    row.variable_name for row in data.get("rows", [])
+                }
+
+                synthetic: List[DeviceRegisterView] = build_synthetic_rows(
+                    transport, registry_type=registry_type, exclude_names=already_materialized
+                )
                 if synthetic:
                     data["rows"] = list(data.get("rows", [])) + synthetic
 
-    # Initial table order: synthetic metrics first, then anything with a
-    # W/M/S checkbox selected, then everything else — alphabetical by
-    # variable_name within each group. get_protocol_registers() itself still
-    # orders by register_address (that's what pagination/offset math above
-    # relies on); this re-sorts only the page actually being displayed.
+                # Look up each _desc row's source register's address so it
+                # displays next to the register it decodes, e.g. "27.b14",
+                # rather than falling back to the source's variable_name.
+                address_by_variable: dict[str, str] = {
+                    row.variable_name: row.register_address
+                    for row in data.get("rows", [])
+                }
+                json_desc: List[DeviceRegisterView] = build_json_desc_rows(
+                    transport, registry_type=registry_type,
+                    address_by_variable=address_by_variable, exclude_names=already_materialized,
+                )
+                if json_desc:
+                    data["rows"] = list(data.get("rows", [])) + json_desc
+
+    # Initial table order: synthetic metrics first, then JSON
+    # code-description metrics, then anything with a W/M/S checkbox
+    # selected, then everything else — alphabetical by variable_name within
+    # each group. get_protocol_registers() itself still orders by
+    # register_address (that's what pagination/offset math above relies
+    # on); this re-sorts only the page actually being displayed.
     data["rows"] = sorted(data.get("rows", []), key=register_row_sort_key)
 
     return request.app.state.templates.TemplateResponse(

@@ -21,18 +21,18 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
 from unittest.mock import MagicMock, patch
 
 from classes.WebServer.diff_engine import (
+    ChangeType,
     DiffResult,
     ProtocolDiff,
     SettingDiff,
     build_diff,
 )
-from classes.WebServer.models import ProtocolRegister, Setting  # noqa: F401
 from classes.WebServer.scanner import _classify_transport, scan_transport_library
 from classes.WebServer.services import analysis_service, backup_service, device_service
+from classes.WebServer.services.device_service import TransportLibraryRow
 
 
 class QueryStub:
@@ -57,10 +57,10 @@ class QueryStub:
 def test_diff_result_summary_counts_changes() -> None:
     """Happy path: DiffResult.summary aggregates setting and protocol change counts."""
     result = DiffResult()
-    result.settings.append(SettingDiff("transport.inv", "host", "old", "new", "modified"))
-    result.settings.append(SettingDiff("transport.inv", "unused", "x", "x", "orphan", is_orphan=True))
+    result.settings.append(SettingDiff("transport.inv", "host", "old", "new", ChangeType.MODIFIED))
+    result.settings.append(SettingDiff("transport.inv", "unused", "x", "x", ChangeType.ORPHAN, is_orphan=True))
     result.protocols.append(
-        ProtocolDiff("eg4", "input", "1", "soc", "mask_enabled", False, True, "modified")  # noqa: FBT003
+        ProtocolDiff("eg4", "input", "1", "soc", "mask_enabled", False, True, ChangeType.MODIFIED)  # noqa: FBT003
     )
     assert result.has_changes is True
     assert result.summary["total_changes"] == 3
@@ -152,7 +152,7 @@ def test_get_transport_library_shapes_scanner_output(mock_scan: MagicMock, tmp_p
         "mqtt": {"classification": "bridge", "keys": {"host": "", "port": ""}},
         "modbus_tcp": {"classification": "scraper", "keys": {"host": "", "protocol_version": ""}},
     }
-    result: list[dict[str, Any]] = device_service.get_transport_library(tmp_path)
+    result: list[TransportLibraryRow] = device_service.get_transport_library(tmp_path)
     assert [row["name"] for row in result] == ["modbus_tcp", "mqtt"]
     assert result[0]["key_count"] == 2
 

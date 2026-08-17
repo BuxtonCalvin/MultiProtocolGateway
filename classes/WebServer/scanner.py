@@ -44,12 +44,16 @@ from sqlalchemy.orm import Session
 from .database import refresh_app_state, session_scope
 from .models import AppState, DeviceProtocolSelection, ProtocolRegister, Setting
 from .transport_registry import (
+    TransportLibraryEntry,
     get_known_transport_keys,
     get_transport_base_keys,
     sync_from_library,
 )
 
 _log: logging.Logger = logging.getLogger(__name__)
+
+
+EMPTY_TRANSPORT_ENTRY: TransportLibraryEntry = {"classification": "", "keys": {}, "file": ""}
 
 # ---------------------------------------------------------------------------
 # Module-level alias kept for backwards compatibility.
@@ -309,7 +313,7 @@ def _extract_settings_keys_from_ast(py_path: Path) -> dict[str, str | None]:
     return found
 
 
-def scan_transport_library(transports_dir: Path) -> dict[str, dict[str, Any]]:
+def scan_transport_library(transports_dir: Path) -> dict[str, TransportLibraryEntry]:
     """
     Scan all .py files in the transports directory.
     Returns {filename_stem: {classification, keys: {key: default}}}.
@@ -318,7 +322,7 @@ def scan_transport_library(transports_dir: Path) -> dict[str, dict[str, Any]]:
     setting_descriptions.json are automatically updated with any newly
     discovered transports or keys.
     """
-    result: dict[str, dict[str, Any]] = {}
+    result: dict[str, TransportLibraryEntry] = {}
     if not transports_dir.exists():
         _log.warning(f"Transports directory not found: {transports_dir}")
         return result
@@ -1089,7 +1093,7 @@ class Scanner:
             # Scan config.cfg
             # ----------------------------------------------------------------
             config_data: dict[str, dict[str, str]] = load_config(self.config_path)
-            transport_library: dict[str, dict[str, Any]] = scan_transport_library(self.transports_dir)
+            transport_library: dict[str, TransportLibraryEntry] = scan_transport_library(self.transports_dir)
 
             for section, keys in config_data.items():
                 transport_type = "general"
@@ -1137,7 +1141,7 @@ class Scanner:
                 # argument.  For those we keep the JSON registry default so the
                 # UI always has something useful to show.
                 json_defaults: dict[str, str] = dict(known_transport_keys.get(transport_name, {}))
-                lib_entry: dict[str, Any] = transport_library.get(transport_name, {})
+                lib_entry: TransportLibraryEntry = transport_library.get(transport_name, EMPTY_TRANSPORT_ENTRY)
                 ast_keys_raw: dict[str, str | None] = lib_entry.get("keys", {})
 
                 # Merged: JSON baseline, overridden only where AST has a real value
@@ -1230,7 +1234,7 @@ class Scanner:
         section: str,
         key: str,
         section_keys: dict[str, str],
-        transport_library: dict[str, dict[str, Any]],
+        transport_library: dict[str, TransportLibraryEntry],
     ) -> str | None:
         """
         Look up the default value for a key.
@@ -1253,8 +1257,8 @@ class Scanner:
         # in code.  We skip those and fall through to the JSON registry so
         # the hand-curated defaults are used instead.
         # A key absent from the dict entirely also returns None from .get().
-        lib_entry: dict[str, Any] = transport_library.get(transport_name, {})
-        ast_keys: dict[str, str | None] = lib_entry.get("keys", {})
+        lib_entry: TransportLibraryEntry = transport_library.get(transport_name, EMPTY_TRANSPORT_ENTRY)
+        ast_keys: dict[str, str | None] = lib_entry["keys"]
         if key in ast_keys and ast_keys[key] is not None:
             return ast_keys[key]
 

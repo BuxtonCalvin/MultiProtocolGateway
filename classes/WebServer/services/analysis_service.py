@@ -24,21 +24,26 @@ This module now provides live transport summaries and connection status only.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import cast
+
+from classes.transports.transport_base import transport_base
 
 _log: logging.Logger = logging.getLogger(__name__)
 
+TransportSummary = dict[str, str | bool]
 
-def get_scraper_transports(gateway: Any) -> list[dict[str, str]]:
+
+def get_scraper_transports(gateway: object | None) -> list[TransportSummary]:
     """
     Returns a list of scraper transport summaries from the live gateway instance.
     Used by the UI to populate the Analyze dropdown.
     """
     if gateway is None:
+        _log.warning("get_scraper_transports: gateway is None, returning empty list")
         return []
 
-    transports: Any | list[Any] = getattr(gateway, "_Protocol_Gateway__transports", [])
-    result: list[dict[str, Any]] = []
+    transports: list[transport_base] = cast(list[transport_base], getattr(gateway, "_Protocol_Gateway__transports", []))
+    result: list[TransportSummary] = []
     for t in transports:
         if getattr(t, "protocolSettings", None) is not None:
             result.append({
@@ -50,12 +55,13 @@ def get_scraper_transports(gateway: Any) -> list[dict[str, str]]:
     return result
 
 
-def get_transport_connection_status(gateway: Any) -> dict[str, bool]:
+def get_transport_connection_status(gateway: object | None) -> dict[str, bool]:
     """
     Returns {transport_name: is_connected} for all transports.
     Called by the bridge pane to show live connection status.
     """
     if gateway is None:
+        _log.warning("get_transport_connection_status: gateway is None, returning empty dict")
         return {}
-    transports: Any | list[Any] = getattr(gateway, "_Protocol_Gateway__transports", [])
+    transports: list[transport_base] = cast(list[transport_base], getattr(gateway, "_Protocol_Gateway__transports", []))
     return {t.transport_name: getattr(t, "connected", False) for t in transports}

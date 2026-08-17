@@ -24,13 +24,22 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, List, Sequence
+from typing import List, Sequence, TypedDict
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..models import AppState, Setting
-from ..scanner import scan_transport_library
+from ..scanner import TransportLibraryEntry, scan_transport_library
+
+
+class TransportLibraryRow(TypedDict):
+    """Shape of each row returned by get_transport_library()."""
+    name: str
+    classification: str
+    key_count: int
+    sample_keys: list[str]
+    all_keys: list[str]
 
 
 @dataclass
@@ -145,13 +154,13 @@ def _get_section_keys(db: Session, section: str) -> dict[str, str]:
     return result
 
 
-def get_transport_library(transports_dir: Path) -> list[dict[str, Any]]:
+def get_transport_library(transports_dir: Path) -> list[TransportLibraryRow]:
     """
     Returns the transport library list for the TRANSPORT LIBRARY page.
     Each entry has: name, classification, keys.
     """
-    library: dict[str, dict[str, Any]] = scan_transport_library(transports_dir)
-    result: list[dict[str, Any]] = []
+    library: dict[str, TransportLibraryEntry] = scan_transport_library(transports_dir)
+    result: list[TransportLibraryRow] = []
     for name, info in sorted(library.items()):
         all_keys: list[str] = list(info["keys"].keys())
         result.append({

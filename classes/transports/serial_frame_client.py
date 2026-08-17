@@ -27,7 +27,8 @@ from typing import Any, Callable
 import serial
 
 
-class serial_frame_client():
+class serial_frame_client():
+
     transport_type = "base class"
     ''' basic serial client implementing an empty SOI/EOI frame'''
     client : serial.Serial
@@ -89,29 +90,31 @@ class serial_frame_client():
         if reset_buffer:
             self.client.reset_input_buffer()
 
-        timedout = time.time() + self.timeout
+        timedout: float = time.time() + self.timeout
         self.client.timeout = self.timeout
 
         while time.time() < timedout:
-            data = self.client.read()
+            data: bytes = self.client.read()
 
             if data:
                 buffer += data
-                soi_index = buffer.find(self.soi)
+                soi_index: int = buffer.find(self.soi)
 
                 while soi_index != -1:
-                    buffer = buffer[soi_index:]
-                    eoi_index = buffer.find(self.eoi)
+                    buffer: bytearray = buffer[soi_index:]
+                    eoi_index: int = buffer.find(self.eoi)
 
                     if eoi_index != -1:
-                        frame = buffer[len(self.soi):eoi_index]
+                        # Convert slice to immutable bytes right away
+                        frame: bytes = bytes(buffer[len(self.soi):eoi_index])
 
                         if frames == 1:
-                            return bytes(frame)
+                            return frame
 
                         # Accumulate frames and return when we have enough
                         self.pending_frames.append(frame)
                         if len(self.pending_frames) == frames:
+
                             return self.pending_frames
 
                         buffer = buffer[eoi_index + len(self.eoi):]
@@ -124,7 +127,7 @@ class serial_frame_client():
 
             time.sleep(0.01)
 
-        # Timeout reached — return whatever was collected (could be empty or partial)
+        # Timeout reached — return whatever was collected
         return self.pending_frames if self.pending_frames else None
 
 
@@ -133,45 +136,46 @@ class serial_frame_client():
         self.running = True
         while self.running:
             # Read data from serial port
-            data = self.client.read()
+            data: bytes = self.client.read()
 
             # Check if data is available
             if data:
                 # Append data to buffer
-                buffer += data
+                buffer: bytearray = buffer + data
 
                 # Find SOI index in buffer
-                soi_index = buffer.find(self.soi)
+                soi_index: int = buffer.find(self.soi)
 
                 # Process all occurrences of SOI in buffer
                 while soi_index != -1:
                     # Remove data before SOI sequence
-                    buffer = buffer[soi_index:]
+                    buffer: bytearray = buffer[soi_index:]
 
                     # Find EOI index in buffer
-                    eoi_index = buffer.find(self.eoi)
+                    eoi_index: int = buffer.find(self.eoi)
 
                     if eoi_index != -1:
-                        # Extract and store the complete frame
-                        self.pending_frames.append(buffer[len(self.soi):eoi_index])
+                        # Extract and store the complete frame as immutable bytes
+                        self.pending_frames.append(bytes(buffer[len(self.soi):eoi_index]))
 
                         # Remove the processed data from the buffer
-                        buffer = buffer[eoi_index + len(self.eoi) : ]
+                        buffer: bytearray = buffer[eoi_index + len(self.eoi) : ]
 
                         # Find next SOI index in the remaining buffer
-                        soi_index = buffer.find(self.soi)
+                        soi_index: int = buffer.find(self.soi)
                     else:
                         # If no EOI is found and buffer size exceeds max_frame_size, clear buffer
                         if len(buffer) > self.max_frame_size:
                             buffer.clear()
                         break #no eoi, continue waiting
 
-                #can probably be in the loop, but being cautious
+                # Process new frames
                 for frame in self.pending_frames:
                     with self.callback_lock:
                         if self.on_message:
                             self.on_message(frame)
 
+                # Clear the processed frames so they don't trigger again on the next read iteration
+                self.pending_frames.clear()
+
             time.sleep(0.01)
-
-

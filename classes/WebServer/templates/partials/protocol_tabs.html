@@ -46,7 +46,7 @@
           hx-swap="innerHTML scroll:false"
           hx-headers='{"Cache-Control": "no-cache"}'
           {% if loop.first %}hx-trigger="load, click"{% else %}hx-trigger="click"{% endif %}>
-    {{ tab.registry_type | title }}
+    {{ tab.registry_type | replace('_', ' ') | title }}
     <span class="text-mpg-100 ml-1">({{ tab.protocol_name }})</span>
     {% if tab.registry_type != "json" %}
     <span class="tab-counts ml-1.5 text-green-600 font-semibold text-xs">
@@ -66,11 +66,11 @@
       Total Selected: <span id="metric-chosen-count" class="text-green-600 font-semibold">{{ metric_summary.chosen_count }}</span>
     </span>
     <span id="metric-tab-available-wrap" class="surface-muted {% if not active_map_tab %}hidden{% endif %}">
-      <span id="metric-tab-available-label">{{ active_map_tab.registry_type | title if active_map_tab else '' }} Available</span>:
+      <span id="metric-tab-available-label">{{ active_map_tab.registry_type | replace('_', ' ') | title if active_map_tab else '' }} Available</span>:
       <span id="metric-tab-available" class="text-green-600 font-semibold">{{ active_map_stats.total if active_map_stats else 0 }}</span>
     </span>
     <span id="metric-tab-chosen-wrap" class="surface-muted {% if not active_map_tab %}hidden{% endif %}">
-      <span id="metric-tab-chosen-label">{{ active_map_tab.registry_type | title if active_map_tab else '' }} Selected</span>:
+      <span id="metric-tab-chosen-label">{{ active_map_tab.registry_type | replace('_', ' ') | title if active_map_tab else '' }} Selected</span>:
       <span id="metric-tab-chosen" class="text-green-600 font-semibold">{{ active_map_stats.chosen if active_map_stats else 0 }}</span>
     </span>
     {% if timescale_bridge_available() %}

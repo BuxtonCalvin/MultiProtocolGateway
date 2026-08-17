@@ -78,7 +78,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Mapping, TypedDict, cast
 
 _log: logging.Logger = logging.getLogger(__name__)
 
@@ -87,16 +87,40 @@ _log: logging.Logger = logging.getLogger(__name__)
 _REMOVAL_PREFIX: str = "--"
 
 # ---------------------------------------------------------------------------
+# Shared type aliases
+# ---------------------------------------------------------------------------
+
+# A single transport's raw JSON entry: flat key -> string value, including
+# the "$extends" pointer and any "--key" removal directives. All values in
+# transport_defaults.json are strings by convention (see module docstring).
+TransportEntry = dict[str, str]
+
+# transport_defaults.json in full: transport_name -> its raw entry, including
+# private "_base" / "_modbus_base" inheritance templates (names starting
+# with "_").
+TransportDefaultsRaw = dict[str, TransportEntry]
+
+
+class TransportLibraryEntry(TypedDict):
+    """Shape of each per-transport value returned by
+    scanner.scan_transport_library() and consumed by sync_from_library()."""
+    classification: str
+    keys: dict[str, str | None]
+    file: str
+
+
+# In-process caches — populated on first load, cleared by configure() or sync.
+_defaults_cache: TransportDefaultsRaw | None = None       # raw JSON (with $extends, with _base etc.)
+_resolved_cache: dict[str, dict[str, str]] | None = None  # flat per-transport (public transports only)
+_descriptions_cache: dict[str, str] | None = None   # key → description string
+
+
+# ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
 
 # Default: files sit next to this module.  Call configure() to override.
 _registry_dir: Path = Path(__file__).parent
-
-# In-process caches — populated on first load, cleared by configure() or sync.
-_defaults_cache: dict[str, Any] | None = None       # raw JSON (with $extends, with _base etc.)
-_resolved_cache: dict[str, dict[str, str]] | None = None  # flat per-transport (public transports only)
-_descriptions_cache: dict[str, str] | None = None   # key → description string
 
 
 def configure(registry_dir: Path) -> None:
@@ -126,16 +150,20 @@ def _descriptions_path() -> Path:
     return _registry_dir / "setting_descriptions.json"
 
 
-def _load_json(path: Path) -> dict[str, Any]:
+def _load_json(path: Path) -> dict[str, object]:
     """
     Read a JSON file and return its contents.
 
     Only the literal "_comment" key is stripped — private base/mixin entries
     like "_base" and "_modbus_base" are intentionally kept so that $extends
     resolution works correctly after a round-trip through _save_json.
+
+    Returns the top-level object with values left as `object`; callers know
+    the expected shape for the specific file they're reading (transport
+    defaults vs. descriptions) and narrow accordingly.
     """
     try:
-        data: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+        data: dict[str, object] = cast(dict[str, object], json.loads(path.read_text(encoding="utf-8")))
         return {k: v for k, v in data.items() if k != "_comment"}
     except FileNotFoundError:
         _log.warning("transport_registry: file not found: %s — returning empty dict", path)
@@ -145,14 +173,14 @@ def _load_json(path: Path) -> dict[str, Any]:
         return {}
 
 
-def _save_json(path: Path, data: dict[str, Any], comment: str = "") -> None:
+def _save_json(path: Path, data: Mapping[str, object], comment: str = "") -> None:
     """
     Write a JSON file, inserting the _comment key first if provided.
 
     Private base entries (keys starting with "_") are written back to the
     file so $extends chains survive the round-trip.
     """
-    payload: dict[str, Any] = {}
+    payload: dict[str, object] = {}
     if comment:
         payload["_comment"] = comment
     payload.update(data)
@@ -172,7 +200,7 @@ def _removal_target(key: str) -> str:
     return key[len(_REMOVAL_PREFIX):]
 
 
-def _resolve_transport(name: str, raw: dict[str, Any], visited: set[str] | None = None,) -> dict[str, str]:
+def _resolve_transport(name: str, raw: TransportDefaultsRaw, visited: set[str] | None = None,) -> dict[str, str]:
     """
     Recursively resolve $extends inheritance for a single transport entry.
 
@@ -197,7 +225,7 @@ def _resolve_transport(name: str, raw: dict[str, Any], visited: set[str] | None 
         return {}
     visited.add(name)
 
-    entry: dict[str, Any] = raw.get(name, {})
+    entry: TransportEntry = raw.get(name, {})
     parent_name: str | None = entry.get("$extends")
 
     own_keys: dict[str, str] = {}
@@ -208,7 +236,7 @@ def _resolve_transport(name: str, raw: dict[str, Any], visited: set[str] | None 
         if _is_removal_key(k):
             removals.add(_removal_target(k))
             continue
-        own_keys[k] = str(v)
+        own_keys[k] = v
 
     if parent_name:
         parent_keys: dict[str, str] = _resolve_transport(parent_name, raw, visited)
@@ -229,7 +257,7 @@ def _resolve_transport(name: str, raw: dict[str, Any], visited: set[str] | None 
     return resolved
 
 
-def _load_defaults() -> tuple[dict[str, Any], dict[str, dict[str, str]]]:
+def _load_defaults() -> tuple[TransportDefaultsRaw, dict[str, dict[str, str]]]:
     """
     Load and resolve transport_defaults.json.
 
@@ -241,7 +269,7 @@ def _load_defaults() -> tuple[dict[str, Any], dict[str, dict[str, str]]]:
     resolved_dict: flat {transport_name: {key: default}} with inheritance
                    applied.  Only public (non-"_") transport names are included.
     """
-    raw: dict[str, Any] = _load_json(_defaults_path())
+    raw: TransportDefaultsRaw = cast(TransportDefaultsRaw, _load_json(_defaults_path()))
     resolved: dict[str, dict[str, str]] = {}
     for name in raw:
         if name.startswith("_"):
@@ -274,7 +302,7 @@ def get_transport_base_keys() -> dict[str, str]:
     global _defaults_cache, _resolved_cache
     if _defaults_cache is None:
         _defaults_cache, _resolved_cache = _load_defaults()
-    raw: dict[str, Any] = _defaults_cache or {}
+    raw: TransportDefaultsRaw = _defaults_cache or {}
     return _resolve_transport("_base", raw)
 
 
@@ -322,7 +350,7 @@ def write_descriptions_to_json(descriptions: dict[str, str]) -> None:
     The file is written in alphabetical key order for clean diffs.
     """
     global _descriptions_cache
-    existing: dict[str, str] = dict(_load_json(_descriptions_path()))
+    existing: dict[str, str] = {k: str(v) for k, v in _load_json(_descriptions_path()).items()}
     # Overlay: caller's values win; unmentioned keys are preserved
     merged: dict[str, str] = {**existing, **descriptions}
     sorted_merged: dict[str, str] = dict(sorted(merged.items()))
@@ -349,7 +377,7 @@ def write_descriptions_to_json(descriptions: dict[str, str]) -> None:
 # ---------------------------------------------------------------------------
 
 def sync_from_library(
-    library: dict[str, dict[str, Any]],
+    library: dict[str, TransportLibraryEntry],
     *,
     write_defaults: bool = True,
     write_descriptions: bool = True,
@@ -411,7 +439,7 @@ def sync_from_library(
         # Always reload from disk so we include any hand-edits made since startup.
         # _load_json keeps "_base" / "_modbus_base" entries so $extends chains
         # survive the round-trip intact.
-        raw: dict[str, Any]
+        raw: TransportDefaultsRaw
         _: dict[str, dict[str, str]]
 
         raw, _ = _load_defaults()
@@ -434,7 +462,7 @@ def sync_from_library(
                     # Entirely new transport — add all keys we have real defaults for.
                     # Keys with no AST default are added as "" so they appear in the UI.
                     raw[transport_name] = {
-                        k: (ast_keys_raw[k] if ast_keys_raw[k] is not None else "")
+                        k: (v if (v := ast_keys_raw[k]) is not None else "")
                         for k in ast_all_keys
                     }
                     stats["new_transports"] += 1
@@ -450,7 +478,7 @@ def sync_from_library(
                     # without this check every sync would silently undo
                     # an intentional removal the moment the source still
                     # contains a settings.get() call for that key.
-                    entry: dict[str, Any] = raw[transport_name]
+                    entry: TransportEntry = raw[transport_name]
                     resolved_existing: dict[str, str] = _resolve_transport(transport_name, raw)
                     removed_keys: set[str] = {
                         _removal_target(k) for k in entry if _is_removal_key(k)
@@ -460,7 +488,8 @@ def sync_from_library(
                             continue
                         if key not in resolved_existing:
                             # Use the AST default if available, otherwise ""
-                            entry[key] = ast_keys_raw[key] if ast_keys_raw[key] is not None else ""
+                            ast_val: str | None = ast_keys_raw[key]
+                            entry[key] = ast_val if ast_val is not None else ""
                             stats["new_default_keys"] += 1
                             changed = True
                             _log.debug("transport_registry: added key '%s' to transport '%s'",key, transport_name)
@@ -530,7 +559,7 @@ def sync_from_library(
     # ---- Sync setting_descriptions.json ----
     if write_descriptions or purge_removed:
         global _descriptions_cache
-        descs: dict[str, str] = dict(_load_json(_descriptions_path()))
+        descs: dict[str, str] = {k: str(v) for k, v in _load_json(_descriptions_path()).items()}
 
         changed = False
 

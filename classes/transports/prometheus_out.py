@@ -74,9 +74,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any, Optional
 
 from prometheus_client import CollectorRegistry, Counter, Gauge, Histogram
-from prometheus_client import (
-    make_asgi_app as _make_asgi_app,  # type: ignore[assignment]
-)
+from prometheus_client import make_asgi_app as _make_asgi_app  # type: ignore
 
 from defs.common import TransportSettings
 

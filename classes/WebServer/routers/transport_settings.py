@@ -28,7 +28,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_session, refresh_app_state
 from ..models import SettingDescription
-from ..scanner import scan_transport_library
+from ..scanner import TransportLibraryEntry, scan_transport_library
 from ..services.setting_description_service import (
     get_all_setting_descriptions,
     seed_setting_descriptions,
@@ -100,7 +100,7 @@ def scan_for_new_settings(request: Request, db: Session = Depends(get_session))-
     """
     transports_dir: Path = request.app.state.transports_dir
 
-    library: dict[str, dict[str, Any]] = scan_transport_library(transports_dir)
+    library:dict[str, TransportLibraryEntry] = scan_transport_library(transports_dir)
 
     # Build current key → transports mapping from library
     key_to_transports: dict[str, set[str]] = {}

@@ -18,12 +18,8 @@
 from __future__ import annotations
 
 # scraper for Modbus TCP devices, inheriting from modbus_base and implementing TCP-specific client setup and register access logic.
-from typing import Any, cast
-
-from packaging import version
-from pymodbus import __version__ as pymodbus_version
 from pymodbus.client import ModbusTcpClient
-from pymodbus.client.base import ModbusBaseClient, ModbusBaseSyncClient
+from pymodbus.client.base import ModbusBaseSyncClient
 from pymodbus.exceptions import ConnectionException, ModbusException
 from pymodbus.pdu import ExceptionResponse, ModbusPDU
 
@@ -36,8 +32,6 @@ from .modbus_base import modbus_base
 class modbus_tcp(modbus_base):
 
     transport_type: str = "scraper"
-    pymodbus_slave_arg: str = "unit"  # default legacy device arg
-    client = cast(ModbusBaseClient, ModbusTcpClient)
 
     def __init__(self, settings : TransportSettings ) -> None:
         super().__init__(settings)
@@ -47,11 +41,6 @@ class modbus_tcp(modbus_base):
             raise ValueError("Host is not set")
 
         self.port = settings.getint("port", fallback=502)
-
-        try:
-            self.curr_version: version.Version = version.parse(pymodbus_version)
-        except Exception:
-            self.curr_version: version.Version = version.parse("0.0.0")
 
         client_str: str = f"{self.host}-tcp-{self.port}"
         #check if client is already initialized
@@ -63,40 +52,37 @@ class modbus_tcp(modbus_base):
 
         timeout: int = settings.getint("timeout", fallback=7)
         retries: int = settings.getint("retries", fallback=3)
-        self.client = cast(ModbusBaseClient, ModbusTcpClient(host=self.host, port=self.port, timeout=timeout, retries=retries))
+        self.client = ModbusTcpClient(host=self.host, port=self.port, timeout=timeout, retries=retries)
         self._log.debug(f"Created new client for '{client_str}' (id={id(self.client)})")
 
         #add to clients (thread-safe)
         with self._clients_lock:
             modbus_base.clients[client_str] = self.client
 
-    def read_registers(self, start: int, count: int = 1, registry_type: Registry_Type = Registry_Type.INPUT, **kwargs: Any) -> Any:
+    def read_registers(self, start: int, count: int = 1, registry_type: Registry_Type = Registry_Type.INPUT, device_id: int | None = None) -> ModbusPDU | None:
         if self.client is None:
             self._log.error("read_registers called before client was initialized")
             return None
 
-        # Cast to ModbusBaseSyncClient (ModbusClientMixin[ModbusPDU]) so the type
-        # checker resolves T -> ModbusPDU and types result as ModbusPDU, not
-        # Awaitable[ModbusPDU] (which is the async specialization).
-        sync_client: ModbusBaseSyncClient = cast(ModbusBaseSyncClient, self.client)
-        call_kwargs: dict[str, Any] = self._get_correct_device_arg(kwargs)
+        sync_client: ModbusBaseSyncClient = self.client
+        resolved_device_id: int = self._get_device_id(device_id)
         result: ModbusPDU | None = None
 
         # Proactively verify socket health before making the call
-        if hasattr(self.client, 'connected') and not self.client.connected:
+        if hasattr(self.client, 'connected') and not getattr(self.client, 'connected'):
             self._log.warning(f"Socket closed before read for {self.transport_name}. Triggering reconnect.")
             self.connected = False
             return None
 
         try:
             if registry_type == Registry_Type.INPUT:
-                result = sync_client.read_input_registers(start, count=count, **call_kwargs)
+                result = sync_client.read_input_registers(start, count=count, device_id=resolved_device_id)
             elif registry_type == Registry_Type.HOLDING:
-                result = sync_client.read_holding_registers(start, count=count, **call_kwargs)
+                result = sync_client.read_holding_registers(start, count=count, device_id=resolved_device_id)
             elif registry_type == Registry_Type.COIL:
-                result = sync_client.read_coils(start, count=count, **call_kwargs)
+                result = sync_client.read_coils(start, count=count, device_id=resolved_device_id)
             elif registry_type == Registry_Type.DISCRETE:
-                result = sync_client.read_discrete_inputs(start, count=count, **call_kwargs)
+                result = sync_client.read_discrete_inputs(start, count=count, device_id=resolved_device_id)
             else:
                 self._log.warning(f"read_registers: unsupported registry_type '{registry_type.name}' for TCP transport — returning None")
                 return None
@@ -132,7 +118,7 @@ class modbus_tcp(modbus_base):
             return None
 
         # Use hasattr to safely check for the error attribute/method
-        is_error: bool | Any = result.isError() if hasattr(result, "isError") else getattr(result, "is_error", False)
+        is_error: bool = result.isError() if hasattr(result, "isError") else bool(getattr(result, "is_error", False))
 
         if is_error:
             self._log.error(f"Modbus Error: {result}")

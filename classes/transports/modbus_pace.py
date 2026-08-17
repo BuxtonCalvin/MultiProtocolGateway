@@ -38,7 +38,7 @@ from __future__ import annotations
 
 import struct
 import threading
-from typing import Any, Optional
+from typing import Optional
 
 import serial
 
@@ -369,7 +369,7 @@ class pace(modbus_base):
     # Register reads — overrides modbus_base.read_registers
     # -----------------------------------------------------------------------
 
-    def read_registers(self, start: int, count: int = 1, registry_type: Registry_Type = Registry_Type.INPUT, **kwargs: Any) -> Any:
+    def read_registers(self, start: int, count: int = 1, registry_type: Registry_Type = Registry_Type.INPUT, device_id: int | None = None) -> _PaceResponse:
         """
         Read registers from the PACE BMS device over raw serial.
         Returns a _PaceResponse object compatible with modbus_base's
@@ -433,7 +433,7 @@ class pace(modbus_base):
                 return _PaceResponse.error()
             return _PaceResponse(registers)
 
-    def write_register(self, register: int, value: int, **kwargs: Any) -> None:
+    def write_register(self, register: int, value: int, *, device_id: int | None = None) -> None:
         """
         Write a single holding register to the PACE BMS device.
         Uses Modbus function code 0x06 (Write Single Register).
@@ -468,7 +468,7 @@ class pace(modbus_base):
                 self._log.error(f"PACE BMS write_register serial error: {e}")
                 self.connected = False
 
-    def write_coil(self, register: int, value: bool, variable_name: str | None = None, **kwargs: Any) -> bool:
+    def write_coil(self, register: int, value: bool, *, variable_name: str | None = None, device_id: int | None = None) -> bool:
         """
         Write a single coil to the PACE BMS device.
         Uses Modbus function code 0x05 (Write Single Coil).

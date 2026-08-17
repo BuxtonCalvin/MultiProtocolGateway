@@ -199,14 +199,14 @@ class serial_frame_transport(transport_base):
 
         registry: dict[int, bytes] = {i: bytes([b]) for i, b in enumerate(raw)}
 
-        registry_type = Registry_Type.INPUT
-        reg_map = self.protocolSettings.registry_map.get(registry_type, [])
+        registry_type: Registry_Type = Registry_Type.INPUT
+        reg_map: list[registry_map_entry] = self.protocolSettings.registry_map.get(registry_type, [])
 
         if not reg_map:
             return {"raw_frame": raw.hex()}
 
         try:
-            info = self.protocolSettings.process_registery(registry, reg_map)
+            info: dict[str, int | float | str] = self.protocolSettings.process_registery(registry, reg_map)
         except Exception:
             self._log.exception("process_registery failed for frame: %s", raw.hex())
             return {"raw_frame": raw.hex()}
@@ -215,7 +215,7 @@ class serial_frame_transport(transport_base):
         if self.on_message:
             entry_map: dict[str, registry_map_entry] = {e.variable_name: e for e in reg_map}
             for key, value in info.items():
-                entry = entry_map.get(key)
+                entry: registry_map_entry | None = entry_map.get(key)
                 if entry:
                     try:
                         self.on_message(self, entry, str(value))

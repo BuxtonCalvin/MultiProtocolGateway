@@ -387,10 +387,10 @@ class canbus(transport_base):
 
         if ascii_ratio >= self._SN_ASCII_RATIO and alnum_count >= self._SN_MIN_ALNUM:
             # Strip null padding and non-printable trailer bytes
-            decoded = payload.rstrip(b"\x00\xff").decode("ascii", errors="replace").strip()
+            decoded: str = payload.rstrip(b"\x00\xff").decode("ascii", errors="replace").strip()
             if re.fullmatch(r"[A-Za-z0-9\-_.]{4,}", decoded):
                 # Bonus if it starts with a letter (common inverter SN pattern)
-                bonus = 0.2 if decoded[0].isalpha() else 0.0
+                bonus: float = 0.2 if decoded[0].isalpha() else 0.0
                 return round(ascii_ratio + bonus, 3), decoded
 
         # --- Packed-integer path ------------------------------------------
@@ -436,7 +436,7 @@ class canbus(transport_base):
 
                     new_info: dict[str, int | float | str] = self.protocolSettings.process_registery(
                         registry,
-                        self.protocolSettings.get_registry_map(Registry_Type.ZERO)
+                        self.protocolSettings.get_registry_map(Registry_Type.CUSTOM_BUS)
                     )
                     info.update(new_info)
                     currentTime: float = time.time()

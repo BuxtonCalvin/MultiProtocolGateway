@@ -27,13 +27,16 @@ import threading
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
-from typing import Any, AsyncGenerator
+from typing import TYPE_CHECKING, Any, AsyncGenerator
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from ...transports.modbus_base import modbus_base
+from ...transports.modbus_base import ProtocolAnalysisReport, modbus_base
+
+if TYPE_CHECKING:
+    from _csv import Writer
 
 router = APIRouter(prefix="/api/analyze", tags=["analysis"])
 
@@ -344,7 +347,7 @@ def _apply_protocol_changes(csv_path: Path, changes: list[AnalysisChange]) -> tu
 
     _backup_protocol_csv(csv_path)
     with open(csv_path, "w", newline="", encoding="latin-1") as handle:
-        writer = csv.writer(handle, delimiter=delimiter)
+        writer: Writer = csv.writer(handle, delimiter=delimiter)
         writer.writerow(header)
         writer.writerows(rows)
 
@@ -430,14 +433,14 @@ async def run_analysis(device_name: str, payload: AnalyzeRequest, request: Reque
 
     # Register the progress queue BEFORE entering the thread so the SSE
     # endpoint can find it immediately after the browser issues the POST.
-    progress_queue = _register_progress_queue(clean)
+    progress_queue: queue.Queue[ProgressMessage | _ScanDoneSentinel] = _register_progress_queue(clean)
 
     def progress_cb(phase: str, done: int, total: int) -> None:
         pct: int = round((done / total) * 100) if total else 0
         progress_queue.put({"type": "progress", "phase": phase, "done": done, "total": total, "pct": pct})
 
     try:
-        result: dict[str, Any] = await asyncio.to_thread(
+        result: ProtocolAnalysisReport = await asyncio.to_thread(
             transport.analyze_protocols,
             protocol_names,
             payload.current_protocol,

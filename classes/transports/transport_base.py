@@ -24,7 +24,15 @@ import logging
 import threading
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Callable, ClassVar, Iterator, Literal, Optional
+from typing import (
+    TYPE_CHECKING,
+    Callable,
+    ClassVar,
+    Iterator,
+    Literal,
+    Optional,
+    TypedDict,
+)
 
 from classes.messaging.message_handler import send_message as _send_message
 from classes.protocol_settings import (
@@ -34,6 +42,8 @@ from classes.protocol_settings import (
 )
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from defs.common import TransportSettings
 
     from .transport_base import transport_base
@@ -52,6 +62,107 @@ class TransportCycleResult:
     expected_units: int = 0
     completed_units: int = 0
     skipped_units: int = 0
+
+
+class BridgeHealthSnapshot(TypedDict):
+    """
+    Read-only snapshot of a bridge's live connection/backlog/staleness state,
+    for the device page's "Bridge Health" panel. Shared shape across every
+    bridge that tracks a backlog and stale-data registry (influxdb_out,
+    influxdb3_out, ...) so the panel template doesn't need per-bridge branches.
+    """
+    connected: bool
+    batch_pending: int
+    batch_size: int
+    backlog_count: int
+    max_backlog_size: int
+    max_backlog_age: int
+    persistent_storage_enabled: bool
+    periodic_reconnect_interval: float
+    last_periodic_reconnect_attempt: float
+    stale_transport_count: int
+    tracked_transport_count: int
+
+
+class RetentionPolicy(TypedDict):
+    """One row of get_storage_overview()'s retention_policies list (InfluxDB v1 only)."""
+    name: object
+    duration: object
+    shardGroupDuration: object
+    default: object
+
+
+class TableStat(TypedDict):
+    """One row of get_storage_overview()'s table_stats list (InfluxDB v3 only)."""
+    table_name: str
+    row_count: int
+    file_size_bytes: int
+    memory_bytes: int
+
+
+class ColumnInfo(TypedDict):
+    """One row of get_storage_overview()'s columns list (InfluxDB v3 only)."""
+    table_name: str
+    column_name: str
+    data_type: str
+    iox_column_type: str
+
+
+class HeapProfile(TypedDict):
+    """get_storage_overview()'s optional heap-profile reachability probe
+    result (see influxdb3_out._probe_heap_profile)."""
+    reachable: bool
+    size_bytes: int | None
+    elapsed_ms: int | None
+    error: str | None
+
+
+# Shared payload shape passed to every bridge's write_data(); a flat
+# variable_name -> value map for one read cycle.
+DataPayload = dict[str, int | float | str]
+
+
+class StaleRegistryState(TypedDict):
+    """Per-transport runtime state tracked by a bridge's _stale_registry for
+    stale-data detection (see _check_is_stale / _commit_transport_state /
+    _handle_stale_event in influxdb_out.py and influxdb3_out.py)."""
+    last_row: DataPayload
+    start_ts: datetime
+    is_stale: bool
+    last_seen: datetime
+    stale_event_count: int
+    last_event_ts: datetime | None
+
+
+class StorageOverview(TypedDict, total=False):
+    """
+    Best-effort, read-only storage snapshot for the device page's Storage
+    Overview panel. Shared shape between influxdb_out (v1) and influxdb3_out
+    (v3) — see each bridge's get_storage_overview() docstring for which
+    fields it actually populates versus leaves at their v1/v3-inapplicable
+    default — so the shared bridge_influxdb_storage_panel.html template can
+    treat both result shapes identically without `is defined` guards.
+
+    total=False because each bridge only ever sets a subset (e.g. v1 sets
+    v1_diagnostics / data_dir_size_display, which v3 never sets; v3 sets
+    table_stats / columns with real data, which v1 always leaves empty).
+    """
+    connected: bool
+    database: str | None
+    items_label: str
+    has_table_stats: bool
+    table_stats: list[TableStat]
+    columns: list[ColumnInfo]
+    item_names: list[str]
+    sample_item: str | None
+    sample_item_approx_rows: int | None
+    retention_policies: list[RetentionPolicy] | None
+    data_dir: str | None
+    data_dir_size_bytes: int | None
+    data_dir_size_display: str | None
+    heap_profile: HeapProfile | None
+    v1_diagnostics: dict[str, dict[str, object]]
+    error: str | None
 
 class TransportWriteMode(Enum):
     READ = 0x00
@@ -343,14 +454,14 @@ class transport_base:
 
 
     @classmethod
-    def _get_top_class_name(cls, cls_obj: Any) -> str:
+    def _get_top_class_name(cls, cls_obj: type) -> str:
         """Finds the root class name in the inheritance chain."""
         # Ensure it is a class and has bases, and that the bases tuple is not empty
         if not hasattr(cls_obj, "__bases__") or not cls_obj.__bases__:
             return getattr(cls_obj, "__name__", str(cls_obj))
 
         # Safely extract the primary base class
-        base: Any = cls_obj.__bases__[0]
+        base: type = cls_obj.__bases__[0]
 
         # Stop recursion if the base is 'object' (the ultimate root of all Python classes)
         if base is object:
@@ -434,6 +545,20 @@ class transport_base:
         from resetting state that read_group_data_iter already initialized.
         """
         self._start_cycle_tracking()
+
+        # Non-modbus-shaped groups (e.g. every member's registry map lives
+        # entirely under Registry_Type.CUSTOM_BUS — serial_pylon, canbus)
+        has_modbus_shaped_data: bool = any(
+            getattr(getattr(m, 'protocolSettings', None), 'registry_map', {}).get(rt)
+            for m in members
+            for rt in (Registry_Type.INPUT, Registry_Type.HOLDING,
+                       Registry_Type.COIL, Registry_Type.DISCRETE)
+        )
+        if not has_modbus_shaped_data:
+            for member in members:
+                yield from member.read_data_iter()
+            self.finish_cycle_tracking(self._partial_info)
+            return
 
         for registry_type in (Registry_Type.INPUT, Registry_Type.HOLDING,
                             Registry_Type.COIL, Registry_Type.DISCRETE):
@@ -748,7 +873,7 @@ class transport_base:
         if self.on_message is not None:
             self.on_message(self, entry, value)
 
-    def send_message(self, message: str, title: str = "", priority: int = 0, services: "list[str] | str | None" = None, **kwargs: Any) -> None:
+    def send_message(self, message: str, title: str = "", priority: int = 0, services: "list[str] | str | None" = None, **kwargs: object) -> None:
         """
         Scheduling path: N/A — messaging utility, independent of read_mode.
 
@@ -778,15 +903,15 @@ class transport_base:
 
     #region - modbus
     # keep here as methods might also apply to future protocols
-    def read_registers(self, start: int, count: int = 1, registry_type : Registry_Type = Registry_Type.INPUT, **kwargs: Any) -> Any:
+    def read_registers(self, start: int, count: int = 1, registry_type : Registry_Type = Registry_Type.INPUT, device_id: int | None = None) -> object:
         """Scheduling path: All (Sequential, Concurrent, Interleaved) — base stub; modbus_base overrides with the real implementation."""
         pass
 
-    def write_register(self, register : int, value : int, **kwargs: Any) -> None:
+    def write_register(self, register : int, value : int, *, device_id: int | None = None) -> None:
         """Scheduling path: N/A — write path, independent of read_mode; base stub, modbus_base overrides."""
         pass
 
-    def write_coil(self, register: int, value: bool, **kwargs: Any) -> bool:
+    def write_coil(self, register: int, value: bool, *, device_id: int | None = None) -> bool:
         """
         Scheduling path: N/A — write path, independent of read_mode.
 

@@ -33,12 +33,12 @@ AppState         — single-row global flags (dirty, orphan counts, last commit)
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Tuple
 
 from sqlalchemy import (
     Boolean,
     DateTime,
     Integer,
+    MetaData,
     String,
     Text,
     UniqueConstraint,
@@ -52,8 +52,17 @@ from sqlalchemy.orm import (
     object_session,
 )
 
+# Define explicit naming tokens to enforce consistent SQLite alter rules
+naming_convention: dict[str, str] = {
+    "ix": "ix_%(column_0_label)s",
+    "uq": "uq_%(table_name)s_%(column_0_name)s",
+    "ck": "ck_%(table_name)s_%(constraint_name)s",
+    "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+    "pk": "pk_%(table_name)s"
+}
 
 class Base(DeclarativeBase):
+    metadata = MetaData(naming_convention=naming_convention)
     pass
 
 
@@ -73,7 +82,7 @@ class Setting(Base):
     transport_type— "scraper" | "bridge" | "general" | "logging"
     """
     __tablename__: str = "settings"
-    __table_args__: Tuple[Any, ...] = (
+    __table_args__: tuple[UniqueConstraint, ...] = (
         UniqueConstraint("section", "key", name="uq_settings_section_key"),
     )
 
@@ -128,7 +137,7 @@ class ProtocolRegister(Base):
     not here — two devices sharing this protocol can make different choices.
     """
     __tablename__: str = "protocol_registers"
-    __table_args__: Tuple[Any, ...] = (
+    __table_args__: tuple[UniqueConstraint, ...] = (
         UniqueConstraint(
             "protocol_name", "registry_type", "register_address",
             name="uq_register_protocol_type_addr"
@@ -141,7 +150,7 @@ class ProtocolRegister(Base):
     protocol_group: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     protocol_name: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     registry_type: Mapped[str] = mapped_column(String(16), nullable=False)
-    # "input" | "holding" | "coil" | "discrete" | "json"
+    # "input" | "holding" | "coil" | "discrete" | "custom_bus" | "json"
 
     # Register fields (sourced from CSV)
     register_address: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -164,6 +173,32 @@ class ProtocolRegister(Base):
     # whenever a metadata field above is edited in the protocol editor —
     # triggers a CSV rewrite for this protocol on the next commit.
     is_dirty: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # True for rows materialized on-demand for a synthetic metric (see
+    # services.protocol_service.build_synthetic_rows) or a JSON
+    # code-description "<name>_desc" metric (see build_json_desc_rows) the
+    # first time a device selects it — NOT sourced from a protocol CSV row,
+    # despite living in this table. config_writer._write_protocol_csvs
+    # MUST exclude any row with either flag set when regenerating a
+    # protocol's CSV file on commit, or these get written back as fake
+    # register rows that don't correspond to real hardware registers and
+    # will re-parse incorrectly (a literal "<name>_desc" CSV row would
+    # collide with the one _add_code_description_entries generates fresh
+    # from its source row at every load). register_address for these rows
+    # is never a real CSV address — see _virtual_register_address().
+    is_synthetic: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_json_desc: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Only meaningful when is_json_desc is True — the variable_name of the
+    # real CSV register this "<name>_desc" entry decodes (registry_map_entry
+    # .description_source in the live transport, see build_json_desc_rows).
+    # Lets the mask/screen auto-link cascade (see protocol_service
+    # .toggle_register_field / materialize_and_toggle_virtual_metric) find
+    # the paired code row from the desc side without needing the live
+    # transport — the reverse direction (code -> desc) still needs it,
+    # since a not-yet-materialized desc has no DB row to search for by
+    # source_variable_name; that direction is resolved at the API layer
+    # (routers.protocols), which has transport access, via build_json_desc_rows.
+    source_variable_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
@@ -188,7 +223,7 @@ class DeviceProtocolSelection(Base):
     """
 
     __tablename__: str = "device_protocol_selections"
-    __table_args__: Tuple[Any, ...] = (
+    __table_args__: tuple[UniqueConstraint, ...] = (
         UniqueConstraint(
             "device_name", "protocol_name", "registry_type", "register_address",
             name="uq_device_protocol_selection"

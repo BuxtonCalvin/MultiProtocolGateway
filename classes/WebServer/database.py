@@ -43,7 +43,7 @@ from typing import Generator
 from alembic.config import Config
 from sqlalchemy import create_engine, event, func, select
 from sqlalchemy.engine import Engine
-from sqlalchemy.engine.interfaces import DBAPIConnection
+from sqlalchemy.engine.interfaces import DBAPIConnection, DBAPICursor
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import ConnectionPoolEntry
 
@@ -86,7 +86,7 @@ def init_db(db_path: Path) -> Engine:
     def set_wal_mode(
         dbapi_connection: DBAPIConnection, connection_record: ConnectionPoolEntry
     ) -> None:
-        cursor = dbapi_connection.cursor()
+        cursor: DBAPICursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
@@ -130,8 +130,8 @@ def get_session() -> Generator[Session, None, None]:
         def view(db: Session = Depends(get_session)):
             ...
     """
-    factory = get_session_factory()
-    db = factory()
+    factory: sessionmaker[Session] = get_session_factory()
+    db: Session = factory()
     try:
         yield db
         db.commit()
@@ -148,8 +148,8 @@ def session_scope() -> Generator[Session, None, None]:
     Context-manager variant for use outside of FastAPI routes
     (e.g., the scanner, file watcher, commit engine).
     """
-    factory = get_session_factory()
-    db = factory()
+    factory: sessionmaker[Session] = get_session_factory()
+    db: Session = factory()
     try:
         yield db
         db.commit()

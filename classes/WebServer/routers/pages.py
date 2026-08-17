@@ -55,12 +55,19 @@ from sqlalchemy.orm import Session
 
 from classes.messaging.message_handler import is_active
 from classes.messaging.message_handler import send_message as _send_message
+from classes.WebServer.services.device_service import TransportLibraryRow
 
 from ...transports.modbus_base import modbus_base
 from ..config_writer import create_backup
 from ..database import get_session, refresh_app_state, session_scope
 from ..models import AppState, ProtocolRegister, Setting, SettingDescription
-from ..scanner import TRANSPORT_BASE_KEYS, load_config, scan_transport_library
+from ..scanner import (
+    EMPTY_TRANSPORT_ENTRY,
+    TRANSPORT_BASE_KEYS,
+    TransportLibraryEntry,
+    load_config,
+    scan_transport_library,
+)
 from ..services.analysis_service import get_transport_connection_status
 from ..services.bridge_service import (
     get_background_jobs,
@@ -181,11 +188,19 @@ async def device_page(request: Request, device_name: str):
         # This prevents scraper base keys (protocol_version, read_interval,
         # variable_mask, etc.) from appearing in the bridge settings pane.
         if summary and summary.transport_type == "bridge":
-            library: dict[str, dict[str, Any]] = scan_transport_library(request.app.state.transports_dir)
-            bridge_info: dict[str, Any] = library.get(summary.transport_class, {})
-            bridge_keys: set[Any] = set(bridge_info.get("keys", {}).keys())
+            library: dict[str, TransportLibraryEntry] = scan_transport_library(request.app.state.transports_dir)
+
+            bridge_info: TransportLibraryEntry = library.get(summary.transport_class, EMPTY_TRANSPORT_ENTRY)
+
+            # bridge_info is now a real TransportLibraryEntry (not a loose
+            # dict), so "keys" resolves to its declared dict[str, str | None]
+            # on its own — no | Any escape hatch needed here anymore.
+            raw_keys: dict[str, str | None] = bridge_info.get("keys", {})
+            bridge_keys: set[str] = set(raw_keys.keys()) if raw_keys else set()
+
             # Always keep log_level as it's shown in a dedicated dropdown
             bridge_keys.add("log_level")
+
             settings: List[Setting] = [
                 s for s in all_settings if s.key in bridge_keys
             ] if bridge_keys else all_settings
@@ -370,7 +385,7 @@ async def transport_library_page(request: Request):
 
     with session_scope() as db:
         nav: NavData = get_nav_data(db)
-    library: List[dict[str, Any]] = get_transport_library(
+    library: List[TransportLibraryRow]  = get_transport_library(
         request.app.state.transports_dir
     )
     return request.app.state.templates.TemplateResponse(
@@ -432,7 +447,7 @@ async def create_device_page(request: Request):
     proto_groups: List[dict[str, Any]] = get_protocol_groups(
         request.app.state.protocols_dir
     )
-    transport_library: dict[str, dict[str, Any]] = scan_transport_library(request.app.state.transports_dir)
+    transport_library: dict[str, TransportLibraryEntry] = scan_transport_library(request.app.state.transports_dir)
     create_device_data: dict[str, Any] = {
         "scrapers": [
             {
@@ -1393,8 +1408,8 @@ def create_device(request: Request, payload: CreateDeviceRequest, db: Session = 
     if section in config_data or db.query(Setting).filter_by(section=section).first():
         raise HTTPException(status_code=409, detail=f"Device '{payload.device_name}' already exists.")
 
-    library: dict[str, dict[str, Any]] = scan_transport_library(request.app.state.transports_dir)
-    scraper_info: dict[str, Any] | None = library.get(payload.scraper_transport)
+    library: dict[str, TransportLibraryEntry] = scan_transport_library(request.app.state.transports_dir)
+    scraper_info: TransportLibraryEntry | None = library.get(payload.scraper_transport)
     if not scraper_info or scraper_info.get("classification") != "scraper":
         raise HTTPException(status_code=400, detail="Selected scraper transport is not valid.")
 
@@ -1405,7 +1420,7 @@ def create_device(request: Request, payload: CreateDeviceRequest, db: Session = 
             if not bridge_part:
                 continue
             bridge_name: str = bridge_part.removeprefix("transport.")
-            bridge_info: dict[str, Any] | None = library.get(bridge_name)
+            bridge_info: TransportLibraryEntry | None = library.get(bridge_name)
             if not bridge_info or bridge_info.get("classification") != "bridge":
                 raise HTTPException(status_code=400, detail=f"Selected bridge '{bridge_part}' is not valid.")
 

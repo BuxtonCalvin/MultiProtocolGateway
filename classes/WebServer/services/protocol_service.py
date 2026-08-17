@@ -65,6 +65,18 @@ class DeviceRegisterView:
     # no ProtocolRegister DB row, no toggle endpoints, and are never written
     # to mask / screen files.
     is_synthetic: bool = False
+    # True for auto-generated "<name>_desc" rows (see
+    # protocol_settings._add_code_description_entries) — a companion text
+    # description for a register that carries a code/enum dict. Like
+    # synthetic rows, these exist only on the live transport's registry_map
+    # (keyed off registry_map_entry.description_source), never as a
+    # ProtocolRegister DB row — see build_json_desc_rows().
+    is_json_desc: bool = False
+    # Only meaningful when is_json_desc is True — see ProtocolRegister
+    # .source_variable_name. Threaded from build_json_desc_rows through to
+    # the template's create-and-toggle payload so the API layer can find
+    # (or materialize) the paired code row for the mask/screen auto-link.
+    source_variable_name: str | None = None
 
     @property
     def is_paired(self) -> bool:
@@ -98,6 +110,46 @@ def _safe_paired_address(row: Any) -> str | None:
         return None
     else:
         return val
+
+
+def _virtual_register_address(kind: str, variable_name: str) -> str:
+    """
+    Synthetic and JSON-desc metrics have no real CSV register address, but
+    ProtocolRegister.register_address is part of the uniqueness constraint
+    (protocol_name, registry_type, register_address) and DeviceProtocolSelection
+    keys off the same triple + device_name, so they still need *some* unique,
+    stable string. Real CSV addresses are numeric ("21") or dotted-bit
+    ("27.b14") — never "~"-prefixed — so this can't collide with one no
+    matter what a future protocol's CSV looks like.
+    """
+    return f"~{kind}:{variable_name}"
+
+
+def _safe_flag(row: Any, name: str) -> bool:
+    """
+    Same defensive-read reasoning as _safe_paired_address, generalized for
+    is_synthetic / is_json_desc — both added in the same migration as
+    paired_high_address was originally, so an un-migrated DB would raise
+    InvalidRequestError (not AttributeError) on plain attribute access.
+    """
+    instance_state = getattr(row, "__dict__", {})
+    if name in instance_state:
+        return bool(instance_state[name])
+    try:
+        return bool(getattr(row, name))
+    except Exception:
+        return False
+
+
+def _safe_str(row: Any, name: str) -> str | None:
+    """String-valued counterpart to _safe_flag — same un-migrated-DB reasoning."""
+    instance_state = getattr(row, "__dict__", {})
+    if name in instance_state:
+        return instance_state[name]
+    try:
+        return getattr(row, name)
+    except Exception:
+        return None
 
 
 def get_protocol_registers(
@@ -169,6 +221,9 @@ def get_protocol_registers(
                     screen_enabled=s.screen_enabled if s else False,
                     is_dirty=s.is_dirty if s else False,
                     paired_high_address=_safe_paired_address(row),
+                    is_synthetic=_safe_flag(row, "is_synthetic"),
+                    is_json_desc=_safe_flag(row, "is_json_desc"),
+                    source_variable_name=_safe_str(row, "source_variable_name"),
                 )
             )
         except Exception as exc:
@@ -247,12 +302,15 @@ def get_protocols_for_device(db: Session, protocol_version: str, device_name: st
 # form the table, so the UI warns the user before they hit that wall.
 WIDE_TABLE_COLUMN_LIMIT: int = 160
 
-# The registry types that actually feed the wide table. A protocol can, in
-# principle, expose other registry types (e.g. "coil", "discrete") that
-# don't participate in that table — those are excluded from
-# register_map_chosen even though they're included in total_available /
-# chosen_count.
-_REGISTER_MAP_TYPES: set[str] = {"holding", "input"}
+# Every registry-type tab feeds the wide table except the synthetic "json"
+# config tab — matches timescaledb._extract_metric_names, which (as of the
+# CUSTOM_BUS fix) iterates every registry type actually present in a
+# transport's registry_map rather than a fixed modbus-shaped allowlist.
+# register_map_chosen is intentionally *not* narrowed to a type subset here
+# for the same reason: a hardcoded allowlist is exactly what silently
+# undercounted coil/discrete before, and would do the same to custom_bus
+# (serial_pylon, canbus, ...) or any future registry type. existing_registry_types
+# is already "json" excluded (see below), so nothing further to filter.
 
 
 def get_device_metric_summary(
@@ -393,9 +451,31 @@ def get_device_metric_summary(
                 synthetic_names_by_type[field_registry_type].add(name)
     synthetic_total: int = len(all_synthetic_names)
     register_map_synthetic_names: set[str] = set()
-    for rt in _REGISTER_MAP_TYPES & existing_registry_types:
+    for rt in existing_registry_types:
         register_map_synthetic_names |= synthetic_names_by_type[rt]
     register_map_synthetic_total: int = len(register_map_synthetic_names)
+
+    # JSON code-description entries ("<name>_desc") behave exactly like
+    # synthetic fields for counting purposes: no per-register toggle (no
+    # ProtocolRegister/DeviceProtocolSelection row exists for them), always
+    # forwarded, so they're added in once here rather than through the
+    # mask/screen tab_chosen logic below. build_json_desc_rows() reads
+    # transport.registry_map directly and already tags each row with the
+    # registry-type bucket it came from via row.registry_type.
+    json_desc_names_by_type: dict[str, set[str]] = {rt: set() for rt in existing_registry_types}
+    all_json_desc_names: set[str] = set()
+    if transport is not None:
+        for row in build_json_desc_rows(transport):
+            if row.registry_type not in existing_registry_types:
+                continue
+            all_json_desc_names.add(row.variable_name)
+            json_desc_names_by_type[row.registry_type].add(row.variable_name)
+    json_desc_total: int = len(all_json_desc_names)
+    # Every tab reaching by_registry_type below is already register-map
+    # eligible (see register_map_chosen note above), so no further
+    # restriction is needed here the way register_map_synthetic_names
+    # needed one before that fix.
+    register_map_json_desc_total: int = json_desc_total
 
     by_registry_type: dict[str, dict[str, int]] = {}
     for registry_type, tab_total, mask_count, screen_count in tab_data:
@@ -409,18 +489,20 @@ def get_device_metric_summary(
             tab_chosen = 0
 
         chosen_count += tab_chosen
-        if registry_type in _REGISTER_MAP_TYPES:
-            register_map_chosen += tab_chosen
+        # Every tab reaching this loop is already non-json (see tab_data's
+        # own "json" skip above), so every tab is wide-table-eligible now.
+        register_map_chosen += tab_chosen
 
         tab_synthetic: int = len(synthetic_names_by_type.get(registry_type, set()))
+        tab_json_desc: int = len(json_desc_names_by_type.get(registry_type, set()))
         by_registry_type[registry_type] = {
-            "total":  tab_total + tab_synthetic,
-            "chosen": tab_chosen + tab_synthetic,
+            "total":  tab_total + tab_synthetic + tab_json_desc,
+            "chosen": tab_chosen + tab_synthetic + tab_json_desc,
         }
 
-    total_available += synthetic_total
-    chosen_count += synthetic_total
-    register_map_chosen += register_map_synthetic_total
+    total_available += synthetic_total + json_desc_total
+    chosen_count += synthetic_total + json_desc_total
+    register_map_chosen += register_map_synthetic_total + register_map_json_desc_total
 
     return {
         "total_available":     total_available,
@@ -432,30 +514,138 @@ def get_device_metric_summary(
     }
 
 
-def toggle_register_field(
+def _find_protocol_register(
+    db: Session, protocol_name: str, registry_type: str, variable_name: str
+) -> ProtocolRegister | None:
+    """Look up a ProtocolRegister by variable_name rather than register_address —
+    used by the code<->desc auto-link cascade, which only ever has the
+    counterpart's variable_name in hand, not its address."""
+    return (
+        db.query(ProtocolRegister)
+        .filter(
+            ProtocolRegister.protocol_name == protocol_name,
+            ProtocolRegister.registry_type == registry_type,
+            ProtocolRegister.variable_name == variable_name,
+        )
+        .first()
+    )
+
+
+def materialize_and_toggle_virtual_metric(
     db: Session,
-    register_id: int,
-    field: str,   # "user_write_enabled" | "mask_enabled" | "screen_enabled"
+    protocol_name: str,
+    registry_type: str,
+    device_name: str,
+    kind: str,             # "synthetic" | "json_desc"
+    variable_name: str,
+    documented_name: str,
+    unit: str | None,
+    data_type: str | None,
+    note: str | None,
+    read_interval: str | None,
+    field: str,             # "user_write_enabled" | "mask_enabled" | "screen_enabled"
     value: bool,
-    device_name: str | None = None,
+    source_variable_name: str | None = None,
 ) -> DeviceProtocolSelection | None:
     """
-    Toggle a single write/mask/screen field for one device's selection of a
-    register. These are device-scoped choices (see DeviceProtocolSelection),
-    not part of the shared ProtocolRegister definition, so a device_name is
-    required — there's no protocol-wide toggle to fall back to.
-    Enforces the two-gate rule: user_write_enabled can only be True
-    if the protocol permits writing.
-    Returns the updated row, or None if not found / not allowed.
+    First-selection path for a synthetic or JSON code-description metric —
+    the equivalent of devices.create_and_activate() for a virtual Setting
+    row, but for a virtual register row (DeviceRegisterView.id == -1).
+
+    Neither kind of metric is a real CSV register row, so no ProtocolRegister
+    exists for it yet the first time a device selects it. This creates that
+    row on demand (is_synthetic / is_json_desc flagged, so config_writer
+    must exclude it when regenerating the protocol's CSV — see the model
+    docstring), keyed under a "~"-prefixed virtual address
+    (_virtual_register_address) that can't collide with a real CSV address,
+    then hands off to the exact same toggle_register_field() used by every
+    other register from that point on — including its two-gate write rule
+    (write_mode_protocol is always "R" here, so user_write_enabled can never
+    be granted, same as any other read-only register).
+
+    kind == "json_desc" additionally cascades mask_enabled/screen_enabled to
+    the underlying CODE register (source_variable_name, always a real CSV
+    row for a CSV-backed protocol, so no materialization needed there) —
+    per the mask/screen semantics: selecting a description always selects
+    its code too, and vice versa (see toggle_register_field's own cascade
+    for the code -> desc direction when the desc already exists). Neither
+    the description's own name nor a synthetic field's name is ever written
+    to a mask/screen file (see config_writer._write_mask_screen_files) — the
+    code register is what actually gets written and read back at scrape
+    time, and the code<->desc link is what carries a description's
+    selection into the mask/screen file via its paired code.
+
+    Once this row exists, subsequent toggles for this device/metric go
+    through the normal PATCH /api/protocols/{register_id}/toggle endpoint
+    with the real id this returns — this function is only for the first one.
+
+    Returns the updated DeviceProtocolSelection, or None if field/kind is
+    invalid.
     """
+    if kind not in ("synthetic", "json_desc"):
+        return None
     allowed_fields: set[str] = {"user_write_enabled", "mask_enabled", "screen_enabled"}
     if field not in allowed_fields or not device_name:
         return None
 
-    row: ProtocolRegister | None = db.get(ProtocolRegister, register_id)
-    if row is None:
-        return None
+    register_address: str = _virtual_register_address(kind, variable_name)
 
+    row: ProtocolRegister | None = (
+        db.query(ProtocolRegister)
+        .filter(
+            ProtocolRegister.protocol_name == protocol_name,
+            ProtocolRegister.registry_type == registry_type,
+            ProtocolRegister.register_address == register_address,
+        )
+        .first()
+    )
+    if row is None:
+        # protocol_group isn't derivable from anything passed to this
+        # function — pull it from any existing row of this protocol rather
+        # than defaulting to protocol_name, since get_protocol_json() and
+        # the CSV-export routes key off the real value.
+        existing_group_row: ProtocolRegister | None = (
+            db.query(ProtocolRegister)
+            .filter(ProtocolRegister.protocol_name == protocol_name)
+            .first()
+        )
+        protocol_group: str = existing_group_row.protocol_group if existing_group_row else protocol_name
+
+        row = ProtocolRegister(
+            protocol_group=protocol_group,
+            protocol_name=protocol_name,
+            registry_type=registry_type,
+            register_address=register_address,
+            variable_name=variable_name,
+            documented_name=documented_name or variable_name,
+            unit=unit,
+            data_type=data_type,
+            values_range=None,
+            adjustments=None,
+            note=note,
+            read_interval=read_interval,
+            write_mode_protocol="R",
+            is_synthetic=(kind == "synthetic"),
+            is_json_desc=(kind == "json_desc"),
+            source_variable_name=source_variable_name if kind == "json_desc" else None,
+        )
+        db.add(row)
+        db.flush()
+
+    return toggle_register_field(db, row.id, field, value, device_name)
+
+
+def _toggle_selection_for_row(
+    db: Session, row: ProtocolRegister, field: str, value: bool, device_name: str
+) -> DeviceProtocolSelection | None:
+    """
+    Applies one field/value to one row's DeviceProtocolSelection, with no
+    code<->desc cascade — the cascade lives in toggle_register_field, which
+    calls this once for the row actually requested and, for mask/screen,
+    once more (non-recursively) for its code<->desc counterpart if one
+    exists. Kept separate so that second call can't trigger a further
+    cascade of its own and loop.
+    """
     target: DeviceProtocolSelection | None = (
         db.query(DeviceProtocolSelection)
         .filter(
@@ -494,6 +684,78 @@ def toggle_register_field(
         setattr(target, "mask_enabled", False)
     target.mark_dirty()
     db.flush()
+    return target
+
+
+def toggle_register_field(
+    db: Session,
+    register_id: int,
+    field: str,   # "user_write_enabled" | "mask_enabled" | "screen_enabled"
+    value: bool,
+    device_name: str | None = None,
+) -> DeviceProtocolSelection | None:
+    """
+    Toggle a single write/mask/screen field for one device's selection of a
+    register. These are device-scoped choices (see DeviceProtocolSelection),
+    not part of the shared ProtocolRegister definition, so a device_name is
+    required — there's no protocol-wide toggle to fall back to.
+    Enforces the two-gate rule: user_write_enabled can only be True
+    if the protocol permits writing.
+
+    mask_enabled / screen_enabled cascade to a register's JSON
+    code-description counterpart, in whichever direction is DB-resolvable:
+      - row is the "<name>_desc" entry (is_json_desc, source_variable_name
+        set) -> cascades to the code register it decodes, which is always a
+        real, already-materialized CSV row for a CSV-backed protocol.
+      - row is a plain CSV register with an *already materialized* desc
+        companion (found by source_variable_name == row.variable_name) ->
+        cascades to it.
+      - row is a plain CSV register whose desc companion has never been
+        selected/materialized before -> nothing to cascade to here; that
+        direction is resolved one layer up, in routers.protocols, which has
+        transport access (via build_json_desc_rows) to discover and
+        materialize the not-yet-existing desc row.
+    This mirrors the requirement that selecting either a description or its
+    code always selects both, and that only the code's own selection is
+    ever written to a mask/screen file (see
+    config_writer._write_mask_screen_files) — cascading here is what makes
+    a description's selection actually reach the file, via its code.
+
+    user_write_enabled never cascades — write-back is only ever meaningful
+    for the code register itself (descriptions/synthetics are always "R").
+
+    Returns the updated row, or None if not found / not allowed.
+    """
+    allowed_fields: set[str] = {"user_write_enabled", "mask_enabled", "screen_enabled"}
+    if field not in allowed_fields or not device_name:
+        return None
+
+    row: ProtocolRegister | None = db.get(ProtocolRegister, register_id)
+    if row is None:
+        return None
+
+    target: DeviceProtocolSelection | None = _toggle_selection_for_row(db, row, field, value, device_name)
+    if target is None:
+        return None
+
+    if field in ("mask_enabled", "screen_enabled"):
+        counterpart: ProtocolRegister | None = None
+        if row.is_json_desc and row.source_variable_name:
+            counterpart = _find_protocol_register(db, row.protocol_name, row.registry_type, row.source_variable_name)
+        elif not row.is_synthetic and not row.is_json_desc:
+            counterpart = (
+                db.query(ProtocolRegister)
+                .filter(
+                    ProtocolRegister.protocol_name == row.protocol_name,
+                    ProtocolRegister.registry_type == row.registry_type,
+                    ProtocolRegister.is_json_desc == True,   # noqa: E712
+                    ProtocolRegister.source_variable_name == row.variable_name,
+                )
+                .first()
+            )
+        if counterpart is not None and counterpart.id != row.id:
+            _toggle_selection_for_row(db, counterpart, field, value, device_name)
+
     refresh_app_state(db)
     _log.debug("toggle_register_field: register=%d field=%s value=%s device=%s", register_id, field, value, device_name)
     return target
@@ -564,9 +826,11 @@ def register_row_sort_key(row: DeviceRegisterView) -> tuple[int, str]:
 
     Groups rows, in order:
       0. Synthetic metrics (row.is_synthetic)
-      1. Any row with at least one W/M/S checkbox selected
+      1. JSON code-description metrics (row.is_json_desc) — auto-generated
+         "<name>_desc" companions, see build_json_desc_rows()
+      2. Any row with at least one W/M/S checkbox selected
          (user_write_enabled, mask_enabled, or screen_enabled)
-      2. Everything else
+      3. Everything else
 
     ...and alphabetizes by variable_name (case-insensitive) within each
     group. Used to set the *initial* order of the table when it's rendered
@@ -575,14 +839,18 @@ def register_row_sort_key(row: DeviceRegisterView) -> tuple[int, str]:
     """
     if row.is_synthetic:
         group = 0
-    elif row.user_write_enabled or row.mask_enabled or row.screen_enabled:
+    elif row.is_json_desc:
         group = 1
-    else:
+    elif row.user_write_enabled or row.mask_enabled or row.screen_enabled:
         group = 2
+    else:
+        group = 3
     return (group, (row.variable_name or "").lower())
 
 
-def build_synthetic_rows(transport: Any, registry_type: str | None = None) -> list[DeviceRegisterView]:
+def build_synthetic_rows(
+    transport: Any, registry_type: str | None = None, exclude_names: set[str] | None = None
+) -> list[DeviceRegisterView]:
     """Build display-only DeviceRegisterView rows for a transport's synthetic fields.
 
     Reads ``transport.synthetic_fields_metadata`` — a list of
@@ -604,11 +872,20 @@ def build_synthetic_rows(transport: Any, registry_type: str | None = None) -> li
     (the default) to get every synthetic field regardless of registry, e.g.
     for a combined/JSON view.
 
-    Synthetic rows are display-only:
-    - ``id = -1`` so no toggle PATCH endpoint is reachable
+    ``exclude_names``, when given, skips any field whose variable_name is
+    in the set — used by the /table endpoint to drop fields that have
+    already been materialized into a real ProtocolRegister row (once a
+    device has selected one, it comes back from the DB query with a real
+    id and belongs there, not in this live-only list — see
+    materialize_and_toggle_virtual_metric()).
+
+    Rows default to display-only (``id = -1``, no toggle endpoint
+    reachable) — that's the pre-selection state for every synthetic field.
+    Once selected for a device, the materialized DB row (with a real id)
+    takes over via get_protocol_registers(), and this function's copy of
+    that same field is excluded via exclude_names as above.
     - ``register_address = "synthetic"`` to distinguish from CSV rows
     - ``write_mode_protocol = "R"`` so the W checkbox is always disabled
-    - W / M / S toggles are always False and non-interactive in the template
 
     Returns an empty list when the transport has no synthetic fields or
     ``synthetic_fields_metadata`` is not defined.
@@ -619,9 +896,12 @@ def build_synthetic_rows(transport: Any, registry_type: str | None = None) -> li
     if not metadata:
         return []
 
+    exclude_names = exclude_names or set()
     rows: list[DeviceRegisterView] = []
     for field in metadata:
         variable_name: str = field[0]
+        if variable_name in exclude_names:
+            continue
         data_type: str | None = field[1]
         unit_mod: float = field[2]
         note: str | None = field[3]
@@ -658,6 +938,99 @@ def build_synthetic_rows(transport: Any, registry_type: str | None = None) -> li
                 is_synthetic=True,
             )
         )
+    return rows
+
+
+def build_json_desc_rows(
+    transport: Any,
+    registry_type: str | None = None,
+    address_by_variable: dict[str, str] | None = None,
+    exclude_names: set[str] | None = None,
+) -> list[DeviceRegisterView]:
+    """Build display-only DeviceRegisterView rows for JSON-code-derived
+    "<name>_desc" entries (see protocol_settings._add_code_description_entries).
+
+    These are NOT literal CSV rows — ProtocolRegister only ever mirrors
+    real CSV register rows (see its docstring) — they're synthesized at
+    registry-map load time for any register that carries a code/enum
+    dict, so like synthetic rows they only ever exist on the live
+    transport's registry_map, never in the DB. Identified by
+    registry_map_entry.description_source being truthy (it holds the
+    source register's variable_name, not just a bool — see
+    _add_code_description_entries).
+
+    registry_type, when given, filters to entries whose registry bucket
+    matches (case-insensitive) — mirrors build_synthetic_rows' filtering so
+    the /table endpoint can request just the tab currently open. Reads the
+    registry_map's own keys directly (rather than trusting each entry's own
+    .registry_type) so this stays correct regardless of which Registry_Type
+    members exist — same reasoning as timescaledb._extract_metric_names and
+    bridge_service._active_metric_names_for_protocol.
+
+    address_by_variable, when given, maps a source register's variable_name
+    to its already-known register_address (e.g. built from the DB rows
+    already fetched for this tab) so a _desc row can display the address of
+    the register it decodes rather than a placeholder. Falls back to the
+    source variable_name itself when no lookup is supplied or the source
+    isn't found in it (e.g. the source register lives on a tab that hasn't
+    been fetched yet).
+
+    exclude_names, when given, skips any entry whose variable_name is in
+    the set — same reasoning as build_synthetic_rows' exclude_names: drops
+    entries already materialized into a real ProtocolRegister row for this
+    device (see materialize_and_toggle_virtual_metric()).
+
+    Display-only, same as synthetic rows:
+    - id = -1, no toggle PATCH endpoint reachable
+    - write_mode_protocol = "R" (desc entries are always WriteMode.READDISABLED)
+
+    Returns an empty list when the transport has no registry_map, or no
+    entry in it carries description_source.
+    """
+    registry_map: dict[Any, list[Any]] = getattr(transport, "registry_map", None) or {}
+    if not registry_map:
+        return []
+
+    address_by_variable = address_by_variable or {}
+    exclude_names = exclude_names or set()
+    rows: list[DeviceRegisterView] = []
+
+    for reg_type, entries in registry_map.items():
+        type_name: str = getattr(reg_type, "name", str(reg_type)).lower()
+        if registry_type is not None and type_name != registry_type.lower():
+            continue
+
+        for entry in entries or []:
+            source_name: str | None = getattr(entry, "description_source", None)
+            if not source_name:
+                continue
+            if entry.variable_name in exclude_names:
+                continue
+
+            rows.append(
+                DeviceRegisterView(
+                    id=-1,
+                    protocol_name=getattr(transport, "protocol_version", ""),
+                    registry_type=type_name,
+                    register_address=address_by_variable.get(source_name, source_name),
+                    variable_name=entry.variable_name,
+                    documented_name=getattr(entry, "documented_name", entry.variable_name),
+                    unit=getattr(entry, "unit", "") or "",
+                    data_type=str(getattr(entry, "data_type", "")),
+                    values_range="",
+                    adjustments=None,
+                    note=getattr(entry, "note", None),
+                    read_interval=getattr(entry, "read_interval", None),
+                    write_mode_protocol="R",
+                    user_write_enabled=False,
+                    mask_enabled=False,
+                    screen_enabled=False,
+                    is_dirty=False,
+                    paired_high_address=None,
+                    is_json_desc=True,
+                    source_variable_name=source_name,
+                )
+            )
     return rows
 
 

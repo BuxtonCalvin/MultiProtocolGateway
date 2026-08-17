@@ -26,7 +26,7 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Callable, Literal, Optional, cast
+from typing import Callable, Literal, Optional, cast
 
 #  influx db methods are not recognized by type checker
 from influxdb import InfluxDBClient  # type: ignore
@@ -36,10 +36,13 @@ from classes.protocol_settings import registry_map_entry
 from defs.common import TransportSettings, strtobool
 
 from ..protocol_settings import Data_Type, Registry_Type
-from .transport_base import transport_base
-
-# Type alias for the data payload shared across all write methods
-DataPayload = dict[str, int | float | str]
+from .transport_base import (
+    BridgeHealthSnapshot,
+    DataPayload,
+    StaleRegistryState,
+    StorageOverview,
+    transport_base,
+)
 
 # Type alias for a serializable InfluxDB point dict (including the optional
 # internal '_backlog_time' sentinel used for age-based eviction)
@@ -150,7 +153,7 @@ class influxdb_out(transport_base):
         self.retry_delay_mins: int = settings.getint("retry_delay_mins", fallback=self.retry_delay_mins)
 
         # Stale data runtime state — keyed by transport_name, tracks last seen data and timestamps for stale detection logic
-        self._stale_registry: dict[str, dict[str, Any]] = {}
+        self._stale_registry: dict[str, StaleRegistryState] = {}
 
         # Timestamp timezone setting — mirrors timescaledb.use_utc_timestamp
         self.use_utc_timestamp: bool = strtobool(settings.get("use_utc_timestamp", fallback=str(self.use_utc_timestamp)))
@@ -448,7 +451,7 @@ class influxdb_out(transport_base):
         self.last_periodic_reconnect_attempt = 0.0
         return self._check_connection()
 
-    def get_health_snapshot(self) -> dict[str, Any]:
+    def get_health_snapshot(self) -> BridgeHealthSnapshot:
         """
         Read-only snapshot of this bridge's live connection/backlog/
         staleness state, for the device page's "Bridge Health" panel.
@@ -477,7 +480,7 @@ class influxdb_out(transport_base):
             "tracked_transport_count": len(self._stale_registry),
         }
 
-    def get_storage_overview(self) -> dict[str, Any]:
+    def get_storage_overview(self) -> StorageOverview:
         """
         Best-effort, read-only storage snapshot for the device page's
         Storage Overview panel: configured retention policies, discovered
@@ -513,7 +516,7 @@ class influxdb_out(transport_base):
         Nothing here raises — a failed query is recorded in `error` and
         the rest of the snapshot still returns.
         """
-        result: dict[str, Any] = {
+        result: StorageOverview = {
             "connected": self.connected,
             "database": self.database,
             "items_label": "Measurements",
@@ -555,7 +558,7 @@ class influxdb_out(transport_base):
             errors.append(f"Retention policy query failed: {e}")
 
         # 2. Extract Specific Stats Safely (Bypassing the global parsing issue)
-        v1_diag: dict[str, Any] = {}
+        v1_diag: dict[str, dict[str, object]] = {}
 
         # Safely query Runtime stats separately via SHOW STATS
         try:
@@ -750,12 +753,12 @@ class influxdb_out(transport_base):
         than stale_data_timeout seconds. Numeric comparisons use math.isclose
         to avoid false positives from floating point noise.
         """
-        state: dict[str, Any] | None = self._stale_registry.get(transport_id)
-        if not state or state["last_row"] is None:
+        state: StaleRegistryState | None = self._stale_registry.get(transport_id)
+        if not state:
             return False
 
         for key, val in row.items():
-            prev = state["last_row"].get(key)
+            prev: int | float | str | None = state["last_row"].get(key)
             if isinstance(val, (int, float)) and isinstance(prev, (int, float)):
                 if not math.isclose(val, prev, rel_tol=1e-4, abs_tol=1e-6):
                     return False
@@ -779,7 +782,7 @@ class influxdb_out(transport_base):
                 "last_seen": timestamp, "stale_event_count": 0, "last_event_ts": None,
             }
 
-        state: dict[str, Any] = self._stale_registry[transport_id]
+        state: StaleRegistryState = self._stale_registry[transport_id]
         state["last_seen"] = timestamp
 
         self._log.debug(
@@ -810,7 +813,7 @@ class influxdb_out(transport_base):
         times, with a minimum of retry_delay_mins between attempts.
         Sends a push notification on each attempt.
         """
-        state: dict[str, Any] | None = self._stale_registry.get(transport_id)
+        state: StaleRegistryState | None = self._stale_registry.get(transport_id)
         if not state:
             return
 
