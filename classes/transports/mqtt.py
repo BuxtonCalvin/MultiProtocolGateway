@@ -28,7 +28,7 @@ import time
 import warnings
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import NotRequired, TypedDict
+from typing import TypedDict
 
 import paho.mqtt.packettypes
 from paho.mqtt.client import (
@@ -80,7 +80,7 @@ class HADiscoveryPayload(TypedDict):
     name: str
     unique_id: str
     state_topic: str
-    unit_of_measurement: NotRequired[str]
+    unit_of_measurement: str
 
 
 class mqtt(transport_base):
