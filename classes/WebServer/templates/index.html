@@ -97,6 +97,13 @@
       Rollback Configuration
     </button>
 
+    <button id="reload-engine-btn"
+            class="w-full btn-secondary text-xs mt-2"
+            aria-label="Manually reload the protocol gateway engine from the on-disk configuration">
+      Reload Engine
+    </button>
+    <p id="reload-engine-status" class="surface-muted text-xs mt-1"></p>
+
   </aside>
 
 <!-- ── Rollback modal ──────────────────────────────────────────────────── -->
@@ -209,6 +216,49 @@
   closeBtn.addEventListener('click', closeModal);
   modal.addEventListener('click', e => { if (e.target === modal) closeModal(); });
   document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+})();
+
+// ── Reload Engine ───────────────────────────────────────────────────────
+// Manually triggers POST /api/gateway/reload, independent of the commit
+// cycle. The request itself blocks for the duration of the reload (see
+// gateway_status.py), so this only needs to show a "working" state on the
+// button while in flight and a final ok/fail line — the existing
+// pollGatewayStatus() in base.html is still what drives the shared
+// "System is reloading…" banner during that window, since it's polling
+// regardless of what triggered the reload.
+(function () {
+  const btn    = document.getElementById('reload-engine-btn');
+  const status = document.getElementById('reload-engine-status');
+  if (!btn) return;
+
+  btn.addEventListener('click', function () {
+    btn.disabled = true;
+    status.textContent = 'Reloading…';
+    status.className = 'surface-muted text-xs mt-1';
+
+    fetch('/api/gateway/reload', { method: 'POST' })
+      .then(r => r.json())
+      .then(data => {
+        if (data.ok) {
+          status.textContent = data.using_fallback
+            ? `⚠ Reloaded, but running on last-known-good config — ${data.message}`
+            : '✔ Reload complete.';
+          status.className = data.using_fallback
+            ? 'text-warning text-xs mt-1'
+            : 'text-success text-xs mt-1';
+        } else {
+          status.textContent = `✖ Reload failed: ${data.message || 'unknown error'}`;
+          status.className = 'text-danger text-xs mt-1';
+        }
+      })
+      .catch(() => {
+        status.textContent = '✖ Network error during reload.';
+        status.className = 'text-danger text-xs mt-1';
+      })
+      .finally(() => {
+        btn.disabled = false;
+      });
+  });
 })();
 </script>
 

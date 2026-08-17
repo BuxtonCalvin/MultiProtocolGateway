@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 
 router = APIRouter(prefix="/api/gateway", tags=["gateway"])
 
@@ -70,4 +70,44 @@ def gateway_status(request: Request) -> dict[str, Any]:
         "fatal": status.fatal if status else None,
         "trigger": status.trigger if status else None,
         "when": status.when.isoformat() if status else None,
+    }
+
+
+@router.post("/reload")
+def gateway_reload(request: Request) -> dict[str, Any]:
+    """
+    Manually rebuild the gateway from the current on-disk config.cfg,
+    independent of the commit cycle. do_commit() (see commit.py) already
+    triggers a reload after writing config.cfg, so this exists for the case
+    where there's nothing staged to commit but a reload is still wanted —
+    e.g. config.cfg was hand-edited and the FileWatcher-triggered reload
+    (trigger="file_watch") failed or was missed, or an admin just wants to
+    force the engine to re-read disk without waiting on that.
+
+    Uses trigger="manual" like the commit-triggered reload does; nothing on
+    either side (GatewayManager.reload() or the /status payload above)
+    distinguishes "manual via commit" from "manual via this button" — both
+    are an admin-initiated reload of whatever's currently on disk.
+
+    Blocks for the duration of the reload, same as do_commit()'s own call
+    to manager.reload() — the reload itself is what's slow (stop old
+    gateway -> build new -> maybe fall back), not this endpoint. Any open
+    tab still sees the "reloading, please wait" banner during that window
+    via GET /api/gateway/status polling (see pollGatewayStatus() in
+    base.html), same as it would for a commit-triggered reload.
+    """
+    manager: Any | None = getattr(request.app.state, "gateway_manager", None)
+    if manager is None:
+        raise HTTPException(status_code=503, detail="Gateway manager not available.")
+
+    status: Any = manager.reload(trigger="manual")
+    request.app.state.gateway = manager.current
+
+    return {
+        "ok": status.ok,
+        "message": status.message,
+        "using_fallback": status.using_fallback,
+        "fatal": status.fatal,
+        "trigger": status.trigger,
+        "when": status.when.isoformat(),
     }

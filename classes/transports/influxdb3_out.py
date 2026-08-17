@@ -30,7 +30,7 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Callable, Optional, TypedDict, cast
+from typing import Callable, NotRequired, Optional, TypedDict, cast
 from urllib.parse import urlsplit
 
 import pyarrow as pa
@@ -60,6 +60,7 @@ if sys.version_info >= (3, 11):
     from typing import NotRequired
 else:
     from typing_extensions import NotRequired
+
 # Type alias for a serializable InfluxDB point dict (including the optional
 # internal '_backlog_time' sentinel used for age-based eviction)
 InfluxPoint = dict[str, object]
@@ -645,8 +646,12 @@ class influxdb3_out(transport_base):
            (row_count, size_bytes per file, summed per table) — Core has no
            'system.chunks' table (that's Enterprise/Cloud-only), but it does
            persist real per-file size and row count in system.parquet_files,
-           which this aggregates by table_name. See the inline comment below
-           for the accuracy trade-off this implies vs. a live COUNT(*).
+           which this aggregates by table_name. If parquet_files comes back
+           completely empty (nothing flushed to disk yet, or the server has
+           no persistent object store configured at all), falls back to a
+           live per-table COUNT(*) so row_count is still populated —
+           file_size_bytes has no such fallback and stays 0 in that case,
+           since COUNT(*) can't produce a size.
         2. information_schema.columns — Flat schema map of all columns,
            types, and iox designations.
         3. object_store_dir — Local directory size calculation. Crucial
@@ -673,20 +678,35 @@ class influxdb3_out(transport_base):
         }
 
         if not self.connected or self.client is None:
+            self._log.debug(
+                f"get_storage_overview: skipping — connected={self.connected}, "
+                f"client={'set' if self.client is not None else 'None'}"
+            )
             result["error"] = "Not connected to InfluxDB."
             return result
+
+        self._log.debug(f"get_storage_overview: starting for database '{self.database}' via {self._endpoint_url}")
 
         # 1. Gather Table Metric Fallbacks
         try:
             # Drop the 'public' filter and explicitly filter out system tables instead
-            tables_query: pa.Table = cast(pa.Table, self.client.query( # type: ignore
+            tables_sql: str = (
                 "SELECT DISTINCT table_name FROM information_schema.columns "
-                "WHERE table_schema NOT IN ('information_schema', 'system')",
+                "WHERE table_schema NOT IN ('information_schema', 'system')"
+            )
+            self._log.debug(f"get_storage_overview: running table-name query: {tables_sql}")
+            tables_query: pa.Table = cast(pa.Table, self.client.query( # type: ignore
+                tables_sql,
                 database=self.database,
                 language="sql",
             ))
+            table_rows: list[dict[str, object]] = tables_query.to_pylist()
             table_names: list[str] = sorted(
-                row["table_name"] for row in tables_query.to_pylist() if row.get("table_name")
+                cast(str, row["table_name"]) for row in table_rows if row.get("table_name")
+            )
+            self._log.debug(
+                f"get_storage_overview: table-name query returned {len(table_rows)} row(s), "
+                f"table_names={table_names!r}"
             )
 
             # Real per-table row counts and on-disk sizes, aggregated from
@@ -708,22 +728,92 @@ class influxdb3_out(transport_base):
             # being silently absent.
             parquet_stats: dict[str, dict[str, int]] = {}
             try:
+                # Quoted exactly as InfluxDB's own documented example does —
+                # system."parquet_files", not system.parquet_files. Whether
+                # that quoting is strictly required or just defensive isn't
+                # documented, but it costs nothing to match it exactly.
+                parquet_sql: str = 'SELECT table_name, size_bytes, row_count FROM system."parquet_files"'
+                self._log.debug(f"get_storage_overview: running parquet-files query: {parquet_sql}")
                 parquet_table: pa.Table = cast(pa.Table, self.client.query(  # type: ignore[reportUnknownMemberType]
-                    "SELECT table_name, size_bytes, row_count FROM system.parquet_files",
+                    parquet_sql,
                     database=self.database,
                     language="sql",
                 ))
-                for row in parquet_table.to_pylist():
-                    table_name: str | None = row.get("table_name")
+                parquet_rows: list[dict[str, object]] = parquet_table.to_pylist()
+                self._log.debug(
+                    f"get_storage_overview: parquet-files query returned {len(parquet_rows)} row(s)"
+                    + (f", columns={parquet_table.column_names!r}" if parquet_rows else "")
+                )
+                if parquet_rows:
+                    # Log a sample row verbatim so a column-name mismatch
+                    # (e.g. if a future client version renames size_bytes)
+                    # is visible here instead of silently producing zeros.
+                    self._log.debug(f"get_storage_overview: parquet-files sample row: {parquet_rows[0]!r}")
+
+                skipped_no_table_name = 0
+                for row in parquet_rows:
+                    table_name: str | None = cast(Optional[str], row.get("table_name"))
                     if not table_name:
+                        skipped_no_table_name += 1
                         continue
                     bucket: dict[str, int] = parquet_stats.setdefault(
                         table_name, {"row_count": 0, "file_size_bytes": 0}
                     )
-                    bucket["row_count"] += int(row.get("row_count") or 0)
-                    bucket["file_size_bytes"] += int(row.get("size_bytes") or 0)
+                    bucket["row_count"] += int(cast(Optional[int], row.get("row_count")) or 0)
+                    bucket["file_size_bytes"] += int(cast(Optional[int], row.get("size_bytes")) or 0)
+
+                if skipped_no_table_name:
+                    self._log.warning(
+                        f"get_storage_overview: {skipped_no_table_name} of {len(parquet_rows)} "
+                        "parquet-files row(s) had no usable 'table_name' value and were skipped — "
+                        "if this is every row, the column name returned by the server may not "
+                        "match what this query expects (see the sample row logged above)."
+                    )
+
+                self._log.debug(f"get_storage_overview: aggregated parquet_stats (pre-fallback)={parquet_stats!r}")
+
+                if not parquet_rows:
+                    # Query succeeded but returned nothing at all — distinct
+                    # from "returned rows for some tables but not others",
+                    # which is normal for a brand-new table. Two real causes
+                    # produce this, and only one resolves on its own:
+                    #   - not-yet-flushed: Core persists on an interval, not
+                    #     on every write, so very fresh data legitimately
+                    #     has no parquet files yet — this clears up after
+                    #     the next persist cycle with no action needed.
+                    #   - in-memory object store: if the server was started
+                    #     without a persistent object store (e.g. no
+                    #     --object-store=file/s3/... configured), there are
+                    #     no parquet files, ever, by design — this table
+                    #     will stay empty permanently, not just for now.
+                    # This module can't tell which case it's in from here,
+                    # so it falls back to a live per-table COUNT(*) below
+                    # to get *a* row count either way; file_size_bytes has
+                    # no fallback (COUNT(*) can't produce a size), so it
+                    # stays 0 whenever parquet_files is empty.
+                    self._log.info(
+                        "get_storage_overview: system.\"parquet_files\" returned no rows for "
+                        f"database '{self.database}' — either no data has been persisted to disk "
+                        "yet (still buffered in the WAL — resolves on its own), or the server has "
+                        "no persistent object store configured (permanent — check its --object-store "
+                        "startup setting). Falling back to a live row count per table."
+                    )
+                    for name in table_names:
+                        try:
+                            count_sql: str = f'SELECT COUNT(*) as row_count FROM "{name}"'  # noqa: S608
+                            count_table: pa.Table = cast(pa.Table, self.client.query(  # type: ignore[reportUnknownMemberType]
+                                count_sql, database=self.database, language="sql",
+                            ))
+                            count_rows: list[dict[str, object]] = count_table.to_pylist()
+                            live_count: int = int(cast(Optional[int], count_rows[0].get("row_count")) or 0) if count_rows else 0
+                            parquet_stats[name] = {"row_count": live_count, "file_size_bytes": 0}
+                            self._log.debug(f"get_storage_overview: live COUNT(*) for '{name}' = {live_count}")
+                        except Exception as count_err:
+                            self._log.debug(f"get_storage_overview: live COUNT(*) for '{name}' failed: {count_err}")
+                    self._log.debug(f"get_storage_overview: aggregated parquet_stats (post-fallback)={parquet_stats!r}")
             except Exception as parquet_err:
-                self._log.debug(f"get_storage_overview: system.parquet_files query failed: {parquet_err}")
+                self._log.warning(f"get_storage_overview: system.\"parquet_files\" query failed: {parquet_err}")
+                result["error"] = f"Per-table size/row-count query failed: {parquet_err}"
 
             table_stats: list[TableStat] = [
                 {
@@ -737,12 +827,15 @@ class influxdb3_out(transport_base):
                 for name in table_names
             ]
 
+            self._log.debug(f"get_storage_overview: final table_stats={table_stats!r}")
+
             result["table_stats"] = table_stats
             result["item_names"] = table_names
 
         except Exception as e:
             self._log.warning(f"get_storage_overview: fallback table metrics failed: {e}")
             result["has_table_stats"] = False
+
 
         # 2. Gather Complete Schema Maps
         try:
@@ -778,6 +871,7 @@ class influxdb3_out(transport_base):
                 })
 
             result["columns"] = processed_columns
+            self._log.debug(f"get_storage_overview: schema query returned {len(raw_columns)} column row(s)")
 
             if not result["item_names"] and result["columns"]:
                 result["item_names"] = sorted(list({row["table_name"] for row in result["columns"]}))  # noqa: C414
@@ -787,6 +881,7 @@ class influxdb3_out(transport_base):
 
 
         # 3. Object Store Directory Disk Footprint
+        self._log.debug(f"get_storage_overview: object_store_dir setting = {self.object_store_dir!r}")
         if self.object_store_dir:
             try:
                 store_path: Path = Path(self.object_store_dir)
