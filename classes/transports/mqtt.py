@@ -23,6 +23,7 @@ import atexit
 import csv
 import json
 import random
+import sys
 import threading
 import time
 import warnings
@@ -50,6 +51,11 @@ from defs.common import TransportSettings, strtobool
 
 from ..protocol_settings import Registry_Type, WriteMode, registry_map_entry
 from .transport_base import transport_base
+
+if sys.version_info >= (3, 11):
+    from typing import NotRequired
+else:
+    from typing_extensions import NotRequired
 
 
 class MqttHealthSnapshot(TypedDict):
@@ -80,7 +86,7 @@ class HADiscoveryPayload(TypedDict):
     name: str
     unique_id: str
     state_topic: str
-    unit_of_measurement: str
+    unit_of_measurement: NotRequired[str]
 
 
 class mqtt(transport_base):
@@ -783,7 +789,8 @@ class mqtt(transport_base):
                 ),
             }
 
-            if item.unit:
+            # Safely check if a unit exists and is not just empty whitespace
+            if item.unit and str(item.unit).strip():
                 disc_payload["unit_of_measurement"] = item.unit
 
             discovery_topic: str = (
