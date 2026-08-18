@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, List
+from typing import TYPE_CHECKING, Any, List
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
@@ -45,8 +45,22 @@ from ..services.setting_description_service import (
     discard_descriptions,
 )
 
+if TYPE_CHECKING:
+    # Deferred at runtime (see the local import in do_commit()) —
+    # importing protocol_gateway at module load time risks a circular
+    # import, since it's what wires up the WebServer app in the first
+    # place. Only needed here, under TYPE_CHECKING, for annotations.
+    from protocol_gateway import GatewayManager, ReloadStatus
+
 _log: logging.Logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/commit", tags=["commit"])
+
+# commit_staged_deletions() (bridge_service.py) is declared to return
+# list[dict[str, Any]] — that Any is outside this file's scope (it's a
+# service module, not a router), so it isn't tightened here.
+BackupSummary = dict[str, int | str | None]
+DiffResponse = dict[str, dict[str, int] | list[dict[str, str | bool | None]]]
+CommitResponse = dict[str, str | int | list[str] | dict[str, bool | str] | None]
 
 
 def _has_dirty_config_state(db: Session) -> bool:
@@ -75,7 +89,7 @@ def _has_dirty_descriptions(db: Session) -> bool:
 
 
 @router.post("")
-def do_commit(request: Request, db: Session = Depends(get_session))-> dict[str, Any]:
+def do_commit(request: Request, db: Session = Depends(get_session))-> CommitResponse:
     """
     Full commit: backup → write config.cfg → write masks/screens/overrides →
     reset dirty flags → commit setting descriptions → apply any staged
@@ -88,7 +102,6 @@ def do_commit(request: Request, db: Session = Depends(get_session))-> dict[str, 
     also rewrites config.cfg and every mask/screen/override/description
     file along with it.
     """
-    from protocol_gateway import GatewayManager, ReloadStatus
     state = request.app.state
     try:
         result: dict[str, int | str] = {}
@@ -145,7 +158,7 @@ def do_commit(request: Request, db: Session = Depends(get_session))-> dict[str, 
         # either way; gateway_reload.ok communicates whether the *live*
         # gateway picked it up cleanly, separately from the commit itself
         # (see gateway_reload_status() / the banner in base.html).
-        gateway_reload: dict[str, Any] | None = None
+        gateway_reload: dict[str, bool | str] | None = None
         if config_was_dirty:
             manager: GatewayManager | None = getattr(state, "gateway_manager", None)
             if manager is not None:
@@ -168,14 +181,14 @@ def do_commit(request: Request, db: Session = Depends(get_session))-> dict[str, 
         _log.error(f"do_commit: commit failed: {exc}")
         raise HTTPException(status_code=500, detail=str(exc))
     else:
-        response: dict[str, Any] = {"status": "ok", **result, **timescale_summary}
+        response: CommitResponse = {"status": "ok", **result, **timescale_summary}
         if gateway_reload is not None:
             response["gateway_reload"] = gateway_reload
         return response
 
 
 @router.get("/diff")
-def diff(db: Session = Depends(get_session))-> dict[str, Any]:
+def diff(db: Session = Depends(get_session))-> DiffResponse:
     """Return structured diff of staged vs disk state."""
     result: DiffResult = build_diff(db)
     return {
@@ -206,7 +219,7 @@ def diff(db: Session = Depends(get_session))-> dict[str, Any]:
 
 
 @router.get("/backups")
-def get_backups(db: Session = Depends(get_session))-> list[dict[str, Any]]:
+def get_backups(db: Session = Depends(get_session))-> list[BackupSummary]:
     backups: List[ConfigBackup] = list_backups(db)
     return [
         {
@@ -260,7 +273,7 @@ class RollbackRequest(BaseModel):
 
 
 @router.post("/rollback")
-def do_rollback(payload: RollbackRequest, request: Request, db: Session = Depends(get_session)) -> dict[str, Any]:
+def do_rollback(payload: RollbackRequest, request: Request, db: Session = Depends(get_session)) -> dict[str, str | int]:
     """
     Restore config.cfg from a backup, then re-scan so the DB matches the
     restored file. The config file is treated as ground truth after rollback:

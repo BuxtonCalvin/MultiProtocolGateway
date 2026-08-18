@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
@@ -45,7 +44,7 @@ class DescriptionUpdate(BaseModel):
 
 
 @router.get("")
-def list_settings(db: Session = Depends(get_session)) -> list[dict[str, Any]]:
+def list_settings(db: Session = Depends(get_session)) -> list[dict[str, int | str | bool | None]]:
     rows: list[SettingDescription] = get_all_setting_descriptions(db)
     return [
         {
@@ -60,7 +59,7 @@ def list_settings(db: Session = Depends(get_session)) -> list[dict[str, Any]]:
 
 
 @router.get("/description/{key}")
-def get_description(key: str, db: Session = Depends(get_session))-> dict[str, Any]:
+def get_description(key: str, db: Session = Depends(get_session))-> dict[str, str | bool]:
     """
     Look up the description and transport list for a single setting key.
     Used by the device page help overlay — called client-side when the user
@@ -93,7 +92,7 @@ def get_description(key: str, db: Session = Depends(get_session))-> dict[str, An
 
 
 @router.post("/scan")
-def scan_for_new_settings(request: Request, db: Session = Depends(get_session))-> dict[str, Any]:
+def scan_for_new_settings(request: Request, db: Session = Depends(get_session))-> dict[str, int | list[dict[str, str | list[str]]] | list[str]]:
     """
     Re-scan the transport library and report any newly discovered setting keys
     that were not previously in the database. Returns a summary message.
@@ -109,9 +108,9 @@ def scan_for_new_settings(request: Request, db: Session = Depends(get_session))-
             key_to_transports.setdefault(key, set()).add(transport_name)
 
     # Find genuinely new keys (not yet in DB)
-    existing_keys: set[Any] = {r[0] for r in db.query(SettingDescription.key).all()}
+    existing_keys: set[str] = {r[0] for r in db.query(SettingDescription.key).all()}
 
-    new_findings: list[dict[str, Any]] = []
+    new_findings: list[dict[str, str | list[str]]] = []
     for key, transport_set in sorted(key_to_transports.items()):
         if key not in existing_keys:
             new_findings.append({
@@ -139,7 +138,7 @@ def scan_for_new_settings(request: Request, db: Session = Depends(get_session))-
 
 
 @router.patch("/{setting_id}")
-def patch_description(setting_id: int, payload: DescriptionUpdate, db: Session = Depends(get_session))-> dict[str, Any]:
+def patch_description(setting_id: int, payload: DescriptionUpdate, db: Session = Depends(get_session))-> dict[str, int | str | bool | None]:
 
     row: SettingDescription | None = update_description(db, setting_id, payload.description)
     if not row:

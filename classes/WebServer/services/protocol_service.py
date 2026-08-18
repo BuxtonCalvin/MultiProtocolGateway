@@ -25,16 +25,28 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, List, Literal, Sequence, Tuple
+from typing import List, Literal, Sequence, Tuple
 
 from sqlalchemy import func, select
 from sqlalchemy.engine.row import Row
 from sqlalchemy.orm import Query, Session
 
+from ...protocol_settings import Registry_Type, registry_map_entry
+from ...transports.transport_base import transport_base
 from ..database import refresh_app_state
 from ..models import DeviceProtocolSelection, ProtocolRegister
 
 _log: logging.Logger = logging.getLogger(__name__)
+
+# One entry of transport.synthetic_fields_metadata — either
+# (variable_name, data_type, unit_mod, note) or the newer
+# (variable_name, data_type, unit_mod, note, registry_type) form, where the
+# 5th element is a lowercase registry-type string. See
+# build_synthetic_rows()'s docstring / transport_base.synthetic_fields_metadata.
+SyntheticFieldMetadata = (
+    tuple[str, str | None, float, str | None]
+    | tuple[str, str | None, float, str | None, str]
+)
 
 
 @dataclass
@@ -88,7 +100,7 @@ class DeviceRegisterView:
         return self.write_mode_protocol in ("RW", "W", "WO", "WRITE", "R/W")
 
 
-def _safe_paired_address(row: Any) -> str | None:
+def _safe_paired_address(row: ProtocolRegister) -> str | None:
     """
     Safely read paired_high_address from a ProtocolRegister ORM row.
 
@@ -125,7 +137,7 @@ def _virtual_register_address(kind: str, variable_name: str) -> str:
     return f"~{kind}:{variable_name}"
 
 
-def _safe_flag(row: Any, name: str) -> bool:
+def _safe_flag(row: ProtocolRegister, name: str) -> bool:
     """
     Same defensive-read reasoning as _safe_paired_address, generalized for
     is_synthetic / is_json_desc — both added in the same migration as
@@ -141,7 +153,7 @@ def _safe_flag(row: Any, name: str) -> bool:
         return False
 
 
-def _safe_str(row: Any, name: str) -> str | None:
+def _safe_str(row: ProtocolRegister, name: str) -> str | None:
     """String-valued counterpart to _safe_flag — same un-migrated-DB reasoning."""
     instance_state = getattr(row, "__dict__", {})
     if name in instance_state:
@@ -159,7 +171,7 @@ def get_protocol_registers(
     page: int = 1,
     page_size: int = 50,
     device_name: str | None = None,
-) -> dict[str, Any]:
+) -> dict[str, str | int | list[DeviceRegisterView]]:
     """
     Returns a paginated list of ProtocolRegister rows for a given
     protocol_name and registry_type (input | holding | coil | discrete | json).
@@ -246,7 +258,7 @@ def get_protocol_registers(
     }
 
 
-def get_protocols_for_device(db: Session, protocol_version: str, device_name: str | None = None) -> List[dict[str, Any]]:
+def get_protocols_for_device(db: Session, protocol_version: str, device_name: str | None = None) -> List[dict[str, str | int]]:
     """
     Given a protocol_version string (e.g. "eg4_18kpv"),
     returns the available registry_types (tabs) for that device,
@@ -265,7 +277,7 @@ def get_protocols_for_device(db: Session, protocol_version: str, device_name: st
         .all()
     )
 
-    tabs: List[dict[str, Any]] = []
+    tabs: List[dict[str, str | int]] = []
     protocol_name: str
     registry_type: str
     for r in rows:
@@ -317,8 +329,8 @@ def get_device_metric_summary(
     db: Session,
     protocol_version: str,
     device_name: str,
-    transport: Any = None,
-) -> dict[str, Any]:
+    transport: transport_base | None = None,
+) -> dict[str, int | bool | dict[str, dict[str, int]]]:
     """
     Device-wide metric-selection summary across every non-JSON registry-type
     tab (register map) for a protocol_version. Used to render the
@@ -437,8 +449,9 @@ def get_device_metric_summary(
     synthetic_names_by_type: dict[str, set[str]] = {rt: set() for rt in existing_registry_types}
     all_synthetic_names: set[str] = set()
     if transport is not None:
-        for field in getattr(transport, "synthetic_fields_metadata", []):
-            rest: tuple[Any, ...] = field[4:]
+        metadata: list[SyntheticFieldMetadata] = getattr(transport, "synthetic_fields_metadata", [])
+        for field in metadata:
+            rest: tuple[str, ...] = field[4:]
             field_registry_type: str | None = str(rest[0]).lower() if rest and rest[0] else None
             if field_registry_type is not None and field_registry_type not in existing_registry_types:
                 continue
@@ -787,12 +800,20 @@ def update_protocol_register_field(db: Session, register_id: int, field: str, va
     return row
 
 
+# A generic JSON value — used for get_protocol_json()'s return type below.
+# json.loads() itself is typed Any at the stdlib level (JSON content is
+# inherently dynamic there), but every protocol .json config file this
+# reads is a top-level JSON object, so the function's own declared return
+# type can be this specific instead of inheriting json.loads()'s Any.
+JSONValue = dict[str, "JSONValue"] | list["JSONValue"] | str | int | float | bool | None
+
+
 def get_protocol_json(
     protocols_dir: Path,
     protocol_group: str,
     protocol_name: str,
     config_dir: Path | None = None,
-)  -> Tuple[Any, Literal[True]] | Tuple[None, Literal[False]] | Tuple[Any, Literal[False]]:
+)  -> Tuple[dict[str, JSONValue], Literal[True]] | Tuple[None, Literal[False]] | Tuple[dict[str, JSONValue], Literal[False]]:
     """
     Load the JSON config file for a protocol.
     Checks config_dir first (user override), then falls back to protocols_dir.
@@ -849,7 +870,7 @@ def register_row_sort_key(row: DeviceRegisterView) -> tuple[int, str]:
 
 
 def build_synthetic_rows(
-    transport: Any, registry_type: str | None = None, exclude_names: set[str] | None = None
+    transport: transport_base, registry_type: str | None = None, exclude_names: set[str] | None = None
 ) -> list[DeviceRegisterView]:
     """Build display-only DeviceRegisterView rows for a transport's synthetic fields.
 
@@ -890,7 +911,7 @@ def build_synthetic_rows(
     Returns an empty list when the transport has no synthetic fields or
     ``synthetic_fields_metadata`` is not defined.
     """
-    metadata: list[tuple[Any, ...]] = getattr(
+    metadata: list[SyntheticFieldMetadata] = getattr(
         transport, "synthetic_fields_metadata", []
     )
     if not metadata:
@@ -905,7 +926,7 @@ def build_synthetic_rows(
         data_type: str | None = field[1]
         unit_mod: float = field[2]
         note: str | None = field[3]
-        rest: tuple[Any, ...] = field[4:]
+        rest: tuple[str, ...] = field[4:]
         field_registry_type: str | None = str(rest[0]).lower() if rest and rest[0] else None
 
         if (
@@ -942,7 +963,7 @@ def build_synthetic_rows(
 
 
 def build_json_desc_rows(
-    transport: Any,
+    transport: transport_base,
     registry_type: str | None = None,
     address_by_variable: dict[str, str] | None = None,
     exclude_names: set[str] | None = None,
@@ -987,7 +1008,7 @@ def build_json_desc_rows(
     Returns an empty list when the transport has no registry_map, or no
     entry in it carries description_source.
     """
-    registry_map: dict[Any, list[Any]] = getattr(transport, "registry_map", None) or {}
+    registry_map: dict[Registry_Type, list[registry_map_entry]] = getattr(transport, "registry_map", None) or {}
     if not registry_map:
         return []
 
@@ -1039,7 +1060,7 @@ def export_protocol_registers(
     protocol_name: str,
     registry_type: str,
     device_name: str | None = None,
-) -> list[dict[str, Any]]:
+) -> list[dict[str, str | bool]]:
     """
     Return ALL registers for a protocol/registry_type as a flat list of dicts
     suitable for CSV or JSON export.  Unlike get_protocol_registers this is
@@ -1071,7 +1092,7 @@ def export_protocol_registers(
             ).all()
         }
 
-    result: list[dict[str, Any]] = []
+    result: list[dict[str, str | bool]] = []
     for row in protocol_rows:
         paired_high: str | None = _safe_paired_address(row)
         # Address column: show range "40-41" for paired rows, plain address otherwise
@@ -1080,7 +1101,7 @@ def export_protocol_registers(
             else str(row.register_address)
         )
 
-        entry: dict[str, Any] = {
+        entry: dict[str, str | bool] = {
             "register_address":   address_display,
             "variable_name":      row.variable_name,
             "documented_name":    row.documented_name,
@@ -1107,12 +1128,12 @@ def export_protocol_registers(
     return result
 
 
-def get_protocol_groups(protocols_dir: Path) -> list[dict[str, Any]]:
+def get_protocol_groups(protocols_dir: Path) -> list[dict[str, str | list[str]]]:
     """
     Scan protocols_dir and return the cascading menu structure:
     [ { group: "eg4", protocols: ["eg4_18kpv_holding", "eg4_18kpv_input", ...] } ]
     """
-    groups: list[dict[str, Any]] = []
+    groups: list[dict[str, str | list[str]]] = []
     if not protocols_dir.exists():
         return groups
 

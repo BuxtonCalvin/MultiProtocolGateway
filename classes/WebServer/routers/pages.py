@@ -39,7 +39,7 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Any, List, Sequence, Tuple
+from typing import TYPE_CHECKING, Any, List, Sequence, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import (
@@ -58,6 +58,7 @@ from classes.messaging.message_handler import send_message as _send_message
 from classes.WebServer.services.device_service import TransportLibraryRow
 
 from ...transports.modbus_base import modbus_base
+from ...transports.transport_base import transport_base
 from ..config_writer import create_backup
 from ..database import get_session, refresh_app_state, session_scope
 from ..models import AppState, ProtocolRegister, Setting, SettingDescription
@@ -98,6 +99,7 @@ from ..services.device_service import (
     get_transport_library,
 )
 from ..services.protocol_service import (
+    JSONValue,
     export_protocol_registers,
     get_device_metric_summary,
     get_protocol_groups,
@@ -106,18 +108,38 @@ from ..services.protocol_service import (
 )
 from ..services.setting_description_service import get_all_setting_descriptions
 
+if TYPE_CHECKING:
+    # Deferred at runtime — importing protocol_gateway at module load time
+    # risks a circular import, since it's what wires up the WebServer app
+    # in the first place (see the same pattern in commit.py/devices.py).
+    # Only needed here, under TYPE_CHECKING, for the annotations below.
+    from protocol_gateway import Protocol_Gateway
+
 router = APIRouter(tags=["pages"])
 _log: logging.Logger = logging.getLogger(__name__)
 
+# A number of the /pages/timescale/*, /pages/influxdb/*, /pages/mqtt/*, and
+# /pages/prometheus/* partial endpoints below keep dict[str, Any] /
+# list[dict[str, Any]] return-shaped locals rather than a tightened union.
+# In every one of those cases the dict is a near-verbatim pass-through of a
+# services/bridge_service.py introspection call (get_timescale_health,
+# get_storage_overview, get_background_jobs, list_wide_table_fields,
+# list_rollup_view_groups, list_compression_groups, get_influxdb_health,
+# get_influxdb_storage, get_mqtt_health, get_prometheus_health,
+# get_prometheus_targets, ...) — a service module, out of this pass's
+# "router modules" scope, reading genuinely heterogeneous live-bridge data
+# with no fixed shape this file can assert without guessing at internals it
+# doesn't own (see the identical note in timescale.py).
 
-def _base_context(request: Request, nav: NavData) -> dict[str, Any]:
+
+def _base_context(request: Request, nav: NavData) -> dict[str, NavData | list[dict[str, str | list[str]]]]:
     return {
         "nav": nav,
         "proto_groups": get_protocol_groups(request.app.state.protocols_dir),
     }
 
 
-def _analysis_protocol_options(protocol_groups: list[dict[str, Any]]) -> list[dict[str, str]]:
+def _analysis_protocol_options(protocol_groups: list[dict[str, str | list[str]]]) -> list[dict[str, str]]:
     options: list[dict[str, str]] = []
     for group in protocol_groups:
         group_name = str(group.get("group", ""))
@@ -147,7 +169,7 @@ async def dashboard(request: Request):
         nav: NavData = get_nav_data(db)
         state: AppState = get_app_state(db)
 
-    proto_groups: List[dict[str, Any]] = get_protocol_groups(request.app.state.protocols_dir)
+    proto_groups: List[dict[str, str | list[str]]] = get_protocol_groups(request.app.state.protocols_dir)
 
     return request.app.state.templates.TemplateResponse(
         request=request,
@@ -167,8 +189,8 @@ async def device_page(request: Request, device_name: str):
     # Resolved up front (doesn't need a db session) so both the connection
     # status below and the metric summary computed inside the session block
     # can use the same live transport instance.
-    gateway: Any = getattr(request.app.state, "gateway", None)
-    live_transport: Any = None
+    gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
+    live_transport: transport_base | None = None
     if gateway is not None:
         live_transport = next(
             (
@@ -206,7 +228,7 @@ async def device_page(request: Request, device_name: str):
             ] if bridge_keys else all_settings
         else:
             settings = all_settings
-        proto_tabs: List[dict[str, str]]   = (
+        proto_tabs: List[dict[str, str | int]]   = (
             get_protocols_for_device(db, summary.protocol_version, device_name=device_name)
             if summary and summary.protocol_version
             else []
@@ -217,7 +239,7 @@ async def device_page(request: Request, device_name: str):
             t.get("mask_count", 0) or t.get("screen_count", 0) or t.get("write_count", 0)
             for t in proto_tabs
         ) if proto_tabs else False
-        metric_summary: dict[str, Any] | None = (
+        metric_summary: dict[str, int | bool | dict[str, dict[str, int]]] | None = (
             get_device_metric_summary(db, summary.protocol_version, device_name, transport=live_transport)
             if summary and summary.protocol_version and summary.transport_type == "scraper"
             else None
@@ -238,7 +260,7 @@ async def device_page(request: Request, device_name: str):
             )
         return HTMLResponse("<p>Device not found.</p>", status_code=404)
 
-    proto_groups: List[dict[str, Any]] = get_protocol_groups(request.app.state.protocols_dir)
+    proto_groups: List[dict[str, str | list[str]]] = get_protocol_groups(request.app.state.protocols_dir)
 
     partial_template_name: str = (
         "partials/scraper_panes.html"
@@ -401,7 +423,7 @@ async def transport_settings_page(request: Request):
         nav: NavData = get_nav_data(db)
         settings: List[SettingDescription] = get_all_setting_descriptions(db)
         # Convert to plain dicts for template (avoids lazy-load issues outside session)
-        settings_data: List[dict[str, Any]] = [
+        settings_data: List[dict[str, int | str | bool]] = [
             {
                 "id": s.id,
                 "key": s.key,
@@ -444,11 +466,14 @@ async def about_page(request: Request):
 async def create_device_page(request: Request):
     with session_scope() as db:
         nav: NavData = get_nav_data(db)
-    proto_groups: List[dict[str, Any]] = get_protocol_groups(
+    proto_groups: List[dict[str, str | list[str]]] = get_protocol_groups(
         request.app.state.protocols_dir
     )
     transport_library: dict[str, TransportLibraryEntry] = scan_transport_library(request.app.state.transports_dir)
-    create_device_data: dict[str, Any] = {
+    create_device_data: dict[
+        str,
+        list[dict[str, str | dict[str, str | None]]] | list[dict[str, str]] | list[str]
+    ] = {
         "scrapers": [
             {
                 "name": name,
@@ -488,7 +513,7 @@ async def timescale_delete_columns_page(request: Request):
     TimescaleDB bridge. Selecting one loads its column checklist via HTMX
     (see timescale_fields_partial below).
     """
-    gateway = getattr(request.app.state, "gateway", None)
+    gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
     if not is_timescale_available(gateway):
         raise HTTPException(
             status_code=404,
@@ -518,7 +543,7 @@ async def timescale_fields_partial(protocol_name: str, request: Request):
     currently staged for deletion, so navigating away and back doesn't
     lose the admin's selections before they commit.
     """
-    gateway = getattr(request.app.state, "gateway", None)
+    gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
     if not is_timescale_available(gateway):
         raise HTTPException(
             status_code=404,
@@ -554,7 +579,7 @@ async def timescale_rebuild_rollups_page(request: Request):
     (see timescale_rollups_partial below); this route only renders the
     page shell + "Rebuild Rollups" button.
     """
-    gateway = getattr(request.app.state, "gateway", None)
+    gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
     if not is_timescale_available(gateway):
         raise HTTPException(
             status_code=404,
@@ -582,7 +607,7 @@ async def timescale_rollups_partial(request: Request):
     page load and again after every "Rebuild Rollups" click (see
     timescale_rebuild_rollups.html).
     """
-    gateway = getattr(request.app.state, "gateway", None)
+    gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
     if not is_timescale_available(gateway):
         raise HTTPException(
             status_code=404,
@@ -616,7 +641,7 @@ async def timescale_rebuild_compression_page(request: Request):
     timescale_compression_partial below); this route only renders the
     page shell + action buttons.
     """
-    gateway = getattr(request.app.state, "gateway", None)
+    gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
     if not is_timescale_available(gateway):
         raise HTTPException(
             status_code=404,
@@ -644,7 +669,7 @@ async def timescale_compression_partial(request: Request):
     every "Rebuild Compression" click (see timescale_rebuild_compression
     .html).
     """
-    gateway = getattr(request.app.state, "gateway", None)
+    gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
     if not is_timescale_available(gateway):
         raise HTTPException(
             status_code=404,
@@ -675,7 +700,7 @@ async def timescale_health_partial(request: Request):
     state, backlog buffering, and rollup setup completion. Read-only; lazy-
     loaded so a slow query here can't block the rest of the page.
     """
-    gateway = getattr(request.app.state, "gateway", None)
+    gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
     if not is_timescale_available(gateway):
         raise HTTPException(status_code=404, detail="No TimescaleDB bridge is attached to this gateway.")
 
@@ -700,7 +725,7 @@ async def timescale_storage_partial(request: Request):
     count, size, chunk count, and time range per source table. Read-only;
     lazy-loaded since this queries every source table individually.
     """
-    gateway = getattr(request.app.state, "gateway", None)
+    gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
     if not is_timescale_available(gateway):
         raise HTTPException(status_code=404, detail="No TimescaleDB bridge is attached to this gateway.")
 
@@ -726,7 +751,7 @@ async def timescale_indexes_partial(request: Request):
     counts. Read-only; lazy-loaded since this queries every source table
     individually, same as the Storage Overview panel.
     """
-    gateway = getattr(request.app.state, "gateway", None)
+    gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
     if not is_timescale_available(gateway):
         raise HTTPException(status_code=404, detail="No TimescaleDB bridge is attached to this gateway.")
 
@@ -751,7 +776,7 @@ async def timescale_compression_retention_partial(request: Request):
     device page — the configured compression schedule and raw-data
     retention interval. Read-only; this is config, not a live query.
     """
-    gateway = getattr(request.app.state, "gateway", None)
+    gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
     if not is_timescale_available(gateway):
         raise HTTPException(status_code=404, detail="No TimescaleDB bridge is attached to this gateway.")
 
@@ -776,7 +801,7 @@ async def timescale_jobs_partial(request: Request):
     TimescaleDB's own compression/retention/refresh scheduler jobs for
     every hypertable and rollup view this bridge manages. Read-only.
     """
-    gateway = getattr(request.app.state, "gateway", None)
+    gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
     if not is_timescale_available(gateway):
         raise HTTPException(status_code=404, detail="No TimescaleDB bridge is attached to this gateway.")
 
@@ -806,7 +831,7 @@ async def influxdb_health_partial(device_name: str, request: Request):
     device_name rather than assuming "the" InfluxDB bridge — see
     services/bridge_service.get_influxdb_bridge.
     """
-    gateway = getattr(request.app.state, "gateway", None)
+    gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
     device_section: str = f"transport.{device_name}"
 
     try:
@@ -833,7 +858,7 @@ async def influxdb_storage_partial(device_name: str, request: Request):
     failed underlying query is reported inline rather than erroring the
     whole panel — see services/bridge_service.get_influxdb_storage.
     """
-    gateway = getattr(request.app.state, "gateway", None)
+    gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
     device_section: str = f"transport.{device_name}"
 
     try:
@@ -860,7 +885,7 @@ async def mqtt_health_partial(device_name: str, request: Request):
     gateway can have more than one configured — see services/bridge_service
     .get_mqtt_bridge.
     """
-    gateway = getattr(request.app.state, "gateway", None)
+    gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
     device_section: str = f"transport.{device_name}"
 
     try:
@@ -890,7 +915,7 @@ async def prometheus_health_partial(device_name: str, request: Request):
     /metrics endpoints on different ports) — see services/bridge_service
     .get_prometheus_bridge.
     """
-    gateway = getattr(request.app.state, "gateway", None)
+    gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
     device_section: str = f"transport.{device_name}"
 
     try:
@@ -916,7 +941,7 @@ async def prometheus_targets_partial(device_name: str, request: Request):
     scrape_failures_total, and time since last_scrape_timestamp_seconds.
     Read-only.
     """
-    gateway = getattr(request.app.state, "gateway", None)
+    gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
     device_section: str = f"transport.{device_name}"
 
     try:
@@ -933,8 +958,8 @@ async def prometheus_targets_partial(device_name: str, request: Request):
     )
 
 
-def _protocol_create_groups(protocols_dir: Path) -> list[dict[str, Any]]:
-    groups: list[dict[str, Any]] = []
+def _protocol_create_groups(protocols_dir: Path) -> list[dict[str, str | list[str]]]:
+    groups: list[dict[str, str | list[str]]] = []
     if not protocols_dir.exists():
         return groups
 
@@ -961,7 +986,10 @@ async def create_protocol_page(request: Request):
     with session_scope() as db:
         nav: NavData = get_nav_data(db)
 
-    protocol_create_data: dict[str, Any] = {
+    protocol_create_data: dict[
+        str,
+        list[dict[str, str | list[str]]] | list[dict[str, str]] | tuple[str, ...]
+    ] = {
         "manufacturers": _protocol_create_groups(request.app.state.protocols_dir),
         "protocol_types": [
             {"label": "Coil", "value": "coil"},
@@ -986,10 +1014,10 @@ async def create_protocol_page(request: Request):
 
 @router.get("/pages/analyze/{device_name}", response_class=HTMLResponse, response_model=None)
 async def analyze_device_page(request: Request, device_name: str):
-    gateway = getattr(request.app.state, "gateway", None)
-    transport = None
+    gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
+    transport: transport_base | None = None
     if gateway is not None:
-        transports = getattr(gateway, "_Protocol_Gateway__transports", [])
+        transports: list[transport_base] = getattr(gateway, "_Protocol_Gateway__transports", [])
         transport = next(
             (
                 t for t in transports
@@ -1012,7 +1040,7 @@ async def analyze_device_page(request: Request, device_name: str):
             detail="Analyze is only available for Modbus-based scrapers",
         )
 
-    proto_groups: list[dict[str, Any]] = get_protocol_groups(request.app.state.protocols_dir)
+    proto_groups: list[dict[str, str | list[str]]] = get_protocol_groups(request.app.state.protocols_dir)
     protocol_options: List[dict[str, str]] = _analysis_protocol_options(proto_groups)
     current_protocol: str = device.protocol_version or ""
 
@@ -1069,7 +1097,7 @@ async def protocol_editor(
             .all()
         )
 
-    proto_tabs: List[dict[str, Any]] = [
+    proto_tabs: List[dict[str, str | int]] = [
         {
             "protocol_name": r[0],
             "registry_type": r[1],
@@ -1081,16 +1109,23 @@ async def protocol_editor(
     json_data_raw, _is_override = get_protocol_json(
         protocols_dir, protocol_group, protocol_name
     )
-    json_data: dict[str, Any] = json_data_raw or {}
+    # See protocols.py's protocol_table_partial() for why this uses a
+    # separate raw-result name with an explicit `is not None` check rather
+    # than annotating "json_data" directly on the unpack line or falling
+    # back via `or {}` — get_protocol_json() can genuinely return None.
+    json_data: dict[str, JSONValue] = json_data_raw if json_data_raw is not None else {}
 
     csv_path: str | None = None
     candidate: Path = protocols_dir / protocol_group / f"{protocol_name}.csv"
     if candidate.exists():
         csv_path = str(candidate)
 
-    proto_groups: List[dict[str, Any]] = get_protocol_groups(protocols_dir)
+    proto_groups: List[dict[str, str | list[str]]] = get_protocol_groups(protocols_dir)
 
-    context: dict[str, Any] = {
+    context: dict[
+        str,
+        NavData | list[dict[str, str | list[str]]] | str | list[dict[str, str | int]] | dict[str, JSONValue] | None
+    ] = {
         "nav":            nav,
         "proto_groups":   proto_groups,
         "protocol_group": protocol_group,
@@ -1131,7 +1166,7 @@ def export_registers_csv(
     Paired _l/_h registers show an address range (e.g. 40-41) and a single
     logical row — mirroring what the table displays.
     """
-    rows: list[dict[str, Any]] = export_protocol_registers(
+    rows: list[dict[str, str | bool]] = export_protocol_registers(
         db, protocol_name, registry_type, device_name
     )
     if not rows:
@@ -1168,13 +1203,13 @@ def export_registers_json(
     Same contract as the CSV export — address ranges for paired registers,
     optional W/M/S fields when device_name is provided.
     """
-    rows: list[dict[str, Any]] = export_protocol_registers(
+    rows: list[dict[str, str | bool]] = export_protocol_registers(
         db, protocol_name, registry_type, device_name
     )
     if not rows:
         raise HTTPException(status_code=404, detail="No registers found")
 
-    payload: dict[str, Any] = {
+    payload: dict[str, str | int | None | list[dict[str, str | bool]]] = {
         "protocol_name":  protocol_name,
         "registry_type":  registry_type,
         "device_name":    device_name,
@@ -1384,7 +1419,7 @@ def _csv_filename(protocol_name: str, protocol_type: str) -> str:
     return f"{protocol_name}.{protocol_type}_registry_map.csv"
 
 
-def _base_protocol_json(manufacturer: str, protocol_name: str, protocol_type: str) -> dict[str, Any]:
+def _base_protocol_json(manufacturer: str, protocol_name: str, protocol_type: str) -> dict[str, str | int | bool]:
     return {
         "manufacturer": manufacturer,
         "protocol": protocol_name,
@@ -1397,7 +1432,7 @@ def _base_protocol_json(manufacturer: str, protocol_name: str, protocol_type: st
 
 
 @router.post("/api/devices/create")
-def create_device(request: Request, payload: CreateDeviceRequest, db: Session = Depends(get_session)) -> dict[str, Any]:
+def create_device(request: Request, payload: CreateDeviceRequest, db: Session = Depends(get_session)) -> dict[str, str | int]:
     """
     Create a new device directly in config.cfg, then re-scan so the staging
     database reflects the new on-disk section without disturbing existing rows.
@@ -1424,7 +1459,7 @@ def create_device(request: Request, payload: CreateDeviceRequest, db: Session = 
             if not bridge_info or bridge_info.get("classification") != "bridge":
                 raise HTTPException(status_code=400, detail=f"Selected bridge '{bridge_part}' is not valid.")
 
-    allowed_keys: set[Any] = {
+    allowed_keys: set[str] = {
         key for key in scraper_info.get("keys", {}).keys()
         if key not in FIXED_CREATE_KEYS
     }

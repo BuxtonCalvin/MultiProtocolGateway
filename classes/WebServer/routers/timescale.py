@@ -35,12 +35,13 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from ...transports.transport_base import transport_base
 from ..services.bridge_service import (
     get_all_staged,
     get_background_jobs,
@@ -61,12 +62,33 @@ from ..services.bridge_service import (
     staged_deletion_count,
 )
 
+if TYPE_CHECKING:
+    # Deferred at runtime — importing protocol_gateway at module load time
+    # risks a circular import, since it's what wires up the WebServer app
+    # in the first place (see the same pattern in commit.py/devices.py).
+    # Only needed here, under TYPE_CHECKING, for the annotations below.
+    from protocol_gateway import Protocol_Gateway
+
 _log: logging.Logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/timescale", tags=["timescale"])
 
+# A number of endpoints below keep dict[str, Any]/list[dict[str, Any]]
+# return types rather than a tightened union. In every one of those cases
+# the dict is a near-verbatim pass-through of a services/bridge_service.py
+# introspection call (get_timescale_health, get_storage_overview,
+# get_background_jobs, list_wide_table_fields, list_rollup_views,
+# list_compression_groups, get_all_staged, ...) — a service module, out of
+# this pass's "router modules" scope, and one that's reading genuinely
+# heterogeneous data out of Postgres/TimescaleDB system catalogs (table
+# names, byte sizes, timestamps, job statuses, per-column type info) with
+# no fixed shape this router file can assert without guessing at internals
+# it doesn't own. Only the parts genuinely local to this file — the
+# gateway/bridge objects, and the couple of endpoints whose response dict
+# is built entirely from locally-known values — are tightened below.
 
-def _require_bridge(request: Request) -> Any:
+
+def _require_bridge(request: Request) -> transport_base:
     """
     Resolves the live timescaledb bridge or raises 404.
 
@@ -75,8 +97,8 @@ def _require_bridge(request: Request) -> Any:
     show either way, and the nav pad that links here is itself hidden when
     this would fail (see timescale_bridge_available() in base.html).
     """
-    gateway: Any | None = getattr(request.app.state, "gateway", None)
-    bridge: Any | None = get_timescale_bridge(gateway)
+    gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
+    bridge: transport_base | None = get_timescale_bridge(gateway)
     if bridge is None:
         _log.warning("No TimescaleDB bridge is attached to this gateway.")
         raise HTTPException(status_code=404, detail="No TimescaleDB bridge is attached to this gateway.")
@@ -121,7 +143,7 @@ def stage_field(
     column_name: str,
     payload: StageFieldRequest,
     request: Request,
-    ) -> dict[str, Any]:
+    ) -> dict[str, str | bool | int]:
     """
     Stages or un-stages one column for deletion. This is a checkbox toggle
     only — no ALTER TABLE happens here. The actual delete + rollup rebuild
@@ -222,7 +244,7 @@ def rebuild_rollups(payload: RebuildRollupsRequest, request: Request) -> Streami
 
     protocol_names: set[str] = set(payload.protocol_names)
     force: bool = payload.force
-    gateway: Any = request.app.state.gateway
+    gateway: "Protocol_Gateway | None" = request.app.state.gateway
 
     def event_stream():
         try:
@@ -275,7 +297,7 @@ def refresh_rollups(payload: RefreshRollupsRequest, request: Request) -> Streami
 
     protocol_names: set[str] = set(payload.protocol_names)
     force_full: bool = payload.force_full
-    gateway: Any = request.app.state.gateway
+    gateway: "Protocol_Gateway | None" = request.app.state.gateway
 
     def event_stream():
         try:
@@ -373,7 +395,7 @@ def rebuild_compression_endpoint(payload: RebuildCompressionRequest, request: Re
         raise HTTPException(status_code=400, detail="Select at least one group to rebuild.")
 
     protocol_names: set[str] = set(payload.protocol_names)
-    gateway: Any = request.app.state.gateway
+    gateway: "Protocol_Gateway | None" = request.app.state.gateway
 
     def event_stream():
         try:

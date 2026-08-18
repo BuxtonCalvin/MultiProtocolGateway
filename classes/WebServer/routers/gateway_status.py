@@ -18,15 +18,29 @@
 """routers/gateway_status.py — Live gateway (re)build status for the webUI's reload banner."""
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, HTTPException, Request
 
+if TYPE_CHECKING:
+    # Deferred at runtime (see the local imports below) to match the
+    # existing convention in commit.py's do_commit() — importing
+    # protocol_gateway at module load time risks a circular import, since
+    # it's what wires up the WebServer app in the first place. Only needed
+    # here, under TYPE_CHECKING, for the annotations below.
+    from protocol_gateway import GatewayManager, ReloadStatus
+
 router = APIRouter(prefix="/api/gateway", tags=["gateway"])
+
+# Every field of the /status and /reload responses, by name. ReloadStatus
+# itself has no optional fields (see protocol_gateway.py) — the `| None`
+# here covers the "no manager" / "no reload has ever run yet" cases below,
+# not optionality on ReloadStatus.
+GatewayStatusResponse = dict[str, bool | str | None]
 
 
 @router.get("/status")
-def gateway_status(request: Request) -> dict[str, Any]:
+def gateway_status(request: Request) -> GatewayStatusResponse:
     """
     Polled every couple of seconds by base.html (see pollGatewayStatus())
     to drive the "System is reloading, please be patient" / "Reload
@@ -49,7 +63,7 @@ def gateway_status(request: Request) -> dict[str, Any]:
     initial "startup" ReloadStatus, which is ok=True — see below for why
     that's excluded from `ok`/etc here rather than reported as trouble).
     """
-    manager: Any | None = getattr(request.app.state, "gateway_manager", None)
+    manager: "GatewayManager | None" = getattr(request.app.state, "gateway_manager", None)
     if manager is None:
         return {
             "reloading": False,
@@ -61,7 +75,7 @@ def gateway_status(request: Request) -> dict[str, Any]:
             "when": None,
         }
 
-    status: Any | None = manager.status
+    status: "ReloadStatus | None" = manager.status
     return {
         "reloading": manager.reloading,
         "ok": status.ok if status else None,
@@ -74,7 +88,7 @@ def gateway_status(request: Request) -> dict[str, Any]:
 
 
 @router.post("/reload")
-def gateway_reload(request: Request) -> dict[str, Any]:
+def gateway_reload(request: Request) -> GatewayStatusResponse:
     """
     Manually rebuild the gateway from the current on-disk config.cfg,
     independent of the commit cycle. do_commit() (see commit.py) already
@@ -96,11 +110,11 @@ def gateway_reload(request: Request) -> dict[str, Any]:
     via GET /api/gateway/status polling (see pollGatewayStatus() in
     base.html), same as it would for a commit-triggered reload.
     """
-    manager: Any | None = getattr(request.app.state, "gateway_manager", None)
+    manager: "GatewayManager | None" = getattr(request.app.state, "gateway_manager", None)
     if manager is None:
         raise HTTPException(status_code=503, detail="Gateway manager not available.")
 
-    status: Any = manager.reload(trigger="manual")
+    status: "ReloadStatus" = manager.reload(trigger="manual")
     request.app.state.gateway = manager.current
 
     return {

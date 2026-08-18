@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any, List, Tuple
+from typing import TYPE_CHECKING, Any, List, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -32,6 +32,7 @@ from sqlalchemy.orm import Session
 
 from classes.WebServer.models import DeviceProtocolSelection, ProtocolRegister
 
+from ...transports.transport_base import transport_base
 from ..database import get_session, session_scope
 from ..services.protocol_service import (
     DeviceRegisterView,
@@ -47,9 +48,24 @@ from ..services.protocol_service import (
     update_protocol_register_field,
 )
 
+if TYPE_CHECKING:
+    # Deferred at runtime — importing protocol_gateway at module load time
+    # risks a circular import, since it's what wires up the WebServer app
+    # in the first place (see the same pattern in commit.py/devices.py).
+    # Only needed here, under TYPE_CHECKING, for the annotations below.
+    from protocol_gateway import Protocol_Gateway
+
 _log: logging.Logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/protocols", tags=["protocols"])
+
+# A generic JSON value — used for the two spots in this file that read or
+# write an arbitrary protocol .json config file's contents, where the
+# actual shape is whatever's in that file (see save_protocol_json() /
+# protocol_table_partial()'s "json" registry_type branch), not something
+# this router defines or controls.
+JSONValue = dict[str, "JSONValue"] | list["JSONValue"] | str | int | float | bool | None
+
 
 @router.get("/{protocol_name}/{registry_type}")
 def list_registers(
@@ -60,6 +76,11 @@ def list_registers(
     device_name: str | None = None,
     db: Session = Depends(get_session),
 ) -> dict[str, Any]:
+    # dict[str, Any] kept: this passes straight through
+    # get_protocol_registers()'s own return shape, which is
+    # protocol_service.py's to define (a service module, not this router —
+    # out of this pass's scope, same reasoning as commit_staged_deletions()
+    # in commit.py).
     return get_protocol_registers(db, protocol_name, registry_type, page, page_size, device_name)
 
 
@@ -77,6 +98,8 @@ def device_protocol_tabs(
     endpoint after a toggle to refresh the tab strip — so the two can
     never disagree.
     """
+    # dict[str, Any] kept: same reasoning as list_registers() above —
+    # get_protocols_for_device()'s return shape belongs to protocol_service.py.
     return get_protocols_for_device(db, protocol_version, device_name=device_name)
 
 
@@ -93,8 +116,11 @@ def device_metric_summary(
     re-fetches this after every mask/screen toggle to keep the badges in
     sync — same source of truth used for the initial page render.
     """
-    gateway: Any = getattr(request.app.state, "gateway", None)
-    transport: Any = gateway.get_transport(f"transport.{device_name}") if gateway is not None else None
+    # Return type kept dict[str, Any]: get_device_metric_summary()'s shape
+    # belongs to protocol_service.py, same reasoning as above. gateway/
+    # transport below are locally-owned and now precisely typed.
+    gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
+    transport: transport_base | None = gateway.get_transport(f"transport.{device_name}") if gateway is not None else None
     return get_device_metric_summary(db, protocol_version, device_name, transport=transport)
 
 
@@ -127,7 +153,7 @@ def toggle_register(
     payload: ToggleRequest,
     device_name: str | None = None,
     db: Session = Depends(get_session),
-)-> dict[str, Any]:
+)-> dict[str, int | bool]:
 
     result: DeviceProtocolSelection | None = toggle_register_field(db, register_id, payload.field, payload.value, device_name)
     if result is None:
@@ -148,8 +174,8 @@ def toggle_register(
     if payload.field in ("mask_enabled", "screen_enabled") and device_name:
         source_row: ProtocolRegister | None = db.get(ProtocolRegister, register_id)
         if source_row is not None and not source_row.is_synthetic and not source_row.is_json_desc:
-            gateway: Any = getattr(request.app.state, "gateway", None)
-            transport: Any = gateway.get_transport(f"transport.{device_name}") if gateway is not None else None
+            gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
+            transport: transport_base | None = gateway.get_transport(f"transport.{device_name}") if gateway is not None else None
             if transport is not None:
                 for desc_row in build_json_desc_rows(transport, registry_type=source_row.registry_type):
                     if desc_row.source_variable_name == source_row.variable_name:
@@ -192,7 +218,7 @@ def create_and_toggle_virtual_register(
     payload: VirtualToggleRequest,
     device_name: str | None = None,
     db: Session = Depends(get_session),
-) -> dict[str, Any]:
+) -> dict[str, int | bool]:
     """
     First-selection endpoint for a synthetic or JSON code-description
     metric — the register-row equivalent of POST .../settings/create-and-
@@ -231,6 +257,12 @@ def create_and_toggle_virtual_register(
 
 @router.patch("/{register_id}/field")
 def update_register_field(register_id: int, payload: FieldUpdateRequest, db: Session = Depends(get_session))-> dict[str, Any]:
+    # dict[str, Any] kept: "value" below is getattr(result, payload.field) —
+    # payload.field names an arbitrary ProtocolRegister column at runtime,
+    # so its value type genuinely can't be known statically (could be a
+    # register's bool/int/str/float column depending on what the caller asked
+    # to read back). id/field/is_dirty are known (int/str/bool) but a dict's
+    # value type is one union across all keys, so they inherit Any too.
     result: ProtocolRegister | None = update_protocol_register_field(db, register_id, payload.field, payload.value)
     if result is None:
         raise HTTPException(status_code=404, detail="Protocol register or field not found")
@@ -269,13 +301,20 @@ async def protocol_table_partial(
                 .filter(ProtocolRegister.protocol_name == protocol_name)
                 .first()
             )
-        protocol_group: Any = row[0] if row else ""
+        protocol_group: str = row[0] if row else ""
         config_dir: Path = getattr(request.app.state, "config_dir")
-        json_data, is_override = get_protocol_json(
+        json_data_raw, is_override = get_protocol_json(
             request.app.state.protocols_dir, protocol_group, protocol_name,
             config_dir=config_dir,
         )
-        json_data: Any = json_data or {}
+        # get_protocol_json() (protocol_service.py) can return None as its
+        # first tuple element (no json file found / failed to load), so its
+        # declared type is dict[str, JSONValue] | None — using a separate
+        # name here (json_data_raw) rather than annotating "json_data"
+        # directly on the unpack line avoids redeclaring the same name with
+        # a narrower (non-Optional) type, which Pyright rejects outright
+        # regardless of how the None case is actually handled below.
+        json_data: dict[str, JSONValue] = json_data_raw if json_data_raw is not None else {}
         return request.app.state.templates.TemplateResponse(
             request=request,
             name="partials/json_editor.html",
@@ -288,6 +327,7 @@ async def protocol_table_partial(
         )
 
     with session_scope() as db:
+        # dict[str, Any] kept: same out-of-scope reasoning as list_registers().
         data: dict[str, Any] = get_protocol_registers(
             db, protocol_name, registry_type, page, page_size=5000, device_name=device_name
         )
@@ -301,9 +341,9 @@ async def protocol_table_partial(
     # DB state. The transport is looked up by name via the gateway so
     # anything not yet materialized stays live.
     if device_name:
-        gateway: Any = getattr(request.app.state, "gateway", None)
+        gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
         if gateway is not None:
-            transport: Any = gateway.get_transport(f"transport.{device_name}")
+            transport: transport_base | None = gateway.get_transport(f"transport.{device_name}")
             if transport is not None:
                 already_materialized: set[str] = {
                     row.variable_name for row in data.get("rows", [])
@@ -354,7 +394,7 @@ async def save_protocol_json(request: Request, protocol_group: str, protocol_nam
     """Save updated JSON config for a protocol directly to disk."""
 
     try:
-        body: Any = await request.json()
+        body: dict[str, JSONValue] = await request.json()
     except Exception:
         return JSONResponse({"status": "error", "detail": "Invalid JSON body"}, status_code=400)
     config_dir: Path = getattr(request.app.state, "config_dir", request.app.state.protocols_dir / protocol_group)
