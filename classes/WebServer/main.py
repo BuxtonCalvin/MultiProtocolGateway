@@ -75,6 +75,9 @@ JsonValue = str | int | float | bool | None
 
 
 class GatewayManagerLike(Protocol):
+    # GatewayManager is a concrete class in protocol_gateway.py,
+    # but we don't want to import it here (circular dependency with the routers).
+    # This Protocol defines the interface we need to interact with it.
     @property
     def current(self) -> object | None: ...
 

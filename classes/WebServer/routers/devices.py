@@ -47,6 +47,7 @@ from ..services.analysis_service import get_transport_connection_status
 from ..services.bridge_service import has_staged_deletions, staged_deletion_count
 from ..services.device_service import (
     delete_orphans_bulk,
+    ensure_bridge_sections_exist,
     get_app_state,
     get_device_settings,
     get_device_summary,
@@ -527,6 +528,15 @@ def update_setting(device_name: str, setting_id: int, payload: SettingUpdate, re
     else:
         row.is_dirty = bool(row.value_disk)  # dirty only if disk had something to remove
 
+    if row.key == "bridge" and payload.value_staged is not None:
+        # The bridge multi-select (scraper_panes.html) PATCHes this row
+        # directly rather than going through reconcile-settings, so this is
+        # the only place that sees a new bridge selection land. Auto-create
+        # DB rows for any newly-referenced bridge section that doesn't exist
+        # yet — otherwise the staged "bridge = transport.X" reference points
+        # at a section commit_all() has no rows for and will never write.
+        ensure_bridge_sections_exist(db, row.value_staged)
+
     db.flush()
     refresh_app_state(db)
     db.commit()
@@ -576,15 +586,23 @@ def _failed_register_keys(transport: Any) -> dict[str, str]:
 
 
 def _clean_last_known_data(raw: dict[str, Any]) -> dict[str, str]:
-    """Stringify a transport's last_known_data for JSON response, dropping
-    the paired "*_desc" text entries. Shared by the immediate and wait
-    variants of /last-values, which otherwise present the same values in
-    the same shape at two different points in the scrape cycle.
+    """Stringify a transport's last_known_data for JSON response.
+
+    Includes "*_desc" entries — these are real registry_map rows in their
+    own right (protocol_settings.py's _add_code_description_entries()
+    generates a synthetic "<name>_desc" entry for any code-mapped field,
+    and it gets its own row in the Protocol Metrics table via
+    data-value-key="<name>_desc"), not incidental duplicates of their
+    source field. Previously filtered out here on the assumption they were
+    redundant, which left every "_desc" row's VALUE column permanently
+    showing the "—" not-yet-populated placeholder (see populateValues() in
+    scraper_panes.html) instead of the human-readable text
+    _code_description_for_value() computed for it. Shared by the immediate
+    and wait variants of /last-values, which otherwise present the same
+    values in the same shape at two different points in the scrape cycle.
     """
     clean: dict[str, str] = {}
     for k, v in raw.items():
-        if k.endswith("_desc"):
-            continue
         try:
             clean[k] = str(round(v, 4)) if isinstance(v, float) else str(v)
         except Exception as e:

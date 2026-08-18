@@ -4,15 +4,15 @@
       "id": "dashboard-status",
       "x_percent": 15.080568720379144,
       "y_percent": 15.219514554430095,
-      "label_x_percent": 11.083728278041075,
-      "label_y_percent": 29.29417356069733,
+      "label_x_percent": 9.930990525879693,
+      "label_y_percent": 23.524942608448935,
       "label": "Gateway status cards show staged settings sync state, protocol toggle state, and last scan / commit timestamps.",
       "shape_type": "dot"
     },
     {
       "id": "dashboard-devices",
-      "x_percent": 77.4,
-      "y_percent": 35.5,
+      "x_percent": 75.59884726224786,
+      "y_percent": 35.032224517385266,
       "label_x_percent": 66.7,
       "label_y_percent": 39.2,
       "width_percent": 100,
@@ -23,11 +23,29 @@
     {
       "id": "dashboard-rescan",
       "x_percent": 5.1,
-      "y_percent": 72.7,
-      "label_x_percent": 1.9,
-      "label_y_percent": 78.9,
+      "y_percent": 39.8,
+      "label_x_percent": 1,
+      "label_y_percent": 59.9,
       "label": "Re-scan Configuration reloads config.cfg and protocol files without restarting. Rollback Configuration reverts to the last committed backup.",
       "shape_type": "dot"
+    },
+    {
+      "id": "dashboard-dot-rollback",
+      "x_percent": 4.7,
+      "y_percent": 45.2,
+      "label": "Rollback to your previous config file.",
+      "shape_type": "dot",
+      "label_x_percent": 0.9,
+      "label_y_percent": 75.8
+    },
+    {
+      "id": "dashboard-dot-reload",
+      "x_percent": 5,
+      "y_percent": 49.3,
+      "label": "Reload the MPG app to allow settings to take hold.",
+      "shape_type": "dot",
+      "label_x_percent": 1,
+      "label_y_percent": 85.1
     }
   ],
   "device__scraper_read_generic": [
