@@ -37,12 +37,12 @@
     "85": "on-grid",
     "170": "off-grid"
   },
-  "Output type_codes": {
+  "Output_type_codes": {
     "0": "single-phase",
     "1": "three-phase four-wire",
     "2": "three-phase three-wire"
   },
-  "System state_codes": {
+  "System_state_codes": {
     "2": "stop",
     "8": "standby",
     "16": "initial standby",
@@ -55,7 +55,7 @@
     "9473": "restarting",
     "16384": "running in external EMS mode"
   },
-  "Running state_codes": {
+  "Running_state_codes": {
     "b0": "PV generating power",
     "b1": "battery charging",
     "b2": "battery discharging",
@@ -64,7 +64,7 @@
     "b5": "importing from grid",
     "b7": "negative load"
   },
-  "Grid state_codes": {
+  "Grid_state_codes": {
     "85": "on-grid",
     "170": "off-grid"
   }

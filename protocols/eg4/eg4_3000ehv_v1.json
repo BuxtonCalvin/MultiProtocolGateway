@@ -103,7 +103,7 @@
     "0": "Remote shutdown",
     "1": "Remote turn-on"
   },
-  "Fault code_codes": {
+  "Fault_code_codes": {
     "b0": "Reserve",
     "b1": "Over temperature of DCDC module",
     "b2": "Battery over voltage",
@@ -132,7 +132,7 @@
     "b25": "Reserve",
     "b26": "Parallel versions are incompatible"
   },
-  "Obtain warning code_codes": {
+  "Obtain_warning code_codes": {
     "b0": "Zero crossing loss of mains power",
     "b1": "Mains waveform abnormal",
     "b2": "Mains over voltage",
@@ -153,7 +153,7 @@
     "b17": "Output mode of Single and Parallel systems is inconsistent",
     "b18": "Battery voltage difference of parallel system is too large"
   },
-  "Working Mode_codes": {
+  "Working_Mode_codes": {
     "0": "Power On Mode",
     "1": "Standby mode",
     "2": "Mains mode",
@@ -162,7 +162,7 @@
     "5": "Charging mode",
     "6": "Fault mode"
   },
-  "Output Mode_codes": {
+  "Output_Mode_codes": {
     "0": "Single",
     "1": "Parallel",
     "2": "3 Phase-P1",
@@ -171,26 +171,26 @@
     "5": "Split Phase-P1",
     "6": "Split Phase-P2"
   },
-  "Output priority_codes": {
+  "Output_priority_codes": {
     "0": "Utility-PV-Battery",
     "1": "PV-Utility-Battery",
     "2": "PV-Battery-Utility"
   },
-  "Input voltage range_codes": {
+  "Input_voltage range_codes": {
     "0": "Wide range",
     "1": "Narrow range"
   },
-  "Buzzer mode_codes": {
+  "Buzzer_mode_codes": {
     "0": "Mute in all situations",
     "1": "Sound when the input source is changed or there is a specific warning or fault",
     "2": "Sound when there is a specific warning or fault",
     "3": "Sound when fault occurs"
   },
-  "LCD backlight_codes": {
+  "LCD_backlight_codes": {
     "0": "Timed off",
     "1": "Always on"
   },
-  "LCD automatically returns to the homepage_codes": {
+  "LCD_automatically_returns_to_the_homepage_codes": {
     "0": "Do not return automatically;",
     "1": "Automatically return after 1 minute;"
   },
@@ -198,34 +198,34 @@
     "0": "Energy-saving mode is off;",
     "1": "Energy-saving mode is on;"
   },
-  "Overload automatic restart_codes": {
+  "Overload_automatic restart_codes": {
     "0": "Overload failure will not restart;",
     "1": "Automatic restart after overload failure;"
   },
-  "Over temperature automatic restart_codes": {
+  "Over_temperature_automatic restart_codes": {
     "0": "Over temperature failure will not restart;",
     "1": "Automatic restart after over-temperature fault;"
   },
-  "Overload transfer to bypass enabled_codes": {
+  "Overload_transfer_to_bypass_enabled_codes": {
     "0": "Disable;",
     "1": "Enable;"
   },
-  "Battery Eq mode is enabled_codes": {
+  "Battery_Eq_mode is enabled_codes": {
     "0": "Disable;",
     "1": "Enable;"
   },
-  "Battery charging priority_codes": {
+  "Battery_charging priority_codes": {
     "0": "Utility priority;",
     "1": "PV priority;",
     "2": "PV is at the same level as the Utility;",
     "3": "Only PV charging is allowed;"
   },
-  "Turn on mode_codes": {
+  "Turn_on_mode_codes": {
     "0": "Can be turn-on locally or remotely;",
     "1": "Only local turn-on;",
     "2": "Only remote turn-on;"
   },
-  "Remote switch_codes": {
+  "Remote_switch_codes": {
     "0": "Remote shutdown",
     "1": "Remote turn-on"
   }

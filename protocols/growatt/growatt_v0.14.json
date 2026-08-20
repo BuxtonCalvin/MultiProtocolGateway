@@ -134,26 +134,26 @@
     "1": "Enable",
     "0": "Disable"
   },
-  "Battery Type_codes": {
+  "Battery_Type_codes": {
     "0": "AGM",
     "1": "FLD",
     "2": "USE",
     "3": "Lithium",
     "4": "USE2"
   },
-  "Aging Mode_codes": {
+  "Aging_Mode_codes": {
     "0": "Normal Mode",
     "1": "Aging Mode"
   },
-  "Etl check enable_codes": {
+  "Etl_check_enable_codes": {
     "1": "Enable",
     "0": "Disable"
   },
-  "Pv ISO Check enable_codes": {
+  "Pv_ISO_Check_enable_codes": {
     "1": "Enable",
     "0": "Disable"
   },
-  "Safety Type_codes": {
+  "Safety_Type_codes": {
     "1": "standard",
     "2": "ETL",
     "3": "AS4777",

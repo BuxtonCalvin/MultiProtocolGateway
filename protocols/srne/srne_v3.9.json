@@ -40,15 +40,15 @@
     "b14": "reserved",
     "b15": "reserved"
   },
-  "product type_codes": {
+  "product_type_codes": {
     "0": "controller",
     "01": "inverter"
   },
-  "Load Status_codes": {
+  "Load_Status_codes": {
     "0": "Load Off",
     "01": "Load On"
   },
-  "Charging state_codes": {
+  "Charging_state_codes": {
     "0": "charging deactivated",
     "1": "charging activated",
     "2": "mppt charging mode",
@@ -57,7 +57,7 @@
     "5": "floating charging mode",
     "6": "current limiting (overpower)"
   },
-  "Controller failure Alarm High bits_codes": {
+  "Controller_failure_Alarm_High_bits_codes": {
     "b0": "reserved",
     "b1": "reserved",
     "b2": "reserved",
@@ -75,7 +75,7 @@
     "b14": "induction probe damaged (street light)",
     "b15": "load open-circuit (street light)"
   },
-  "Controller failure Alarm Low bits_codes": {
+  "Controller_failure_Alarm_Low_bits_codes": {
     "b0": "battery over-discharge",
     "b1": "battery over-voltage",
     "b2": "battery under-voltage",
@@ -93,15 +93,15 @@
     "b14": "reserved",
     "b15": "reserved"
   },
-  "Load working modes_codes": {
+  "Load_working_modes_codes": {
     "0": "Sole light control, light control over on/off of load",
     "1": "Load is turned on by light control, and goes off after a time delay of 1 hour"
   },
-  "Special power control_codes": {
+  "Special_power_control_codes": {
     "b1": "special power control function enabled",
     "b0": "each night on function enabled"
   },
-  "Special power control 2_codes": {
+  "Special_power_control_2_codes": {
     "b0": "charging method - direct",
     "b1": "charging method - PWM",
     "b2": "no charging below 0C"

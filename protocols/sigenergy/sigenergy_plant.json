@@ -52,22 +52,22 @@
     "b3": "AFCI self-test circuit fault",
     "b4": "off-grid protection"
   },
-  "EMS work mode_codes": {
+  "EMS_work_mode_codes": {
     "0": "maximum self-consumption",
     "1": "Sigen AI mode",
     "2": "TOU",
     "7": "remote EMS mode"
   },
-  "Grid sensor status_codes": {
+  "Grid_sensor_status_codes": {
     "0": "not connected",
     "1": "connected"
   },
-  "On/off-grid status_codes": {
+  "On_off_grid_status_codes": {
     "0": "on-grid",
     "1": "off-grid automatic",
     "2": "off-grid manual"
   },
-  "Plant running state_codes": {
+  "Plant_running_state_codes": {
     "0": "standby",
     "1": "running",
     "2": "fault",
