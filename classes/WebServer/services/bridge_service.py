@@ -59,9 +59,21 @@ from __future__ import annotations
 
 import itertools
 import logging
+import sys
 import threading
 import time
 from typing import TYPE_CHECKING, Any, Generator
+
+from starlette.datastructures import State
+
+from ...protocol_settings import Registry_Type, registry_map_entry
+from ...transports.transport_base import transport_base
+from .protocol_service import SyntheticFieldMetadata
+
+if sys.version_info >= (3, 12):
+    from typing import TypedDict
+else:
+    from typing_extensions import TypedDict
 
 _log: logging.Logger = logging.getLogger(__name__)
 
@@ -107,12 +119,36 @@ def _format_bytes(n: int | None) -> str:
 # ever used in annotations in this file (never instantiated here), so they
 # don't need a runtime binding at all — under `from __future__ import
 # annotations` those annotations are never evaluated at runtime.
+#
+# Protocol_Gateway is included here for the same reason every other
+# router/service in this app defers it under TYPE_CHECKING (see
+# commit.py, devices.py, gateway_status.py, timescale.py, pages.py) —
+# importing protocol_gateway at module load time risks a circular import,
+# since it's what wires up the WebServer app in the first place.
 if TYPE_CHECKING:
+    from protocol_gateway import Protocol_Gateway
+
     from ...transports.timescaledb import (
         WideTableField,
         WideTableFieldDeletionResult,
         WideTableFieldManager,
     )
+
+# A great many functions below deliberately keep `Any` for values that
+# originate from calling a method on a bridge object found via duck-typing
+# (type(t).__name__ == "timescaledb"/"mqtt"/etc. — see get_timescale_bridge()
+# and its influxdb/mqtt/prometheus counterparts) rather than isinstance
+# against an imported class. That's this module's own documented design
+# choice (see the module docstring above): every bridge transport module is
+# optional/pluggable, and this file must not fail to import just because
+# one of them isn't installed in a given deployment. Once a value comes from
+# `bridge.get_health_snapshot()`, `bridge.rollup_mgr.list_...()`, or similar,
+# there is no type available to assert against without hard-importing that
+# specific transport class — which is exactly what the duck-typing exists to
+# avoid. Those Any usages are intentional and are not re-justified
+# individually at each occurrence below; only genuinely fixable Any usage
+# (gateway/app_state parameters, the locally-defined staging-dict shape,
+# locally-built dict literals with a fully known shape) is narrowed.
 
 # Declared Any up front, before either branch assigns to it: this is what
 # makes _field_manager() calling it not get flagged as "Object of type
@@ -137,7 +173,7 @@ except ImportError:
 # Live bridge discovery
 # ---------------------------------------------------------------------------
 
-def get_timescale_bridge(gateway: Any) -> Any | None:
+def get_timescale_bridge(gateway: "Protocol_Gateway | None") -> transport_base | None:
     """
     Finds the live timescaledb bridge transport on the gateway, if any.
 
@@ -150,14 +186,14 @@ def get_timescale_bridge(gateway: Any) -> Any | None:
     """
     if gateway is None or not Timescale_Available:
         return None
-    transports = getattr(gateway, "_Protocol_Gateway__transports", [])
+    transports: list[transport_base] = getattr(gateway, "_Protocol_Gateway__transports", [])
     for t in transports:
         if type(t).__name__ == "timescaledb":
             return t
     return None
 
 
-def is_timescale_available(gateway: Any) -> bool:
+def is_timescale_available(gateway: "Protocol_Gateway | None") -> bool:
     """
     True when a live TimescaleDB bridge is attached to this gateway.
     Drives whether the "Timescale DB" nav pad is shown — see the
@@ -166,7 +202,7 @@ def is_timescale_available(gateway: Any) -> bool:
     return get_timescale_bridge(gateway) is not None
 
 
-def _get_live_transport(gateway: Any, protocol_name: str) -> Any | None:
+def _get_live_transport(gateway: "Protocol_Gateway | None", protocol_name: str) -> transport_base | None:
     """
     Finds the live transport instance whose protocol_name matches, so its
     current (post variable_mask/variable_screen) registry_map can be
@@ -181,14 +217,14 @@ def _get_live_transport(gateway: Any, protocol_name: str) -> Any | None:
     """
     if gateway is None:
         return None
-    transports = getattr(gateway, "_Protocol_Gateway__transports", [])
+    transports: list[transport_base] = getattr(gateway, "_Protocol_Gateway__transports", [])
     for t in transports:
         if getattr(t, "protocol_name", None) == protocol_name:
             return t
     return None
 
 
-def _active_metric_names_for_protocol(gateway: Any, protocol_name: str) -> set[str] | None:
+def _active_metric_names_for_protocol(gateway: "Protocol_Gateway | None", protocol_name: str) -> set[str] | None:
     """
     Returns the metric/variable names the live transport for
     protocol_name is currently configured to produce, via its
@@ -211,11 +247,11 @@ def _active_metric_names_for_protocol(gateway: Any, protocol_name: str) -> set[s
     "everything is stale", since flagging every column red just because a
     transport hasn't connected yet would be misleading.
     """
-    transport: Any | None = _get_live_transport(gateway, protocol_name)
+    transport: transport_base | None = _get_live_transport(gateway, protocol_name)
     if transport is None:
         return None
 
-    registry_map: dict[Any, list[Any]] = getattr(transport, "registry_map", None) or {}
+    registry_map: dict[Registry_Type, list[registry_map_entry]] = getattr(transport, "registry_map", None) or {}
     if not registry_map:
         return None
 
@@ -226,16 +262,18 @@ def _active_metric_names_for_protocol(gateway: Any, protocol_name: str) -> set[s
             if variable_name:
                 names.add(variable_name)
 
-    for synthetic in getattr(transport, "synthetic_fields_metadata", []):
-        # synthetic is a (variable_name, data_type, unit_mod, note) tuple —
-        # see transport_base.synthetic_fields_metadata.
+    metadata: list[SyntheticFieldMetadata] = getattr(transport, "synthetic_fields_metadata", [])
+    for synthetic in metadata:
+        # synthetic is a (variable_name, data_type, unit_mod, note[, registry_type])
+        # tuple — see protocol_service.SyntheticFieldMetadata / transport_base.
+        # synthetic_fields_metadata.
         if synthetic:
             names.add(synthetic[0])
 
     return names
 
 
-def _field_manager(gateway: Any) -> "WideTableFieldManager":
+def _field_manager(gateway: "Protocol_Gateway | None") -> "WideTableFieldManager":
     bridge = get_timescale_bridge(gateway)
     if bridge is None:
         raise RuntimeError("No TimescaleDB bridge is attached to this gateway.")
@@ -246,7 +284,7 @@ def _field_manager(gateway: Any) -> "WideTableFieldManager":
 # Read-only listings for the UI
 # ---------------------------------------------------------------------------
 
-def list_wide_tables(gateway: Any) -> list[dict[str, str]]:
+def list_wide_tables(gateway: "Protocol_Gateway | None") -> list[dict[str, str]]:
     """
     Returns [{protocol_name, wide_table_name}, ...] for the wide-table
     picker screen (step 4 of the Delete Columns flow).
@@ -258,17 +296,17 @@ def list_wide_tables(gateway: Any) -> list[dict[str, str]]:
     ]
 
 
-def resolve_wide_table_name(gateway: Any, protocol_name: str) -> str:
+def resolve_wide_table_name(gateway: "Protocol_Gateway | None", protocol_name: str) -> str:
     """Returns the wide_table_name for protocol_name. Raises ValueError if unknown/narrow-only."""
     mgr: WideTableFieldManager = _field_manager(gateway)
     return mgr.resolve_wide_table_name(protocol_name)
 
 
 def list_wide_table_fields(
-    gateway: Any,
+    gateway: "Protocol_Gateway | None",
     protocol_name: str,
     staged_columns: set[str] | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[dict[str, str | bool]]:
     """
     Returns the alpha-ordered field list (step 5 of the Delete Columns
     flow) for one protocol's wide table, each row annotated with:
@@ -289,13 +327,20 @@ def list_wide_table_fields(
     staged: set[str] = staged_columns or set()
     active_metric_names: set[str] | None = _active_metric_names_for_protocol(gateway, protocol_name)
     fields: list[WideTableField] = mgr.list_fields(protocol_name, active_metric_names=active_metric_names)
+    # str(...) here isn't defensive filler — it's what makes the dict[str,
+    # str | bool] return type actually true by construction, rather than an
+    # assumed pass-through of whatever WideTableField.metric_name/
+    # column_name/data_type happen to be declared as (this file doesn't
+    # import that class at runtime — see the TYPE_CHECKING note above — so
+    # their exact field types aren't something this function can assert
+    # without guessing).
     return [
         {
-            "metric_name": f.metric_name,
-            "column_name": f.column_name,
-            "data_type": f.data_type,
+            "metric_name": str(f.metric_name),
+            "column_name": str(f.column_name),
+            "data_type": str(f.data_type),
             "checked": f.column_name in staged,
-            "stale": f.stale,
+            "stale": bool(f.stale),
         }
         for f in fields
     ]
@@ -311,7 +356,7 @@ def list_wide_table_fields(
 # riding the app's "Commit All Changes" flow.
 # ---------------------------------------------------------------------------
 
-def list_rollup_views(gateway: Any) -> list[dict[str, Any]]:
+def list_rollup_views(gateway: "Protocol_Gateway | None") -> list[dict[str, Any]]:
     """
     Returns the rollup-view inventory (shared narrow stack + every wide
     protocol's hourly/daily/weekly/monthly stack) for the Rebuild Rollup
@@ -328,7 +373,7 @@ def list_rollup_views(gateway: Any) -> list[dict[str, Any]]:
     return bridge.rollup_mgr.list_rollup_views()
 
 
-def list_rollup_view_groups(gateway: Any) -> list[dict[str, Any]]:
+def list_rollup_view_groups(gateway: "Protocol_Gateway | None") -> list[dict[str, Any]]:
     """
     Same inventory as list_rollup_views(), grouped into one entry per
     source table -- the shared narrow stack, plus one entry per wide-table
@@ -360,7 +405,7 @@ def list_rollup_view_groups(gateway: Any) -> list[dict[str, Any]]:
 
 
 def rebuild_all_rollups(
-    gateway: Any,
+    gateway: "Protocol_Gateway | None",
     protocol_names: set[str] | None = None,
     force: bool = False
     ) -> Generator[dict[str, Any], None, None]:
@@ -405,7 +450,7 @@ def rebuild_all_rollups(
 
 
 def refresh_selected_rollups(
-    gateway: Any,
+    gateway: "Protocol_Gateway | None",
     protocol_names: set[str] | None = None,
     force_full: bool = False
     ) -> Generator[dict[str, Any], None, None]:
@@ -451,7 +496,7 @@ def refresh_selected_rollups(
 # actually takes effect on historical data instead of only new chunks.
 # ---------------------------------------------------------------------------
 
-def list_compression_groups(gateway: Any) -> list[dict[str, Any]]:
+def list_compression_groups(gateway: "Protocol_Gateway | None") -> list[dict[str, Any]]:
     """
     Read-only compression inventory (one row per group, each carrying a
     `tables` breakdown of that group's raw table + all four rollup views'
@@ -497,7 +542,7 @@ def _annotate_compression_change(entry: dict[str, Any]) -> None:
 
 
 def rebuild_compression(
-    gateway: Any,
+    gateway: "Protocol_Gateway | None",
     protocol_names: set[str] | None = None
     ) -> Generator[dict[str, Any], None, None]:
     """
@@ -568,7 +613,7 @@ def _format_dt(value: Any) -> str:
         return str(value)
 
 
-def get_timescale_health(gateway: Any) -> dict[str, Any]:
+def get_timescale_health(gateway: "Protocol_Gateway | None") -> dict[str, Any]:
     """
     Read-only connection/background-worker snapshot for the "Bridge
     Health" panel. See timescaledb.get_health_snapshot for the field list.
@@ -584,7 +629,7 @@ def get_timescale_health(gateway: Any) -> dict[str, Any]:
     return bridge.get_health_snapshot()
 
 
-def get_storage_overview(gateway: Any) -> list[dict[str, Any]]:
+def get_storage_overview(gateway: "Protocol_Gateway | None") -> list[dict[str, Any]]:
     """
     Read-only per-source-table storage snapshot for the "Storage Overview"
     panel, with a human-readable `size_display` added to each row. See
@@ -605,7 +650,7 @@ def get_storage_overview(gateway: Any) -> list[dict[str, Any]]:
     return rows
 
 
-def get_index_overview(gateway: Any) -> list[dict[str, Any]]:
+def get_index_overview(gateway: "Protocol_Gateway | None") -> list[dict[str, Any]]:
     """
     Read-only per-index snapshot for the "Indexes" panel, with a human-
     readable `size_display` added to each row. See timescaledb.
@@ -624,7 +669,7 @@ def get_index_overview(gateway: Any) -> list[dict[str, Any]]:
     return rows
 
 
-def get_compression_retention_summary(gateway: Any) -> dict[str, Any]:
+def get_compression_retention_summary(gateway: "Protocol_Gateway | None") -> dict[str, Any]:
     """
     Read-only compression/retention configuration summary for the
     "Compression & Retention Status" panel, with `dynamic_raw_tables` and
@@ -665,7 +710,7 @@ def get_compression_retention_summary(gateway: Any) -> dict[str, Any]:
     return summary
 
 
-def get_background_jobs(gateway: Any) -> list[dict[str, Any]]:
+def get_background_jobs(gateway: "Protocol_Gateway | None") -> list[dict[str, Any]]:
     """
     Read-only snapshot of TimescaleDB's background scheduler jobs for
     every hypertable/view this bridge manages, for the "Background Job
@@ -694,7 +739,18 @@ def get_background_jobs(gateway: Any) -> list[dict[str, Any]]:
 #                            "columns": { column_name: data_type } } }
 # ---------------------------------------------------------------------------
 
-def _store(app_state: Any) -> dict[str, dict[str, Any]]:
+# One protocol's staged-for-deletion entry — fully local to this module
+# (unlike the bridge-derived dicts above), so this can be precise rather
+# than Any. A TypedDict rather than dict[str, str | dict[str, str]]
+# specifically so entry["columns"] resolves to dict[str, str] on its own
+# (supporting .pop()/.keys()/item assignment) instead of the whole
+# str | dict[str, str] union every value would otherwise carry.
+class StagedEntry(TypedDict):
+    wide_table_name: str
+    columns: dict[str, str]
+
+
+def _store(app_state: State) -> dict[str, StagedEntry]:
     """Lazily initializes and returns the staging dict on app.state."""
     # Check if the attribute exists
     if not hasattr(app_state, "timescale_pending_deletions"):
@@ -702,11 +758,11 @@ def _store(app_state: Any) -> dict[str, dict[str, Any]]:
         setattr(app_state, "timescale_pending_deletions", {})
 
     # Retrieve it via getattr to satisfy the static analyzer
-    deletions: dict[str, dict[str, Any]] = getattr(app_state, "timescale_pending_deletions")
+    deletions: dict[str, StagedEntry] = getattr(app_state, "timescale_pending_deletions")
     return deletions
 
 
-def _lock(app_state: Any) -> threading.RLock:
+def _lock(app_state: State) -> threading.RLock:
     """Lazily initializes and returns the staging lock on app.state."""
     if not hasattr(app_state, "timescale_pending_lock"):
         app_state.timescale_pending_lock = threading.RLock()
@@ -714,7 +770,7 @@ def _lock(app_state: Any) -> threading.RLock:
 
 
 def stage_field_deletion(
-    app_state: Any,
+    app_state: State,
     protocol_name: str,
     wide_table_name: str,
     column_name: str,
@@ -727,8 +783,8 @@ def stage_field_deletion(
     /api/timescale/wide-tables/{protocol}/fields/{column}/stage).
     """
     with _lock(app_state):
-        store: dict[str, dict[str, Any]] = _store(app_state)
-        entry: dict[str, Any] | None = None
+        store: dict[str, StagedEntry] = _store(app_state)
+        entry: StagedEntry | None = None
         if checked:
             entry = store.setdefault(
                 protocol_name, {"wide_table_name": wide_table_name, "columns": {}}
@@ -743,14 +799,14 @@ def stage_field_deletion(
                     store.pop(protocol_name, None)
 
 
-def get_staged_columns(app_state: Any, protocol_name: str) -> set[str]:
+def get_staged_columns(app_state: State, protocol_name: str) -> set[str]:
     """Column names currently staged for deletion on one protocol's wide table."""
     with _lock(app_state):
-        entry: dict[str, Any] | None = _store(app_state).get(protocol_name)
+        entry: StagedEntry | None = _store(app_state).get(protocol_name)
         return set(entry["columns"].keys()) if entry else set()
 
 
-def get_all_staged(app_state: Any) -> dict[str, dict[str, Any]]:
+def get_all_staged(app_state: State) -> dict[str, StagedEntry]:
     """Returns a shallow copy of the full staged-deletions map, for a review/diff panel."""
     with _lock(app_state):
         return {
@@ -762,19 +818,19 @@ def get_all_staged(app_state: Any) -> dict[str, dict[str, Any]]:
         }
 
 
-def has_staged_deletions(app_state: Any) -> bool:
+def has_staged_deletions(app_state: State) -> bool:
     """Drives the commit/discard buttons' lit-up state, alongside has_dirty_settings/has_dirty_protocols."""
     with _lock(app_state):
         return bool(_store(app_state))
 
 
-def staged_deletion_count(app_state: Any) -> int:
+def staged_deletion_count(app_state: State) -> int:
     """Total number of columns staged for deletion, across all protocols."""
     with _lock(app_state):
         return sum(len(entry["columns"]) for entry in _store(app_state).values())
 
 
-def clear_staged_deletions(app_state: Any) -> None:
+def clear_staged_deletions(app_state: State) -> None:
     """Discards all staged deletions without touching the database. Wired into /api/commit/discard."""
     with _lock(app_state):
         _store(app_state).clear()
@@ -784,7 +840,7 @@ def clear_staged_deletions(app_state: Any) -> None:
 # Commit — actually performs the drops via WideTableFieldManager
 # ---------------------------------------------------------------------------
 
-def commit_staged_deletions(gateway: Any, app_state: Any) -> list[dict[str, Any]]:
+def commit_staged_deletions(gateway: "Protocol_Gateway | None", app_state: State) -> list[dict[str, Any]]:
     """
     Executes every staged deletion against the live TimescaleDB bridge, one
     protocol at a time. Called from routers/commit.py's do_commit() as part
@@ -808,11 +864,11 @@ def commit_staged_deletions(gateway: Any, app_state: Any) -> list[dict[str, Any]
         return []
 
     mgr: WideTableFieldManager = _field_manager(gateway)
-    staged: dict[str, dict[str, Any]] = get_all_staged(app_state)
+    staged: dict[str, StagedEntry] = get_all_staged(app_state)
     results: list[dict[str, Any]] = []
 
     with _lock(app_state):
-        store: dict[str, dict[str, Any]] = _store(app_state)
+        store: dict[str, StagedEntry] = _store(app_state)
         for protocol_name, entry in staged.items():
             column_names: list[str] = sorted(entry["columns"].keys())
             try:
@@ -845,7 +901,7 @@ def commit_staged_deletions(gateway: Any, app_state: Any) -> list[dict[str, Any]
 # INFLUXDB (v1 / v3)
 # ============================================================================
 
-def get_influxdb_bridge(gateway: Any, device_section: str) -> Any | None:
+def get_influxdb_bridge(gateway: "Protocol_Gateway | None", device_section: str) -> transport_base | None:
     """
     Finds the live influxdb_out / influxdb3_out bridge transport whose
     transport_name matches device_section (e.g. "transport.influxdb_out"),
@@ -859,14 +915,14 @@ def get_influxdb_bridge(gateway: Any, device_section: str) -> Any | None:
     """
     if gateway is None:
         return None
-    transports: list[Any] = getattr(gateway, "_Protocol_Gateway__transports", [])
+    transports: list[transport_base] = getattr(gateway, "_Protocol_Gateway__transports", [])
     for t in transports:
         if type(t).__name__ in ("influxdb_out", "influxdb3_out") and getattr(t, "transport_name", None) == device_section:
             return t
     return None
 
 
-def is_influxdb_bridge(gateway: Any, device_section: str) -> bool:
+def is_influxdb_bridge(gateway: "Protocol_Gateway | None", device_section: str) -> bool:
     """True when an InfluxDB v1 or v3 bridge with this name is attached to the gateway."""
     return get_influxdb_bridge(gateway, device_section) is not None
 
@@ -888,7 +944,7 @@ def _format_elapsed(seconds: float) -> str:
     return f"{days}d ago"
 
 
-def get_influxdb_health(gateway: Any, device_section: str) -> dict[str, Any]:
+def get_influxdb_health(gateway: "Protocol_Gateway | None", device_section: str) -> dict[str, Any]:
     """
     Read-only connection/backlog/staleness snapshot for the "Bridge
     Health" panel, with a human-readable `last_periodic_reconnect_display`
@@ -913,7 +969,7 @@ def get_influxdb_health(gateway: Any, device_section: str) -> dict[str, Any]:
 
     return health
 
-def get_influxdb_storage(gateway: Any, device_section: str) -> dict[str, Any]:
+def get_influxdb_storage(gateway: "Protocol_Gateway | None", device_section: str) -> dict[str, Any]:
     """
     Best-effort, read-only storage snapshot for the "Storage Overview"
     panel. See influxdb_out.get_storage_overview / influxdb3_out.
@@ -980,7 +1036,7 @@ def get_influxdb_storage(gateway: Any, device_section: str) -> dict[str, Any]:
 # MQTT
 # ============================================================================
 
-def get_mqtt_bridge(gateway: Any, device_section: str) -> Any | None:
+def get_mqtt_bridge(gateway: "Protocol_Gateway | None", device_section: str) -> transport_base | None:
     """
     Finds the live mqtt bridge transport whose transport_name matches
     device_section (e.g. "transport.mqtt"), if any.
@@ -993,19 +1049,19 @@ def get_mqtt_bridge(gateway: Any, device_section: str) -> Any | None:
     """
     if gateway is None:
         return None
-    transports: list[Any] = getattr(gateway, "_Protocol_Gateway__transports", [])
+    transports: list[transport_base] = getattr(gateway, "_Protocol_Gateway__transports", [])
     for t in transports:
         if type(t).__name__ == "mqtt" and getattr(t, "transport_name", None) == device_section:
             return t
     return None
 
 
-def is_mqtt_bridge(gateway: Any, device_section: str) -> bool:
+def is_mqtt_bridge(gateway: "Protocol_Gateway | None", device_section: str) -> bool:
     """True when an MQTT bridge with this name is attached to the gateway."""
     return get_mqtt_bridge(gateway, device_section) is not None
 
 
-def get_mqtt_health(gateway: Any, device_section: str) -> dict[str, Any]:
+def get_mqtt_health(gateway: "Protocol_Gateway | None", device_section: str) -> dict[str, Any]:
     """
     Read-only connection/reconnect/write-topic snapshot for the "Bridge
     Health" panel. See mqtt.get_health_snapshot for the field list.
@@ -1024,7 +1080,7 @@ def get_mqtt_health(gateway: Any, device_section: str) -> dict[str, Any]:
 # PROMETHEUS
 # ============================================================================
 
-def get_prometheus_bridge(gateway: Any, device_section: str) -> Any | None:
+def get_prometheus_bridge(gateway: "Protocol_Gateway | None", device_section: str) -> transport_base | None:
     """
     Finds the live prometheus_out bridge transport whose transport_name
     matches device_section (e.g. "transport.prometheus_out"), if any.
@@ -1037,14 +1093,14 @@ def get_prometheus_bridge(gateway: Any, device_section: str) -> Any | None:
     """
     if gateway is None:
         return None
-    transports: list[Any] = getattr(gateway, "_Protocol_Gateway__transports", [])
+    transports: list[transport_base] = getattr(gateway, "_Protocol_Gateway__transports", [])
     for t in transports:
         if type(t).__name__ == "prometheus_out" and getattr(t, "transport_name", None) == device_section:
             return t
     return None
 
 
-def is_prometheus_bridge(gateway: Any, device_section: str) -> bool:
+def is_prometheus_bridge(gateway: "Protocol_Gateway | None", device_section: str) -> bool:
     """True when a Prometheus bridge with this name is attached to the gateway."""
     return get_prometheus_bridge(gateway, device_section) is not None
 
@@ -1071,7 +1127,7 @@ def _format_duration(seconds: float | None) -> str:
     return f"{total_seconds}s"
 
 
-def get_prometheus_health(gateway: Any, device_section: str) -> dict[str, Any]:
+def get_prometheus_health(gateway: "Protocol_Gateway | None", device_section: str) -> dict[str, Any]:
     """
     Read-only in-memory-registry summary for the "Bridge Health" panel —
     metrics registered, standalone-server state, and machine counts by
@@ -1090,7 +1146,7 @@ def get_prometheus_health(gateway: Any, device_section: str) -> dict[str, Any]:
     return summary
 
 
-def get_prometheus_targets(gateway: Any, device_section: str) -> list[dict[str, Any]]:
+def get_prometheus_targets(gateway: "Protocol_Gateway | None", device_section: str) -> list[dict[str, Any]]:
     """
     Read-only per-machine scrape-target snapshot for the "Target Health"
     panel — one row per machine this bridge has ever been wired to or
