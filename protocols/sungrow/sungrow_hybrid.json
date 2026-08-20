@@ -6,13 +6,11 @@
   "send_input_register": "true",
   "send_coil_register": "false",
   "send_discrete_register": "false",
-
   "output_type_codes": {
     "0": "single-phase",
     "1": "three-phase four-wire",
     "2": "three-phase three-wire"
   },
-
   "system_state_codes": {
     "2": "stop",
     "8": "standby",
@@ -26,7 +24,6 @@
     "9473": "restarting",
     "16384": "running in external EMS mode"
   },
-
   "running_state_codes": {
     "b0": "PV generating power",
     "b1": "battery charging",
@@ -36,8 +33,38 @@
     "b5": "importing from grid",
     "b7": "negative load"
   },
-
   "grid_state_codes": {
+    "85": "on-grid",
+    "170": "off-grid"
+  },
+  "Output type_codes": {
+    "0": "single-phase",
+    "1": "three-phase four-wire",
+    "2": "three-phase three-wire"
+  },
+  "System state_codes": {
+    "2": "stop",
+    "8": "standby",
+    "16": "initial standby",
+    "32": "startup",
+    "64": "running",
+    "256": "fault",
+    "1024": "running in maintain mode",
+    "2048": "running in forced mode",
+    "4096": "running in off-grid mode",
+    "9473": "restarting",
+    "16384": "running in external EMS mode"
+  },
+  "Running state_codes": {
+    "b0": "PV generating power",
+    "b1": "battery charging",
+    "b2": "battery discharging",
+    "b3": "positive load",
+    "b4": "feed-in to grid",
+    "b5": "importing from grid",
+    "b7": "negative load"
+  },
+  "Grid state_codes": {
     "85": "on-grid",
     "170": "off-grid"
   }

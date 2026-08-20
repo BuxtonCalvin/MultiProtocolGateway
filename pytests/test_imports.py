@@ -34,7 +34,7 @@ def module_names() -> list[str]:
     for path in CLASSES_ROOT.rglob("*.py"):
         if path.name == "__init__.py":
             continue
-        rel = path.relative_to(PROJECT_ROOT).with_suffix("")
+        rel: Path = path.relative_to(PROJECT_ROOT).with_suffix("")
         names.append(".".join(rel.parts))
     return sorted(names)
 

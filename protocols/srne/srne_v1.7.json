@@ -4,28 +4,130 @@
   "send_input_register": false,
   "send_coil_register": false,
   "send_discrete_register": false,
-
   "device_state_codes": {
-    "0":  "Power-up delay",
-    "1":  "Waiting state",
-    "2":  "Initialization",
-    "3":  "Soft start",
-    "4":  "Mains powered operation",
-    "5":  "Inverter powered operation",
-    "6":  "Inverter to mains",
-    "7":  "Mains to inverter",
-    "8":  "Battery activate",
-    "9":  "Shutdown by user",
+    "0": "Power-up delay",
+    "1": "Waiting state",
+    "2": "Initialization",
+    "3": "Soft start",
+    "4": "Mains powered operation",
+    "5": "Inverter powered operation",
+    "6": "Inverter to mains",
+    "7": "Mains to inverter",
+    "8": "Battery activate",
+    "9": "Shutdown by user",
     "10": "Fault"
   },
-
   "password_protection_status_mark_codes": {
     "0": "No password entered by the user",
     "1": "User password has been entered",
     "4": "Manufacturer password has been entered"
   },
-
   "record_fault_code_codes": {
+    "0": "Disable",
+    "1": "Enable"
+  },
+  "Product type_codes": {
+    "0": "domestic controller",
+    "1": "controller for street light",
+    "3": "grid-connected inverter",
+    "4": "all-in-one solar charger inverter",
+    "5": "power frequency off-grid"
+  },
+  "Device Charge state_codes": {
+    "0": "Charge off",
+    "1": "Quick charge",
+    "2": "Const voltage charge",
+    "4": "Float charge",
+    "6": "Li battery activate",
+    "8": "Full"
+  },
+  "Device state_codes": {
+    "0": "Power-up delay",
+    "1": "Waiting state",
+    "2": "Initialization",
+    "3": "Soft start",
+    "4": "Mains powered operation",
+    "5": "Inverter powered operation",
+    "6": "Inverter to mains",
+    "7": "Mains to inverter",
+    "8": "Battery activate",
+    "9": "Shutdown by user",
+    "10": "Fault"
+  },
+  "Password protection status mark_codes": {
+    "0": "No password entered by the user",
+    "1": "User password has been entered",
+    "4": "Manufacturer password has been entered"
+  },
+  "Battery Type_codes": {
+    "0": "User define",
+    "1": "SLD",
+    "2": "FLD"
+  },
+  "Sectional charging function enable_codes": {
+    "0": "Disable",
+    "1": "Enable"
+  },
+  "Sectional discharging function enable_codes": {
+    "0": "Disable",
+    "1": "Enable"
+  },
+  "PV grid_connected power generation enable_codes": {
+    "0": "Disable",
+    "1": "Enable"
+  },
+  "GFCI Enable_codes": {
+    "0": "Disable",
+    "1": "Enable"
+  },
+  "Output priority_codes": {
+    "0": "solar",
+    "1": "line",
+    "2": "sbu"
+  },
+  "AC input range_codes": {
+    "0": "wide range (APL)",
+    "1": "narrow range (UPS)"
+  },
+  "Eco mode_codes": {
+    "0": "Disable",
+    "1": "Enable"
+  },
+  "Overload auto restart_codes": {
+    "0": "Disable",
+    "1": "Enable"
+  },
+  "Over temperature auto restart_codes": {
+    "0": "Disable",
+    "1": "Enable"
+  },
+  "Charge priority_codes": {
+    "0": "PV preferred, only start mains charging when PV is not available",
+    "1": "Mains preferred, only start PV charging when mains is not available",
+    "2": "Hybrid mode, mains and PV charging at the same time, PV is preferred",
+    "3": "PV only, mains does not charge"
+  },
+  "Alarm control_codes": {
+    "0": "Disable",
+    "1": "Enable"
+  },
+  "Alarm enable when input source is interrupted_codes": {
+    "0": "Disable",
+    "1": "Enable"
+  },
+  "Overload bypass enable_codes": {
+    "0": "Disable",
+    "1": "Enable"
+  },
+  "Record fault code_codes": {
+    "0": "Disable",
+    "1": "Enable"
+  },
+  "Split_phase transformer_codes": {
+    "0": "Disable",
+    "1": "Enable"
+  },
+  "BMS communication enable_codes": {
     "0": "Disable",
     "1": "Enable"
   }

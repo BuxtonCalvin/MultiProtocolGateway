@@ -6,32 +6,27 @@
   "send_input_register": "false",
   "send_coil_register": "false",
   "send_discrete_register": "false",
-
   "ems_work_mode_codes": {
     "0": "maximum self-consumption",
     "1": "Sigen AI mode",
     "2": "TOU",
     "7": "remote EMS mode"
   },
-
   "grid_sensor_status_codes": {
     "0": "not connected",
     "1": "connected"
   },
-
   "on_off_grid_status_codes": {
     "0": "on-grid",
     "1": "off-grid automatic",
     "2": "off-grid manual"
   },
-
   "plant_running_state_codes": {
     "0": "standby",
     "1": "running",
     "2": "fault",
     "3": "shutdown"
   },
-
   "alarm_1_codes": {
     "b0": "software version mismatch",
     "b1": "low insulation resistance",
@@ -50,12 +45,32 @@
     "b14": "grid voltage imbalance",
     "b15": "output current DC component over limit"
   },
-
   "alarm_2_codes": {
     "b0": "leakage current over limit",
     "b1": "communication abnormal",
     "b2": "system internal protection",
     "b3": "AFCI self-test circuit fault",
     "b4": "off-grid protection"
+  },
+  "EMS work mode_codes": {
+    "0": "maximum self-consumption",
+    "1": "Sigen AI mode",
+    "2": "TOU",
+    "7": "remote EMS mode"
+  },
+  "Grid sensor status_codes": {
+    "0": "not connected",
+    "1": "connected"
+  },
+  "On/off-grid status_codes": {
+    "0": "on-grid",
+    "1": "off-grid automatic",
+    "2": "off-grid manual"
+  },
+  "Plant running state_codes": {
+    "0": "standby",
+    "1": "running",
+    "2": "fault",
+    "3": "shutdown"
   }
 }

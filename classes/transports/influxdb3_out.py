@@ -61,6 +61,11 @@ if sys.version_info >= (3, 11):
 else:
     from typing_extensions import NotRequired
 
+if sys.version_info >= (3, 12):
+    from typing import TypedDict
+else:
+    from typing_extensions import TypedDict
+
 # Type alias for a serializable InfluxDB point dict (including the optional
 # internal '_backlog_time' sentinel used for age-based eviction)
 InfluxPoint = dict[str, object]

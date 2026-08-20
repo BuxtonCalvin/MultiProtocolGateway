@@ -21,11 +21,12 @@ from __future__ import annotations
 import logging
 import re
 import struct
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
 from threading import Lock
-from typing import Callable, Iterator, Literal, Optional, Protocol, TypedDict
+from typing import Callable, Iterator, Literal, Optional, Protocol
 
 from pymodbus.client.base import ModbusBaseSyncClient
 from pymodbus.constants import ExcCodes
@@ -44,6 +45,11 @@ from ..protocol_settings import (
     registry_map_entry,
 )
 from .transport_base import TransportWriteMode, transport_base
+
+if sys.version_info >= (3, 12):
+    from typing import TypedDict
+else:
+    from typing_extensions import TypedDict
 
 # Modbus function codes for exception interpretation
 MODBUS_FUNCTION_CODES: dict[int, str] = {

@@ -71,13 +71,10 @@ from .services.setting_description_service import seed_setting_descriptions
 
 _log: logging.Logger = logging.getLogger(__name__)
 
-JsonValue = str | int | float | bool | None
+JsonValue = str | int | float | bool | dict[str, str | bool] | None
 
 
 class GatewayManagerLike(Protocol):
-    # GatewayManager is a concrete class in protocol_gateway.py,
-    # but we don't want to import it here (circular dependency with the routers).
-    # This Protocol defines the interface we need to interact with it.
     @property
     def current(self) -> object | None: ...
 
@@ -409,7 +406,17 @@ def create_app(
 
     @app.get("/api/scan", tags=["admin"])
     async def trigger_scan(request: Request) -> dict[str, JsonValue]:  # pyright: ignore[reportUnusedFunction]
-        """Manually trigger a re-scan of config + protocols."""
+        """Manually trigger a re-scan of config + protocols, then reload the
+        live gateway from what that scan just wrote to the DB and disk.
+
+        A re-scan alone only updates the staging DB (settings, protocol
+        registers, orphans) — the running engine's live transports are
+        built once at startup/last-reload and don't pick up a re-scan's
+        changes on their own. Without this, "Re-scan Configuration" would
+        make the UI show fresh state while the engine kept serving on
+        stale transports/settings until something else (a commit, or the
+        separate "Reload Engine" button) happened to reload it.
+        """
         # from classes.WebServer.debug_defaults import check_stale_db_rows, run_debug
         # run_debug(project_root=request.app.state.project_root, config_path=request.app.state.config_path)
         # check_stale_db_rows(
@@ -422,8 +429,22 @@ def create_app(
             stats: dict[str, int] = request.app.state.scanner.run()
         except Exception as exc:
             return {"status": "error", "detail": str(exc)}
-        else:
-            return {"status": "ok", **stats}
+
+        response: dict[str, JsonValue] = {"status": "ok", **stats}
+
+        manager: GatewayManagerLike | None = getattr(request.app.state, "gateway_manager", None)
+        if manager is not None:
+            try:
+                reload_status: ReloadStatusLike = manager.reload(trigger="manual")
+                request.app.state.gateway = manager.current
+                response["gateway_reload"] = {"ok": reload_status.ok, "message": reload_status.message}
+                if not reload_status.ok:
+                    _log.error(f"trigger_scan: gateway reload did not fully succeed: {reload_status.message}")
+            except Exception as exc:
+                _log.error(f"trigger_scan: gateway reload failed: {exc}")
+                response["gateway_reload"] = {"ok": False, "message": str(exc)}
+
+        return response
 
     return app
 

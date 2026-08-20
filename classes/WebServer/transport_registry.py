@@ -77,8 +77,14 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
 from pathlib import Path
-from typing import Mapping, TypedDict, cast
+from typing import Mapping, cast
+
+if sys.version_info >= (3, 12):
+    from typing import TypedDict
+else:
+    from typing_extensions import TypedDict
 
 _log: logging.Logger = logging.getLogger(__name__)
 

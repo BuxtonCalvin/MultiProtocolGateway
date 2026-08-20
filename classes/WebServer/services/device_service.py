@@ -23,9 +23,10 @@ used to build the navigation menus and device panes.
 from __future__ import annotations
 
 import logging
+import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Sequence, TypedDict
+from typing import List, Sequence
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -33,6 +34,11 @@ from sqlalchemy.orm import Session
 from ..models import AppState, Setting
 from ..scanner import TransportLibraryEntry, scan_transport_library
 from ..transport_registry import get_known_transport_keys
+
+if sys.version_info >= (3, 12):
+    from typing import TypedDict
+else:
+    from typing_extensions import TypedDict
 
 _log: logging.Logger = logging.getLogger(__name__)
 

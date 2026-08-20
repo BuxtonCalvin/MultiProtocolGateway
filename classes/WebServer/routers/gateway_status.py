@@ -18,9 +18,13 @@
 """routers/gateway_status.py — Live gateway (re)build status for the webUI's reload banner."""
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, HTTPException, Request
+
+from ..database import refresh_app_state, session_scope
+from ..scanner import Scanner
 
 if TYPE_CHECKING:
     # Deferred at runtime (see the local imports below) to match the
@@ -29,6 +33,8 @@ if TYPE_CHECKING:
     # it's what wires up the WebServer app in the first place. Only needed
     # here, under TYPE_CHECKING, for the annotations below.
     from protocol_gateway import GatewayManager, ReloadStatus
+
+_log: logging.Logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/gateway", tags=["gateway"])
 
@@ -90,26 +96,47 @@ def gateway_status(request: Request) -> GatewayStatusResponse:
 @router.post("/reload")
 def gateway_reload(request: Request) -> GatewayStatusResponse:
     """
-    Manually rebuild the gateway from the current on-disk config.cfg,
-    independent of the commit cycle. do_commit() (see commit.py) already
-    triggers a reload after writing config.cfg, so this exists for the case
-    where there's nothing staged to commit but a reload is still wanted —
-    e.g. config.cfg was hand-edited and the FileWatcher-triggered reload
-    (trigger="file_watch") failed or was missed, or an admin just wants to
-    force the engine to re-read disk without waiting on that.
+    Full reload: re-scan config + protocols into the staging DB, then
+    rebuild the live gateway from that same on-disk state — independent of
+    the commit cycle.
 
-    Uses trigger="manual" like the commit-triggered reload does; nothing on
-    either side (GatewayManager.reload() or the /status payload above)
-    distinguishes "manual via commit" from "manual via this button" — both
-    are an admin-initiated reload of whatever's currently on disk.
+    A gateway rebuild alone only reflects config.cfg; it doesn't pick up
+    protocol-file changes (registers added/removed on disk) or refresh the
+    settings/orphan picture the UI is showing, since that all lives in the
+    staging DB and only the scanner (Scanner.run(), see scanner.py)
+    refreshes it. This mirrors what GET /api/scan now does (see
+    trigger_scan() in main.py) — "Re-scan Configuration" and "Reload
+    Engine" both do a full scan-then-reload cycle now, just from opposite
+    starting points (one's the settings-focused entry point, this one's
+    the engine-focused one) and existing to cover the case where there's
+    nothing staged to commit but a full refresh is still wanted — e.g.
+    config.cfg or a protocol file was hand-edited outside the webUI, or an
+    admin just wants to force everything to re-read disk.
 
-    Blocks for the duration of the reload, same as do_commit()'s own call
-    to manager.reload() — the reload itself is what's slow (stop old
-    gateway -> build new -> maybe fall back), not this endpoint. Any open
-    tab still sees the "reloading, please wait" banner during that window
-    via GET /api/gateway/status polling (see pollGatewayStatus() in
+    A scan failure is logged but doesn't abort the gateway reload below —
+    the two are independently useful, and a hiccup in one shouldn't block
+    the other. Uses trigger="manual" like the commit-triggered reload
+    does; nothing on either side (GatewayManager.reload() or the /status
+    payload above) distinguishes "manual via commit" from "manual via this
+    button" — both are an admin-initiated reload of whatever's currently
+    on disk.
+
+    Blocks for the duration of the scan + reload, same as do_commit()'s
+    own call to manager.reload() — the reload itself is what's slow (stop
+    old gateway -> build new -> maybe fall back), not this endpoint. Any
+    open tab still sees the "reloading, please wait" banner during that
+    window via GET /api/gateway/status polling (see pollGatewayStatus() in
     base.html), same as it would for a commit-triggered reload.
     """
+    scanner: Scanner | None = getattr(request.app.state, "scanner", None)
+    if scanner is not None:
+        try:
+            scanner.run()
+            with session_scope() as db:
+                refresh_app_state(db)
+        except Exception as exc:
+            _log.error(f"gateway_reload: pre-reload scan failed: {exc}")
+
     manager: "GatewayManager | None" = getattr(request.app.state, "gateway_manager", None)
     if manager is None:
         raise HTTPException(status_code=503, detail="Gateway manager not available.")

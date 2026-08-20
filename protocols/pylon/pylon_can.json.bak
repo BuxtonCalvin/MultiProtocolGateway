@@ -1,0 +1,36 @@
+{
+  "transport": "canbus",
+  "baud": 500000,
+  "send_holding_register": true,
+  "send_input_register": false,
+  "send_coil_register": false,
+  "send_discrete_register": false,  
+
+  "protection_codes": {
+    "b1":  "cell or module over voltage",
+    "b2":  "cell or module under voltage",
+    "b3":  "cell over temperature",
+    "b4":  "cell under temperature",
+    "b7":  "discharge over current",
+    "b8":  "charge over current",
+    "b11": "system error"
+  },
+
+  "alarm_codes": {
+    "b1":  "cell or module high voltage",
+    "b2":  "cell or module low voltage",
+    "b3":  "cell high temperature",
+    "b4":  "cell low temperature",
+    "b7":  "discharge high current",
+    "b8":  "charge high current",
+    "b11": "Internal communication fail"
+  },
+
+  "request_flag_codes": {
+    "b7": "Charge enable",
+    "b6": "Discharge enable",
+    "b5": "Request force charge I",
+    "b4": "Request force charge II",
+    "b3": "Request full charge"
+  }
+}

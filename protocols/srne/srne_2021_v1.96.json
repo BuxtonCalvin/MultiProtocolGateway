@@ -4,7 +4,6 @@
   "send_input_register": false,
   "send_coil_register": false,
   "send_discrete_register": false,
-
   "product_type_codes": {
     "0": "domestic controller",
     "1": "controller for street light",
@@ -12,7 +11,6 @@
     "4": "all-in-one solar charger inverter",
     "5": "power frequency off-grid"
   },
-
   "device_charge_state_codes": {
     "0": "Charge off",
     "1": "Quick charge",
@@ -21,8 +19,28 @@
     "6": "Li battery activate",
     "8": "Full"
   },
-
   "device_state_codes": {
+    "0": "Initialization",
+    "1": "Standby",
+    "2": "AC power operation",
+    "3": "Inverter operation"
+  },
+  "Product type_codes": {
+    "0": "domestic controller",
+    "1": "controller for street light",
+    "3": "grid-connected inverter",
+    "4": "all-in-one solar charger inverter",
+    "5": "power frequency off-grid"
+  },
+  "Device Charge state_codes": {
+    "0": "Charge off",
+    "1": "Quick charge",
+    "2": "Const voltage charge",
+    "4": "Float charge",
+    "6": "Li battery activate",
+    "8": "Full"
+  },
+  "Device state_codes": {
     "0": "Initialization",
     "1": "Standby",
     "2": "AC power operation",

@@ -316,7 +316,7 @@ aside .theme-input {
 
 .btn-secondary {
   background-color: transparent;
-  color: rgb(var(--mpg-200));
+  color: rgb(var(--mpg-400));
   font-weight: 500;
   padding: 0.375rem 0.875rem;
   border-radius: 0.375rem;

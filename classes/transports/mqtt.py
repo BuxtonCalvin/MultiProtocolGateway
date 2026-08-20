@@ -29,7 +29,6 @@ import time
 import warnings
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TypedDict
 
 import paho.mqtt.packettypes
 from paho.mqtt.client import (
@@ -56,6 +55,11 @@ if sys.version_info >= (3, 11):
     from typing import NotRequired
 else:
     from typing_extensions import NotRequired
+
+if sys.version_info >= (3, 12):
+    from typing import TypedDict
+else:
+    from typing_extensions import TypedDict
 
 
 class MqttHealthSnapshot(TypedDict):

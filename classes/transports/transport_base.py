@@ -21,18 +21,11 @@
 from __future__ import annotations
 
 import logging
+import sys
 import threading
 from dataclasses import dataclass
 from enum import Enum
-from typing import (
-    TYPE_CHECKING,
-    Callable,
-    ClassVar,
-    Iterator,
-    Literal,
-    Optional,
-    TypedDict,
-)
+from typing import TYPE_CHECKING, Callable, ClassVar, Iterator, Literal, Optional
 
 from classes.messaging.message_handler import send_message as _send_message
 from classes.protocol_settings import (
@@ -40,6 +33,11 @@ from classes.protocol_settings import (
     protocol_settings,
     registry_map_entry,
 )
+
+if sys.version_info >= (3, 12):
+    from typing import TypedDict
+else:
+    from typing_extensions import TypedDict
 
 if TYPE_CHECKING:
     from datetime import datetime
