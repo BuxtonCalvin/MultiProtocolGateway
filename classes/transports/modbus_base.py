@@ -2623,11 +2623,15 @@ class modbus_base(transport_base):
                 self.cycle_mark_incomplete()
                 continue
 
-            self._log.info("get registers ("+str(index)+"): " +str(registry_type)+ " - " + str(register_range[0]) + " to " + str(register_range[0]+register_range[1]-1) + " ("+str(register_range[1])+")")
+            self._log.info(
+                f"get registers for {self.transport_name} with ({index}): "
+                f"{registry_type} - {register_range[0]} to "
+                f"{register_range[0]+register_range[1]-1} ({register_range[1]})"
+            )
             time.sleep(self.modbus_delay) #sleep for 1ms to give bus a rest #manual recommends 1s between commands
 
             isError = False
-            register = None  # Initialize register variable
+            register: ModbusResponseLike | bytes | None = None  # Initialize register variable
 
             # Acquire the shared bus lock for this single block attempt.
             # Released immediately after the read returns (or times out)
@@ -2640,7 +2644,7 @@ class modbus_base(transport_base):
             if bus_lock is not None:
                 bus_lock.acquire()
             try:
-                register = self.read_registers(register_range[0], register_range[1], registry_type=registry_type)
+                register: ModbusResponseLike | bytes | None = self.read_registers(register_range[0], register_range[1], registry_type=registry_type)
 
                 """  TODO to handle dynamic registers
                         # Pass 1 — read base registers to get device configuration
