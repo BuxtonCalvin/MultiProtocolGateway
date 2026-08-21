@@ -119,29 +119,3 @@ register,variable_name,documented_name,unit,data_type,values,read_interval,writa
 105-116,model,model,,ASCII,,3600,R,,Product model number.  result[2:25] -> regs 105-116. 24-byte ASCII string.
 117-119,fw_version,fw_version,,ASCII,,3600,R,,BMS firmware version.  result[27:33] -> regs 117-119. 6-byte ASCII string e.g. V03R04.
 120-127,serial_no,serial_no,,ASCII,,3600,R,,Product serial number.  result[33:48] -> regs 120-127. 16-byte ASCII string. RW per PDF.
-30,register_30,Register 30,,ushort,0-65535,,R,,Unknown
-32,register_32,Register 32,,ushort,0-65535,,R,,Unknown
-39,register_39,Register 39,,ushort,0-65535,,R,,Unknown
-40,register_40,Register 40,,ushort,0-65535,,R,,Unknown
-41,register_41,Register 41,,ushort,0-65535,,R,,Unknown
-42,register_42,Register 42,,ushort,0-65535,,R,,Unknown
-43,register_43,Register 43,,ushort,0-65535,,R,,Unknown
-44,register_44,Register 44,,ushort,0-65535,,R,,Unknown
-45,register_45,Register 45,,ushort,0-65535,,R,,Unknown
-46,register_46,Register 46,,ushort,0-65535,,R,,Unknown
-47,register_47,Register 47,,ushort,0-65535,,R,,Unknown
-48,register_48,Register 48,,ushort,0-65535,,R,,Unknown
-49,register_49,Register 49,,ushort,0-65535,,R,,Unknown
-50,register_50,Register 50,,ushort,0-65535,,R,,Unknown
-51,register_51,Register 51,,ushort,0-65535,,R,,Unknown
-52,register_52,Register 52,,ushort,0-65535,,R,,Unknown
-53,register_53,Register 53,,ushort,0-65535,,R,,Unknown
-54,register_54,Register 54,,ushort,0-65535,,R,,Unknown
-55,register_55,Register 55,,ushort,0-65535,,R,,Unknown
-59,register_59,Register 59,,ushort,0-65535,,R,,Unknown
-60,register_60,Register 60,,ushort,0-65535,,R,,Unknown
-73,register_73,Register 73,,ushort,0-65535,,R,,Unknown
-74,register_74,Register 74,,ushort,0-65535,,R,,Unknown
-75,register_75,Register 75,,ushort,0-65535,,R,,Unknown
-76,register_76,Register 76,,ushort,0-65535,,R,,Unknown
-77,register_77,Register 77,,ushort,0-65535,,R,,Unknown

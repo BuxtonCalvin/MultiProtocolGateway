@@ -28,13 +28,13 @@
     "1750": "grid tied",
     "1769": "stop"
   },
-  "Operating state_codes": {
+  "operating_state_codes": {
     "0": "",
     "1": "Operating",
     "3": "Warning",
     "4": "Failure"
   },
-  "External Alarm 1_codes": {
+  "external_alarm_1_codes": {
     "b0": "General arrive",
     "b1": "General leave",
     "b2": "Battery High Voltage arrive",
@@ -44,7 +44,7 @@
     "b6": "Battery High Temp arrive",
     "b7": "Battery High Temp leave"
   },
-  "External Alarm 2_codes": {
+  "external_alarm_2_codes": {
     "b0": "Battery High Current Charge arrive",
     "b1": "Battery High Current Charge leave",
     "b2": "Contactor arrive",
@@ -54,7 +54,7 @@
     "b6": "BMS internal arrive",
     "b7": "BMS internal leave"
   },
-  "External Alarm 3_codes": {
+  "external_alarm_3_codes": {
     "b0": "Cell Imbalance arrive",
     "b1": "Cell Imbalance leave",
     "b2": "Arrives Reserved",
@@ -64,7 +64,7 @@
     "b6": "Arrives Reserved",
     "b7": "Leaves Reserved"
   },
-  "External Warning 1_codes": {
+  "external_warning_1_codes": {
     "b0": "General arrive",
     "b1": "General leave",
     "b2": "Battery High Voltage arrive",
@@ -74,7 +74,7 @@
     "b6": "Battery High Temp arrive",
     "b7": "Battery High Temp leave"
   },
-  "External Warning 2_codes": {
+  "external_warning_2_codes": {
     "b0": "Battery Low Temp arrive",
     "b1": "Battery Low Temp leaves",
     "b2": "Battery High Temp Charge arrive",
@@ -84,7 +84,7 @@
     "b6": "Battery High Current arrive",
     "b7": "Battery High Current leaves"
   },
-  "External Warning 3_codes": {
+  "external_warning_3_codes": {
     "b0": "Battery High Current Charge arrive",
     "b1": "Battery High Current Charge leave",
     "b2": "Contactor arrive",
@@ -94,7 +94,7 @@
     "b6": "BMS internal arrive",
     "b7": "BMS internal leave"
   },
-  "External Warning 4_codes": {
+  "external_warning_4_codes": {
     "b0": "Cell Imbalance arrive",
     "b1": "Cell Imbalance leave",
     "b2": "Reserved arrive",

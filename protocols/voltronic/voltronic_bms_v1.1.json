@@ -19,7 +19,7 @@
     "2": "above higher limit",
     "240": "other error"
   },
-  "Warning_flag_codes": {
+  "warning_flag_codes": {
     "b0": "battery cell overvoltage alarm",
     "b1": "battery cell low voltage alarm",
     "b2": "battery pack overvoltage alarm",
@@ -35,7 +35,7 @@
     "b14": "MOSFET high temperature alarm",
     "b15": "SOC Low alarm"
   },
-  "Protection_flag_codes": {
+  "protection_flag_codes": {
     "b0": "battery cell over voltage protection",
     "b1": "battery cell low voltage protection",
     "b2": "battery pack over voltage protection",
@@ -53,7 +53,7 @@
     "b14": "environment low temperature protection",
     "b15": "reserve"
   },
-  "Status_Fault_flag_codes": {
+  "status_fault_flag_codes": {
     "b0": "charging MOSFET fault",
     "b1": "discharging MOSFET fault",
     "b2": "temperature sensor fault",

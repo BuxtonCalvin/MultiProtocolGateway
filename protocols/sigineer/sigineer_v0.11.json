@@ -93,95 +93,83 @@
     "26": "Over Current",
     "27": "Li-Bat Over Load"
   },
-  "OutputConfig_codes": {
+  "outputconfig_codes": {
     "0": "BAT First",
     "1": "PV First",
     "2": "UTI First"
   },
-  "ChargeConfig_codes": {
+  "chargeconfig_codes": {
     "0": "PV first",
     "1": "PV&UTI",
     "2": "PV Only"
   },
-  "PVModel_codes": {
+  "pvmodel_codes": {
     "0": "Independent",
     "1": "Parallel"
   },
-  "ACInModel_codes": {
+  "acinmodel_codes": {
     "0": "APL,90-280VAC",
     "1": "UPS,170-280VAC"
   },
-  "LCD language_codes": {
+  "lcd_language_codes": {
     "0": "Chinese?",
     "1": "English"
   },
-  "OutputVoltType_codes": {
+  "outputvolttype_codes": {
     "0": "208VAC",
     "1": "230VAC",
     "2": "240VAC"
   },
-  "OutputFreqType_codes": {
+  "outputfreqtype_codes": {
     "0": "50Hz",
     "1": "60Hz"
   },
-  "OverLoadRestart_codes": {
+  "overloadrestart_codes": {
     "0": "Yes",
     "1": "No",
     "2": "Switch to UTI"
   },
-  "OverTempRestart_codes": {
+  "overtemprestart_codes": {
     "0": "Yes",
     "1": "No"
   },
-  "BuzzerEN_codes": {
+  "buzzeren_codes": {
     "1": "Enable",
     "0": "Disable"
   },
-  "Battery Type_codes": {
+  "battery_type_codes": {
     "0": "Lead_Acid",
     "1": "Lithium",
     "2": "CustomLead_Acid"
   },
-  "Aging Mode_codes": {
+  "aging_mode_codes": {
     "0": "Normal Mode",
     "1": "Aging Mode"
   },
-  "System Status_codes": {
-    "0": "Standby",
-    "1": "(No Use)",
-    "2": "Discharge",
-    "3": "Fault",
-    "4": "Flash",
-    "5": "PV charge",
-    "6": "AC charge",
-    "7": "Combine charge",
-    "8": "Combine charge and Bypass",
-    "9": "PV charge and Bypass",
-    "10": "AC charge and Bypass",
-    "11": "Bypass",
-    "12": "PV charge and Discharge"
-  },
-  "Check Step_codes": {
-    "1": "PV1 charge power check",
-    "2": "PV2 charge power check",
-    "3": "AC charge Power check"
-  },
-  "Production Line Mode_codes": {
-    "0": "Not at ProductionLine Mode",
-    "1": "Production LineMode",
-    "2": "Production Line Clear Fault Mode"
-  },
-  "ConstantPowerOKFlag_codes": {
+  "constantpowerokflag_codes": {
     "0": "Not OK",
     "1": "OK"
   },
-  "BatOverCharge_codes": {
+  "batovercharge_codes": {
     "0": "Battery not over charge",
     "1": "Battery over charge"
   },
-  "Solar_BatVoltConsistFl ag_codes": {
+  "solar_connectokflag_codes": {
+    "1": "Solar Charger1",
+    "2": "Solar Charger2",
+    "3": "Solar Charger1 and 2"
+  },
+  "solar_batvoltconsistfl_ag_codes": {
     "1": "Check Solar Charger1battery voltage OK",
     "2": "Check Solar Charger2battery voltage OK",
     "3": "Check Solar Charger1 and 2 battery voltage OK"
+  },
+  "solar_typeswstate_codes": {
+    "0": "Master SolarCharger",
+    "1": "Slaver SolarCharger"
+  },
+  "solar_modeswstate_codes": {
+    "0": "Parallel Mode",
+    "1": "Single Mode"
   }
 }

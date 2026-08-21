@@ -40,29 +40,11 @@
     "b14": "Arc_Fault - F63",
     "b15": "Heatsink_HighTemp_Fault - F64"
   },
-  "Fault_information_word_2_codes": {
-    "b1": "HW_Ac_OverCurr_Fault - F18",
-    "b3": "Tz_Dc_OverCurr_Fault - F20",
-    "b5": "Tz_EmergStop_Fault - F22",
-    "b6": "Tz_GFCI_OC_Fault - F23",
-    "b7": "DC_Insulation_ISO_Fault - F24",
-    "b9": "BusUnbalance_Fault - F26",
-    "b12": "Parallel_Fault - F29"
-  },
-  "Fault_information_word_4_codes": {
-    "b6": "DC_VoltHigh_Fault - F55",
-    "b7": "DC_VoltLow_Fault - F56",
-    "b9": "AC_U_GridCurr_High_Fault - F58",
-    "b12": "Button_Manual_OFF - F61",
-    "b13": "AC_B_InductCurr_High_Fault - F62",
-    "b14": "Arc_Fault - F63",
-    "b15": "Heatsink_HighTemp_Fault - F64"
-  },
-  "Grid_side_relay_status_codes": {
+  "grid_side_relay_status_codes": {
     "1": "Open (Disconnect)",
     "2": "Closed"
   },
-  "Generator_side_relay_status_codes": {
+  "generator_side_relay_status_codes": {
     "b0": "Open",
     "b1": "Closed",
     "b2": "No Connection",

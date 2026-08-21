@@ -3,7 +3,7 @@
   "batch_size": 7,
   "send_holding_register": true,
   "send_input_register": false,
-  "buad rate_codes": {
+  "buad_rate_codes": {
     "0": "9600",
     "1": "1200",
     "2": "2400",
@@ -14,7 +14,7 @@
     "7": "57600",
     "8": "115200"
   },
-  "check bit_codes": {
+  "check_bit_codes": {
     "0": "N, 8, 1",
     "1": "E, 8, 1",
     "2": "O, 8, 1",

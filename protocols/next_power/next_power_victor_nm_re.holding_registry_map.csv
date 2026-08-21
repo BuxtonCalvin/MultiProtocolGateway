@@ -14,7 +14,7 @@ register,variable_name,documented_name,unit,data_type,values,read_interval,writa
 4513,,Load VA,0.01VA,USHORT,,,R,,
 4514,,Inverter load percentage,0.0001%,USHORT,,,R,,
 4515,,Second load percentage,0.0001%,USHORT,,,R,,
-4516,,Settings1,,32BIT_FLAGS,"{ ""b0"": ""Reserve"", ""b1"": ""ukn"", ""b2"": ""overload?"", ""b3"": ""Reserve"" }",,R,,
+4516,,Settings1,,USHORT,"{ ""b0"": ""Reserve"", ""b1"": ""ukn"", ""b2"": ""overload?"", ""b3"": ""Reserve"" }",,R,,
 4517,,Battery average power,0.01W,USHORT,,,R,,
 4519,,PV average voltage,0.01V,USHORT,,,R,,
 4520,,PV average Current,0.001A,USHORT,,,R,,
@@ -28,7 +28,7 @@ register,variable_name,documented_name,unit,data_type,values,read_interval,writa
 4532,,Battery average current,0.001A,SHORT,,,R,,"Positive number means charging, negative number means discharging"
 4533,,Inverter charging average current,0.001A,USHORT,,,R,,
 4534,,PV charging average current,0.001A,USHORT,,,R,,
-4535,,Settings2,,32BIT_FLAGS,"{""b0"": ""Settings"", ""b1"": ""record fault code"", ""b2"": ""equalization"", ""b3"": ""unk3"", ""b4"": ""equalize impatiently"", ""b5"": ""unk5"", ""b6"": ""unk6"",""b7"": ""unk7"",""b8"": ""restart on overload"",""b10"": ""restart on overheat"",""b11"": ""beep on primary power fail"",""b12"": ""return to default screen"",""b13"": ""overload bypass""}",,R,,
+4535,,Settings2,,USHORT,"{""b0"": ""Settings"", ""b1"": ""record fault code"", ""b2"": ""equalization"", ""b3"": ""unk3"", ""b4"": ""equalize impatiently"", ""b5"": ""unk5"", ""b6"": ""unk6"",""b7"": ""unk7"",""b8"": ""restart on overload"",""b10"": ""restart on overheat"",""b11"": ""beep on primary power fail"",""b12"": ""return to default screen"",""b13"": ""overload bypass""}",,R,,
 4536,,Output Mode,,USHORT,"{""0"": ""Single"", ""1"": ""Parallel"", ""2"": ""3 Phase-P1"", ""3"": ""3 Phase-P2"", ""4"": ""3 Phase-P3"", ""5"": ""Split Phase-P1"", ""6"": ""Split Phase-P2""}",,R,,
 4537,,Output priority,,USHORT,"{""0"": ""Utility-PV-Battery"", ""1"": ""PV-Utility-Battery"", ""2"": ""PV-Battery-Utility""}",,R,,
 4538,,Input voltage range,,USHORT,"{""0"": ""Wide range"", ""1"": ""Narrow range""}",,R/W,,0: Wide range 1: Narrow range

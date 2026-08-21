@@ -18,15 +18,7 @@
     "2": "discharging",
     "10": "idle"
   },
-  "system-CCGX Relay 1 state_codes": {
-    "0": "Open",
-    "1": "Closed"
-  },
-  "system-CCGX Relay 2 state_codes": {
-    "0": "Open",
-    "1": "Closed"
-  },
-  "system-Active input source_codes": {
+  "system/ac/activein/source_codes": {
     "0": "Unknown",
     "1": "Grid",
     "2": "Generator",

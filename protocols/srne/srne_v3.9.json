@@ -44,11 +44,11 @@
     "0": "controller",
     "01": "inverter"
   },
-  "Load_Status_codes": {
+  "load_status_codes": {
     "0": "Load Off",
     "01": "Load On"
   },
-  "Charging_state_codes": {
+  "charging_state_codes": {
     "0": "charging deactivated",
     "1": "charging activated",
     "2": "mppt charging mode",
@@ -57,51 +57,15 @@
     "5": "floating charging mode",
     "6": "current limiting (overpower)"
   },
-  "Controller_failure_Alarm_High_bits_codes": {
-    "b0": "reserved",
-    "b1": "reserved",
-    "b2": "reserved",
-    "b3": "reserved",
-    "b4": "reserved",
-    "b5": "reserved",
-    "b6": "power supply status (0 battery power supply, 1 mains power supply)",
-    "b7": "no battery detected (SLD)",
-    "b8": "battery high temperature protection (temperature higher than the upper discharge limit) prohibit discharging",
-    "b9": "battery low temperature protection (the temperature is lower than the lower discharge limit) prohibit discharging",
-    "b10": "overcharge protection, stop charging",
-    "b11": "battery low temperature protection (temperature is lower than the lower limit of charging) stop charging",
-    "b12": "battery reversely connected",
-    "b13": "capacitor over-voltage (reserved)",
-    "b14": "induction probe damaged (street light)",
-    "b15": "load open-circuit (street light)"
-  },
-  "Controller_failure_Alarm_Low_bits_codes": {
-    "b0": "battery over-discharge",
-    "b1": "battery over-voltage",
-    "b2": "battery under-voltage",
-    "b3": "load short circuit",
-    "b4": "load overpower or load over-current",
-    "b5": "controller temperature too high",
-    "b6": "battery high temperature protection (temperature higher than the upper discharge limit) prohibit charging",
-    "b7": "photovoltaic input overpower",
-    "b8": "reserved",
-    "b9": "photovoltaic input side over-voltage",
-    "b10": "reserved",
-    "b11": "solar panel working point over-voltage",
-    "b12": "solar panel reversely connected",
-    "b13": "reserved",
-    "b14": "reserved",
-    "b15": "reserved"
-  },
-  "Load_working_modes_codes": {
+  "load_working_modes_codes": {
     "0": "Sole light control, light control over on/off of load",
     "1": "Load is turned on by light control, and goes off after a time delay of 1 hour"
   },
-  "Special_power_control_codes": {
+  "special_power_control_codes": {
     "b1": "special power control function enabled",
     "b0": "each night on function enabled"
   },
-  "Special_power_control_2_codes": {
+  "special_power_control_2_codes": {
     "b0": "charging method - direct",
     "b1": "charging method - PWM",
     "b2": "no charging below 0C"

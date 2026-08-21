@@ -22,7 +22,7 @@
   "check_step_codes": {
     "1": "PV1   charge   power check",
     "2": "PV2   charge   power check",
-    "3": "AC    charge   power check"
+    "3": "AC    charge    Powercheck"
   },
   "production_line_mode_codes": {
     "0": "Not at Production Line Mode",
@@ -88,27 +88,27 @@
     "0": "Other",
     "1": "English"
   },
-  "OutputConfig_codes": {
+  "outputconfig_codes": {
     "0": "BAT First",
     "1": "PV First",
     "2": "UTI First",
     "3": "PV&UTI First"
   },
-  "ChargeConfig_codes": {
+  "chargeconfig_codes": {
     "0": "PV first",
     "1": "PV&UTI",
     "2": "PV Only"
   },
-  "PVModel_codes": {
+  "pv_input_mode_codes": {
     "0": "Independent",
     "1": "Parallel"
   },
-  "ACInModel_codes": {
+  "ac_input_mode_codes": {
     "0": "APL,90-280VAC",
     "1": "UPS,170-280VAC",
     "2": "GEN"
   },
-  "OutputVoltType_codes": {
+  "outputvolttype_codes": {
     "0": "208VAC",
     "1": "230VAC",
     "2": "240VAC",
@@ -117,43 +117,43 @@
     "5": "110VAC",
     "6": "120VAC"
   },
-  "OutputFreqType_codes": {
+  "outputfreqtype_codes": {
     "0": "50Hz",
     "1": "60Hz"
   },
-  "OverLoadRestart_codes": {
+  "overloadrestart_codes": {
     "0": "Yes",
     "1": "No",
     "2": "Swith to UTI"
   },
-  "OverTempRestart_codes": {
+  "overtemprestart_codes": {
     "0": "Yes",
     "1": "No"
   },
-  "BuzzerEN_codes": {
+  "buzzeren_codes": {
     "1": "Enable",
     "0": "Disable"
   },
-  "Battery_Type_codes": {
+  "battery_type_codes": {
     "0": "AGM",
     "1": "FLD",
     "2": "USE",
     "3": "Lithium",
     "4": "USE2"
   },
-  "Aging_Mode_codes": {
+  "aging_mode_codes": {
     "0": "Normal Mode",
     "1": "Aging Mode"
   },
-  "Etl_check_enable_codes": {
+  "etl_check_enable_codes": {
     "1": "Enable",
     "0": "Disable"
   },
-  "Pv_ISO_Check_enable_codes": {
+  "pv_iso_check_enable_codes": {
     "1": "Enable",
     "0": "Disable"
   },
-  "Safety_Type_codes": {
+  "safety_type_codes": {
     "1": "standard",
     "2": "ETL",
     "3": "AS4777",

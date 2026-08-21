@@ -19,7 +19,7 @@
     "2": "above higher limit",
     "240": "other error"
   },
-  "Charge_Alarm_codes": {
+  "charge_alarm_codes": {
     "b15": "Reserved",
     "b14": "Reserved",
     "b13": "Reserved",
@@ -37,7 +37,7 @@
     "b1": "Cell over voltage alarm",
     "b0": "Charge over temperature alarm"
   },
-  "Discharge_Alarm_codes": {
+  "discharge_alarm_codes": {
     "b15": "Reserved",
     "b14": "Reserved",
     "b13": "Reserved",
@@ -55,7 +55,7 @@
     "b1": "Discharge low temperature alarm",
     "b0": "Discharge over temperature alarm"
   },
-  "Charge_Protect_codes": {
+  "charge_protect_codes": {
     "b15": "OCC2-2nd level charge over current",
     "b14": "Reserved-",
     "b13": "CANID-CAN ID distribution not complete",
@@ -73,7 +73,7 @@
     "b1": "BoostNRDY-Mosfet driver status",
     "b0": "PRES-'In System' signal"
   },
-  "Charge_Protect_2_codes": {
+  "charge_protect_2_codes": {
     "b15": "Reserved-",
     "b14": "Reserved-",
     "b13": "Reserved-",
@@ -91,7 +91,7 @@
     "b1": "Shutdown-Low voltage shutdown",
     "b0": "ShutdownByCmd-Receive shutdown command"
   },
-  "Discharge_Protect_codes": {
+  "discharge_protect_codes": {
     "b15": "Shutdown-Low voltage shutdown",
     "b14": "DHT-Discharge over temperature",
     "b13": "DLT-Discharge low temperature",
@@ -109,7 +109,7 @@
     "b1": "BoostNRDY-Mosfet driver status",
     "b0": "PRES-'In System' signal"
   },
-  "Discharge_Protect_2_codes": {
+  "discharge_protect_2_codes": {
     "b15": "Reserved-",
     "b14": "Reserved-",
     "b13": "CANID-CAN ID distribution not complete",
@@ -127,7 +127,7 @@
     "b1": "Short-Detect discharge short circuit",
     "b0": "AFEComm-AFE communication fail"
   },
-  "Charge_discharge_status_codes": {
+  "charge_discharge_status_codes": {
     "b7": "Charge enable-",
     "b6": "Discharge enable-",
     "b5": "Charge immediately-",
