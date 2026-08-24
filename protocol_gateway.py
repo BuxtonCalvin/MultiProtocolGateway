@@ -851,7 +851,7 @@ class Protocol_Gateway:
             full_data: dict[str, int | float | str] = primary.read_group_data(group.members)
             cycle_complete: bool = primary.cycle_is_complete_for_bridge()
 
-            self._log_group_read_diagnostics(group, full_data)
+            # self._log_group_read_diagnostics(group, full_data)
 
             if not full_data:
                 self.__log.warning(f"No data from [{primary.scrape_target}] - device may be unresponsive.")
@@ -871,7 +871,7 @@ class Protocol_Gateway:
             for member in due_members:
                 member_data: dict[str, int | float | str] = self._filter_for_member(full_data, member)
 
-                self._log_mask_diagnostics(member, full_data, member_data)
+                # self._log_mask_diagnostics(member, full_data, member_data)
 
                 if not member_data:
                     continue
@@ -1038,7 +1038,7 @@ class Protocol_Gateway:
 
         Log mask-vs-data diagnostics for one member after filtering.
 
-        Under the new paradigm both the variable mask and ``full_data`` use
+        both the variable mask and ``full_data`` use
         logical stem names (``_l``/``_h`` pairs have been merged upstream), so
         the diagnostic simply compares the mask set against the lowercased keys
         of ``full_data`` with no special suffix handling needed.
@@ -1671,7 +1671,7 @@ class Protocol_Gateway:
                     self.__log.warning(f"'{member.transport_name}' produced no data this cycle.")
                     continue
                 member_data: dict[str, int | float | str] = self._filter_for_member(member_own_data, member)
-                self._log_mask_diagnostics(member, member_own_data, member_data)
+                # self._log_mask_diagnostics(member, member_own_data, member_data)
                 if not member_data:
                     continue
                 self._forward_to_bridges(member, member_data, cycle_complete)
@@ -1689,7 +1689,7 @@ class Protocol_Gateway:
             )
 
             member_data = self._filter_for_member(data, transport)
-            self._log_mask_diagnostics(transport, data, member_data)
+            # self._log_mask_diagnostics(transport, data, member_data)
 
             if not member_data:
                 return

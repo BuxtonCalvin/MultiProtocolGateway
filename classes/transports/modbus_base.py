@@ -325,6 +325,16 @@ class modbus_base(transport_base):
         ''' Populated at connect for EG4 protocols by eg4_metadata.read_eg4_device_metadata(); None otherwise. '''
         self.eg4_hardware_kind_cache: str | None = None
         ''' Cached result of eg4_metadata.detect_eg4_hardware_kind(): "inverter", "battery", or "unknown". '''
+        self.identification_attempted: bool = False
+        ''' Set True the first time init_after_connect() runs device
+        identification (serial number / EG4 hardware-kind+metadata),
+        regardless of whether it actually succeeded — gates that whole block
+        to run exactly ONCE per transport instance rather than on every
+        reconnect. Without this, `not self.device_serial_number` alone would
+        keep re-triggering it forever for any device that genuinely has no
+        Modbus-readable serial (e.g. an EG4 battery, whose serial is
+        CANbus-only — see eg4_metadata.read_eg4_serial_number), since an
+        empty string is indistinguishable from "not yet tried". '''
 
         self.send_holding_register : bool = True
         self.send_input_register : bool = True
@@ -1182,31 +1192,58 @@ class modbus_base(transport_base):
             if self.write_enabled:
                 self.enable_write()
 
-            #if sn is empty, attempt to auto-read it
-            if not self.device_serial_number:
-                self._log.info(f"Reading serial number for transport {self.transport_name} on port {getattr(self, 'port', 'unknown')}")
-                self.device_serial_number = self.read_serial_number()
-                self._log.info(f"Transport {self.transport_name} serial number: {self.device_serial_number}")
-                self.update_identifier()
+            # Device identification (serial number, and for EG4 protocols,
+            # hardware-kind + extended metadata) — runs exactly ONCE per
+            # transport instance, on whichever connect (first or a later
+            # reconnect) happens to get here first, regardless of outcome.
+            # See self.identification_attempted's docstring for why this
+            # can't just be gated on `not self.device_serial_number`: a
+            # device that legitimately has no Modbus-readable serial number
+            # would otherwise re-run this whole probe sequence on every
+            # single reconnect forever.
+            if self.identification_attempted:
+                self._log.debug(
+                    f"Transport {self.transport_name} device identification "
+                    f"already attempted this session (serial="
+                    f"{self.device_serial_number or '<none>'}) — skipping."
+                )
             else:
-                self._log.debug(f"Transport {self.transport_name} already has serial number: {self.device_serial_number}")
+                self.identification_attempted = True
+                protocol_name: str = getattr(self._protocol, "protocol", "") or ""
 
-            # EG4 devices expose useful discovery metadata (model, device type,
-            # firmware version, parallel-group role, or — for EG4 batteries —
-            # pack voltage/SOC/SOH) beyond just the serial number. See
-            # eg4_metadata.read_eg4_device_metadata() for details. Only
-            # attempted once; safe to skip on reconnect.
-            protocol_name: str = getattr(self._protocol, "protocol", "") or ""
-            if eg4_metadata.is_eg4_protocol(protocol_name) and self.device_metadata is None:
-                try:
-                    self.device_metadata = eg4_metadata.read_eg4_device_metadata(self)
-                    if self.device_metadata:
-                        self._log.info(f"Transport {self.transport_name} EG4 metadata: {self.device_metadata}")
-                except Exception:
-                    self._log.exception(
-                        f"Transport {self.transport_name} failed to read EG4 device metadata — "
-                        f"continuing without it."
-                    )
+                if eg4_metadata.is_eg4_protocol(protocol_name):
+                    # Serial number and extended metadata (model, device
+                    # type, firmware version, parallel-group role / or for
+                    # a battery, pack voltage/SOC/SOH) are read together as
+                    # a single coordinated pass — see
+                    # eg4_metadata.identify_eg4_device() — rather than as
+                    # two independent top-level calls that used to each
+                    # separately detect hardware kind and, on an
+                    # inverter/unknown-kind device, could each separately
+                    # (re-)attempt the exact same fixed-address
+                    # serial-number register reads if the other one had
+                    # already failed.
+                    try:
+                        self.device_serial_number, self.device_metadata = (
+                            eg4_metadata.identify_eg4_device(self)
+                        )
+                        self._log.info(
+                            f"Transport {self.transport_name} serial number: "
+                            f"{self.device_serial_number}"
+                        )
+                        if self.device_metadata:
+                            self._log.info(f"Transport {self.transport_name} EG4 metadata: {self.device_metadata}")
+                        self.update_identifier()
+                    except Exception:
+                        self._log.exception(
+                            f"Transport {self.transport_name} failed EG4 device "
+                            f"identification — continuing without it."
+                        )
+                else:
+                    self._log.info(f"Reading serial number for transport {self.transport_name} on port {getattr(self, 'port', 'unknown')}")
+                    self.device_serial_number = self.read_serial_number()
+                    self._log.info(f"Transport {self.transport_name} serial number: {self.device_serial_number}")
+                    self.update_identifier()
 
     def connect(self) -> bool | None:
         """Scheduling path: All (Sequential, Concurrent, Interleaved) — called at startup and on reconnect from any read path.

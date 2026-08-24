@@ -1,121 +1,147 @@
-register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note
-0,pack_voltage,pack_voltage,0.01V,USHORT,,,R,,Pack voltage. PDF: 10 mV/LSB = 0.01 V. Verified: u16(offset 3)/100.
-1,pack_current,pack_current,0.01A,SHORT,,,R,,Pack current. PDF: 10 mA/LSB = 0.01 A. Positive=charging Negative=discharging. Verified: s16(offset 5)/100.
-2,cell_01_voltage,cell_01_voltage,0.001V,USHORT,0-65535,,R,,Cell 1 voltage.  u16(offset 7)/1000 V; raw is mV.
-3,cell_02_voltage,cell_02_voltage,0.001V,USHORT,0-65535,,R,,Cell 2 voltage.
-4,cell_03_voltage,cell_03_voltage,0.001V,USHORT,0-65535,,R,,Cell 3 voltage.
-5,cell_04_voltage,cell_04_voltage,0.001V,USHORT,0-65535,,R,,Cell 4 voltage.
-6,cell_05_voltage,cell_05_voltage,0.001V,USHORT,0-65535,,R,,Cell 5 voltage.
-7,cell_06_voltage,cell_06_voltage,0.001V,USHORT,0-65535,,R,,Cell 6 voltage.
-8,cell_07_voltage,cell_07_voltage,0.001V,USHORT,0-65535,,R,,Cell 7 voltage.
-9,cell_08_voltage,cell_08_voltage,0.001V,USHORT,0-65535,,R,,Cell 8 voltage.
-10,cell_09_voltage,cell_09_voltage,0.001V,USHORT,0-65535,,R,,Cell 9 voltage.
-11,cell_10_voltage,cell_10_voltage,0.001V,USHORT,0-65535,,R,,Cell 10 voltage.
-12,cell_11_voltage,cell_11_voltage,0.001V,USHORT,0-65535,,R,,Cell 11 voltage.
-13,cell_12_voltage,cell_12_voltage,0.001V,USHORT,0-65535,,R,,Cell 12 voltage.
-14,cell_13_voltage,cell_13_voltage,0.001V,USHORT,0-65535,,R,,Cell 13 voltage.
-15,cell_14_voltage,cell_14_voltage,0.001V,USHORT,0-65535,,R,,Cell 14 voltage.
-16,cell_15_voltage,cell_15_voltage,0.001V,USHORT,0-65535,,R,,Cell 15 voltage.
-17,cell_16_voltage,cell_16_voltage,0.001V,USHORT,0-65535,,R,,Cell 16 voltage.
-18,temp_pcb,temp_pcb,1C,SHORT,,,R,,PCB/MOSFET temperature. PDF: Temp of PCB SHORT degC. Verified:  s16(offset 39) -> reg 18.
-19,temp_avg,temp_avg,1C,SHORT,,,R,,Average cell temperature. PDF: Temp Avg SHORT degC. Present in read window; not decoded separately by .
-20,temp_max,temp_max,1C,SHORT,,,R,,Maximum cell temperature. PDF: Temp Max SHORT degC. Present in read window; not decoded separately by .
-21,cap_remaining,cap_remaining,,USHORT,0-65535,,R,,Remaining capacity. PDF: Cap Remaining USHORT no unit. Verified:  u16(offset 45) -> reg 21.
-22,max_charge_current,max_charge_current,,USHORT,0-65535,,R,,Maximum charging current. PDF: Max charging Current USHORT no unit. Verified:  u16(offset 47) -> reg 22.
-23,soh,soh,%,USHORT,0-100,,R,,State of Health 0-100%. Verified:  u16(offset 49) -> reg 23.
-24,soc,soc,%,USHORT,0-100,,R,,State of Charge 0-100%. Verified:  u16(offset 51) -> reg 24.
-25.b8,heater_state,heater_state,,_8BIT,"{""0"": ""Off"", ""128"": ""On""}",,R,,High byte of reg 25 (packet[53]). Reports the state of the internal battery heater circuit used to warm cells in sub-zero ambient conditions so that charging is safe (lithium cells must not be charged below 0 °C). 0x80=Heater ON — the BMS has activated the heating element; charging may be deferred or reduced until cell temperatures rise above the charge_ut_protect threshold (reg 91). 0x00=Heater OFF — cells are at or above the minimum charge temperature; heater is not energized. No other values are defined. Monitor in conjunction with temp_sensor_1..4 (regs 33-34) and charge_ut_warn/protect/release (regs 90-92) to understand thermal management behavior.
-25.b0,status,status,,_8BIT,"{""0"": ""Inactive/Standby"", ""1"": ""Inactive/Charging"", ""2"": ""Inactive/Discharging"", ""4"": ""Inactive/Protect"", ""8"": ""Inactive/Charging_Lmt"", ""128"": ""Active/Standby"", ""129"": ""Active/Charging"", ""130"": ""Active/Discharging"", ""132"": ""Active/Protect"", ""136"": ""Active/Charging_Lmt""}",,R,,"""Low byte of reg 25 (packet[54]). Reports the BMS operating mode and active-state flags as a single byte code. The high bit (0x80) distinguishes Active from Inactive states. Inactive codes (BMS output FETs may be open or limited): 0x00=Inactive/Standby (idle, no charge or discharge), 0x01=Inactive/Charging (charge FET open, accepting charge), 0x02=Inactive/Discharging (discharge FET open, supplying load), 0x04=Inactive/Protect (FETs held open by a protection condition — check regs 26-28), 0x08=Inactive/Charging_Lmt (current-limited charge; BMS throttling input). Active codes (BMS FETs closed, normal operation): 0x80=Active/Standby (FETs closed but no significant current flow), 0x81=Active/Charging (normal charge in progress), 0x82=Active/Discharging (normal discharge in progress), 0x84=Active/Protect (transient protect condition; FETs may momentarily open), 0x88=Active/Charging_Lmt (FETs closed but charge current is being actively limited by BMS). Any value not listed above should be treated as unknown/reserved."""
-26.b6,warning_amb_temp,Warning Abnormal Amb Temp,,1bit,"{""0"":""Clear"",""1"":""Abnormal_Ambient_Temp""}",,R,,"Reg 26 bit 6. Early warning: ambient (environmental) temperature sensor reading is outside the normal operating range (too hot or too cold). 1=Abnormal_Ambient_Temp active, 0=clear."
-26.b1,warning_cell_ov,Warning Cell OV,,1bit,"{""0"":""Clear"",""1"":""Cell_OV""}",,R,,"Reg 26 bit 1. Early warning: one or more individual cell voltages exceed the cell over-voltage warning threshold. 1=Cell_OV active, 0=clear. Precursor to protection_cell_ov."
-26.b3,warning_cell_uv,Warning Cell UV,,1bit,"{""0"":""Clear"",""1"":""Cell_UV""}",,R,,"Reg 26 bit 3. Early warning: one or more individual cell voltages have dropped below the cell under-voltage warning threshold. 1=Cell_UV active, 0=clear. Precursor to protection_cell_uv."
-26.b4,warning_charge_oc,Warning Charge OC,,1bit,"{""0"":""Clear"",""1"":""Charge_OC""}",,R,,"Reg 26 bit 4. Early warning: charge current has exceeded the over-current warning threshold. 1=Charge_OC active, 0=clear. Precursor to protection_charge_oc."
-26.b8,warning_charge_ot,Warning Charge OT,,1bit,"{""0"":""Clear"",""1"":""Charge_OT""}",,R,,"Reg 26 bit 8. Early warning: battery temperature during charging has exceeded the over-temperature warning threshold (OT = Over Temperature). 1=Charge_OT active, 0=clear."
-26.b10,warning_charge_ut,Warning Charge UT,,1bit,"{""0"":""Clear"",""1"":""Charge_UT""}",,R,,"Reg 26 bit 10. Early warning: battery temperature during charging has dropped below the under-temperature warning threshold (UT = Under Temperature). 1=Charge_UT active, 0=clear."
-26.b5,warning_discharge_oc,Warning Discharge OC,,1bit,"{""0"":""Clear"",""1"":""Discharge_OC""}",,R,,"Reg 26 bit 5. Early warning: discharge current has exceeded the over-current warning threshold. 1=Discharge_OC active, 0=clear. Precursor to protection_discharge_oc."
-26.b9,warning_discharge_ot,Warning Discharge OT,,1bit,"{""0"":""Clear"",""1"":""Discharge_OT""}",,R,,"Reg 26 bit 9. Early warning: battery temperature during discharging has exceeded the over-temperature warning threshold. 1=Discharge_OT active, 0=clear."
-26.b11,warning_discharge_ut,Warning Discharge UT,,1bit,"{""0"":""Clear"",""1"":""Discharge_UT""}",,R,,"Reg 26 bit 11. Early warning: battery temperature during discharging has dropped below the under-temperature warning threshold. 1=Discharge_UT active, 0=clear."
-26.b13,warning_float_stopped,Warning Float Stopped,,1bit,"{""0"":""Clear"",""1"":""Float_Stopped""}",,R,,"Reg 26 bit 13. Warning: float charging has been suspended or interrupted before completion. 1=Float_Stopped active, 0=clear. Indicates the charger did not complete the float-charge phase."
-26.b15,warning_inactive_charging_lmt,Warning Inactive/Charging_Lmt,,1bit,"{""0"":""Clear"",""1"":""Inactive/Charging_Lmt""}",,R,,"Reg 26 bit 15. Warning: BMS is inactive and charge current is being limited (throttled below the configured maximum). 1=Inactive/Charging_Lmt active, 0=clear."
-26.b14,warning_inactive_protect,Warning Inactive/Protect,,1bit,"{""0"":""Clear"",""1"":""Inactive/Protect""}",,R,,"Reg 26 bit 14. Warning: BMS has entered an inactive/protected state (e.g. over-discharge lockout or external protect signal). 1=Inactive/Protect active, 0=clear."
-26.b12,warning_low_capacity,Warning Low Capacity,,1bit,"{""0"":""Clear"",""1"":""Low_Capacity""}",,R,,"Reg 26 bit 12. Early warning: state-of-charge (SOC) has dropped below the low-capacity warning threshold. 1=Low_Capacity active, 0=clear. Alerts before full discharge protection triggers."
-26.b7,warning_mos_overheat,Warning MOS Overheat,,1bit,"{""0"":""Clear"",""1"":""MOS_Overheating""}",,R,,"Reg 26 bit 7. Early warning: MOSFET (charge/discharge switch) temperature has exceeded the overheat warning threshold. 1=MOS_Overheating active, 0=clear. Precursor to protection_mos_overheat."
-26.b0,warning_pack_ov,Warning Pack OV,,1bit,"{""0"":""Clear"",""1"":""Pack_OV""}",,R,,"Reg 26 bit 0. Early warning: pack (string) voltage has risen above the over-voltage warning threshold. 1=Pack_OV active, 0=clear. Does not trigger protection; alerts before protection_pack_ov fires."
-26.b2,warning_pack_uv,Warning Pack UV,,1bit,"{""0"":""Clear"",""1"":""Pack_UV""}",,R,,"Reg 26 bit 2. Early warning: pack (string) voltage has dropped below the under-voltage warning threshold. 1=Pack_UV active, 0=clear. Precursor to protection_pack_uv."
-27.b6,protection_amb_temp,Protection Abnormal Amb Temp,,1bit,"{""0"":""Clear"",""1"":""Abnormal_Ambient_Temp""}",,R,,"Reg 27 bit 6. Hard protection: ambient temperature sensor reading exceeded safe operating bounds. BMS may limit or cut charging/discharging. 1=Abnormal_Ambient_Temp tripped, 0=clear."
-27.b1,protection_cell_ov,Protection Cell OV,,1bit,"{""0"":""Clear"",""1"":""Cell_OV""}",,R,,"Reg 27 bit 1. Hard protection: one or more cell voltages exceeded the cell over-voltage protection limit. BMS opens charge FET. 1=Cell_OV tripped, 0=clear."
-27.b3,protection_cell_uv,Protection Cell UV,,1bit,"{""0"":""Clear"",""1"":""Cell_UV""}",,R,,"Reg 27 bit 3. Hard protection: one or more cell voltages dropped below the cell under-voltage protection limit. BMS opens discharge FET. 1=Cell_UV tripped, 0=clear."
-27.b4,protection_charge_oc,Protection Charge OC,,1bit,"{""0"":""Clear"",""1"":""Charge_OC""}",,R,,"Reg 27 bit 4. Hard protection: charge current exceeded the over-current protection threshold. BMS opens charge FET. 1=Charge_OC tripped, 0=clear. See reg 78 for release timer."
-27.b8,protection_charge_ot,Protection Charge OT,,1bit,"{""0"":""Clear"",""1"":""Charge_OT""}",,R,,"Reg 27 bit 8. Hard protection: battery temperature during charging exceeded the over-temperature protection limit. BMS opens charge FET. 1=Charge_OT tripped, 0=clear."
-27.b10,protection_charge_ut,Protection Charge UT,,1bit,"{""0"":""Clear"",""1"":""Charge_UT""}",,R,,"Reg 27 bit 10. Hard protection: battery temperature during charging dropped below the under-temperature protection limit. BMS opens charge FET to prevent lithium plating. 1=Charge_UT tripped, 0=clear."
-27.b5,protection_discharge_oc,Protection Discharge OC,,1bit,"{""0"":""Clear"",""1"":""Discharge_OC""}",,R,,"Reg 27 bit 5. Hard protection: discharge current exceeded the over-current protection threshold. BMS opens discharge FET. 1=Discharge_OC tripped, 0=clear. See reg 79 for release timer."
-27.b9,protection_discharge_ot,Protection Discharge OT,,1bit,"{""0"":""Clear"",""1"":""Discharge_OT""}",,R,,"Reg 27 bit 9. Hard protection: battery temperature during discharging exceeded the over-temperature protection limit. BMS opens discharge FET. 1=Discharge_OT tripped, 0=clear."
-27.b11,protection_discharge_ut,Protection Discharge UT,,1bit,"{""0"":""Clear"",""1"":""Discharge_UT""}",,R,,"Reg 27 bit 11. Hard protection: battery temperature during discharging dropped below the under-temperature protection limit. BMS opens discharge FET. 1=Discharge_UT tripped, 0=clear."
-27.b13,protection_float_stopped,Protection Float Stopped,,1bit,"{""0"":""Clear"",""1"":""Float_Stopped""}",,R,,"Reg 27 bit 13. Hard protection: float-charge phase was stopped by the BMS (e.g. timeout or fault during absorption/float). 1=Float_Stopped tripped, 0=clear."
-27.b15,protection_inactive_charging_lmt,Protection Inactive/Charging_Lmt,,1bit,"{""0"":""Clear"",""1"":""Inactive/Charging_Lmt""}",,R,,"Reg 27 bit 15. Hard protection: BMS is inactive and charge current is being hard-limited. 1=Inactive/Charging_Lmt active, 0=clear. More severe than the corresponding warning bit; BMS enforces current cap."
-27.b14,protection_inactive_protect,Protection Inactive/Protect,,1bit,"{""0"":""Clear"",""1"":""Inactive/Protect""}",,R,,"Reg 27 bit 14. Hard protection: BMS is in an inactive/protect state — FETs are held open due to a protection condition. 1=Inactive/Protect active, 0=clear. Mirrors warning_inactive_protect at the protection severity level."
-27.b12,protection_low_capacity,Protection Low Capacity,,1bit,"{""0"":""Clear"",""1"":""Low_Capacity""}",,R,,"Reg 27 bit 12. Hard protection: SOC has reached the configured low-capacity protection floor. BMS opens discharge FET to prevent deep discharge. 1=Low_Capacity tripped, 0=clear."
-27.b7,protection_mos_overheat,Protection MOS Overheat,,1bit,"{""0"":""Clear"",""1"":""MOS_Overheating""}",,R,,"Reg 27 bit 7. Hard protection: MOSFET temperature exceeded the overheat protection threshold. BMS opens FETs to protect switching hardware. 1=MOS_Overheating tripped, 0=clear."
-27.b0,protection_pack_ov,ProtectionPack OV,,1bit,"{""0"":""Clear"",""1"":""Pack_OV""}",,R,,"Reg 27 bit 0. Hard protection: pack (string) voltage exceeded the over-voltage protection limit. BMS opens charge FET to halt charging. 1=Pack_OV tripped, 0=clear. Latches until voltage drops below release threshold."
-27.b2,protection_pack_uv,Protection Pack UV,,1bit,"{""0"":""Clear"",""1"":""Pack_UV""}",,R,,"Reg 27 bit 2. Hard protection: pack voltage dropped below the under-voltage protection limit. BMS opens discharge FET to halt load. 1=Pack_UV tripped, 0=clear."
-28.b4,error_cell_unbalance,Error Cell_Unbalance,,1bit,"{""0"":""Clear"",""1"":""Cell_Unbalance""}",,R,,"Reg 28 bit 4. Fault: cell voltages within the pack are significantly unbalanced beyond the allowable delta. 1=Cell_Unbalance active, 0=clear. BMS may activate passive balancing or restrict charging to top-balance cells."
-28.b2,error_current_flow_error,Error Current_Flow_Error,,1bit,"{""0"":""Clear"",""1"":""Current_Flow_Error""}",,R,,"Reg 28 bit 2. Fault: a current measurement error has been detected (e.g. shunt/hall-sensor fault, reading implausible). 1=Current_Flow_Error active, 0=clear. May disable charge/discharge current protection."
-28.b1,error_temperature_error,Error Temperature_Error,,1bit,"{""0"":""Clear"",""1"":""Temperature_Error""}",,R,,"Reg 28 bit 1. Fault: a temperature sensor error has been detected (e.g. open/short thermistor, reading out of physical range). 1=Temperature_Error active, 0=clear. Affects thermal protection reliability."
-28.b0,error_voltage_error,Error Voltage_Error,,1bit,"{""0"":""Clear"",""1"":""Pack_OV""}",,R,,"Reg 28 bit 0. Fault: a voltage measurement error has been detected by the BMS (e.g. ADC fault, sensor out of range, or pack voltage reading is implausible). 1=Voltage_Error active, 0=clear. Requires BMS inspection."
-29_30,cycle_count,cycle_count,,UINT,,,W,,Cycle count. Big Endian ABCD. Technically not low_high but high_low.  Except battery expects high to be read first.
-31_32,full_capacity,full_capacity,0.00000027778aH,UINT,,,W,,Full capacity. Big Endian ABCD. Displayed in Amp Hours. Technically not low_high but high_low.  Except battery expects high to be read first.
-33.b8,temp_sensor_1,temp_sensor_1,1C,_8SBIT,,,R,,Temperature sensor 1. High byte of reg 33.  s8(offset 69). Signed degC.
-33.b0,temp_sensor_2,temp_sensor_2,1C,_8SBIT,,,R,,Temperature sensor 2. Low byte of reg 33.  s8(offset 70). Signed degC.
-34.b8,temp_sensor_3,temp_sensor_3,1C,_8SBIT,,,R,,Temperature sensor 3. High byte of reg 34.  s8(offset 71). Signed degC.
-34.b0,temp_sensor_4,temp_sensor_4,1C,_8SBIT,,,R,,Temperature sensor 4. Low byte of reg 34.  s8(offset 72). Signed degC.
-35.b8,temp_sensor_5,temp_sensor_5,1C,_8SBIT,,,R,,Temperature sensor 5. High byte of reg 35. PDF only; not read by . May be 0 if sensor absent.
-35.b0,temp_sensor_6,temp_sensor_6,1C,_8SBIT,,,R,,Temperature sensor 6. Low byte of reg 35. PDF only; not read by . May be 0 if sensor absent.
-36,cell_num,cell_num,,USHORT,48214,,W,,Number of cells in series string.  u16(offset 75) -> reg 36. RW per PDF.
-37,designed_capacity,designed_capacity,0.1AH,USHORT,0-65535,,R,,Designed battery capacity. PDF: 0.1 AH/LSB. raw*0.1=Ah. Not read by ; present in cell read window.
-38,cell_balance_status,cell_balance_status,,USHORT,,,R,,Cell balance flags. bit0=Cell_1_Balanced...bit15=Cell_16_Balanced. Not read by ; present in cell read window.
-56,balance_volt,balance_volt,0.001V,USHORT,,,W,,Minimum cell voltage to enable balancing.  offset 25-27. raw*0.001=V (e.g. 3400=3.400 V).
-57,balance_volt_diff,balance_volt_diff,0.001V,USHORT,,,W,,Cell voltage delta threshold to trigger balancing.  offset 27-29. raw*0.001=V.
-58,low_cap_warn,low_cap_warn,%,USHORT,,,W,,SOC level that triggers low capacity warning.  offset 29-31.
-61,cell_uv_warn,cell_uv_warn,0.001V,USHORT,,,W,,Cell undervoltage WARNING threshold.  offset 35-37. raw*0.001=V.
-62,cell_uv_protect,cell_uv_protect,0.001V,USHORT,,,W,,Cell undervoltage PROTECTION threshold.  offset 37-39. raw*0.001=V.
-63,cell_uv_release,cell_uv_release,0.001V,USHORT,,,W,,Cell undervoltage RELEASE (recovery) threshold.  offset 39-41. raw*0.001=V.
-64,pack_uv_warn,pack_uv_warn,0.01V,USHORT,,,W,,Pack undervoltage WARNING threshold.  offset 41-43. raw*0.01=V.
-65,pack_uv_protect,pack_uv_protect,0.01V,USHORT,,,W,,Pack undervoltage PROTECTION threshold.  offset 43-45. raw*0.01=V.
-66,pack_uv_release,pack_uv_release,0.01V,USHORT,,,W,,Pack undervoltage RELEASE (recovery) threshold.  offset 45-47. raw*0.01=V.
-67,cell_ov_warn,cell_ov_warn,0.001V,USHORT,,,W,,Cell overvoltage WARNING threshold.  offset 47-49. raw*0.001=V.
-68,cell_ov_protect,cell_ov_protect,0.001V,USHORT,,,W,,Cell overvoltage PROTECTION threshold.  offset 49-51. raw*0.001=V.
-69,cell_ov_release,cell_ov_release,0.001V,USHORT,,,W,,Cell overvoltage RELEASE (recovery) threshold.  offset 51-53. raw*0.001=V.
-70,pack_ov_warn,pack_ov_warn,0.01V,USHORT,,,W,,Pack overvoltage WARNING threshold.  offset 53-55. raw*0.01=V.
-71,pack_ov_protect,pack_ov_protect,0.01V,USHORT,,,W,,Pack overvoltage PROTECTION threshold.  offset 55-57. raw*0.01=V.
-72,pack_ov_release,pack_ov_release,0.01V,USHORT,,,W,,Pack overvoltage RELEASE (recovery) threshold.  offset 57-59. raw*0.01=V.
-78,discharge_oc_release,discharge_oc_release,,USHORT,,,W,,Discharge overcurrent protection release time in seconds.  offset 69-71.
-79,charge_oc_release,charge_oc_release,,USHORT,,,W,,Charge overcurrent protection release time in seconds.  offset 71-73.
-80,charge_oc1_protect,charge_oc1_protect,0.01A,USHORT,,,W,,Charge overcurrent level 1 PROTECTION threshold.  offset 73-75. raw*0.01=A.
-81,discharge_oc1_protect,discharge_oc1_protect,0.01A,USHORT,,,W,,Discharge overcurrent level 1 PROTECTION threshold.  offset 75-77. raw*0.01=A.
-82,short_circuit_current,short_circuit_current,0.01A,USHORT,,,W,,Short circuit / instantaneous overcurrent threshold.  offset 77-79. raw*0.01=A.
-83,charge_oc2_protect,charge_oc2_protect,0.01A,USHORT,,,W,,Charge overcurrent level 2 PROTECTION threshold.  offset 79-81. raw*0.01=A.
-84,discharge_oc2_protect,discharge_oc2_protect,0.01A,USHORT,,,W,,Discharge overcurrent level 2 PROTECTION threshold.  offset 81-83. raw*0.01=A.
-85,charge_oc1_delay,charge_oc1_delay,,USHORT,0-255,,W,,Charge OC1 trip delay in seconds.  offset 83-85.
-86,charge_oc2_delay,charge_oc2_delay,,USHORT,0-255,,W,,Charge OC2 trip delay in seconds.  offset 85-87.
-87,discharge_oc1_delay,discharge_oc1_delay,,USHORT,0-255,,W,,Discharge OC1 trip delay in seconds.  offset 87-89.
-88,discharge_oc2_delay,discharge_oc2_delay,,USHORT,0-255,,W,,Discharge OC2 trip delay in seconds.  offset 89-91.
-89.b8,charge_oc_times,charge_oc_times,,_8BIT,0-255,,W,,Charge overcurrent retry count. High byte of reg 89.  offset 91 (1 byte).
-89.b0,discharge_oc_times,discharge_oc_times,,_8BIT,0-255,,W,,Discharge overcurrent retry count. Low byte of reg 89.  offset 92 (1 byte).
-90,charge_ut_warn,charge_ut_warn,1C,SHORT,,,W,"{""Offset"":-50}",Charge undertemperature WARNING.  offset 93-95. offset: raw-50=degC.
-91,charge_ut_protect,charge_ut_protect,1C,SHORT,,,W,"{""Offset"":-50}",Charge undertemperature PROTECTION.  offset 95-97. offset: raw-50=degC.
-92,charge_ut_release,charge_ut_release,1C,SHORT,,,W,"{""Offset"":-50}",Charge undertemperature RELEASE.  offset 97-99. offset: raw-50=degC.
-93,charge_ot_warn,charge_ot_warn,1C,SHORT,,,W,"{""Offset"":-50}",Charge overtemperature WARNING.  offset 99-101. offset: raw-50=degC.
-94,charge_ot_protect,charge_ot_protect,1C,SHORT,,,W,"{""Offset"":-50}",Charge overtemperature PROTECTION.  offset 101-103. offset: raw-50=degC.
-95,charge_ot_release,charge_ot_release,1C,SHORT,,,W,"{""Offset"":-50}",Charge overtemperature RELEASE.  offset 103-105. offset: raw-50=degC.
-96,discharge_ut_warn,discharge_ut_warn,1C,SHORT,,,W,"{""Offset"":-50}",Discharge undertemperature WARNING.  offset 105-107. offset: raw-50=degC.
-97,discharge_ut_protect,discharge_ut_protect,1C,SHORT,,,W,"{""Offset"":-50}",Discharge undertemperature PROTECTION.  offset 107-109. offset: raw-50=degC.
-98,discharge_ut_release,discharge_ut_release,1C,SHORT,,,W,"{""Offset"":-50}",Discharge undertemperature RELEASE.  offset 109-111. offset: raw-50=degC.
-99,discharge_ot_warn,discharge_ot_warn,1C,SHORT,,,W,"{""Offset"":-50}",Discharge overtemperature WARNING.  offset 111-113. offset: raw-50=degC.
-100,discharge_ot_protect,discharge_ot_protect,1C,SHORT,,,W,"{""Offset"":-50}",Discharge overtemperature PROTECTION.  offset 113-115. offset: raw-50=degC.
-101,discharge_ot_release,discharge_ot_release,1C,SHORT,,,W,"{""Offset"":-50}",Discharge overtemperature RELEASE.  offset 115-117. offset: raw-50=degC.
-102,pcb_ot_warn,pcb_ot_warn,1C,SHORT,,,W,"{""Offset"":-50}",PCB/MOSFET overtemperature WARNING.  offset 117-119. offset: raw-50=degC.
-103,pcb_ot_protect,pcb_ot_protect,1C,SHORT,,,W,"{""Offset"":-50}",PCB/MOSFET overtemperature PROTECTION.  offset 119-121. offset: raw-50=degC.
-104,pcb_ot_release,pcb_ot_release,1C,SHORT,,,W,"{""Offset"":-50}",PCB/MOSFET overtemperature RELEASE.  offset 121-123. offset: raw-50=degC.
-105-116,model,model,,ASCII,,3600,R,,Product model number.  result[2:25] -> regs 105-116. 24-byte ASCII string.
-117-119,fw_version,fw_version,,ASCII,,3600,R,,BMS firmware version.  result[27:33] -> regs 117-119. 6-byte ASCII string e.g. V03R04.
-120-127,serial_no,serial_no,,ASCII,,3600,R,,Product serial number.  result[33:48] -> regs 120-127. 16-byte ASCII string. RW per PDF.
+register,variable_name,documented_name,unit,data_type,values,adjustments,note,writable,read_interval
+0,pack_voltage,pack_voltage,0.01V,USHORT,,,Pack voltage. PDF: 10 mV/LSB = 0.01 V. Verified: u16(offset 3)/100.,R,
+1,pack_current,pack_current,0.01A,SHORT,,,Pack current. PDF: 10 mA/LSB = 0.01 A. Positive=charging Negative=discharging. Verified: s16(offset 5)/100.,R,
+10,cell_09_voltage,cell_09_voltage,0.001V,USHORT,0-65535,,Cell 9 voltage.,R,
+100,discharge_ot_protect,discharge_ot_protect,1C,SHORT,,"{""Offset"":-50}",Discharge overtemperature PROTECTION.  offset 113-115. offset: raw-50=degC.,W,
+101,discharge_ot_release,discharge_ot_release,1C,SHORT,,"{""Offset"":-50}",Discharge overtemperature RELEASE.  offset 115-117. offset: raw-50=degC.,W,
+102,pcb_ot_warn,pcb_ot_warn,1C,SHORT,,"{""Offset"":-50}",PCB/MOSFET overtemperature WARNING.  offset 117-119. offset: raw-50=degC.,W,
+103,pcb_ot_protect,pcb_ot_protect,1C,SHORT,,"{""Offset"":-50}",PCB/MOSFET overtemperature PROTECTION.  offset 119-121. offset: raw-50=degC.,W,
+104,pcb_ot_release,pcb_ot_release,1C,SHORT,,"{""Offset"":-50}",PCB/MOSFET overtemperature RELEASE.  offset 121-123. offset: raw-50=degC.,W,
+105-116,model,model,,ASCII,,,Product model number.  result[2:25] -> regs 105-116. 24-byte ASCII string.,R,3600
+11,cell_10_voltage,cell_10_voltage,0.001V,USHORT,0-65535,,Cell 10 voltage.,R,
+117-119,fw_version,fw_version,,ASCII,,,BMS firmware version.  result[27:33] -> regs 117-119. 6-byte ASCII string e.g. V03R04.,R,3600
+12,cell_11_voltage,cell_11_voltage,0.001V,USHORT,0-65535,,Cell 11 voltage.,R,
+120-127,serial_no,serial_no,,ASCII,,,Product serial number.  result[33:48] -> regs 120-127. 16-byte ASCII string. RW per PDF.,R,3600
+13,cell_12_voltage,cell_12_voltage,0.001V,USHORT,0-65535,,Cell 12 voltage.,R,
+14,cell_13_voltage,cell_13_voltage,0.001V,USHORT,0-65535,,Cell 13 voltage.,R,
+15,cell_14_voltage,cell_14_voltage,0.001V,USHORT,0-65535,,Cell 14 voltage.,R,
+16,cell_15_voltage,cell_15_voltage,0.001V,USHORT,0-65535,,Cell 15 voltage.,R,
+17,cell_16_voltage,cell_16_voltage,0.001V,USHORT,0-65535,,Cell 16 voltage.,R,
+18,temp_pcb,temp_pcb,1C,SHORT,,,PCB/MOSFET temperature. PDF: Temp of PCB SHORT degC. Verified:  s16(offset 39) -> reg 18.,R,
+19,temp_avg,temp_avg,1C,SHORT,,,Average cell temperature. PDF: Temp Avg SHORT degC. Present in read window; not decoded separately by .,R,
+2,cell_01_voltage,cell_01_voltage,0.001V,USHORT,0-65535,,Cell 1 voltage.  u16(offset 7)/1000 V; raw is mV.,R,
+20,temp_max,temp_max,1C,SHORT,,,Maximum cell temperature. PDF: Temp Max SHORT degC. Present in read window; not decoded separately by .,R,
+21,cap_remaining,cap_remaining,,USHORT,0-65535,,Remaining capacity. PDF: Cap Remaining USHORT no unit. Verified:  u16(offset 45) -> reg 21.,R,
+22,max_charge_current,max_charge_current,,USHORT,0-65535,,Maximum charging current. PDF: Max charging Current USHORT no unit. Verified:  u16(offset 47) -> reg 22.,R,
+23,soh,soh,%,USHORT,0-100,,State of Health 0-100%. Verified:  u16(offset 49) -> reg 23.,R,
+24,soc,soc,%,USHORT,0-100,,State of Charge 0-100%. Verified:  u16(offset 51) -> reg 24.,R,
+25.b0,status,status,,_8BIT,"{""0"": ""Inactive/Standby"", ""1"": ""Inactive/Charging"", ""2"": ""Inactive/Discharging"", ""4"": ""Inactive/Protect"", ""8"": ""Inactive/Charging_Lmt"", ""128"": ""Active/Standby"", ""129"": ""Active/Charging"", ""130"": ""Active/Discharging"", ""132"": ""Active/Protect"", ""136"": ""Active/Charging_Lmt""}",,"""Low byte of reg 25 (packet[54]). Reports the BMS operating mode and active-state flags as a single byte code. The high bit (0x80) distinguishes Active from Inactive states. Inactive codes (BMS output FETs may be open or limited): 0x00=Inactive/Standby (idle, no charge or discharge), 0x01=Inactive/Charging (charge FET open, accepting charge), 0x02=Inactive/Discharging (discharge FET open, supplying load), 0x04=Inactive/Protect (FETs held open by a protection condition â check regs 26-28), 0x08=Inactive/Charging_Lmt (current-limited charge; BMS throttling input). Active codes (BMS FETs closed, normal operation): 0x80=Active/Standby (FETs closed but no significant current flow), 0x81=Active/Charging (normal charge in progress), 0x82=Active/Discharging (normal discharge in progress), 0x84=Active/Protect (transient protect condition; FETs may momentarily open), 0x88=Active/Charging_Lmt (FETs closed but charge current is being actively limited by BMS). Any value not listed above should be treated as unknown/reserved.""",R,
+25.b8,heater_state,heater_state,,_8BIT,"{""0"": ""Off"", ""128"": ""On""}",,High byte of reg 25 (packet[53]). Reports the state of the internal battery heater circuit used to warm cells in sub-zero ambient conditions so that charging is safe (lithium cells must not be charged below 0 Â°C). 0x80=Heater ON â the BMS has activated the heating element; charging may be deferred or reduced until cell temperatures rise above the charge_ut_protect threshold (reg 91). 0x00=Heater OFF â cells are at or above the minimum charge temperature; heater is not energized. No other values are defined. Monitor in conjunction with temp_sensor_1..4 (regs 33-34) and charge_ut_warn/protect/release (regs 90-92) to understand thermal management behavior.,R,
+26.b0,warning_pack_ov,Warning Pack OV,,1bit,"{""0"":""Clear"",""1"":""Pack_OV""}",,"Reg 26 bit 0. Early warning: pack (string) voltage has risen above the over-voltage warning threshold. 1=Pack_OV active, 0=clear. Does not trigger protection; alerts before protection_pack_ov fires.",R,
+26.b1,warning_cell_ov,Warning Cell OV,,1bit,"{""0"":""Clear"",""1"":""Cell_OV""}",,"Reg 26 bit 1. Early warning: one or more individual cell voltages exceed the cell over-voltage warning threshold. 1=Cell_OV active, 0=clear. Precursor to protection_cell_ov.",R,
+26.b10,warning_charge_ut,Warning Charge UT,,1bit,"{""0"":""Clear"",""1"":""Charge_UT""}",,"Reg 26 bit 10. Early warning: battery temperature during charging has dropped below the under-temperature warning threshold (UT = Under Temperature). 1=Charge_UT active, 0=clear.",R,
+26.b11,warning_discharge_ut,Warning Discharge UT,,1bit,"{""0"":""Clear"",""1"":""Discharge_UT""}",,"Reg 26 bit 11. Early warning: battery temperature during discharging has dropped below the under-temperature warning threshold. 1=Discharge_UT active, 0=clear.",R,
+26.b12,warning_low_capacity,Warning Low Capacity,,1bit,"{""0"":""Clear"",""1"":""Low_Capacity""}",,"Reg 26 bit 12. Early warning: state-of-charge (SOC) has dropped below the low-capacity warning threshold. 1=Low_Capacity active, 0=clear. Alerts before full discharge protection triggers.",R,
+26.b13,warning_float_stopped,Warning Float Stopped,,1bit,"{""0"":""Clear"",""1"":""Float_Stopped""}",,"Reg 26 bit 13. Warning: float charging has been suspended or interrupted before completion. 1=Float_Stopped active, 0=clear. Indicates the charger did not complete the float-charge phase.",R,
+26.b14,warning_inactive_protect,Warning Inactive/Protect,,1bit,"{""0"":""Clear"",""1"":""Inactive/Protect""}",,"Reg 26 bit 14. Warning: BMS has entered an inactive/protected state (e.g. over-discharge lockout or external protect signal). 1=Inactive/Protect active, 0=clear.",R,
+26.b15,warning_inactive_charging_lmt,Warning Inactive/Charging_Lmt,,1bit,"{""0"":""Clear"",""1"":""Inactive/Charging_Lmt""}",,"Reg 26 bit 15. Warning: BMS is inactive and charge current is being limited (throttled below the configured maximum). 1=Inactive/Charging_Lmt active, 0=clear.",R,
+26.b2,warning_pack_uv,Warning Pack UV,,1bit,"{""0"":""Clear"",""1"":""Pack_UV""}",,"Reg 26 bit 2. Early warning: pack (string) voltage has dropped below the under-voltage warning threshold. 1=Pack_UV active, 0=clear. Precursor to protection_pack_uv.",R,
+26.b3,warning_cell_uv,Warning Cell UV,,1bit,"{""0"":""Clear"",""1"":""Cell_UV""}",,"Reg 26 bit 3. Early warning: one or more individual cell voltages have dropped below the cell under-voltage warning threshold. 1=Cell_UV active, 0=clear. Precursor to protection_cell_uv.",R,
+26.b4,warning_charge_oc,Warning Charge OC,,1bit,"{""0"":""Clear"",""1"":""Charge_OC""}",,"Reg 26 bit 4. Early warning: charge current has exceeded the over-current warning threshold. 1=Charge_OC active, 0=clear. Precursor to protection_charge_oc.",R,
+26.b5,warning_discharge_oc,Warning Discharge OC,,1bit,"{""0"":""Clear"",""1"":""Discharge_OC""}",,"Reg 26 bit 5. Early warning: discharge current has exceeded the over-current warning threshold. 1=Discharge_OC active, 0=clear. Precursor to protection_discharge_oc.",R,
+26.b6,warning_amb_temp,Warning Abnormal Amb Temp,,1bit,"{""0"":""Clear"",""1"":""Abnormal_Ambient_Temp""}",,"Reg 26 bit 6. Early warning: ambient (environmental) temperature sensor reading is outside the normal operating range (too hot or too cold). 1=Abnormal_Ambient_Temp active, 0=clear.",R,
+26.b7,warning_mos_overheat,Warning MOS Overheat,,1bit,"{""0"":""Clear"",""1"":""MOS_Overheating""}",,"Reg 26 bit 7. Early warning: MOSFET (charge/discharge switch) temperature has exceeded the overheat warning threshold. 1=MOS_Overheating active, 0=clear. Precursor to protection_mos_overheat.",R,
+26.b8,warning_charge_ot,Warning Charge OT,,1bit,"{""0"":""Clear"",""1"":""Charge_OT""}",,"Reg 26 bit 8. Early warning: battery temperature during charging has exceeded the over-temperature warning threshold (OT = Over Temperature). 1=Charge_OT active, 0=clear.",R,
+26.b9,warning_discharge_ot,Warning Discharge OT,,1bit,"{""0"":""Clear"",""1"":""Discharge_OT""}",,"Reg 26 bit 9. Early warning: battery temperature during discharging has exceeded the over-temperature warning threshold. 1=Discharge_OT active, 0=clear.",R,
+27.b0,protection_pack_ov,ProtectionPack OV,,1bit,"{""0"":""Clear"",""1"":""Pack_OV""}",,"Reg 27 bit 0. Hard protection: pack (string) voltage exceeded the over-voltage protection limit. BMS opens charge FET to halt charging. 1=Pack_OV tripped, 0=clear. Latches until voltage drops below release threshold.",R,
+27.b1,protection_cell_ov,Protection Cell OV,,1bit,"{""0"":""Clear"",""1"":""Cell_OV""}",,"Reg 27 bit 1. Hard protection: one or more cell voltages exceeded the cell over-voltage protection limit. BMS opens charge FET. 1=Cell_OV tripped, 0=clear.",R,
+27.b10,protection_charge_ut,Protection Charge UT,,1bit,"{""0"":""Clear"",""1"":""Charge_UT""}",,"Reg 27 bit 10. Hard protection: battery temperature during charging dropped below the under-temperature protection limit. BMS opens charge FET to prevent lithium plating. 1=Charge_UT tripped, 0=clear.",R,
+27.b11,protection_discharge_ut,Protection Discharge UT,,1bit,"{""0"":""Clear"",""1"":""Discharge_UT""}",,"Reg 27 bit 11. Hard protection: battery temperature during discharging dropped below the under-temperature protection limit. BMS opens discharge FET. 1=Discharge_UT tripped, 0=clear.",R,
+27.b12,protection_low_capacity,Protection Low Capacity,,1bit,"{""0"":""Clear"",""1"":""Low_Capacity""}",,"Reg 27 bit 12. Hard protection: SOC has reached the configured low-capacity protection floor. BMS opens discharge FET to prevent deep discharge. 1=Low_Capacity tripped, 0=clear.",R,
+27.b13,protection_float_stopped,Protection Float Stopped,,1bit,"{""0"":""Clear"",""1"":""Float_Stopped""}",,"Reg 27 bit 13. Hard protection: float-charge phase was stopped by the BMS (e.g. timeout or fault during absorption/float). 1=Float_Stopped tripped, 0=clear.",R,
+27.b14,protection_inactive_protect,Protection Inactive/Protect,,1bit,"{""0"":""Clear"",""1"":""Inactive/Protect""}",,"Reg 27 bit 14. Hard protection: BMS is in an inactive/protect state â FETs are held open due to a protection condition. 1=Inactive/Protect active, 0=clear. Mirrors warning_inactive_protect at the protection severity level.",R,
+27.b15,protection_inactive_charging_lmt,Protection Inactive/Charging_Lmt,,1bit,"{""0"":""Clear"",""1"":""Inactive/Charging_Lmt""}",,"Reg 27 bit 15. Hard protection: BMS is inactive and charge current is being hard-limited. 1=Inactive/Charging_Lmt active, 0=clear. More severe than the corresponding warning bit; BMS enforces current cap.",R,
+27.b2,protection_pack_uv,Protection Pack UV,,1bit,"{""0"":""Clear"",""1"":""Pack_UV""}",,"Reg 27 bit 2. Hard protection: pack voltage dropped below the under-voltage protection limit. BMS opens discharge FET to halt load. 1=Pack_UV tripped, 0=clear.",R,
+27.b3,protection_cell_uv,Protection Cell UV,,1bit,"{""0"":""Clear"",""1"":""Cell_UV""}",,"Reg 27 bit 3. Hard protection: one or more cell voltages dropped below the cell under-voltage protection limit. BMS opens discharge FET. 1=Cell_UV tripped, 0=clear.",R,
+27.b4,protection_charge_oc,Protection Charge OC,,1bit,"{""0"":""Clear"",""1"":""Charge_OC""}",,"Reg 27 bit 4. Hard protection: charge current exceeded the over-current protection threshold. BMS opens charge FET. 1=Charge_OC tripped, 0=clear. See reg 78 for release timer.",R,
+27.b5,protection_discharge_oc,Protection Discharge OC,,1bit,"{""0"":""Clear"",""1"":""Discharge_OC""}",,"Reg 27 bit 5. Hard protection: discharge current exceeded the over-current protection threshold. BMS opens discharge FET. 1=Discharge_OC tripped, 0=clear. See reg 79 for release timer.",R,
+27.b6,protection_amb_temp,Protection Abnormal Amb Temp,,1bit,"{""0"":""Clear"",""1"":""Abnormal_Ambient_Temp""}",,"Reg 27 bit 6. Hard protection: ambient temperature sensor reading exceeded safe operating bounds. BMS may limit or cut charging/discharging. 1=Abnormal_Ambient_Temp tripped, 0=clear.",R,
+27.b7,protection_mos_overheat,Protection MOS Overheat,,1bit,"{""0"":""Clear"",""1"":""MOS_Overheating""}",,"Reg 27 bit 7. Hard protection: MOSFET temperature exceeded the overheat protection threshold. BMS opens FETs to protect switching hardware. 1=MOS_Overheating tripped, 0=clear.",R,
+27.b8,protection_charge_ot,Protection Charge OT,,1bit,"{""0"":""Clear"",""1"":""Charge_OT""}",,"Reg 27 bit 8. Hard protection: battery temperature during charging exceeded the over-temperature protection limit. BMS opens charge FET. 1=Charge_OT tripped, 0=clear.",R,
+27.b9,protection_discharge_ot,Protection Discharge OT,,1bit,"{""0"":""Clear"",""1"":""Discharge_OT""}",,"Reg 27 bit 9. Hard protection: battery temperature during discharging exceeded the over-temperature protection limit. BMS opens discharge FET. 1=Discharge_OT tripped, 0=clear.",R,
+28.b0,error_voltage_error,Error Voltage_Error,,1bit,"{""0"":""Clear"",""1"":""Pack_OV""}",,"Reg 28 bit 0. Fault: a voltage measurement error has been detected by the BMS (e.g. ADC fault, sensor out of range, or pack voltage reading is implausible). 1=Voltage_Error active, 0=clear. Requires BMS inspection.",R,
+28.b1,error_temperature_error,Error Temperature_Error,,1bit,"{""0"":""Clear"",""1"":""Temperature_Error""}",,"Reg 28 bit 1. Fault: a temperature sensor error has been detected (e.g. open/short thermistor, reading out of physical range). 1=Temperature_Error active, 0=clear. Affects thermal protection reliability.",R,
+28.b2,error_current_flow_error,Error Current_Flow_Error,,1bit,"{""0"":""Clear"",""1"":""Current_Flow_Error""}",,"Reg 28 bit 2. Fault: a current measurement error has been detected (e.g. shunt/hall-sensor fault, reading implausible). 1=Current_Flow_Error active, 0=clear. May disable charge/discharge current protection.",R,
+28.b4,error_cell_unbalance,Error Cell_Unbalance,,1bit,"{""0"":""Clear"",""1"":""Cell_Unbalance""}",,"Reg 28 bit 4. Fault: cell voltages within the pack are significantly unbalanced beyond the allowable delta. 1=Cell_Unbalance active, 0=clear. BMS may activate passive balancing or restrict charging to top-balance cells.",R,
+29_30,cycle_count,cycle_count,,UINT,,,Cycle count. Big Endian ABCD. Technically not low_high but high_low.  Except battery expects high to be read first.,W,
+3,cell_02_voltage,cell_02_voltage,0.001V,USHORT,0-65535,,Cell 2 voltage.,R,
+30,register_30,Register 30,,ushort,0-65535,,Unknown,R,
+31_32,full_capacity,full_capacity,0.00000027778aH,UINT,,,Full capacity. Big Endian ABCD. Displayed in Amp Hours. Technically not low_high but high_low.  Except battery expects high to be read first.,W,
+32,register_32,Register 32,,ushort,0-65535,,Unknown,R,
+33.b0,temp_sensor_2,temp_sensor_2,1C,_8SBIT,,,Temperature sensor 2. Low byte of reg 33.  s8(offset 70). Signed degC.,R,
+33.b8,temp_sensor_1,temp_sensor_1,1C,_8SBIT,,,Temperature sensor 1. High byte of reg 33.  s8(offset 69). Signed degC.,R,
+34.b0,temp_sensor_4,temp_sensor_4,1C,_8SBIT,,,Temperature sensor 4. Low byte of reg 34.  s8(offset 72). Signed degC.,R,
+34.b8,temp_sensor_3,temp_sensor_3,1C,_8SBIT,,,Temperature sensor 3. High byte of reg 34.  s8(offset 71). Signed degC.,R,
+35.b0,temp_sensor_6,temp_sensor_6,1C,_8SBIT,,,Temperature sensor 6. Low byte of reg 35. PDF only; not read by . May be 0 if sensor absent.,R,
+35.b8,temp_sensor_5,temp_sensor_5,1C,_8SBIT,,,Temperature sensor 5. High byte of reg 35. PDF only; not read by . May be 0 if sensor absent.,R,
+36,cell_num,cell_num,,USHORT,48214,,Number of cells in series string.  u16(offset 75) -> reg 36. RW per PDF.,W,
+37,designed_capacity,designed_capacity,0.1AH,USHORT,0-65535,,Designed battery capacity. PDF: 0.1 AH/LSB. raw*0.1=Ah. Not read by ; present in cell read window.,R,
+38,cell_balance_status,cell_balance_status,,USHORT,,,Cell balance flags. bit0=Cell_1_Balanced...bit15=Cell_16_Balanced. Not read by ; present in cell read window.,R,
+39,register_39,Register 39,,ushort,0-65535,,Unknown,R,
+4,cell_03_voltage,cell_03_voltage,0.001V,USHORT,0-65535,,Cell 3 voltage.,R,
+40,register_40,Register 40,,ushort,0-65535,,Unknown,R,
+41,register_41,Register 41,,ushort,0-65535,,Unknown,R,
+42,register_42,Register 42,,ushort,0-65535,,Unknown,R,
+43,register_43,Register 43,,ushort,0-65535,,Unknown,R,
+44,register_44,Register 44,,ushort,0-65535,,Unknown,R,
+45,register_45,Register 45,,ushort,0-65535,,Unknown,R,
+46,register_46,Register 46,,ushort,0-65535,,Unknown,R,
+47,register_47,Register 47,,ushort,0-65535,,Unknown,R,
+48,register_48,Register 48,,ushort,0-65535,,Unknown,R,
+49,register_49,Register 49,,ushort,0-65535,,Unknown,R,
+5,cell_04_voltage,cell_04_voltage,0.001V,USHORT,0-65535,,Cell 4 voltage.,R,
+50,register_50,Register 50,,ushort,0-65535,,Unknown,R,
+51,register_51,Register 51,,ushort,0-65535,,Unknown,R,
+52,register_52,Register 52,,ushort,0-65535,,Unknown,R,
+53,register_53,Register 53,,ushort,0-65535,,Unknown,R,
+54,register_54,Register 54,,ushort,0-65535,,Unknown,R,
+55,register_55,Register 55,,ushort,0-65535,,Unknown,R,
+56,balance_volt,balance_volt,0.001V,USHORT,,,Minimum cell voltage to enable balancing.  offset 25-27. raw*0.001=V (e.g. 3400=3.400 V).,W,
+57,balance_volt_diff,balance_volt_diff,0.001V,USHORT,,,Cell voltage delta threshold to trigger balancing.  offset 27-29. raw*0.001=V.,W,
+58,low_cap_warn,low_cap_warn,%,USHORT,,,SOC level that triggers low capacity warning.  offset 29-31.,W,
+59,register_59,Register 59,,ushort,0-65535,,Unknown,R,
+6,cell_05_voltage,cell_05_voltage,0.001V,USHORT,0-65535,,Cell 5 voltage.,R,
+60,register_60,Register 60,,ushort,0-65535,,Unknown,R,
+61,cell_uv_warn,cell_uv_warn,0.001V,USHORT,,,Cell undervoltage WARNING threshold.  offset 35-37. raw*0.001=V.,W,
+62,cell_uv_protect,cell_uv_protect,0.001V,USHORT,,,Cell undervoltage PROTECTION threshold.  offset 37-39. raw*0.001=V.,W,
+63,cell_uv_release,cell_uv_release,0.001V,USHORT,,,Cell undervoltage RELEASE (recovery) threshold.  offset 39-41. raw*0.001=V.,W,
+64,pack_uv_warn,pack_uv_warn,0.01V,USHORT,,,Pack undervoltage WARNING threshold.  offset 41-43. raw*0.01=V.,W,
+65,pack_uv_protect,pack_uv_protect,0.01V,USHORT,,,Pack undervoltage PROTECTION threshold.  offset 43-45. raw*0.01=V.,W,
+66,pack_uv_release,pack_uv_release,0.01V,USHORT,,,Pack undervoltage RELEASE (recovery) threshold.  offset 45-47. raw*0.01=V.,W,
+67,cell_ov_warn,cell_ov_warn,0.001V,USHORT,,,Cell overvoltage WARNING threshold.  offset 47-49. raw*0.001=V.,W,
+68,cell_ov_protect,cell_ov_protect,0.001V,USHORT,,,Cell overvoltage PROTECTION threshold.  offset 49-51. raw*0.001=V.,W,
+69,cell_ov_release,cell_ov_release,0.001V,USHORT,,,Cell overvoltage RELEASE (recovery) threshold.  offset 51-53. raw*0.001=V.,W,
+7,cell_06_voltage,cell_06_voltage,0.001V,USHORT,0-65535,,Cell 6 voltage.,R,
+70,pack_ov_warn,pack_ov_warn,0.01V,USHORT,,,Pack overvoltage WARNING threshold.  offset 53-55. raw*0.01=V.,W,
+71,pack_ov_protect,pack_ov_protect,0.01V,USHORT,,,Pack overvoltage PROTECTION threshold.  offset 55-57. raw*0.01=V.,W,
+72,pack_ov_release,pack_ov_release,0.01V,USHORT,,,Pack overvoltage RELEASE (recovery) threshold.  offset 57-59. raw*0.01=V.,W,
+73,register_73,Register 73,,ushort,0-65535,,Unknown,R,
+74,register_74,Register 74,,ushort,0-65535,,Unknown,R,
+75,register_75,Register 75,,ushort,0-65535,,Unknown,R,
+76,register_76,Register 76,,ushort,0-65535,,Unknown,R,
+77,register_77,Register 77,,ushort,0-65535,,Unknown,R,
+78,discharge_oc_release,discharge_oc_release,,USHORT,,,Discharge overcurrent protection release time in seconds.  offset 69-71.,W,
+79,charge_oc_release,charge_oc_release,,USHORT,,,Charge overcurrent protection release time in seconds.  offset 71-73.,W,
+8,cell_07_voltage,cell_07_voltage,0.001V,USHORT,0-65535,,Cell 7 voltage.,R,
+80,charge_oc1_protect,charge_oc1_protect,0.01A,USHORT,,,Charge overcurrent level 1 PROTECTION threshold.  offset 73-75. raw*0.01=A.,W,
+81,discharge_oc1_protect,discharge_oc1_protect,0.01A,USHORT,,,Discharge overcurrent level 1 PROTECTION threshold.  offset 75-77. raw*0.01=A.,W,
+82,short_circuit_current,short_circuit_current,0.01A,USHORT,,,Short circuit / instantaneous overcurrent threshold.  offset 77-79. raw*0.01=A.,W,
+83,charge_oc2_protect,charge_oc2_protect,0.01A,USHORT,,,Charge overcurrent level 2 PROTECTION threshold.  offset 79-81. raw*0.01=A.,W,
+84,discharge_oc2_protect,discharge_oc2_protect,0.01A,USHORT,,,Discharge overcurrent level 2 PROTECTION threshold.  offset 81-83. raw*0.01=A.,W,
+85,charge_oc1_delay,charge_oc1_delay,,USHORT,0-255,,Charge OC1 trip delay in seconds.  offset 83-85.,W,
+86,charge_oc2_delay,charge_oc2_delay,,USHORT,0-255,,Charge OC2 trip delay in seconds.  offset 85-87.,W,
+87,discharge_oc1_delay,discharge_oc1_delay,,USHORT,0-255,,Discharge OC1 trip delay in seconds.  offset 87-89.,W,
+88,discharge_oc2_delay,discharge_oc2_delay,,USHORT,0-255,,Discharge OC2 trip delay in seconds.  offset 89-91.,W,
+89.b0,discharge_oc_times,discharge_oc_times,,_8BIT,0-255,,Discharge overcurrent retry count. Low byte of reg 89.  offset 92 (1 byte).,W,
+89.b8,charge_oc_times,charge_oc_times,,_8BIT,0-255,,Charge overcurrent retry count. High byte of reg 89.  offset 91 (1 byte).,W,
+9,cell_08_voltage,cell_08_voltage,0.001V,USHORT,0-65535,,Cell 8 voltage.,R,
+90,charge_ut_warn,charge_ut_warn,1C,SHORT,,"{""Offset"":-50}",Charge undertemperature WARNING.  offset 93-95. offset: raw-50=degC.,W,
+91,charge_ut_protect,charge_ut_protect,1C,SHORT,,"{""Offset"":-50}",Charge undertemperature PROTECTION.  offset 95-97. offset: raw-50=degC.,W,
+92,charge_ut_release,charge_ut_release,1C,SHORT,,"{""Offset"":-50}",Charge undertemperature RELEASE.  offset 97-99. offset: raw-50=degC.,W,
+93,charge_ot_warn,charge_ot_warn,1C,SHORT,,"{""Offset"":-50}",Charge overtemperature WARNING.  offset 99-101. offset: raw-50=degC.,W,
+94,charge_ot_protect,charge_ot_protect,1C,SHORT,,"{""Offset"":-50}",Charge overtemperature PROTECTION.  offset 101-103. offset: raw-50=degC.,W,
+95,charge_ot_release,charge_ot_release,1C,SHORT,,"{""Offset"":-50}",Charge overtemperature RELEASE.  offset 103-105. offset: raw-50=degC.,W,
+96,discharge_ut_warn,discharge_ut_warn,1C,SHORT,,"{""Offset"":-50}",Discharge undertemperature WARNING.  offset 105-107. offset: raw-50=degC.,W,
+97,discharge_ut_protect,discharge_ut_protect,1C,SHORT,,"{""Offset"":-50}",Discharge undertemperature PROTECTION.  offset 107-109. offset: raw-50=degC.,W,
+98,discharge_ut_release,discharge_ut_release,1C,SHORT,,"{""Offset"":-50}",Discharge undertemperature RELEASE.  offset 109-111. offset: raw-50=degC.,W,
+99,discharge_ot_warn,discharge_ot_warn,1C,SHORT,,"{""Offset"":-50}",Discharge overtemperature WARNING.  offset 111-113. offset: raw-50=degC.,W,

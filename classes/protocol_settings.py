@@ -1598,6 +1598,23 @@ class protocol_settings:
 
             # Apply variable mask (allowlist)
             if self.variable_mask:
+                mask_matched_count: int = sum(
+                    1 for item in registry_map
+                    if item.documented_name.strip().lower() in self.variable_mask
+                    or item.variable_name.strip().lower() in self.variable_mask
+                    or (item.documented_name.strip().lower() + "_l") in self.variable_mask
+                    or (item.variable_name.strip().lower() + "_l") in self.variable_mask
+                )
+                if mask_matched_count == 0 and registry_map:
+                    self._log.warning(
+                        f"[{self.protocol}] variable_mask has {len(self.variable_mask)} "
+                        f"entries but none match any {registry_type.name} register "
+                        f"({len(registry_map)} available) — excluding the ENTIRE "
+                        f"{registry_type.name} registry type (0 metrics will be scraped from "
+                        f"it). This almost always means the mask file references register "
+                        f"names that no longer exist (e.g. after a protocol CSV update)"
+                        f"or that no metrics have been chosen from one of the registers."
+                    )
                 for index in reversed(range(len(registry_map))):
                     item = registry_map[index]
                     if (
@@ -1642,6 +1659,16 @@ class protocol_settings:
                     for item in registry_map
                 )
                 if not type_has_own_screen_entries:
+                    self._log.warning(
+                        f"[{self.protocol}] variable_screen has {len(self.variable_screen)} "
+                        f"entries but none match any {registry_type.name} register "
+                        f"({len(registry_map)} available) — excluding the ENTIRE "
+                        f"{registry_type.name} registry type (0 metrics will be scraped from "
+                        f"it). This almost always means the screen file references register "
+                        f"names that no longer exist (e.g. after a protocol CSV update). "
+                        f"If this type should still be scraped, remove its entries from "
+                        f"the screen file or verify the names against the current registry map."
+                    )
                     registry_map.clear()
                 else:
                     for index in reversed(range(len(registry_map))):

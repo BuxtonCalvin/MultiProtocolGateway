@@ -43,6 +43,7 @@
           &mdash;
           {{ diff.summary.settings_modified }} settings,
           {{ diff.summary.protocols_modified }} protocol toggles,
+          {{ diff.summary.protocols_removed }} pending deletion{{ 's' if diff.summary.protocols_removed != 1 else '' }},
           {{ diff.summary.settings_orphaned }} orphans
         </p>
       </div>
@@ -106,11 +107,12 @@
       </section>
       {% endif %}
 
-      <!-- Protocol diff -->
-      {% if diff.protocols %}
+      <!-- Protocol toggle diff (W/M/S field changes — not deletions) -->
+      {% set toggle_diffs = diff.protocols | selectattr('field', 'ne', 'pending_delete') | list %}
+      {% if toggle_diffs %}
       <section>
         <h3 class="text-mpg-300 text-xs font-semibold uppercase tracking-widest mb-2">
-          Protocol Toggles ({{ diff.protocols | length }})
+          Protocol Toggles ({{ toggle_diffs | length }})
         </h3>
         <div class="overflow-x-auto rounded border border-mpg-700">
           <table class="w-full text-xs" role="table" aria-label="Protocol toggles diff">
@@ -125,7 +127,7 @@
               </tr>
             </thead>
             <tbody>
-              {% for d in diff.protocols %}
+              {% for d in toggle_diffs %}
               <tr class="diff-table-row bg-warning/5" role="row">
                 <td class="px-3 py-1.5 font-mono text-mpg-400 text-xs">{{ d.protocol_name }}</td>
                 <td class="px-3 py-1.5 text-mpg-300">{{ d.registry_type }}</td>
@@ -136,6 +138,55 @@
                   <span class="text-danger">{{ d.old_value }}</span>
                   <span class="text-mpg-500 mx-1">→</span>
                   <span class="text-success">{{ d.new_value }}</span>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+      {% endif %}
+
+      <!-- Pending protocol register deletions — kept visually separate from  -->
+      <!-- ordinary toggles: this is destructive and irreversible on commit,  -->
+      <!-- unlike everything else in this panel, so it gets its own section  -->
+      <!-- with unambiguous "will be deleted" language rather than a         -->
+      <!-- misleading false → true row. -->
+      {% set delete_diffs = diff.protocols | selectattr('field', 'eq', 'pending_delete') | list %}
+      {% if delete_diffs %}
+      <section>
+        <h3 class="text-danger text-xs font-semibold uppercase tracking-widest mb-2 flex items-center gap-1.5">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"/>
+          </svg>
+          Pending Deletions ({{ delete_diffs | length }})
+        </h3>
+        <p class="text-mpg-400 text-xs mb-2">
+          These registers will be permanently removed from their protocol CSV on commit — along with any
+          device's mask/screen/write selection of them. This cannot be undone from within the app; the
+          register would need to be re-added by hand (or restored from a config backup) to bring it back.
+        </p>
+        <div class="overflow-x-auto rounded border border-danger/40">
+          <table class="w-full text-xs" role="table" aria-label="Pending protocol register deletions">
+            <thead>
+              <tr class="diff-table-header" role="row">
+                <th class="px-3 py-2" scope="col">Protocol</th>
+                <th class="px-3 py-2" scope="col">Type</th>
+                <th class="px-3 py-2 w-16" scope="col">Addr</th>
+                <th class="px-3 py-2" scope="col">Variable</th>
+                <th class="px-3 py-2" scope="col">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for d in delete_diffs %}
+              <tr class="diff-table-row bg-danger/10" role="row">
+                <td class="px-3 py-1.5 font-mono text-mpg-400 text-xs">{{ d.protocol_name }}</td>
+                <td class="px-3 py-1.5 text-mpg-300">{{ d.registry_type }}</td>
+                <td class="px-3 py-1.5 font-mono text-mpg-400">{{ d.register_address }}</td>
+                <td class="px-3 py-1.5 font-mono text-mpg-200 line-through">{{ d.variable_name }}</td>
+                <td class="px-3 py-1.5">
+                  <span class="badge badge-danger text-xs">will be deleted</span>
                 </td>
               </tr>
               {% endfor %}
@@ -163,7 +214,7 @@
       {% if diff.has_changes %}
       <button class="btn-primary text-sm"
               hx-post="/api/commit"
-              hx-confirm="Commit all staged changes to disk?"
+              hx-confirm="{% if diff.summary.protocols_removed %}This will PERMANENTLY DELETE {{ diff.summary.protocols_removed }} protocol register{{ 's' if diff.summary.protocols_removed != 1 else '' }} — this cannot be undone from within the app. Commit all staged changes to disk?{% else %}Commit all staged changes to disk?{% endif %}"
               hx-target="#commit-result"
               hx-swap="none"
               onclick="this.closest('[role=dialog]').remove()">

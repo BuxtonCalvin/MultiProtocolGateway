@@ -50,6 +50,7 @@ from sqlalchemy.pool import ConnectionPoolEntry
 from .models import (
     AppState,
     DeviceProtocolSelection,
+    OrphanedFilterName,
     ProtocolRegister,
     Setting,
     SettingDescription,
@@ -229,17 +230,25 @@ def refresh_app_state(db: Session) -> AppState:
     dirty_protocols: int = db.scalar(
         select(func.count()).where(ProtocolRegister.is_dirty == True)  # noqa: E712
     ) or 0
+    pending_delete_protocols: int = db.scalar(
+        select(func.count()).where(ProtocolRegister.pending_delete == True)  # noqa: E712
+    ) or 0
     dirty_device_protocols: int = db.scalar(
         select(func.count()).where(DeviceProtocolSelection.is_dirty == True)  # noqa: E712
+    ) or 0
+    orphaned_filter_count: int = db.scalar(
+        select(func.count()).select_from(OrphanedFilterName)
     ) or 0
 
     state: AppState = ensure_app_state(db)
     state.dirty_settings_count = dirty_settings + dirty_descriptions
     state.orphan_count = orphan_count
-    state.dirty_protocols_count = dirty_protocols + dirty_device_protocols
+    state.orphaned_filter_count = orphaned_filter_count
+    state.dirty_protocols_count = dirty_protocols + pending_delete_protocols + dirty_device_protocols
     state.has_dirty_settings = (dirty_settings + dirty_descriptions) > 0
-    state.has_dirty_protocols = (dirty_protocols + dirty_device_protocols) > 0
+    state.has_dirty_protocols = (dirty_protocols + pending_delete_protocols + dirty_device_protocols) > 0
     state.has_orphans = orphan_count > 0
+    state.has_orphaned_filters = orphaned_filter_count > 0
     db.commit()
     db.refresh(state)
     return state

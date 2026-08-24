@@ -42,7 +42,13 @@ from typing import Any, List, Literal
 from sqlalchemy.orm import Session
 
 from .database import refresh_app_state, session_scope
-from .models import AppState, DeviceProtocolSelection, ProtocolRegister, Setting
+from .models import (
+    AppState,
+    DeviceProtocolSelection,
+    OrphanedFilterName,
+    ProtocolRegister,
+    Setting,
+)
 from .transport_registry import (
     TransportLibraryEntry,
     get_known_transport_keys,
@@ -1024,6 +1030,84 @@ def _sync_device_protocol_selections(
                 screen_names,
                 write_names,
             )
+
+        _sync_orphaned_filter_names(
+            db, device_name, mask_file, mask_names, screen_file, screen_names, protocol_rows,
+        )
+
+
+def _sync_orphaned_filter_names(
+    db: Session,
+    device_name: str,
+    mask_file: str,
+    mask_names: set[str],
+    screen_file: str,
+    screen_names: set[str],
+    protocol_rows: List[ProtocolRegister],
+) -> None:
+    """
+    Cross-check every name in a device's mask/screen file against the
+    device's *actual, current* registry (every variable_name/documented_name
+    across all its ProtocolRegister rows, any registry type).
+
+    _upsert_device_protocol_selection only ever asks "is this known register
+    in the filter file?" — it has no way to notice a filter-file line that
+    matches nothing at all (e.g. a register renamed or removed from the
+    protocol CSV since the file was written). That's exactly the case that
+    silently zeroes out an entire registry type in protocol_settings.py's
+    screen/mask application (registry_map.clear()) — a single stale line
+    can take down every metric for a device with no error anywhere.
+
+    This is deliberately just a WARNING log, not a toggle: an orphaned
+    filter-file entry is unambiguously stale (it cannot ever match
+    anything), so there's no legitimate case where suppressing this
+    warning is correct.
+    """
+    known_names: set[str] = set()
+    for row in protocol_rows:
+        known_names.add(row.variable_name.strip().lower())
+        known_names.add(row.documented_name.strip().lower())
+
+    orphaned_mask: set[str] = {n for n in mask_names if n not in known_names} if mask_names else set()
+    orphaned_screen: set[str] = {n for n in screen_names if n not in known_names} if screen_names else set()
+
+    if orphaned_mask:
+        _log.warning(
+            f"[{device_name}] {mask_file} contains {len(orphaned_mask)} name(s) that "
+            f"don't match ANY currently known register for this device's protocol: "
+            f"{sorted(orphaned_mask)}. These entries can never match anything and are "
+            f"most likely stale (e.g. a register renamed/removed in a protocol update). "
+            f"If this mask is meant to allow-list specific registers, verify these names "
+            f"against the current protocol CSV."
+        )
+    if orphaned_screen:
+        _log.warning(
+            f"[{device_name}] {screen_file} contains {len(orphaned_screen)} name(s) that "
+            f"don't match ANY currently known register for this device's protocol: "
+            f"{sorted(orphaned_screen)}. Since screen is applied per registry type, if "
+            f"NONE of a type's registers are in this file, that ENTIRE type gets excluded "
+            f"from scraping (see protocol_settings.py) — a stale name here can silently "
+            f"zero out all data for a registry type. Verify these names against the "
+            f"current protocol CSV and remove/update them if they're leftover from a "
+            f"prior protocol version."
+        )
+
+    # Persist so the web UI can surface this without anyone needing to go
+    # looking through logs. Delete-then-insert per device: these rows are
+    # purely derived from the current scan, there's nothing to preserve
+    # across scans (an orphan that gets fixed should simply stop appearing).
+    db.query(OrphanedFilterName).filter(
+        OrphanedFilterName.device_name == device_name
+    ).delete(synchronize_session=False)
+
+    for name in sorted(orphaned_mask):
+        db.add(OrphanedFilterName(
+            device_name=device_name, file_type="mask", filename=mask_file, name=name,
+        ))
+    for name in sorted(orphaned_screen):
+        db.add(OrphanedFilterName(
+            device_name=device_name, file_type="screen", filename=screen_file, name=name,
+        ))
 
 
 # ---------------------------------------------------------------------------

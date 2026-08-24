@@ -45,6 +45,7 @@ from ..services.protocol_service import (
     materialize_and_toggle_virtual_metric,
     register_row_sort_key,
     toggle_register_field,
+    toggle_register_pending_delete,
     update_protocol_register_field,
 )
 
@@ -253,6 +254,30 @@ def create_and_toggle_virtual_register(
         "is_dirty": result.is_dirty,
         "is_writable_by_protocol": getattr(result, "is_writable_by_protocol", False),
     }
+
+
+class DeleteToggleRequest(BaseModel):
+    value: bool
+
+
+@router.patch("/{register_id}/delete")
+def toggle_delete_register(register_id: int, payload: DeleteToggleRequest, db: Session = Depends(get_session)) -> dict[str, int | bool]:
+    """
+    Stage/unstage a protocol editor row for deletion (the DELETE column —
+    protocol-editor-only, no device_name; see toggle_register_pending_delete).
+    Actual removal happens on the next commit (config_writer.commit_all),
+    same "check now, commit later" pattern as every other staged change in
+    this app.
+    """
+    result: ProtocolRegister | None = toggle_register_pending_delete(db, register_id, payload.value)
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Register not found, or it's a synthetic/JSON-description "
+                   "row that has no real CSV row to delete."
+        )
+    db.commit()
+    return {"id": result.id, "pending_delete": result.pending_delete}
 
 
 @router.patch("/{register_id}/field")

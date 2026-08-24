@@ -35,7 +35,7 @@ from enum import Enum
 
 from sqlalchemy.orm import Session
 
-from .models import Setting
+from .models import ProtocolRegister, Setting
 
 
 class ChangeType(str, Enum):
@@ -61,7 +61,7 @@ class ProtocolDiff:
     registry_type: str
     register_address: str
     variable_name: str
-    field: str                  # "user_write_enabled" | "mask_enabled" | "screen_enabled"
+    field: str                  # "user_write_enabled" | "mask_enabled" | "screen_enabled" | "pending_delete"
     old_value: bool
     new_value: bool
     change_type: ChangeType
@@ -89,6 +89,7 @@ class DiffResult:
             "settings_removed": sc[ChangeType.REMOVED],
             "settings_orphaned": sc[ChangeType.ORPHAN],
             "protocols_modified": pc[ChangeType.MODIFIED],
+            "protocols_removed": pc[ChangeType.REMOVED],
             "total_changes": len(self.settings) + len(self.protocols),
         }
 
@@ -139,5 +140,25 @@ def build_diff(db: Session) -> DiffResult:
             change_type=change_type,
         ))
 
+    # ---- Protocol register diff: pending deletions ----
+    # Deliberately scoped to pending_delete only, not every ProtocolRegister
+    # .is_dirty field edit (variable_name, documented_name, etc.) — those
+    # are already visible inline in the protocol table itself (dirty-row
+    # highlight + "*" indicator, see protocol_table.html) as they're being
+    # made, so duplicating each one here wouldn't add information. A staged
+    # deletion is different: it's destructive and irreversible once
+    # committed, unlike every other change in that table, so it gets its
+    # own explicit, un-missable line in the pre-commit diff review.
+    for row in db.query(ProtocolRegister).filter(ProtocolRegister.pending_delete == True).all():  # noqa: E712
+        result.protocols.append(ProtocolDiff(
+            protocol_name=row.protocol_name,
+            registry_type=row.registry_type,
+            register_address=row.register_address,
+            variable_name=row.variable_name,
+            field="pending_delete",
+            old_value=False,
+            new_value=True,
+            change_type=ChangeType.REMOVED,
+        ))
 
     return result

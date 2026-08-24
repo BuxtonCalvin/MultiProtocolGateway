@@ -33,7 +33,6 @@ import logging
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import List, Tuple
 
 from sqlalchemy.engine.row import Row
 from sqlalchemy.orm import Session
@@ -97,15 +96,15 @@ def _build_config_text(settings_rows: list[Setting]) -> str:
             sections[row.section].append(row)
 
     # Section ordering
-    order: List[str] = ["general", "logging"]
-    transport_sections: List[str] = sorted(
+    order: list[str] = ["general", "logging"]
+    transport_sections: list[str] = sorted(
         s for s in sections if s.startswith("transport.")
     )
-    other_sections: List[str] = sorted(
+    other_sections: list[str] = sorted(
         s for s in sections
         if s not in order and s not in transport_sections
     )
-    final_order: List[str] = order + transport_sections + other_sections
+    final_order: list[str] = order + transport_sections + other_sections
 
     lines: list[str] = []
     for section in final_order:
@@ -159,7 +158,7 @@ def _write_mask_screen_files(db: Session, project_root: Path) -> dict[str, int]:
         # own name — same for a synthetic field's code (there isn't one, so
         # a synthetic selection has no file representation at all; it can
         # only reach the data stream via its own always-forwarded path).
-        registers: List[Row[Tuple[DeviceProtocolSelection, ProtocolRegister]]] = (
+        registers: list[Row[tuple[DeviceProtocolSelection, ProtocolRegister]]] = (
             db.query(DeviceProtocolSelection, ProtocolRegister)
             .join(
                 ProtocolRegister,
@@ -170,8 +169,8 @@ def _write_mask_screen_files(db: Session, project_root: Path) -> dict[str, int]:
             .filter(
                 DeviceProtocolSelection.device_name == transport_name,
                 DeviceProtocolSelection.protocol_name.like(f"{protocol_version}%"),
-                ProtocolRegister.is_synthetic == False,   # noqa: E712
-                ProtocolRegister.is_json_desc == False,   # noqa: E712
+                ProtocolRegister.is_synthetic == False,  # noqa: E712
+                ProtocolRegister.is_json_desc == False,  # noqa: E712
             )
             .all()
         )
@@ -287,7 +286,7 @@ def _write_writable_csv(db: Session, protocols_dir: Path, config_dir: Path) -> i
         # rebuilt result. Removed rather than fixed, since the DB is already
         # authoritative here and there was nothing from the on-disk file this
         # function needed to preserve.
-        selected_rows: List[ProtocolRegister] = (
+        selected_rows: list[ProtocolRegister] = (
             db.query(ProtocolRegister)
             .join(
                 DeviceProtocolSelection,
@@ -341,8 +340,53 @@ def _find_protocol_csv(protocols_dir: Path, protocol_name: str) -> Path | None:
     return None
 
 
-def _write_protocol_csvs(db: Session, protocols_dir: Path) -> int:
-    dirty_protocols: List[str] = [
+def _delete_pending_protocol_registers(db: Session) -> tuple[int, set[str]]:
+    """
+    Permanently remove protocol_registers rows staged for deletion (the
+    protocol editor's DELETE column), along with any DeviceProtocolSelection
+    rows — across every device — that reference them. There's no FK/cascade
+    between those two tables (DeviceProtocolSelection only loosely matches
+    by protocol_name/registry_type/register_address — see its docstring in
+    models.py), so without this a deleted register would leave orphaned
+    per-device selection rows behind forever, referencing a register that
+    no longer exists anywhere.
+
+    Runs before _write_protocol_csvs in commit_all() so the CSV rewrite
+    naturally reflects these rows already being gone. Returns the set of
+    protocol_names touched, so the caller can force a CSV rewrite even for
+    a protocol whose ONLY change this commit was a deletion — pending_delete
+    alone doesn't set is_dirty (there's no future value for that row left to
+    write back once it's gone), so it wouldn't otherwise be picked up by
+    _write_protocol_csvs's own is_dirty-based query.
+    """
+    pending: list[ProtocolRegister] = (
+        db.query(ProtocolRegister)
+        .filter(ProtocolRegister.pending_delete == True)  # noqa: E712
+        .all()
+    )
+
+    touched_protocols: set[str] = set()
+    for row in pending:
+        touched_protocols.add(row.protocol_name)
+        db.query(DeviceProtocolSelection).filter(
+            DeviceProtocolSelection.protocol_name == row.protocol_name,
+            DeviceProtocolSelection.registry_type == row.registry_type,
+            DeviceProtocolSelection.register_address == row.register_address,
+        ).delete(synchronize_session=False)
+        db.delete(row)
+
+    if pending:
+        _log.info(
+            f"Deleted {len(pending)} protocol register(s) staged for deletion, "
+            f"spanning {len(touched_protocols)} protocol(s): {sorted(touched_protocols)}"
+        )
+
+    db.flush()
+    return len(pending), touched_protocols
+
+
+def _write_protocol_csvs(db: Session, protocols_dir: Path, force_protocols: set[str] | None = None) -> int:
+    dirty_protocols: set[str] = {
         row[0]
         for row in (
             db.query(ProtocolRegister.protocol_name)
@@ -350,7 +394,8 @@ def _write_protocol_csvs(db: Session, protocols_dir: Path) -> int:
             .distinct()
             .all()
         )
-    ]
+    }
+    dirty_protocols |= force_protocols or set()
 
     written = 0
     for protocol_name in dirty_protocols:
@@ -358,7 +403,7 @@ def _write_protocol_csvs(db: Session, protocols_dir: Path) -> int:
         if not csv_path:
             continue
 
-        rows: List[ProtocolRegister] = (
+        rows: list[ProtocolRegister] = (
             db.query(ProtocolRegister)
             .filter(
                 ProtocolRegister.protocol_name == protocol_name,
@@ -370,8 +415,14 @@ def _write_protocol_csvs(db: Session, protocols_dir: Path) -> int:
                 # token, not a real register address, so writing them out
                 # would corrupt the CSV even if is_dirty tripped for an
                 # unrelated real row in the same protocol.
-                ProtocolRegister.is_synthetic == False,   # noqa: E712
-                ProtocolRegister.is_json_desc == False,   # noqa: E712
+                ProtocolRegister.is_synthetic == False,  # noqa: E712
+                ProtocolRegister.is_json_desc == False,  # noqa: E712
+                # Belt-and-suspenders: pending_delete rows are normally
+                # already gone from the DB by the time this runs (see
+                # _delete_pending_protocol_registers, called first in
+                # commit_all) — this guards against ever writing one back
+                # if that ordering changes.
+                ProtocolRegister.pending_delete == False,  # noqa: E712
             )
             .order_by(ProtocolRegister.register_address)
             .all()
@@ -468,7 +519,7 @@ def commit_all(db: Session, config_path: Path, project_root: Path, protocols_dir
     result["backup_path"] = backup.filepath
 
     # 2. Rebuild config.cfg
-    all_settings: List[Setting] = db.query(Setting).filter(Setting.is_orphan == False).all()  # noqa: E712
+    all_settings: list[Setting] = db.query(Setting).filter(Setting.is_orphan == False).all()  # noqa: E712
     config_text: str = _build_config_text(all_settings)
     config_path.write_text(config_text, encoding="utf-8")
     result["settings_written"] = len([s for s in all_settings if s.is_active])
@@ -487,8 +538,15 @@ def commit_all(db: Session, config_path: Path, project_root: Path, protocols_dir
     _config_dir: Path = config_dir or config_path.parent
     result["override_files_written"] = _write_writable_csv(db, protocols_dir, _config_dir)
 
-    # 5. Protocol CSVs
-    result["protocol_csvs_written"] = _write_protocol_csvs(db, protocols_dir)
+    # 5. Delete rows staged in the protocol editor's DELETE column, then
+    # rewrite protocol CSVs (force_protocols covers deletion-only commits,
+    # which don't otherwise set is_dirty on anything — see
+    # _delete_pending_protocol_registers).
+    deleted_count: int
+    deleted_protocols: set[str]
+    deleted_count, deleted_protocols = _delete_pending_protocol_registers(db)
+    result["protocol_registers_deleted"] = deleted_count
+    result["protocol_csvs_written"] = _write_protocol_csvs(db, protocols_dir, force_protocols=deleted_protocols)
 
     # 6. Reset dirty flags
     _reset_dirty_flags(db)

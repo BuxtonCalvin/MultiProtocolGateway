@@ -56,6 +56,7 @@ from classes.WebServer.models import Base, ConfigBackup
 from .database import ensure_app_state, init_db, run_migrations, session_scope
 from .file_watcher import FileWatcher
 from .routers.analysis import router as analysis_router
+from .routers.bridges import router as bridges_router
 from .routers.commit import router as commit_router
 from .routers.devices import router as devices_router
 from .routers.gateway_status import router as gateway_status_router
@@ -378,6 +379,7 @@ def create_app(
     app.include_router(analysis_router)
     app.include_router(help_router)
     app.include_router(pages_router)
+    app.include_router(bridges_router)
     app.include_router(timescale_router)
     app.include_router(gateway_status_router)
 

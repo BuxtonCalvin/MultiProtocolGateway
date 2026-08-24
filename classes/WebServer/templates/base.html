@@ -202,7 +202,8 @@
       </button>
       <ul class="dropdown-menu absolute left-0 top-full mt-1 w-56 bg-mpg-800
                  border border-mpg-600 rounded shadow-xl z-50
-                 hidden group-hover:block group-focus-within:block"
+                 hidden group-hover:block group-focus-within:block
+                 max-h-[70vh] overflow-y-auto overscroll-contain"
           role="menu" aria-label="Protocols submenu">
         {% for group in proto_groups %}
         <li role="none" class="relative group/sub">
@@ -217,7 +218,8 @@
           </button>
           <ul class="absolute left-full top-0 w-56 bg-mpg-800
                      border border-mpg-600 rounded shadow-xl z-50
-                     hidden group-hover/sub:block"
+                     hidden group-hover/sub:block
+                     max-h-[70vh] overflow-y-auto overscroll-contain"
               role="menu">
             {% for proto in group.protocols %}
             <li role="none">
@@ -250,7 +252,8 @@
       </button>
       <ul class="dropdown-menu absolute left-0 top-full mt-1 w-52 bg-mpg-800
                  border border-mpg-600 rounded shadow-xl z-50
-                 hidden group-hover:block group-focus-within:block"
+                 hidden group-hover:block group-focus-within:block
+                 max-h-[70vh] overflow-y-auto overscroll-contain"
           role="menu" aria-label="Scrapers submenu">
         {% for scraper in nav.scrapers %}
         <li role="none">
@@ -284,7 +287,8 @@
       </button>
       <ul class="dropdown-menu absolute left-0 top-full mt-1 w-52 bg-mpg-800
                  border border-mpg-600 rounded shadow-xl z-50
-                 hidden group-hover:block group-focus-within:block"
+                 hidden group-hover:block group-focus-within:block
+                 max-h-[70vh] overflow-y-auto overscroll-contain"
           role="menu" aria-label="Bridges submenu">
         {% for bridge in nav.bridges %}
         <li role="none">

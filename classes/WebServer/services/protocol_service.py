@@ -89,6 +89,12 @@ class DeviceRegisterView:
     # the template's create-and-toggle payload so the API layer can find
     # (or materialize) the paired code row for the mask/screen auto-link.
     source_variable_name: str | None = None
+    # Staged for deletion via the protocol editor's DELETE column — see
+    # ProtocolRegister.pending_delete. Read directly off the ProtocolRegister
+    # row (not device-scoped like is_dirty above), since a pending deletion
+    # is shared protocol-definition state, the same scope as the row's other
+    # editable fields.
+    pending_delete: bool = False
 
     @property
     def is_paired(self) -> bool:
@@ -236,6 +242,7 @@ def get_protocol_registers(
                     is_synthetic=_safe_flag(row, "is_synthetic"),
                     is_json_desc=_safe_flag(row, "is_json_desc"),
                     source_variable_name=_safe_str(row, "source_variable_name"),
+                    pending_delete=_safe_flag(row, "pending_delete"),
                 )
             )
         except Exception as exc:
@@ -772,6 +779,29 @@ def toggle_register_field(
     refresh_app_state(db)
     _log.debug("toggle_register_field: register=%d field=%s value=%s device=%s", register_id, field, value, device_name)
     return target
+
+
+def toggle_register_pending_delete(db: Session, register_id: int, value: bool) -> ProtocolRegister | None:
+    """
+    Stage or unstage a protocol editor row for deletion. Protocol-editor-only
+    (no device_name) — this is shared protocol *definition* state, same
+    scope as update_protocol_register_field, not a per-device selection.
+
+    Deliberately refuses synthetic/json_desc rows: those aren't real CSV
+    rows to begin with (see ProtocolRegister.is_synthetic docstring) — they
+    already don't get written back, and materialize on demand the next time
+    a device selects that metric, so "deleting" one here would be
+    meaningless (and, worse, misleading: the checkbox would appear to do
+    something permanent to a row that isn't really there).
+    """
+    row: ProtocolRegister | None = db.get(ProtocolRegister, register_id)
+    if row is None or row.is_synthetic or row.is_json_desc:
+        return None
+
+    row.pending_delete = value
+    db.flush()
+    refresh_app_state(db)
+    return row
 
 
 def update_protocol_register_field(db: Session, register_id: int, field: str, value: str) -> ProtocolRegister | None:
