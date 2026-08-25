@@ -130,7 +130,7 @@
       "shape_type": "rect"
     }
   ],
-  "device__bridge_generic": [
+  "device__bridge_timescaledb": [
     {
       "id": "bridge-left-panel",
       "x_percent": 10.9,
@@ -167,7 +167,7 @@
       "fill_color": "rgba(14,165,233,0.18)"
     },
     {
-      "id": "device__bridge_generic-storage",
+      "id": "bridge_storage",
       "x_percent": 74.8,
       "y_percent": 33.3,
       "label": "Describes table storage stats.",
@@ -180,10 +180,10 @@
       "fill_color": "rgba(14,165,233,0.18)"
     },
     {
-      "id": "device__bridge_generic-indexes",
+      "id": "bridge_indexes",
       "x_percent": 36.2,
       "y_percent": 66.4,
-      "label": "Describes the MPG system indexes.",
+      "label": "Describes the MPG TimescaleDB indexes.",
       "shape_type": "rect",
       "label_x_percent": 34.9,
       "label_y_percent": 84.9,
@@ -193,10 +193,10 @@
       "fill_color": "rgba(14,165,233,0.18)"
     },
     {
-      "id": "device__bridge_generic-jobs",
+      "id": "bridge_jobs",
       "x_percent": 75.7,
       "y_percent": 70.5,
-      "label": "Describes the currently running compression jobs.",
+      "label": "Describes the currently running timescale jobs.",
       "shape_type": "rect",
       "label_x_percent": 72.2,
       "label_y_percent": 90.2,
@@ -795,10 +795,10 @@
     "device__inverter_write": "device__scraper_write_generic",
     "device__eg4_ll_s_1": "device__scraper_read_generic",
     "device__eg4_ll_s_2": "device__scraper_read_generic",
-    "device__mqtt": "device__bridge_generic",
-    "device__timescaledb": "device__bridge_generic",
-    "device__influxdb_out": "device__bridge_generic",
-    "device__json_out": "device__bridge_generic",
+    "device__mqtt": "device__bridge_mqtt",
+    "device__timescaledb": "device__bridge_timescaledb",
+    "device__influxdb_out": "device__bridge_influxdb",
+    "device__json_out": "device__bridge_json",
     "protocol-editor__*": "protocols",
     "pages__logging-settings": "logging-settings",
     "pages__messaging-settings": "messages",

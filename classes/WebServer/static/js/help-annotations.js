@@ -58,7 +58,7 @@
         'stroke-width': '0.35',
         'vector-effect': 'non-scaling-stroke',
       });
-      // Use inline style (not presentation attributes) so colours override any CSS rule
+      // Use inline style (not presentation attributes) so colors override any CSS rule
       rectEl.style.fill   = fillColor;
       rectEl.style.stroke = strokeColor;
       g.appendChild(rectEl);

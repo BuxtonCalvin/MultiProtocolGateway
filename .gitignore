@@ -54,4 +54,6 @@ lint-css.yml
 package.json
 stylelintrc.json
 protocols/migrate_code_maps.py
+node_modules
+package-lock.json
 
