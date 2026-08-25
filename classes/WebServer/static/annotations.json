@@ -308,9 +308,9 @@
       "label_y_percent": 53.2
     }
   ],
-  "protocols": [
+  "protocol_edit": [
     {
-      "id": "protocols-left",
+      "id": "protocol_edit-left",
       "x_percent": 12.1,
       "y_percent": 16.9,
       "label_x_percent": 3,
@@ -319,7 +319,7 @@
       "shape_type": "dot"
     },
     {
-      "id": "protocols-table",
+      "id": "protocol_edit-table",
       "x_percent": 61.6,
       "y_percent": 51.3,
       "label_x_percent": 47,
@@ -790,6 +790,88 @@
       "label_y_percent": 12
     }
   ],
+  "device__bridge_influx3db": [
+    {
+      "id": "device__bridge_influx3db-health",
+      "x_percent": 39.8,
+      "y_percent": 24.1,
+      "label": "Influx 3 Bridge stats.",
+      "shape_type": "rect",
+      "label_x_percent": 19.682319500163896,
+      "label_y_percent": 43.99304512847991,
+      "width_percent": 38.87807466841501,
+      "height_percent": 19.1808688317867,
+      "stroke_color": "rgb(14,165,233)",
+      "fill_color": "rgba(14,165,233,0.18)"
+    },
+    {
+      "id": "device__bridge_influx3db-settings",
+      "x_percent": 9.3,
+      "y_percent": 48.4,
+      "label": "Influx 3 settings",
+      "shape_type": "rect",
+      "label_x_percent": 19.592078833715785,
+      "label_y_percent": 54.284356810612906,
+      "width_percent": 17.7,
+      "height_percent": 93.2,
+      "stroke_color": "rgb(255,255,128)",
+      "fill_color": "rgba(255,255,128,0.18)"
+    },
+    {
+      "id": "device__bridge_influx3db-rect-storage",
+      "x_percent": 79.7,
+      "y_percent": 25.8,
+      "label": "Storage statistics.  This may or may not populate based on the version of influx 3 you're running.",
+      "shape_type": "rect",
+      "label_x_percent": 60.2,
+      "label_y_percent": 47.9,
+      "width_percent": 40.5,
+      "height_percent": 22.1,
+      "stroke_color": "rgb(14,165,233)",
+      "fill_color": "rgba(14,165,233,0.18)"
+    }
+  ],
+  "device__bridge_prometheus": [
+    {
+      "id": "device__bridge_prometheus-rect-settings",
+      "x_percent": 9.7,
+      "y_percent": 40.4,
+      "label": "Prometheus bridge settings.",
+      "shape_type": "rect",
+      "label_x_percent": 1.8,
+      "label_y_percent": 57.7,
+      "width_percent": 19.1,
+      "height_percent": 78,
+      "stroke_color": "rgb(255,255,128)",
+      "fill_color": "rgba(255,255,128,0.18)"
+    },
+    {
+      "id": "device__bridge_prometheus-rect-health",
+      "x_percent": 39.1,
+      "y_percent": 27.6,
+      "label": "Prometheus bridge health check.",
+      "shape_type": "rect",
+      "label_x_percent": 21.4,
+      "label_y_percent": 49.5,
+      "width_percent": 39.6,
+      "height_percent": 25.1,
+      "stroke_color": "rgb(14,165,233)",
+      "fill_color": "rgba(14,165,233,0.18)"
+    },
+    {
+      "id": "device__bridge_prometheus-rect-scraper",
+      "x_percent": 79.2,
+      "y_percent": 26.1,
+      "label": "Prometheus scraper health.",
+      "shape_type": "rect",
+      "label_x_percent": 60.7,
+      "label_y_percent": 50.2,
+      "width_percent": 39.9,
+      "height_percent": 24,
+      "stroke_color": "rgb(14,165,233)",
+      "fill_color": "rgba(14,165,233,0.18)"
+    }
+  ],
   "_aliases": {
     "device__inverter_read": "device__scraper_read_generic",
     "device__inverter_write": "device__scraper_write_generic",
@@ -798,8 +880,9 @@
     "device__mqtt": "device__bridge_mqtt",
     "device__timescaledb": "device__bridge_timescaledb",
     "device__influxdb_out": "device__bridge_influxdb",
+    "device__influx3db_out": "device__bridge_influx3db",
     "device__json_out": "device__bridge_json",
-    "protocol-editor__*": "protocols",
+    "protocol-editor__*": "protocol_edit",
     "pages__logging-settings": "logging-settings",
     "pages__messaging-settings": "messages",
     "pages__view-log": "view_log",
