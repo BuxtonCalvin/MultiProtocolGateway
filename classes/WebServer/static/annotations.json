@@ -872,6 +872,75 @@
       "fill_color": "rgba(14,165,233,0.18)"
     }
   ],
+  "device__bridge_influxdb": [
+    {
+      "id": "device__bridge_influxdb-rect-health",
+      "x_percent": 39.4,
+      "y_percent": 24.7,
+      "label": "Influx DB bridge stats",
+      "shape_type": "rect",
+      "label_x_percent": 19.8,
+      "label_y_percent": 37.5,
+      "width_percent": 39.8,
+      "height_percent": 19.3,
+      "stroke_color": "rgb(14,165,233)",
+      "fill_color": "rgba(14,165,233,0.18)"
+    },
+    {
+      "id": "device__bridge_influxdb-rect-1787631464449",
+      "x_percent": 9.5,
+      "y_percent": 45.3,
+      "label": "Influx DB settings",
+      "shape_type": "rect",
+      "label_x_percent": 19.8,
+      "label_y_percent": 63.7,
+      "width_percent": 19.1,
+      "height_percent": 87.8,
+      "stroke_color": "rgb(255,255,128)",
+      "fill_color": "rgba(255,255,128,0.18)"
+    },
+    {
+      "id": "device__bridge_influxdb-rect-1787631579531",
+      "x_percent": 79.2,
+      "y_percent": 33.3,
+      "label": "",
+      "shape_type": "rect",
+      "label_x_percent": 60.2,
+      "label_y_percent": 59.9,
+      "width_percent": 39.3,
+      "height_percent": 36.2,
+      "stroke_color": "rgb(14,165,233)",
+      "fill_color": "rgba(14,165,233,0.18)"
+    }
+  ],
+  "device__bridge_mqtt": [
+    {
+      "id": "device__bridge_mqtt-rect-settings",
+      "x_percent": 9.9,
+      "y_percent": 38.1,
+      "label": "MQTT settings",
+      "shape_type": "rect",
+      "label_x_percent": 20,
+      "label_y_percent": 54.9,
+      "width_percent": 19.1,
+      "height_percent": 76.2,
+      "stroke_color": "rgb(255,255,128)",
+      "fill_color": "rgba(255,255,128,0.18)"
+    },
+    {
+      "id": "device__bridge_mqtt-rect-stats",
+      "x_percent": 39.9,
+      "y_percent": 27.7,
+      "label": "MQTT statistics.",
+      "shape_type": "rect",
+      "label_x_percent": 61.35367997686204,
+      "label_y_percent": 22.437385070186963,
+      "width_percent": 40.4,
+      "height_percent": 27.2,
+      "stroke_color": "rgb(14,165,233)",
+      "fill_color": "rgba(14,165,233,0.18)"
+    }
+  ],
   "_aliases": {
     "device__inverter_read": "device__scraper_read_generic",
     "device__inverter_write": "device__scraper_write_generic",

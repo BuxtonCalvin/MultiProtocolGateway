@@ -1448,7 +1448,8 @@ class Protocol_Gateway:
                 self.__log.warning(
                     f"Interleaved cycle still running for [{', '.join(overlapping_names)}] - "
                     f"skipping this tick to avoid overlapping reads and thread accumulation. "
-                    f"Consider increasing read_interval if this recurs."
+                    f"Consider increasing read_interval, or if using TimescaleDB, turn off "
+                    f"write_requires_complete_cycle if this recurs."
                 )
                 return
 
