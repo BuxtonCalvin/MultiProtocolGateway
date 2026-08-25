@@ -88,7 +88,7 @@ def send_message(
     title: str = "",
     priority: int = 0,
     services: list[str] | str | None = None,
-    **kwargs: Any,
+    **kwargs: object,
 ) -> None:
     """
     Send *message* via messaging services.
@@ -261,7 +261,7 @@ class MessageHandler:
         title: str = "",
         priority: int = 0,
         services: list[str] | str | None = None,
-        **kwargs: Any,
+        **kwargs: object,
     ) -> None:
         """
         Fan the notification out to the requested services.
@@ -316,7 +316,7 @@ class MessageHandler:
         text: str,
         title: str,
         priority: int,
-        extra: dict[str, Any],
+        extra: dict[str, object],
     ) -> Any:
         """
         Construct a service-specific message object.

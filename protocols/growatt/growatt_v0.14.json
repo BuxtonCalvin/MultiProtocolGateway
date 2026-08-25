@@ -1,98 +1,163 @@
 {
-    "transport" : "modbus_rtu",
-    "send_holding_register": true,
-    "send_input_register": true,
-    "send_coil_register": false,
-    "send_discrete_register": false,    
-    "system_status_codes" : 
-    {
-        "0" : "StandBy",
-        "1" : "PV and Grid Combine Discharge",
-        "2" : "Discharge", 
-        "3" : "Fault",
-        "4" : "Flash",
-        "5" : "PV charge",
-        "6" :  "AC charge",
-        "7" : "Combine charge",
-        "8" : "Combine charge and Bypass",
-        "9" : "PV charge and Bypass",
-        "10" : "AC charge and Bypass",
-        "11" : "Bypass",
-        "12" : "PV charge and Discharge"
-    },
-    "check_step_codes":
-    {
-        "1" : "PV1   charge   power check",
-        "2" : "PV2   charge   power check",
-        "3" : "AC    charge    Powercheck"
-    },
-    "production_line_mode_codes" :
-    {
-        "0" : "Not at Production Line Mode",
-        "1" : "Production Line Mode",
-        "2" : "Production Line Clear Fault Mode"
-    },
-    "fault_bit_codes":
-    {
-        "2" : "Over Temperature",
-        "3" : "Bat Voltage High",
-        "5" : "Output short",
-        "6" : "Output voltage high",
-        "7" : "Over Load",
-        "8" : "Bus voltage high",
-        "9" : "Bus start fail",
-        "51" : "Over current",
-        "52" : "Bus voltage low", 
-        "53" : "inverter softstart fail",
-        "56" : "battery open",
-        "58" : "output voltage low",
-        "60" : "negtive power",
-        "61" : "PV voltage high",
-        "62" : "SCI com error",
-        "80" : "can fault",
-        "81" : "host loss"
-    },
-    "warning_bit_codes":
-    {
-       "b0" : "Fan_lock_warning", 
-       "b1": "Over_charge", 
-       "b2": "Battery_voltage_low", 
-       "b3": "Over_load", 
-       "b4": "Op_power_derating", 
-       "b5": "Solar_stop_due_to_bat_low", 
-       "b6": "Solar_stop_due_to_Pv_high", 
-       "b7": "Solar_stop_due_to_over_load", 
-       "b8": "Grid_different", 
-       "b9": "Grid_phase_error", 
-       "b10": "Op_phase_loss", 
-       "b11": "Over_temprature", 
-       "b12": "Buck_current_over", 
-       "b13": "Battery_disconnected", 
-       "b14": "BMS_com_error", 
-       "b15": "Pv_power_insufficient"
-    },
-    "warning_bit_high_codes":
-    {
-       "b0" : "No bat parallel disable", 
-       "b1": "Parallel version different", 
-       "b2": "Unknown", 
-       "b3": "Capacity different", 
-       "b4": "Host Loss", 
-       "b5": "BmsCellOverVolt", 
-       "b6": "BmsTotalOverVolt", 
-       "b7": "BmsDischgOverCurr", 
-       "b8": "BmsChgOverCurr", 
-       "b9": "BmsOverTemp", 
-       "b10": "Battery voltage consistent", 
-       "b11": "Unknown - Bit Flag 11", 
-       "b12": "Unknown - Bit Flag 12", 
-       "b13": "Unknown - Bit Flag 13", 
-       "b14": "Unknown - Bit Flag 14", 
-       "b15": "Unknown - Bit Flag 16"
-    },
-    "lcd_language_codes" :
-    {
-       "0" : "Other",
-       "1" : "English"
-    }
+  "transport": "modbus_rtu",
+  "send_holding_register": true,
+  "send_input_register": true,
+  "send_coil_register": false,
+  "send_discrete_register": false,
+  "system_status_codes": {
+    "0": "StandBy",
+    "1": "PV and Grid Combine Discharge",
+    "2": "Discharge",
+    "3": "Fault",
+    "4": "Flash",
+    "5": "PV charge",
+    "6": "AC charge",
+    "7": "Combine charge",
+    "8": "Combine charge and Bypass",
+    "9": "PV charge and Bypass",
+    "10": "AC charge and Bypass",
+    "11": "Bypass",
+    "12": "PV charge and Discharge"
+  },
+  "check_step_codes": {
+    "1": "PV1   charge   power check",
+    "2": "PV2   charge   power check",
+    "3": "AC    charge    Powercheck"
+  },
+  "production_line_mode_codes": {
+    "0": "Not at Production Line Mode",
+    "1": "Production Line Mode",
+    "2": "Production Line Clear Fault Mode"
+  },
+  "fault_bit_codes": {
+    "2": "Over Temperature",
+    "3": "Bat Voltage High",
+    "5": "Output short",
+    "6": "Output voltage high",
+    "7": "Over Load",
+    "8": "Bus voltage high",
+    "9": "Bus start fail",
+    "51": "Over current",
+    "52": "Bus voltage low",
+    "53": "inverter softstart fail",
+    "56": "battery open",
+    "58": "output voltage low",
+    "60": "negtive power",
+    "61": "PV voltage high",
+    "62": "SCI com error",
+    "80": "can fault",
+    "81": "host loss"
+  },
+  "warning_bit_codes": {
+    "b0": "Fan_lock_warning",
+    "b1": "Over_charge",
+    "b2": "Battery_voltage_low",
+    "b3": "Over_load",
+    "b4": "Op_power_derating",
+    "b5": "Solar_stop_due_to_bat_low",
+    "b6": "Solar_stop_due_to_Pv_high",
+    "b7": "Solar_stop_due_to_over_load",
+    "b8": "Grid_different",
+    "b9": "Grid_phase_error",
+    "b10": "Op_phase_loss",
+    "b11": "Over_temprature",
+    "b12": "Buck_current_over",
+    "b13": "Battery_disconnected",
+    "b14": "BMS_com_error",
+    "b15": "Pv_power_insufficient"
+  },
+  "warning_bit_high_codes": {
+    "b0": "No bat parallel disable",
+    "b1": "Parallel version different",
+    "b2": "Unknown",
+    "b3": "Capacity different",
+    "b4": "Host Loss",
+    "b5": "BmsCellOverVolt",
+    "b6": "BmsTotalOverVolt",
+    "b7": "BmsDischgOverCurr",
+    "b8": "BmsChgOverCurr",
+    "b9": "BmsOverTemp",
+    "b10": "Battery voltage consistent",
+    "b11": "Unknown - Bit Flag 11",
+    "b12": "Unknown - Bit Flag 12",
+    "b13": "Unknown - Bit Flag 13",
+    "b14": "Unknown - Bit Flag 14",
+    "b15": "Unknown - Bit Flag 16"
+  },
+  "lcd_language_codes": {
+    "0": "Other",
+    "1": "English"
+  },
+  "outputconfig_codes": {
+    "0": "BAT First",
+    "1": "PV First",
+    "2": "UTI First",
+    "3": "PV&UTI First"
+  },
+  "chargeconfig_codes": {
+    "0": "PV first",
+    "1": "PV&UTI",
+    "2": "PV Only"
+  },
+  "pv_input_mode_codes": {
+    "0": "Independent",
+    "1": "Parallel"
+  },
+  "ac_input_mode_codes": {
+    "0": "APL,90-280VAC",
+    "1": "UPS,170-280VAC",
+    "2": "GEN"
+  },
+  "outputvolttype_codes": {
+    "0": "208VAC",
+    "1": "230VAC",
+    "2": "240VAC",
+    "3": "220VAC",
+    "4": "100VAC",
+    "5": "110VAC",
+    "6": "120VAC"
+  },
+  "outputfreqtype_codes": {
+    "0": "50Hz",
+    "1": "60Hz"
+  },
+  "overloadrestart_codes": {
+    "0": "Yes",
+    "1": "No",
+    "2": "Swith to UTI"
+  },
+  "overtemprestart_codes": {
+    "0": "Yes",
+    "1": "No"
+  },
+  "buzzeren_codes": {
+    "1": "Enable",
+    "0": "Disable"
+  },
+  "battery_type_codes": {
+    "0": "AGM",
+    "1": "FLD",
+    "2": "USE",
+    "3": "Lithium",
+    "4": "USE2"
+  },
+  "aging_mode_codes": {
+    "0": "Normal Mode",
+    "1": "Aging Mode"
+  },
+  "etl_check_enable_codes": {
+    "1": "Enable",
+    "0": "Disable"
+  },
+  "pv_iso_check_enable_codes": {
+    "1": "Enable",
+    "0": "Disable"
+  },
+  "safety_type_codes": {
+    "1": "standard",
+    "2": "ETL",
+    "3": "AS4777",
+    "4": "CQC",
+    "5": "VDE4105"
+  }
 }

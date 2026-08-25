@@ -39,7 +39,7 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Any, List, Sequence, Tuple
+from typing import TYPE_CHECKING, List, Sequence, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import (
@@ -55,32 +55,21 @@ from sqlalchemy.orm import Session
 
 from classes.messaging.message_handler import is_active
 from classes.messaging.message_handler import send_message as _send_message
+from classes.WebServer.services.device_service import TransportLibraryRow
 
 from ...transports.modbus_base import modbus_base
+from ...transports.transport_base import transport_base
 from ..config_writer import create_backup
 from ..database import get_session, refresh_app_state, session_scope
 from ..models import AppState, ProtocolRegister, Setting, SettingDescription
-from ..scanner import TRANSPORT_BASE_KEYS, load_config, scan_transport_library
-from ..services.analysis_service import get_transport_connection_status
-from ..services.bridge_service import (
-    get_background_jobs,
-    get_compression_retention_summary,
-    get_index_overview,
-    get_influxdb_health,
-    get_influxdb_storage,
-    get_mqtt_health,
-    get_prometheus_health,
-    get_prometheus_targets,
-    get_staged_columns,
-    get_storage_overview,
-    get_timescale_health,
-    is_timescale_available,
-    list_compression_groups,
-    list_rollup_view_groups,
-    list_wide_table_fields,
-    list_wide_tables,
-    resolve_wide_table_name,
+from ..scanner import (
+    EMPTY_TRANSPORT_ENTRY,
+    TRANSPORT_BASE_KEYS,
+    TransportLibraryEntry,
+    load_config,
+    scan_transport_library,
 )
+from ..services.analysis_service import get_transport_connection_status
 from ..services.device_service import (
     DeviceSummary,
     NavData,
@@ -91,6 +80,7 @@ from ..services.device_service import (
     get_transport_library,
 )
 from ..services.protocol_service import (
+    JSONValue,
     export_protocol_registers,
     get_device_metric_summary,
     get_protocol_groups,
@@ -99,18 +89,25 @@ from ..services.protocol_service import (
 )
 from ..services.setting_description_service import get_all_setting_descriptions
 
+if TYPE_CHECKING:
+    # Deferred at runtime — importing protocol_gateway at module load time
+    # risks a circular import, since it's what wires up the WebServer app
+    # in the first place (see the same pattern in commit.py/devices.py).
+    # Only needed here, under TYPE_CHECKING, for the annotations below.
+    from protocol_gateway import Protocol_Gateway
+
 router = APIRouter(tags=["pages"])
 _log: logging.Logger = logging.getLogger(__name__)
 
 
-def _base_context(request: Request, nav: NavData) -> dict[str, Any]:
+def base_context(request: Request, nav: NavData) -> dict[str, NavData | list[dict[str, str | list[str]]]]:
     return {
         "nav": nav,
         "proto_groups": get_protocol_groups(request.app.state.protocols_dir),
     }
 
 
-def _analysis_protocol_options(protocol_groups: list[dict[str, Any]]) -> list[dict[str, str]]:
+def _analysis_protocol_options(protocol_groups: list[dict[str, str | list[str]]]) -> list[dict[str, str]]:
     options: list[dict[str, str]] = []
     for group in protocol_groups:
         group_name = str(group.get("group", ""))
@@ -140,7 +137,7 @@ async def dashboard(request: Request):
         nav: NavData = get_nav_data(db)
         state: AppState = get_app_state(db)
 
-    proto_groups: List[dict[str, Any]] = get_protocol_groups(request.app.state.protocols_dir)
+    proto_groups: List[dict[str, str | list[str]]] = get_protocol_groups(request.app.state.protocols_dir)
 
     return request.app.state.templates.TemplateResponse(
         request=request,
@@ -160,8 +157,8 @@ async def device_page(request: Request, device_name: str):
     # Resolved up front (doesn't need a db session) so both the connection
     # status below and the metric summary computed inside the session block
     # can use the same live transport instance.
-    gateway: Any = getattr(request.app.state, "gateway", None)
-    live_transport: Any = None
+    gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
+    live_transport: transport_base | None = None
     if gateway is not None:
         live_transport = next(
             (
@@ -181,17 +178,25 @@ async def device_page(request: Request, device_name: str):
         # This prevents scraper base keys (protocol_version, read_interval,
         # variable_mask, etc.) from appearing in the bridge settings pane.
         if summary and summary.transport_type == "bridge":
-            library: dict[str, dict[str, Any]] = scan_transport_library(request.app.state.transports_dir)
-            bridge_info: dict[str, Any] = library.get(summary.transport_class, {})
-            bridge_keys: set[Any] = set(bridge_info.get("keys", {}).keys())
+            library: dict[str, TransportLibraryEntry] = scan_transport_library(request.app.state.transports_dir)
+
+            bridge_info: TransportLibraryEntry = library.get(summary.transport_class, EMPTY_TRANSPORT_ENTRY)
+
+            # bridge_info is now a real TransportLibraryEntry (not a loose
+            # dict), so "keys" resolves to its declared dict[str, str | None]
+            # on its own — no | Any escape hatch needed here anymore.
+            raw_keys: dict[str, str | None] = bridge_info.get("keys", {})
+            bridge_keys: set[str] = set(raw_keys.keys()) if raw_keys else set()
+
             # Always keep log_level as it's shown in a dedicated dropdown
             bridge_keys.add("log_level")
+
             settings: List[Setting] = [
                 s for s in all_settings if s.key in bridge_keys
             ] if bridge_keys else all_settings
         else:
             settings = all_settings
-        proto_tabs: List[dict[str, str]]   = (
+        proto_tabs: List[dict[str, str | int]]   = (
             get_protocols_for_device(db, summary.protocol_version, device_name=device_name)
             if summary and summary.protocol_version
             else []
@@ -202,7 +207,7 @@ async def device_page(request: Request, device_name: str):
             t.get("mask_count", 0) or t.get("screen_count", 0) or t.get("write_count", 0)
             for t in proto_tabs
         ) if proto_tabs else False
-        metric_summary: dict[str, Any] | None = (
+        metric_summary: dict[str, int | bool | dict[str, dict[str, int]]] | None = (
             get_device_metric_summary(db, summary.protocol_version, device_name, transport=live_transport)
             if summary and summary.protocol_version and summary.transport_type == "scraper"
             else None
@@ -223,7 +228,7 @@ async def device_page(request: Request, device_name: str):
             )
         return HTMLResponse("<p>Device not found.</p>", status_code=404)
 
-    proto_groups: List[dict[str, Any]] = get_protocol_groups(request.app.state.protocols_dir)
+    proto_groups: List[dict[str, str | list[str]]] = get_protocol_groups(request.app.state.protocols_dir)
 
     partial_template_name: str = (
         "partials/scraper_panes.html"
@@ -291,7 +296,7 @@ async def global_settings_page(request: Request):
     return request.app.state.templates.TemplateResponse(
         request=request,
         name="pages/global_settings.html",
-        context={**_base_context(request, nav), "settings": settings},
+        context={**base_context(request, nav), "settings": settings},
     )
 
 
@@ -308,7 +313,7 @@ async def logging_settings_page(request: Request):
     return request.app.state.templates.TemplateResponse(
         request=request,
         name="pages/logging_settings.html",
-        context={**_base_context(request, nav), "settings": settings},
+        context={**base_context(request, nav), "settings": settings},
     )
 
 @router.get("/pages/messaging-settings", response_class=HTMLResponse, response_model=None)
@@ -325,7 +330,7 @@ async def messaging_settings_page(request: Request):
     return request.app.state.templates.TemplateResponse(
         request=request,
         name="pages/messaging_settings.html",
-        context={**_base_context(request, nav), "settings": settings},
+        context={**base_context(request, nav), "settings": settings},
     )
 
 
@@ -361,7 +366,7 @@ async def view_log_page(request: Request):
     return request.app.state.templates.TemplateResponse(
         request=request,
         name="pages/view_log.html",
-        context=_base_context(request, nav),
+        context=base_context(request, nav),
     )
 
 
@@ -370,13 +375,13 @@ async def transport_library_page(request: Request):
 
     with session_scope() as db:
         nav: NavData = get_nav_data(db)
-    library: List[dict[str, Any]] = get_transport_library(
+    library: List[TransportLibraryRow]  = get_transport_library(
         request.app.state.transports_dir
     )
     return request.app.state.templates.TemplateResponse(
         request=request,
         name="pages/transport_library.html",
-        context={**_base_context(request, nav), "library": library},
+        context={**base_context(request, nav), "library": library},
     )
 
 
@@ -386,7 +391,7 @@ async def transport_settings_page(request: Request):
         nav: NavData = get_nav_data(db)
         settings: List[SettingDescription] = get_all_setting_descriptions(db)
         # Convert to plain dicts for template (avoids lazy-load issues outside session)
-        settings_data: List[dict[str, Any]] = [
+        settings_data: List[dict[str, int | str | bool]] = [
             {
                 "id": s.id,
                 "key": s.key,
@@ -399,7 +404,7 @@ async def transport_settings_page(request: Request):
     return request.app.state.templates.TemplateResponse(
         request=request,
         name="pages/transport_settings.html",
-        context={**_base_context(request, nav), "settings": settings_data},
+        context={**base_context(request, nav), "settings": settings_data},
     )
 
 
@@ -410,7 +415,7 @@ async def faq_page(request: Request):
     return request.app.state.templates.TemplateResponse(
         request=request,
         name="pages/faq.html",
-        context=_base_context(request, nav),
+        context=base_context(request, nav),
     )
 
 
@@ -421,7 +426,7 @@ async def about_page(request: Request):
     return request.app.state.templates.TemplateResponse(
         request=request,
         name="pages/about.html",
-        context=_base_context(request, nav),
+        context=base_context(request, nav),
     )
 
 
@@ -429,11 +434,14 @@ async def about_page(request: Request):
 async def create_device_page(request: Request):
     with session_scope() as db:
         nav: NavData = get_nav_data(db)
-    proto_groups: List[dict[str, Any]] = get_protocol_groups(
+    proto_groups: List[dict[str, str | list[str]]] = get_protocol_groups(
         request.app.state.protocols_dir
     )
-    transport_library: dict[str, dict[str, Any]] = scan_transport_library(request.app.state.transports_dir)
-    create_device_data: dict[str, Any] = {
+    transport_library: dict[str, TransportLibraryEntry] = scan_transport_library(request.app.state.transports_dir)
+    create_device_data: dict[
+        str,
+        list[dict[str, str | dict[str, str | None]]] | list[dict[str, str]] | list[str]
+    ] = {
         "scrapers": [
             {
                 "name": name,
@@ -466,460 +474,9 @@ async def create_device_page(request: Request):
     )
 
 
-@router.get("/pages/timescale-delete-columns", response_class=HTMLResponse, response_model=None)
-async def timescale_delete_columns_page(request: Request):
-    """
-    Step 4 of the Delete Columns flow — lists every wide table on the live
-    TimescaleDB bridge. Selecting one loads its column checklist via HTMX
-    (see timescale_fields_partial below).
-    """
-    gateway = getattr(request.app.state, "gateway", None)
-    if not is_timescale_available(gateway):
-        raise HTTPException(
-            status_code=404,
-            detail="No TimescaleDB bridge is attached to this gateway.",
-        )
 
-    with session_scope() as db:
-        nav: NavData = get_nav_data(db)
-
-    try:
-        wide_tables: list[dict[str, str]] = list_wide_tables(gateway)
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-
-    return request.app.state.templates.TemplateResponse(
-        request=request,
-        name="pages/timescale_delete_columns.html",
-        context={**_base_context(request, nav), "wide_tables": wide_tables},
-    )
-
-
-@router.get("/pages/timescale/fields/{protocol_name}", response_class=HTMLResponse, response_model=None)
-async def timescale_fields_partial(protocol_name: str, request: Request):
-    """
-    Step 5 of the Delete Columns flow — the alpha-ordered, checkbox-ready
-    column list for one wide table. `checked` reflects whatever is
-    currently staged for deletion, so navigating away and back doesn't
-    lose the admin's selections before they commit.
-    """
-    gateway = getattr(request.app.state, "gateway", None)
-    if not is_timescale_available(gateway):
-        raise HTTPException(
-            status_code=404,
-            detail="No TimescaleDB bridge is attached to this gateway.",
-        )
-
-    staged: set[str] = get_staged_columns(request.app.state, protocol_name)
-    try:
-        fields: list[dict[str, Any]] = list_wide_table_fields(gateway, protocol_name, staged_columns=staged)
-        wide_table_name: str = resolve_wide_table_name(gateway, protocol_name)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-
-    return request.app.state.templates.TemplateResponse(
-        request=request,
-        name="partials/timescale_field_checklist.html",
-        context={
-            "protocol_name": protocol_name,
-            "wide_table_name": wide_table_name,
-            "fields": fields,
-        },
-    )
-
-
-@router.get("/pages/timescale-rebuild-rollups", response_class=HTMLResponse, response_model=None)
-async def timescale_rebuild_rollups_page(request: Request):
-    """
-    "Rebuild Rollup Views" screen — a single-pane page (no left-hand picker,
-    unlike Delete Columns: this screen acts on every rollup stack at once,
-    not one wide table at a time). The view inventory itself loads via HTMX
-    (see timescale_rollups_partial below); this route only renders the
-    page shell + "Rebuild Rollups" button.
-    """
-    gateway = getattr(request.app.state, "gateway", None)
-    if not is_timescale_available(gateway):
-        raise HTTPException(
-            status_code=404,
-            detail="No TimescaleDB bridge is attached to this gateway.",
-        )
-
-    with session_scope() as db:
-        nav: NavData = get_nav_data(db)
-
-    return request.app.state.templates.TemplateResponse(
-        request=request,
-        name="pages/timescale_rebuild_rollups.html",
-        context={**_base_context(request, nav)},
-    )
-
-
-@router.get("/pages/timescale/rollups", response_class=HTMLResponse, response_model=None)
-async def timescale_rollups_partial(request: Request):
-    """
-    Rollup-view inventory for the Rebuild Rollup Views screen, grouped one
-    entry per source table — the shared narrow stack, plus every wide-table
-    protocol's own hourly/daily/weekly/monthly stack — each group getting
-    one "include in next rebuild" checkbox (see list_rollup_view_groups for
-    why selection stops at the group level rather than per view). Loaded on
-    page load and again after every "Rebuild Rollups" click (see
-    timescale_rebuild_rollups.html).
-    """
-    gateway = getattr(request.app.state, "gateway", None)
-    if not is_timescale_available(gateway):
-        raise HTTPException(
-            status_code=404,
-            detail="No TimescaleDB bridge is attached to this gateway.",
-        )
-
-    try:
-        groups: list[dict[str, Any]] = list_rollup_view_groups(gateway)
-    except RuntimeError:
-        # Bridge attached but not connected to TimescaleDB yet (rollup_mgr
-        # not initialized) — render an empty inventory rather than a hard
-        # error; the "load" trigger only fires once, so a transient empty
-        # table beats a page that never finishes loading.
-        groups = []
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-
-    return request.app.state.templates.TemplateResponse(
-        request=request,
-        name="partials/timescale_rollup_view_list.html",
-        context={"groups": groups},
-    )
-
-
-@router.get("/pages/timescale-rebuild-compression", response_class=HTMLResponse, response_model=None)
-async def timescale_rebuild_compression_page(request: Request):
-    """
-    "Rebuild Compression" screen — sibling of Rebuild Rollup Views: a
-    single-pane page (no left-hand picker) that acts on every compression
-    group at once. The inventory itself loads via HTMX (see
-    timescale_compression_partial below); this route only renders the
-    page shell + action buttons.
-    """
-    gateway = getattr(request.app.state, "gateway", None)
-    if not is_timescale_available(gateway):
-        raise HTTPException(
-            status_code=404,
-            detail="No TimescaleDB bridge is attached to this gateway.",
-        )
-
-    with session_scope() as db:
-        nav: NavData = get_nav_data(db)
-
-    return request.app.state.templates.TemplateResponse(
-        request=request,
-        name="pages/timescale_rebuild_compression.html",
-        context={**_base_context(request, nav)},
-    )
-
-
-@router.get("/pages/timescale/compression", response_class=HTMLResponse, response_model=None)
-async def timescale_compression_partial(request: Request):
-    """
-    Compression inventory for the Rebuild Compression screen, grouped one
-    entry per source table — the shared narrow stack, plus every wide-
-    table protocol's own raw table + rollup-view stack — each group
-    getting one "include in next rebuild" checkbox, same grouping as
-    timescale_rollups_partial above. Loaded on page load and again after
-    every "Rebuild Compression" click (see timescale_rebuild_compression
-    .html).
-    """
-    gateway = getattr(request.app.state, "gateway", None)
-    if not is_timescale_available(gateway):
-        raise HTTPException(
-            status_code=404,
-            detail="No TimescaleDB bridge is attached to this gateway.",
-        )
-
-    try:
-        groups: list[dict[str, Any]] = list_compression_groups(gateway)
-    except RuntimeError:
-        # Bridge attached but not connected to TimescaleDB yet — render an
-        # empty inventory rather than a hard error, same reasoning as
-        # timescale_rollups_partial.
-        groups = []
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-
-    return request.app.state.templates.TemplateResponse(
-        request=request,
-        name="partials/timescale_compression_group_list.html",
-        context={"groups": groups},
-    )
-
-
-@router.get("/pages/timescale/health", response_class=HTMLResponse, response_model=None)
-async def timescale_health_partial(request: Request):
-    """
-    Bridge Health panel for the TimescaleDB bridge's device page — connection
-    state, backlog buffering, and rollup setup completion. Read-only; lazy-
-    loaded so a slow query here can't block the rest of the page.
-    """
-    gateway = getattr(request.app.state, "gateway", None)
-    if not is_timescale_available(gateway):
-        raise HTTPException(status_code=404, detail="No TimescaleDB bridge is attached to this gateway.")
-
-    try:
-        health: dict[str, Any] = get_timescale_health(gateway)
-    except RuntimeError:
-        health = {}
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-
-    return request.app.state.templates.TemplateResponse(
-        request=request,
-        name="partials/bridge_timescale_health_panel.html",
-        context={"health": health},
-    )
-
-
-@router.get("/pages/timescale/storage", response_class=HTMLResponse, response_model=None)
-async def timescale_storage_partial(request: Request):
-    """
-    Storage Overview panel for the TimescaleDB bridge's device page — row
-    count, size, chunk count, and time range per source table. Read-only;
-    lazy-loaded since this queries every source table individually.
-    """
-    gateway = getattr(request.app.state, "gateway", None)
-    if not is_timescale_available(gateway):
-        raise HTTPException(status_code=404, detail="No TimescaleDB bridge is attached to this gateway.")
-
-    try:
-        tables: list[dict[str, Any]] = get_storage_overview(gateway)
-    except RuntimeError:
-        tables = []
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-
-    return request.app.state.templates.TemplateResponse(
-        request=request,
-        name="partials/bridge_timescale_storage_panel.html",
-        context={"tables": tables},
-    )
-
-
-@router.get("/pages/timescale/indexes", response_class=HTMLResponse, response_model=None)
-async def timescale_indexes_partial(request: Request):
-    """
-    Indexes panel for the TimescaleDB bridge's device page — every index
-    on the shared narrow table and each wide table, with size and scan
-    counts. Read-only; lazy-loaded since this queries every source table
-    individually, same as the Storage Overview panel.
-    """
-    gateway = getattr(request.app.state, "gateway", None)
-    if not is_timescale_available(gateway):
-        raise HTTPException(status_code=404, detail="No TimescaleDB bridge is attached to this gateway.")
-
-    try:
-        indexes: list[dict[str, Any]] = get_index_overview(gateway)
-    except RuntimeError:
-        indexes = []
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-
-    return request.app.state.templates.TemplateResponse(
-        request=request,
-        name="partials/bridge_timescale_indexes_panel.html",
-        context={"indexes": indexes},
-    )
-
-
-@router.get("/pages/timescale/compression-retention", response_class=HTMLResponse, response_model=None)
-async def timescale_compression_retention_partial(request: Request):
-    """
-    Compression & Retention Status panel for the TimescaleDB bridge's
-    device page — the configured compression schedule and raw-data
-    retention interval. Read-only; this is config, not a live query.
-    """
-    gateway = getattr(request.app.state, "gateway", None)
-    if not is_timescale_available(gateway):
-        raise HTTPException(status_code=404, detail="No TimescaleDB bridge is attached to this gateway.")
-
-    try:
-        summary: dict[str, Any] | None = get_compression_retention_summary(gateway)
-    except RuntimeError:
-        summary = None
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-
-    return request.app.state.templates.TemplateResponse(
-        request=request,
-        name="partials/bridge_compression_panel.html",
-        context={"summary": summary},
-    )
-
-
-@router.get("/pages/timescale/jobs", response_class=HTMLResponse, response_model=None)
-async def timescale_jobs_partial(request: Request):
-    """
-    Background Job Status panel for the TimescaleDB bridge's device page —
-    TimescaleDB's own compression/retention/refresh scheduler jobs for
-    every hypertable and rollup view this bridge manages. Read-only.
-    """
-    gateway = getattr(request.app.state, "gateway", None)
-    if not is_timescale_available(gateway):
-        raise HTTPException(status_code=404, detail="No TimescaleDB bridge is attached to this gateway.")
-
-    try:
-        jobs: list[dict[str, Any]] = get_background_jobs(gateway)
-    except RuntimeError:
-        jobs = []
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-
-    return request.app.state.templates.TemplateResponse(
-        request=request,
-        name="partials/bridge_timescale_jobs_panel.html",
-        context={"jobs": jobs},
-    )
-
-
-@router.get("/pages/influxdb/{device_name}/health", response_class=HTMLResponse, response_model=None)
-async def influxdb_health_partial(device_name: str, request: Request):
-    """
-    Bridge Health panel for an InfluxDB v1 (influxdb_out) or v3
-    (influxdb3_out) device page — connection/backlog/staleness state.
-    Read-only; lazy-loaded like the TimescaleDB panels.
-
-    Unlike the TimescaleDB bridge (a singleton), a gateway can have more
-    than one InfluxDB v1/v3 bridge configured, so this is scoped by
-    device_name rather than assuming "the" InfluxDB bridge — see
-    services/bridge_service.get_influxdb_bridge.
-    """
-    gateway = getattr(request.app.state, "gateway", None)
-    device_section: str = f"transport.{device_name}"
-
-    try:
-        health: dict[str, Any] = get_influxdb_health(gateway, device_section)
-    except RuntimeError:
-        raise HTTPException(status_code=404, detail=f"No InfluxDB bridge named '{device_name}' is attached to this gateway.")
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-
-    return request.app.state.templates.TemplateResponse(
-        request=request,
-        name="partials/bridge_influxdb_health_panel.html",
-        context={"health": health},
-    )
-
-
-@router.get("/pages/influxdb/{device_name}/storage", response_class=HTMLResponse, response_model=None)
-async def influxdb_storage_partial(device_name: str, request: Request):
-    """
-    Storage Overview panel for an InfluxDB v1 (influxdb_out) or v3
-    (influxdb3_out) device page — discovered measurements/tables, a
-    sample row-count estimate, and (v1 only) retention policies and
-    optional on-disk data directory size. Read-only, best-effort; a
-    failed underlying query is reported inline rather than erroring the
-    whole panel — see services/bridge_service.get_influxdb_storage.
-    """
-    gateway = getattr(request.app.state, "gateway", None)
-    device_section: str = f"transport.{device_name}"
-
-    try:
-        storage: dict[str, Any] = get_influxdb_storage(gateway, device_section)
-    except RuntimeError:
-        raise HTTPException(status_code=404, detail=f"No InfluxDB bridge named '{device_name}' is attached to this gateway.")
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-
-    return request.app.state.templates.TemplateResponse(
-        request=request,
-        name="partials/bridge_influxdb_storage_panel.html",
-        context={"storage": storage},
-    )
-
-
-@router.get("/pages/mqtt/{device_name}/health", response_class=HTMLResponse, response_model=None)
-async def mqtt_health_partial(device_name: str, request: Request):
-    """
-    Bridge Health panel for an MQTT device page — connection/reconnect/
-    write-topic state. Read-only; lazy-loaded like the other bridge panels.
-
-    Scoped by device_name rather than assuming "the" MQTT bridge, since a
-    gateway can have more than one configured — see services/bridge_service
-    .get_mqtt_bridge.
-    """
-    gateway = getattr(request.app.state, "gateway", None)
-    device_section: str = f"transport.{device_name}"
-
-    try:
-        health: dict[str, Any] = get_mqtt_health(gateway, device_section)
-    except RuntimeError:
-        raise HTTPException(status_code=404, detail=f"No MQTT bridge named '{device_name}' is attached to this gateway.")
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-
-    return request.app.state.templates.TemplateResponse(
-        request=request,
-        name="partials/mqtt_health_panel.html",
-        context={"health": health},
-    )
-
-
-@router.get("/pages/prometheus/{device_name}/health", response_class=HTMLResponse, response_model=None)
-async def prometheus_health_partial(device_name: str, request: Request):
-    """
-    Bridge Health panel for a Prometheus device page — in-memory metrics
-    registry summary (metrics registered, standalone-server state, machine
-    counts by connectivity bucket) plus uptime. Read-only; lazy-loaded like
-    the other bridge panels.
-
-    Scoped by device_name rather than assuming "the" Prometheus bridge,
-    since a gateway can have more than one configured (e.g. separate
-    /metrics endpoints on different ports) — see services/bridge_service
-    .get_prometheus_bridge.
-    """
-    gateway = getattr(request.app.state, "gateway", None)
-    device_section: str = f"transport.{device_name}"
-
-    try:
-        health: dict[str, Any] = get_prometheus_health(gateway, device_section)
-    except RuntimeError:
-        raise HTTPException(status_code=404, detail=f"No Prometheus bridge named '{device_name}' is attached to this gateway.")
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-
-    return request.app.state.templates.TemplateResponse(
-        request=request,
-        name="partials/bridge_prometheus_health_panel.html",
-        context={"health": health},
-    )
-
-
-@router.get("/pages/prometheus/{device_name}/targets", response_class=HTMLResponse, response_model=None)
-async def prometheus_targets_partial(device_name: str, request: Request):
-    """
-    Target Health panel for a Prometheus device page — one row per
-    upstream machine this bridge has ever been wired to or received data
-    from: connectivity status, configured scrape interval, accumulated
-    scrape_failures_total, and time since last_scrape_timestamp_seconds.
-    Read-only.
-    """
-    gateway = getattr(request.app.state, "gateway", None)
-    device_section: str = f"transport.{device_name}"
-
-    try:
-        targets: list[dict[str, Any]] = get_prometheus_targets(gateway, device_section)
-    except RuntimeError:
-        raise HTTPException(status_code=404, detail=f"No Prometheus bridge named '{device_name}' is attached to this gateway.")
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-
-    return request.app.state.templates.TemplateResponse(
-        request=request,
-        name="partials/bridge_prometheus_targets_panel.html",
-        context={"targets": targets},
-    )
-
-
-def _protocol_create_groups(protocols_dir: Path) -> list[dict[str, Any]]:
-    groups: list[dict[str, Any]] = []
+def _protocol_create_groups(protocols_dir: Path) -> list[dict[str, str | list[str]]]:
+    groups: list[dict[str, str | list[str]]] = []
     if not protocols_dir.exists():
         return groups
 
@@ -946,7 +503,10 @@ async def create_protocol_page(request: Request):
     with session_scope() as db:
         nav: NavData = get_nav_data(db)
 
-    protocol_create_data: dict[str, Any] = {
+    protocol_create_data: dict[
+        str,
+        list[dict[str, str | list[str]]] | list[dict[str, str]] | tuple[str, ...]
+    ] = {
         "manufacturers": _protocol_create_groups(request.app.state.protocols_dir),
         "protocol_types": [
             {"label": "Coil", "value": "coil"},
@@ -971,10 +531,10 @@ async def create_protocol_page(request: Request):
 
 @router.get("/pages/analyze/{device_name}", response_class=HTMLResponse, response_model=None)
 async def analyze_device_page(request: Request, device_name: str):
-    gateway = getattr(request.app.state, "gateway", None)
-    transport = None
+    gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
+    transport: transport_base | None = None
     if gateway is not None:
-        transports = getattr(gateway, "_Protocol_Gateway__transports", [])
+        transports: list[transport_base] = getattr(gateway, "_Protocol_Gateway__transports", [])
         transport = next(
             (
                 t for t in transports
@@ -997,7 +557,7 @@ async def analyze_device_page(request: Request, device_name: str):
             detail="Analyze is only available for Modbus-based scrapers",
         )
 
-    proto_groups: list[dict[str, Any]] = get_protocol_groups(request.app.state.protocols_dir)
+    proto_groups: list[dict[str, str | list[str]]] = get_protocol_groups(request.app.state.protocols_dir)
     protocol_options: List[dict[str, str]] = _analysis_protocol_options(proto_groups)
     current_protocol: str = device.protocol_version or ""
 
@@ -1054,7 +614,7 @@ async def protocol_editor(
             .all()
         )
 
-    proto_tabs: List[dict[str, Any]] = [
+    proto_tabs: List[dict[str, str | int]] = [
         {
             "protocol_name": r[0],
             "registry_type": r[1],
@@ -1066,16 +626,23 @@ async def protocol_editor(
     json_data_raw, _is_override = get_protocol_json(
         protocols_dir, protocol_group, protocol_name
     )
-    json_data: dict[str, Any] = json_data_raw or {}
+    # See protocols.py's protocol_table_partial() for why this uses a
+    # separate raw-result name with an explicit `is not None` check rather
+    # than annotating "json_data" directly on the unpack line or falling
+    # back via `or {}` — get_protocol_json() can genuinely return None.
+    json_data: dict[str, JSONValue] = json_data_raw if json_data_raw is not None else {}
 
     csv_path: str | None = None
     candidate: Path = protocols_dir / protocol_group / f"{protocol_name}.csv"
     if candidate.exists():
         csv_path = str(candidate)
 
-    proto_groups: List[dict[str, Any]] = get_protocol_groups(protocols_dir)
+    proto_groups: List[dict[str, str | list[str]]] = get_protocol_groups(protocols_dir)
 
-    context: dict[str, Any] = {
+    context: dict[
+        str,
+        NavData | list[dict[str, str | list[str]]] | str | list[dict[str, str | int]] | dict[str, JSONValue] | None
+    ] = {
         "nav":            nav,
         "proto_groups":   proto_groups,
         "protocol_group": protocol_group,
@@ -1109,14 +676,14 @@ def export_registers_csv(
     registry_type: str,
     device_name: str | None = None,
     db: Session = Depends(get_session),
-):
+) -> StreamingResponse:
     """
     Export all registers for a protocol/registry_type as a CSV download.
     When device_name is supplied, W/M/S selection columns are included.
     Paired _l/_h registers show an address range (e.g. 40-41) and a single
     logical row — mirroring what the table displays.
     """
-    rows: list[dict[str, Any]] = export_protocol_registers(
+    rows: list[dict[str, str | bool]] = export_protocol_registers(
         db, protocol_name, registry_type, device_name
     )
     if not rows:
@@ -1147,19 +714,19 @@ def export_registers_json(
     registry_type: str,
     device_name: str | None = None,
     db: Session = Depends(get_session),
-):
+) -> StreamingResponse:
     """
     Export all registers for a protocol/registry_type as a JSON download.
     Same contract as the CSV export — address ranges for paired registers,
     optional W/M/S fields when device_name is provided.
     """
-    rows: list[dict[str, Any]] = export_protocol_registers(
+    rows: list[dict[str, str | bool]] = export_protocol_registers(
         db, protocol_name, registry_type, device_name
     )
     if not rows:
         raise HTTPException(status_code=404, detail="No registers found")
 
-    payload: dict[str, Any] = {
+    payload: dict[str, str | int | None | list[dict[str, str | bool]]] = {
         "protocol_name":  protocol_name,
         "registry_type":  registry_type,
         "device_name":    device_name,
@@ -1369,7 +936,7 @@ def _csv_filename(protocol_name: str, protocol_type: str) -> str:
     return f"{protocol_name}.{protocol_type}_registry_map.csv"
 
 
-def _base_protocol_json(manufacturer: str, protocol_name: str, protocol_type: str) -> dict[str, Any]:
+def _base_protocol_json(manufacturer: str, protocol_name: str, protocol_type: str) -> dict[str, str | int | bool]:
     return {
         "manufacturer": manufacturer,
         "protocol": protocol_name,
@@ -1382,7 +949,7 @@ def _base_protocol_json(manufacturer: str, protocol_name: str, protocol_type: st
 
 
 @router.post("/api/devices/create")
-def create_device(request: Request, payload: CreateDeviceRequest, db: Session = Depends(get_session)) -> dict[str, Any]:
+def create_device(request: Request, payload: CreateDeviceRequest, db: Session = Depends(get_session)) -> dict[str, str | int]:
     """
     Create a new device directly in config.cfg, then re-scan so the staging
     database reflects the new on-disk section without disturbing existing rows.
@@ -1393,8 +960,8 @@ def create_device(request: Request, payload: CreateDeviceRequest, db: Session = 
     if section in config_data or db.query(Setting).filter_by(section=section).first():
         raise HTTPException(status_code=409, detail=f"Device '{payload.device_name}' already exists.")
 
-    library: dict[str, dict[str, Any]] = scan_transport_library(request.app.state.transports_dir)
-    scraper_info: dict[str, Any] | None = library.get(payload.scraper_transport)
+    library: dict[str, TransportLibraryEntry] = scan_transport_library(request.app.state.transports_dir)
+    scraper_info: TransportLibraryEntry | None = library.get(payload.scraper_transport)
     if not scraper_info or scraper_info.get("classification") != "scraper":
         raise HTTPException(status_code=400, detail="Selected scraper transport is not valid.")
 
@@ -1405,11 +972,11 @@ def create_device(request: Request, payload: CreateDeviceRequest, db: Session = 
             if not bridge_part:
                 continue
             bridge_name: str = bridge_part.removeprefix("transport.")
-            bridge_info: dict[str, Any] | None = library.get(bridge_name)
+            bridge_info: TransportLibraryEntry | None = library.get(bridge_name)
             if not bridge_info or bridge_info.get("classification") != "bridge":
                 raise HTTPException(status_code=400, detail=f"Selected bridge '{bridge_part}' is not valid.")
 
-    allowed_keys: set[Any] = {
+    allowed_keys: set[str] = {
         key for key in scraper_info.get("keys", {}).keys()
         if key not in FIXED_CREATE_KEYS
     }

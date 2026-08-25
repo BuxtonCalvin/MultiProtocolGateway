@@ -1314,18 +1314,29 @@ class timescaledb(transport_base):
 
         Returns:
             Sorted list of (variable_name, data_type, unit_mod, note) tuples,
-            filtered to INPUT, HOLDING, COIL and DISCRETE registry types only,
-            with synthetic fields appended (duplicates removed by variable_name).
+            covering every registry type actually present in registry_map —
+            not just the modbus-shaped INPUT/HOLDING/COIL/DISCRETE types, so
+            transports that key everything under Registry_Type.CUSTOM_BUS
+            (e.g. serial_pylon, canbus — anything calling get_registry_map()
+            with no argument) still get a wide table instead of silently
+            computing a metric_count of 0. Iteration order is by enum value
+            for deterministic seen_names/dedup precedence when the same
+            variable_name appears under more than one registry type.
+            Duplicates are removed by variable_name (first type wins).
             Returns empty list if registry_map is None, empty, or malformed.
-            TODO  adapt for non-modbus registers.
+
+            Mirrors services.bridge_service._active_metric_names_for_protocol,
+            which reads registry_map.values() unfiltered for the same reason
+            — keep both in sync if this logic changes.
         """
         if not registry_map:
+            self._log.warning("_extract_metric_names: registry_map is None or empty — no metrics to extract")
             return []
 
         results: list[tuple[str, str, Any, Any]] = []
         seen_names: set[str] = set()
 
-        for registry_type in (Registry_Type.INPUT, Registry_Type.HOLDING, Registry_Type.COIL, Registry_Type.DISCRETE):
+        for registry_type in sorted(registry_map.keys(), key=lambda rt: rt.value):
 
             entries: list[registry_map_entry] | None = registry_map.get(registry_type)
 

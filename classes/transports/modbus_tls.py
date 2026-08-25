@@ -21,12 +21,9 @@ import ssl
 
 # scraper for Modbus TLS devices, inheriting from modbus_base and implementing TLS-specific client setup and register access logic.
 from pathlib import Path
-from typing import Any, cast
 
-from packaging import version
-from pymodbus import __version__ as pymodbus_version
 from pymodbus.client import ModbusTlsClient
-from pymodbus.client.base import ModbusBaseClient, ModbusBaseSyncClient
+from pymodbus.client.base import ModbusBaseSyncClient
 from pymodbus.exceptions import ConnectionException, ModbusException, ModbusIOException
 from pymodbus.pdu import ExceptionResponse, ModbusPDU
 
@@ -69,83 +66,63 @@ class modbus_tls(modbus_base):
                 self.client = modbus_base.clients[client_str]
                 return
 
-        # Version detection
-        # Falls back to a safe legacy mode if version cannot be parsed
-        try:
-            self.curr_version: version.Version = version.parse(pymodbus_version)
-            is_modern = self.curr_version >= version.parse("3.7.0")
+        if not (cert_path.is_file() and key_path.is_file()):
+            self._log.error(f"TLS Files missing at: {cert_path.absolute()} or {key_path.absolute()}")
 
-        except Exception:
-            self.curr_version: version.Version = version.parse("0.0.0")
-            is_modern: bool = hasattr(ModbusTlsClient, "generate_ssl")
+            msg = "SSL cert or key not found. Ensure they are on the host in the config folder."
+            raise FileNotFoundError(msg)
 
-        # 3. Construct version-specific arguments
-        client_args: dict[str, Any] = {
-            "host": self.host,
-            "port": self.port,
-            "timeout": self.timeout,
-            "retries": self.retries
-        }
-        if is_modern:
-            # Pymodbus 3.14.0+
-            if not (cert_path.is_file() and key_path.is_file()):
-                self._log.error(f"TLS Files missing at: {cert_path.absolute()} or {key_path.absolute()}")
+        # 1. Create a standard TLS client SSL context
+        ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
 
-                msg = "SSL cert or key not found. Ensure they are on the host in the config folder."
-                raise FileNotFoundError(msg)
+        # 2. Configure certificate validation and trust settings
+        ssl_context.verify_mode = ssl.CERT_REQUIRED
+        ssl_context.check_hostname = True
 
-            # generate_ssl usually expects strings, so convert them back with str()
-            # 1. Create a standard TLS client SSL context
-            ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        # 3. Load your certificates natively
+        ssl_context.load_verify_locations(cafile=str(cert_path))
+        ssl_context.load_cert_chain(certfile=str(cert_path), keyfile=str(key_path))
 
-            # 2. Configure certificate validation and trust settings
-            ssl_context.verify_mode = ssl.CERT_REQUIRED
-            ssl_context.check_hostname = True
-
-            # 3. Load your certificates natively
-            ssl_context.load_verify_locations(cafile=str(cert_path))
-            ssl_context.load_cert_chain(certfile=str(cert_path), keyfile=str(key_path))
-
-            # 4. Pass the native context directly to your client arguments
-            client_args["sslctx"] = ssl_context
-
-            client_args["server_hostname"] = self.hostname
-        else:
-            # Legacy Pymodbus support
-            client_args["certfile"] = self.certfile
-            client_args["keyfile"] = self.keyfile
-            client_args["hostname"] = self.hostname
-
-
-        # 4. Initialize and cache the client
-        self.client = cast(ModbusBaseClient, ModbusTlsClient(**client_args))
+        # 4. Initialize and cache the client.
+        # NOTE: pymodbus 3.14.0's ModbusTlsClient constructor does not accept
+        # a separate server_hostname/hostname override — only sslctx. That
+        # means self.hostname (settings key "hostname", falling back to
+        # self.host) currently has no effect: certificate/SNI validation is
+        # always performed against `host` itself. If your config relies on
+        # connecting via an IP while validating against a different
+        # hostname, that override is not currently honored — flag this back
+        # if you need it addressed.
+        self.client = ModbusTlsClient(
+            host=self.host,
+            port=self.port,
+            timeout=self.timeout,
+            retries=self.retries,
+            sslctx=ssl_context,
+        )
 
         with self._clients_lock:
             modbus_base.clients[client_str] = self.client
 
-    def read_registers(self, start: int, count: int = 1, registry_type: Registry_Type = Registry_Type.INPUT, **kwargs: Any) -> Any:
+    def read_registers(self, start: int, count: int = 1, registry_type: Registry_Type = Registry_Type.INPUT, device_id: int | None = None) -> ModbusPDU | None:
         if self.client is None:
             self._log.error("read_registers called before client was initialized")
             return None
 
-        # Cast to ModbusBaseSyncClient (ModbusClientMixin[ModbusPDU]) so the type
-        # checker resolves T -> ModbusPDU and types result as ModbusPDU, not
-        # Awaitable[ModbusPDU] (which is the async specialization).
-        sync_client: ModbusBaseSyncClient = cast(ModbusBaseSyncClient, self.client)
-        call_kwargs: dict[str, Any] = self._get_correct_device_arg(kwargs)
+        sync_client: ModbusBaseSyncClient = self.client
+        resolved_device_id: int = self._get_device_id(device_id)
         result: ModbusPDU | None = None
         # no need for a lock here since the client handles its own internal locking and
         # we don't have any shared state to protect in this method.  If we were to add retries or other
         # logic that re-enters this method, we would need to add a lock to prevent concurrent access to the client.
         try:
             if registry_type == Registry_Type.INPUT:
-                result = sync_client.read_input_registers(start, count=count, **call_kwargs)
+                result = sync_client.read_input_registers(start, count=count, device_id=resolved_device_id)
             elif registry_type == Registry_Type.HOLDING:
-                result = sync_client.read_holding_registers(start, count=count, **call_kwargs)
+                result = sync_client.read_holding_registers(start, count=count, device_id=resolved_device_id)
             elif registry_type == Registry_Type.COIL:
-                result = sync_client.read_coils(start, count=count, **call_kwargs)
+                result = sync_client.read_coils(start, count=count, device_id=resolved_device_id)
             elif registry_type == Registry_Type.DISCRETE:
-                result = sync_client.read_discrete_inputs(start, count=count, **call_kwargs)
+                result = sync_client.read_discrete_inputs(start, count=count, device_id=resolved_device_id)
             else:
                 self._log.warning(f"read_registers: unsupported registry_type '{registry_type.name}' for TLS transport — returning None")
                 return None
@@ -170,7 +147,7 @@ class modbus_tls(modbus_base):
             return None
 
         # Use hasattr to safely check for the error attribute/method
-        is_error: bool | Any = result.isError() if hasattr(result, "isError") else getattr(result, "is_error", False)
+        is_error: bool = result.isError() if hasattr(result, "isError") else bool(getattr(result, "is_error", False))
 
         if is_error:
             self._log.error(f"Modbus Error: {result}")

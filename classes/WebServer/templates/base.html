@@ -24,43 +24,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>{% block title %}MPG Admin{% endblock %}</title>
 
-  <!-- Tailwind CDN (play) -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      darkMode: 'class',
-      theme: {
-        extend: {
-          colors: {
-            mpg: {
-              900: '#0f1923',
-              800: '#1a2535',
-              700: '#243040',
-              600: '#2e3d52',
-              500: '#3d5166',
-              400: '#5b7a99',
-              300: '#8aaec8',
-              200: '#b9d0e4',
-              100: '#ddeaf5',
-              50:  '#f0f6fc',
-            },
-            accent: {
-              DEFAULT: '#38bdf8',
-              dark:    '#0ea5e9',
-            },
-            success: '#22c55e',
-            warning: '#f59e0b',
-            danger:  '#ef4444',
-            dirty:   '#fb923c',
-          }
-        }
-      }
-    }
-  </script>
+  <link rel="stylesheet" href="/static/css/tailwind.css">
 
-  <!-- HTMX — loaded synchronously so extensions register before DOM is processed -->
-  <script src="https://unpkg.com/htmx.org@1.9.12/dist/htmx.min.js"></script>
-  <script src="https://unpkg.com/htmx.org@1.9.12/dist/ext/sse.js"></script>
+  <!-- HTMX — loaded synchronously so extensions register before DOM is processed.
+       Vendored locally (classes/WebServer/static/js/) rather than fetched from
+       unpkg.com at request time — same file, same version (1.9.12), just no
+       longer a runtime dependency on an external CDN being reachable. -->
+  <script src="/static/js/htmx.min.js"></script>
+  <script src="/static/js/htmx-sse.js"></script>
   <script src="/static/js/json-enc.js"></script>
 
   <!-- WCAG / custom properties -->
@@ -200,34 +171,35 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
         </svg>
       </button>
-      <ul class="dropdown-menu absolute left-0 top-full mt-1 w-56 bg-mpg-800
+      <ul class="dropdown-menu absolute left-0 top-full mt-1 w-max min-w-56 max-w-sm bg-mpg-800
                  border border-mpg-600 rounded shadow-xl z-50
-                 hidden group-hover:block group-focus-within:block"
+                 hidden group-hover:block group-focus-within:block
+                 max-h-[70vh] overflow-y-auto overscroll-contain"
           role="menu" aria-label="Protocols submenu">
         {% for group in proto_groups %}
-        <li role="none" class="relative group/sub">
-          <button class="w-full text-left px-4 py-2 text-mpg-200
-                         hover:bg-mpg-600 hover:text-white flex justify-between items-center"
-                  role="menuitem" aria-haspopup="true">
-            {{ group.group }}
-            <svg class="w-3 h-3 opacity-60" fill="none" stroke="currentColor"
-                 viewBox="0 0 24 24" aria-hidden="true">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
-            </svg>
-          </button>
-          <ul class="absolute left-full top-0 w-56 bg-mpg-800
-                     border border-mpg-600 rounded shadow-xl z-50
-                     hidden group-hover/sub:block"
-              role="menu">
-            {% for proto in group.protocols %}
-            <li role="none">
-              <a href="/protocol-editor/{{ group.group }}/{{ proto }}" role="menuitem"
-                 class="block px-4 py-2 text-mpg-200 hover:bg-mpg-600 hover:text-white text-xs">
-                {{ proto }}
-              </a>
-            </li>
-            {% endfor %}
-          </ul>
+        <li role="none">
+          <details class="group/sub">
+            <summary class="w-full px-4 py-2 text-mpg-200 cursor-pointer
+                           hover:bg-mpg-600 hover:text-white flex justify-between items-center
+                           list-none marker:content-none"
+                     role="menuitem">
+              {{ group.group }}
+              <svg class="w-3 h-3 opacity-60 shrink-0 transition-transform group-open/sub:rotate-90"
+                   fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+              </svg>
+            </summary>
+            <ul class="bg-mpg-900/40 border-t border-mpg-600" role="menu">
+              {% for proto in group.protocols %}
+              <li role="none">
+                <a href="/protocol-editor/{{ group.group }}/{{ proto }}" role="menuitem"
+                   class="block pl-8 pr-4 py-2 text-mpg-200 hover:bg-mpg-600 hover:text-white text-xs">
+                  {{ proto }}
+                </a>
+              </li>
+              {% endfor %}
+            </ul>
+          </details>
         </li>
         {% endfor %}
       </ul>
@@ -250,7 +222,8 @@
       </button>
       <ul class="dropdown-menu absolute left-0 top-full mt-1 w-52 bg-mpg-800
                  border border-mpg-600 rounded shadow-xl z-50
-                 hidden group-hover:block group-focus-within:block"
+                 hidden group-hover:block group-focus-within:block
+                 max-h-[70vh] overflow-y-auto overscroll-contain"
           role="menu" aria-label="Scrapers submenu">
         {% for scraper in nav.scrapers %}
         <li role="none">
@@ -284,7 +257,8 @@
       </button>
       <ul class="dropdown-menu absolute left-0 top-full mt-1 w-52 bg-mpg-800
                  border border-mpg-600 rounded shadow-xl z-50
-                 hidden group-hover:block group-focus-within:block"
+                 hidden group-hover:block group-focus-within:block
+                 max-h-[70vh] overflow-y-auto overscroll-contain"
           role="menu" aria-label="Bridges submenu">
         {% for bridge in nav.bridges %}
         <li role="none">

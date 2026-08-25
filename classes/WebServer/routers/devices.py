@@ -24,7 +24,7 @@ import logging
 import threading
 import types
 from pathlib import Path
-from typing import Any, List
+from typing import TYPE_CHECKING, Any, List
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -36,13 +36,19 @@ from classes.WebServer.models import AppState
 from classes.WebServer.services.device_service import DeviceSummary, NavData
 
 from ...transports.modbus_base import modbus_base
+from ...transports.transport_base import transport_base
 from ..database import get_session, refresh_app_state, session_scope
 from ..models import Setting
-from ..scanner import scan_transport_library
+from ..scanner import (
+    EMPTY_TRANSPORT_ENTRY,
+    TransportLibraryEntry,
+    scan_transport_library,
+)
 from ..services.analysis_service import get_transport_connection_status
 from ..services.bridge_service import has_staged_deletions, staged_deletion_count
 from ..services.device_service import (
     delete_orphans_bulk,
+    ensure_bridge_sections_exist,
     get_app_state,
     get_device_settings,
     get_device_summary,
@@ -53,6 +59,13 @@ from ..services.protocol_service import (
     get_device_metric_summary,
     get_protocols_for_device,
 )
+
+if TYPE_CHECKING:
+    # Deferred at runtime — importing protocol_gateway at module load time
+    # risks a circular import, since it's what wires up the WebServer app
+    # in the first place (see the same pattern in commit.py/gateway_status.py).
+    # Only needed here, under TYPE_CHECKING, for the annotations below.
+    from protocol_gateway import Protocol_Gateway
 
 _log: logging.Logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/devices", tags=["devices"])
@@ -87,7 +100,7 @@ class OrphanDeleteRequest(BaseModel):
 
 
 @router.patch("/diag/patch-test")
-def diag_patch_test(payload: SettingUpdate, request: Request, db: Session = Depends(get_session)) -> dict[str, Any]:
+def diag_patch_test(payload: SettingUpdate, request: Request, db: Session = Depends(get_session)) -> dict[str, str | bool | dict[str, str | bool | None]]:
     """
     Test endpoint: POST a JSON body here to verify FastAPI receives it correctly.
     Example: curl -X PATCH http://host:1717/api/devices/diag/patch-test \
@@ -109,6 +122,13 @@ def diagnostics(db: Session = Depends(get_session)) -> dict[str, Any]:
     """
     Self-test endpoint. Visit /api/devices/diag in your browser to verify
     routing, DB connectivity, and app state. Safe — read-only.
+
+    Genuinely Any here rather than a tightened union: this is a free-form
+    debug grab-bag by design (each try/except branch stuffs in whatever
+    succeeded — a row count, an error string, a nested state dict — and
+    that shape is meant to grow as new debug checks get added ad hoc).
+    A precise type would just be relisted every time a check is added,
+    with no caller ever consuming this beyond eyeballing it in a browser.
     """
     result: dict[str, Any] = {}
 
@@ -148,7 +168,7 @@ def diagnostics(db: Session = Depends(get_session)) -> dict[str, Any]:
 
 
 @router.get("/nav")
-def nav_data(db: Session = Depends(get_session)) -> dict[str, Any]:
+def nav_data(db: Session = Depends(get_session)) -> dict[str, list[dict[str, str]] | list[str]]:
     """Returns scraper/bridge lists and protocol groups for nav rendering."""
     nav: NavData = get_nav_data(db)
     return {
@@ -166,7 +186,7 @@ def nav_data(db: Session = Depends(get_session)) -> dict[str, Any]:
 
 
 @router.get("/state")
-def app_state(request: Request, db: Session = Depends(get_session)) -> dict[str, Any]:
+def app_state(request: Request, db: Session = Depends(get_session)) -> dict[str, bool | int | str | None]:
     state: AppState = get_app_state(db)
     return {
         "has_dirty_settings": state.has_dirty_settings,
@@ -187,7 +207,7 @@ def app_state(request: Request, db: Session = Depends(get_session)) -> dict[str,
 
 
 @router.get("/orphans")
-def list_orphans(db: Session = Depends(get_session)) -> list[dict[str, Any]]:
+def list_orphans(db: Session = Depends(get_session)) -> list[dict[str, int | str | None]]:
     rows: list[Setting] = get_orphaned_settings(db)
     return [
         {
@@ -212,7 +232,7 @@ def delete_orphans(payload: OrphanDeleteRequest, db: Session = Depends(get_sessi
 @router.get("/connection-status")
 def connection_status(request: Request) -> dict[str, bool]:
     """Returns live connection status for all transports from the gateway instance."""
-    gateway: Any | None = getattr(request.app.state, "gateway", None)
+    gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
     result: dict[str, bool] = get_transport_connection_status(gateway)
     if result:
         _log.debug("connection-status keys: %s", list(result.keys()))
@@ -220,7 +240,7 @@ def connection_status(request: Request) -> dict[str, bool]:
 
 
 @router.patch("/general/{section}/{setting_id}")
-def update_general_setting(section: str, setting_id: int, payload: SettingUpdate, request: Request, db: Session = Depends(get_session)) -> dict[str, Any]:
+def update_general_setting(section: str, setting_id: int, payload: SettingUpdate, request: Request, db: Session = Depends(get_session)) -> dict[str, int | bool | str | None]:
     """Update a setting in general/logging sections."""
     _log.warning("PATCH update_general: section=%s id=%s content-type=%s payload=%s",
                  section, setting_id,
@@ -299,21 +319,29 @@ def reconcile_settings(
     ).first()
     current_transport: str | None = transport_row.value_staged if transport_row else ""
 
-    library: dict[str, dict[str, Any]] = scan_transport_library(transports_dir)
-    transport_info: dict[str, Any] = {}
+    library: dict[str, TransportLibraryEntry] = scan_transport_library(transports_dir)
+    transport_info: TransportLibraryEntry = EMPTY_TRANSPORT_ENTRY
     if current_transport is not None:
-        transport_info = library.get(current_transport, {})
-    expected_keys: dict[str, str] = transport_info.get("keys", {})
+        transport_info = library.get(current_transport, EMPTY_TRANSPORT_ENTRY)
+    expected_keys: dict[str, str | None] = transport_info.get("keys", {})
 
 
-    FIXED_KEYS: set[str] = {"transport", "bridge", "protocol_version", "log_level",
-                  "transport_type_cached"}
+    FIXED_KEYS: set[str] = {
+        "transport",
+        "bridge",
+        "protocol_version",
+        "log_level",
+        "transport_type_cached"}
 
     # Build the display list without touching the DB
     existing_rows: list[Setting] = get_device_settings(db, section)
     existing_map: dict[str, Setting] = {r.key: r for r in existing_rows}
 
-    display_rows: list[Any] = []
+    # Both branches below populate this with either a real Setting row or a
+    # types.SimpleNamespace "virtual row" placeholder (see below) — the
+    # template only relies on their shared duck-typed attribute set
+    # (key, value_staged, default_value, is_active, is_dirty, is_orphan, ...).
+    display_rows: list[Setting | types.SimpleNamespace] = []
 
     if expected_keys:
         # Keys the new transport defines — use DB row if it exists, else virtual.
@@ -370,7 +398,7 @@ def create_and_activate(
     device_name: str,
     payload: CreateAndActivateRequest,
     db: Session = Depends(get_session),
-) -> dict[str, Any]:
+) -> dict[str, int | str | bool | None]:
     """
     Creates a new Setting row for a virtual key (one from the transport library
     that has no DB row yet) and immediately marks it active and dirty.
@@ -440,6 +468,10 @@ def refresh_protocol_tabs(
         db.commit()
 
     proto_tabs: List[dict[str, Any]] = get_protocols_for_device(db, payload.new_protocol, device_name=device_name)
+    # proto_tabs / metric_summary below keep Any: both come from
+    # protocol_service.py (a service module, not this router — its own
+    # return types are out of this pass's scope; see the equivalent note
+    # for commit_staged_deletions() in commit.py).
     summary: DeviceSummary | None = get_device_summary(db, device_name)
 
     # Rebuild summary with updated protocol_version so the heading shows correctly
@@ -451,8 +483,8 @@ def refresh_protocol_tabs(
         for t in proto_tabs
     ) if proto_tabs else False
 
-    gateway: Any = getattr(request.app.state, "gateway", None)
-    live_transport: Any = gateway.get_transport(f"transport.{device_name}") if gateway is not None else None
+    gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
+    live_transport: transport_base | None = gateway.get_transport(f"transport.{device_name}") if gateway is not None else None
     metric_summary: dict[str, Any] | None = (
         get_device_metric_summary(db, payload.new_protocol, device_name, transport=live_transport)
         if payload.new_protocol else None
@@ -472,7 +504,7 @@ def refresh_protocol_tabs(
 # ── Wildcard /{device_name} routes — registered last ───────────────────────
 
 @router.get("/{device_name}/settings")
-def device_settings(device_name: str, db: Session = Depends(get_session)) -> list[dict[str, Any]]:
+def device_settings(device_name: str, db: Session = Depends(get_session)) -> list[dict[str, int | str | bool | None]]:
     """Return all settings rows for a device."""
     section: str = f"transport.{device_name}"
     rows: list[Setting] = get_device_settings(db, section)
@@ -493,7 +525,7 @@ def device_settings(device_name: str, db: Session = Depends(get_session)) -> lis
 
 
 @router.patch("/{device_name}/settings/{setting_id}")
-def update_setting(device_name: str, setting_id: int, payload: SettingUpdate, request: Request, db: Session = Depends(get_session)) -> dict[str, Any]:
+def update_setting(device_name: str, setting_id: int, payload: SettingUpdate, request: Request, db: Session = Depends(get_session)) -> dict[str, int | str | bool | None]:
     """Update a single setting's staged value or active state."""
     _log.warning("PATCH update_setting: device=%s id=%s content-type=%s payload=%s",
                  device_name, setting_id,
@@ -518,6 +550,15 @@ def update_setting(device_name: str, setting_id: int, payload: SettingUpdate, re
         row.mark_dirty()
     else:
         row.is_dirty = bool(row.value_disk)  # dirty only if disk had something to remove
+
+    if row.key == "bridge" and payload.value_staged is not None:
+        # The bridge multi-select (scraper_panes.html) PATCHes this row
+        # directly rather than going through reconcile-settings, so this is
+        # the only place that sees a new bridge selection land. Auto-create
+        # DB rows for any newly-referenced bridge section that doesn't exist
+        # yet — otherwise the staged "bridge = transport.X" reference points
+        # at a section commit_all() has no rows for and will never write.
+        ensure_bridge_sections_exist(db, row.value_staged)
 
     db.flush()
     refresh_app_state(db)
@@ -551,12 +592,12 @@ async def orphan_modal(request: Request):
     )
 
 
-def _failed_register_keys(transport: Any) -> dict[str, str]:
+def _failed_register_keys(transport: transport_base | None) -> dict[str, str]:
     """Best-effort {variable_name: "disabled"|"failing"} map for a transport.
 
     Only modbus_base subclasses track register failures; anything else
-    (bridges, non-modbus scrapers) returns an empty map so the caller can
-    merge this in unconditionally.
+    (bridges, non-modbus scrapers, or no transport at all) returns an empty
+    map so the caller can merge this in unconditionally.
     """
     if not isinstance(transport, modbus_base):
         return {}
@@ -568,15 +609,29 @@ def _failed_register_keys(transport: Any) -> dict[str, str]:
 
 
 def _clean_last_known_data(raw: dict[str, Any]) -> dict[str, str]:
-    """Stringify a transport's last_known_data for JSON response, dropping
-    the paired "*_desc" text entries. Shared by the immediate and wait
-    variants of /last-values, which otherwise present the same values in
-    the same shape at two different points in the scrape cycle.
+    """Stringify a transport's last_known_data for JSON response.
+
+    ``raw``'s values genuinely span whatever a register or synthetic/computed
+    metric produced for a given cycle — int, float, str, bool, ASCII decodes,
+    etc. (see protocol_settings.py's process_registry_map()) — there's no
+    single value type that's actually accurate here, hence Any rather than a
+    tightened union.
+
+    Includes "*_desc" entries — these are real registry_map rows in their
+    own right (protocol_settings.py's _add_code_description_entries()
+    generates a synthetic "<name>_desc" entry for any code-mapped field,
+    and it gets its own row in the Protocol Metrics table via
+    data-value-key="<name>_desc"), not incidental duplicates of their
+    source field. Previously filtered out here on the assumption they were
+    redundant, which left every "_desc" row's VALUE column permanently
+    showing the "—" not-yet-populated placeholder (see populateValues() in
+    scraper_panes.html) instead of the human-readable text
+    _code_description_for_value() computed for it. Shared by the immediate
+    and wait variants of /last-values, which otherwise present the same
+    values in the same shape at two different points in the scrape cycle.
     """
     clean: dict[str, str] = {}
     for k, v in raw.items():
-        if k.endswith("_desc"):
-            continue
         try:
             clean[k] = str(round(v, 4)) if isinstance(v, float) else str(v)
         except Exception as e:
@@ -593,13 +648,15 @@ async def device_last_values(request: Request, device_name: str) -> JSONResponse
     ``bridge.write_data()`` call — the authoritative point where a cycle
     is confirmed complete and bridge-bound.
     """
-    gateway: Any | None = getattr(request.app.state, "gateway", None)  # gateway object
+    gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
     if gateway is None:
         return JSONResponse({"values": {}, "status": "no_gateway"})
-    transport: Any = gateway.get_transport(f"transport.{device_name}")  # transport object
+    transport: transport_base | None = gateway.get_transport(f"transport.{device_name}")
     if transport is None:
         return JSONResponse({"values": {}, "status": "not_found"})
 
+    # last_known_data's value type is genuinely heterogeneous — see
+    # _clean_last_known_data()'s docstring.
     raw: dict[str, Any] = getattr(transport, "last_known_data", {})
     clean: dict[str, str] = _clean_last_known_data(raw)
 
@@ -622,10 +679,10 @@ async def device_last_values_wait(request: Request, device_name: str) -> JSONRes
     """
 
     timeout: float = 90.0
-    gateway: Any | None = getattr(request.app.state, "gateway", None)  # gateway object
+    gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
     if gateway is None:
         return JSONResponse({"values": {}, "status": "no_gateway"})
-    transport: Any = gateway.get_transport(f"transport.{device_name}")  # transport object
+    transport: transport_base | None = gateway.get_transport(f"transport.{device_name}")
     if transport is None:
         return JSONResponse({"values": {}, "status": "not_found"})
 

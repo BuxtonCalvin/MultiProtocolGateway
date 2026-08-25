@@ -1,4 +1,7 @@
  __pycache__
+.pytest_cache
+.mypy_cache
+
 *.pyc
 .vscode
 settings.json
@@ -50,3 +53,7 @@ stylelint.config.mjs
 lint-css.yml
 package.json
 stylelintrc.json
+protocols/migrate_code_maps.py
+node_modules
+package-lock.json
+

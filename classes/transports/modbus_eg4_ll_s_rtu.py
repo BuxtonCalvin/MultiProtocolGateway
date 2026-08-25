@@ -68,15 +68,20 @@ Holding register cache
 ----------------------
 Protection thresholds (balance_volt, balance_volt_diff, cell_ov_release)
 are read once after each successful connection via the on_first_connect_read()
-hook and cached.  The cache uses the same mask/screen filter applied to the
-main scrape (because read_registry() calls get_registry_map(), which already
-reflects the filtered map), so variables excluded from the mask will not be
-present in the cache and the built-in defaults will be used instead.
+hook (deferred to the first successful scrape cycle — see that hook's
+docstring) and cached.  Read directly at their fixed holding addresses
+(56-57, 69) via self.read_registers(), bypassing mask/screen entirely —
+same convention eg4_metadata.py already uses for serial-number/device-type
+reads — since these 3 values aren't exposed as their own scraped metrics,
+only consumed internally for balancing_state inference.  A device's
+mask/screen configuration has no effect on whether this cache loads.
 
-If the holding register read fails on startup, safe built-in defaults are
-used throughout the connection lifetime.  The cache is cleared and refreshed
-on every reconnect so stale threshold values from a previous session never
-persist.
+If the holding register read fails, safe built-in defaults are used until
+it succeeds — see _load_holding_cache()'s docstring for why this is
+tracked entirely independently of the main scrape's per-cycle completeness
+state, so a failure here can never suppress data the main scrape already
+collected.  The cache is cleared and re-armed on every reconnect so stale
+threshold values from a previous session never persist.
 
 Variable names used from the holding cache match the variable_name column
 in eg4_ll_s.holding_registry_map.csv exactly:
@@ -124,6 +129,11 @@ Manual verification commands (send to RS485 bus to confirm addressing):
 
 from __future__ import annotations
 
+import logging
+from typing import NoReturn
+
+from pymodbus.pdu import ModbusPDU
+
 from classes.protocol_settings import Registry_Type
 from classes.transports.modbus_rtu import modbus_rtu
 from defs.common import TransportSettings
@@ -160,6 +170,11 @@ class modbus_eg4_ll_s_rtu(modbus_rtu):
         self._holding_cache: dict[str, int | float | str] = {}
         self._cell_stats_inputs_warned: bool = False
         self._holding_cache_loaded: bool = False
+        self._holding_cache_load_failures: int = 0
+        ''' Local, cycle-tracking-independent failure counter for
+        _load_holding_cache() — see that method's docstring. Reset on every
+        (re)connect by on_first_connect_read(), same as the other cache
+        flags. '''
         super().__init__(settings)
 
     # ------------------------------------------------------------------
@@ -206,6 +221,7 @@ class modbus_eg4_ll_s_rtu(modbus_rtu):
         self._holding_cache = {}
         self._cell_stats_inputs_warned = False
         self._holding_cache_loaded = False  # arm the deferred load
+        self._holding_cache_load_failures = 0
 
         # Log which threshold inputs will use defaults until cache loads
         _BALANCING_STATE_INPUTS: dict[str, str] = {
@@ -226,61 +242,127 @@ class modbus_eg4_ll_s_rtu(modbus_rtu):
             ),
         )
 
+    # Fixed holding-register addresses for the 3 threshold values this cache
+    # exists to provide (see class docstring): balance_volt (56) and
+    # balance_volt_diff (57) are contiguous and read together in one call;
+    # cell_ov_release (69) is separate.
+    _BALANCE_VOLT_REGISTER: int = 56
+    _CELL_OV_RELEASE_REGISTER: int = 69
+
+    @staticmethod
+    def _raise_incomplete_threshold_read(low_regs: ModbusPDU | None, ov_release_regs: ModbusPDU | None) -> NoReturn:
+        """Raises for _load_holding_cache() when either threshold register
+        read came back empty. Pulled out into its own function (rather than
+        a bare `raise` inside the try block) per Ruff TRY301/EM102 — keeps
+        the try block itself to statements that can actually fail, and
+        avoids constructing the f-string message directly inside `raise`.
+        """
+        msg: str = (
+            "one or both threshold register reads returned no data "
+            f"(balance_volt/diff={getattr(low_regs, 'registers', None)}, "
+            f"cell_ov_release={getattr(ov_release_regs, 'registers', None)})"
+        )
+        raise IOError(msg)
+
     def _load_holding_cache(self) -> None:
-        """Load the BMS configuration threshold registers into the cache.
+        """Load the 3 BMS configuration threshold registers into the cache.
 
-        Called from post_process_data on the first successful scrape cycle
-        so the load happens within the normal scheduler timeslot rather than
-        blocking the connection phase.
+        Reads ONLY holding registers 56-57 (balance_volt, balance_volt_diff)
+        and 69 (cell_ov_release) — the exact fixed addresses this cache
+        exists for — via self.read_registers(), the same low-level PDU read
+        modbus_rtu uses for the main scrape.
 
-        Uses the same mask/screen filter as the main scrape because
-        read_registry() calls get_registry_map() which already reflects the
-        filtered map.  Threshold variables excluded from the mask will be
-        absent from the cache and built-in defaults will be used instead.
+        Deliberately NOT self.read_registry(HOLDING) / read_modbus_registers():
+        those pull the ENTIRE mask/screen-filtered holding map (136+
+        registers on a typical device) and are wired into the shared
+        per-cycle completeness tracker (_cycle_expect_unit() /
+        cycle_mark_incomplete()) — a single failed range anywhere in that
+        much larger read used to be able to mark the WHOLE cycle incomplete,
+        silently suppressing data the main scrape had already successfully
+        collected moments earlier in that same cycle, over nothing more than
+        a hiccup loading these 3 optional threshold values. self.
+        read_registers() never touches cycle-tracking state at all, so a
+        failure here genuinely cannot affect the main scrape's data. This
+        matters at least as much on RTU as on TCP — likely more, since this
+        transport shares one physical RS485 bus across every battery on it
+        (see class docstring), so a bus collision affecting one register
+        range is not a rare event here.
+
+        Consequence of reading fixed addresses directly: these 3 registers
+        are now read regardless of the device's mask/screen configuration
+        (same convention eg4_metadata.py already uses for serial-number/
+        device-type reads — "fixed address, bypassing mask/screen"). They
+        aren't exposed as their own scraped metrics, only consumed
+        internally for balancing_state inference, so bypassing mask/screen
+        for them is intentional, not an oversight — unlike before, a user
+        excluding balance_volt/etc. from their mask no longer affects
+        whether balancing_state uses live values or the built-in defaults.
+
+        Failures are tracked entirely in the local
+        _holding_cache_load_failures counter — never in cycle-tracking
+        state — and simply retry on the next cycle via
+        _holding_cache_loaded staying False.
         """
         if self.protocolSettings is None:
             return
 
         try:
             self._log.info(
-                "Loading EG4 BMS holding registers for %s (%s)...",
+                "Loading EG4 BMS threshold registers for %s (%s)...",
                 self.transport_name,
                 self.scrape_target,
             )
-            self._holding_cache = self.read_registry(Registry_Type.HOLDING)
-            self._holding_cache_loaded = True
-            self._log.info(
-                "EG4 BMS holding registers loaded for %s: %d values cached.",
-                self.transport_name,
-                len(self._holding_cache),
+
+            low_regs: ModbusPDU | None = self.read_registers(
+                start=self._BALANCE_VOLT_REGISTER, count=2, registry_type=Registry_Type.HOLDING,
+            )
+            ov_release_regs: ModbusPDU | None = self.read_registers(
+                start=self._CELL_OV_RELEASE_REGISTER, count=1, registry_type=Registry_Type.HOLDING,
             )
 
-            # Log any threshold inputs missing from the cache
-            _BALANCING_STATE_INPUTS: dict[str, str] = {
-                "balance_volt":      "minimum cell voltage to enable balancing",
-                "balance_volt_diff": "cell voltage delta threshold to start balancing",
-                "cell_ov_release":   "OV release voltage used for balancing hysteresis",
+            if (
+                low_regs is None or not getattr(low_regs, "registers", None)
+                or len(low_regs.registers) < 2
+                or ov_release_regs is None or not getattr(ov_release_regs, "registers", None)
+            ):
+                self._raise_incomplete_threshold_read(low_regs, ov_release_regs)
+
+            # Raw register values are mV; this map's convention is 0.001V
+            # per LSB (see _BALANCE_VOLT_DEFAULT / _BALANCE_VOLT_DIFF_DEFAULT
+            # / _CELL_OV_RELEASE_DEFAULT above).
+            self._holding_cache = {
+                "balance_volt":      low_regs.registers[0] * 0.001,
+                "balance_volt_diff": low_regs.registers[1] * 0.001,
+                "cell_ov_release":   ov_release_regs.registers[0] * 0.001,
             }
-            missing: list[str] = [k for k in _BALANCING_STATE_INPUTS if k not in self._holding_cache]
-            if missing:
-                self._log.info(
-                    "[%s] To enable accurate 'balancing_state' / 'balancing_state_text' "
-                    "synthetic metrics, add the following register(s) to the variable mask: %s  "
-                    "(%s).  Built-in defaults will be used until then.",
-                    self.transport_name,
-                    ", ".join(missing),
-                    " | ".join(
-                        f"{k}: {_BALANCING_STATE_INPUTS[k]}" for k in missing
-                    ),
-                )
-        except Exception:
-            self._log.exception(
-                "Failed to load holding registers for %s — "
-                "balancing inference will use built-in defaults. "
-                "Will retry on next cycle.",
+            self._holding_cache_loaded = True
+            self._holding_cache_load_failures = 0
+            self._log.info(
+                "EG4 BMS threshold registers loaded for %s: %s",
                 self.transport_name,
+                self._holding_cache,
             )
-            # Leave _holding_cache_loaded = False so we retry next cycle
+
+        except Exception:
+            self._holding_cache_load_failures += 1
+            self._log.warning(
+                "[%s] Failed to load EG4 BMS threshold registers (attempt %d) "
+                "— balancing inference will use built-in defaults "
+                "(balance_volt=%.3f, balance_volt_diff=%.3f, "
+                "cell_ov_release=%.3f) until this succeeds. This does NOT "
+                "affect the main scrape data already collected this cycle "
+                "— only these 3 threshold registers are involved. "
+                "Will retry next cycle.",
+                self.transport_name,
+                self._holding_cache_load_failures,
+                self._BALANCE_VOLT_DEFAULT,
+                self._BALANCE_VOLT_DIFF_DEFAULT,
+                self._CELL_OV_RELEASE_DEFAULT,
+                exc_info=self._log.isEnabledFor(logging.DEBUG),
+            )
+            # Leave _holding_cache_loaded = False so we retry next cycle.
+            # No cycle-tracking state is touched anywhere in this except
+            # block — this failure is fully local to this cache.
 
     # ------------------------------------------------------------------
     # modbus_base / transport_base hook: per-cycle post-processing

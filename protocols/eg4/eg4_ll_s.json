@@ -1,26 +1,168 @@
 {
-  "batch_size":    "40",
+  "batch_size": "40",
   "read_interval": "15",
   "send_holding_register": true,
   "send_input_register": false,
   "send_coil_register": false,
   "send_discrete_register": false,
-
   "status_codes": {
-    "0":   "Inactive/Standby",
-    "1":   "Inactive/Charging",
-    "2":   "Inactive/Discharging",
-    "4":   "Inactive/Protect",
-    "8":   "Inactive/Charging_Lmt",
+    "0": "Inactive/Standby",
+    "1": "Inactive/Charging",
+    "2": "Inactive/Discharging",
+    "4": "Inactive/Protect",
+    "8": "Inactive/Charging_Lmt",
     "128": "Active/Standby",
     "129": "Active/Charging",
     "130": "Active/Discharging",
     "132": "Active/Protect",
     "136": "Active/Charging_Lmt"
   },
-
   "heater_state_codes": {
-    "0":   "Off",
+    "0": "Off",
     "128": "On"
+  },
+  "warning_amb_temp_codes": {
+    "0": "Clear",
+    "1": "Abnormal_Ambient_Temp"
+  },
+  "warning_cell_ov_codes": {
+    "0": "Clear",
+    "1": "Cell_OV"
+  },
+  "warning_cell_uv_codes": {
+    "0": "Clear",
+    "1": "Cell_UV"
+  },
+  "warning_charge_oc_codes": {
+    "0": "Clear",
+    "1": "Charge_OC"
+  },
+  "warning_charge_ot_codes": {
+    "0": "Clear",
+    "1": "Charge_OT"
+  },
+  "warning_charge_ut_codes": {
+    "0": "Clear",
+    "1": "Charge_UT"
+  },
+  "warning_discharge_oc_codes": {
+    "0": "Clear",
+    "1": "Discharge_OC"
+  },
+  "warning_discharge_ot_codes": {
+    "0": "Clear",
+    "1": "Discharge_OT"
+  },
+  "warning_discharge_ut_codes": {
+    "0": "Clear",
+    "1": "Discharge_UT"
+  },
+  "warning_float_stopped_codes": {
+    "0": "Clear",
+    "1": "Float_Stopped"
+  },
+  "warning_inactive_charging_lmt_codes": {
+    "0": "Clear",
+    "1": "Inactive/Charging_Lmt"
+  },
+  "warning_inactive_protect_codes": {
+    "0": "Clear",
+    "1": "Inactive/Protect"
+  },
+  "warning_low_capacity_codes": {
+    "0": "Clear",
+    "1": "Low_Capacity"
+  },
+  "warning_mos_overheat_codes": {
+    "0": "Clear",
+    "1": "MOS_Overheating"
+  },
+  "warning_pack_ov_codes": {
+    "0": "Clear",
+    "1": "Pack_OV"
+  },
+  "warning_pack_uv_codes": {
+    "0": "Clear",
+    "1": "Pack_UV"
+  },
+  "protection_amb_temp_codes": {
+    "0": "Clear",
+    "1": "Abnormal_Ambient_Temp"
+  },
+  "protection_cell_ov_codes": {
+    "0": "Clear",
+    "1": "Cell_OV"
+  },
+  "protection_cell_uv_codes": {
+    "0": "Clear",
+    "1": "Cell_UV"
+  },
+  "protection_charge_oc_codes": {
+    "0": "Clear",
+    "1": "Charge_OC"
+  },
+  "protection_charge_ot_codes": {
+    "0": "Clear",
+    "1": "Charge_OT"
+  },
+  "protection_charge_ut_codes": {
+    "0": "Clear",
+    "1": "Charge_UT"
+  },
+  "protection_discharge_oc_codes": {
+    "0": "Clear",
+    "1": "Discharge_OC"
+  },
+  "protection_discharge_ot_codes": {
+    "0": "Clear",
+    "1": "Discharge_OT"
+  },
+  "protection_discharge_ut_codes": {
+    "0": "Clear",
+    "1": "Discharge_UT"
+  },
+  "protection_float_stopped_codes": {
+    "0": "Clear",
+    "1": "Float_Stopped"
+  },
+  "protection_inactive_charging_lmt_codes": {
+    "0": "Clear",
+    "1": "Inactive/Charging_Lmt"
+  },
+  "protection_inactive_protect_codes": {
+    "0": "Clear",
+    "1": "Inactive/Protect"
+  },
+  "protection_low_capacity_codes": {
+    "0": "Clear",
+    "1": "Low_Capacity"
+  },
+  "protection_mos_overheat_codes": {
+    "0": "Clear",
+    "1": "MOS_Overheating"
+  },
+  "protection_pack_ov_codes": {
+    "0": "Clear",
+    "1": "Pack_OV"
+  },
+  "protection_pack_uv_codes": {
+    "0": "Clear",
+    "1": "Pack_UV"
+  },
+  "error_cell_unbalance_codes": {
+    "0": "Clear",
+    "1": "Cell_Unbalance"
+  },
+  "error_current_flow_error_codes": {
+    "0": "Clear",
+    "1": "Current_Flow_Error"
+  },
+  "error_temperature_error_codes": {
+    "0": "Clear",
+    "1": "Temperature_Error"
+  },
+  "error_voltage_error_codes": {
+    "0": "Clear",
+    "1": "Pack_OV"
   }
 }

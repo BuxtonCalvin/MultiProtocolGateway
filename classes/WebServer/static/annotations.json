@@ -4,15 +4,15 @@
       "id": "dashboard-status",
       "x_percent": 15.080568720379144,
       "y_percent": 15.219514554430095,
-      "label_x_percent": 11.083728278041075,
-      "label_y_percent": 29.29417356069733,
+      "label_x_percent": 9.930990525879693,
+      "label_y_percent": 23.524942608448935,
       "label": "Gateway status cards show staged settings sync state, protocol toggle state, and last scan / commit timestamps.",
       "shape_type": "dot"
     },
     {
       "id": "dashboard-devices",
-      "x_percent": 77.4,
-      "y_percent": 35.5,
+      "x_percent": 75.59884726224786,
+      "y_percent": 35.032224517385266,
       "label_x_percent": 66.7,
       "label_y_percent": 39.2,
       "width_percent": 100,
@@ -23,11 +23,29 @@
     {
       "id": "dashboard-rescan",
       "x_percent": 5.1,
-      "y_percent": 72.7,
-      "label_x_percent": 1.9,
-      "label_y_percent": 78.9,
+      "y_percent": 39.8,
+      "label_x_percent": 1,
+      "label_y_percent": 59.9,
       "label": "Re-scan Configuration reloads config.cfg and protocol files without restarting. Rollback Configuration reverts to the last committed backup.",
       "shape_type": "dot"
+    },
+    {
+      "id": "dashboard-dot-rollback",
+      "x_percent": 4.7,
+      "y_percent": 45.2,
+      "label": "Rollback to your previous config file.",
+      "shape_type": "dot",
+      "label_x_percent": 0.9,
+      "label_y_percent": 75.8
+    },
+    {
+      "id": "dashboard-dot-reload",
+      "x_percent": 5,
+      "y_percent": 49.3,
+      "label": "Reload the MPG app to allow settings to take hold.",
+      "shape_type": "dot",
+      "label_x_percent": 1,
+      "label_y_percent": 85.1
     }
   ],
   "device__scraper_read_generic": [
@@ -112,7 +130,7 @@
       "shape_type": "rect"
     }
   ],
-  "device__bridge_generic": [
+  "device__bridge_timescaledb": [
     {
       "id": "bridge-left-panel",
       "x_percent": 10.9,
@@ -149,7 +167,7 @@
       "fill_color": "rgba(14,165,233,0.18)"
     },
     {
-      "id": "device__bridge_generic-storage",
+      "id": "bridge_storage",
       "x_percent": 74.8,
       "y_percent": 33.3,
       "label": "Describes table storage stats.",
@@ -162,10 +180,10 @@
       "fill_color": "rgba(14,165,233,0.18)"
     },
     {
-      "id": "device__bridge_generic-indexes",
+      "id": "bridge_indexes",
       "x_percent": 36.2,
       "y_percent": 66.4,
-      "label": "Describes the MPG system indexes.",
+      "label": "Describes the MPG TimescaleDB indexes.",
       "shape_type": "rect",
       "label_x_percent": 34.9,
       "label_y_percent": 84.9,
@@ -175,10 +193,10 @@
       "fill_color": "rgba(14,165,233,0.18)"
     },
     {
-      "id": "device__bridge_generic-jobs",
+      "id": "bridge_jobs",
       "x_percent": 75.7,
       "y_percent": 70.5,
-      "label": "Describes the currently running compression jobs.",
+      "label": "Describes the currently running timescale jobs.",
       "shape_type": "rect",
       "label_x_percent": 72.2,
       "label_y_percent": 90.2,
@@ -290,9 +308,9 @@
       "label_y_percent": 53.2
     }
   ],
-  "protocols": [
+  "protocol_edit": [
     {
-      "id": "protocols-left",
+      "id": "protocol_edit-left",
       "x_percent": 12.1,
       "y_percent": 16.9,
       "label_x_percent": 3,
@@ -301,7 +319,7 @@
       "shape_type": "dot"
     },
     {
-      "id": "protocols-table",
+      "id": "protocol_edit-table",
       "x_percent": 61.6,
       "y_percent": 51.3,
       "label_x_percent": 47,
@@ -772,16 +790,168 @@
       "label_y_percent": 12
     }
   ],
+  "device__bridge_influx3db": [
+    {
+      "id": "device__bridge_influx3db-health",
+      "x_percent": 39.8,
+      "y_percent": 24.1,
+      "label": "Influx 3 Bridge stats.",
+      "shape_type": "rect",
+      "label_x_percent": 19.682319500163896,
+      "label_y_percent": 43.99304512847991,
+      "width_percent": 38.87807466841501,
+      "height_percent": 19.1808688317867,
+      "stroke_color": "rgb(14,165,233)",
+      "fill_color": "rgba(14,165,233,0.18)"
+    },
+    {
+      "id": "device__bridge_influx3db-settings",
+      "x_percent": 9.3,
+      "y_percent": 48.4,
+      "label": "Influx 3 settings",
+      "shape_type": "rect",
+      "label_x_percent": 19.592078833715785,
+      "label_y_percent": 54.284356810612906,
+      "width_percent": 17.7,
+      "height_percent": 93.2,
+      "stroke_color": "rgb(255,255,128)",
+      "fill_color": "rgba(255,255,128,0.18)"
+    },
+    {
+      "id": "device__bridge_influx3db-rect-storage",
+      "x_percent": 79.7,
+      "y_percent": 25.8,
+      "label": "Storage statistics.  This may or may not populate based on the version of influx 3 you're running.",
+      "shape_type": "rect",
+      "label_x_percent": 60.2,
+      "label_y_percent": 47.9,
+      "width_percent": 40.5,
+      "height_percent": 22.1,
+      "stroke_color": "rgb(14,165,233)",
+      "fill_color": "rgba(14,165,233,0.18)"
+    }
+  ],
+  "device__bridge_prometheus": [
+    {
+      "id": "device__bridge_prometheus-rect-settings",
+      "x_percent": 9.7,
+      "y_percent": 40.4,
+      "label": "Prometheus bridge settings.",
+      "shape_type": "rect",
+      "label_x_percent": 1.8,
+      "label_y_percent": 57.7,
+      "width_percent": 19.1,
+      "height_percent": 78,
+      "stroke_color": "rgb(255,255,128)",
+      "fill_color": "rgba(255,255,128,0.18)"
+    },
+    {
+      "id": "device__bridge_prometheus-rect-health",
+      "x_percent": 39.1,
+      "y_percent": 27.6,
+      "label": "Prometheus bridge health check.",
+      "shape_type": "rect",
+      "label_x_percent": 21.4,
+      "label_y_percent": 49.5,
+      "width_percent": 39.6,
+      "height_percent": 25.1,
+      "stroke_color": "rgb(14,165,233)",
+      "fill_color": "rgba(14,165,233,0.18)"
+    },
+    {
+      "id": "device__bridge_prometheus-rect-scraper",
+      "x_percent": 79.2,
+      "y_percent": 26.1,
+      "label": "Prometheus scraper health.",
+      "shape_type": "rect",
+      "label_x_percent": 60.7,
+      "label_y_percent": 50.2,
+      "width_percent": 39.9,
+      "height_percent": 24,
+      "stroke_color": "rgb(14,165,233)",
+      "fill_color": "rgba(14,165,233,0.18)"
+    }
+  ],
+  "device__bridge_influxdb": [
+    {
+      "id": "device__bridge_influxdb-rect-health",
+      "x_percent": 39.4,
+      "y_percent": 24.7,
+      "label": "Influx DB bridge stats",
+      "shape_type": "rect",
+      "label_x_percent": 19.8,
+      "label_y_percent": 37.5,
+      "width_percent": 39.8,
+      "height_percent": 19.3,
+      "stroke_color": "rgb(14,165,233)",
+      "fill_color": "rgba(14,165,233,0.18)"
+    },
+    {
+      "id": "device__bridge_influxdb-rect-1787631464449",
+      "x_percent": 9.5,
+      "y_percent": 45.3,
+      "label": "Influx DB settings",
+      "shape_type": "rect",
+      "label_x_percent": 19.8,
+      "label_y_percent": 63.7,
+      "width_percent": 19.1,
+      "height_percent": 87.8,
+      "stroke_color": "rgb(255,255,128)",
+      "fill_color": "rgba(255,255,128,0.18)"
+    },
+    {
+      "id": "device__bridge_influxdb-rect-1787631579531",
+      "x_percent": 79.2,
+      "y_percent": 33.3,
+      "label": "",
+      "shape_type": "rect",
+      "label_x_percent": 60.2,
+      "label_y_percent": 59.9,
+      "width_percent": 39.3,
+      "height_percent": 36.2,
+      "stroke_color": "rgb(14,165,233)",
+      "fill_color": "rgba(14,165,233,0.18)"
+    }
+  ],
+  "device__bridge_mqtt": [
+    {
+      "id": "device__bridge_mqtt-rect-settings",
+      "x_percent": 9.9,
+      "y_percent": 38.1,
+      "label": "MQTT settings",
+      "shape_type": "rect",
+      "label_x_percent": 20,
+      "label_y_percent": 54.9,
+      "width_percent": 19.1,
+      "height_percent": 76.2,
+      "stroke_color": "rgb(255,255,128)",
+      "fill_color": "rgba(255,255,128,0.18)"
+    },
+    {
+      "id": "device__bridge_mqtt-rect-stats",
+      "x_percent": 39.9,
+      "y_percent": 27.7,
+      "label": "MQTT statistics.",
+      "shape_type": "rect",
+      "label_x_percent": 61.35367997686204,
+      "label_y_percent": 22.437385070186963,
+      "width_percent": 40.4,
+      "height_percent": 27.2,
+      "stroke_color": "rgb(14,165,233)",
+      "fill_color": "rgba(14,165,233,0.18)"
+    }
+  ],
   "_aliases": {
     "device__inverter_read": "device__scraper_read_generic",
     "device__inverter_write": "device__scraper_write_generic",
     "device__eg4_ll_s_1": "device__scraper_read_generic",
     "device__eg4_ll_s_2": "device__scraper_read_generic",
-    "device__mqtt": "device__bridge_generic",
-    "device__timescaledb": "device__bridge_generic",
-    "device__influxdb_out": "device__bridge_generic",
-    "device__json_out": "device__bridge_generic",
-    "protocol-editor__*": "protocols",
+    "device__mqtt": "device__bridge_mqtt",
+    "device__timescaledb": "device__bridge_timescaledb",
+    "device__influxdb_out": "device__bridge_influxdb",
+    "device__influx3db_out": "device__bridge_influx3db",
+    "device__json_out": "device__bridge_json",
+    "protocol-editor__*": "protocol_edit",
     "pages__logging-settings": "logging-settings",
     "pages__messaging-settings": "messages",
     "pages__view-log": "view_log",

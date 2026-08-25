@@ -6,16 +6,49 @@
   "send_input_register": false,
   "send_coil_register": false,
   "send_discrete_register": false,
-
   "settings2_codes": {
-    "b0":  "Settings",
-    "b1":  "record fault code",
-    "b2":  "equalization",
-    "b4":  "equalize impatiently",
-    "b8":  "restart on overload",
+    "b0": "Settings",
+    "b1": "record fault code",
+    "b2": "equalization",
+    "b3": "unknown3",
+    "b4": "equalize impatiently",
+    "b5": "unknown5",
+    "b6": "unknown6",
+    "b7": "unknown7",
+    "b8": "restart on overload",
     "b10": "restart on overheat",
     "b11": "beep on primary power fail",
     "b12": "return to default screen",
-    "b13": "overload bypass"
+    "b13": "overload bypass"},
+  "settings1_codes": {
+    "b0": "Reserve",
+    "b1": "unknown",
+    "b2": "overload?",
+    "b3": "Reserve"
+  },
+  "output_mode_codes": {
+    "0": "Single",
+    "1": "Parallel",
+    "2": "3 Phase-P1",
+    "3": "3 Phase-P2",
+    "4": "3 Phase-P3",
+    "5": "Split Phase-P1",
+    "6": "Split Phase-P2"
+  },
+  "output_priority_codes": {
+    "0": "Utility-PV-Battery",
+    "1": "PV-Utility-Battery",
+    "2": "PV-Battery-Utility"
+  },
+  "input_voltage_range_codes": {
+    "0": "Wide range",
+    "1": "Narrow range"
+  },
+  "operation_mode_codes": {
+    "1": "On Battery",
+    "2": "AC Active",
+    "10": "Inverter off",
+    "20": "AC Active",
+    "40": "Load enabled"
   }
 }

@@ -33,12 +33,12 @@ AppState         — single-row global flags (dirty, orphan counts, last commit)
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Tuple
 
 from sqlalchemy import (
     Boolean,
     DateTime,
     Integer,
+    MetaData,
     String,
     Text,
     UniqueConstraint,
@@ -52,8 +52,17 @@ from sqlalchemy.orm import (
     object_session,
 )
 
+# Define explicit naming tokens to enforce consistent SQLite alter rules
+naming_convention: dict[str, str] = {
+    "ix": "ix_%(column_0_label)s",
+    "uq": "uq_%(table_name)s_%(column_0_name)s",
+    "ck": "ck_%(table_name)s_%(constraint_name)s",
+    "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+    "pk": "pk_%(table_name)s"
+}
 
 class Base(DeclarativeBase):
+    metadata = MetaData(naming_convention=naming_convention)
     pass
 
 
@@ -73,7 +82,7 @@ class Setting(Base):
     transport_type— "scraper" | "bridge" | "general" | "logging"
     """
     __tablename__: str = "settings"
-    __table_args__: Tuple[Any, ...] = (
+    __table_args__: tuple[UniqueConstraint, ...] = (
         UniqueConstraint("section", "key", name="uq_settings_section_key"),
     )
 
@@ -128,7 +137,7 @@ class ProtocolRegister(Base):
     not here — two devices sharing this protocol can make different choices.
     """
     __tablename__: str = "protocol_registers"
-    __table_args__: Tuple[Any, ...] = (
+    __table_args__: tuple[UniqueConstraint, ...] = (
         UniqueConstraint(
             "protocol_name", "registry_type", "register_address",
             name="uq_register_protocol_type_addr"
@@ -141,7 +150,7 @@ class ProtocolRegister(Base):
     protocol_group: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     protocol_name: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
     registry_type: Mapped[str] = mapped_column(String(16), nullable=False)
-    # "input" | "holding" | "coil" | "discrete" | "json"
+    # "input" | "holding" | "coil" | "discrete" | "custom_bus" | "json"
 
     # Register fields (sourced from CSV)
     register_address: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -164,6 +173,44 @@ class ProtocolRegister(Base):
     # whenever a metadata field above is edited in the protocol editor —
     # triggers a CSV rewrite for this protocol on the next commit.
     is_dirty: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # True for rows materialized on-demand for a synthetic metric (see
+    # services.protocol_service.build_synthetic_rows) or a JSON
+    # code-description "<name>_desc" metric (see build_json_desc_rows) the
+    # first time a device selects it — NOT sourced from a protocol CSV row,
+    # despite living in this table. config_writer._write_protocol_csvs
+    # MUST exclude any row with either flag set when regenerating a
+    # protocol's CSV file on commit, or these get written back as fake
+    # register rows that don't correspond to real hardware registers and
+    # will re-parse incorrectly (a literal "<name>_desc" CSV row would
+    # collide with the one _add_code_description_entries generates fresh
+    # from its source row at every load). register_address for these rows
+    # is never a real CSV address — see _virtual_register_address().
+    is_synthetic: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_json_desc: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Staged for deletion by the protocol editor's DELETE checkbox column.
+    # Deliberately not folded into is_dirty (used for in-place field edits
+    # that get *rewritten* into the CSV) — a deletion isn't a value to
+    # write back, it's the absence of the row, and needs its own explicit
+    # commit step: _write_protocol_csvs excludes pending_delete rows from
+    # the regenerated CSV, and config_writer._delete_pending_protocol_registers
+    # (run earlier in commit_all, before the CSV write) actually removes
+    # the row — and any DeviceProtocolSelection rows across every device
+    # that reference it, since that table has no FK/cascade of its own,
+    # only a loose (protocol_name, registry_type, register_address) match
+    # (see DeviceProtocolSelection) — from the DB.
+    pending_delete: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Only meaningful when is_json_desc is True — the variable_name of the
+    # real CSV register this "<name>_desc" entry decodes (registry_map_entry
+    # .description_source in the live transport, see build_json_desc_rows).
+    # Lets the mask/screen auto-link cascade (see protocol_service
+    # .toggle_register_field / materialize_and_toggle_virtual_metric) find
+    # the paired code row from the desc side without needing the live
+    # transport — the reverse direction (code -> desc) still needs it,
+    # since a not-yet-materialized desc has no DB row to search for by
+    # source_variable_name; that direction is resolved at the API layer
+    # (routers.protocols), which has transport access, via build_json_desc_rows.
+    source_variable_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
@@ -188,7 +235,7 @@ class DeviceProtocolSelection(Base):
     """
 
     __tablename__: str = "device_protocol_selections"
-    __table_args__: Tuple[Any, ...] = (
+    __table_args__: tuple[UniqueConstraint, ...] = (
         UniqueConstraint(
             "device_name", "protocol_name", "registry_type", "register_address",
             name="uq_device_protocol_selection"
@@ -267,6 +314,57 @@ class ConfigBackup(Base):
 
 
 # ---------------------------------------------------------------------------
+# OrphanedFilterName
+# ---------------------------------------------------------------------------
+
+class OrphanedFilterName(Base):
+    """
+    One row per mask/screen filter-file line that matches no known register
+    for its device's current protocol, as of the last scan.
+
+    Why this exists: variable_mask_<device>.txt / variable_screen_<device>.txt
+    are plain text files a user (or an "Analyze"-driven export) can write
+    register names into. If a name in one of those files stops matching any
+    register — most commonly because the protocol's CSV was updated and the
+    register was renamed or removed — that line becomes permanently inert.
+    For screen (denylist) files specifically this is worse than inert: if
+    NONE of a registry type's registers appear in the screen file, the whole
+    type is treated as fully screened and excluded from scraping entirely
+    (see protocol_settings.py's load__registry) — a single stale line can
+    silently zero out all data for a device with no error anywhere. This
+    table makes that condition visible in the web UI instead of only in
+    logs.
+
+    Purely derived, not user-edited: every scan replaces a device's rows
+    wholesale (delete-then-insert), same pattern the scanner already uses
+    for ProtocolRegister. There's no is_dirty/value_staged here because
+    there's nothing to stage — a name simply does or doesn't currently
+    resolve.
+    """
+    __tablename__: str = "orphaned_filter_names"
+    __table_args__: tuple[UniqueConstraint, ...] = (
+        UniqueConstraint(
+            "device_name", "file_type", "name",
+            name="uq_orphaned_filter_device_type_name",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    device_name: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    file_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    # "mask" | "screen"
+    filename: Mapped[str] = mapped_column(String(256), nullable=False)
+    name: Mapped[str] = mapped_column(String(256), nullable=False)
+
+    detected_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+
+    def __repr__(self) -> str:
+        return f"<OrphanedFilterName [{self.device_name}] {self.file_type}:{self.name}>"
+
+
+# ---------------------------------------------------------------------------
 # AppState
 # ---------------------------------------------------------------------------
 
@@ -286,10 +384,18 @@ class AppState(Base):
     has_dirty_settings: Mapped[bool] = mapped_column(Boolean, default=False)
     has_dirty_protocols: Mapped[bool] = mapped_column(Boolean, default=False)
     has_orphans: Mapped[bool] = mapped_column(Boolean, default=False)
+    has_orphaned_filters: Mapped[bool] = mapped_column(Boolean, default=False)
+    # True when any mask/screen filter-file line matches no current
+    # register — see OrphanedFilterName. Deliberately separate from
+    # has_orphans: a Setting orphan is a stale config.cfg key (safe to
+    # ignore indefinitely), an orphaned filter name can be silently
+    # suppressing live data (see OrphanedFilterName docstring) — these
+    # need different urgency in the UI, so they shouldn't share one flag.
 
     dirty_settings_count: Mapped[int] = mapped_column(Integer, default=0)
     dirty_protocols_count: Mapped[int] = mapped_column(Integer, default=0)
     orphan_count: Mapped[int] = mapped_column(Integer, default=0)
+    orphaned_filter_count: Mapped[int] = mapped_column(Integer, default=0)
 
     scanner_status: Mapped[str] = mapped_column(String(32), default="idle")
     # "idle" | "running" | "error"

@@ -30,12 +30,12 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, List
+from typing import List
 
 from sqlalchemy.orm import Session
 
 from ..models import SettingDescription
-from ..scanner import scan_transport_library
+from ..scanner import TransportLibraryEntry, scan_transport_library
 from ..transport_registry import (
     get_setting_descriptions,
     sync_from_library,
@@ -60,7 +60,7 @@ def seed_setting_descriptions(db: Session, transports_dir: Path, purge_removed: 
 
     Returns (count of rows inserted/updated, list of purged keys).
     """
-    library: dict[str, dict[str, Any]] = scan_transport_library(transports_dir)
+    library: dict[str, TransportLibraryEntry]  = scan_transport_library(transports_dir)
 
     # Keep transport_defaults.json and setting_descriptions.json current.
     # New keys get an empty description stub; existing entries are untouched.

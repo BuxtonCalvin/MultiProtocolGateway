@@ -30,7 +30,7 @@ from enum import Enum
 
 from classes.WebServer.config_writer import create_backup
 from classes.WebServer.database import session_scope
-from classes.WebServer.main import start_webserver
+from classes.WebServer.main import NoSignalServer, start_webserver
 from classes.WebServer.models import ConfigBackup
 
 # Check if Python version is greater than 3.10
@@ -51,7 +51,7 @@ from configparser import ConfigParser, NoOptionError, NoSectionError
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, TextIO, cast
+from typing import Callable, ParamSpec, TextIO, TypeVar, cast
 
 from classes.messaging.message_handler import MessageHandler
 from classes.protocol_settings import (
@@ -60,6 +60,9 @@ from classes.protocol_settings import (
 )
 from classes.transports.transport_base import transport_base
 from defs.common import TransportSettings
+
+P = ParamSpec("P")
+T = TypeVar("T")
 
 __logo = """
 
@@ -90,7 +93,14 @@ class CustomConfigParser(ConfigParser):
     - Strips whitespace and comments from values
 
     """
-    def get(self, section: str, option: str | list[str], *args: ..., **kwargs: ...) -> str:
+    # NOTE ON `section: str`: Python 3.13 widened ConfigParser.get/getint/
+    # getfloat/getboolean's `section` parameter to `str | UNNAMED_SECTION` to
+    # support the opt-in unnamed-section feature (ConfigParser(..., allow_unnamed_section=True)).
+    # CustomConfigParser is always constructed as plain ConfigParser() in this
+    # codebase, so it can never actually receive that sentinel — narrowing
+    # back to `str` below is intentional and the pyright override-compatibility
+    # warning is a false positive for how this class is actually used here.
+    def get(self, section: str, option: str | list[str], *args: object, **kwargs: object) -> str:  # pyright: ignore[reportIncompatibleMethodOverride]
         """Scheduling path: N/A — config parsing, used during setup regardless of read_mode.
 
         Read a string value from the config, with alias support and comment stripping.
@@ -102,8 +112,16 @@ class CustomConfigParser(ConfigParser):
         rather than silently returning ``None``.  Inline ``#`` comments are
         stripped from the returned value before it is returned.
         """
-        fallback = None
-        value = None
+        fallback: object | None = None
+        # config_value stays str | None throughout — it only ever comes from
+        # safe_get(), which reads real config text. It's kept separate from
+        # `fallback` (object | None) below, since fallback can be any type:
+        # getint()/getfloat()/getboolean() all forward their own fallback
+        # (int/float/bool) into this method via **kwargs, so this get() call
+        # doesn't always see a str. The two converge only at the final
+        # str(...) coercion, which is what actually guarantees this method's
+        # `-> str` return type.
+        config_value: str | None = None
 
         # Extract fallback to handle it manually at the end
         if "fallback" in kwargs:
@@ -124,13 +142,14 @@ class CustomConfigParser(ConfigParser):
         # Logic for handling list of options or a single string
         if isinstance(option, list):
             for name in option:
-                value = safe_get(section, name)
-                if value is not None:
+                config_value = safe_get(section, name)
+                if config_value is not None:
                     break
         else:
-            value: str | None = safe_get(section, option)
+            config_value = safe_get(section, option)
 
         # Apply fallback if no value was found in the config
+        value: object | None = config_value
         if value is None:
             value = fallback
 
@@ -140,7 +159,7 @@ class CustomConfigParser(ConfigParser):
             if not self.has_section(section):
                 raise NoSectionError(section)
 
-            error_opt = option[0] if isinstance(option, list) else option
+            error_opt: str = option[0] if isinstance(option, list) else option
             raise NoOptionError(error_opt, section)
 
         # Cleanup and type conversion
@@ -151,19 +170,19 @@ class CustomConfigParser(ConfigParser):
         return value
 
     # because using get, None is not reachable, so removed and type checker is happy.
-    def getint(self, section: str, option: str | list[str], *args: Any, **kwargs: Any) -> int:
+    def getint(self, section: str, option: str | list[str], *args: object, **kwargs: object) -> int:  # pyright: ignore[reportIncompatibleMethodOverride]
         """Scheduling path: N/A — config parsing, used during setup regardless of read_mode.
 
         Read a config value and return it as an int. Delegates to get,
         inheriting alias-list and fallback support. Falls back or raises
         ValueError if the resolved string is empty or cannot be converted.
         """
-        fallback: int |None = kwargs.get("fallback", None)
+        fallback: object | None = kwargs.get("fallback", None)
 
         def handle_error(error_msg: str) -> int:
             """Process fallback if available; otherwise raise ValueError."""
             if fallback is not None:
-                return int(fallback)
+                return int(cast(str | int | float, fallback))
             raise ValueError(error_msg)
 
         try:
@@ -177,19 +196,19 @@ class CustomConfigParser(ConfigParser):
         except ValueError:
             return handle_error(f"Config option '{option}' in section '{section}' is not a valid integer.")
 
-    def getfloat(self, section: str, option: str | list[str], *args: Any, **kwargs: Any ) -> float:
+    def getfloat(self, section: str, option: str | list[str], *args: object, **kwargs: object ) -> float:  # pyright: ignore[reportIncompatibleMethodOverride]
         """Scheduling path: N/A — config parsing, used during setup regardless of read_mode.
 
         Read a config value and return it as an float. Delegates to get,
         inheriting alias-list and fallback support. Falls back or raises
         ValueError if the resolved string is empty or cannot be converted.
         """
-        fallback: float |None = kwargs.get("fallback", None)
+        fallback: object | None = kwargs.get("fallback", None)
 
         def handle_error(error_msg: str) -> float:
             """Process fallback if available; otherwise raise ValueError."""
             if fallback is not None:
-                return float(fallback)
+                return float(cast(str | int | float, fallback))
             raise ValueError(error_msg)
 
         try:
@@ -203,7 +222,7 @@ class CustomConfigParser(ConfigParser):
         except ValueError:
             return handle_error(f"Config option '{option}' in section '{section}' is not a valid float.")
 
-    def getboolean(self, section: str, option: str | list[str], *args: Any, **kwargs: Any) -> bool:
+    def getboolean(self, section: str, option: str | list[str], *args: object, **kwargs: object) -> bool:  # pyright: ignore[reportIncompatibleMethodOverride]
         """Scheduling path: N/A — config parsing, used during setup regardless of read_mode.
 
         Read a config value and return it as a ``bool``.
@@ -213,7 +232,7 @@ class CustomConfigParser(ConfigParser):
         ``false/no/off/0/disable/disabled`` as ``False`` (case-insensitive).
         Raises ``ValueError`` for any other string or empty value without a fallback.
         """
-        fallback: bool | str | None  = kwargs.get("fallback", None)
+        fallback: object | None  = kwargs.get("fallback", None)
 
         def handle_error(error_msg: str) -> bool:
             """Process fallback if available; otherwise raise ValueError."""
@@ -421,6 +440,14 @@ class Protocol_Gateway:
         log_path: Path = log_dir / log_file
 
         # ---- Choose handler ----
+        # Declared once as the common base class: the branches below assign
+        # sibling subclasses of logging.Handler (StreamHandler,
+        # RotatingFileHandler, TimedRotatingFileHandler), not subclasses of
+        # each other, so `handler` can't be pinned to any single one of them.
+        # Handler is all this variable actually needs — only
+        # .setFormatter() (below) and root.addHandler() (further down) are
+        # called on it, and both are declared on Handler itself.
+        handler: logging.Handler
         if rotation == "weekly":
             handler = logging.handlers.TimedRotatingFileHandler(
                 filename=log_path,
@@ -543,7 +570,13 @@ class Protocol_Gateway:
         ) if transport_names else "idle"
         return self._compact_thread_label(joined_names)
 
-    def _run_with_thread_task_name(self, task_label: str, fn: Any, *args: Any, **kwargs: Any) -> Any:
+    def _run_with_thread_task_name(
+        self,
+        task_label: str,
+        fn: Callable[P, T],
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> T:
         """Scheduling path: Concurrent, Interleaved (the two modes that use thread pools).
 
         Execute ``fn(*args, **kwargs)`` on the current thread with a temporary task-specific name.
@@ -597,6 +630,11 @@ class Protocol_Gateway:
         copy of this logic.
         """
         self.__log: logging.Logger = logging.getLogger(__name__)
+
+        # Set by start_webserver() once the FastAPI/uvicorn server is up, so
+        # the gateway (and GatewayManager.reload()) can reach it back — e.g.
+        # to hand it off across a reload. None until the web server starts.
+        self.web_server: NoSignalServer | None = None
 
         # Establish the parent root folder where the gateway script is located.
         base_dir: Path = Path(__file__).resolve().parent
@@ -813,7 +851,7 @@ class Protocol_Gateway:
             full_data: dict[str, int | float | str] = primary.read_group_data(group.members)
             cycle_complete: bool = primary.cycle_is_complete_for_bridge()
 
-            self._log_group_read_diagnostics(group, full_data)
+            # self._log_group_read_diagnostics(group, full_data)
 
             if not full_data:
                 self.__log.warning(f"No data from [{primary.scrape_target}] - device may be unresponsive.")
@@ -833,7 +871,7 @@ class Protocol_Gateway:
             for member in due_members:
                 member_data: dict[str, int | float | str] = self._filter_for_member(full_data, member)
 
-                self._log_mask_diagnostics(member, full_data, member_data)
+                # self._log_mask_diagnostics(member, full_data, member_data)
 
                 if not member_data:
                     continue
@@ -1000,7 +1038,7 @@ class Protocol_Gateway:
 
         Log mask-vs-data diagnostics for one member after filtering.
 
-        Under the new paradigm both the variable mask and ``full_data`` use
+        both the variable mask and ``full_data`` use
         logical stem names (``_l``/``_h`` pairs have been merged upstream), so
         the diagnostic simply compares the mask set against the lowercased keys
         of ``full_data`` with no special suffix handling needed.
@@ -1410,7 +1448,8 @@ class Protocol_Gateway:
                 self.__log.warning(
                     f"Interleaved cycle still running for [{', '.join(overlapping_names)}] - "
                     f"skipping this tick to avoid overlapping reads and thread accumulation. "
-                    f"Consider increasing read_interval if this recurs."
+                    f"Consider increasing read_interval, or if using TimescaleDB, turn off "
+                    f"write_requires_complete_cycle if this recurs."
                 )
                 return
 
@@ -1633,7 +1672,7 @@ class Protocol_Gateway:
                     self.__log.warning(f"'{member.transport_name}' produced no data this cycle.")
                     continue
                 member_data: dict[str, int | float | str] = self._filter_for_member(member_own_data, member)
-                self._log_mask_diagnostics(member, member_own_data, member_data)
+                # self._log_mask_diagnostics(member, member_own_data, member_data)
                 if not member_data:
                     continue
                 self._forward_to_bridges(member, member_data, cycle_complete)
@@ -1651,7 +1690,7 @@ class Protocol_Gateway:
             )
 
             member_data = self._filter_for_member(data, transport)
-            self._log_mask_diagnostics(transport, data, member_data)
+            # self._log_mask_diagnostics(transport, data, member_data)
 
             if not member_data:
                 return
@@ -2056,7 +2095,7 @@ class GatewayManager:
         # so "backups/<name>.cfg" resolves to exactly that path.
         backup_config_file: str = f"backups/{Path(backup_filepath).name}"
 
-        # Protocol_Gateway.__init__ does NOT raise when the requested file is
+        # Protocol_Gateway.__init__ does not raise when the requested file is
         # missing — it silently falls back to config/config.cfg (the exact
         # file that just failed to load). Check existence ourselves first, or
         # a missing/moved backup file would look like a successful fallback
@@ -2159,7 +2198,7 @@ def main(args: list[str] | None = None) -> None:
 
     start_webserver(config_path, log_file, log_dir, gateway_instance=mpg, gateway_manager=manager)
 
-    # run() now executes on its own thread (started inside manager.start()),
+    # run() executes on its own thread (started inside manager.start()),
     # not this one — that's what lets a reload triggered from the webUI
     # thread (a commit, or FileWatcher noticing a hand-edited config.cfg)
     # call manager.reload() and swap in a new gateway without contending

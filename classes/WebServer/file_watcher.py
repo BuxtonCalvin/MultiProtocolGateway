@@ -28,13 +28,38 @@ from __future__ import annotations
 import logging
 import os
 import threading
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Callable, Protocol, cast
 
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
 _log: logging.Logger = logging.getLogger(__name__)
+
+
+class ScannerLike(Protocol):
+    def run(self) -> dict[str, int]: ...
+
+
+class ObserverLike(Protocol):
+    name: str
+    daemon: bool
+    emitters: Iterable["EmitterLike"]
+
+    def schedule(self, event_handler: FileSystemEventHandler, path: str, recursive: bool = False) -> object: ...
+
+    def start(self) -> None: ...
+
+    def is_alive(self) -> bool: ...
+
+    def stop(self) -> None: ...
+
+    def join(self, timeout: float | None = None) -> None: ...
+
+
+class EmitterLike(Protocol):
+    name: str
 
 # Mute the watchdog buffer and observer debug logs
 logging.getLogger("watchdog.observers.inotify_buffer").setLevel(logging.WARNING)
@@ -56,13 +81,13 @@ class _MPGEventHandler:
 
     def __init__(
         self,
-        scanner: Any,
+        scanner: ScannerLike,
         config_path: Path,
         on_config_changed: Callable[[], None] | None = None,
         debounce_seconds: float = 2.0,
         config_debounce_seconds: float = 1.0,
     ) -> None:
-        self._scanner: Any = scanner
+        self._scanner: ScannerLike = scanner
         self._config_path: Path = config_path
         self._on_config_changed: Callable[[], None] | None = on_config_changed
         self._debounce: float = debounce_seconds
@@ -144,16 +169,16 @@ class FileWatcher:
 
     def __init__(
         self,
-        scanner: Any,
+        scanner: ScannerLike,
         config_path: Path,
         protocols_dir: Path,
         on_config_changed: Callable[[], None] | None = None,
     ) -> None:
-        self._scanner: Any = scanner
+        self._scanner: ScannerLike = scanner
         self._config_path: Path = config_path
         self._protocols_dir: Path = protocols_dir
         self._on_config_changed: Callable[[], None] | None = on_config_changed
-        self._observer: Any | None = None
+        self._observer: ObserverLike | None = None
         self._available = False
 
         try:
@@ -177,27 +202,28 @@ class FileWatcher:
                 self._inner.on_any_event(event)
 
         shim = _WatchdogShim(handler_obj)
-        self._observer = Observer()
+        observer: ObserverLike = cast(ObserverLike, Observer())
+        self._observer = observer
         try:
-            self._observer.name = "MPGFileWatcher"
+            observer.name = "MPGFileWatcher"
         except Exception as exc:
             msg: str = f"Failed to set observer name: {exc}"
             _log.warning(msg)
 
         # Watch config file's parent directory, filter in handler
-        self._observer.schedule(shim, str(self._config_path.parent), recursive=False)
+        observer.schedule(shim, str(self._config_path.parent), recursive=False)
 
         if self._protocols_dir.exists():
-            self._observer.schedule(shim, str(self._protocols_dir), recursive=True)
+            observer.schedule(shim, str(self._protocols_dir), recursive=True)
 
-        self._observer.daemon = True
-        self._observer.start()
+        observer.daemon = True
+        observer.start()
         try:
-            for idx, emitter in enumerate(getattr(self._observer, "emitters", [])):
+            for idx, emitter in enumerate(observer.emitters):
                 emitter.name = f"MPGFileEmitter_{idx}"
         except Exception as exc:
-            msg: str = f"Failed to set emitter names: {exc}"
-            _log.warning(msg)
+            emitter_msg: str = f"Failed to set emitter names: {exc}"
+            _log.warning(emitter_msg)
         _log.info(f"File watcher started: watching {self._config_path.parent} and {self._protocols_dir}")
 
     def stop(self) -> None:

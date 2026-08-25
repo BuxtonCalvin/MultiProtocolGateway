@@ -378,13 +378,26 @@ def test_register_failure_tracker_disables_then_resets() -> None:
 
 
 def test_modbus_helpers_interpret_exceptions_and_validate_client_presence(dummy_settings) -> None:
-    """Error handling: Modbus helpers describe exception codes and require an initialized client."""
+    """Error handling: Modbus helpers describe exception codes, and read/write
+    methods log and return a sentinel (None/False) — rather than raising —
+    when called before the client is initialized."""
     assert "Modbus Exception" in interpret_modbus_exception_code(0x83)
     base = modbus_base_module.modbus_base.__new__(modbus_base_module.modbus_base)
     base.client = None
     base.transport_name = "transport.modbus"
-    with pytest.raises(RuntimeError, match="client is not initialized"):
-        base._get_correct_device_arg({"unit": 1})
+    base.write_enabled = True
+    base._log = MagicMock()
+
+    assert base.read_registers(0, 1) is None
+    base._log.error.assert_called_once()
+
+    base._log.reset_mock()
+    assert base.write_registers(0, [1]) is False
+    base._log.error.assert_called_once()
+
+    base._log.reset_mock()
+    assert base.write_coil(0, True) is False  # noqa: FBT003
+    base._log.error.assert_called_once()
 
 
 def test_modbus_base_register_word_helpers_all_four_encodings() -> None:

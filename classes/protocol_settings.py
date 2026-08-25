@@ -30,7 +30,7 @@ from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Literal, Optional, cast
+from typing import Callable, Literal, Optional, cast
 
 from defs.common import TransportSettings, strtoint_safe
 
@@ -266,7 +266,7 @@ class WriteMode(Enum):
 
 class Registry_Type(Enum):
     # for protocols that don't have a command / registry type
-    ZERO = 0x00
+    CUSTOM_BUS = 0x00
 
     COIL = 0x01
     DISCRETE = 0x02
@@ -288,7 +288,7 @@ class registry_map_entry:
     note: str
     unit: str
     unit_mod: float
-    adjustments: dict[str, Any]
+    adjustments: dict[str, object]
     concatenate: bool
     concatenate_registers: list[int]
     values: list[int | str] = field(default_factory=lambda: [])
@@ -498,7 +498,7 @@ class DataAdjustments:
     # Parsing
     # ------------------------------------------------------------------
 
-    def parse_adjustments(self, raw_adjustments: str | None) -> dict[str, Any]:
+    def parse_adjustments(self, raw_adjustments: str | None) -> dict[str, object]:
         """Parse the CSV adjustments field into a plain dict.
 
         Canonical form is a JSON object.  Simple shorthand such as
@@ -512,7 +512,7 @@ class DataAdjustments:
             try:
                 parsed = json.loads(text)
                 if isinstance(parsed, dict):
-                    return cast(dict[str, Any], parsed)
+                    return cast(dict[str, object], parsed)
                 else:
                     self._log.warning(f"Ignoring non-object adjustments JSON: {text}")
                     return {}
@@ -536,7 +536,7 @@ class DataAdjustments:
     # Lookup helpers
     # ------------------------------------------------------------------
 
-    def get_adjustment(self, entry: "registry_map_entry", name: str) -> Any | None:
+    def get_adjustment(self, entry: "registry_map_entry", name: str) -> object | None:
         """Return the value for *name* from ``entry.adjustments`` (case-insensitive)."""
         target: str = name.lower()
         for key, value in entry.adjustments.items():
@@ -562,7 +562,7 @@ class DataAdjustments:
           ``abcd``, ``badc``, ``cdab``, ``dcba``
         """
         if entry.adjustments:
-            endian: Any | None = self.get_adjustment(entry, "Register_Endian")
+            endian: object | None = self.get_adjustment(entry, "Register_Endian")
             if endian is not None:
                 endian_str: str = str(endian).strip().lower()
                 word_order: WordOrder | None = _WORD_ORDER_ALIASES.get(endian_str)
@@ -631,7 +631,7 @@ class DataAdjustments:
             # High_Low encodes the complete scaling formula (e.g. x/1000),
             # so unit_mod must NOT also be applied — the formula is the
             # complete transform.
-            high_low: Any | None = self.get_adjustment(entry, "High_Low") if entry.adjustments else None
+            high_low: object | None = self.get_adjustment(entry, "High_Low") if entry.adjustments else None
             if high_low is not None:
                 adjusted = self.apply_range_formula(float(adjusted), str(high_low))
             else:
@@ -639,10 +639,10 @@ class DataAdjustments:
                     adjusted = adjusted * entry.unit_mod
 
                 if entry.adjustments:
-                    offset: Any | None = self.get_adjustment(entry, "Offset")
+                    offset: object | None = self.get_adjustment(entry, "Offset")
                     if offset is not None:
                         try:
-                            adjusted = adjusted + float(offset)
+                            adjusted = adjusted + float(cast(str | int | float, offset))
                         except (TypeError, ValueError):
                             self._log.warning(f"Unsupported Offset adjustment '{offset}' for {entry.variable_name}")
 
@@ -661,10 +661,10 @@ class DataAdjustments:
             if context is None or not isinstance(value, (int, float)):
                 return value
 
-            context_adjustment: Any | None = self.get_adjustment(entry, "Context")
+            context_adjustment: object | None = self.get_adjustment(entry, "Context")
             if not isinstance(context_adjustment, dict):
                 return value
-            context_adjustment = cast(dict[str, Any], context_adjustment)
+            context_adjustment = cast(dict[str, object], context_adjustment)
 
             key: str = str(context_adjustment.get("key", "")).strip()
             if not key or key not in context:
@@ -673,11 +673,11 @@ class DataAdjustments:
                 )
                 return value
 
-            cases: Any = context_adjustment.get("cases", {})
+            cases: object = context_adjustment.get("cases", {})
             formula = ""
             context_value: int | float | str = context[key]
             if isinstance(cases, dict):
-                cases = cast(dict[Any, Any], cases)
+                cases = cast(dict[object, object], cases)
                 formula = str(cases.get(str(context_value), cases.get(context_value, "")))
             if not formula:
                 formula = str(context_adjustment.get("default", ""))
@@ -752,7 +752,7 @@ class DataAdjustments:
                 right: int | float = _safe_eval(node.right)
 
                 # Type the dictionary explicitly with Callable
-                ops: dict[type[ast.operator], Callable[[Any, Any], int | float]] = {
+                ops: dict[type[ast.operator], Callable[[int | float, int | float], int | float]] = {
                     ast.Add:      lambda a, b: a + b,
                     ast.Sub:      lambda a, b: a - b,
                     ast.Mult:     lambda a, b: a * b,
@@ -846,9 +846,9 @@ class protocol_settings:
         self.registry_map: dict[Registry_Type, list[registry_map_entry]] = {}
         self.registry_map_size: dict[Registry_Type, int] = {}
         self.registry_map_ranges: dict[Registry_Type, list[tuple[int, int]]] = {}
-        self.dynamic_registry_rows: list[dict[str, str]] = []
+        self.dynamic_registry_rows: list[dict[str, object]] = []
         self.dynamic_registry_resolved = False
-        self.codes: dict[str, str | bool | int | float | dict[str, str]] = {}
+        self.codes: dict[str, object] = {}
         self.settings: dict[str, str] = {}
         self.variable_mask: list[str] = []
         self.mask_file_name: str = ""
@@ -944,7 +944,7 @@ class protocol_settings:
         self._log.debug(f"Loaded {len(entries)} entries from filter file '{filename}'")
         return entries
 
-    def get_registry_map(self, registry_type: Registry_Type = Registry_Type.ZERO) -> list[registry_map_entry]:
+    def get_registry_map(self, registry_type: Registry_Type = Registry_Type.CUSTOM_BUS) -> list[registry_map_entry]:
         """Return the loaded registry map for ``registry_type``, or an empty list if not yet loaded."""
         return self.registry_map.get(registry_type, [])
 
@@ -999,9 +999,9 @@ class protocol_settings:
         method safely returns only dict values so callers always receive a
         iterable mapping.
         """
-        value: str | bool | int | float | dict[str, str] | None = self.codes.get(key)
+        value: object | None = self.codes.get(key)
         if isinstance(value, dict):
-            return value
+            return cast(dict[str, str], value)
         return {}
 
     def get_entry_code_dict(self, entry: registry_map_entry) -> dict[str, str]:
@@ -1071,7 +1071,7 @@ class protocol_settings:
             if not key.endswith("_codes") and isinstance(value, (str, bool, int, float)):
                 self.settings[key] = str(value).lower() if isinstance(value, bool) else str(value)
 
-    def load_registry_overrides(self, override_path: str, keys: list[str]) -> dict[str, dict[str, Any]]:
+    def load_registry_overrides(self, override_path: str, keys: list[str]) -> dict[str, dict[str, dict[str, str]]]:
         """Parse a CSV override file and return a nested dict keyed by each column in ``keys``.
 
         For each row, normalizes the value of every ``keys`` column (strip,
@@ -1134,7 +1134,7 @@ class protocol_settings:
         if not os.path.exists(path):
             return registry_map
 
-        overrides: dict[str, dict[str, Any]] | None = None
+        overrides: dict[str, dict[str, dict[str, str]]] | None = None
         override_keys: list[str] = ["documented name", "register"]
         overrided_keys: set[str] = set()
 
@@ -1144,7 +1144,7 @@ class protocol_settings:
             self._log.info("loading override file: " + override_path)
             overrides = self.load_registry_overrides(override_path, override_keys)
 
-        def process_row(row: dict[str, Any]) -> None:
+        def process_row(row: dict[str, str]) -> None:
             """Parse one CSV row and append the resulting ``registry_map_entry`` objects to ``registry_map``.
 
             Skips commented rows (leading ``#``), entirely empty rows, and rows
@@ -1156,7 +1156,7 @@ class protocol_settings:
             unit_multiplier: float = 1
             unit_symbol: str = ""
             read_interval: int = 0
-            adjustments: dict[str, Any] = self._adjustments.parse_adjustments(row.get("adjustments", ""))
+            adjustments: dict[str, object] = self._adjustments.parse_adjustments(row.get("adjustments", ""))
 
             # Strip \r from all field values at parse time to handle Windows CRLF CSVs
             # Strip CR from all string field values at parse time to handle Windows CRLF CSVs
@@ -1198,11 +1198,11 @@ class protocol_settings:
 
             # region overrides
             if overrides is not None:
-                override_row: dict[str, Any] | None = None
+                override_row: dict[str, str] | None = None
                 for key in override_keys:
                     key_value: str | None = row.get(key)
                     if key_value and key_value in overrides[key]:
-                        override_row: dict[str, Any] | None = overrides[key][key_value]
+                        override_row: dict[str, str] | None = overrides[key][key_value]
                         overrided_keys.add(key_value)
                         break
 
@@ -1302,7 +1302,7 @@ class protocol_settings:
 
             if "{" in row["values"]:
                 try:
-                    codes_json: Any = json.loads(row["values"])
+                    codes_json: object = json.loads(row["values"])
                     value_is_json = True
                     name: str = row["documented name"] + "_codes"
                     if name not in self.codes:
@@ -1420,14 +1420,14 @@ class protocol_settings:
                     if not range_match:
                         if "[" in row["register"]:
                             self._log.info(f"Deferred dynamic register expression: {row['register']}")
-                            deferred_row: dict[str, Any] = dict(row)
+                            deferred_row: dict[str, object] = dict(row)
                             deferred_row["_registry_type"] = registry_type
                             self.dynamic_registry_rows.append(deferred_row)
                             return
                         else:
                             register = strtoint_safe(row["register"])
                     else:
-                        reverse: str | Any = range_match.group("reverse")
+                        reverse: str = range_match.group("reverse")
                         start = strtoint_safe(range_match.group("start"))
                         end = strtoint_safe(range_match.group("end"))
                         register = start
@@ -1460,34 +1460,32 @@ class protocol_settings:
                 writeMode = WriteMode.fromString(row["write"])
 
             for i in r:
-                entry_kwargs: dict[str, Any] = {
-                    "registry_type": registry_type,
-                    "register": register,
-                    "register_bit": register_bit,
-                    "register_bit_end": register_bit_end,
-                    "register_byte": register_byte,
-                    "register_list": register_list,
-                    "variable_name": variable_name,
-                    "documented_name": row["documented name"],
-                    "unit": str(unit_symbol),
-                    "unit_mod": unit_multiplier,
-                    "adjustments": adjustments,
-                    "data_type": data_type,
-                    "data_type_size": data_type_len,
-                    "note": note,
-                    "concatenate": concatenate,
-                    "concatenate_registers": concatenate_registers,
-                    "values": values,
-                    "value_min": value_min,
-                    "value_max": value_max,
-                    "value_regex": value_regex,
-                    "read_command": read_command,
-                    "read_interval": read_interval,
-                    "write_mode": writeMode,
-                    "has_enum_mapping": value_is_json,
-                }
-
-                item = registry_map_entry(**entry_kwargs)
+                item = registry_map_entry(
+                    registry_type=registry_type,
+                    register=register,
+                    register_bit=register_bit,
+                    register_bit_end=register_bit_end,
+                    register_byte=register_byte,
+                    register_list=register_list,
+                    variable_name=variable_name,
+                    documented_name=row["documented name"],
+                    unit=str(unit_symbol),
+                    unit_mod=unit_multiplier,
+                    adjustments=adjustments,
+                    data_type=data_type,
+                    data_type_size=data_type_len,
+                    note=note,
+                    concatenate=concatenate,
+                    concatenate_registers=concatenate_registers,
+                    values=values,
+                    value_min=value_min,
+                    value_max=value_max,
+                    value_regex=value_regex,
+                    read_command=read_command,
+                    read_interval=read_interval,
+                    write_mode=writeMode,
+                    has_enum_mapping=value_is_json,
+                )
 
                 # Cross-check register_list token count against data_type word width.
                 # Mismatch means the address format and data_type disagree —
@@ -1533,7 +1531,9 @@ class protocol_settings:
                                 self._log.info("Loading unique entry from overrides for both unique keys")
                                 process_row(override_row)
                                 for k in override_keys:
-                                    overrided_keys.add(override_row.get(k))
+                                    override_value = override_row.get(k)
+                                    if override_value is not None:
+                                        overrided_keys.add(override_value)
                                 applied = True
                                 break
 
@@ -1598,6 +1598,23 @@ class protocol_settings:
 
             # Apply variable mask (allowlist)
             if self.variable_mask:
+                mask_matched_count: int = sum(
+                    1 for item in registry_map
+                    if item.documented_name.strip().lower() in self.variable_mask
+                    or item.variable_name.strip().lower() in self.variable_mask
+                    or (item.documented_name.strip().lower() + "_l") in self.variable_mask
+                    or (item.variable_name.strip().lower() + "_l") in self.variable_mask
+                )
+                if mask_matched_count == 0 and registry_map:
+                    self._log.warning(
+                        f"[{self.protocol}] variable_mask has {len(self.variable_mask)} "
+                        f"entries but none match any {registry_type.name} register "
+                        f"({len(registry_map)} available) — excluding the ENTIRE "
+                        f"{registry_type.name} registry type (0 metrics will be scraped from "
+                        f"it). This almost always means the mask file references register "
+                        f"names that no longer exist (e.g. after a protocol CSV update)"
+                        f"or that no metrics have been chosen from one of the registers."
+                    )
                 for index in reversed(range(len(registry_map))):
                     item = registry_map[index]
                     if (
@@ -1608,17 +1625,61 @@ class protocol_settings:
                     ):
                         del registry_map[index]
 
-            # Apply variable screen (denylist)
+            # Apply variable screen (denylist). Screen files are a single
+            # flat, type-agnostic list shared by every registry type on a
+            # device (variable_screen_<device>.txt has no per-type
+            # sections), so when this runs for e.g. INPUT, a screen entry
+            # that happens to name a HOLDING register is indistinguishable
+            # at the file level from "this device doesn't screen INPUT at
+            # all." That ambiguity used to resolve as "nothing in INPUT
+            # matched the screen list, so nothing gets removed" — INPUT was
+            # silently left fully unscreened (de facto whitelisted) the
+            # moment screening was used for any *other* type on the same
+            # device, rather than being treated as fully screened itself.
+            #
+            # Correct behavior: once screening is in use anywhere on this
+            # device, a registry type with zero of its *own* entries in the
+            # screen list is fully screened (nothing scraped from it), not
+            # left untouched — only a type that has at least one of its own
+            # entries in the list gets the normal per-item denylist
+            # treatment, scoped to just those entries. A device whose
+            # screen file is entirely empty is unaffected either way
+            # (self.variable_screen is falsy, this block is skipped
+            # entirely, same "no selections = forward everything" device
+            # default as before). Mask (allowlist) needs no equivalent fix:
+            # an allowlist with zero of its own type's entries already
+            # deletes everything in that type via the loop above, which is
+            # the correct behavior for a whitelist with nothing listed.
             if self.variable_screen:
-                for index in reversed(range(len(registry_map))):
-                    item = registry_map[index]
-                    if (
-                        item.documented_name.strip().lower() in self.variable_screen
-                        or item.variable_name.strip().lower() in self.variable_screen
-                        or (item.documented_name.strip().lower() + "_l") in self.variable_screen
-                        or (item.variable_name.strip().lower() + "_l") in self.variable_screen
-                    ):
-                        del registry_map[index]
+                type_has_own_screen_entries: bool = any(
+                    item.documented_name.strip().lower() in self.variable_screen
+                    or item.variable_name.strip().lower() in self.variable_screen
+                    or (item.documented_name.strip().lower() + "_l") in self.variable_screen
+                    or (item.variable_name.strip().lower() + "_l") in self.variable_screen
+                    for item in registry_map
+                )
+                if not type_has_own_screen_entries:
+                    self._log.warning(
+                        f"[{self.protocol}] variable_screen has {len(self.variable_screen)} "
+                        f"entries but none match any {registry_type.name} register "
+                        f"({len(registry_map)} available) — excluding the ENTIRE "
+                        f"{registry_type.name} registry type (0 metrics will be scraped from "
+                        f"it). This almost always means the screen file references register "
+                        f"names that no longer exist (e.g. after a protocol CSV update). "
+                        f"If this type should still be scraped, remove its entries from "
+                        f"the screen file or verify the names against the current registry map."
+                    )
+                    registry_map.clear()
+                else:
+                    for index in reversed(range(len(registry_map))):
+                        item = registry_map[index]
+                        if (
+                            item.documented_name.strip().lower() in self.variable_screen
+                            or item.variable_name.strip().lower() in self.variable_screen
+                            or (item.documented_name.strip().lower() + "_l") in self.variable_screen
+                            or (item.variable_name.strip().lower() + "_l") in self.variable_screen
+                        ):
+                            del registry_map[index]
 
             self._add_code_description_entries(registry_map)
 
@@ -1769,7 +1830,7 @@ class protocol_settings:
 
         Derives the filename from the protocol name and registry type when
         ``file`` is not supplied (``<protocol>.registry_map.csv`` for
-        ``ZERO``, ``<protocol>.<type>_registry_map.csv`` for all others).
+        ``CUSTOM_BUS``, ``<protocol>.<type>_registry_map.csv`` for all others).
         After loading, walks the entries to determine the highest register
         address for ``registry_map_size``, then pre-computes and caches the
         initial read ranges in ``registry_map_ranges``.  Silently returns when
@@ -1779,7 +1840,7 @@ class protocol_settings:
             settings_dir = self.settings_dir
 
         if not file:
-            if registry_type == Registry_Type.ZERO:
+            if registry_type == Registry_Type.CUSTOM_BUS:
                 file = self.protocol + ".registry_map.csv"
             else:
                 file = self.protocol + "." + registry_type.name.lower() + "_registry_map.csv"
@@ -2589,7 +2650,7 @@ class protocol_settings:
             def replace_maths(match: re.Match[str]) -> str:
                 """Evaluate one arithmetic token; return the original token unchanged on any error."""
                 try:
-                    maths: str | Any = match.group("maths")
+                    maths: str = match.group("maths")
                     result: int | float = self._adjustments.safe_eval_expression(maths)
                     return str(result)
                 except Exception:
@@ -2624,12 +2685,13 @@ class protocol_settings:
 
         for row in self.dynamic_registry_rows.copy():
             try:
-                resolved_registers: list[str] = self.evaluate_expressions(row["register"], live_values)
+                register_expression = str(row["register"])
+                resolved_registers: list[str] = self.evaluate_expressions(register_expression, live_values)
 
                 for resolved_register in resolved_registers:
-                    resolved_row: dict[str, str] = dict(row)
+                    resolved_row: dict[str, object] = dict(row)
                     resolved_row["register"] = resolved_register
-                    self._log.info(f"Resolved dynamic register {row['register']} -> {resolved_register}")
+                    self._log.info(f"Resolved dynamic register {register_expression} -> {resolved_register}")
                     resolved_count += 1
 
                 self.dynamic_registry_rows.remove(row)

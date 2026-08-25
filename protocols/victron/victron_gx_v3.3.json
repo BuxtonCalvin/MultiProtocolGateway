@@ -4,21 +4,25 @@
   "send_input_register": false,
   "send_coil_register": false,
   "send_discrete_register": false,
-
   "system/relay/0/state_codes": {
     "0": "Open",
     "1": "Closed"
   },
-
   "system/relay/1/state_codes": {
     "0": "Open",
     "1": "Closed"
   },
-
   "system/dc/battery/state_codes": {
     "0": "idle",
     "1": "charging",
     "2": "discharging",
     "10": "idle"
+  },
+  "system/ac/activein/source_codes": {
+    "0": "Unknown",
+    "1": "Grid",
+    "2": "Generator",
+    "3": "Shore power",
+    "240": "Not connected"
   }
 }

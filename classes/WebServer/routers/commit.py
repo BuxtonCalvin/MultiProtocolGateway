@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, List
+from typing import TYPE_CHECKING, Any, List
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
@@ -45,8 +45,22 @@ from ..services.setting_description_service import (
     discard_descriptions,
 )
 
+if TYPE_CHECKING:
+    # Deferred at runtime (see the local import in do_commit()) —
+    # importing protocol_gateway at module load time risks a circular
+    # import, since it's what wires up the WebServer app in the first
+    # place. Only needed here, under TYPE_CHECKING, for annotations.
+    from protocol_gateway import GatewayManager, ReloadStatus
+
 _log: logging.Logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/commit", tags=["commit"])
+
+# commit_staged_deletions() (bridge_service.py) is declared to return
+# list[dict[str, Any]] — that Any is outside this file's scope (it's a
+# service module, not a router), so it isn't tightened here.
+BackupSummary = dict[str, int | str | None]
+DiffResponse = dict[str, dict[str, int] | list[dict[str, str | bool | None]]]
+CommitResponse = dict[str, str | int | list[str] | dict[str, bool | str] | None]
 
 
 def _has_dirty_config_state(db: Session) -> bool:
@@ -61,10 +75,20 @@ def _has_dirty_config_state(db: Session) -> bool:
     disk. Gating on exactly these three tables' is_dirty flags is safe
     because they're the same flags discard_changes() below already treats
     as authoritative for "is there a config-side change pending".
+
+    Also checks ProtocolRegister.pending_delete separately from is_dirty:
+    a staged deletion deliberately does NOT set is_dirty (see
+    ProtocolRegister.pending_delete's docstring — it's not a value to
+    write back, it's the row's absence), so without this OR clause a
+    commit consisting of ONLY pending deletions would find every is_dirty
+    flag False and skip commit_all() entirely — the deletion would stay
+    staged forever, silently never applied, no matter how many times
+    Commit was clicked.
     """
     return (
         db.query(Setting).filter(Setting.is_dirty == True).first() is not None  # noqa: E712
         or db.query(ProtocolRegister).filter(ProtocolRegister.is_dirty == True).first() is not None  # noqa: E712
+        or db.query(ProtocolRegister).filter(ProtocolRegister.pending_delete == True).first() is not None  # noqa: E712
         or db.query(DeviceProtocolSelection).filter(DeviceProtocolSelection.is_dirty == True).first() is not None  # noqa: E712
     )
 
@@ -75,7 +99,7 @@ def _has_dirty_descriptions(db: Session) -> bool:
 
 
 @router.post("")
-def do_commit(request: Request, db: Session = Depends(get_session))-> dict[str, Any]:
+def do_commit(request: Request, db: Session = Depends(get_session))-> CommitResponse:
     """
     Full commit: backup → write config.cfg → write masks/screens/overrides →
     reset dirty flags → commit setting descriptions → apply any staged
@@ -144,11 +168,11 @@ def do_commit(request: Request, db: Session = Depends(get_session))-> dict[str, 
         # either way; gateway_reload.ok communicates whether the *live*
         # gateway picked it up cleanly, separately from the commit itself
         # (see gateway_reload_status() / the banner in base.html).
-        gateway_reload: dict[str, Any] | None = None
+        gateway_reload: dict[str, bool | str] | None = None
         if config_was_dirty:
-            manager = getattr(state, "gateway_manager", None)
+            manager: GatewayManager | None = getattr(state, "gateway_manager", None)
             if manager is not None:
-                reload_status = manager.reload(trigger="manual")
+                reload_status: ReloadStatus = manager.reload(trigger="manual")
                 state.gateway = manager.current
                 gateway_reload = {
                     "ok": reload_status.ok,
@@ -158,23 +182,18 @@ def do_commit(request: Request, db: Session = Depends(get_session))-> dict[str, 
                 if not reload_status.ok:
                     _log.error(f"do_commit: gateway reload did not fully succeed: {reload_status.message}")
     except Exception as exc:
-        # Was previously a hardcoded, debug-level "descriptions not
-        # committed" message regardless of which step actually failed
-        # (config write, descriptions, or a staged TimescaleDB column
-        # deletion) -- misleading and, at debug level, invisible in most
-        # deployments' default logging config. Log what actually failed,
-        # at error level, so a commit failure is never silent.
+
         _log.error(f"do_commit: commit failed: {exc}")
         raise HTTPException(status_code=500, detail=str(exc))
     else:
-        response: dict[str, Any] = {"status": "ok", **result, **timescale_summary}
+        response: CommitResponse = {"status": "ok", **result, **timescale_summary}
         if gateway_reload is not None:
             response["gateway_reload"] = gateway_reload
         return response
 
 
 @router.get("/diff")
-def diff(db: Session = Depends(get_session))-> dict[str, Any]:
+def diff(db: Session = Depends(get_session))-> DiffResponse:
     """Return structured diff of staged vs disk state."""
     result: DiffResult = build_diff(db)
     return {
@@ -198,6 +217,7 @@ def diff(db: Session = Depends(get_session))-> dict[str, Any]:
                 "field": d.field,
                 "old_value": d.old_value,
                 "new_value": d.new_value,
+                "change_type": d.change_type,
             }
             for d in result.protocols
         ],
@@ -205,7 +225,7 @@ def diff(db: Session = Depends(get_session))-> dict[str, Any]:
 
 
 @router.get("/backups")
-def get_backups(db: Session = Depends(get_session))-> list[dict[str, Any]]:
+def get_backups(db: Session = Depends(get_session))-> list[BackupSummary]:
     backups: List[ConfigBackup] = list_backups(db)
     return [
         {
@@ -235,10 +255,18 @@ def discard_changes(request: Request, db: Session = Depends(get_session)) -> dic
         row.value_staged = row.value_disk
         row.is_dirty = False
 
-    # Reset ProtocolRegister dirty flags
-    dirty_protocols: List[ProtocolRegister] = db.query(ProtocolRegister).filter(ProtocolRegister.is_dirty == True).all()  # noqa: E712
-    for row in dirty_protocols:
+    # Reset ProtocolRegister dirty flags and un-stage any pending deletions
+    dirty_or_pending_delete: List[ProtocolRegister] = (
+        db.query(ProtocolRegister)
+        .filter(
+            (ProtocolRegister.is_dirty == True)  # noqa: E712
+            | (ProtocolRegister.pending_delete == True)  # noqa: E712
+        )
+        .all()
+    )
+    for row in dirty_or_pending_delete:
         row.is_dirty = False
+        row.pending_delete = False
 
     # Reset DeviceProtocolSelection dirty flags
     dirty_selections: List[DeviceProtocolSelection] = db.query(DeviceProtocolSelection).filter(DeviceProtocolSelection.is_dirty == True).all()  # noqa: E712
@@ -259,7 +287,7 @@ class RollbackRequest(BaseModel):
 
 
 @router.post("/rollback")
-def do_rollback(payload: RollbackRequest, request: Request, db: Session = Depends(get_session)) -> dict[str, Any]:
+def do_rollback(payload: RollbackRequest, request: Request, db: Session = Depends(get_session)) -> dict[str, str | int]:
     """
     Restore config.cfg from a backup, then re-scan so the DB matches the
     restored file. The config file is treated as ground truth after rollback:

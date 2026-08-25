@@ -23,12 +23,12 @@ import atexit
 import csv
 import json
 import random
+import sys
 import threading
 import time
 import warnings
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
 import paho.mqtt.packettypes
 from paho.mqtt.client import (
@@ -36,6 +36,7 @@ from paho.mqtt.client import (
     MQTT_ERR_SUCCESS,
     ConnectFlags,
     DisconnectFlags,
+    MQTTMessage,
     MQTTMessageInfo,
 )
 from paho.mqtt.client import (
@@ -49,6 +50,47 @@ from defs.common import TransportSettings, strtobool
 
 from ..protocol_settings import Registry_Type, WriteMode, registry_map_entry
 from .transport_base import transport_base
+
+if sys.version_info >= (3, 11):
+    from typing import NotRequired
+else:
+    from typing_extensions import NotRequired
+
+if sys.version_info >= (3, 12):
+    from typing import TypedDict
+else:
+    from typing_extensions import TypedDict
+
+
+class MqttHealthSnapshot(TypedDict):
+    """
+    Read-only snapshot of this bridge's live connection/reconnect/write-topic
+    state, for the device page's "Bridge Health" panel (see
+    mqtt.get_health_snapshot). Deliberately not BridgeHealthSnapshot (shared
+    by the InfluxDB bridges) — MQTT publishes are fire-and-forget per metric
+    with no local backlog/batch to report, and this panel tracks reconnect
+    state and discovery/write-topic counts instead.
+    """
+    connected: bool
+    reconnecting: bool
+    reconnect_delay: int | None
+    reconnect_attempts: int | None
+    write_topic_count: int
+    known_device_count: int
+    discovery_enabled: bool
+    json_mode: bool
+    base_topic: str
+
+
+class HADiscoveryPayload(TypedDict):
+    """Home Assistant MQTT discovery config payload for one sensor topic
+    (see mqtt.mqtt_discovery) — published as-is via json.dumps()."""
+    availability_topic: str
+    device: dict[str, str]
+    name: str
+    unique_id: str
+    state_topic: str
+    unit_of_measurement: NotRequired[str]
 
 
 class mqtt(transport_base):
@@ -275,7 +317,7 @@ class mqtt(transport_base):
     def on_disconnect(
         self,
         client: MQTTClient,
-        userdata: Any,
+        userdata: object,
         disconnect_flags: DisconnectFlags,
         reason_code: ReasonCode,
         properties: Properties | None
@@ -286,7 +328,7 @@ class mqtt(transport_base):
     def on_connect(
         self,
         client: MQTTClient,
-        userdata: Any,
+        userdata: object,
         flags: ConnectFlags,
         reason_code: ReasonCode ,
         properties: Properties | None,
@@ -490,7 +532,7 @@ class mqtt(transport_base):
         except Exception as exc:
             self._log.debug(f"Failed to publish to error_topic (non-fatal): {exc}")
 
-    def client_on_message(self, client: MQTTClient, userdata: Any, msg: Any) -> None:
+    def client_on_message(self, client: MQTTClient, userdata: object, msg: MQTTMessage) -> None:
         """Callback for PUBLISH messages received from the broker."""
         self._log.info("MQTT MSG: " + msg.topic + " " + str(msg.payload.decode("utf-8")))
 
@@ -512,13 +554,6 @@ class mqtt(transport_base):
             try:
                 self._emit_message(entry, msg.payload.decode("utf-8"))
             except Exception as exc:
-                # Previously unhandled: an exception here (bad payload, a
-                # type coercion failure downstream, etc.) would propagate up
-                # into paho's own callback thread, where it's swallowed by
-                # paho's internal handling and logged (if at all) somewhere
-                # this application never sees or reacts to. Caught here so
-                # it's both logged clearly and, for anyone monitoring
-                # error_topic, actionable without needing application logs.
                 self._log.error(f"Failed to process write command on '{msg.topic}': {exc}")
                 self._publish_error(
                     "write_command",
@@ -651,7 +686,7 @@ class mqtt(transport_base):
     # Bridge info pane
     # ------------------------------------------------------------------
 
-    def get_health_snapshot(self) -> dict[str, Any]:
+    def get_health_snapshot(self) -> MqttHealthSnapshot:
         """
         Read-only snapshot of this bridge's live connection/reconnect/
         write-topic state, for the device page's "Bridge Health" panel.
@@ -748,7 +783,7 @@ class mqtt(transport_base):
             ):
                 writePrefix = ""  # Home Assistant doesn't like write prefix
 
-            disc_payload: dict[str, Any] = {
+            disc_payload: HADiscoveryPayload = {
                 "availability_topic": availability_topic,
                 "device": device,
                 "name": clean_name,
@@ -758,7 +793,8 @@ class mqtt(transport_base):
                 ),
             }
 
-            if item.unit:
+            # Safely check if a unit exists and is not just empty whitespace
+            if item.unit and str(item.unit).strip():
                 disc_payload["unit_of_measurement"] = item.unit
 
             discovery_topic: str = (

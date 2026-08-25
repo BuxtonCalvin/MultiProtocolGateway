@@ -364,6 +364,44 @@ def detect_eg4_hardware_kind(transport: EG4MetadataTransport) -> str:
     return transport.eg4_hardware_kind_cache
 
 
+def identify_eg4_device(transport: EG4MetadataTransport) -> tuple[str, "EG4DeviceMetadata | EG4BatteryMetadata | None"]:
+    """Single coordinated identification pass for an EG4-protocol transport:
+    hardware-kind detection, serial number, and extended metadata, all in
+    one call.
+
+    This exists because read_eg4_serial_number() and
+    read_eg4_device_metadata() used to be two independent top-level entry
+    points, each of which would call detect_eg4_hardware_kind() and, for an
+    inverter/unknown-kind device, each independently read the same
+    fixed-address serial-number registers if the OTHER one's result wasn't
+    available yet — in practice, whenever the first attempt legitimately
+    came back empty (e.g. a misread on a fresh connection), the second
+    caller would silently redo the exact same register reads a second time
+    rather than trusting "empty" as a real answer. See modbus_base.py's
+    init_after_connect(), which now calls this once per transport instance
+    instead of calling read_serial_number() and read_eg4_device_metadata()
+    as two separate steps.
+
+    Returns (serial_number, metadata) — either may be "" / None on failure,
+    same as read_eg4_serial_number() / read_eg4_device_metadata() always
+    could independently.
+    """
+    protocol_name: str = getattr(transport.proto, "protocol", "") or ""
+    if not is_eg4_protocol(protocol_name):
+        return "", None
+
+    if detect_eg4_hardware_kind(transport) == "battery":
+        msg: str = (
+            f"Transport {transport.transport_name} is an EG4 battery — "
+            f"serial number requires a CANbus connection and isn't readable "
+            f"over Modbus.")
+        _log.info(msg)
+        return "", _read_battery_metadata(transport)
+
+    serial: str = read_eg4_serial_number(transport)
+    return serial, _read_inverter_metadata(transport, serial)
+
+
 def read_eg4_serial_number(transport: EG4MetadataTransport) -> str:
     """EG4-specific serial number reconstruction.
 
@@ -455,21 +493,37 @@ def read_eg4_device_metadata(transport: EG4MetadataTransport) -> EG4DeviceMetada
     completely different information at the same register addresses.
 
     Returns None if this isn't an EG4 protocol.
+
+    Kept as a standalone entry point for any external caller that only
+    wants metadata without the serial number — modbus_base.py's
+    init_after_connect() itself now calls identify_eg4_device() directly
+    instead, since it wants both together in one coordinated pass without
+    the potential for a redundant serial-number re-read (see that
+    function's docstring).
     """
     protocol_name: str = getattr(transport.proto, "protocol", "") or ""
     if not is_eg4_protocol(protocol_name):
         return None
 
-    if detect_eg4_hardware_kind(transport) == "battery":
-        return _read_battery_metadata(transport)
-    return _read_inverter_metadata(transport)
+    _, metadata = identify_eg4_device(transport)
+    return metadata
 
 
-def _read_inverter_metadata(transport: EG4MetadataTransport) -> EG4DeviceMetadata:
+def _read_inverter_metadata(transport: EG4MetadataTransport, serial: str) -> EG4DeviceMetadata:
     """Assemble metadata for an EG4 inverter/GridBOSS: model, device type
     code, GridBOSS/MID detection, firmware version, and parallel-group role.
     Modeled on the reference discovery module's DiscoveredDevice, but sourced
     entirely from the transport's own register reads.
+
+    `serial` is passed in by the caller (identify_eg4_device()) rather than
+    read here — this used to fall back to `transport.device_serial_number or
+    read_eg4_serial_number(transport)` internally, which meant a caller that
+    already knew the serial number had come back empty would trigger this
+    function into re-attempting the exact same fixed-address register reads
+    a second time, on the assumption an empty result meant "not tried yet"
+    rather than "already tried and failed". Taking it as a parameter makes
+    this function trust whatever the caller already determined, once,
+    without re-probing hardware.
 
     Individual fields fall back to safe defaults (rather than aborting the
     whole read) if their underlying registers aren't available for this
@@ -477,8 +531,6 @@ def _read_inverter_metadata(transport: EG4MetadataTransport) -> EG4DeviceMetadat
     registers, and some EG4 maps may not expose the parallel-config fields at
     all.
     """
-    serial: str = transport.device_serial_number or read_eg4_serial_number(transport)
-
     # Device type code — holding register 19. Fixed address, not a named CSV
     # field (see EG4_DEVICE_TYPE_CODE_* constants above).
     device_type_code: int | None = None

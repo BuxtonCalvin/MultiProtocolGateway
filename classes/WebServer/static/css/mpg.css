@@ -316,7 +316,7 @@ aside .theme-input {
 
 .btn-secondary {
   background-color: transparent;
-  color: rgb(var(--mpg-200));
+  color: rgb(var(--mpg-400));
   font-weight: 500;
   padding: 0.375rem 0.875rem;
   border-radius: 0.375rem;
@@ -328,6 +328,31 @@ aside .theme-input {
   background-color: rgb(var(--mpg-600));
   border-color: rgb(var(--mpg-400));
 }
+
+.btn-tertiary {
+  background-color: transparent;
+  /* Use a dark color for crisp readability in light mode */
+  color: rgb(var(--mpg-800, 30, 41, 59)); 
+  font-weight: 600; /* Increased to semi-bold for better readability at small text-xs size */
+  padding: 0.375rem 0.875rem;
+  border-radius: 0.375rem;
+  /* Distinct border to anchor the button visually */
+  border: 1px solid rgb(var(--mpg-400, 148, 163, 184));
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.btn-tertiary:hover {
+  background-color: rgb(var(--mpg-100, 241, 245, 249));
+  border-color: rgb(var(--mpg-500, 100, 116, 139));
+  color: rgb(var(--mpg-900, 15, 23, 42));
+}
+
+.btn-tertiary:focus-visible {
+  outline: 2px solid rgb(var(--color-accent, 14, 165, 233));
+  outline-offset: 2px;
+}
+
 
 .btn-danger {
   background-color: rgb(var(--color-danger) / 0.15);

@@ -6,18 +6,17 @@
   "send_input_register": false,
   "send_coil_register": false,
   "send_discrete_register": false,
-
   "fault_code_codes": {
-    "b0":  "Reserve",
-    "b1":  "Over temperature of DCDC module",
-    "b2":  "Battery over voltage",
-    "b3":  "Reserve",
-    "b4":  "Output short circuited",
-    "b5":  "Over Inverter voltage",
-    "b6":  "Output over load",
-    "b7":  "Bus over voltage",
-    "b8":  "Bus soft start times out",
-    "b9":  "PV over current",
+    "b0": "Reserve",
+    "b1": "Over temperature of DCDC module",
+    "b2": "Battery over voltage",
+    "b3": "Reserve",
+    "b4": "Output short circuited",
+    "b5": "Over Inverter voltage",
+    "b6": "Output over load",
+    "b7": "Bus over voltage",
+    "b8": "Bus soft start times out",
+    "b9": "PV over current",
     "b10": "PV over voltage",
     "b11": "Battery over current",
     "b12": "Inverter over current",
@@ -36,18 +35,17 @@
     "b25": "Reserve",
     "b26": "Parallel versions are incompatible"
   },
-
   "obtain_warning_code_codes": {
-    "b0":  "Zero crossing loss of mains power",
-    "b1":  "Mains waveform abnormal",
-    "b2":  "Mains over voltage",
-    "b3":  "Mains low voltage",
-    "b4":  "Mains over frequency",
-    "b5":  "Mains low frequency",
-    "b6":  "PV low voltage",
-    "b7":  "Over temperature",
-    "b8":  "Battery low voltage",
-    "b9":  "Battery is not connected",
+    "b0": "Zero crossing loss of mains power",
+    "b1": "Mains waveform abnormal",
+    "b2": "Mains over voltage",
+    "b3": "Mains low voltage",
+    "b4": "Mains over frequency",
+    "b5": "Mains low frequency",
+    "b6": "PV low voltage",
+    "b7": "Over temperature",
+    "b8": "Battery low voltage",
+    "b9": "Battery is not connected",
     "b10": "Overload",
     "b11": "Battery Eq charging",
     "b12": "Battery discharged at low voltage, not charged back to recovery point",
@@ -58,7 +56,6 @@
     "b17": "Output mode of Single and Parallel systems inconsistent",
     "b18": "Battery voltage difference of parallel system too large"
   },
-
   "working_mode_codes": {
     "0": "Power On Mode",
     "1": "Standby mode",
@@ -68,7 +65,6 @@
     "5": "Charging mode",
     "6": "Fault mode"
   },
-
   "output_mode_codes": {
     "0": "Single",
     "1": "Parallel",
@@ -78,39 +74,62 @@
     "5": "Split Phase-P1",
     "6": "Split Phase-P2"
   },
-
   "output_priority_codes": {
     "0": "Utility-PV-Battery",
     "1": "PV-Utility-Battery",
     "2": "PV-Battery-Utility"
   },
-
   "input_voltage_range_codes": {
     "0": "Wide range",
     "1": "Narrow range"
   },
-
   "buzzer_mode_codes": {
     "0": "Mute in all situations",
     "1": "Sound when input source changed or specific warning/fault",
     "2": "Sound when specific warning or fault",
     "3": "Sound when fault occurs"
   },
-
   "lcd_backlight_codes": {
     "0": "Timed off",
     "1": "Always on"
   },
-
   "battery_charging_priority_codes": {
     "0": "Utility priority",
     "1": "PV priority",
     "2": "PV same level as Utility",
     "3": "Only PV charging allowed"
   },
-
   "remote_switch_codes": {
     "0": "Remote shutdown",
     "1": "Remote turn-on"
+  },
+  "lcd_automatically_returns_to_the_homepage_codes": {
+    "0": "Do not return automatically;",
+    "1": "Automatically return after 1 minute;"
+  },
+  "energy_saving_mode_codes": {
+    "0": "Energy-saving mode is off;",
+    "1": "Energy-saving mode is on;"
+  },
+  "overload_automatic_restart_codes": {
+    "0": "Overload failure will not restart;",
+    "1": "Automatic restart after overload failure;"
+  },
+  "over_temperature_automatic_restart_codes": {
+    "0": "Over temperature failure will not restart;",
+    "1": "Automatic restart after over-temperature fault;"
+  },
+  "overload_transfer_to_bypass_enabled_codes": {
+    "0": "Disable;",
+    "1": "Enable;"
+  },
+  "battery_eq_mode_is_enabled_codes": {
+    "0": "Disable;",
+    "1": "Enable;"
+  },
+  "turn_on_mode_codes": {
+    "0": "Can be turn-on locally or remotely;",
+    "1": "Only local turn-on;",
+    "2": "Only remote turn-on;"
   }
 }

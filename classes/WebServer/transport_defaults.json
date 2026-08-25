@@ -63,7 +63,9 @@
     "$extends": "_base"
   },
   "modbus_base": {
-    "$extends": "_modbus_base"
+    "$extends": "_modbus_base",
+    "slave": "",
+    "unit": ""
   },
   "canbus": {
     "$extends": "_base",
@@ -257,7 +259,8 @@
     "use_utc_timestamp": "",
     "username": "",
     "debug_pprof_url": "",
-    "object_store_dir": ""
+    "object_store_dir": "",
+    "port": ""
   },
   "mqtt": {
     "base_topic": "home/device",

@@ -190,7 +190,7 @@ Here are the overviews of the MQTT, Prometheus and JSON bridges
 - Prometheus [![Prometheus](https://img.shields.io/badge/Prometheus-E6522C?style=for-the-badge&logo=prometheus&logoColor=white)](https://prometheus.io/)
 
   - Readme
-    [`Prometheus`](documentation/bridges/JSON/prometheus_out.md)
+    [`Prometheus`](documentation/bridges/prometheus/prometheus.md)
 
 - JSON
   - Readme
