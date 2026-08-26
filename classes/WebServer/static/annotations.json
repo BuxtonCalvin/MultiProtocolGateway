@@ -842,8 +842,8 @@
       "y_percent": 40.4,
       "label": "Prometheus bridge settings.",
       "shape_type": "rect",
-      "label_x_percent": 1.0795389048991357,
-      "label_y_percent": 82.70677680087472,
+      "label_x_percent": 1.1,
+      "label_y_percent": 82.7,
       "width_percent": 19.1,
       "height_percent": 78,
       "stroke_color": "rgb(255,255,128)",
@@ -973,6 +973,11 @@
     "pages__timescale-rebuild-rollups": "timescale_rebuild_rollups",
     "pages__timescale_compression_group_list": "compression",
     "pages__timescale-rebuild-compression": "compression",
-    "device__prometheus": "device__bridge_prometheus"
+    "device__prometheus": "device__bridge_prometheus",
+    "device__prometheus_out": "device__bridge_prometheus",
+    "device__influx3db": "device__bridge_influx3db",
+    "device__influxdb3_out": "device__bridge_influx3db",
+    "device__influx3db_out": "device__bridge_influx3db",
+    "device__influxdb_out": "device__bridge_influxdb"
   }
 }
