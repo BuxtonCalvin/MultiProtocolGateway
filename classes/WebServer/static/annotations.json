@@ -2,50 +2,52 @@
   "dashboard": [
     {
       "id": "dashboard-status",
-      "x_percent": 15.080568720379144,
-      "y_percent": 15.219514554430095,
-      "label_x_percent": 9.930990525879693,
-      "label_y_percent": 23.524942608448935,
+      "x_percent": 16.089214253520353,
+      "y_percent": 11.937665007849025,
+      "label_x_percent": 10.435313292450296,
+      "label_y_percent": 15.004348534900387,
       "label": "Gateway status cards show staged settings sync state, protocol toggle state, and last scan / commit timestamps.",
       "shape_type": "dot"
     },
     {
       "id": "dashboard-devices",
-      "x_percent": 75.59884726224786,
-      "y_percent": 35.032224517385266,
-      "label_x_percent": 66.7,
-      "label_y_percent": 39.2,
-      "width_percent": 100,
-      "height_percent": 34.6,
+      "x_percent": 62.1,
+      "y_percent": 42.7,
+      "label_x_percent": 63.4,
+      "label_y_percent": 79,
+      "width_percent": 73.1,
+      "height_percent": 68.3,
       "label": "Configured scrapers and bridges are listed here. Click Configure to jump directly to a device's setup screen.",
-      "shape_type": "rect"
+      "shape_type": "rect",
+      "stroke_color": "rgb(14,165,233)",
+      "fill_color": "rgba(14,165,233,0.18)"
     },
     {
       "id": "dashboard-rescan",
-      "x_percent": 5.1,
-      "y_percent": 39.8,
-      "label_x_percent": 1,
-      "label_y_percent": 59.9,
+      "x_percent": 3.7,
+      "y_percent": 54,
+      "label_x_percent": 9.6,
+      "label_y_percent": 33.8,
       "label": "Re-scan Configuration reloads config.cfg and protocol files without restarting. Rollback Configuration reverts to the last committed backup.",
       "shape_type": "dot"
     },
     {
       "id": "dashboard-dot-rollback",
-      "x_percent": 4.7,
-      "y_percent": 45.2,
+      "x_percent": 3.6913544668587908,
+      "y_percent": 61.21648341252736,
       "label": "Rollback to your previous config file.",
       "shape_type": "dot",
-      "label_x_percent": 0.9,
-      "label_y_percent": 75.8
+      "label_x_percent": 0.9000000000000137,
+      "label_y_percent": 72.37252820748274
     },
     {
       "id": "dashboard-dot-reload",
-      "x_percent": 5,
-      "y_percent": 49.3,
+      "x_percent": 3.4,
+      "y_percent": 67.9,
       "label": "Reload the MPG app to allow settings to take hold.",
       "shape_type": "dot",
-      "label_x_percent": 1,
-      "label_y_percent": 85.1
+      "label_x_percent": 1.1,
+      "label_y_percent": 83.9
     }
   ],
   "device__scraper_read_generic": [
