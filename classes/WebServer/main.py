@@ -400,14 +400,14 @@ def create_app(
     BASE_WEB_DIR: Path = Path(__file__).resolve().parent
 
     @app.get('/favicon.ico', include_in_schema=False)
-    async def favicon() -> FileResponse:  # pyright: ignore[reportUnusedFunction]
+    async def favicon() -> FileResponse:
 
         favicon_path: Path = BASE_WEB_DIR / "static" / "favicon.ico"
 
         return FileResponse(favicon_path)
 
     @app.get("/api/scan", tags=["admin"])
-    async def trigger_scan(request: Request) -> dict[str, JsonValue]:  # pyright: ignore[reportUnusedFunction]
+    async def trigger_scan(request: Request) -> dict[str, JsonValue]:
         """Manually trigger a re-scan of config + protocols, then reload the
         live gateway from what that scan just wrote to the DB and disk.
 
@@ -524,7 +524,7 @@ def start_webserver(
     def _run() -> None:
 
         try:
-            asyncio.run(server.serve()) # type: ignore
+            asyncio.run(server.serve())
         except KeyboardInterrupt:
             # Graceful exit on Ctrl+C
             pass

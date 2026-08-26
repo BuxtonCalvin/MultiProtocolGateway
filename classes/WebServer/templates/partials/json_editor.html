@@ -85,7 +85,7 @@
           <td class="px-2 py-1.5 border-r border-mpg-700/40">
             {% if vtype in ('object', 'array') %}
             <textarea class="json-value w-full chrome-input rounded px-2 py-1 font-mono text-xs focus:ring-1
-                             min-h-[4rem] resize-y"
+                             min-h-16 resize-y"
                       aria-label="Value for {{ key }}"
                       data-type="{{ vtype }}">{{ value | tojson(indent=2) }}</textarea>
             {% else %}
@@ -136,7 +136,7 @@
     <div id="json-raw-panel" class="hidden mt-2">
       <textarea id="json-raw-textarea"
                 class="w-full chrome-input rounded px-3 py-2 font-mono text-xs focus:ring-1
-                       min-h-[12rem] resize-y"
+                       min-h-48 resize-y"
                 spellcheck="false"
                 aria-label="Raw JSON editor">{{ json_data | tojson(indent=2) }}</textarea>
       <div class="flex gap-2 mt-2 items-center">

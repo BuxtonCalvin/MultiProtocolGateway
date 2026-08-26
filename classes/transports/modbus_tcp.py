@@ -17,6 +17,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 # scraper for Modbus TCP devices, inheriting from modbus_base and implementing TCP-specific client setup and register access logic.
 from pymodbus.client import ModbusTcpClient
 from pymodbus.client.base import ModbusBaseSyncClient
@@ -163,7 +165,7 @@ class modbus_tcp(modbus_base):
         (e.g. a future pymodbus internal change) — this is a best-effort
         guard, not something that should ever block a connection.
         """
-        sock = getattr(self.client, "socket", None)
+        sock: Any | None = getattr(self.client, "socket", None)
         if sock is None:
             return
 
@@ -178,7 +180,7 @@ class modbus_tcp(modbus_base):
             # something that should ever affect a connection's outcome.
             self._log.debug(f"{self.transport_name}: could not read socket timeout before priming-byte drain: {e}")
 
-        drained = b""
+        drained: bytes = b""
         try:
             # Short and deliberately non-configurable: this only needs to be
             # long enough for bytes the device sends immediately on connect

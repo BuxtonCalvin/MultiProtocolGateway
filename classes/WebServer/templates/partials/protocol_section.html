@@ -95,6 +95,19 @@
       if (hint) hint.classList.add('hidden');
     }
 
+    // This section's URL never changes when a tab is clicked — only
+    // #protocol-table-container is swapped — so the "This screen" help
+    // link (base.html) can't tell tabs apart from the URL alone. Point it
+    // at the right screenshot explicitly per tab instead.
+    function updateContextHelp(registryType) {
+      if (!window.mpgSetContextHelp || !window.mpgResetContextHelp) return;
+      if (registryType === 'json') {
+        window.mpgSetContextHelp('protocol_json');
+      } else {
+        window.mpgResetContextHelp();
+      }
+    }
+
     document.querySelectorAll('#protocol-section .tab-btn').forEach(btn => {
       btn.addEventListener('click', function() {
         // Tab active styling
@@ -108,6 +121,7 @@
         this.setAttribute('aria-selected', 'true');
         // Export links
         updateExportLinks(this.dataset.protocol, this.dataset.registry);
+        updateContextHelp(this.dataset.registry);
         // "<Registry Map> Available / Selected" badges — defined in
         // scraper_panes.html's persistent script, which is still loaded
         // since only #protocol-section itself gets swapped.
@@ -119,6 +133,7 @@
     const firstTab = document.querySelector('#protocol-section .tab-btn[data-protocol]');
     if (firstTab) {
       updateExportLinks(firstTab.dataset.protocol, firstTab.dataset.registry);
+      updateContextHelp(firstTab.dataset.registry);
     }
   })();
 </script>
