@@ -22,7 +22,7 @@
 from __future__ import annotations
 
 from threading import Lock
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import serial
 from pymodbus.client import ModbusSerialClient
@@ -180,7 +180,7 @@ class modbus_rtu(modbus_base):
         after chasing the exact same bug a second time on different
         hardware.
         """
-        ser = getattr(self.client, "socket", None)  # a pyserial.Serial instance once connected
+        ser: Any | None = getattr(self.client, "socket", None)  # a pyserial.Serial instance once connected
         if ser is None:
             return
 
@@ -195,7 +195,7 @@ class modbus_rtu(modbus_base):
             # something that should ever affect a connection's outcome.
             self._log.debug(f"{self.transport_name}: could not read serial timeout before priming-byte drain: {e}")
 
-        drained = b""
+        drained: bytes = b""
         try:
             ser.timeout = 0.25
             while True:

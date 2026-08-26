@@ -31,7 +31,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Optional, TypedDict, cast
-from urllib.parse import urlsplit
+from urllib.parse import SplitResult, urlsplit
 
 import pyarrow as pa
 import requests
@@ -444,7 +444,7 @@ class influxdb3_out(transport_base):
         """
         host = host.strip()
 
-        scheme = "http"
+        scheme: str = "http"
         for candidate in ("http", "https"):
             prefix: str = f"{candidate}://"
             if host.startswith(prefix):
@@ -455,7 +455,7 @@ class influxdb3_out(transport_base):
         # Parsed via urlsplit (rather than a hand-rolled rsplit on ":") so
         # IPv6 literals like "[::1]:8181" are split into hostname/port
         # correctly instead of on every colon.
-        parsed = urlsplit(f"//{host}")
+        parsed: SplitResult = urlsplit(f"//{host}")
         hostname: str = parsed.hostname or host
         if ":" in hostname:  # bare (unbracketed) IPv6 literal — needs brackets in a URL
             hostname = f"[{hostname}]"
