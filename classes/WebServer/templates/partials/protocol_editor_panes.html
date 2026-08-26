@@ -194,12 +194,26 @@
       if (hint) hint.classList.add('hidden');
     }
 
+    // This page's URL (/protocol-editor/{group}/{proto}) never changes when
+    // a tab is clicked — only #protocol-table-container is swapped — so the
+    // "This screen" help link (base.html) can't tell tabs apart from the URL
+    // alone. Point it at the right screenshot explicitly per tab instead.
+    function updateContextHelp(registryType) {
+      if (!window.mpgSetContextHelp || !window.mpgResetContextHelp) return;
+      if (registryType === 'json') {
+        window.mpgSetContextHelp('protocol_json');
+      } else {
+        window.mpgResetContextHelp();
+      }
+    }
+
     // Bind click listeners on all tab buttons
     document.querySelectorAll('.tab-btn[data-protocol]').forEach(btn => {
       // Remove any previously bound listener to avoid duplicates on re-swap
       btn.removeEventListener('click', btn._exportHandler);
       btn._exportHandler = function() {
         updateExportLinks(this.dataset.protocol, this.dataset.registry);
+        updateContextHelp(this.dataset.registry);
       };
       btn.addEventListener('click', btn._exportHandler);
     });
@@ -209,6 +223,7 @@
     const firstTab = document.querySelector('.tab-btn[data-protocol]');
     if (firstTab) {
       updateExportLinks(firstTab.dataset.protocol, firstTab.dataset.registry);
+      updateContextHelp(firstTab.dataset.registry);
     }
   })();
 </script>

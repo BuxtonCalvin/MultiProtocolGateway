@@ -814,8 +814,8 @@
       "y_percent": 48.4,
       "label": "Influx 3 settings",
       "shape_type": "rect",
-      "label_x_percent": 19.592078833715785,
-      "label_y_percent": 54.284356810612906,
+      "label_x_percent": 19.6,
+      "label_y_percent": 54.3,
       "width_percent": 17.7,
       "height_percent": 93.2,
       "stroke_color": "rgb(255,255,128)",
@@ -891,19 +891,6 @@
       "fill_color": "rgba(14,165,233,0.18)"
     },
     {
-      "id": "device__bridge_influxdb-rect-1787631464449",
-      "x_percent": 9.5,
-      "y_percent": 45.3,
-      "label": "Influx DB settings",
-      "shape_type": "rect",
-      "label_x_percent": 19.3,
-      "label_y_percent": 69.1,
-      "width_percent": 19.1,
-      "height_percent": 87.8,
-      "stroke_color": "rgb(255,255,128)",
-      "fill_color": "rgba(255,255,128,0.18)"
-    },
-    {
       "id": "device__bridge_influxdb-rect-storage",
       "x_percent": 79.6,
       "y_percent": 39.8,
@@ -915,6 +902,19 @@
       "height_percent": 46.3,
       "stroke_color": "rgb(14,165,233)",
       "fill_color": "rgba(14,165,233,0.18)"
+    },
+    {
+      "id": "device__bridge_influxdb-rect-settings",
+      "x_percent": 9.5,
+      "y_percent": 45.3,
+      "label": "Influx DB settings",
+      "shape_type": "rect",
+      "label_x_percent": 19.3,
+      "label_y_percent": 69.1,
+      "width_percent": 19.1,
+      "height_percent": 87.8,
+      "stroke_color": "rgb(255,255,128)",
+      "fill_color": "rgba(255,255,128,0.18)"
     }
   ],
   "device__bridge_mqtt": [
@@ -952,8 +952,6 @@
     "device__eg4_ll_s_2": "device__scraper_read_generic",
     "device__mqtt": "device__bridge_mqtt",
     "device__timescaledb": "device__bridge_timescaledb",
-    "device__influxdb_out": "device__bridge_influxdb",
-    "device__influx3db_out": "device__bridge_influx3db",
     "device__json_out": "device__bridge_json",
     "protocol-editor__*": "protocol_edit",
     "pages__logging-settings": "logging-settings",
@@ -961,10 +959,10 @@
     "pages__view-log": "view_log",
     "pages__transport-library": "transport_library",
     "pages__transport-settings": "transport_settings_trunc",
-    "device__influxdb": "device__bridge_generic",
+    "device__influxdb": "device__bridge_influxdb",
     "pages__create-device": "create_device",
     "pages__analyze*": "analysis",
-    "device__influxdb3": "device__bridge_generic",
+    "device__influxdb3": "device__bridge_influx3db",
     "pages__create-protocol": "create_protocol",
     "device__device_help": "device__device_help",
     "pages__timescale-delete-columns": "timescale_delete",
@@ -975,6 +973,6 @@
     "pages__timescale-rebuild-rollups": "timescale_rebuild_rollups",
     "pages__timescale_compression_group_list": "compression",
     "pages__timescale-rebuild-compression": "compression",
-    "device__prometheus_out": "device__bridge_prometheus"
+    "device__prometheus": "device__bridge_prometheus"
   }
 }

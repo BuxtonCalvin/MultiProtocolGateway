@@ -87,6 +87,23 @@
    shift very slightly bluer as a result; every other --mpg-900 usage was
    already at this value. */
 
+/* ── Brand mark — the "MPG" text logo in the top nav ─────────────────────
+   Flat color only, no glow/gradient (the source logo artwork has those,
+   this intentionally doesn't). Uses --color-primary rather than
+   --color-accent: --color-accent is reused everywhere for focus rings,
+   active tabs, and links, so tying the brand mark to it would mean any
+   future accent-color change also silently recolors the logo. Decoupling
+   the two lets each vary independently. Dark mode swaps to the lighter
+   --color-accent tone for a bit more contrast against the header's
+   near-black background — same light/dark token-swap pattern used
+   throughout this file (e.g. .label below), just applied to one element. */
+.brand-mark {
+  color: rgb(var(--color-primary));
+}
+.dark .brand-mark {
+  color: rgb(var(--color-accent));
+}
+
 
 /* ══════════════════════════════════════════════════════════════════════
    1. ACCESSIBILITY & BASE ELEMENT DEFAULTS
