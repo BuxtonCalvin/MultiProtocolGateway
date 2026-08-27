@@ -2,7 +2,7 @@
   "apiVersion": "dashboard.grafana.app/v2",
   "kind": "Dashboard",
   "metadata": {
-    "name": "7d84886e-fba2-44ab-9d7f-d89bebbd9126"
+    "name": "kefmj8z"
   },
   "spec": {
     "annotations": [
@@ -42,47 +42,20 @@
                     "hidden": false,
                     "query": {
                       "datasource": {
-                        "name": "000000001"
+                        "name": "afwe78j0ll1j4b"
                       },
                       "group": "influxdb",
                       "kind": "DataQuery",
                       "spec": {
-                        "alias": "Ch 1",
-                        "groupBy": [
-                          {
-                            "params": [
-                              "$__interval"
-                            ],
-                            "type": "time"
-                          },
-                          {
-                            "params": [
-                              "null"
-                            ],
-                            "type": "fill"
-                          }
-                        ],
-                        "measurement": "device_data",
-                        "orderByTime": "ASC",
-                        "policy": "default",
-                        "query": "SELECT last(\"afci_arcch1\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time($__interval) fill(null)",
+                        "editorMode": "code",
+                        "format": "time_series",
                         "rawQuery": true,
-                        "resultFormat": "time_series",
-                        "select": [
-                          [
-                            {
-                              "params": [
-                                "afci_arcch1"
-                              ],
-                              "type": "field"
-                            },
-                            {
-                              "params": [],
-                              "type": "last"
-                            }
-                          ]
-                        ],
-                        "tags": []
+                        "rawSql": "SELECT\n  date_bin(INTERVAL '$__interval_ms' MILLISECOND, time) AS time,\n  selector_last(afci_arcch1, time)['value'] AS \"Ch 1\"\nFROM device_data\nWHERE $__timeFilter(time)\n  AND device_name IN (${device_name:sqlstring})\nGROUP BY 1\nORDER BY 1",
+                        "sql": {
+                          "columns": [],
+                          "groupBy": [],
+                          "limit": 50
+                        }
                       },
                       "version": "v0"
                     },
@@ -95,47 +68,20 @@
                     "hidden": false,
                     "query": {
                       "datasource": {
-                        "name": "000000001"
+                        "name": "afwe78j0ll1j4b"
                       },
                       "group": "influxdb",
                       "kind": "DataQuery",
                       "spec": {
-                        "alias": "Ch 2",
-                        "groupBy": [
-                          {
-                            "params": [
-                              "$__interval"
-                            ],
-                            "type": "time"
-                          },
-                          {
-                            "params": [
-                              "null"
-                            ],
-                            "type": "fill"
-                          }
-                        ],
-                        "measurement": "device_data",
-                        "orderByTime": "ASC",
-                        "policy": "default",
-                        "query": "SELECT last(\"afci_arcch2\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/  GROUP BY time($__interval) fill(null)",
+                        "editorMode": "code",
+                        "format": "time_series",
                         "rawQuery": true,
-                        "resultFormat": "time_series",
-                        "select": [
-                          [
-                            {
-                              "params": [
-                                "afci_arcch2"
-                              ],
-                              "type": "field"
-                            },
-                            {
-                              "params": [],
-                              "type": "last"
-                            }
-                          ]
-                        ],
-                        "tags": []
+                        "rawSql": "SELECT\n  date_bin(INTERVAL '$__interval_ms' MILLISECOND, time) AS time,\n  selector_last(afci_arcch2, time)['value'] AS \"Ch 2\"\nFROM device_data\nWHERE $__timeFilter(time)\n  AND device_name IN (${device_name:sqlstring})\nGROUP BY 1\nORDER BY 1",
+                        "sql": {
+                          "columns": [],
+                          "groupBy": [],
+                          "limit": 50
+                        }
                       },
                       "version": "v0"
                     },
@@ -148,47 +94,20 @@
                     "hidden": false,
                     "query": {
                       "datasource": {
-                        "name": "000000001"
+                        "name": "afwe78j0ll1j4b"
                       },
                       "group": "influxdb",
                       "kind": "DataQuery",
                       "spec": {
-                        "alias": "Ch 3",
-                        "groupBy": [
-                          {
-                            "params": [
-                              "$__interval"
-                            ],
-                            "type": "time"
-                          },
-                          {
-                            "params": [
-                              "null"
-                            ],
-                            "type": "fill"
-                          }
-                        ],
-                        "measurement": "device_data",
-                        "orderByTime": "ASC",
-                        "policy": "default",
-                        "query": "SELECT last(\"afci_arcch3\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time($__interval) fill(null)",
+                        "editorMode": "code",
+                        "format": "time_series",
                         "rawQuery": true,
-                        "resultFormat": "time_series",
-                        "select": [
-                          [
-                            {
-                              "params": [
-                                "afci_arcch3"
-                              ],
-                              "type": "field"
-                            },
-                            {
-                              "params": [],
-                              "type": "last"
-                            }
-                          ]
-                        ],
-                        "tags": []
+                        "rawSql": "SELECT\n  date_bin(INTERVAL '$__interval_ms' MILLISECOND, time) AS time,\n  selector_last(afci_arcch3, time)['value'] AS \"Ch 3\"\nFROM device_data\nWHERE $__timeFilter(time)\n  AND device_name IN (${device_name:sqlstring})\nGROUP BY 1\nORDER BY 1",
+                        "sql": {
+                          "columns": [],
+                          "groupBy": [],
+                          "limit": 50
+                        }
                       },
                       "version": "v0"
                     },
@@ -201,47 +120,20 @@
                     "hidden": false,
                     "query": {
                       "datasource": {
-                        "name": "000000001"
+                        "name": "afwe78j0ll1j4b"
                       },
                       "group": "influxdb",
                       "kind": "DataQuery",
                       "spec": {
-                        "alias": "Ch 4",
-                        "groupBy": [
-                          {
-                            "params": [
-                              "$__interval"
-                            ],
-                            "type": "time"
-                          },
-                          {
-                            "params": [
-                              "null"
-                            ],
-                            "type": "fill"
-                          }
-                        ],
-                        "measurement": "device_data",
-                        "orderByTime": "ASC",
-                        "policy": "default",
-                        "query": "SELECT last(\"afci_arcch4\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time($__interval) fill(null)",
+                        "editorMode": "code",
+                        "format": "time_series",
                         "rawQuery": true,
-                        "resultFormat": "time_series",
-                        "select": [
-                          [
-                            {
-                              "params": [
-                                "afci_arcch4"
-                              ],
-                              "type": "field"
-                            },
-                            {
-                              "params": [],
-                              "type": "last"
-                            }
-                          ]
-                        ],
-                        "tags": []
+                        "rawSql": "SELECT\n  date_bin(INTERVAL '$__interval_ms' MILLISECOND, time) AS time,\n  selector_last(afci_arcch4, time)['value'] AS \"Ch 4\"\nFROM device_data\nWHERE $__timeFilter(time)\n  AND device_name IN (${device_name:sqlstring})\nGROUP BY 1\nORDER BY 1",
+                        "sql": {
+                          "columns": [],
+                          "groupBy": [],
+                          "limit": 50
+                        }
                       },
                       "version": "v0"
                     },
@@ -357,47 +249,20 @@
                     "hidden": false,
                     "query": {
                       "datasource": {
-                        "name": "000000001"
+                        "name": "afwe78j0ll1j4b"
                       },
                       "group": "influxdb",
                       "kind": "DataQuery",
                       "spec": {
-                        "alias": "Solar",
-                        "groupBy": [
-                          {
-                            "params": [
-                              "$__interval"
-                            ],
-                            "type": "time"
-                          },
-                          {
-                            "params": [
-                              "null"
-                            ],
-                            "type": "fill"
-                          }
-                        ],
-                        "measurement": "device_data",
-                        "orderByTime": "ASC",
-                        "policy": "default",
-                        "query": "SELECT last(\"epv1_day\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time(1d,$TimeOffset) fill(null)",
+                        "editorMode": "code",
+                        "format": "time_series",
                         "rawQuery": true,
-                        "resultFormat": "time_series",
-                        "select": [
-                          [
-                            {
-                              "params": [
-                                "epv1_day"
-                              ],
-                              "type": "field"
-                            },
-                            {
-                              "params": [],
-                              "type": "last"
-                            }
-                          ]
-                        ],
-                        "tags": []
+                        "rawSql": "SELECT\n  DATE_BIN(INTERVAL '1 day', time, TIMESTAMP '$TimeOffset') AS time,\n  selector_last(epv1_day, time)['value'] AS \"Solar\"\nFROM device_data\nWHERE $__timeFilter(time)\n  AND device_name IN (${device_name:sqlstring})\nGROUP BY 1\nORDER BY 1",
+                        "sql": {
+                          "columns": [],
+                          "groupBy": [],
+                          "limit": 50
+                        }
                       },
                       "version": "v0"
                     },
@@ -410,47 +275,20 @@
                     "hidden": false,
                     "query": {
                       "datasource": {
-                        "name": "000000001"
+                        "name": "afwe78j0ll1j4b"
                       },
                       "group": "influxdb",
                       "kind": "DataQuery",
                       "spec": {
-                        "alias": "Consumption",
-                        "groupBy": [
-                          {
-                            "params": [
-                              "$__interval"
-                            ],
-                            "type": "time"
-                          },
-                          {
-                            "params": [
-                              "null"
-                            ],
-                            "type": "fill"
-                          }
-                        ],
-                        "measurement": "device_data",
-                        "orderByTime": "ASC",
-                        "policy": "default",
-                        "query": "SELECT last(\"eload_day\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time(1d,$TimeOffset) fill(null)",
+                        "editorMode": "code",
+                        "format": "time_series",
                         "rawQuery": true,
-                        "resultFormat": "time_series",
-                        "select": [
-                          [
-                            {
-                              "params": [
-                                "eload_day"
-                              ],
-                              "type": "field"
-                            },
-                            {
-                              "params": [],
-                              "type": "last"
-                            }
-                          ]
-                        ],
-                        "tags": []
+                        "rawSql": "SELECT\n  DATE_BIN(INTERVAL '1 day', time, TIMESTAMP '$TimeOffset') AS time,\n  selector_last(eload_day, time)['value'] AS \"Consumption\"\nFROM device_data\nWHERE $__timeFilter(time)\n  AND device_name IN (${device_name:sqlstring})\nGROUP BY 1\nORDER BY 1",
+                        "sql": {
+                          "columns": [],
+                          "groupBy": [],
+                          "limit": 50
+                        }
                       },
                       "version": "v0"
                     },
@@ -463,47 +301,20 @@
                     "hidden": false,
                     "query": {
                       "datasource": {
-                        "name": "000000001"
+                        "name": "afwe78j0ll1j4b"
                       },
                       "group": "influxdb",
                       "kind": "DataQuery",
                       "spec": {
-                        "alias": "Import From Grid",
-                        "groupBy": [
-                          {
-                            "params": [
-                              "$__interval"
-                            ],
-                            "type": "time"
-                          },
-                          {
-                            "params": [
-                              "null"
-                            ],
-                            "type": "fill"
-                          }
-                        ],
-                        "measurement": "device_data",
-                        "orderByTime": "ASC",
-                        "policy": "default",
-                        "query": "SELECT last(\"etouser_day\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time(1d,$TimeOffset) fill(null)",
+                        "editorMode": "code",
+                        "format": "time_series",
                         "rawQuery": true,
-                        "resultFormat": "time_series",
-                        "select": [
-                          [
-                            {
-                              "params": [
-                                "etouser_day"
-                              ],
-                              "type": "field"
-                            },
-                            {
-                              "params": [],
-                              "type": "last"
-                            }
-                          ]
-                        ],
-                        "tags": []
+                        "rawSql": "SELECT\n  DATE_BIN(INTERVAL '1 day', time, TIMESTAMP '$TimeOffset') AS time,\n  selector_last(etouser_day, time)['value'] AS \"Import From Grid\"\nFROM device_data\nWHERE $__timeFilter(time)\n  AND device_name IN (${device_name:sqlstring})\nGROUP BY 1\nORDER BY 1",
+                        "sql": {
+                          "columns": [],
+                          "groupBy": [],
+                          "limit": 50
+                        }
                       },
                       "version": "v0"
                     },
@@ -516,47 +327,20 @@
                     "hidden": false,
                     "query": {
                       "datasource": {
-                        "name": "000000001"
+                        "name": "afwe78j0ll1j4b"
                       },
                       "group": "influxdb",
                       "kind": "DataQuery",
                       "spec": {
-                        "alias": "Export To Grid",
-                        "groupBy": [
-                          {
-                            "params": [
-                              "$__interval"
-                            ],
-                            "type": "time"
-                          },
-                          {
-                            "params": [
-                              "null"
-                            ],
-                            "type": "fill"
-                          }
-                        ],
-                        "measurement": "device_data",
-                        "orderByTime": "ASC",
-                        "policy": "default",
-                        "query": "SELECT last(\"etogrid_day\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time(1d,$TimeOffset) fill(null)",
+                        "editorMode": "code",
+                        "format": "time_series",
                         "rawQuery": true,
-                        "resultFormat": "time_series",
-                        "select": [
-                          [
-                            {
-                              "params": [
-                                "etogrid_day"
-                              ],
-                              "type": "field"
-                            },
-                            {
-                              "params": [],
-                              "type": "last"
-                            }
-                          ]
-                        ],
-                        "tags": []
+                        "rawSql": "SELECT\n  DATE_BIN(INTERVAL '1 day', time, TIMESTAMP '$TimeOffset') AS time,\n  selector_last(etogrid_day, time)['value'] AS \"Export To Grid\"\nFROM device_data\nWHERE $__timeFilter(time)\n  AND device_name IN (${device_name:sqlstring})\nGROUP BY 1\nORDER BY 1",
+                        "sql": {
+                          "columns": [],
+                          "groupBy": [],
+                          "limit": 50
+                        }
                       },
                       "version": "v0"
                     },
@@ -569,47 +353,20 @@
                     "hidden": false,
                     "query": {
                       "datasource": {
-                        "name": "000000001"
+                        "name": "afwe78j0ll1j4b"
                       },
                       "group": "influxdb",
                       "kind": "DataQuery",
                       "spec": {
-                        "alias": "Battery Charge",
-                        "groupBy": [
-                          {
-                            "params": [
-                              "$__interval"
-                            ],
-                            "type": "time"
-                          },
-                          {
-                            "params": [
-                              "null"
-                            ],
-                            "type": "fill"
-                          }
-                        ],
-                        "measurement": "device_data",
-                        "orderByTime": "ASC",
-                        "policy": "default",
-                        "query": "SELECT last(\"echg_day\") FROM \"device_data\" WHERE $timeFilter AND \"device_name\" =~ /^$device_name$/  GROUP BY time(1d,$TimeOffset) fill(null)",
+                        "editorMode": "code",
+                        "format": "time_series",
                         "rawQuery": true,
-                        "resultFormat": "time_series",
-                        "select": [
-                          [
-                            {
-                              "params": [
-                                "echg_day"
-                              ],
-                              "type": "field"
-                            },
-                            {
-                              "params": [],
-                              "type": "last"
-                            }
-                          ]
-                        ],
-                        "tags": []
+                        "rawSql": "SELECT\n  DATE_BIN(INTERVAL '1 day', time, TIMESTAMP '$TimeOffset') AS time,\n  selector_last(echg_day, time)['value'] AS \"Battery Charge\"\nFROM device_data\nWHERE $__timeFilter(time)\n  AND device_name IN (${device_name:sqlstring})\nGROUP BY 1\nORDER BY 1",
+                        "sql": {
+                          "columns": [],
+                          "groupBy": [],
+                          "limit": 50
+                        }
                       },
                       "version": "v0"
                     },
@@ -622,47 +379,20 @@
                     "hidden": false,
                     "query": {
                       "datasource": {
-                        "name": "000000001"
+                        "name": "afwe78j0ll1j4b"
                       },
                       "group": "influxdb",
                       "kind": "DataQuery",
                       "spec": {
-                        "alias": "Battery Discharge",
-                        "groupBy": [
-                          {
-                            "params": [
-                              "$__interval"
-                            ],
-                            "type": "time"
-                          },
-                          {
-                            "params": [
-                              "null"
-                            ],
-                            "type": "fill"
-                          }
-                        ],
-                        "measurement": "device_data",
-                        "orderByTime": "ASC",
-                        "policy": "default",
-                        "query": "SELECT last(\"edischg_day\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/  GROUP BY time(1d,$TimeOffset) fill(null)",
+                        "editorMode": "code",
+                        "format": "time_series",
                         "rawQuery": true,
-                        "resultFormat": "time_series",
-                        "select": [
-                          [
-                            {
-                              "params": [
-                                "edischg_day"
-                              ],
-                              "type": "field"
-                            },
-                            {
-                              "params": [],
-                              "type": "last"
-                            }
-                          ]
-                        ],
-                        "tags": []
+                        "rawSql": "SELECT\n  DATE_BIN(INTERVAL '1 day', time, TIMESTAMP '$TimeOffset') AS time,\n  selector_last(edischg_day, time)['value'] AS \"Battery Discharge\"\nFROM device_data\nWHERE $__timeFilter(time)\n  AND device_name IN (${device_name:sqlstring})\nGROUP BY 1\nORDER BY 1",
+                        "sql": {
+                          "columns": [],
+                          "groupBy": [],
+                          "limit": 50
+                        }
                       },
                       "version": "v0"
                     },
@@ -675,47 +405,20 @@
                     "hidden": false,
                     "query": {
                       "datasource": {
-                        "name": "000000001"
+                        "name": "afwe78j0ll1j4b"
                       },
                       "group": "influxdb",
                       "kind": "DataQuery",
                       "spec": {
-                        "alias": " Inverter Output",
-                        "groupBy": [
-                          {
-                            "params": [
-                              "$__interval"
-                            ],
-                            "type": "time"
-                          },
-                          {
-                            "params": [
-                              "null"
-                            ],
-                            "type": "fill"
-                          }
-                        ],
-                        "measurement": "device_data",
-                        "orderByTime": "ASC",
-                        "policy": "default",
-                        "query": "SELECT last(\"einv_day\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time(1d,$TimeOffset) fill(null)",
+                        "editorMode": "code",
+                        "format": "time_series",
                         "rawQuery": true,
-                        "resultFormat": "time_series",
-                        "select": [
-                          [
-                            {
-                              "params": [
-                                "einv_day"
-                              ],
-                              "type": "field"
-                            },
-                            {
-                              "params": [],
-                              "type": "last"
-                            }
-                          ]
-                        ],
-                        "tags": []
+                        "rawSql": "SELECT\n  DATE_BIN(INTERVAL '1 day', time, TIMESTAMP '$TimeOffset') AS time,\n  selector_last(einv_day, time)['value'] AS \" Inverter Output\"\nFROM device_data\nWHERE $__timeFilter(time)\n  AND device_name IN (${device_name:sqlstring})\nGROUP BY 1\nORDER BY 1",
+                        "sql": {
+                          "columns": [],
+                          "groupBy": [],
+                          "limit": 50
+                        }
                       },
                       "version": "v0"
                     },
@@ -954,47 +657,20 @@
                     "hidden": false,
                     "query": {
                       "datasource": {
-                        "name": "000000001"
+                        "name": "afwe78j0ll1j4b"
                       },
                       "group": "influxdb",
                       "kind": "DataQuery",
                       "spec": {
-                        "alias": "Peak Solar Power",
-                        "groupBy": [
-                          {
-                            "params": [
-                              "$__interval"
-                            ],
-                            "type": "time"
-                          },
-                          {
-                            "params": [
-                              "null"
-                            ],
-                            "type": "fill"
-                          }
-                        ],
-                        "measurement": "device_data",
-                        "orderByTime": "ASC",
-                        "policy": "default",
-                        "query": "SELECT max(\"ppv1\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/  GROUP BY time(1d,$TimeOffset) fill(null)",
+                        "editorMode": "code",
+                        "format": "time_series",
                         "rawQuery": true,
-                        "resultFormat": "time_series",
-                        "select": [
-                          [
-                            {
-                              "params": [
-                                "ppv1"
-                              ],
-                              "type": "field"
-                            },
-                            {
-                              "params": [],
-                              "type": "mean"
-                            }
-                          ]
-                        ],
-                        "tags": []
+                        "rawSql": "SELECT\n  DATE_BIN(INTERVAL '1 day', time, TIMESTAMP '$TimeOffset') AS time,\n  MAX(ppv1) AS \"Peak Solar Power\"\nFROM device_data\nWHERE $__timeFilter(time)\n  AND device_name IN (${device_name:sqlstring})\nGROUP BY 1\nORDER BY 1",
+                        "sql": {
+                          "columns": [],
+                          "groupBy": [],
+                          "limit": 50
+                        }
                       },
                       "version": "v0"
                     },
@@ -1104,47 +780,20 @@
                     "hidden": false,
                     "query": {
                       "datasource": {
-                        "name": "000000001"
+                        "name": "afwe78j0ll1j4b"
                       },
                       "group": "influxdb",
                       "kind": "DataQuery",
                       "spec": {
-                        "alias": "SOC %",
-                        "groupBy": [
-                          {
-                            "params": [
-                              "$__interval"
-                            ],
-                            "type": "time"
-                          },
-                          {
-                            "params": [
-                              "null"
-                            ],
-                            "type": "fill"
-                          }
-                        ],
-                        "measurement": "device_data",
-                        "orderByTime": "ASC",
-                        "policy": "default",
-                        "query": "SELECT last(\"soc\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time($__interval) fill(null)",
+                        "editorMode": "code",
+                        "format": "time_series",
                         "rawQuery": true,
-                        "resultFormat": "time_series",
-                        "select": [
-                          [
-                            {
-                              "params": [
-                                "soc"
-                              ],
-                              "type": "field"
-                            },
-                            {
-                              "params": [],
-                              "type": "last"
-                            }
-                          ]
-                        ],
-                        "tags": []
+                        "rawSql": "SELECT\n  date_bin(INTERVAL '$__interval_ms' MILLISECOND, time) AS time,\n  selector_last(soc, time)['value'] AS \"SOC %\"\nFROM device_data\nWHERE $__timeFilter(time)\n  AND device_name IN (${device_name:sqlstring})\nGROUP BY 1\nORDER BY 1",
+                        "sql": {
+                          "columns": [],
+                          "groupBy": [],
+                          "limit": 50
+                        }
                       },
                       "version": "v0"
                     },
@@ -1157,47 +806,20 @@
                     "hidden": false,
                     "query": {
                       "datasource": {
-                        "name": "000000001"
+                        "name": "afwe78j0ll1j4b"
                       },
                       "group": "influxdb",
                       "kind": "DataQuery",
                       "spec": {
-                        "alias": "Voltage (V)",
-                        "groupBy": [
-                          {
-                            "params": [
-                              "$__interval"
-                            ],
-                            "type": "time"
-                          },
-                          {
-                            "params": [
-                              "null"
-                            ],
-                            "type": "fill"
-                          }
-                        ],
-                        "measurement": "device_data",
-                        "orderByTime": "ASC",
-                        "policy": "default",
-                        "query": "SELECT last(\"vbat\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time($__interval) fill(null)",
+                        "editorMode": "code",
+                        "format": "time_series",
                         "rawQuery": true,
-                        "resultFormat": "time_series",
-                        "select": [
-                          [
-                            {
-                              "params": [
-                                "vbat"
-                              ],
-                              "type": "field"
-                            },
-                            {
-                              "params": [],
-                              "type": "last"
-                            }
-                          ]
-                        ],
-                        "tags": []
+                        "rawSql": "SELECT\n  date_bin(INTERVAL '$__interval_ms' MILLISECOND, time) AS time,\n  selector_last(vbat, time)['value'] AS \"Voltage (V)\"\nFROM device_data\nWHERE $__timeFilter(time)\n  AND device_name IN (${device_name:sqlstring})\nGROUP BY 1\nORDER BY 1",
+                        "sql": {
+                          "columns": [],
+                          "groupBy": [],
+                          "limit": 50
+                        }
                       },
                       "version": "v0"
                     },
@@ -1210,47 +832,20 @@
                     "hidden": false,
                     "query": {
                       "datasource": {
-                        "name": "000000001"
+                        "name": "afwe78j0ll1j4b"
                       },
                       "group": "influxdb",
                       "kind": "DataQuery",
                       "spec": {
-                        "alias": "Charge (W)",
-                        "groupBy": [
-                          {
-                            "params": [
-                              "$__interval"
-                            ],
-                            "type": "time"
-                          },
-                          {
-                            "params": [
-                              "null"
-                            ],
-                            "type": "fill"
-                          }
-                        ],
-                        "measurement": "device_data",
-                        "orderByTime": "ASC",
-                        "policy": "default",
-                        "query": "SELECT last(\"pcharge\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time($__interval) fill(null)",
+                        "editorMode": "code",
+                        "format": "time_series",
                         "rawQuery": true,
-                        "resultFormat": "time_series",
-                        "select": [
-                          [
-                            {
-                              "params": [
-                                "pcharge"
-                              ],
-                              "type": "field"
-                            },
-                            {
-                              "params": [],
-                              "type": "last"
-                            }
-                          ]
-                        ],
-                        "tags": []
+                        "rawSql": "SELECT\n  date_bin(INTERVAL '$__interval_ms' MILLISECOND, time) AS time,\n  selector_last(pcharge, time)['value'] AS \"Charge (W)\"\nFROM device_data\nWHERE $__timeFilter(time)\n  AND device_name IN (${device_name:sqlstring})\nGROUP BY 1\nORDER BY 1",
+                        "sql": {
+                          "columns": [],
+                          "groupBy": [],
+                          "limit": 50
+                        }
                       },
                       "version": "v0"
                     },
@@ -1263,47 +858,20 @@
                     "hidden": false,
                     "query": {
                       "datasource": {
-                        "name": "000000001"
+                        "name": "afwe78j0ll1j4b"
                       },
                       "group": "influxdb",
                       "kind": "DataQuery",
                       "spec": {
-                        "alias": "Discharge (W)",
-                        "groupBy": [
-                          {
-                            "params": [
-                              "$__interval"
-                            ],
-                            "type": "time"
-                          },
-                          {
-                            "params": [
-                              "null"
-                            ],
-                            "type": "fill"
-                          }
-                        ],
-                        "measurement": "device_data",
-                        "orderByTime": "ASC",
-                        "policy": "default",
-                        "query": "SELECT last(\"pdischarge\") FROM \"device_data\" WHERE $timeFilter AND \"device_name\" =~ /^$device_name$/  GROUP BY time($__interval) fill(null)",
+                        "editorMode": "code",
+                        "format": "time_series",
                         "rawQuery": true,
-                        "resultFormat": "time_series",
-                        "select": [
-                          [
-                            {
-                              "params": [
-                                "pdischarge"
-                              ],
-                              "type": "field"
-                            },
-                            {
-                              "params": [],
-                              "type": "last"
-                            }
-                          ]
-                        ],
-                        "tags": []
+                        "rawSql": "SELECT\n  date_bin(INTERVAL '$__interval_ms' MILLISECOND, time) AS time,\n  selector_last(pdischarge, time)['value'] AS \"Discharge (W)\"\nFROM device_data\nWHERE $__timeFilter(time)\n  AND device_name IN (${device_name:sqlstring})\nGROUP BY 1\nORDER BY 1",
+                        "sql": {
+                          "columns": [],
+                          "groupBy": [],
+                          "limit": 50
+                        }
                       },
                       "version": "v0"
                     },
@@ -1439,47 +1007,20 @@
                     "hidden": false,
                     "query": {
                       "datasource": {
-                        "name": "000000001"
+                        "name": "afwe78j0ll1j4b"
                       },
                       "group": "influxdb",
                       "kind": "DataQuery",
                       "spec": {
-                        "alias": "Line 1 Volts",
-                        "groupBy": [
-                          {
-                            "params": [
-                              "$__interval"
-                            ],
-                            "type": "time"
-                          },
-                          {
-                            "params": [
-                              "null"
-                            ],
-                            "type": "fill"
-                          }
-                        ],
-                        "measurement": "device_data",
-                        "orderByTime": "ASC",
-                        "policy": "default",
-                        "query": "SELECT mean(\"epsvoltl1n\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/  GROUP BY time($__interval) fill(null)",
+                        "editorMode": "code",
+                        "format": "time_series",
                         "rawQuery": true,
-                        "resultFormat": "time_series",
-                        "select": [
-                          [
-                            {
-                              "params": [
-                                "epsvoltl1n"
-                              ],
-                              "type": "field"
-                            },
-                            {
-                              "params": [],
-                              "type": "mean"
-                            }
-                          ]
-                        ],
-                        "tags": []
+                        "rawSql": "SELECT\n  date_bin(INTERVAL '$__interval_ms' MILLISECOND, time) AS time,\n  AVG(epsvoltl1n) AS \"Line 1 Volts\"\nFROM device_data\nWHERE $__timeFilter(time)\n  AND device_name IN (${device_name:sqlstring})\nGROUP BY 1\nORDER BY 1",
+                        "sql": {
+                          "columns": [],
+                          "groupBy": [],
+                          "limit": 50
+                        }
                       },
                       "version": "v0"
                     },
@@ -1492,47 +1033,20 @@
                     "hidden": false,
                     "query": {
                       "datasource": {
-                        "name": "000000001"
+                        "name": "afwe78j0ll1j4b"
                       },
                       "group": "influxdb",
                       "kind": "DataQuery",
                       "spec": {
-                        "alias": "Line 2 Volts",
-                        "groupBy": [
-                          {
-                            "params": [
-                              "$__interval"
-                            ],
-                            "type": "time"
-                          },
-                          {
-                            "params": [
-                              "null"
-                            ],
-                            "type": "fill"
-                          }
-                        ],
-                        "measurement": "device_data",
-                        "orderByTime": "ASC",
-                        "policy": "default",
-                        "query": "SELECT mean(\"epsvoltl2n\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/  GROUP BY time($__interval) fill(null)",
+                        "editorMode": "code",
+                        "format": "time_series",
                         "rawQuery": true,
-                        "resultFormat": "time_series",
-                        "select": [
-                          [
-                            {
-                              "params": [
-                                "epsvoltl2n"
-                              ],
-                              "type": "field"
-                            },
-                            {
-                              "params": [],
-                              "type": "mean"
-                            }
-                          ]
-                        ],
-                        "tags": []
+                        "rawSql": "SELECT\n  date_bin(INTERVAL '$__interval_ms' MILLISECOND, time) AS time,\n  AVG(epsvoltl2n) AS \"Line 2 Volts\"\nFROM device_data\nWHERE $__timeFilter(time)\n  AND device_name IN (${device_name:sqlstring})\nGROUP BY 1\nORDER BY 1",
+                        "sql": {
+                          "columns": [],
+                          "groupBy": [],
+                          "limit": 50
+                        }
                       },
                       "version": "v0"
                     },
@@ -1545,47 +1059,20 @@
                     "hidden": true,
                     "query": {
                       "datasource": {
-                        "name": "000000001"
+                        "name": "afwe78j0ll1j4b"
                       },
                       "group": "influxdb",
                       "kind": "DataQuery",
                       "spec": {
-                        "alias": "Hertz",
-                        "groupBy": [
-                          {
-                            "params": [
-                              "$__interval"
-                            ],
-                            "type": "time"
-                          },
-                          {
-                            "params": [
-                              "null"
-                            ],
-                            "type": "fill"
-                          }
-                        ],
-                        "measurement": "device_data",
-                        "orderByTime": "ASC",
-                        "policy": "default",
-                        "query": "SELECT mean(\"fac\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time($__interval) fill(null)",
+                        "editorMode": "code",
+                        "format": "time_series",
                         "rawQuery": true,
-                        "resultFormat": "time_series",
-                        "select": [
-                          [
-                            {
-                              "params": [
-                                "fac"
-                              ],
-                              "type": "field"
-                            },
-                            {
-                              "params": [],
-                              "type": "mean"
-                            }
-                          ]
-                        ],
-                        "tags": []
+                        "rawSql": "SELECT\n  date_bin(INTERVAL '$__interval_ms' MILLISECOND, time) AS time,\n  AVG(fac) AS \"Hertz\"\nFROM device_data\nWHERE $__timeFilter(time)\n  AND device_name IN (${device_name:sqlstring})\nGROUP BY 1\nORDER BY 1",
+                        "sql": {
+                          "columns": [],
+                          "groupBy": [],
+                          "limit": 50
+                        }
                       },
                       "version": "v0"
                     },
@@ -1667,6 +1154,30 @@
                         "id": "unit"
                       }
                     ]
+                  },
+                  {
+                    "__systemRef": "hideSeriesFrom",
+                    "matcher": {
+                      "id": "byNames",
+                      "options": {
+                        "mode": "exclude",
+                        "names": [
+                          "Line 1 Volts"
+                        ],
+                        "prefix": "All except:",
+                        "readOnly": true
+                      }
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.hideFrom",
+                        "value": {
+                          "legend": false,
+                          "tooltip": true,
+                          "viz": true
+                        }
+                      }
+                    ]
                   }
                 ]
               },
@@ -1709,47 +1220,20 @@
                     "hidden": false,
                     "query": {
                       "datasource": {
-                        "name": "000000001"
+                        "name": "afwe78j0ll1j4b"
                       },
                       "group": "influxdb",
                       "kind": "DataQuery",
                       "spec": {
-                        "alias": "PV 1 Volts",
-                        "groupBy": [
-                          {
-                            "params": [
-                              "$__interval"
-                            ],
-                            "type": "time"
-                          },
-                          {
-                            "params": [
-                              "null"
-                            ],
-                            "type": "fill"
-                          }
-                        ],
-                        "measurement": "device_data",
-                        "orderByTime": "ASC",
-                        "policy": "default",
-                        "query": "SELECT mean(\"vpv1\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time($__interval) fill(null)",
+                        "editorMode": "code",
+                        "format": "time_series",
                         "rawQuery": true,
-                        "resultFormat": "time_series",
-                        "select": [
-                          [
-                            {
-                              "params": [
-                                "vpv1"
-                              ],
-                              "type": "field"
-                            },
-                            {
-                              "params": [],
-                              "type": "mean"
-                            }
-                          ]
-                        ],
-                        "tags": []
+                        "rawSql": "SELECT\n  date_bin(INTERVAL '$__interval_ms' MILLISECOND, time) AS time,\n  AVG(vpv1) AS \"PV 1 Volts\"\nFROM device_data\nWHERE $__timeFilter(time)\n  AND device_name IN (${device_name:sqlstring})\nGROUP BY 1\nORDER BY 1",
+                        "sql": {
+                          "columns": [],
+                          "groupBy": [],
+                          "limit": 50
+                        }
                       },
                       "version": "v0"
                     },
@@ -1762,47 +1246,20 @@
                     "hidden": false,
                     "query": {
                       "datasource": {
-                        "name": "000000001"
+                        "name": "afwe78j0ll1j4b"
                       },
                       "group": "influxdb",
                       "kind": "DataQuery",
                       "spec": {
-                        "alias": "PV 1 Watts",
-                        "groupBy": [
-                          {
-                            "params": [
-                              "$__interval"
-                            ],
-                            "type": "time"
-                          },
-                          {
-                            "params": [
-                              "null"
-                            ],
-                            "type": "fill"
-                          }
-                        ],
-                        "measurement": "device_data",
-                        "orderByTime": "ASC",
-                        "policy": "default",
-                        "query": "SELECT mean(\"ppv1\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time($__interval) fill(null)",
+                        "editorMode": "code",
+                        "format": "time_series",
                         "rawQuery": true,
-                        "resultFormat": "time_series",
-                        "select": [
-                          [
-                            {
-                              "params": [
-                                "ppv1"
-                              ],
-                              "type": "field"
-                            },
-                            {
-                              "params": [],
-                              "type": "mean"
-                            }
-                          ]
-                        ],
-                        "tags": []
+                        "rawSql": "SELECT\n  date_bin(INTERVAL '$__interval_ms' MILLISECOND, time) AS time,\n  AVG(ppv1) AS \"PV 1 Watts\"\nFROM device_data\nWHERE $__timeFilter(time)\n  AND device_name IN (${device_name:sqlstring})\nGROUP BY 1\nORDER BY 1",
+                        "sql": {
+                          "columns": [],
+                          "groupBy": [],
+                          "limit": 50
+                        }
                       },
                       "version": "v0"
                     },
@@ -1924,47 +1381,20 @@
                     "hidden": false,
                     "query": {
                       "datasource": {
-                        "name": "000000001"
+                        "name": "afwe78j0ll1j4b"
                       },
                       "group": "influxdb",
                       "kind": "DataQuery",
                       "spec": {
-                        "alias": "Total Watts",
-                        "groupBy": [
-                          {
-                            "params": [
-                              "$__interval"
-                            ],
-                            "type": "time"
-                          },
-                          {
-                            "params": [
-                              "null"
-                            ],
-                            "type": "fill"
-                          }
-                        ],
-                        "measurement": "device_data",
-                        "orderByTime": "ASC",
-                        "policy": "default",
-                        "query": "SELECT mean(\"pload\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/  GROUP BY time($__interval) fill(null)",
+                        "editorMode": "code",
+                        "format": "time_series",
                         "rawQuery": true,
-                        "resultFormat": "time_series",
-                        "select": [
-                          [
-                            {
-                              "params": [
-                                "pload"
-                              ],
-                              "type": "field"
-                            },
-                            {
-                              "params": [],
-                              "type": "mean"
-                            }
-                          ]
-                        ],
-                        "tags": []
+                        "rawSql": "SELECT\n  date_bin(INTERVAL '$__interval_ms' MILLISECOND, time) AS time,\n  AVG(pload) AS \"Total Watts\"\nFROM device_data\nWHERE $__timeFilter(time)\n  AND device_name IN (${device_name:sqlstring})\nGROUP BY 1\nORDER BY 1",
+                        "sql": {
+                          "columns": [],
+                          "groupBy": [],
+                          "limit": 50
+                        }
                       },
                       "version": "v0"
                     },
@@ -1977,47 +1407,20 @@
                     "hidden": false,
                     "query": {
                       "datasource": {
-                        "name": "000000001"
+                        "name": "afwe78j0ll1j4b"
                       },
                       "group": "influxdb",
                       "kind": "DataQuery",
                       "spec": {
-                        "alias": "Grid To all Loads",
-                        "groupBy": [
-                          {
-                            "params": [
-                              "$__interval"
-                            ],
-                            "type": "time"
-                          },
-                          {
-                            "params": [
-                              "null"
-                            ],
-                            "type": "fill"
-                          }
-                        ],
-                        "measurement": "device_data",
-                        "orderByTime": "ASC",
-                        "policy": "default",
-                        "query": "SELECT mean(\"ptouser\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/  GROUP BY time($__interval) fill(null)",
+                        "editorMode": "code",
+                        "format": "time_series",
                         "rawQuery": true,
-                        "resultFormat": "time_series",
-                        "select": [
-                          [
-                            {
-                              "params": [
-                                "ptouser"
-                              ],
-                              "type": "field"
-                            },
-                            {
-                              "params": [],
-                              "type": "mean"
-                            }
-                          ]
-                        ],
-                        "tags": []
+                        "rawSql": "SELECT\n  date_bin(INTERVAL '$__interval_ms' MILLISECOND, time) AS time,\n  AVG(ptouser) AS \"Grid To all Loads\"\nFROM device_data\nWHERE $__timeFilter(time)\n  AND device_name IN (${device_name:sqlstring})\nGROUP BY 1\nORDER BY 1",
+                        "sql": {
+                          "columns": [],
+                          "groupBy": [],
+                          "limit": 50
+                        }
                       },
                       "version": "v0"
                     },
@@ -2030,47 +1433,20 @@
                     "hidden": false,
                     "query": {
                       "datasource": {
-                        "name": "000000001"
+                        "name": "afwe78j0ll1j4b"
                       },
                       "group": "influxdb",
                       "kind": "DataQuery",
                       "spec": {
-                        "alias": "Grid to batteries",
-                        "groupBy": [
-                          {
-                            "params": [
-                              "$__interval"
-                            ],
-                            "type": "time"
-                          },
-                          {
-                            "params": [
-                              "null"
-                            ],
-                            "type": "fill"
-                          }
-                        ],
-                        "measurement": "device_data",
-                        "orderByTime": "ASC",
-                        "policy": "default",
-                        "query": "SELECT mean(\"prec\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/  GROUP BY time($__interval) fill(null)",
+                        "editorMode": "code",
+                        "format": "time_series",
                         "rawQuery": true,
-                        "resultFormat": "time_series",
-                        "select": [
-                          [
-                            {
-                              "params": [
-                                "prec"
-                              ],
-                              "type": "field"
-                            },
-                            {
-                              "params": [],
-                              "type": "mean"
-                            }
-                          ]
-                        ],
-                        "tags": []
+                        "rawSql": "SELECT\n  date_bin(INTERVAL '$__interval_ms' MILLISECOND, time) AS time,\n  AVG(prec) AS \"Grid to batteries\"\nFROM device_data\nWHERE $__timeFilter(time)\n  AND device_name IN (${device_name:sqlstring})\nGROUP BY 1\nORDER BY 1",
+                        "sql": {
+                          "columns": [],
+                          "groupBy": [],
+                          "limit": 50
+                        }
                       },
                       "version": "v0"
                     },
@@ -2195,47 +1571,20 @@
                     "hidden": false,
                     "query": {
                       "datasource": {
-                        "name": "000000001"
+                        "name": "afwe78j0ll1j4b"
                       },
                       "group": "influxdb",
                       "kind": "DataQuery",
                       "spec": {
-                        "alias": "Solar To Grid",
-                        "groupBy": [
-                          {
-                            "params": [
-                              "$__interval"
-                            ],
-                            "type": "time"
-                          },
-                          {
-                            "params": [
-                              "null"
-                            ],
-                            "type": "fill"
-                          }
-                        ],
-                        "measurement": "device_data",
-                        "orderByTime": "ASC",
-                        "policy": "default",
-                        "query": "SELECT mean(\"ptogrid\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time($__interval) fill(null)",
+                        "editorMode": "code",
+                        "format": "time_series",
                         "rawQuery": true,
-                        "resultFormat": "time_series",
-                        "select": [
-                          [
-                            {
-                              "params": [
-                                "ptogrid"
-                              ],
-                              "type": "field"
-                            },
-                            {
-                              "params": [],
-                              "type": "mean"
-                            }
-                          ]
-                        ],
-                        "tags": []
+                        "rawSql": "SELECT\n  date_bin(INTERVAL '$__interval_ms' MILLISECOND, time) AS time,\n  AVG(ptogrid) AS \"Solar To Grid\"\nFROM device_data\nWHERE $__timeFilter(time)\n  AND device_name IN (${device_name:sqlstring})\nGROUP BY 1\nORDER BY 1",
+                        "sql": {
+                          "columns": [],
+                          "groupBy": [],
+                          "limit": 50
+                        }
                       },
                       "version": "v0"
                     },
@@ -2248,47 +1597,20 @@
                     "hidden": false,
                     "query": {
                       "datasource": {
-                        "name": "000000001"
+                        "name": "afwe78j0ll1j4b"
                       },
                       "group": "influxdb",
                       "kind": "DataQuery",
                       "spec": {
-                        "alias": "Solar/AC To Battery",
-                        "groupBy": [
-                          {
-                            "params": [
-                              "$__interval"
-                            ],
-                            "type": "time"
-                          },
-                          {
-                            "params": [
-                              "null"
-                            ],
-                            "type": "fill"
-                          }
-                        ],
-                        "measurement": "device_data",
-                        "orderByTime": "ASC",
-                        "policy": "default",
-                        "query": "SELECT mean(\"pcharge\") FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time($__interval) fill(null)",
+                        "editorMode": "code",
+                        "format": "time_series",
                         "rawQuery": true,
-                        "resultFormat": "time_series",
-                        "select": [
-                          [
-                            {
-                              "params": [
-                                "pcharge"
-                              ],
-                              "type": "field"
-                            },
-                            {
-                              "params": [],
-                              "type": "mean"
-                            }
-                          ]
-                        ],
-                        "tags": []
+                        "rawSql": "SELECT\n  date_bin(INTERVAL '$__interval_ms' MILLISECOND, time) AS time,\n  AVG(pcharge) AS \"Solar/AC To Battery\"\nFROM device_data\nWHERE $__timeFilter(time)\n  AND device_name IN (${device_name:sqlstring})\nGROUP BY 1\nORDER BY 1",
+                        "sql": {
+                          "columns": [],
+                          "groupBy": [],
+                          "limit": 50
+                        }
                       },
                       "version": "v0"
                     },
@@ -2413,47 +1735,20 @@
                     "hidden": false,
                     "query": {
                       "datasource": {
-                        "name": "000000001"
+                        "name": "afwe78j0ll1j4b"
                       },
                       "group": "influxdb",
                       "kind": "DataQuery",
                       "spec": {
-                        "alias": "Temperature of BDC (Low)",
-                        "groupBy": [
-                          {
-                            "params": [
-                              "$__interval"
-                            ],
-                            "type": "time"
-                          },
-                          {
-                            "params": [
-                              "null"
-                            ],
-                            "type": "fill"
-                          }
-                        ],
-                        "measurement": "device_data",
-                        "orderByTime": "ASC",
-                        "policy": "default",
-                        "query": "SELECT ((mean(\"tinner\") *1.8 )+ 32) FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time($__interval) fill(null)",
+                        "editorMode": "code",
+                        "format": "time_series",
                         "rawQuery": true,
-                        "resultFormat": "time_series",
-                        "select": [
-                          [
-                            {
-                              "params": [
-                                "tinner"
-                              ],
-                              "type": "field"
-                            },
-                            {
-                              "params": [],
-                              "type": "mean"
-                            }
-                          ]
-                        ],
-                        "tags": []
+                        "rawSql": "SELECT\n  date_bin(INTERVAL '$__interval_ms' MILLISECOND, time) AS time,\n  (AVG(tinner) * 1.8 + 32) AS \"Temperature of BDC (Low)\"\nFROM device_data\nWHERE $__timeFilter(time)\n  AND device_name IN (${device_name:sqlstring})\nGROUP BY 1\nORDER BY 1",
+                        "sql": {
+                          "columns": [],
+                          "groupBy": [],
+                          "limit": 50
+                        }
                       },
                       "version": "v0"
                     },
@@ -2466,47 +1761,20 @@
                     "hidden": false,
                     "query": {
                       "datasource": {
-                        "name": "000000001"
+                        "name": "afwe78j0ll1j4b"
                       },
                       "group": "influxdb",
                       "kind": "DataQuery",
                       "spec": {
-                        "alias": "Temperature of BDC (TF)",
-                        "groupBy": [
-                          {
-                            "params": [
-                              "$__interval"
-                            ],
-                            "type": "time"
-                          },
-                          {
-                            "params": [
-                              "null"
-                            ],
-                            "type": "fill"
-                          }
-                        ],
-                        "measurement": "device_data",
-                        "orderByTime": "ASC",
-                        "policy": "default",
-                        "query": "SELECT ((mean(\"tradiator1\")*1.8 )+ 32) FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time($__interval) fill(null)",
+                        "editorMode": "code",
+                        "format": "time_series",
                         "rawQuery": true,
-                        "resultFormat": "time_series",
-                        "select": [
-                          [
-                            {
-                              "params": [
-                                "tradiator1"
-                              ],
-                              "type": "field"
-                            },
-                            {
-                              "params": [],
-                              "type": "mean"
-                            }
-                          ]
-                        ],
-                        "tags": []
+                        "rawSql": "SELECT\n  date_bin(INTERVAL '$__interval_ms' MILLISECOND, time) AS time,\n  (AVG(tradiator1) * 1.8 + 32) AS \"Temperature of BDC (TF)\"\nFROM device_data\nWHERE $__timeFilter(time)\n  AND device_name IN (${device_name:sqlstring})\nGROUP BY 1\nORDER BY 1",
+                        "sql": {
+                          "columns": [],
+                          "groupBy": [],
+                          "limit": 50
+                        }
                       },
                       "version": "v0"
                     },
@@ -2519,47 +1787,20 @@
                     "hidden": false,
                     "query": {
                       "datasource": {
-                        "name": "000000001"
+                        "name": "afwe78j0ll1j4b"
                       },
                       "group": "influxdb",
                       "kind": "DataQuery",
                       "spec": {
-                        "alias": "Temperature of the Inverter",
-                        "groupBy": [
-                          {
-                            "params": [
-                              "$__interval"
-                            ],
-                            "type": "time"
-                          },
-                          {
-                            "params": [
-                              "null"
-                            ],
-                            "type": "fill"
-                          }
-                        ],
-                        "measurement": "device_data",
-                        "orderByTime": "ASC",
-                        "policy": "default",
-                        "query": "SELECT ((mean(\"tradiator2\")*1.8 )+ 32) FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time($__interval) fill(null)",
+                        "editorMode": "code",
+                        "format": "time_series",
                         "rawQuery": true,
-                        "resultFormat": "time_series",
-                        "select": [
-                          [
-                            {
-                              "params": [
-                                "tradiator2"
-                              ],
-                              "type": "field"
-                            },
-                            {
-                              "params": [],
-                              "type": "mean"
-                            }
-                          ]
-                        ],
-                        "tags": []
+                        "rawSql": "SELECT\n  date_bin(INTERVAL '$__interval_ms' MILLISECOND, time) AS time,\n  (AVG(tradiator2) * 1.8 + 32) AS \"Temperature of the Inverter\"\nFROM device_data\nWHERE $__timeFilter(time)\n  AND device_name IN (${device_name:sqlstring})\nGROUP BY 1\nORDER BY 1",
+                        "sql": {
+                          "columns": [],
+                          "groupBy": [],
+                          "limit": 50
+                        }
                       },
                       "version": "v0"
                     },
@@ -2572,47 +1813,20 @@
                     "hidden": true,
                     "query": {
                       "datasource": {
-                        "name": "000000001"
+                        "name": "afwe78j0ll1j4b"
                       },
                       "group": "influxdb",
                       "kind": "DataQuery",
                       "spec": {
-                        "alias": "Max Cell",
-                        "groupBy": [
-                          {
-                            "params": [
-                              "$__interval"
-                            ],
-                            "type": "time"
-                          },
-                          {
-                            "params": [
-                              "null"
-                            ],
-                            "type": "fill"
-                          }
-                        ],
-                        "measurement": "device_data",
-                        "orderByTime": "ASC",
-                        "policy": "default",
-                        "query": "SELECT ((mean(\"maxcelltemp_bms\")*1.8 )+ 32) * -1  FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time($__interval) fill(null)",
+                        "editorMode": "code",
+                        "format": "time_series",
                         "rawQuery": true,
-                        "resultFormat": "time_series",
-                        "select": [
-                          [
-                            {
-                              "params": [
-                                "maxcelltemp_bms"
-                              ],
-                              "type": "field"
-                            },
-                            {
-                              "params": [],
-                              "type": "mean"
-                            }
-                          ]
-                        ],
-                        "tags": []
+                        "rawSql": "SELECT\n  date_bin(INTERVAL '$__interval_ms' MILLISECOND, time) AS time,\n  ((AVG(maxcelltemp_bms) * 1.8 + 32) * -1) AS \"Max Cell\"\nFROM device_data\nWHERE $__timeFilter(time)\n  AND device_name IN (${device_name:sqlstring})\nGROUP BY 1\nORDER BY 1",
+                        "sql": {
+                          "columns": [],
+                          "groupBy": [],
+                          "limit": 50
+                        }
                       },
                       "version": "v0"
                     },
@@ -2625,47 +1839,20 @@
                     "hidden": true,
                     "query": {
                       "datasource": {
-                        "name": "000000001"
+                        "name": "afwe78j0ll1j4b"
                       },
                       "group": "influxdb",
                       "kind": "DataQuery",
                       "spec": {
-                        "alias": "Min Cell",
-                        "groupBy": [
-                          {
-                            "params": [
-                              "$__interval"
-                            ],
-                            "type": "time"
-                          },
-                          {
-                            "params": [
-                              "null"
-                            ],
-                            "type": "fill"
-                          }
-                        ],
-                        "measurement": "device_data",
-                        "orderByTime": "ASC",
-                        "policy": "default",
-                        "query": "SELECT ((mean(\"mincelltemp_bms\")*1.8 )+ 32) * -1  FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time($__interval) fill(null)",
+                        "editorMode": "code",
+                        "format": "time_series",
                         "rawQuery": true,
-                        "resultFormat": "time_series",
-                        "select": [
-                          [
-                            {
-                              "params": [
-                                "mincelltemp_bms"
-                              ],
-                              "type": "field"
-                            },
-                            {
-                              "params": [],
-                              "type": "mean"
-                            }
-                          ]
-                        ],
-                        "tags": []
+                        "rawSql": "SELECT\n  date_bin(INTERVAL '$__interval_ms' MILLISECOND, time) AS time,\n  ((AVG(mincelltemp_bms) * 1.8 + 32) * -1) AS \"Min Cell\"\nFROM device_data\nWHERE $__timeFilter(time)\n  AND device_name IN (${device_name:sqlstring})\nGROUP BY 1\nORDER BY 1",
+                        "sql": {
+                          "columns": [],
+                          "groupBy": [],
+                          "limit": 50
+                        }
                       },
                       "version": "v0"
                     },
@@ -2683,40 +1870,17 @@
                       "group": "influxdb",
                       "kind": "DataQuery",
                       "spec": {
-                        "alias": "Power Room",
-                        "groupBy": [
-                          {
-                            "params": [
-                              "$__interval"
-                            ],
-                            "type": "time"
-                          },
-                          {
-                            "params": [
-                              "null"
-                            ],
-                            "type": "fill"
-                          }
-                        ],
-                        "measurement": "VeraHome.340_TemperaturePowerRoom.TemperatureSensor1.CurrentTemperature",
-                        "orderByTime": "ASC",
-                        "policy": "default",
+                        "dataset": "iox",
+                        "editorMode": "builder",
+                        "format": "time_series",
+                        "query": "SELECT mean(\"value\") FROM \"VeraHome.340_TemperaturePowerRoom.TemperatureSensor1.CurrentTemperature\" WHERE $timeFilter GROUP BY time($__interval) fill(null)",
+                        "rawQuery": true,
+                        "rawSql": "",
                         "resultFormat": "time_series",
-                        "select": [
-                          [
-                            {
-                              "params": [
-                                "value"
-                              ],
-                              "type": "field"
-                            },
-                            {
-                              "params": [],
-                              "type": "mean"
-                            }
-                          ]
-                        ],
-                        "tags": []
+                        "sql": {
+                          "columns": [],
+                          "groupBy": []
+                        }
                       },
                       "version": "v0"
                     },
@@ -2829,47 +1993,20 @@
                     "hidden": false,
                     "query": {
                       "datasource": {
-                        "name": "000000001"
+                        "name": "afwe78j0ll1j4b"
                       },
                       "group": "influxdb",
                       "kind": "DataQuery",
                       "spec": {
-                        "alias": "Consumption",
-                        "groupBy": [
-                          {
-                            "params": [
-                              "$__interval"
-                            ],
-                            "type": "time"
-                          },
-                          {
-                            "params": [
-                              "null"
-                            ],
-                            "type": "fill"
-                          }
-                        ],
-                        "measurement": "device_data",
-                        "orderByTime": "ASC",
-                        "policy": "default",
-                        "query": "SELECT cumulative_sum(last(\"eload_day\")) FROM \"device_data\" WHERE $timeFilter AND \"device_name\" =~ /^$device_name$/ GROUP BY time(1d,$TimeOffset) fill(null)",
+                        "editorMode": "code",
+                        "format": "time_series",
                         "rawQuery": true,
-                        "resultFormat": "time_series",
-                        "select": [
-                          [
-                            {
-                              "params": [
-                                "eload_day"
-                              ],
-                              "type": "field"
-                            },
-                            {
-                              "params": [],
-                              "type": "last"
-                            }
-                          ]
-                        ],
-                        "tags": []
+                        "rawSql": "SELECT\n  time,\n  SUM(val) OVER (ORDER BY time) AS \"Consumption\"\nFROM (\n  SELECT\n    DATE_BIN(INTERVAL '1 day', time, TIMESTAMP '$TimeOffset') AS time,\n    selector_last(eload_day, time)['value'] AS val\n  FROM device_data\n  WHERE $__timeFilter(time)\n    AND device_name IN (${device_name:sqlstring})\n  GROUP BY 1\n) t\nORDER BY time",
+                        "sql": {
+                          "columns": [],
+                          "groupBy": [],
+                          "limit": 50
+                        }
                       },
                       "version": "v0"
                     },
@@ -2882,47 +2019,20 @@
                     "hidden": false,
                     "query": {
                       "datasource": {
-                        "name": "000000001"
+                        "name": "afwe78j0ll1j4b"
                       },
                       "group": "influxdb",
                       "kind": "DataQuery",
                       "spec": {
-                        "alias": "Import From Grid",
-                        "groupBy": [
-                          {
-                            "params": [
-                              "$__interval"
-                            ],
-                            "type": "time"
-                          },
-                          {
-                            "params": [
-                              "null"
-                            ],
-                            "type": "fill"
-                          }
-                        ],
-                        "measurement": "device_data",
-                        "orderByTime": "ASC",
-                        "policy": "default",
-                        "query": "SELECT cumulative_sum(last(\"etouser_day\")) FROM \"device_data\" WHERE $timeFilter AND \"device_name\" =~ /^$device_name$/ GROUP BY time(1d,$TimeOffset) fill(null)",
+                        "editorMode": "code",
+                        "format": "time_series",
                         "rawQuery": true,
-                        "resultFormat": "time_series",
-                        "select": [
-                          [
-                            {
-                              "params": [
-                                "etouser_day"
-                              ],
-                              "type": "field"
-                            },
-                            {
-                              "params": [],
-                              "type": "last"
-                            }
-                          ]
-                        ],
-                        "tags": []
+                        "rawSql": "SELECT\n  time,\n  SUM(val) OVER (ORDER BY time) AS \"Import From Grid\"\nFROM (\n  SELECT\n    DATE_BIN(INTERVAL '1 day', time, TIMESTAMP '$TimeOffset') AS time,\n    selector_last(etouser_day, time)['value'] AS val\n  FROM device_data\n  WHERE $__timeFilter(time)\n    AND device_name IN (${device_name:sqlstring})\n  GROUP BY 1\n) t\nORDER BY time",
+                        "sql": {
+                          "columns": [],
+                          "groupBy": [],
+                          "limit": 50
+                        }
                       },
                       "version": "v0"
                     },
@@ -2935,47 +2045,20 @@
                     "hidden": false,
                     "query": {
                       "datasource": {
-                        "name": "000000001"
+                        "name": "afwe78j0ll1j4b"
                       },
                       "group": "influxdb",
                       "kind": "DataQuery",
                       "spec": {
-                        "alias": "Export To Grid",
-                        "groupBy": [
-                          {
-                            "params": [
-                              "$__interval"
-                            ],
-                            "type": "time"
-                          },
-                          {
-                            "params": [
-                              "null"
-                            ],
-                            "type": "fill"
-                          }
-                        ],
-                        "measurement": "device_data",
-                        "orderByTime": "ASC",
-                        "policy": "default",
-                        "query": "SELECT cumulative_sum(last(\"etogrid_day\")) FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time(1d,$TimeOffset) fill(null)",
+                        "editorMode": "code",
+                        "format": "time_series",
                         "rawQuery": true,
-                        "resultFormat": "time_series",
-                        "select": [
-                          [
-                            {
-                              "params": [
-                                "etogrid_day"
-                              ],
-                              "type": "field"
-                            },
-                            {
-                              "params": [],
-                              "type": "last"
-                            }
-                          ]
-                        ],
-                        "tags": []
+                        "rawSql": "SELECT\n  time,\n  SUM(val) OVER (ORDER BY time) AS \"Export To Grid\"\nFROM (\n  SELECT\n    DATE_BIN(INTERVAL '1 day', time, TIMESTAMP '$TimeOffset') AS time,\n    selector_last(etogrid_day, time)['value'] AS val\n  FROM device_data\n  WHERE $__timeFilter(time)\n    AND device_name IN (${device_name:sqlstring})\n  GROUP BY 1\n) t\nORDER BY time",
+                        "sql": {
+                          "columns": [],
+                          "groupBy": [],
+                          "limit": 50
+                        }
                       },
                       "version": "v0"
                     },
@@ -2988,47 +2071,20 @@
                     "hidden": false,
                     "query": {
                       "datasource": {
-                        "name": "000000001"
+                        "name": "afwe78j0ll1j4b"
                       },
                       "group": "influxdb",
                       "kind": "DataQuery",
                       "spec": {
-                        "alias": "Solar",
-                        "groupBy": [
-                          {
-                            "params": [
-                              "$__interval"
-                            ],
-                            "type": "time"
-                          },
-                          {
-                            "params": [
-                              "null"
-                            ],
-                            "type": "fill"
-                          }
-                        ],
-                        "measurement": "device_data",
-                        "orderByTime": "ASC",
-                        "policy": "default",
-                        "query": "SELECT cumulative_sum(last(\"epv1_day\")) FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/  GROUP BY time(1d,$TimeOffset) fill(null)",
+                        "editorMode": "code",
+                        "format": "time_series",
                         "rawQuery": true,
-                        "resultFormat": "time_series",
-                        "select": [
-                          [
-                            {
-                              "params": [
-                                "epv1_day"
-                              ],
-                              "type": "field"
-                            },
-                            {
-                              "params": [],
-                              "type": "last"
-                            }
-                          ]
-                        ],
-                        "tags": []
+                        "rawSql": "SELECT\n  time,\n  SUM(val) OVER (ORDER BY time) AS \"Solar\"\nFROM (\n  SELECT\n    DATE_BIN(INTERVAL '1 day', time, TIMESTAMP '$TimeOffset') AS time,\n    selector_last(epv1_day, time)['value'] AS val\n  FROM device_data\n  WHERE $__timeFilter(time)\n    AND device_name IN (${device_name:sqlstring})\n  GROUP BY 1\n) t\nORDER BY time",
+                        "sql": {
+                          "columns": [],
+                          "groupBy": [],
+                          "limit": 50
+                        }
                       },
                       "version": "v0"
                     },
@@ -3041,47 +2097,20 @@
                     "hidden": false,
                     "query": {
                       "datasource": {
-                        "name": "000000001"
+                        "name": "afwe78j0ll1j4b"
                       },
                       "group": "influxdb",
                       "kind": "DataQuery",
                       "spec": {
-                        "alias": "Battery Charge",
-                        "groupBy": [
-                          {
-                            "params": [
-                              "$__interval"
-                            ],
-                            "type": "time"
-                          },
-                          {
-                            "params": [
-                              "null"
-                            ],
-                            "type": "fill"
-                          }
-                        ],
-                        "measurement": "device_data",
-                        "orderByTime": "ASC",
-                        "policy": "default",
-                        "query": "SELECT cumulative_sum(last(\"echg_day\")) FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time(1d,$TimeOffset) fill(null)",
+                        "editorMode": "code",
+                        "format": "time_series",
                         "rawQuery": true,
-                        "resultFormat": "time_series",
-                        "select": [
-                          [
-                            {
-                              "params": [
-                                "echg_day"
-                              ],
-                              "type": "field"
-                            },
-                            {
-                              "params": [],
-                              "type": "last"
-                            }
-                          ]
-                        ],
-                        "tags": []
+                        "rawSql": "SELECT\n  time,\n  SUM(val) OVER (ORDER BY time) AS \"Battery Charge\"\nFROM (\n  SELECT\n    DATE_BIN(INTERVAL '1 day', time, TIMESTAMP '$TimeOffset') AS time,\n    selector_last(echg_day, time)['value'] AS val\n  FROM device_data\n  WHERE $__timeFilter(time)\n    AND device_name IN (${device_name:sqlstring})\n  GROUP BY 1\n) t\nORDER BY time",
+                        "sql": {
+                          "columns": [],
+                          "groupBy": [],
+                          "limit": 50
+                        }
                       },
                       "version": "v0"
                     },
@@ -3094,47 +2123,20 @@
                     "hidden": false,
                     "query": {
                       "datasource": {
-                        "name": "000000001"
+                        "name": "afwe78j0ll1j4b"
                       },
                       "group": "influxdb",
                       "kind": "DataQuery",
                       "spec": {
-                        "alias": "Battery Discharge",
-                        "groupBy": [
-                          {
-                            "params": [
-                              "$__interval"
-                            ],
-                            "type": "time"
-                          },
-                          {
-                            "params": [
-                              "null"
-                            ],
-                            "type": "fill"
-                          }
-                        ],
-                        "measurement": "device_data",
-                        "orderByTime": "ASC",
-                        "policy": "default",
-                        "query": "SELECT cumulative_sum(last(\"edischg_day\")) FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time(1d,$TimeOffset) fill(null)",
+                        "editorMode": "code",
+                        "format": "time_series",
                         "rawQuery": true,
-                        "resultFormat": "time_series",
-                        "select": [
-                          [
-                            {
-                              "params": [
-                                "edischg_day"
-                              ],
-                              "type": "field"
-                            },
-                            {
-                              "params": [],
-                              "type": "last"
-                            }
-                          ]
-                        ],
-                        "tags": []
+                        "rawSql": "SELECT\n  time,\n  SUM(val) OVER (ORDER BY time) AS \"Battery Discharge\"\nFROM (\n  SELECT\n    DATE_BIN(INTERVAL '1 day', time, TIMESTAMP '$TimeOffset') AS time,\n    selector_last(edischg_day, time)['value'] AS val\n  FROM device_data\n  WHERE $__timeFilter(time)\n    AND device_name IN (${device_name:sqlstring})\n  GROUP BY 1\n) t\nORDER BY time",
+                        "sql": {
+                          "columns": [],
+                          "groupBy": [],
+                          "limit": 50
+                        }
                       },
                       "version": "v0"
                     },
@@ -3147,47 +2149,20 @@
                     "hidden": false,
                     "query": {
                       "datasource": {
-                        "name": "000000001"
+                        "name": "afwe78j0ll1j4b"
                       },
                       "group": "influxdb",
                       "kind": "DataQuery",
                       "spec": {
-                        "alias": " Inverter Output",
-                        "groupBy": [
-                          {
-                            "params": [
-                              "$__interval"
-                            ],
-                            "type": "time"
-                          },
-                          {
-                            "params": [
-                              "null"
-                            ],
-                            "type": "fill"
-                          }
-                        ],
-                        "measurement": "device_data",
-                        "orderByTime": "ASC",
-                        "policy": "default",
-                        "query": "SELECT cumulative_sum(last(\"einv_day\")) FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time(1d,$TimeOffset) fill(null)",
+                        "editorMode": "code",
+                        "format": "time_series",
                         "rawQuery": true,
-                        "resultFormat": "time_series",
-                        "select": [
-                          [
-                            {
-                              "params": [
-                                "einv_day"
-                              ],
-                              "type": "field"
-                            },
-                            {
-                              "params": [],
-                              "type": "last"
-                            }
-                          ]
-                        ],
-                        "tags": []
+                        "rawSql": "SELECT\n  time,\n  SUM(val) OVER (ORDER BY time) AS \" Inverter Output\"\nFROM (\n  SELECT\n    DATE_BIN(INTERVAL '1 day', time, TIMESTAMP '$TimeOffset') AS time,\n    selector_last(einv_day, time)['value'] AS val\n  FROM device_data\n  WHERE $__timeFilter(time)\n    AND device_name IN (${device_name:sqlstring})\n  GROUP BY 1\n) t\nORDER BY time",
+                        "sql": {
+                          "columns": [],
+                          "groupBy": [],
+                          "limit": 50
+                        }
                       },
                       "version": "v0"
                     },
@@ -3200,15 +2175,20 @@
                     "hidden": false,
                     "query": {
                       "datasource": {
-                        "name": "000000001"
+                        "name": "afwe78j0ll1j4b"
                       },
                       "group": "influxdb",
                       "kind": "DataQuery",
                       "spec": {
-                        "alias": "Number of Days",
-                        "query": "SELECT COUNT(\"daily_count\") FROM (  SELECT COUNT(\"einv_day\") AS \"daily_count\"  FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/  GROUP BY time(1d,$TimeOffset) fill(null))\n\n",
+                        "editorMode": "code",
+                        "format": "table",
                         "rawQuery": true,
-                        "resultFormat": "time_series"
+                        "rawSql": "SELECT COUNT(daily_count) AS \"Number of Days\"\nFROM (\n  SELECT\n    DATE_BIN(INTERVAL '1 day', time, TIMESTAMP '$TimeOffset') AS time,\n    COUNT(einv_day) AS daily_count\n  FROM device_data\n  WHERE $__timeFilter(time)\n    AND device_name IN (${device_name:sqlstring})\n  GROUP BY 1\n) t",
+                        "sql": {
+                          "columns": [],
+                          "groupBy": [],
+                          "limit": 50
+                        }
                       },
                       "version": "v0"
                     },
@@ -3644,47 +2624,20 @@
                     "hidden": false,
                     "query": {
                       "datasource": {
-                        "name": "000000001"
+                        "name": "afwe78j0ll1j4b"
                       },
                       "group": "influxdb",
                       "kind": "DataQuery",
                       "spec": {
-                        "alias": "Import From Grid",
-                        "groupBy": [
-                          {
-                            "params": [
-                              "$__interval"
-                            ],
-                            "type": "time"
-                          },
-                          {
-                            "params": [
-                              "null"
-                            ],
-                            "type": "fill"
-                          }
-                        ],
-                        "measurement": "device_data",
-                        "orderByTime": "ASC",
-                        "policy": "default",
-                        "query": "SELECT cumulative_sum(last(\"etouser_day\")) FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/  GROUP BY time(1d,$TimeOffset) fill(null)",
+                        "editorMode": "code",
+                        "format": "time_series",
                         "rawQuery": true,
-                        "resultFormat": "time_series",
-                        "select": [
-                          [
-                            {
-                              "params": [
-                                "etouser_day"
-                              ],
-                              "type": "field"
-                            },
-                            {
-                              "params": [],
-                              "type": "last"
-                            }
-                          ]
-                        ],
-                        "tags": []
+                        "rawSql": "SELECT\n  time,\n  SUM(val) OVER (ORDER BY time) AS \"Import From Grid\"\nFROM (\n  SELECT\n    DATE_BIN(INTERVAL '1 day', time, TIMESTAMP '$TimeOffset') AS time,\n    selector_last(etouser_day, time)['value'] AS val\n  FROM device_data\n  WHERE $__timeFilter(time)\n    AND device_name IN (${device_name:sqlstring})\n  GROUP BY 1\n) t\nORDER BY time",
+                        "sql": {
+                          "columns": [],
+                          "groupBy": [],
+                          "limit": 50
+                        }
                       },
                       "version": "v0"
                     },
@@ -3697,47 +2650,20 @@
                     "hidden": false,
                     "query": {
                       "datasource": {
-                        "name": "000000001"
+                        "name": "afwe78j0ll1j4b"
                       },
                       "group": "influxdb",
                       "kind": "DataQuery",
                       "spec": {
-                        "alias": "Export To Grid",
-                        "groupBy": [
-                          {
-                            "params": [
-                              "$__interval"
-                            ],
-                            "type": "time"
-                          },
-                          {
-                            "params": [
-                              "null"
-                            ],
-                            "type": "fill"
-                          }
-                        ],
-                        "measurement": "device_data",
-                        "orderByTime": "ASC",
-                        "policy": "default",
-                        "query": "SELECT cumulative_sum(last(\"etogrid_day\")) FROM \"device_data\" WHERE $timeFilter  AND \"device_name\" =~ /^$device_name$/ GROUP BY time(1d,$TimeOffset) fill(null)",
+                        "editorMode": "code",
+                        "format": "time_series",
                         "rawQuery": true,
-                        "resultFormat": "time_series",
-                        "select": [
-                          [
-                            {
-                              "params": [
-                                "etogrid_day"
-                              ],
-                              "type": "field"
-                            },
-                            {
-                              "params": [],
-                              "type": "last"
-                            }
-                          ]
-                        ],
-                        "tags": []
+                        "rawSql": "SELECT\n  time,\n  SUM(val) OVER (ORDER BY time) AS \"Export To Grid\"\nFROM (\n  SELECT\n    DATE_BIN(INTERVAL '1 day', time, TIMESTAMP '$TimeOffset') AS time,\n    selector_last(etogrid_day, time)['value'] AS val\n  FROM device_data\n  WHERE $__timeFilter(time)\n    AND device_name IN (${device_name:sqlstring})\n  GROUP BY 1\n) t\nORDER BY time",
+                        "sql": {
+                          "columns": [],
+                          "groupBy": [],
+                          "limit": 50
+                        }
                       },
                       "version": "v0"
                     },
@@ -4192,7 +3118,7 @@
       "timezone": "browser",
       "to": "now"
     },
-    "title": "Solar metrics InfluxDB",
+    "title": "Solar metrics InfluxDB3",
     "variables": [
       {
         "kind": "CustomVariable",
@@ -4200,7 +3126,7 @@
           "allowCustomValue": false,
           "current": {
             "text": "7h",
-            "value": "7h"
+            "value": "1970-01-01T07:00:00Z"
           },
           "description": "Time Offset for Daylight savings/UTC time.",
           "hide": "dontHide",
@@ -4208,7 +3134,7 @@
           "multi": false,
           "name": "TimeOffset",
           "options": [],
-          "query": "7h,8h",
+          "query": "0h : 1970-01-01T00:00:00Z, 7h : 1970-01-01T07:00:00Z, 8h : 1970-01-01T08:00:00Z",
           "skipUrlSync": false,
           "valuesFormat": "csv"
         }
@@ -4285,17 +3211,13 @@
           "allowCustomValue": true,
           "current": {
             "text": [
-              "EG4 18kpv",
-              "EG4 18kpv1",
-              "EG4_4066670074"
+              "EG4 18kpv1"
             ],
             "value": [
-              "EG4 18kpv",
-              "EG4 18kpv1",
-              "EG4_4066670074"
+              "EG4 18kpv1"
             ]
           },
-          "definition": "SHOW TAG VALUES FROM \"device_data\" WITH KEY = \"device_name\"",
+          "definition": "SELECT DISTINCT device_name AS __text, device_name AS __value FROM device_data ORDER BY device_name",
           "hide": "dontHide",
           "includeAll": false,
           "label": "",
@@ -4304,12 +3226,12 @@
           "options": [],
           "query": {
             "datasource": {
-              "name": "000000001"
+              "name": "afwe78j0ll1j4b"
             },
             "group": "influxdb",
             "kind": "DataQuery",
             "spec": {
-              "query": "SHOW TAG VALUES FROM \"device_data\" WITH KEY = \"device_name\"",
+              "query": "SELECT DISTINCT device_name AS __text, device_name AS __value FROM device_data ORDER BY device_name",
               "refId": "InfluxVariableQueryEditor-VariableQuery"
             },
             "version": "v0"

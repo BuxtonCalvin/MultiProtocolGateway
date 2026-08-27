@@ -309,12 +309,13 @@ publish to bridges
 
 ### Prerequisites
 
-- Python 3.10 or later
 - A hardware device connected via USB serial adapter, RS-485 adapter, or network
 
 ![Hardware](documentation/assets/waveshare_mpg_eg4.png)
 
-### Install
+### Install non-Docker
+
+- Python 3.10 or later
 
 From source:
 
@@ -332,6 +333,7 @@ nano config.cfg
 ```
 
 Or skip the file — open the web UI at `http://localhost:1717` after starting and configure everything there.
+Then restart MPG so all settings are ingested.
 
 ### Run
 
@@ -445,11 +447,16 @@ Data produced by any of the MPG bridges can be visualized in Grafana.  This exam
 The code for this InfluxDB dashboard can be found here:
 [Grafana InfluxDB JSON](documentation/dashboards/GrafanaInfluxDBDashboard.json)
 
+The code for the same InfluxDB3 dashboard can be found here:
+[Grafana InfluxDB3 JSON](documentation/dashboards/GrafanaInfluxDB3Dashboard.json)
+
 The code for the exact same style TimescaleDB dashboards can be found here:
 
 [Grafana TimescaleDB Wide Table JSON](documentation/dashboards/GrafanaTimescaleDBWideDashboard.json)
 
 [Grafana TimescaleDB Narrow Table JSON](documentation/dashboards/GrafanaTimescaleDBNarrowDashboard.json)
+
+Note: you'll need to replace the existing name i.e. "datasource": {"name": "cf1a987bupo1sc"} with your own local datasource name.
 
 ## Protocol Maps & Register Configuration
 
