@@ -309,12 +309,13 @@ publish to bridges
 
 ### Prerequisites
 
-- Python 3.10 or later
 - A hardware device connected via USB serial adapter, RS-485 adapter, or network
 
 ![Hardware](documentation/assets/waveshare_mpg_eg4.png)
 
-### Install
+### Install non-Docker
+
+- Python 3.10 or later
 
 From source:
 
@@ -332,6 +333,7 @@ nano config.cfg
 ```
 
 Or skip the file — open the web UI at `http://localhost:1717` after starting and configure everything there.
+Then restart MPG so all settings are ingested.
 
 ### Run
 
