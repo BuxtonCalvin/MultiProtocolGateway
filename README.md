@@ -445,11 +445,16 @@ Data produced by any of the MPG bridges can be visualized in Grafana.  This exam
 The code for this InfluxDB dashboard can be found here:
 [Grafana InfluxDB JSON](documentation/dashboards/GrafanaInfluxDBDashboard.json)
 
+The code for the same InfluxDB3 dashboard can be found here:
+[Grafana InfluxDB3 JSON](documentation/dashboards/GrafanaInfluxDB3Dashboard.json)
+
 The code for the exact same style TimescaleDB dashboards can be found here:
 
 [Grafana TimescaleDB Wide Table JSON](documentation/dashboards/GrafanaTimescaleDBWideDashboard.json)
 
 [Grafana TimescaleDB Narrow Table JSON](documentation/dashboards/GrafanaTimescaleDBNarrowDashboard.json)
+
+Note: you'll need to replace the existing name i.e. "datasource": {"name": "cf1a987bupo1sc"} with your own local datasource name.
 
 ## Protocol Maps & Register Configuration
 
