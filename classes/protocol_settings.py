@@ -1613,7 +1613,7 @@ class protocol_settings:
                         f"{registry_type.name} registry type (0 metrics will be scraped from "
                         f"it). This almost always means the mask file references register "
                         f"names that no longer exist (e.g. after a protocol CSV update)"
-                        f"or that no metrics have been chosen from one of the registers."
+                        f"or that no metrics have been chosen from only one of the registers."
                     )
                 for index in reversed(range(len(registry_map))):
                     item = registry_map[index]

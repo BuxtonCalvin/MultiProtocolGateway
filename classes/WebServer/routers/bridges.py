@@ -101,6 +101,7 @@ async def timescale_health_partial(request: Request):
     """
     gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
     if not is_timescale_available(gateway):
+        _log.warning("No TimescaleDB bridge is attached to this gateway; returning 404 for /pages/timescale/health")
         raise HTTPException(status_code=404, detail="No TimescaleDB bridge is attached to this gateway.")
 
     try:
@@ -126,6 +127,7 @@ async def timescale_storage_partial(request: Request):
     """
     gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
     if not is_timescale_available(gateway):
+        _log.warning("No TimescaleDB bridge is attached to this gateway; returning 404 for /pages/timescale/storage")
         raise HTTPException(status_code=404, detail="No TimescaleDB bridge is attached to this gateway.")
 
     try:
@@ -152,6 +154,7 @@ async def timescale_indexes_partial(request: Request):
     """
     gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
     if not is_timescale_available(gateway):
+        _log.warning("No TimescaleDB bridge is attached to this gateway; returning 404 for /pages/timescale/indexes")
         raise HTTPException(status_code=404, detail="No TimescaleDB bridge is attached to this gateway.")
 
     try:
@@ -177,6 +180,7 @@ async def timescale_compression_retention_partial(request: Request):
     """
     gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
     if not is_timescale_available(gateway):
+        _log.warning("No TimescaleDB bridge is attached to this gateway; returning 404 for /pages/timescale/compression-retention")
         raise HTTPException(status_code=404, detail="No TimescaleDB bridge is attached to this gateway.")
 
     try:
@@ -202,6 +206,7 @@ async def timescale_jobs_partial(request: Request):
     """
     gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
     if not is_timescale_available(gateway):
+        _log.warning("No TimescaleDB bridge is attached to this gateway; returning 404 for /pages/timescale/jobs")
         raise HTTPException(status_code=404, detail="No TimescaleDB bridge is attached to this gateway.")
 
     try:

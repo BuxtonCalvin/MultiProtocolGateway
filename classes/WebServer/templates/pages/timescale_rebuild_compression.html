@@ -55,7 +55,7 @@
 <div class="col-span-12 flex flex-col gap-2" style="height: calc(100vh - 56px); overflow: hidden;">
 
   <!-- ══ HEADER + REBUILD BUTTON ══ -->
-  <div class="flex-shrink-0 flex items-start justify-between gap-4 px-1 py-2">
+  <div class="shrink-0 flex items-start justify-between gap-4 px-1 py-2">
     <div>
       <h1 class="surface-title text-xs font-semibold uppercase tracking-widest">Rebuild Compression</h1>
       <p class="surface-muted text-xs mt-1 max-w-2xl">
@@ -80,12 +80,10 @@
       </div>
     </div>
 
-    <div class="flex-shrink-0 flex items-center gap-2">
+    <div class="shrink-0 flex items-center gap-2">
       <button type="button"
               id="rebuild-compression-btn"
-              class="px-4 py-2 rounded text-xs font-semibold bg-accent text-white
-                     hover:bg-accent/80 disabled:opacity-50 disabled:cursor-not-allowed
-                     transition-colors"
+              class="w-full btn-tertiary text-xs"
               aria-label="Decompress and recompress every already-compressed chunk in the checked groups"
               title="Decompresses then recompresses every already-compressed chunk of each checked group's raw table and rollup views — always confirmed before running"
               onclick="triggerRebuildCompression()">
@@ -95,7 +93,7 @@
   </div>
 
   <!-- ══ STATUS BANNER — filled in by renderCompressionStatus() below ══ -->
-  <div id="compression-status" class="flex-shrink-0 px-1" role="status" aria-live="polite"></div>
+  <div id="compression-status" class="shrink-0 px-1" role="status" aria-live="polite"></div>
 
   <!-- ══ COMPRESSION GROUPS (one checkbox per source table) ══ -->
   <section class="flex-1 overflow-y-auto px-1" aria-label="Compression inventory">

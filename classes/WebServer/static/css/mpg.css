@@ -346,29 +346,43 @@ aside .theme-input {
   border-color: rgb(var(--mpg-400));
 }
 
-.btn-tertiary {
-  background-color: transparent;
-  /* Use a dark color for crisp readability in light mode */
+/* --- Light Mode (Your Original Code) --- */
+.btn-tertiary { 
+  background-color: transparent; 
   color: rgb(var(--mpg-800, 30, 41, 59)); 
-  font-weight: 600; /* Increased to semi-bold for better readability at small text-xs size */
-  padding: 0.375rem 0.875rem;
-  border-radius: 0.375rem;
-  /* Distinct border to anchor the button visually */
-  border: 1px solid rgb(var(--mpg-400, 148, 163, 184));
-  cursor: pointer;
-  transition: background-color 0.15s, border-color 0.15s, color 0.15s;
+  font-weight: 600; 
+  padding: 0.375rem 0.875rem; 
+  border-radius: 0.375rem; 
+  border: 1px solid rgb(var(--mpg-400, 148, 163, 184)); 
+  cursor: pointer; 
+  transition: background-color 0.15s, border-color 0.15s, color 0.15s; 
 }
 
-.btn-tertiary:hover {
-  background-color: rgb(var(--mpg-100, 241, 245, 249));
+.btn-tertiary:hover { 
+  background-color: rgb(var(--mpg-100, 241, 245, 249)); 
+  border-color: rgb(var(--mpg-500, 100, 116, 139)); 
+  color: rgb(var(--mpg-900, 15, 23, 42)); 
+}
+
+.btn-tertiary:focus-visible { 
+  outline: 2px solid rgb(var(--color-accent, 14, 165, 233)); 
+  outline-offset: 2px; 
+}
+
+/* --- Dark Mode Overrides --- */
+.dark .btn-tertiary {
+  /* Swaps to light text (Slate 200) and a subtle border (Slate 700) */
+  color: rgb(var(--mpg-200, 226, 232, 240));
+  border-color: rgb(var(--mpg-700, 51, 65, 85));
+}
+
+.dark .btn-tertiary:hover {
+  /* Adds a dim background, crisp border (Slate 500), and vibrant text (Slate 50) */
+  background-color: rgba(var(--mpg-800, 30, 41, 59), 0.4);
   border-color: rgb(var(--mpg-500, 100, 116, 139));
-  color: rgb(var(--mpg-900, 15, 23, 42));
+  color: rgb(var(--mpg-50, 248, 250, 252));
 }
 
-.btn-tertiary:focus-visible {
-  outline: 2px solid rgb(var(--color-accent, 14, 165, 233));
-  outline-offset: 2px;
-}
 
 
 .btn-danger {
