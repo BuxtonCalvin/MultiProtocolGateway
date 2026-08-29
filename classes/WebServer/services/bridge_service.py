@@ -62,7 +62,7 @@ import logging
 import sys
 import threading
 import time
-from typing import TYPE_CHECKING, Any, Generator
+from typing import TYPE_CHECKING, Any, Generator, cast
 
 from starlette.datastructures import State
 
@@ -109,10 +109,10 @@ def _format_bytes(n: int | None) -> str:
 # never executed. It gives every annotation in this file one single,
 # unconditional class binding to check against. The runtime try/except
 # further down binds the one class this module actually needs to
-# instantiate (WideTableFieldManager) under a *different* name,
-# _WideTableFieldManagerImpl — deliberately not reusing the same name,
-# because `except ImportError: WideTableFieldManager = None` would make
-# the type checker infer `type[WideTableFieldManager] | None` for that
+# instantiate (BridgeAdminManager) under a *different* name,
+# _BridgeAdminManagerImpl — deliberately not reusing the same name,
+# because `except ImportError: BridgeAdminManager = None` would make
+# the type checker infer `type[BridgeAdminManager] | None` for that
 # name (a variable, not a type), which is exactly what produces
 # "Variable not allowed in type expression" on every annotation that
 # references it. WideTableField / WideTableFieldDeletionResult are only
@@ -129,58 +129,77 @@ if TYPE_CHECKING:
     from protocol_gateway import Protocol_Gateway
 
     from ...transports.timescaledb import (
+        BridgeAdminManager,
         WideTableField,
         WideTableFieldDeletionResult,
-        WideTableFieldManager,
+        timescaledb,
     )
 
 # A great many functions below deliberately keep `Any` for values that
-# originate from calling a method on a bridge object found via duck-typing
-# (type(t).__name__ == "timescaledb"/"mqtt"/etc. — see get_timescale_bridge()
-# and its influxdb/mqtt/prometheus counterparts) rather than isinstance
-# against an imported class. That's this module's own documented design
-# choice (see the module docstring above): every bridge transport module is
-# optional/pluggable, and this file must not fail to import just because
-# one of them isn't installed in a given deployment. Once a value comes from
-# `bridge.get_health_snapshot()`, `bridge.rollup_mgr.list_...()`, or similar,
-# there is no type available to assert against without hard-importing that
-# specific transport class — which is exactly what the duck-typing exists to
+# originate from calling a method on an mqtt/influxdb/prometheus bridge
+# object found via duck-typing (type(t).__name__ == "mqtt"/etc. — see
+# get_influxdb_bridge/get_mqtt_bridge/get_prometheus_bridge) rather than
+# isinstance against an imported class. That's this module's own
+# documented design choice (see the module docstring above): every
+# bridge transport module is optional/pluggable, and this file must not
+# fail to import just because one of them isn't installed in a given
+# deployment. Once a value comes from one of those bridges, there is no
+# type available to assert against without hard-importing that specific
+# transport class — which is exactly what the duck-typing exists to
 # avoid. Those Any usages are intentional and are not re-justified
 # individually at each occurrence below; only genuinely fixable Any usage
 # (gateway/app_state parameters, the locally-defined staging-dict shape,
 # locally-built dict literals with a fully known shape) is narrowed.
+#
+# get_timescale_bridge() below is the one exception to that pattern: it
+# returns a real `timescaledb | None`, not `Any | None`. Runtime
+# behavior is identical to the other three bridge getters — the walk of
+# __transports is still duck-typed on type(t).__name__, no hard import
+# of transports.timescaledb happens at module load — but timescaledb is
+# additionally imported under TYPE_CHECKING (same idiom already used for
+# BridgeAdminManager/WideTableField above), so a type checker can follow
+# the cast() at the one point the duck-typing check proves it's safe,
+# and every TimescaleDB call site below gets full static checking on
+# bridge.rollup_mgr / bridge.hypertable_mgr / bridge.get_health_snapshot()
+# etc. instead of falling through Any. Not extended to the mqtt/influxdb/
+# prometheus getters here — out of scope for this file's TimescaleDB
+# section; the same idiom would apply if those ever need it.
 
 # Declared Any up front, before either branch assigns to it: this is what
 # makes _field_manager() calling it not get flagged as "Object of type
 # 'None' cannot be called". Without this, the type checker infers
-# `type[WideTableFieldManager] | None` from the two conditional
+# `type[BridgeAdminManager] | None` from the two conditional
 # assignments below and won't treat it as callable — even though the
 # `bridge is None` check in _field_manager() already guarantees this is
 # never actually None by the time it's called.
-_WideTableFieldManagerImpl: Any
+_BridgeAdminManagerImpl: Any
 
 try:
     from ...transports.timescaledb import (
-        WideTableFieldManager as _WideTableFieldManagerImpl,
+        BridgeAdminManager as _BridgeAdminManagerImpl,
     )
     Timescale_Available = True
 except ImportError:
     _log.debug("timescale_service: transports.timescaledb is not importable — the TimescaleDB admin UI will stay hidden.")
-    _WideTableFieldManagerImpl = None
+    _BridgeAdminManagerImpl = None
     Timescale_Available = False
 
 # ---------------------------------------------------------------------------
 # Live bridge discovery
 # ---------------------------------------------------------------------------
 
-def get_timescale_bridge(gateway: "Protocol_Gateway | None") -> transport_base | None:
+def get_timescale_bridge(gateway: "Protocol_Gateway | None") -> "timescaledb | None":
     """
     Finds the live timescaledb bridge transport on the gateway, if any.
 
     Returns None if there's no gateway yet (startup race), no such
     transport is configured, or the timescaledb module isn't importable in
     this deployment. Duck-typed on the class name (rather than isinstance)
-    so this module never needs a hard import of the transport class itself.
+    so this module never needs a hard import of the transport class itself
+    at runtime — the cast() below only affects static analysis (see
+    `timescaledb` under the TYPE_CHECKING import above), not runtime
+    behavior; it's safe precisely because the type(t).__name__ check just
+    above it is what actually proves the identity at runtime.
 
     Mirrors analysis_service.get_scraper_transports()'s access pattern.
     """
@@ -189,7 +208,7 @@ def get_timescale_bridge(gateway: "Protocol_Gateway | None") -> transport_base |
     transports: list[transport_base] = getattr(gateway, "_Protocol_Gateway__transports", [])
     for t in transports:
         if type(t).__name__ == "timescaledb":
-            return t
+            return cast("timescaledb", t)
     return None
 
 
@@ -273,11 +292,11 @@ def _active_metric_names_for_protocol(gateway: "Protocol_Gateway | None", protoc
     return names
 
 
-def _field_manager(gateway: "Protocol_Gateway | None") -> "WideTableFieldManager":
+def _field_manager(gateway: "Protocol_Gateway | None") -> "BridgeAdminManager":
     bridge = get_timescale_bridge(gateway)
     if bridge is None:
         raise RuntimeError("No TimescaleDB bridge is attached to this gateway.")
-    return _WideTableFieldManagerImpl(bridge)
+    return _BridgeAdminManagerImpl(bridge)
 
 
 # ---------------------------------------------------------------------------
@@ -289,7 +308,7 @@ def list_wide_tables(gateway: "Protocol_Gateway | None") -> list[dict[str, str]]
     Returns [{protocol_name, wide_table_name}, ...] for the wide-table
     picker screen (step 4 of the Delete Columns flow).
     """
-    mgr: WideTableFieldManager = _field_manager(gateway)
+    mgr: BridgeAdminManager = _field_manager(gateway)
     return [
         {"protocol_name": protocol_name, "wide_table_name": wide_table_name}
         for protocol_name, wide_table_name in mgr.list_editable_protocols()
@@ -298,7 +317,7 @@ def list_wide_tables(gateway: "Protocol_Gateway | None") -> list[dict[str, str]]
 
 def resolve_wide_table_name(gateway: "Protocol_Gateway | None", protocol_name: str) -> str:
     """Returns the wide_table_name for protocol_name. Raises ValueError if unknown/narrow-only."""
-    mgr: WideTableFieldManager = _field_manager(gateway)
+    mgr: BridgeAdminManager = _field_manager(gateway)
     return mgr.resolve_wide_table_name(protocol_name)
 
 
@@ -323,7 +342,7 @@ def list_wide_table_fields(
         _active_metric_names_for_protocol for why that's "no opinion"
         rather than "everything is stale".
     """
-    mgr: WideTableFieldManager = _field_manager(gateway)
+    mgr: BridgeAdminManager = _field_manager(gateway)
     staged: set[str] = staged_columns or set()
     active_metric_names: set[str] | None = _active_metric_names_for_protocol(gateway, protocol_name)
     fields: list[WideTableField] = mgr.list_fields(protocol_name, active_metric_names=active_metric_names)
@@ -365,7 +384,7 @@ def list_rollup_views(gateway: "Protocol_Gateway | None") -> list[dict[str, Any]
     Raises RuntimeError if no bridge is attached, or the bridge is attached
     but hasn't finished connecting to TimescaleDB yet (rollup_mgr is None).
     """
-    bridge: Any | None = get_timescale_bridge(gateway)
+    bridge: "timescaledb | None" = get_timescale_bridge(gateway)
     if bridge is None:
         raise RuntimeError("No TimescaleDB bridge is attached to this gateway.")
     if bridge.rollup_mgr is None:
@@ -440,7 +459,7 @@ def rebuild_all_rollups(
     caller starts iterating it -- see rebuild_compression's docstring
     below for why routers/timescale.py's endpoint relies on that.
     """
-    bridge: Any | None = get_timescale_bridge(gateway)
+    bridge: "timescaledb | None" = get_timescale_bridge(gateway)
     if bridge is None:
         raise RuntimeError("No TimescaleDB bridge is attached to this gateway.")
     if bridge.rollup_mgr is None:
@@ -477,7 +496,7 @@ def refresh_selected_rollups(
     finished connecting to TimescaleDB yet (surfaced on first iteration --
     see rebuild_all_rollups above).
     """
-    bridge: Any | None = get_timescale_bridge(gateway)
+    bridge: "timescaledb | None" = get_timescale_bridge(gateway)
     if bridge is None:
         raise RuntimeError("No TimescaleDB bridge is attached to this gateway.")
     if bridge.rollup_mgr is None:
@@ -508,12 +527,12 @@ def list_compression_groups(gateway: "Protocol_Gateway | None") -> list[dict[str
     Raises RuntimeError if no bridge is attached, or the bridge is
     attached but hasn't finished connecting to TimescaleDB yet.
     """
-    bridge: Any | None = get_timescale_bridge(gateway)
+    bridge: "timescaledb | None" = get_timescale_bridge(gateway)
     if bridge is None:
         raise RuntimeError("No TimescaleDB bridge is attached to this gateway.")
-    if bridge.rollup_mgr is None:
-        raise RuntimeError("Rollup manager is not initialized yet — the bridge is not connected to TimescaleDB.")
-    rows: list[dict[str, Any]] = bridge.rollup_mgr.list_compression_groups()
+    if bridge.hypertable_mgr is None:
+        raise RuntimeError("Hypertable manager is not initialized yet — the bridge is not connected to TimescaleDB.")
+    rows: list[dict[str, Any]] = bridge.hypertable_mgr.list_compression_groups()
     for row in rows:
         row["size_display"] = _format_bytes(row.get("size_bytes"))
         row["raw_size_display"] = _format_bytes(row.get("raw_size_bytes"))
@@ -576,13 +595,13 @@ def rebuild_compression(
     inside a try/except specifically so that first iteration is where
     the error surfaces, before the streaming response has sent anything.
     """
-    bridge: Any | None = get_timescale_bridge(gateway)
+    bridge: "timescaledb | None" = get_timescale_bridge(gateway)
     if bridge is None:
         raise RuntimeError("No TimescaleDB bridge is attached to this gateway.")
-    if bridge.rollup_mgr is None:
-        raise RuntimeError("Rollup manager is not initialized yet — the bridge is not connected to TimescaleDB.")
+    if bridge.hypertable_mgr is None:
+        raise RuntimeError("Hypertable manager is not initialized yet — the bridge is not connected to TimescaleDB.")
 
-    for event in bridge.rollup_mgr.rebuild_compression(protocol_names=protocol_names):
+    for event in bridge.hypertable_mgr.rebuild_compression(protocol_names=protocol_names):
         if event.get("type") == "done":
             result: dict[str, Any] = event.get("result", {})
             for group in result.get("groups", []):
@@ -616,33 +635,34 @@ def _format_dt(value: Any) -> str:
 def get_timescale_health(gateway: "Protocol_Gateway | None") -> dict[str, Any]:
     """
     Read-only connection/background-worker snapshot for the "Bridge
-    Health" panel. See timescaledb.get_health_snapshot for the field list.
+    Health" panel. See BridgeAdminManager.get_health_snapshot for the
+    field list.
 
     Raises RuntimeError if no bridge is attached. Unlike the rollup
     functions, this does NOT require rollup_mgr to be initialized — a
     bridge that's still connecting is itself a valid, useful thing to show
     on a health panel, so this returns whatever it can rather than erroring.
     """
-    bridge: Any | None = get_timescale_bridge(gateway)
+    bridge: "timescaledb | None" = get_timescale_bridge(gateway)
     if bridge is None:
         raise RuntimeError("No TimescaleDB bridge is attached to this gateway.")
-    return bridge.get_health_snapshot()
+    return _field_manager(gateway).get_health_snapshot()
 
 
 def get_storage_overview(gateway: "Protocol_Gateway | None") -> list[dict[str, Any]]:
     """
     Read-only per-source-table storage snapshot for the "Storage Overview"
     panel, with a human-readable `size_display` added to each row. See
-    timescaledb.get_storage_overview for the rest of the field list.
+    BridgeAdminManager.get_storage_overview for the rest of the field list.
 
     Raises RuntimeError if no bridge is attached. Returns an empty list
     (rather than raising) if the bridge is attached but not yet connected
     to TimescaleDB, since there's simply nothing to report yet.
     """
-    bridge: Any | None = get_timescale_bridge(gateway)
+    bridge: "timescaledb | None" = get_timescale_bridge(gateway)
     if bridge is None:
         raise RuntimeError("No TimescaleDB bridge is attached to this gateway.")
-    rows: list[dict[str, Any]] = bridge.get_storage_overview()
+    rows: list[dict[str, Any]] = _field_manager(gateway).get_storage_overview()
     for row in rows:
         row["size_display"] = _format_bytes(row.get("size_bytes"))
         row["oldest_display"] = _format_dt(row.get("oldest"))
@@ -653,17 +673,17 @@ def get_storage_overview(gateway: "Protocol_Gateway | None") -> list[dict[str, A
 def get_index_overview(gateway: "Protocol_Gateway | None") -> list[dict[str, Any]]:
     """
     Read-only per-index snapshot for the "Indexes" panel, with a human-
-    readable `size_display` added to each row. See timescaledb.
+    readable `size_display` added to each row. See BridgeAdminManager.
     get_index_overview for the rest of the field list.
 
     Raises RuntimeError if no bridge is attached. Returns an empty list
     (rather than raising) if the bridge is attached but not yet connected
     to TimescaleDB, since there's simply nothing to report yet.
     """
-    bridge: Any | None = get_timescale_bridge(gateway)
+    bridge: "timescaledb | None" = get_timescale_bridge(gateway)
     if bridge is None:
         raise RuntimeError("No TimescaleDB bridge is attached to this gateway.")
-    rows: list[dict[str, Any]] = bridge.get_index_overview()
+    rows: list[dict[str, Any]] = _field_manager(gateway).get_index_overview()
     for row in rows:
         row["size_display"] = _format_bytes(row.get("size_bytes"))
     return rows
@@ -673,27 +693,27 @@ def get_compression_retention_summary(gateway: "Protocol_Gateway | None") -> dic
     """
     Read-only compression/retention configuration summary for the
     "Compression & Retention Status" panel, with `dynamic_raw_tables` and
-    `dynamic_views` lists merged in — see RollupManager.get_compression_
-    retention_summary for the static-config field list, RollupManager.
-    get_dynamic_raw_table_overview for the per-raw-table dynamic sizing
-    rows (narrow plus every wide table, each with its own live-computed
-    band), and RollupManager.get_dynamic_view_overview for the per-VIEW
-    rows (narrow's four rollup views plus every wide table's own four,
-    one row per (table, granularity) pair since a view's load is
-    granularity-specific — see that method's docstring).
+    `dynamic_view_groups` lists merged in — see BridgeAdminManager.
+    get_compression_retention_summary for the static-config field list
+    plus the per-raw-table dynamic sizing rows (narrow plus every wide
+    table, each with its own live-computed band, sourced from
+    HyperTableManager.get_dynamic_raw_table_overview), and RollupManager.
+    get_dynamic_view_overview for the per-VIEW rows (narrow's four rollup
+    views plus every wide table's own four, one row per (table,
+    granularity) pair since a view's load is granularity-specific — see
+    that method's docstring).
 
     Raises RuntimeError if no bridge is attached, or the bridge hasn't
     finished connecting to TimescaleDB yet (this is config sourced from
-    the rollup manager's own attributes, not a live query, but the rollup
-    manager itself doesn't exist until connected).
+    the hypertable/rollup managers' own attributes, not a live query, but
+    neither manager exists until connected).
     """
-    bridge: Any | None = get_timescale_bridge(gateway)
+    bridge: "timescaledb | None" = get_timescale_bridge(gateway)
     if bridge is None:
         raise RuntimeError("No TimescaleDB bridge is attached to this gateway.")
-    if bridge.rollup_mgr is None:
-        raise RuntimeError("Rollup manager is not initialized yet — the bridge is not connected to TimescaleDB.")
-    summary: dict[str, Any] = bridge.rollup_mgr.get_compression_retention_summary()
-    summary["dynamic_raw_tables"] = bridge.rollup_mgr.get_dynamic_raw_table_overview()
+    if bridge.rollup_mgr is None or bridge.hypertable_mgr is None:
+        raise RuntimeError("Hypertable/rollup managers are not initialized yet — the bridge is not connected to TimescaleDB.")
+    summary: dict[str, Any] = _field_manager(gateway).get_compression_retention_summary()
 
     # Grouped by protocol for display (4 granularity rows per table) --
     # itertools.groupby only merges already-consecutive equal keys, not a
@@ -714,18 +734,18 @@ def get_background_jobs(gateway: "Protocol_Gateway | None") -> list[dict[str, An
     """
     Read-only snapshot of TimescaleDB's background scheduler jobs for
     every hypertable/view this bridge manages, for the "Background Job
-    Status" panel. See RollupManager.get_background_jobs for the field
-    list.
+    Status" panel. See BridgeAdminManager.get_background_jobs for the
+    field list.
 
     Raises RuntimeError if no bridge is attached, or the bridge hasn't
     finished connecting to TimescaleDB yet.
     """
-    bridge: Any | None = get_timescale_bridge(gateway)
+    bridge: "timescaledb | None" = get_timescale_bridge(gateway)
     if bridge is None:
         raise RuntimeError("No TimescaleDB bridge is attached to this gateway.")
     if bridge.rollup_mgr is None:
         raise RuntimeError("Rollup manager is not initialized yet — the bridge is not connected to TimescaleDB.")
-    jobs: list[dict[str, Any]] = bridge.rollup_mgr.get_background_jobs()
+    jobs: list[dict[str, Any]] = _field_manager(gateway).get_background_jobs()
     for job in jobs:
         job["last_successful_finish_display"] = _format_dt(job.get("last_successful_finish"))
         job["next_start_display"] = _format_dt(job.get("next_start"))
@@ -837,7 +857,7 @@ def clear_staged_deletions(app_state: State) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Commit — actually performs the drops via WideTableFieldManager
+# Commit — actually performs the drops via BridgeAdminManager
 # ---------------------------------------------------------------------------
 
 def commit_staged_deletions(gateway: "Protocol_Gateway | None", app_state: State) -> list[dict[str, Any]]:
@@ -863,7 +883,7 @@ def commit_staged_deletions(gateway: "Protocol_Gateway | None", app_state: State
     if not has_staged_deletions(app_state):
         return []
 
-    mgr: WideTableFieldManager = _field_manager(gateway)
+    mgr: BridgeAdminManager = _field_manager(gateway)
     staged: dict[str, StagedEntry] = get_all_staged(app_state)
     results: list[dict[str, Any]] = []
 

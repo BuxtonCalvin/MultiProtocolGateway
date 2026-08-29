@@ -92,6 +92,7 @@ from sqlalchemy import (
     Inspector,
     Integer,
     PrimaryKeyConstraint,
+    Result,
     Row,
     Table,
     Text,
@@ -821,9 +822,15 @@ class timescaledb(transport_base):
             backlog_lock=self._backlog_lock,
             log=self._log
         )
-        # Rollup manager is initialized after the database connection is established, since
-        # it needs the session factory and engine to set up the schema and policies.
-        # don't AttributeError if init raises early.
+        # HyperTableManager and RollupManager are initialized after the
+        # database connection is established, since they need the session
+        # factory and engine to set up the schema and policies. Declared
+        # here (as None) so we don't AttributeError if init raises early.
+        # HyperTableManager is constructed first -- it's the lower-level
+        # primitive RollupManager is built on top of -- then RollupManager
+        # is constructed with a reference to it. See
+        # _init_or_update_rollup_manager.
+        self.hypertable_mgr: "HyperTableManager | None" = None
         self.rollup_mgr: "RollupManager | None" = None
 
         if self.enable_persistent_storage:
@@ -1267,14 +1274,14 @@ class timescaledb(transport_base):
                     # Tell RollupManager real data now exists for this
                     # transport, in case a dynamic-sizing retune is
                     # pending for its protocol (or narrow) -- see
-                    # RollupManager.note_device_metric_count_known. Only
+                    # HyperTableManager.note_device_metric_count_known. Only
                     # meaningful once metric_count is a real, positive
                     # figure; a 0/unknown count wouldn't move the load
                     # score anyway (_compute_metric_writes_per_day_helper
                     # skips it), so there's nothing to check off yet.
-                    if metric_count > 0 and self.rollup_mgr is not None:
+                    if metric_count > 0 and self.hypertable_mgr is not None:
                         try:
-                            self.rollup_mgr.note_device_metric_count_known(t_name, protocol_name)
+                            self.hypertable_mgr.note_device_metric_count_known(t_name, protocol_name)
                         except Exception as e:
                             self._log.warning(
                                 f"note_device_metric_count_known failed for '{t_name}': {e}"
@@ -1958,7 +1965,20 @@ class timescaledb(transport_base):
             return
 
         if self.rollup_mgr is None:
-            # First protocol registered — create the manager
+            # First protocol registered — create HyperTableManager first
+            # (the lower-level hypertable primitive RollupManager is
+            # built on top of), then RollupManager with a reference to
+            # it, then wire HyperTableManager's late-bound back-reference
+            # to RollupManager for the few genuinely bidirectional calls
+            # (dynamic-sizing retune triggering a rollup rebuild, and the
+            # shared performance-tier lookup needing the rollup-view
+            # count) -- see HyperTableManager's class docstring.
+            if self.hypertable_mgr is None:
+                self.hypertable_mgr = HyperTableManager(
+                    rollup_policy=self.rollup_policy,
+                    my_session_factory=self.SessionFactory,
+                    log=self._log,
+                )
             self.rollup_mgr = RollupManager(
                 rollup_policy=self.rollup_policy,
                 my_session_factory=self.SessionFactory,
@@ -1969,8 +1989,10 @@ class timescaledb(transport_base):
                 backlog_lock=self._backlog_lock,
                 flush_queue=self._flush_queue,
                 backlog=self.backlog,
-                reconnect_lock=self._reconnect_lock
+                reconnect_lock=self._reconnect_lock,
+                hypertable_mgr=self.hypertable_mgr,
             )
+            self.hypertable_mgr.rollup_mgr = self.rollup_mgr
             self.rollup_mgr.setup_narrow_rollup()
             # First protocol also needs per-protocol setup.
             # setup_narrow_rollup() only creates shared narrow rollups.
@@ -2031,7 +2053,7 @@ class timescaledb(transport_base):
         # silently a no-op for whichever transport happened to be the
         # very first to trigger protocol registration: rollup_mgr simply
         # didn't exist yet at that moment. That transport's read_interval
-        # then never made it into _transport_read_intervals, which
+        # then never made it into transport_read_intervals, which
         # permanently excluded it from get_dynamic_raw_table_settings_
         # helper's load-score roster AND from
         # RollupManager.note_device_metric_count_known's "every expected
@@ -2073,7 +2095,7 @@ class timescaledb(transport_base):
         # inverters of the same model) and, in principle, run at
         # different intervals; recording only the first one seen would
         # silently undercount that protocol's real combined load.
-        if self.rollup_mgr is not None:
+        if self.hypertable_mgr is not None:
             read_interval: float = getattr(from_transport, "read_interval", 0.0) or 0.0
             if read_interval <= 0:
                 self._log.warning(
@@ -2081,10 +2103,10 @@ class timescaledb(transport_base):
                     f"usable read_interval ({read_interval!r}) — dynamic chunk/compression sizing "
                     f"will fall back to static settings for this protocol until a valid interval is seen."
                 )
-            self.rollup_mgr.record_transport_interval(from_transport.transport_name, protocol, read_interval)
+            self.hypertable_mgr.record_transport_interval(from_transport.transport_name, protocol, read_interval)
         else:
             self._log.debug(
-                f"init_bridge: rollup_mgr unavailable for '{from_transport.transport_name}' "
+                f"init_bridge: hypertable_mgr unavailable for '{from_transport.transport_name}' "
                 f"(protocol '{protocol}') — read_interval not recorded."
             )
 
@@ -2612,381 +2634,6 @@ class timescaledb(transport_base):
     # nothing here creates, drops, or modifies anything.
     # -------------------------
 
-    def get_health_snapshot(self) -> dict[str, Any]:
-        """
-        Read-only snapshot of this bridge's live connection and background-
-        worker state, for the "Bridge Health" panel. Pulls together state
-        that's otherwise scattered across this class, the backlog manager,
-        and the rollup manager. The only DB round trip is a single cheap
-        COUNT against protocol_registry (skipped entirely if not
-        currently connected).
-        """
-        reconnecting: bool = bool(getattr(self, "_reconnect_thread_running", False))
-        migration_in_progress: bool | None = (
-            self.rollup_mgr.migration_in_progress.is_set() if self.rollup_mgr is not None else None
-        )
-        backlog_count: int = (
-            len(self.backlog.backlog_points) if getattr(self, "backlog", None) is not None else 0
-        )
-
-        protocols_rollup_complete: int = 0
-        protocols_rollup_total: int = 0
-        if self.tsdb_connected:
-            try:
-                with self.SessionFactory() as session:
-                    row: Row[Any] = session.execute(
-                        text("""
-                            SELECT
-                                COUNT(*) FILTER (WHERE rollup_setup_complete = true) AS complete,
-                                COUNT(*) AS total
-                            FROM protocol_registry
-                            WHERE rollup_enabled = true
-                        """)
-                    ).one()
-                protocols_rollup_complete = row.complete or 0
-                protocols_rollup_total = row.total or 0
-            except SQLAlchemyError as e:
-                self._log.error(f"get_health_snapshot: protocol_registry tally failed: {e}")
-
-        return {
-            "tsdb_connected": self.tsdb_connected,
-            "reconnecting": reconnecting,
-            "migration_in_progress": migration_in_progress,
-            "backlog_count": backlog_count,
-            "max_backlog_size": self.max_backlog_size,
-            "max_backlog_age": self.max_backlog_age,
-            "enable_auto_refresh": self.rollup_mgr.enable_auto_refresh if self.rollup_mgr else None,
-            "auto_refresh_interval": self.rollup_mgr.auto_refresh_interval if self.rollup_mgr else None,
-            "protocols_rollup_complete": protocols_rollup_complete,
-            "protocols_rollup_total": protocols_rollup_total,
-        }
-
-    def get_storage_overview(self) -> list[dict[str, Any]]:
-        """
-        Read-only per-source-table storage snapshot for the "Storage
-        Overview" panel: the shared narrow table plus every wide table
-        this bridge has created. Row counts use TimescaleDB's own
-        approximate_row_count(), which sums each chunk's analyzed
-        reltuples rather than an exact COUNT(*) (too slow on a large
-        hypertable purely to populate an info panel). This is NOT the
-        same as querying pg_stat_user_tables directly on the hypertable
-        name -- a hypertable's own catalog row holds no tuples itself
-        (the data lives in its per-chunk child tables), so n_live_tup on
-        the parent is always ~0 regardless of how much data exists.
-
-        Each table is queried independently and failures are recorded
-        per-row rather than aborting the whole snapshot, so one table
-        having a transient issue doesn't blank out the rest.
-        """
-        if not self.tsdb_connected:
-            return []
-
-        tables: list[tuple[str, str]] = [("shared_narrow", "device_metrics_narrow")]
-        try:
-            with self.SessionFactory() as session:
-                wide_rows: Sequence[Row[Any]] = session.execute(
-                    text("""
-                        SELECT protocol_name, wide_table_name
-                        FROM protocol_registry
-                        WHERE wide_table_name IS NOT NULL
-                        ORDER BY protocol_name
-                    """)
-                ).fetchall()
-        except SQLAlchemyError as e:
-            self._log.error(f"get_storage_overview: protocol_registry query failed: {e}")
-            wide_rows = []
-
-        tables.extend((protocol_name, wide_table_name) for protocol_name, wide_table_name in wide_rows)
-
-        results: list[dict[str, Any]] = []
-        for protocol_name, table_name in tables:
-            try:
-                with self.SessionFactory() as session:
-                    row: Row[Any] = session.execute(
-                        text(f"""
-                            SELECT
-                                approximate_row_count('{table_name}') AS approx_rows,
-                                hypertable_size('{table_name}'::regclass) AS size_bytes,
-                                (SELECT count(*) FROM timescaledb_information.chunks
-                                    WHERE hypertable_name = '{table_name}') AS chunk_count,
-                                (SELECT min(m_time) FROM {table_name}) AS oldest,
-                                (SELECT max(m_time) FROM {table_name}) AS newest
-                        """)  # noqa: S608
-                    ).one()
-                results.append({
-                    "protocol_name": protocol_name,
-                    "table_name": table_name,
-                    "approx_rows": row.approx_rows or 0,
-                    "size_bytes": row.size_bytes or 0,
-                    "chunk_count": row.chunk_count or 0,
-                    "oldest": row.oldest,
-                    "newest": row.newest,
-                    "error": None,
-                })
-            except SQLAlchemyError as e:
-                self._log.error(f"get_storage_overview: query failed for '{table_name}': {e}")
-                results.append({
-                    "protocol_name": protocol_name, "table_name": table_name,
-                    "approx_rows": None, "size_bytes": None, "chunk_count": None,
-                    "oldest": None, "newest": None, "error": str(e),
-                })
-
-        return results
-
-    # Plain (non-hypertable) validation/lookup tables to include in the
-    # Indexes panel alongside the hypertables below -- these back the
-    # protocol/metric/device registries every write path validates
-    # against, so their indexes matter for the same "is this table
-    # healthy" question the panel is answering, even though they're not
-    # time-series data. Queried the same way regardless of which bridge
-    # instance is asking, so this is safe as a module-level constant.
-    _LOOKUP_TABLE_NAMES: tuple[str, ...] = ("protocol_registry", "metric_catalog", "device_info")
-
-    # SQL shared by both branches of get_index_overview() for pulling an
-    # index's ordered key column list out of pg_index.indkey (a raw int2
-    # vector of attnums, one entry per key column in index order --
-    # WITH ORDINALITY over unnest() is what keeps that order, since a
-    # plain join would give Postgres no reason to preserve it). Returns
-    # NULL for an expression index (attnum 0 has no pg_attribute row),
-    # which the panel falls back to displaying the raw index definition
-    # for instead.
-    _INDEX_KEY_COLUMNS_SQL: str = """
-        (
-            SELECT array_agg(a.attname ORDER BY k.ord)
-            FROM unnest(idx.indkey) WITH ORDINALITY AS k(attnum, ord)
-            JOIN pg_attribute a ON a.attrelid = idx.indrelid AND a.attnum = k.attnum
-        ) AS key_columns
-    """
-
-    def get_index_overview(self) -> list[dict[str, Any]]:
-        """
-        Read-only per-index snapshot for the "Indexes" panel: every index
-        on the shared narrow table, every wide table (the same source-
-        table scope as get_storage_overview -- not the rollup views
-        themselves), and the plain validation/lookup tables in
-        _LOOKUP_TABLE_NAMES (protocol_registry, metric_catalog,
-        device_info).
-
-        Hypertables (narrow/wide) and plain tables need different queries
-        here, not one -- an index defined on a hypertable is real DDL on
-        the parent relation, but the parent itself never holds rows (data
-        lives in per-chunk child tables, same point get_storage_overview's
-        docstring makes about hypertable_size() vs n_live_tup), so a
-        naive pg_relation_size()/pg_stat_user_indexes lookup keyed off the
-        parent index only ever sees an almost-empty catalog entry --
-        every hypertable index reporting the same ~8kB minimum-page size
-        regardless of table size, and idx_scan permanently stuck at 0
-        since Postgres always executes the actual scan against a chunk's
-        own copy of the index, never the parent's. For the hypertable
-        branch below:
-          - size_bytes uses hypertable_index_size(), TimescaleDB's own
-            public sizing function, which sums the index across every
-            chunk instead of reading the parent's near-empty entry.
-          - idx_scan/idx_tup_read/idx_tup_fetch are summed from pg_stat_
-            user_indexes across every chunk's own copy of the index (chunk
-            list from timescaledb_information.chunks, a public, version-
-            stable view -- NOT from TimescaleDB's internal
-            _timescaledb_catalog schema, which an earlier version of this
-            method used to map a chunk-local index back to its parent by
-            name; that schema is TimescaleDB's own private implementation
-            detail, not a supported API, and turned out not to have the
-            expected shape in practice, exactly the risk flagged for a
-            similar shortcut in list_compression_groups' docstring).
-            Lacking that name-based mapping, chunk-level index rows are
-            matched back to the parent index by key-column signature
-            instead (same ordered column list computed for key_columns
-            below) -- reliable here since a chunk's indexes are always
-            struct-for-struct copies of the parent's, propagated
-            automatically when an index is created on the hypertable.
-          - This scan-stats query is best-effort and kept separate from
-            the metadata query below: if it fails for any reason (e.g. a
-            restricted role, or a chunk mid-creation), that table's rows
-            still get real names/sizes/key columns, just with idx_scan
-            etc. left as None ("not available") rather than blanking the
-            whole table out the way one shared query would.
-        Plain lookup tables need neither workaround -- pg_relation_size()
-        and pg_stat_user_indexes already read the real (only) copy of
-        the table/index directly, in one query.
-
-        Each table's metadata query is independent and failures are
-        recorded via a single synthetic error row for that table rather
-        than aborting the whole snapshot, so one table having a
-        transient issue doesn't blank out the rest — same pattern as
-        get_storage_overview.
-        """
-        if not self.tsdb_connected:
-            return []
-
-        tables: list[tuple[str, bool]] = [("device_metrics_narrow", True)]
-        try:
-            with self.SessionFactory() as session:
-                wide_table_names: Sequence[str] = session.execute(
-                    text("""
-                        SELECT wide_table_name
-                        FROM protocol_registry
-                        WHERE wide_table_name IS NOT NULL
-                        ORDER BY protocol_name
-                    """)
-                ).scalars().all()
-        except SQLAlchemyError as e:
-            self._log.error(f"get_index_overview: protocol_registry query failed: {e}")
-            wide_table_names = []
-
-        tables.extend((name, True) for name in wide_table_names)
-        tables.extend((name, False) for name in self._LOOKUP_TABLE_NAMES)
-
-        hypertable_metadata_sql: TextClause = text(f"""
-            SELECT
-                pi.indexname AS index_name,
-                pi.indexdef,
-                hypertable_index_size(quote_ident(pi.indexname)::regclass) AS size_bytes,
-                idx.indisunique AS is_unique,
-                idx.indisprimary AS is_primary,
-                {self._INDEX_KEY_COLUMNS_SQL}
-            FROM pg_indexes pi
-            JOIN pg_index idx ON idx.indexrelid = quote_ident(pi.indexname)::regclass
-            WHERE pi.tablename = :table_name
-            ORDER BY pi.indexname
-        """)  # noqa: S608
-
-        # Best-effort only -- see docstring. Sums pg_stat_user_indexes
-        # across every chunk of the hypertable (chunk list from the
-        # public timescaledb_information.chunks view) and groups by each
-        # chunk-local index's own key-column signature, so the result can
-        # be matched back to the parent index of the same signature in
-        # Python without needing any TimescaleDB-internal name mapping.
-        hypertable_scan_stats_sql: TextClause = text(f"""
-            WITH chunk_list AS (
-                SELECT chunk_schema, chunk_name
-                FROM timescaledb_information.chunks
-                WHERE hypertable_name = :table_name
-            ),
-            chunk_idx AS (
-                SELECT
-                    {self._INDEX_KEY_COLUMNS_SQL},
-                    psui.idx_scan,
-                    psui.idx_tup_read,
-                    psui.idx_tup_fetch
-                FROM chunk_list cl
-                JOIN pg_indexes pi ON pi.schemaname = cl.chunk_schema AND pi.tablename = cl.chunk_name
-                JOIN pg_index idx
-                    ON idx.indexrelid = (quote_ident(pi.schemaname) || '.' || quote_ident(pi.indexname))::regclass
-                LEFT JOIN pg_stat_user_indexes psui
-                    ON psui.schemaname = pi.schemaname AND psui.indexrelname = pi.indexname
-            )
-            SELECT
-                key_columns,
-                coalesce(sum(idx_scan), 0) AS idx_scan,
-                coalesce(sum(idx_tup_read), 0) AS idx_tup_read,
-                coalesce(sum(idx_tup_fetch), 0) AS idx_tup_fetch
-            FROM chunk_idx
-            GROUP BY key_columns
-        """)  # noqa: S608
-
-        plain_table_sql: TextClause = text(f"""
-            SELECT
-                pi.indexname AS index_name,
-                pi.indexdef,
-                pg_relation_size(quote_ident(pi.indexname)::regclass) AS size_bytes,
-                idx.indisunique AS is_unique,
-                idx.indisprimary AS is_primary,
-                {self._INDEX_KEY_COLUMNS_SQL},
-                coalesce(psui.idx_scan, 0) AS idx_scan,
-                coalesce(psui.idx_tup_read, 0) AS idx_tup_read,
-                coalesce(psui.idx_tup_fetch, 0) AS idx_tup_fetch
-            FROM pg_indexes pi
-            JOIN pg_index idx ON idx.indexrelid = quote_ident(pi.indexname)::regclass
-            LEFT JOIN pg_stat_user_indexes psui
-                ON psui.indexrelname = pi.indexname AND psui.schemaname = pi.schemaname
-            WHERE pi.tablename = :table_name
-            ORDER BY pi.indexname
-        """)  # noqa: S608
-
-        results: list[dict[str, Any]] = []
-        for table_name, is_hypertable in tables:
-            if not is_hypertable:
-                try:
-                    with self.SessionFactory() as session:
-                        rows: Sequence[Row[Any]] = session.execute(
-                            plain_table_sql, {"table_name": table_name}
-                        ).fetchall()
-                    for r in rows:
-                        results.append({
-                            "table_name": table_name,
-                            "is_hypertable": False,
-                            "index_name": r.index_name,
-                            "size_bytes": r.size_bytes or 0,
-                            "idx_scan": r.idx_scan or 0,
-                            "idx_tup_read": r.idx_tup_read or 0,
-                            "idx_tup_fetch": r.idx_tup_fetch or 0,
-                            "is_unique": bool(r.is_unique),
-                            "is_primary": bool(r.is_primary),
-                            "key_columns": list(r.key_columns) if r.key_columns else [],
-                            "indexdef": r.indexdef,
-                            "error": None,
-                        })
-                except SQLAlchemyError as e:
-                    self._log.error(f"get_index_overview: query failed for '{table_name}': {e}")
-                    results.append({
-                        "table_name": table_name, "is_hypertable": False,
-                        "index_name": None, "size_bytes": None, "idx_scan": None,
-                        "idx_tup_read": None, "idx_tup_fetch": None,
-                        "is_unique": None, "is_primary": None, "key_columns": [],
-                        "indexdef": None, "error": str(e),
-                    })
-                continue
-
-            try:
-                with self.SessionFactory() as session:
-                    meta_rows: Sequence[Row[Any]] = session.execute(
-                        hypertable_metadata_sql, {"table_name": table_name}
-                    ).fetchall()
-            except SQLAlchemyError as e:
-                self._log.error(f"get_index_overview: metadata query failed for '{table_name}': {e}")
-                results.append({
-                    "table_name": table_name, "is_hypertable": True,
-                    "index_name": None, "size_bytes": None, "idx_scan": None,
-                    "idx_tup_read": None, "idx_tup_fetch": None,
-                    "is_unique": None, "is_primary": None, "key_columns": [],
-                    "indexdef": None, "error": str(e),
-                })
-                continue
-
-            scan_stats_by_key: dict[tuple[str, ...], Row[Any]] = {}
-            try:
-                with self.SessionFactory() as session:
-                    scan_rows: Sequence[Row[Any]] = session.execute(
-                        hypertable_scan_stats_sql, {"table_name": table_name}
-                    ).fetchall()
-                scan_stats_by_key = {
-                    tuple(r.key_columns) if r.key_columns else (): r for r in scan_rows
-                }
-            except SQLAlchemyError as e:
-                # Degrade gracefully -- names/sizes/key columns from the
-                # metadata query above are still good, just without scan
-                # counts for this table. Logged at warning, not error:
-                # this is an expected fallback path, not a broken bridge.
-                self._log.warning(f"get_index_overview: scan-stats query failed for '{table_name}': {e}")
-
-            for r in meta_rows:
-                key_columns: list[str] = list(r.key_columns) if r.key_columns else []
-                scan_row: Row[Any] | None = scan_stats_by_key.get(tuple(key_columns))
-                results.append({
-                    "table_name": table_name,
-                    "is_hypertable": True,
-                    "index_name": r.index_name,
-                    "size_bytes": r.size_bytes or 0,
-                    "idx_scan": scan_row.idx_scan if scan_row is not None else None,
-                    "idx_tup_read": scan_row.idx_tup_read if scan_row is not None else None,
-                    "idx_tup_fetch": scan_row.idx_tup_fetch if scan_row is not None else None,
-                    "is_unique": bool(r.is_unique),
-                    "is_primary": bool(r.is_primary),
-                    "key_columns": key_columns,
-                    "indexdef": r.indexdef,
-                    "error": None,
-                })
-
-        return results
 
     # -------------------------
     # Close / cleanup
@@ -3000,6 +2647,7 @@ class timescaledb(transport_base):
             except Exception as e:
                 self._log.error(f"Error stopping auto refresh thread: {e}")
                 self.rollup_mgr = None
+                self.hypertable_mgr = None
 
         try:
             self._stop_thread_reconnect()
@@ -3335,73 +2983,80 @@ class BacklogManager:
                 priority=1
             )
             raise
-class RollupManager:
-    """ summary logic
-        The RollupManger class creates the structures that enable TimescaleDB rollup views.
-        After all structures are built:
-        1 RollupManager wakes up.
-        2 RollupManager tells BacklogManager to put everything into the _flush_queue if backlog data exists.
-            The _flush_queue is the threaded queue object that accepts MPG data obtained from the source transport.
-        3 RollupManager calls _flush_queue.join() (it pauses here).
-        4 _flush_worker finishes writing everything to the Hypertable and calls task_done() for each.
-        5 RollupManager resumes and calls refresh_continuous_aggregate.
-
-        Backlog Safety: The _refresh_rollup_loop wraps replay_to_queue() in the _backlog_lock and waits for completion via .join().
-        Attribute Persistence: All granular intervals (e.g., hourly_compress_after_interval) are mapped from the rollup_policy in __init__.
-        Live State: tsdb_connected and current_metric_count are implemented as @property to track the timescaledb class state in real-time.
-        SQL Execution: The SET work_mem uses the single-quote fix to prevent f-string placeholder errors.
+class HyperTableManager:
     """
+    Owns TimescaleDB hypertable-level mechanics: creating hypertables,
+    compression policies, retention policies, dynamic chunk/compression
+    sizing for the two raw source tables (device_metrics_narrow and each
+    device_metrics_wide__*), and the generic background-job / resource-
+    tier plumbing that both raw-table maintenance and rollup-view
+    maintenance lean on.
 
-    # This dataclass is used to describe the SQL expressions needed to create rollup continuous aggregates for a given metric.
-    @dataclass(frozen=True)
-    class RollupMetricDescriptor:
-        """
-        Describe one logical metric stream for generic rollup SQL generation.
+    Why this exists as its own class (and not folded back into
+    RollupManager): TimescaleDB itself draws this same line. A
+    continuous aggregate is, under the hood, its own hypertable -- the
+    same create_hypertable/add_compression_policy/add_retention_policy/
+    timescaledb_information.jobs machinery this class wraps is what
+    TimescaleDB uses internally for a CAGG's backing storage too. What's
+    genuinely CONTINUOUS-AGGREGATE-specific -- the view SQL itself,
+    add_continuous_aggregate_policy, refresh scheduling/watchdog,
+    cardinality-based view sizing -- stays on RollupManager. Everything
+    here is the lower-level "how a hypertable is stored, chunked,
+    compressed and retained" substrate that both the two raw tables AND
+    RollupManager's own CAGGs are built on.
 
-        Narrow rollups use a single descriptor keyed by `metric_name`.
-        Wide rollups use one descriptor per protocol-specific metric column.
-        """
+    Relationship to RollupManager: this class has no hard dependency on
+    RollupManager -- it's the lower-level primitive and is constructed
+    first (see timescaledb._init_or_update_rollup_manager). But a few
+    operations are genuinely bidirectional (TimescaleDB's own
+    interlocking of hypertable policy and CAGG definitions doesn't
+    factor into one strict direction): dynamic-sizing retune
+    (_do_retune_work) needs to trigger RollupManager.add_wide_rollup /
+    setup_narrow_rollup to rebuild the CAGGs on top of a newly-retuned
+    raw table, and the shared performance-tier lookup
+    (get_dynamic_settings_helper) needs to know how many rollup views
+    are currently registered. Rather than forcing those through an
+    awkward one-directional API, this class takes a late-bound
+    `rollup_mgr` reference, set once by the bridge right after both
+    managers are constructed. Every call site that uses it guards for
+    None, since this manager's own constructor unavoidably runs before
+    RollupManager's.
 
-        group_key_sql: str | None
-        raw_value_sql: str
-        rolled_min_sql: str
-        rolled_max_sql: str
-        rolled_summary_sql: str
-        min_alias: str
-        max_alias: str
-        summary_alias: str
+    Relationship to BridgeAdminManager (the wide-table field-editing /
+    UI-diagnostics class): BridgeAdminManager calls into this class for
+    the underlying pause/resume-compression-job and decompress-chunks
+    mechanics it needs around a column drop, and composes its
+    diagnostic summaries (get_compression_retention_summary,
+    get_background_jobs) from this class's config/overview methods
+    together with RollupManager's rollup-side ones -- it does not
+    duplicate any hypertable mechanics of its own.
+    """
 
     def __init__(
         self,
         rollup_policy: dict[str, Any],
         my_session_factory: sessionmaker[Session],
-        my_engine: Engine,
-        migration_in_progress: threading.Event,
         log: logging.Logger,
-        send_message:  SendMessageProtocol,
-        backlog_lock: threading.RLock,
-        flush_queue: queue.Queue[dict[str, Any] | None],
-        backlog: BacklogManager,
-        reconnect_lock: threading.RLock
         ) -> None:
 
         self.rollup_policy: dict[str, Any] = rollup_policy
         self.SessionFactory: sessionmaker[Session] = my_session_factory
-        self.engine: Engine = my_engine
-        self.migration_in_progress: threading.Event = migration_in_progress
         self._log: logging.Logger = log
-        self.send_message:  SendMessageProtocol = send_message
-        self._backlog_lock: threading.RLock = backlog_lock
-        self._flush_queue: queue.Queue[dict[str, Any] | None]  = flush_queue
-        self.backlog: 'BacklogManager'  = backlog
-        self._reconnect_lock: threading.RLock = reconnect_lock
 
-        self._refresh_rollup_thread = threading.Thread(target=self._refresh_rollup_loop_helper, daemon=True, name="RollupAutoRefreshThread")
-        self._stop_refresh_rollup_event: threading.Event = getattr(self, "_stop_refresh_rollup_event", threading.Event())
+        # Late-bound back-reference to the RollupManager sharing this
+        # bridge -- see class docstring. Set once by
+        # timescaledb._init_or_update_rollup_manager right after both
+        # managers exist. None only during the brief construction window
+        # before that happens; every internal usage below guards for it.
+        self.rollup_mgr: "RollupManager | None" = None
 
-        # Performance tiers for rollup refreshes, mapped from rollup_policy or default values.
-        # These settings control the computer's resource allocation and batch sizes for refreshing rollups at different granularities,
-        # allowing for optimized performance based on the expected workload and data volume of each tier.
+        # Performance tiers for heavier DDL/refresh-style operations
+        # (decompress/recompress, CAGG refreshes, etc.), scaled by how
+        # many hypertables + rollup views this bridge is currently
+        # managing. Shared by both raw-table maintenance (this class)
+        # and RollupManager's refresh/rebuild paths (via
+        # self.rollup_mgr / hypertable_mgr cross-calls) -- see
+        # get_dynamic_settings_helper.
         self.performance_tiers: dict[str, dict[str, Any]] = {
         "tier_low":    {"count": 50,  "work_mem": "32MB",  "lock_timeout": "10s", "flush_batch_size": 10},
         "tier_medium": {"count": 100, "work_mem": "64MB",  "lock_timeout": "15s", "flush_batch_size": 20},
@@ -3409,23 +3064,21 @@ class RollupManager:
         }
 
         # Tracks metric_count per protocol, keyed by protocol_name.
-        # Populated in add_wide_rollup from protocol_registry.metric_count.
-        # Used by _get_dynamic_settings to determine tier without a DB hit.
-        self._protocol_wide_column_counts: dict[str, int] = {}
+        # Populated in RollupManager.add_wide_rollup from
+        # protocol_registry, read here (via _max_wide_column_count_helper)
+        # so get_dynamic_settings_helper can determine tier without a DB hit.
+        self.protocol_wide_column_counts: dict[str, int] = {}
 
-        """
-        Rollup and Compression Timing Defaults comments only:
-        Rollup Type
-            refresh rollup    start_offset   compress_after   reason
-            1 Hour	          3 hours	     3 days	          Allows a 3-hour window for late data before locking it via compression.
-            1 Day	          3 days	     2 weeks	      Ensures daily rollups are finalized before compressing.
-            1 Week	          3 weeks	     2 months	      Larger window helps capture any delayed source data updates.
-            1 Month	          3 months	     6 months	      Maximum safety for long-term historical accuracy.
-        """
-
-        # hypertable defaults. These are not configurable by the user but can be overridden by changing the below rollup_policy if needed.
-        # These settings are critical for ensuring that the hypertable is created with the appropriate chunking and compression
-        # settings to optimize performance and storage efficiency for time-series data.
+        # Hypertable defaults. These are not configurable by the user but
+        # can be overridden by changing the below rollup_policy if needed.
+        # These settings are critical for ensuring that the hypertable is
+        # created with the appropriate chunking and compression settings
+        # to optimize performance and storage efficiency for time-series
+        # data. RollupManager reads the four rollup-view granularity
+        # entries (hourly/daily/weekly/monthly_*) out of this same dict
+        # for its own CAGG chunk/compress-after settings, rather than
+        # this class duplicating a second copy -- see RollupManager.
+        # __init__.
         self.hypertable_defaults: dict[str, str] = {
             "compress_segmentby_narrow": "device_info_id, metric_name",
             "compress_segmentby_wide": "device_info_id",
@@ -3494,30 +3147,11 @@ class RollupManager:
             "raw_wide_chunk_time_interval": "7 days",
         }
 
-        # rollup defaults, continuous aggregate bucket sizes.
-        self.rollup_defaults: dict[str, str] = {
-            "hourly_rollup_bucket": "1 hour",
-            "hourly_rollup_start": "3 hours",
-            "daily_rollup_bucket": "1 day",
-            "daily_rollup_start": "3 days",
-            "weekly_rollup_bucket": "1 week",
-            "weekly_rollup_start": "3 weeks",
-            "monthly_rollup_bucket": "1 month",
-            "monthly_rollup_start": "3 months",
-            "anchor_start_time_utc": "2000-01-01 00:00:00+00",  # default anchor time for rollup alignment
-        }
-
         self.if_not_exists = True
 
-        # Rollup /Hypertable Settings extracted from rollup_policy  (user can override defaults via rollup_policy)
-        self.current_metric_count: int = self.rollup_policy.get("current_metric_count", 0)
-        self.machine_timezone: str = self.rollup_policy.get("machine_timezone", "UTC")
-        self.auto_refresh_interval: int = self.rollup_policy.get("auto_refresh_interval",21600)
-        self.enable_auto_refresh:bool = self.rollup_policy.get("enable_auto_refresh", True)
-        self.enable_rollups = bool(self.rollup_policy.get("enable_rollups", True))
+        self.enable_compression = bool(self.rollup_policy.get("enable_compression", True))
         self.drop_after: str = self.rollup_policy.get("drop_after", "1 year")
-        self.migrate_data = bool(self.rollup_policy.get("migrate_data",True))
-        self.enable_compression = bool(self.rollup_policy.get("enable_compression",True))
+
         # When True (default), raw-table chunk_time_interval and compress_
         # after are computed dynamically from live scrape load (see
         # get_dynamic_raw_table_settings_helper) instead of using the
@@ -3528,18 +3162,29 @@ class RollupManager:
         # this is disabled.
         self.enable_dynamic_chunk_sizing = bool(self.rollup_policy.get("enable_dynamic_chunk_sizing", True))
 
+        # Compression settings
+        self.compress_segmentby_narrow: str = self.hypertable_defaults["compress_segmentby_narrow"]
+        self.compress_segmentby_wide: str = self.hypertable_defaults["compress_segmentby_wide"]
+        self.compress_orderby: str = self.hypertable_defaults["compress_orderby"]
+        self.time_column: str = self.hypertable_defaults["time_column"]
+
+        self.raw_narrow_compress_after_interval: str = self.hypertable_defaults["raw_narrow_compress_after_interval"]
+        self.raw_wide_compress_after_interval: str = self.hypertable_defaults["raw_wide_compress_after_interval"]
+        self.raw_narrow_chunk_time_interval: str = self.hypertable_defaults["raw_narrow_chunk_time_interval"]
+        self.raw_wide_chunk_time_interval: str = self.hypertable_defaults["raw_wide_chunk_time_interval"]
+
         # Live-tracked (protocol_name, read_interval) per transport_name,
         # populated once per transport by timescaledb.init_bridge() ->
         # record_transport_interval() -- read_interval is fixed for a
         # transport's lifetime, so this is captured once at registration.
-        # This is the one piece of load-sizing data that can't come from protocol_registry
-        # or from any static setting -- it only exists on the live transport object
-        # itself. Deliberately separate from the older _protocol_wide_
-        # column_counts / performance_tiers mechanism above, which tunes
-        # ROLLUP REFRESH lock/memory behavior, not chunk/compression
-        # sizing -- different concern, kept as a distinct dict rather than
-        # overloading that one.
-        self._transport_read_intervals: dict[str, tuple[str, float]] = {}
+        # This is the one piece of load-sizing data that can't come from
+        # protocol_registry or from any static setting -- it only exists
+        # on the live transport object itself. Deliberately separate from
+        # the older protocol_wide_column_counts / performance_tiers
+        # mechanism above, which tunes REFRESH/DDL lock and memory
+        # behavior, not chunk/compression sizing -- different concern,
+        # kept as a distinct dict rather than overloading that one.
+        self.transport_read_intervals: dict[str, tuple[str, float]] = {}
 
         # -------------------------
         # Dynamic-sizing retune tracking (see note_device_metric_count_known).
@@ -3566,14 +3211,14 @@ class RollupManager:
         # still unknown at that point) and lock in the wrong band just as
         # permanently as the original bug. _retune_reported tracks which
         # transports HAVE reported for a pending key; the retune only fires
-        # once that covers every transport _transport_read_intervals
+        # once that covers every transport transport_read_intervals
         # currently knows about for that key -- or once that key's bounded
         # timeout elapses, whichever comes first, so one offline device
         # can't keep the table on static settings indefinitely.
         self._retune_reported: dict[str | None, set[str]] = {}
-        self._retune_timer: dict[str | None, threading.Timer] = {}
+        self.retune_timer: dict[str | None, threading.Timer] = {}
         self._retuned: set[str | None] = set()
-        self._retune_lock: threading.Lock = threading.Lock()
+        self.retune_lock: threading.Lock = threading.Lock()
         # How long to wait, after the first transport for a pending key
         # reports, before retuning anyway even if not every expected
         # transport has reported yet (covers an offline/misconfigured
@@ -3581,65 +3226,21 @@ class RollupManager:
         # this timer is armed once per key and fires at most once.
         self.retune_timeout_seconds: float = float(self.rollup_policy.get("retune_timeout_seconds", 300))
 
-        # Compression settings
-        self.compress_segmentby_narrow: str= self.hypertable_defaults["compress_segmentby_narrow"]
-        self.compress_segmentby_wide: str= self.hypertable_defaults["compress_segmentby_wide"]
-        self.compress_orderby: str= self.hypertable_defaults["compress_orderby"]
-        self.time_column: str= self.hypertable_defaults["time_column"]
-
-        self.hourly_chunk_time_interval: str = self.hypertable_defaults["hourly_chunk_time_interval"]
-        self.daily_chunk_time_interval: str = self.hypertable_defaults["daily_chunk_time_interval"]
-        self.weekly_chunk_time_interval: str = self.hypertable_defaults["weekly_chunk_time_interval"]
-        self.monthly_chunk_time_interval: str = self.hypertable_defaults["monthly_chunk_time_interval"]
-
-        self.hourly_compress_after_interval: str = self.hypertable_defaults["hourly_compress_after_interval"]
-        self.daily_compress_after_interval: str = self.hypertable_defaults["daily_compress_after_interval"]
-        self.weekly_compress_after_interval: str = self.hypertable_defaults["weekly_compress_after_interval"]
-        self.monthly_compress_after_interval: str = self.hypertable_defaults["monthly_compress_after_interval"]
-        self.raw_narrow_compress_after_interval: str = self.hypertable_defaults["raw_narrow_compress_after_interval"]
-        self.raw_wide_compress_after_interval: str = self.hypertable_defaults["raw_wide_compress_after_interval"]
-        self.raw_narrow_chunk_time_interval: str = self.hypertable_defaults["raw_narrow_chunk_time_interval"]
-        self.raw_wide_chunk_time_interval: str = self.hypertable_defaults["raw_wide_chunk_time_interval"]
-
-        # Rollup view settings
-        self.anchor_start_time_utc: str = self.rollup_defaults["anchor_start_time_utc"]
-
-        self.hourly_rollup_bucket: str = self.rollup_defaults["hourly_rollup_bucket"]
-        self.daily_rollup_bucket: str = self.rollup_defaults["daily_rollup_bucket"]
-        self.weekly_rollup_bucket: str = self.rollup_defaults["weekly_rollup_bucket"]
-        self.monthly_rollup_bucket: str = self.rollup_defaults["monthly_rollup_bucket"]
-
-        self.hourly_rollup_start: str = self.rollup_defaults["hourly_rollup_start"]
-        self.daily_rollup_start: str = self.rollup_defaults["daily_rollup_start"]
-        self.weekly_rollup_start: str = self.rollup_defaults["weekly_rollup_start"]
-        self.monthly_rollup_start: str = self.rollup_defaults["monthly_rollup_start"]
-
-        # Tracks whether the shared narrow CAGG views have been created.
-        # Narrow rollup views (hourly/daily/weekly/monthly_rollup_narrow) are shared
-        # across all protocols, so they only need to be built once.
-        self._narrow_rollups_created: bool = False
-
-        # Registry of all CAGG view names this manager is responsible for refreshing.
-        # Populated by add_wide_rollup and _ensure_narrow_cagg_views.
-        # Keyed as view_name -> start_offset string, preserving insertion order
-        # so the refresh loop always runs hourly -> daily -> weekly -> monthly.
-        self._known_rollup_views: dict[str, str] = {}
-
     @property
     def tsdb_connected(self) -> bool:
         """Always returns the live connection state from the shared policy dict.
-            This allows the RollupManager to react immediately to changes in TSDB connection status,
-            which is critical for coordinating rollup refreshes and backlog replays.
+            Mirrors RollupManager.tsdb_connected -- both classes take the
+            same rollup_policy dict, so this is duplicated rather than
+            forced through the rollup_mgr back-reference (which isn't set
+            yet during this class's own construction window).
         """
         val: Any = self.rollup_policy.get("tsdb_connected", False)
-        # If val is the boolean False, the expression 'val is True or val == "True"' will return False.
-        # basically tries to capture string "True" as well as boolean True if somehow the config was passed as a string.
         if val is True or val == "True":
-
             return val is True
         else:
             return False
 
+    # === moved: record_transport_interval (3644-3671) ===
     def record_transport_interval(self, transport_name: str, protocol_name: str, read_interval: float) -> None:
         """
         Records the read_interval for one scraper transport, keyed by
@@ -3665,136 +3266,12 @@ class RollupManager:
         feeds into chunk/compression sizing.
         """
         if read_interval and read_interval > 0:
-            self._transport_read_intervals[transport_name] = (protocol_name, read_interval)
+            self.transport_read_intervals[transport_name] = (protocol_name, read_interval)
 
 
-    def setup_narrow_rollup(self) -> None:
-        """
-        Build the shared narrow-table post-creation stack.
 
-        This method preserves the original narrow bootstrap behavior while
-        routing the work through a single lifecycle helper so shared and
-        protocol-specific paths use the same orchestration shape.
-        """
-        chunk_interval, compress_after, band_name = self.get_dynamic_raw_table_settings_helper(
-            target_protocol_name=None,
-            static_chunk_interval=self.raw_narrow_chunk_time_interval,
-            static_compress_after=self.raw_narrow_compress_after_interval,
-        )
-        self._log.info(f"Narrow raw table sizing: {band_name} -> chunk={chunk_interval}, compress_after={compress_after}")
-        if band_name == "Static (no live data yet)":
-            self._flag_pending_retune(None)
-
-        self.setup_rollup(
-            table_name="device_metrics_narrow",
-            segment_by=self.compress_segmentby_narrow,
-            # Dynamically sized (or falls back to the static raw_narrow_*
-            # settings) -- see get_dynamic_raw_table_settings_helper.
-            compress_after_interval=compress_after,
-            chunk_time_interval=chunk_interval,
-            protocol_name=None,
-            wide_table_name=None,
-            use_shared_rollup_flow=True,
-        )
-
-    def setup_rollup(
-        self,
-        table_name: str,
-        segment_by: str,
-        compress_after_interval: str,
-        chunk_time_interval: str,
-        protocol_name: str | None,
-        wide_table_name: str | None,
-        use_shared_rollup_flow: bool,
-        force: bool = False,
-    ) -> None:
-        """
-        Run the common post-table-processing lifecycle for both narrow and wide sources.
-
-        The shared narrow stack and protocol wide stack both apply the same
-        major categories of work: hypertable setup, compression setup,
-        retention policy, rollup creation, and initial refresh. This helper
-        centralizes that lifecycle while still allowing narrow-specific and
-        wide-specific rollup creation to diverge where required.
-
-        compress_after_interval / chunk_time_interval: both single values,
-        not lists. `table_name` is one raw hypertable, which can only ever
-        have one compression policy and one chunk_time_interval —
-        TimescaleDB doesn't support "4 different values" of either on one
-        object.
-        Callers should pass raw_narrow_compress_after_interval / raw_
-        narrow_chunk_time_interval (from setup_narrow_rollup) or raw_wide_
-        compress_after_interval / raw_wide_chunk_time_interval (from add_
-        wide_rollup) — settings dedicated to each raw table, deliberately
-        separate both from each other (narrow and wide have very different
-        write volume and row density, so their chunk sizing and
-        compression scheduling shouldn't be tied together either — see
-        hypertable_defaults' comments) and from the four rollup-view
-        granularity settings
-        (hourly_compress_after_interval, hourly_chunk_time_interval,
-        etc.), since reusing one of those for the raw table would be an
-        undocumented assumption discoverable only by reading this code.
-
-        force: passed straight through to the rollup-creation step (see
-        ensure_rollups / _ensure_cagg_views_for_protocol) — when True, the
-        stack is purged and fully re-materialized even if its bucket
-        intervals already match config. Used by the admin's "Force Rebuild"
-        button; normal startup/reconnect calls leave this False.
-        """
-        # 1 Hypertable & Policies
-        try:
-            self._ensure_hypertables([table_name], chunk_time_interval=chunk_time_interval)
-            self._log.info("Hypertable check/creation complete")
-        except Exception as e:
-            self._log.error(f"Hypertable creation failed: {e}")
-
-        # 2 Enable compression (if configured)
-        try:
-            if self.enable_compression:
-                self._configure_compression(
-                    table_name=table_name,
-                    segment_by=segment_by,
-                    compress_after_interval=compress_after_interval,
-                )
-        except Exception as e:
-            self._log.error(f"Enable compression failed: {e}")
-
-        # 3 Add retention policy
-        try:
-            self._apply_retention_policy(table_name)
-        except Exception as e:
-            self._log.error(f"Add retention policy failed: {e}")
-
-        # 4 Setup continuous aggregate rollups
-        if self.enable_rollups:
-            if use_shared_rollup_flow:
-                # 4a
-                try:
-                    self.setup_with_retry(force=force)
-                except Exception as e:
-                    self._log.error(f"Aggregate Rollup setup failed: {e}")
-                # 4b
-                try:
-                    self.refresh_rollups(force_full=True)
-                except Exception as e:
-                    self._log.error(f"Refresh Rollup failed: {e}")
-            elif protocol_name is not None:
-                # 4a
-                try:
-                    self._ensure_cagg_views_for_protocol(protocol_name, wide_table_name, force=force)
-                except Exception as e:
-                    self._log.error(f"CAGG view creation failed for protocol '{protocol_name}': {e}")
-
-                # 4b
-                try:
-                    self._refresh_protocol_rollups_helper(protocol_name, wide_table_name)
-                except Exception as e:
-                    self._log.error(
-                        f"Initial rollup refresh failed for '{protocol_name}': {e}"
-                        f" — views exist but data may not be pre-aggregated."
-                    )
-
-    def _ensure_hypertables(self, tables: list[str], chunk_time_interval: str | None = None) -> None:
+    # === moved: ensure_hypertables (3798-3875) ===
+    def ensure_hypertables(self, tables: list[str], chunk_time_interval: str | None = None) -> None:
         """
         Ensure the provided source tables are TimescaleDB hypertables.
 
@@ -3872,7 +3349,9 @@ class RollupManager:
             self._log.error("Failed to ensure hypertables: %s", e)
             raise
 
-    def _configure_compression(self, table_name: str, segment_by: str, compress_after_interval: str) -> None:
+
+    # === moved: configure_compression (3876-3901) ===
+    def configure_compression(self, table_name: str, segment_by: str, compress_after_interval: str) -> None:
         """
         Apply compression settings and the compression policy to one source table.
 
@@ -3898,7 +3377,9 @@ class RollupManager:
 
                 session.commit()
 
-    def _policy_config_matches_helper(
+
+    # === moved: policy_config_matches_helper (3902-3973) ===
+    def policy_config_matches_helper(
         self,
         session: Session,
         target_name: str,
@@ -3914,7 +3395,7 @@ class RollupManager:
         be a pure no-op.
 
         Used to skip the unconditional remove-then-add pattern in
-        ensure_compression_policy / _apply_retention_policy /
+        ensure_compression_policy / apply_retention_policy /
         _add_aggregate_policy_helper on passes where nothing actually
         changed -- e.g. a dynamic-sizing retune (see RollupManager.
         note_device_metric_count_known) that happens to compute the same
@@ -3965,12 +3446,14 @@ class RollupManager:
             )
         except SQLAlchemyError as e:
             self._log.debug(
-                f"_policy_config_matches_helper: could not compare '{proc_name}' config['{config_key}'] "
+                f"policy_config_matches_helper: could not compare '{proc_name}' config['{config_key}'] "
                 f"on '{target_name}': {e}"
             )
             return False
 
-    def _apply_retention_policy(self, table_name: str) -> None:
+
+    # === moved: apply_retention_policy (3974-4017) ===
+    def apply_retention_policy(self, table_name: str) -> None:
         """
         Apply the configured retention policy to one source table.
 
@@ -3978,7 +3461,7 @@ class RollupManager:
         retention interval still take effect on restart -- but skips that
         remove-then-add entirely when the existing policy_retention job's
         drop_after already matches self.drop_after (see
-        _policy_config_matches_helper), since that's unconditional churn
+        policy_config_matches_helper), since that's unconditional churn
         on every reconnect/retune pass in the common case where drop_after
         hasn't actually changed.
         """
@@ -3988,11 +3471,11 @@ class RollupManager:
                 return
 
             try:
-                if self._policy_config_matches_helper(
+                if self.policy_config_matches_helper(
                     session, table_name, "policy_retention", "drop_after", self.drop_after
                 ):
                     self._log.debug(
-                        f"_apply_retention_policy: '{table_name}' already drop_after={self.drop_after}, "
+                        f"apply_retention_policy: '{table_name}' already drop_after={self.drop_after}, "
                         f"skipping remove/re-add."
                     )
                     return
@@ -4014,17 +3497,8 @@ class RollupManager:
 
 
     # 5 Start the rollup thread.  Called from TimescaleDB class upon connection to the database.
-    def start_auto_refresh(self) -> None:
 
-        if self._refresh_rollup_thread.is_alive():
-            self._log.debug("Auto refresh thread already running.")
-            return
-        else:
-            # start _refresh_rollup_thread after connect completes successfully
-            self._refresh_rollup_thread.start()
-            self._log.debug("Auto rollup refresh thread started.")
-
-
+    # === moved: _apply_compression_helper (4029-4048) ===
     def _apply_compression_helper(self, session: Session, table_name: str, segment_by: str) -> None:
         """Apply compression ALTER TABLE settings to one source table."""
         try:
@@ -4045,6 +3519,8 @@ class RollupManager:
             except SQLAlchemyError as e2:
                 self._log.error(f"Rollback error for {table_name}: {e2}")
 
+
+    # === moved: ensure_compression_policy (4049-4116) ===
     def ensure_compression_policy(self, source: str, chunk_interval: str) -> None:
         """
         Automatically compress chunks older than chunk_interval on `source`.
@@ -4059,7 +3535,7 @@ class RollupManager:
         an already-configured hypertable -- only a brand new one would
         ever pick up the new value, while the old job kept running (and
         potentially kept failing) at its original interval forever. This
-        mirrors _apply_retention_policy's own fix for the identical
+        mirrors apply_retention_policy's own fix for the identical
         problem -- see that method's docstring.
 
         Removing and re-adding only affects the *ongoing* job's future
@@ -4072,7 +3548,7 @@ class RollupManager:
 
         Skips the remove-then-add entirely when the existing policy_
         compression job's compress_after already matches chunk_interval
-        (see _policy_config_matches_helper) -- avoids unnecessary churn
+        (see policy_config_matches_helper) -- avoids unnecessary churn
         on a reconnect or dynamic-sizing retune that recomputes the same
         band as before, and avoids racing TimescaleDB's own background
         scheduler if a run happens to already be due for that job.
@@ -4088,7 +3564,7 @@ class RollupManager:
                     return
 
             try:
-                if self._policy_config_matches_helper(
+                if self.policy_config_matches_helper(
                     session, source, "policy_compression", "compress_after", chunk_interval
                 ):
                     self._log.debug(
@@ -4098,7 +3574,7 @@ class RollupManager:
                     return
 
                 # Remove and re-add policy to ensure interval updates apply
-                # -- same reasoning as _apply_retention_policy.
+                # -- same reasoning as apply_retention_policy.
                 session.execute(text(f"SELECT remove_compression_policy('{source}', if_exists => TRUE);"))
                 session.execute(
                     text(f"SELECT add_compression_policy('{source}', compress_after => INTERVAL '{chunk_interval}');")
@@ -4112,6 +3588,1598 @@ class RollupManager:
                     session.rollback()
                 except SQLAlchemyError as e2:
                     self._log.error(f"ensure_compression_policy {source} for {chunk_interval} rollback error: {e2}")
+
+
+    # === moved: _compression_group_tables (5559-5624) ===
+    def _compression_group_tables(self, protocol_names: set[str] | None = None) -> list[dict[str, Any]]:
+        """
+        Resolves each compression group's member tables -- the group's raw
+        hypertable plus its hourly/daily/weekly/monthly rollup views (all
+        five are independently compressible hypertables in TimescaleDB;
+        continuous aggregates materialize into their own hypertable).
+
+        Uses the same group keys as rebuild_all_rollups() /
+        refresh_selected_rollups() above (a wide-table protocol_name, plus
+        the literal "shared_narrow" for the shared narrow stack) and the
+        same ordering (shared narrow stack first, then wide protocols
+        alphabetically) list_rollup_views() produces, so a group's
+        position/selection here always lines up with what the admin sees
+        on the Rebuild Rollup Views screen's checkboxes.
+
+        protocol_names=None resolves every group with selected=True. An
+        empty set resolves every group with selected=False -- callers use
+        `selected` to decide whether to act on a group, not whether to
+        include it in the returned list, so a group always has a result
+        row even when it's skipped.
+        """
+        groups: list[dict[str, Any]] = [{
+            "protocol_name": "shared_narrow",
+            "wide_table_name": "device_metrics_narrow",
+            "selected": protocol_names is None or "shared_narrow" in protocol_names,
+            "tables": [
+                "device_metrics_narrow",
+                "hourly_rollup_narrow",
+                "daily_rollup_narrow",
+                "weekly_rollup_narrow",
+                "monthly_rollup_narrow",
+            ],
+        }]
+
+        with self.SessionFactory() as session:
+            protocol_rows: Sequence[Row[Any]] = session.execute(
+                text("""
+                    SELECT protocol_name, rollup_prefix, wide_table_name
+                    FROM protocol_registry
+                    WHERE wide_table_name IS NOT NULL
+                    ORDER BY protocol_name
+                """)
+            ).fetchall()
+
+        for protocol_name, rollup_prefix, wide_table_name in protocol_rows:
+            tables: list[str] = [wide_table_name]
+            if rollup_prefix:
+                # Registered but rollup setup hasn't finished yet -- the
+                # wide table itself is still a valid compression target,
+                # it just doesn't have rollup views to add yet.
+                tables.extend(f"{gran}_{rollup_prefix}" for gran in ("hourly", "daily", "weekly", "monthly"))
+            groups.append({
+                "protocol_name": protocol_name,
+                "wide_table_name": wide_table_name,
+                "selected": protocol_names is None or protocol_name in protocol_names,
+                "tables": tables,
+            })
+
+        return groups
+
+    # Every group's tables follow the same [raw, hourly, daily, weekly,
+    # monthly] shape (see _compression_group_tables) -- this is just the
+    # granularity label for a table at a given position in that list, used
+    # to annotate each inventory row for the UI.
+    _GRANULARITY_BY_POSITION: tuple[str, ...] = ("raw", "hourly", "daily", "weekly", "monthly")
+
+
+    # === moved: list_compression_groups (5625-5792) ===
+    def list_compression_groups(self) -> list[dict[str, Any]]:
+        """
+        Read-only compression inventory for the Rebuild Compression screen
+        -- one row per group (shared narrow stack, plus each wide-table
+        protocol), each carrying a per-table breakdown (raw table + all
+        four rollup views) of chunk counts and on-disk size, so the admin
+        can see the actual cost of a rebuild before committing to it
+        rather than clicking blind.
+
+        Answered with a SINGLE query across every group's tables at once,
+        rather than the 2-queries-per-table loop this replaced. Two
+        reasons that's the better trade here, not just a micro-
+        optimization:
+          1. Round trips dominate: with ~5-10 groups x 5 tables each, the
+             old loop was 50-100 sequential round trips to Postgres before
+             the page could render. One batched query is one round trip,
+             and GROUP BY lets Postgres answer it off a single scan of
+             timescaledb_information.chunks instead of one scan per table.
+          2. Simpler error handling: to_regclass()/hypertable_size() on a
+             table that doesn't exist yet (rollups mid-setup for a
+             protocol) just yields NULL/0 inline, so there's no per-table
+             try/except -- one missing view no longer needs special-casing
+             to avoid blanking out an otherwise-valid group.
+
+        A view-vs-hypertable subtlety the single query has to account for:
+        a rollup view's NAME (e.g. "hourly_rollup_wide_eg4_18kpv") is not
+        the name TimescaleDB's chunk/size catalogs index by -- continuous
+        aggregates materialize into a separate, internally-named
+        hypertable, and that's what timescaledb_information.chunks and
+        hypertable_size() need. The query below resolves that via
+        timescaledb_information.continuous_aggregates (the public,
+        version-stable catalog view) before joining chunks/computing size,
+        falling back to the table's own name unchanged for the raw wide/
+        narrow tables, which aren't continuous aggregates and don't need
+        resolving.
+
+        raw_size_bytes is the sum of chunk_compression_stats().
+        before_compression_total_bytes across the table's currently-
+        compressed chunks -- the size that data would take up UNcompressed,
+        i.e. what "Rebuild Compression" is shrinking it back down from.
+        Unlike size_bytes (chunk_compression_stats() is called directly
+        with the table/view's own name here, same as rebuild_compression()
+        already does -- TimescaleDB resolves a continuous aggregate's
+        public view to its materialization hypertable internally for this
+        function, no manual resolution needed the way size_bytes needs
+        for hypertable_size()). Deliberately only covers chunks that ARE
+        compressed: an uncompressed chunk has no separate before/after
+        distinction to query -- its current on-disk size already IS its
+        raw size, so a table with nothing compressed yet reports
+        raw_size_bytes=0 rather than double-counting via size_bytes.
+
+        (There's also a lower-level variant of this same query that joins
+        _timescaledb_catalog.* system tables directly by OID instead of
+        timescaledb_information.* -- probably marginally faster, but those
+        catalog tables are TimescaleDB's internal implementation detail,
+        not its supported public API, and can change shape across
+        versions without notice. This inventory isn't a hot path -- it
+        loads once per page view and once after a rebuild -- so the public
+        catalog views are the safer choice here.)
+        """
+        groups: list[dict[str, Any]] = self._compression_group_tables(protocol_names=None)
+
+        granularity_by_table: dict[str, str] = {}
+        all_table_names: list[str] = []
+        for group in groups:
+            for i, table_name in enumerate(group["tables"]):
+                granularity_by_table[table_name] = self._GRANULARITY_BY_POSITION[i]
+                all_table_names.append(table_name)
+
+        with self.SessionFactory() as session:
+            stat_rows: Sequence[Row[Any]] = session.execute(
+                text("""
+                    WITH target_tables AS (
+                        SELECT unnest(CAST(:table_names AS text[])) AS view_name
+                    ),
+                    resolved AS (
+                        SELECT
+                            t.view_name,
+                            coalesce(
+                                ca.materialization_hypertable_schema || '.' || ca.materialization_hypertable_name,
+                                t.view_name
+                            ) AS qualified_relation_name,
+                            coalesce(ca.materialization_hypertable_name, t.view_name) AS hypertable_name
+                        FROM target_tables t
+                        LEFT JOIN timescaledb_information.continuous_aggregates ca
+                            ON ca.view_name = t.view_name
+                    ),
+                    chunk_counts AS (
+                        SELECT
+                            r.view_name,
+                            r.qualified_relation_name,
+                            count(ch.chunk_name) AS total_chunks,
+                            count(ch.chunk_name) FILTER (WHERE ch.is_compressed) AS compressed_chunks
+                        FROM resolved r
+                        LEFT JOIN timescaledb_information.chunks ch
+                            ON ch.hypertable_name = r.hypertable_name
+                        GROUP BY r.view_name, r.qualified_relation_name
+                    ),
+                    raw_size AS (
+                        SELECT
+                            t.view_name,
+                            coalesce(sum(s.before_compression_total_bytes), 0) AS raw_size_bytes
+                        FROM target_tables t
+                        LEFT JOIN LATERAL (
+                            SELECT before_compression_total_bytes
+                            FROM chunk_compression_stats(to_regclass(t.view_name))
+                        ) s ON to_regclass(t.view_name) IS NOT NULL
+                        GROUP BY t.view_name
+                    )
+                    SELECT
+                        c.view_name,
+                        c.total_chunks,
+                        c.compressed_chunks,
+                        coalesce(hypertable_size(to_regclass(c.qualified_relation_name)), 0) AS size_bytes,
+                        coalesce(rs.raw_size_bytes, 0) AS raw_size_bytes
+                    FROM chunk_counts c
+                    LEFT JOIN raw_size rs ON rs.view_name = c.view_name
+                """),
+                {"table_names": all_table_names},
+            ).fetchall()
+
+        stats_by_table: dict[str, dict[str, int]] = {
+            row.view_name: {
+                "total_chunks": row.total_chunks or 0,
+                "compressed_chunks": row.compressed_chunks or 0,
+                "size_bytes": row.size_bytes or 0,
+                "raw_size_bytes": row.raw_size_bytes or 0,
+            }
+            for row in stat_rows
+        }
+
+        rows_out: list[dict[str, Any]] = []
+        for group in groups:
+            table_rows: list[dict[str, Any]] = []
+            total_chunks = 0
+            compressed_chunks = 0
+            size_bytes = 0
+            raw_size_bytes = 0
+            for table_name in group["tables"]:
+                stats: dict[str, int] = stats_by_table.get(
+                    table_name,
+                    {"total_chunks": 0, "compressed_chunks": 0, "size_bytes": 0, "raw_size_bytes": 0},
+                )
+                table_rows.append({
+                    "table_name": table_name,
+                    "granularity": granularity_by_table[table_name],
+                    "total_chunks": stats["total_chunks"],
+                    "compressed_chunks": stats["compressed_chunks"],
+                    "size_bytes": stats["size_bytes"],
+                    "raw_size_bytes": stats["raw_size_bytes"],
+                })
+                total_chunks += stats["total_chunks"]
+                compressed_chunks += stats["compressed_chunks"]
+                size_bytes += stats["size_bytes"]
+                raw_size_bytes += stats["raw_size_bytes"]
+
+            rows_out.append({
+                "protocol_name": group["protocol_name"],
+                "wide_table_name": group["wide_table_name"],
+                "tables": table_rows,
+                "total_chunks": total_chunks,
+                "compressed_chunks": compressed_chunks,
+                "size_bytes": size_bytes,
+                "raw_size_bytes": raw_size_bytes,
+            })
+
+        return rows_out
+
+
+    # === moved: pause_compression_job_for_table (5793-5824) ===
+    def pause_compression_job_for_table(self, session: Session, table_name: str) -> list[int]:
+        """
+        Temporarily disables (scheduled => false) any compression policy
+        job(s) TimescaleDB has configured specifically for table_name.
+        Single canonical implementation used by both this class's own
+        Rebuild Compression flow and BridgeAdminManager.delete_fields
+        (via bridge.hypertable_mgr) around its DROP COLUMN -- previously
+        each kept its own private copy of this same query. Returns the
+        job_id(s) paused, so resume_compression_job_for_table can
+        re-enable them afterward.
+        """
+        try:
+            rows: Sequence[Row[Any]] = session.execute(
+                text("""
+                    SELECT job_id FROM timescaledb_information.jobs
+                    WHERE hypertable_name = :table_name
+                      AND proc_name ILIKE :search_term
+                      AND scheduled = true
+                """),
+                {"table_name": table_name, "search_term": "%compress%"}
+            ).fetchall()
+            job_ids: list[int] = [r[0] for r in rows]
+            for job_id in job_ids:
+                session.execute(text("SELECT alter_job(:job_id, scheduled := false)"), {"job_id": job_id})
+            if job_ids:
+                self._log.info(f"pause_compression_job_for_table: paused job(s) {job_ids} for '{table_name}'")
+        except Exception as e:
+            self._log.warning(
+                f"pause_compression_job_for_table: could not pause compression job for '{table_name}': {e}"
+            )
+            return []
+        else:
+            return job_ids
+
+
+    # === moved: resume_compression_job_for_table (5825-5834) ===
+    def resume_compression_job_for_table(self, session: Session, job_ids: list[int]) -> None:
+        """Re-enables (scheduled => true) job_ids previously paused by pause_compression_job_for_table."""
+        for job_id in job_ids:
+            try:
+                session.execute(text("SELECT alter_job(:job_id, scheduled => true)"), {"job_id": job_id})
+            except Exception as e:
+                self._log.warning(f"resume_compression_job_for_table: could not resume job {job_id}: {e}")
+        if job_ids:
+            self._log.info(f"resume_compression_job_for_table: resumed job(s) {job_ids}")
+
+
+    # === moved: decompress_table_chunks_best_effort (5835-5911) ===
+    def decompress_table_chunks_best_effort(self, session: Session, table_name: str) -> None:
+        """
+        Decompresses every currently-compressed chunk of table_name,
+        best-effort. This is the one place that kind of decompress lives
+        now -- it used to be a private copy
+        (BridgeAdminManager._decompress_chunks_best_effort) kept next
+        to the Delete Columns flow, but decompressing a table's chunks is
+        exactly what this class's Rebuild Compression machinery already
+        does as half of its decompress -> compress cycle, so
+        BridgeAdminManager.delete_fields now calls this instead of
+        keeping its own copy of the same logic. Support for dropping
+        columns directly on compressed hypertable chunks is inconsistent
+        across TimescaleDB versions, so delete_fields calls this
+        proactively, ahead of its ALTER TABLE ... DROP COLUMN. Newly
+        written data is recompressed on the normal compression policy
+        schedule; running the full "Rebuild Compression" screen
+        afterward is what re-compresses these particular chunks under
+        the now-smaller column set (see rebuild_compression's docstring).
+
+        Best-effort: a table with no compressed chunks (or not yet a
+        hypertable) simply no-ops here rather than failing the caller's
+        edit.
+
+        Runs inside a SAVEPOINT (session.begin_nested()), not directly in
+        the caller's transaction. Postgres aborts an entire transaction --
+        not just the one failing statement -- the moment any statement in
+        it errors, and that abort can only be cleared by a ROLLBACK (or
+        ROLLBACK TO SAVEPOINT), never by simply catching the Python
+        exception. Without the SAVEPOINT here, a failure in this
+        best-effort step would silently poison the caller's transaction:
+        the except block below would swallow the Python-level exception,
+        but every statement after it -- including the ALTER TABLE DROP
+        COLUMN this is meant to prepare for -- would then fail with
+        "current transaction is aborted, commands ignored until end of
+        transaction block", surfacing as a confusing failure far from its
+        real cause. begin_nested() ensures only the SAVEPOINT is rolled
+        back on failure, leaving the rest of the caller's transaction
+        (including the DROP COLUMN that follows) usable.
+
+        Deliberately takes and reuses the CALLER's session/transaction
+        (unlike list_compression_groups/rebuild_compression above, which
+        each open their own short-lived sessions) -- delete_fields needs
+        this decompress step and its subsequent DROP COLUMN to be atomic
+        with each other, inside the single advisory-locked transaction it
+        already holds.
+
+        Applies the same dynamic lock_timeout (_get_dynamic_settings_
+        helper -> set_lock_timeout) every other lock-risky operation in
+        this class applies before touching a hypertable/CAGG (see
+        _create_rollup_helper, drop_protocol_rollup,
+        _drop_all_continuous_aggregates) -- decompress_chunk() takes an
+        exclusive lock same as those, and can be blocked by the same
+        sources (the flush thread, an in-flight refresh). Without it this
+        step would hang on that lock indefinitely instead of failing fast
+        like everything else here does; it was inconsistent for this
+        decompress to be the one exception.
+        """
+        r_settings: dict[str, Any] = self.get_dynamic_settings_helper()
+        try:
+            with session.begin_nested():
+                self.set_lock_timeout(session, r_settings["lock_timeout"])
+                session.execute(
+                    text("""
+                        SELECT decompress_chunk(c, true)
+                        FROM show_chunks(:tname) AS c;
+                    """),
+                    {"tname": table_name}
+                )
+        except Exception as e:
+            # the common case -- no compressed chunks yet
+            # -- is entirely expected, but logged at warning so an
+            # unexpected failure here is never silent again.
+            self._log.warning(
+                f"decompress_table_chunks_best_effort: could not decompress chunks for '{table_name}' "
+                f"(continuing -- this step is best-effort): {e}"
+            )
+
+
+    # === moved: _get_hypertable_total_sizes (5912-5955) ===
+    def _get_hypertable_total_sizes(self, table_names: list[str]) -> dict[str, int]:
+        """
+        Returns {table_name: hypertable_size_bytes} for the given table/
+        view names -- same view-resolution technique as
+        list_compression_groups (a rollup view's public name isn't what
+        timescaledb_information.chunks/hypertable_size() index by; this
+        resolves it via timescaledb_information.continuous_aggregates
+        first), but scoped to just total on-disk size, no chunk counts.
+        This is what rebuild_compression uses for its before/after size
+        snapshot, so that a rebuild's reported size change is the SAME
+        metric list_compression_groups' "Size" column already shows the
+        admin, not some other narrower figure that happens to look
+        similar. A name that doesn't resolve to an existing relation
+        yields 0 rather than raising. Empty input short-circuits to `{}`
+        without a round trip.
+        """
+        if not table_names:
+            return {}
+        with self.SessionFactory() as session:
+            rows: Sequence[Row[Any]] = session.execute(
+                text("""
+                    WITH target_tables AS (
+                        SELECT unnest(CAST(:table_names AS text[])) AS view_name
+                    ),
+                    resolved AS (
+                        SELECT
+                            t.view_name,
+                            coalesce(
+                                ca.materialization_hypertable_schema || '.' || ca.materialization_hypertable_name,
+                                t.view_name
+                            ) AS qualified_relation_name
+                        FROM target_tables t
+                        LEFT JOIN timescaledb_information.continuous_aggregates ca
+                            ON ca.view_name = t.view_name
+                    )
+                    SELECT
+                        r.view_name,
+                        coalesce(hypertable_size(to_regclass(r.qualified_relation_name)), 0) AS size_bytes
+                    FROM resolved r
+                """),
+                {"table_names": table_names},
+            ).fetchall()
+        return {row.view_name: row.size_bytes or 0 for row in rows}
+
+
+    # === moved: rebuild_compression (5956-6291) ===
+    def rebuild_compression(self, protocol_names: set[str] | None = None) -> Generator[dict[str, Any], None, None]:
+        """
+        Full decompress -> recompress pass across every already-compressed
+        chunk of the selected group(s)' raw table and all four rollup
+        views, for the admin's "Rebuild Compression" button.
+
+        This is a GENERATOR, not a plain method -- see routers/timescale
+        .py's PATCH /compression/rebuild, which streams each yielded
+        event straight to the browser as one line of newline-delimited
+        JSON per event, over the single request/response connection
+        already open for the rebuild itself. No background job, no
+        second polling endpoint: the request just stays open and the
+        browser reads it incrementally (see triggerRebuildCompression in
+        timescale_rebuild_compression.html). Trade-off worth knowing:
+        if that connection drops mid-run (tab closed, laptop sleeps),
+        the rebuild keeps going server-side same as always, but nothing
+        is watching it anymore -- there's no job ID to reattach to.
+
+        Yields:
+            {"type": "progress", "protocol_name", "table_name",
+             "bytes_processed", "bytes_total"} once per chunk (success or
+             failure) -- bytes_total is fixed for the whole run, computed
+             during the planning pass below from the pre-rebuild size of
+             every table that actually has compressed chunks to touch
+             (tables with nothing compressed contribute nothing to the
+             denominator, so progress reaches 100% exactly when the last
+             real chunk finishes, not before). bytes_processed is
+             cumulative and WEIGHTED BY EACH TABLE'S BYTE SIZE, split
+             evenly across that table's own chunks. This matters because
+             chunk counts are wildly incomparable across a group's own
+             members -- an hourly rollup view routinely has 4-5x the raw
+             table's chunk count for the same wall-clock span, while the
+             raw table's chunks are individually far heavier -- so a
+             naive chunks-done/chunks-total fraction would race through
+             a big rollup view and then appear to stall on the raw
+             table, or the reverse, depending on iteration order. There's
+             no cheaper way to get a single chunk's actual individual
+             byte size without yet another query per chunk; splitting a
+             table's already-known total evenly across its own chunks is
+             a much better proxy than treating every chunk everywhere as
+             equal, since within ONE table chunks are far more
+             comparable to each other than they are across tables/views.
+            {"type": "done", "result": {"groups": [...]}} exactly once,
+             at the end -- the same per-group/per-table/per-chunk result
+             shape this method used to simply return, unchanged.
+
+        Unlike rebuild_all_rollups() / refresh_selected_rollups(), this
+        never drops or recreates a view or a chunk -- it only rewrites
+        each already-compressed chunk's on-disk storage format in place
+        (decompress_chunk() followed by compress_chunk() against the
+        hypertable's CURRENT compress_segmentby/compress_orderby/column
+        set). No row data is touched or lost. This is what actually
+        applies a compress_segmentby/compress_orderby change, or cleans
+        up the physical layout after Delete Columns has dropped wide-
+        table columns, to data that was compressed under the old
+        settings -- editing hypertable_defaults or dropping a column only
+        changes what NEW compression uses; it does nothing to chunks
+        already on disk until something like this rewrites them.
+
+        Args:
+            protocol_names: Same group keys as rebuild_all_rollups() -- a
+                wide-table protocol_name, plus "shared_narrow". None acts
+                on every group. An empty set does nothing -- every group
+                comes back in the result with skipped=True.
+
+        Only touches chunks TimescaleDB already reports as compressed
+        (is_compressed=true in timescaledb_information.chunks) -- an
+        uncompressed chunk (typically the newest one, still inside its
+        compress_after window) is left alone, so this never fights the
+        compression policy schedule or compresses data early.
+
+        Runs in two passes rather than one combined loop:
+          1. PLANNING -- for every table in a selected group, look up
+             which chunks are currently compressed (a read-only query,
+             nothing mutated yet). This is what makes bytes_total known
+             BEFORE the first progress event, instead of discovering it
+             incrementally as tables happen to get visited.
+          2. WORK -- decompress/recompress each planned chunk, in the
+             same order the plan was built (group order, then each
+             group's [raw, hourly, daily, weekly, monthly] order),
+             yielding a progress event after every chunk.
+        Each table's scheduled compression job is paused for the
+        duration of that table's chunk loop in the work pass (mirrors
+        BridgeAdminManager.delete_fields' pause-around-DDL pattern) so
+        the background scheduler can't race a chunk this is already
+        mid-rewrite on, and is always resumed afterward even if a chunk
+        failed. Every chunk gets its own try/except: one chunk failing to
+        decompress or recompress (e.g. a concurrent lock) does not abort
+        the rest of that table, the rest of the group, or any other
+        selected group.
+
+        size_before_bytes/size_after_bytes on the final "done" result (at
+        both the table and group level) are the TABLE's/GROUP's total
+        on-disk size -- via _get_hypertable_total_sizes(), i.e. the exact
+        same hypertable_size() metric list_compression_groups' "Size"
+        column already shows -- snapshotted once for every table the
+        planning pass found work for, right before the work pass starts,
+        and again once for all of them right after the work pass
+        finishes. Two round trips total (not per-table, not per-chunk),
+        regardless of how many groups/tables/chunks are involved.
+
+        This is deliberately NOT a sum of chunk_compression_stats() before/
+        after figures per chunk (an earlier version of this method did
+        that). That approach only measured the chunks actually rewritten,
+        which is a different, narrower quantity than a table's total size
+        (it excludes any never-compressed chunk sitting alongside them,
+        and TOAST/index overhead) -- comparable to nothing else on this
+        screen, and prone to reporting a "before" and "after" that don't
+        visibly relate to the table's actual "Size" column at all. Taking
+        the same total-size measurement before and after means: a rebuild
+        that doesn't change compress_segmentby/compress_orderby/the
+        column set correctly reports ~0% (nothing to shrink), and a
+        rebuild that DOES change one of those reports a percentage that
+        lines up with what the admin already sees in "Size".
+
+        chunk_name values come back from timescaledb_information.chunks
+        unqualified (e.g. "_hyper_3_42_chunk", no schema prefix) -- fine
+        for the WHERE chunk_name comparison, but decompress_chunk()/
+        compress_chunk() need a regclass that actually resolves, which
+        means schema-qualifying it against _timescaledb_internal (where
+        TimescaleDB always creates chunks) before passing it to either
+        call.
+
+        Applies the same dynamic work_mem/lock_timeout tier
+        (get_dynamic_settings_helper) every other lock-risky operation
+        in this class applies before touching a hypertable/CAGG (see
+        _create_rollup_helper, drop_protocol_rollup,
+        _refresh_single_rollup_helper) -- decompress_chunk()/
+        compress_chunk() take the same kind of exclusive chunk lock as
+        those and decompression is memory-heavy, so this was the one
+        compression-adjacent operation in the class NOT getting that
+        tuning. Computed once up front (cheap -- reads in-memory counts,
+        no DB hit) and applied per chunk transaction below, rather than
+        per table, since it doesn't change over the course of one run.
+        """
+        r_settings: dict[str, Any] = self.get_dynamic_settings_helper()
+        all_groups: list[dict[str, Any]] = self._compression_group_tables(protocol_names=protocol_names)
+
+        selected_table_names: list[str] = [
+            table_name for group in all_groups if group["selected"] for table_name in group["tables"]
+        ]
+        old_total_sizes: dict[str, int] = self._get_hypertable_total_sizes(selected_table_names)
+
+        # -------- Planning pass: find out what actually needs doing, and
+        # its total byte weight, before touching anything. This is what
+        # lets the very first progress event already know a real,
+        # correct bytes_total instead of discovering it incrementally.
+        plan: list[dict[str, Any]] = []  # [{protocol_name, table_name, chunk_names}, ...]
+
+        for group in all_groups:
+            if not group["selected"]:
+                continue
+            for table_name in group["tables"]:
+                try:
+                    with self.SessionFactory() as session:
+                        with session.begin():
+                            self.set_lock_timeout(session, r_settings["lock_timeout"])
+                            chunk_rows: Sequence[Row[Any]] = session.execute(
+                                text("""
+                                    SELECT chunk_name
+                                    FROM timescaledb_information.chunks
+                                    WHERE hypertable_name = :tname AND is_compressed = true
+                                """),
+                                {"tname": table_name},
+                            ).fetchall()
+                except SQLAlchemyError as e:
+                    # Table/view doesn't exist yet (rollups not set up for
+                    # this protocol), or has no compressed chunks at all --
+                    # nothing to rebuild here, but don't fail the rest of
+                    # the group over it.
+                    self._log.debug(f"rebuild_compression: skipping '{table_name}': {e}")
+                    continue
+
+                if not chunk_rows:
+                    continue
+
+                plan.append({
+                    "protocol_name": group["protocol_name"],
+                    "table_name": table_name,
+                    "chunk_names": [row.chunk_name for row in chunk_rows],
+                })
+
+        touched_table_names: list[str] = [item["table_name"] for item in plan]
+        bytes_total: int = sum(old_total_sizes.get(t, 0) for t in touched_table_names)
+        bytes_processed: float = 0.0
+
+        # -------- Per-group accumulators for the eventual "done" event,
+        # seeded for every group up front so a selected group that ends
+        # up with nothing to do (every table had zero compressed chunks)
+        # still reports cleanly rather than being absent.
+        group_acc: dict[str, dict[str, Any]] = {
+            group["protocol_name"]: {"chunk_results": [], "table_results": [], "chunks_ok": 0, "chunks_failed": 0}
+            for group in all_groups
+            if group["selected"]
+        }
+
+        # -------- Work pass: actually decompress/recompress, in plan
+        # order, yielding one progress event per chunk.
+        for item in plan:
+            protocol_name: str = item["protocol_name"]
+            table_name: str = item["table_name"]
+            chunk_names: list[str] = item["chunk_names"]
+            acc: dict[str, Any] = group_acc[protocol_name]
+
+            table_weight: int = old_total_sizes.get(table_name, 0)
+            per_chunk_weight: float = (table_weight / len(chunk_names)) if chunk_names else 0.0
+
+            table_chunks_ok = 0
+            table_chunks_failed = 0
+
+            paused_job_ids: list[int] = []
+            try:
+                with self.SessionFactory() as session:
+                    with session.begin():
+                        paused_job_ids = self.pause_compression_job_for_table(session, table_name)
+
+                for chunk_name in chunk_names:
+                    # Ensure the chunk name is fully qualified with its internal schema
+                    if not chunk_name.startswith("_timescaledb_internal."):
+                        qualified_chunk: str = f"_timescaledb_internal.{chunk_name}"
+                    else:
+                        qualified_chunk = chunk_name
+
+                    try:
+                        with self.SessionFactory() as session:
+                            with session.begin():
+                                self.set_lock_timeout(session, r_settings["lock_timeout"])
+                                session.execute(
+                                    text(f"SET LOCAL work_mem = '{r_settings['work_mem']}';")
+                                )
+                                session.execute(text("SELECT decompress_chunk(:c, true)"), {"c": qualified_chunk})
+                                session.execute(text("SELECT compress_chunk(:c, true)"), {"c": qualified_chunk})
+
+                        acc["chunks_ok"] += 1
+                        table_chunks_ok += 1
+                        acc["chunk_results"].append({
+                            "table_name": table_name, "chunk_name": chunk_name,
+                            "ok": True, "error": None,
+                        })
+                    except Exception as e:
+                        acc["chunks_failed"] += 1
+                        table_chunks_failed += 1
+                        self._log.error(
+                            f"rebuild_compression: chunk '{chunk_name}' on '{table_name}' failed: {e}"
+                        )
+                        acc["chunk_results"].append({
+                            "table_name": table_name, "chunk_name": chunk_name,
+                            "ok": False, "error": str(e),
+                        })
+
+                    bytes_processed += per_chunk_weight
+                    yield {
+                        "type": "progress",
+                        "protocol_name": protocol_name,
+                        "table_name": table_name,
+                        "bytes_processed": int(min(bytes_processed, bytes_total)),
+                        "bytes_total": bytes_total,
+                    }
+            finally:
+                if paused_job_ids:
+                    try:
+                        with self.SessionFactory() as session:
+                            with session.begin():
+                                self.resume_compression_job_for_table(session, paused_job_ids)
+                    except Exception as e:
+                        # Never let a resume failure mask chunk results
+                        # already recorded above -- logged so a human
+                        # notices and re-enables the job manually.
+                        self._log.warning(
+                            f"rebuild_compression: could not resume compression job(s) "
+                            f"{paused_job_ids} for '{table_name}': {e}"
+                        )
+
+            acc["table_results"].append({
+                "table_name": table_name,
+                "ok": table_chunks_failed == 0,
+                "chunks_ok": table_chunks_ok,
+                "chunks_failed": table_chunks_failed,
+                "size_before_bytes": old_total_sizes.get(table_name, 0),
+                # size_after_bytes filled in below, once every table has
+                # finished -- see the batched "after" snapshot below.
+            })
+
+        # Single batched "after" snapshot covering every table the
+        # planning pass found work for -- one round trip for everything,
+        # same reasoning as old_total_sizes above.
+        new_total_sizes: dict[str, int] = self._get_hypertable_total_sizes(touched_table_names)
+
+        group_results: list[dict[str, Any]] = []
+        for group in all_groups:
+            protocol_name = group["protocol_name"]
+            if not group["selected"]:
+                group_results.append({
+                    "protocol_name": protocol_name,
+                    "skipped": True,
+                    "ok": True,
+                    "chunks_attempted": 0,
+                    "chunks_ok": 0,
+                    "chunks_failed": 0,
+                    "size_before_bytes": 0,
+                    "size_after_bytes": 0,
+                    "tables": [],
+                    "chunks": [],
+                })
+                continue
+
+            acc = group_acc[protocol_name]
+            group_before = 0
+            group_after = 0
+            for table_entry in acc["table_results"]:
+                after: int = new_total_sizes.get(table_entry["table_name"], 0)
+                table_entry["size_after_bytes"] = after
+                group_before += table_entry["size_before_bytes"]
+                group_after += after
+
+            group_results.append({
+                "protocol_name": protocol_name,
+                "skipped": False,
+                "ok": acc["chunks_failed"] == 0,
+                "chunks_attempted": acc["chunks_ok"] + acc["chunks_failed"],
+                "chunks_ok": acc["chunks_ok"],
+                "chunks_failed": acc["chunks_failed"],
+                "tables": acc["table_results"],
+                "chunks": acc["chunk_results"],
+                "size_before_bytes": group_before,
+                "size_after_bytes": group_after,
+            })
+
+        ok_count: int = sum(1 for g in group_results if g["ok"] and not g["skipped"])
+        attempted_count: int = sum(1 for g in group_results if not g["skipped"])
+        self._log.info(
+            "rebuild_compression: %d/%d selected group(s) fully ok.", ok_count, attempted_count,
+        )
+
+        yield {"type": "done", "result": {"groups": group_results}}
+
+
+    # === moved: get_dynamic_raw_table_overview (6292-6355) ===
+    def get_dynamic_raw_table_overview(self) -> list[dict[str, Any]]:
+        """
+        Read-only, per-raw-table snapshot of the values get_dynamic_raw_
+        table_settings_helper would currently resolve — the shared narrow
+        table plus every protocol with a wide table — for the Compression
+        & Retention Status panel. Unlike the static raw_narrow_*/raw_wide_*
+        settings (which apply the same value to every wide table
+        regardless of its own load), this shows each table's OWN band,
+        since two different protocols' wide tables can easily land in
+        different bands depending on their own metric count and scrape
+        interval.
+
+        Purely observational: computing this never changes any policy or
+        creates/drops anything, unlike calling get_dynamic_raw_table_
+        settings_helper from setup_narrow_rollup/add_wide_rollup (which
+        this reuses read-only).
+        """
+        rows: list[dict[str, Any]] = []
+
+        narrow_chunk, narrow_compress, narrow_band = self.get_dynamic_raw_table_settings_helper(
+            target_protocol_name=None,
+            static_chunk_interval=self.raw_narrow_chunk_time_interval,
+            static_compress_after=self.raw_narrow_compress_after_interval,
+        )
+        rows.append({
+            "table_name": "device_metrics_narrow",
+            "protocol_name": "shared_narrow",
+            "load_score": self._compute_metric_writes_per_day_helper(None),
+            "band_name": narrow_band,
+            "chunk_time_interval": narrow_chunk,
+            "compress_after_interval": narrow_compress,
+        })
+
+        try:
+            with self.SessionFactory() as session:
+                protocol_rows: Sequence[Row[Any]] = session.execute(
+                    text("""
+                        SELECT protocol_name, wide_table_name
+                        FROM protocol_registry
+                        WHERE wide_table_name IS NOT NULL
+                        ORDER BY protocol_name
+                    """)
+                ).fetchall()
+        except SQLAlchemyError as e:
+            self._log.error(f"get_dynamic_raw_table_overview: protocol_registry query failed: {e}")
+            protocol_rows = []
+
+        for protocol_name, wide_table_name in protocol_rows:
+            chunk, compress, band = self.get_dynamic_raw_table_settings_helper(
+                target_protocol_name=protocol_name,
+                static_chunk_interval=self.raw_wide_chunk_time_interval,
+                static_compress_after=self.raw_wide_compress_after_interval,
+            )
+            rows.append({
+                "table_name": wide_table_name,
+                "protocol_name": protocol_name,
+                "load_score": self._compute_metric_writes_per_day_helper(protocol_name),
+                "band_name": band,
+                "chunk_time_interval": chunk,
+                "compress_after_interval": compress,
+            })
+
+        return rows
+
+
+    # === moved: set_lock_timeout (6500-6522) ===
+    def set_lock_timeout(self, session: Session, timeout: str) -> None:
+        """
+        Sets a transaction-scoped lock_timeout via SET LOCAL.
+
+        SET LOCAL only takes effect (and only avoids Postgres's "SET LOCAL
+        can only be used in transaction blocks" warning) when an explicit
+        transaction is already open on the connection. Session normally
+        autobegins one lazily on first use, but several callers here issue
+        SET LOCAL right after a mid-function session.commit()/rollback()
+        (e.g. drop_protocol_rollup's compression-disable retry, or the
+        per-view commit loop in _drop_all_continuous_aggregates) -- exactly
+        the gap where that lazy autobegin can lose the race and leave the
+        statement running outside any transaction block.
+
+        session.begin() is a no-op if a transaction is already open (guarded
+        by in_transaction() so it never raises "already begun"), and
+        guarantees one is in place -- with BEGIN actually sent -- before
+        SET LOCAL runs.
+        """
+        if not session.in_transaction():
+            session.begin()
+        session.execute(text(f"SET LOCAL lock_timeout = '{timeout}';"))
+
+
+    # === moved: get_dynamic_settings_helper (6523-6559) ===
+    def get_dynamic_settings_helper(self) -> dict[str, Any]:
+        """
+        Returns performance tier settings based on the actual workload drivers
+        in a multi-protocol environment.
+
+        Two axes determine lock pressure:
+        1. Protocol count — more protocols = more CAGG views refreshed per cycle
+            = longer total lock hold time across the refresh window.
+        2. Wide table presence — wide rollups generate one stats_agg() expression
+            per metric column, which is significantly more CPU and memory intensive
+            than a single stats_agg(metric_value) on the narrow table.
+
+        Tier selection:
+        tier_low    — many protocols (>4) or any wide table with many columns (>100):
+                        conservative work_mem and short lock_timeout to yield quickly.
+        tier_medium — few protocols with wide tables, or many protocols narrow-only:
+                        balanced settings.
+        tier_high   — single or few protocols, narrow-only or small wide tables:
+                        can afford longer lock windows and higher memory.
+        """
+        protocol_count: int = len(self.rollup_mgr.known_rollup_views) if self.rollup_mgr is not None else 0
+        # Proxy for wide table complexity: any wide views registered means
+        # at least one protocol has per-column rollup expressions in play.
+        has_wide_views: bool = any("wide__" in v for v in self.rollup_mgr.known_rollup_views) if self.rollup_mgr is not None else False
+
+        # Max column count across all wide protocols from protocol_registry.
+        # Cached after registration, so no DB hit on the hot path.
+        max_wide_columns: int = self._max_wide_column_count_helper()
+
+        if protocol_count > 4 or max_wide_columns > 100:
+            return self.performance_tiers["tier_low"]
+        elif has_wide_views or protocol_count > 2:
+            return self.performance_tiers["tier_medium"]
+        else:
+            return self.performance_tiers["tier_high"]
+
+
+
+    # === moved: _max_wide_column_count_helper (6560-6612) ===
+    def _max_wide_column_count_helper(self) -> int:
+        """
+        Returns the highest metric_count across all registered wide-table protocols.
+        Used by _get_dynamic_settings to tune lock/memory settings.
+        Reads from the in-memory protocol_wide_column_counts dict populated
+        during add_wide_rollup, so there is no DB hit on the hot path.
+        """
+        if not self.protocol_wide_column_counts:
+            return 0
+        return max(self.protocol_wide_column_counts.values(), default=0)
+
+
+    # -------------------------
+    #  Dynamic raw-table chunk/compression sizing — a DIFFERENT concern
+    #  from get_dynamic_settings_helper above (which tunes rollup-refresh
+    #  lock/memory behavior). This sizes chunk_time_interval and compress_
+    #  after for the two raw tables based on modeled real-world write load,
+    #  per TimescaleDB's own sizing guidance (chunks should hold a roughly
+    #  comparable, bounded amount of data; compress_after should scale with
+    #  a table's own chunk_time_interval, not be picked independently).
+    # -------------------------
+
+    # Band edges are in "metric-writes/day" -- (metric_count contributed by
+    # a protocol) x (writes/day from its transport(s)' read_interval),
+    # summed across whichever protocols are relevant (all of them, for
+    # narrow; just the one protocol sharing a wide table, for wide). This
+    # single unit works for BOTH raw tables despite their very different
+    # row-count behavior: narrow's actual row rate literally equals
+    # metric_count x writes/day (one row per metric per scrape), while a
+    # wide table's row COUNT stays flat at 1 row/scrape regardless of
+    # column count -- but its BYTE width per row scales with metric_count,
+    # so metric_count x writes/day approximates its data-volume rate too.
+    #
+    # Boundaries were translated from a 50/100/160/350-metric tiering
+    # example at a 15-second scrape interval (50 x 5760 = 288,000, etc.)
+    # into this interval-independent unit, so the same bands apply
+    # correctly regardless of a deployment's actual scrape interval(s).
+    # chunk_time_interval / compress_after pairs follow TimescaleDB's own
+    # ~2-3x multiple guidance at each tier.
+    #
+    # This table is intentionally a plain, easily-edited list rather than
+    # a settings-UI-exposed structure -- tune the values here directly if
+    # real chunk sizes (see the Storage Overview panel) suggest a boundary
+    # or preset needs adjusting for your hardware.
+    _DYNAMIC_CHUNK_BANDS: list[tuple[float | None, str, str, str]] = [
+        # (upper bound metric-writes/day, chunk_time_interval, compress_after_interval, band_name)
+        (288_000.0,   "7 days",   "14 days",   "Group 1 (light)"),
+        (576_000.0,   "3 days",   "7 days",    "Group 2"),
+        (1_152_000.0, "1 day",    "3 days",    "Group 3"),
+        (2_016_000.0, "12 hours", "36 hours",  "Group 4"),
+        (None,        "6 hours",  "18 hours",  "Group 5 (heavy)"),
+    ]
+
+
+    # === moved: _classify_chunk_band_helper (6613-6626) ===
+    def _classify_chunk_band_helper(self, metric_writes_per_day: float) -> tuple[str, str, str]:
+        """
+        Maps a metric-writes/day load score to a (chunk_time_interval,
+        compress_after_interval, band_name) preset from _DYNAMIC_CHUNK_
+        BANDS. Bands are checked in ascending order; the first whose upper
+        bound the score doesn't exceed wins, and the final (None-bounded)
+        entry always matches as the top band.
+        """
+        for upper_bound, chunk_interval, compress_after, band_name in self._DYNAMIC_CHUNK_BANDS:
+            if upper_bound is None or metric_writes_per_day <= upper_bound:
+                return chunk_interval, compress_after, band_name
+        # Unreachable -- the table's last entry has upper_bound=None.
+        return self._DYNAMIC_CHUNK_BANDS[-1][1], self._DYNAMIC_CHUNK_BANDS[-1][2], self._DYNAMIC_CHUNK_BANDS[-1][3]
+
+
+    # === moved: _compute_metric_writes_per_day_helper (6627-6685) ===
+    def _compute_metric_writes_per_day_helper(self, target_protocol_name: str | None) -> float:
+        """
+        Computes the metric-writes/day load score for one raw table.
+
+        target_protocol_name=None -> narrow's score: sum across EVERY
+            transport currently tracked in transport_read_intervals (every
+            protocol's metrics land in the one shared narrow table).
+        target_protocol_name=<name> -> that one wide table's score: only
+            transports whose protocol matches this name (more than one
+            transport instance of the same protocol -- e.g. two battery
+            packs sharing one wide table -- correctly sums their combined
+            contribution here, since this operates per transport_name).
+
+        Computed PER TRANSPORT (per physical device), not per protocol.
+        protocol_registry.metric_count is a schema-wide figure (the wide
+        table's column count, sized for the union of every device's
+        metric set) and wrongly assumes every device of a protocol
+        scrapes the same metric set. In practice, different devices of
+        the same protocol can have very different variable_mask
+        configurations -- one battery might get the full register list,
+        another only a curated few. Each device's own actual figure --
+        captured once at startup in device_info.metric_count, from the
+        real write payload size (see _get_or_create_device) -- is used
+        instead, and summed per transport rather than assumed uniform.
+
+        Returns 0.0 if there's no live tracking data yet for the relevant
+        protocol(s) (e.g. right after a fresh connect, before any scraper
+        has written through this bridge) -- callers should treat 0.0 as
+        "not enough data, fall back to static config" rather than as a
+        genuinely idle table.
+        """
+        relevant_transports: dict[str, float] = {
+            transport_name: read_interval
+            for transport_name, (protocol_name, read_interval) in self.transport_read_intervals.items()
+            if (target_protocol_name is None or protocol_name == target_protocol_name) and read_interval > 0
+        }
+        if not relevant_transports:
+            return 0.0
+
+        try:
+            with self.SessionFactory() as session:
+                rows: Sequence[Row[Any]] = session.execute(
+                    text("SELECT transport, metric_count FROM device_info WHERE transport = ANY(:transports)"),
+                    {"transports": list(relevant_transports.keys())},
+                ).fetchall()
+        except SQLAlchemyError as e:
+            self._log.warning(f"_compute_metric_writes_per_day_helper: device_info lookup failed: {e}")
+            return 0.0
+
+        metric_counts_by_transport: dict[str, int] = {row.transport: (row.metric_count or 0) for row in rows}
+
+        total: float = 0.0
+        for transport_name, read_interval in relevant_transports.items():
+            metric_count: int = metric_counts_by_transport.get(transport_name, 0)
+            if metric_count > 0:
+                total += metric_count * (86400.0 / read_interval)
+
+        return total
+
+
+    # === moved: get_dynamic_raw_table_settings_helper (6686-6729) ===
+    def get_dynamic_raw_table_settings_helper(
+        self, target_protocol_name: str | None, static_chunk_interval: str, static_compress_after: str
+    ) -> tuple[str, str, str]:
+        """
+        Resolves the (chunk_time_interval, compress_after_interval, band_
+        name) to actually use for one raw table -- narrow (target_
+        protocol_name=None) or one wide table (target_protocol_name=that
+        protocol).
+
+        Falls back to (static_chunk_interval, static_compress_after,
+        "Static (manual)") when enable_dynamic_chunk_sizing is False, or
+        when there isn't yet enough live data to compute a load score
+        (returns 0.0 -- see _compute_metric_writes_per_day_helper). This
+        means a freshly connected bridge behaves exactly as it did before
+        dynamic sizing existed until real scrape data starts flowing
+        through it, rather than defaulting to the lightest or heaviest
+        band by guesswork.
+        """
+        if not self.enable_dynamic_chunk_sizing:
+            return static_chunk_interval, static_compress_after, "Static (manual)"
+
+        load_score: float = self._compute_metric_writes_per_day_helper(target_protocol_name)
+        if load_score <= 0.0:
+            return static_chunk_interval, static_compress_after, "Static (no live data yet)"
+
+        chunk_interval, compress_after, band_name = self._classify_chunk_band_helper(load_score)
+        return chunk_interval, compress_after, band_name
+
+    # -------------------------
+    #  Dynamic-sizing retune -- see the _retune_reported block in __init__
+    #  for the full rationale. Four pieces:
+    #    flag_pending_retune       -- called from setup_narrow_rollup /
+    #                                  add_wide_rollup when they land on the
+    #                                  static fallback, to start tracking.
+    #    note_device_metric_count_known -- called by timescaledb.
+    #                                  _get_or_create_device the first time
+    #                                  a transport's real metric_count is
+    #                                  known; checks it off and fires the
+    #                                  retune once its key is fully covered.
+    #    _start_retune_timer_if_needed / _fire_retune -- the bounded
+    #                                  fallback and the actual (threaded,
+    #                                  off the caller's thread) re-run.
+    # -------------------------
+
+
+    # === moved: flag_pending_retune (6730-6744) ===
+    def flag_pending_retune(self, key: str | None) -> None:
+        """
+        Marks `key` (a protocol_name, or None for narrow) as needing a
+        one-shot dynamic-sizing retune once enough live data exists.
+        No-op if this key was already retuned this process lifetime, or is
+        already pending -- setup_narrow_rollup/add_wide_rollup can be
+        called more than once for the same key (reconnect, force rebuild)
+        and this must not reset progress each time.
+        """
+        with self.retune_lock:
+            if key in self._retuned or key in self._retune_reported:
+                return
+            self._retune_reported[key] = set()
+            self._log.debug(f"Dynamic sizing retune armed for {key!r} — waiting on live data.")
+
+
+    # === moved: note_device_metric_count_known (6745-6791) ===
+    def note_device_metric_count_known(self, transport_name: str, protocol_name: str) -> None:
+        """
+        Called once per transport, the first time its real
+        device_info.metric_count becomes known (see timescaledb.
+        _get_or_create_device) -- i.e. the first successful write for that
+        transport this session.
+
+        Checks transport_name off against every key currently pending a
+        retune that it's relevant to: its own protocol (wide), and narrow
+        (key None, since narrow's load score sums every protocol). A
+        transport irrelevant to a given key (already retuned, or never
+        flagged pending) is a cheap no-op for that key.
+
+        Fires the retune for a key once every transport
+        transport_read_intervals currently knows about for that key has
+        reported -- computed fresh here rather than snapshotted when the
+        key was flagged, since add_wide_rollup for a protocol can run (and
+        fall back to static) before every transport sharing that protocol
+        has even called record_transport_interval yet, e.g. protocol
+        registration is driven by whichever of several same-protocol
+        transports happens to initialize first.
+        """
+        do_fire: list[str | None] = []
+        with self.retune_lock:
+            for key in (None, protocol_name):
+                if key not in self._retune_reported or key in self._retuned:
+                    continue
+                reported: set[str] = self._retune_reported[key]
+                first_report_for_key: bool = not reported
+                reported.add(transport_name)
+
+                if first_report_for_key:
+                    self._start_retune_timer_if_needed(key)
+
+                expected: set[str] = {
+                    t_name for t_name, (p_name, _interval) in self.transport_read_intervals.items()
+                    if key is None or p_name == key
+                }
+                if expected and expected <= reported:
+                    do_fire.append(key)
+
+        # Fired outside the lock -- _fire_retune only hands off to a
+        # background thread, but keeping that handoff out of the lock
+        # avoids holding it across anything unexpected.
+        for key in do_fire:
+            self._fire_retune(key)
+
+
+    # === moved: _start_retune_timer_if_needed (6792-6808) ===
+    def _start_retune_timer_if_needed(self, key: str | None) -> None:
+        """
+        Arms the bounded fallback timer for `key`, once, the first time any
+        transport relevant to it reports. Must be called with
+        self.retune_lock held. If not every expected transport ever
+        reports (an offline/misconfigured device sharing a wide table with
+        others that ARE reporting), this fires the retune anyway after
+        retune_timeout_seconds using whatever device_info rows exist by
+        then, rather than leaving the table on static settings forever.
+        """
+        if key in self.retune_timer:
+            return
+        timer = threading.Timer(self.retune_timeout_seconds, self._fire_retune, args=(key,))
+        timer.daemon = True
+        self.retune_timer[key] = timer
+        timer.start()
+
+
+    # === moved: _fire_retune (6809-6838) ===
+    def _fire_retune(self, key: str | None) -> None:
+        """
+        Marks `key` as retuned (idempotent -- safe to call from both the
+        "every expected transport reported" path and the timeout path,
+        whichever wins the race) and hands the actual re-run off to a
+        short-lived background thread. Must never run the DB work
+        synchronously on the caller's thread: the "every transport
+        reported" path is called from note_device_metric_count_known,
+        which is called from timescaledb._get_or_create_device on a live
+        scraper/write thread, and add_wide_rollup / setup_narrow_rollup do
+        real DDL (ALTER TABLE, compression policy changes, CAGG view
+        checks) that has no business blocking a write.
+        """
+        with self.retune_lock:
+            if key in self._retuned:
+                return
+            self._retuned.add(key)
+            self._retune_reported.pop(key, None)
+            timer: threading.Timer | None = self.retune_timer.pop(key, None)
+
+        if timer is not None:
+            timer.cancel()
+
+        threading.Thread(
+            target=self._do_retune_work,
+            args=(key,),
+            daemon=True,
+            name=f"DynamicSizingRetune-{key or 'narrow'}",
+        ).start()
+
+
+    # === moved: _do_retune_work (6839-6883) ===
+    def _do_retune_work(self, key: str | None) -> None:
+        """
+        Actual re-run, on its own thread. Re-invoking setup_narrow_rollup /
+        add_wide_rollup with force=False is deliberate and sufficient here
+        -- it unconditionally re-applies chunk_time_interval (see
+        ensure_hypertables' docstring) and the compression policy (see
+        ensure_compression_policy's docstring) even when nothing changed,
+        and only re-materializes CAGGs if their bucket intervals actually
+        differ from what's already there (_ensure_cagg_views_for_protocol).
+        force=True is for the admin's explicit "Force Rebuild" action, not
+        this — there's no reason to purge and re-materialize views whose
+        bucket intervals haven't changed just because we're retuning the
+        raw table's chunk/compression sizing.
+        """
+        try:
+            if key is None:
+                self._log.info(
+                    "Dynamic sizing retune: live data now available for every known "
+                    "transport — re-tuning the narrow raw table."
+                )
+                if self.rollup_mgr is not None:
+                    self.rollup_mgr.setup_narrow_rollup()
+                return
+
+            wide_table_name: str | None = self._lookup_wide_table_name_helper(key)
+            if wide_table_name is None:
+                self._log.debug(
+                    f"Dynamic sizing retune: '{key}' has no wide table (narrow-only "
+                    f"protocol) — nothing to retune."
+                )
+                return
+
+            self._log.info(
+                f"Dynamic sizing retune: live data now available from every known "
+                f"transport of '{key}' — re-tuning '{wide_table_name}'."
+            )
+            if self.rollup_mgr is not None:
+                self.rollup_mgr.add_wide_rollup(protocol_name=key, wide_table_name=wide_table_name)
+
+        except Exception as e:
+            # Best-effort: a failed retune leaves the table on its current
+            # (static) settings rather than failing anything user-facing.
+            # _retuned already has `key` at this point, so this is a
+            # one-time miss, not a retry loop — logged at error since a
+            # human should notice and can trigger a manual Force Rebuild.
+            self._log.error(f"Dynamic sizing retune failed for {key!r}: {e}")
+
+
+    # === moved: _lookup_wide_table_name_helper (6884-6964) ===
+    def _lookup_wide_table_name_helper(self, protocol_name: str) -> str | None:
+        """Looks up protocol_registry.wide_table_name for one protocol."""
+        try:
+            with self.SessionFactory() as session:
+                return session.execute(
+                    text("SELECT wide_table_name FROM protocol_registry WHERE protocol_name = :p"),
+                    {"p": protocol_name}
+                ).scalar()
+        except SQLAlchemyError as e:
+            self._log.warning(f"_lookup_wide_table_name_helper failed for '{protocol_name}': {e}")
+            return None
+
+    # Only understands the small set of unit words this module's own
+    # interval settings ever use -- not a general PostgreSQL INTERVAL
+    # parser. "month" approximated as 30 days, consistent with
+    # _GRANULARITY_BUCKETS_PER_DAY's monthly bucket constant above.
+    _INTERVAL_UNIT_HOURS: dict[str, float] = {
+        "hour": 1.0, "hours": 1.0,
+        "day": 24.0, "days": 24.0,
+        "week": 168.0, "weeks": 168.0,
+        "month": 720.0, "months": 720.0,
+    }
+
+
+    # moved: parse_interval_to_hours_helper
+    def parse_interval_to_hours_helper(self, interval_str: str) -> float:
+        """
+        Parses a simple "<number> <unit>" interval string (e.g. "1 day",
+        "2 weeks", "4 months") into hours, using _INTERVAL_UNIT_HOURS.
+        Returns 0.0 for anything that doesn't match that shape -- callers
+        treat 0.0 as "unparseable, fall back to the static value" rather
+        than guessing.
+        """
+        parts: list[str] = interval_str.strip().split()
+        if len(parts) != 2:
+            return 0.0
+        try:
+            value: float = float(parts[0])
+        except ValueError:
+            return 0.0
+        hours_per_unit: float | None = self._INTERVAL_UNIT_HOURS.get(parts[1].lower())
+        if hours_per_unit is None:
+            return 0.0
+        return value * hours_per_unit
+
+
+    # moved: format_hours_to_interval_helper
+    def format_hours_to_interval_helper(self, hours: float) -> str:
+        """
+        Formats an hours value back into a clean "<int> <unit>" interval
+        string, picking the coarsest unit that keeps the value >= 1.
+        Floors at 1 hour so a very aggressive scale-down never produces a
+        zero or negative interval.
+        """
+        hours = max(1.0, hours)
+        if hours >= 720:
+            return f"{max(1, round(hours / 720))} months"
+        if hours >= 168:
+            return f"{max(1, round(hours / 168))} weeks"
+        if hours >= 24:
+            return f"{max(1, round(hours / 24))} days"
+        return f"{round(hours)} hours"
+
+
+
+
+class RollupManager:
+    """ summary logic
+        The RollupManger class creates the structures that enable TimescaleDB rollup views.
+        After all structures are built:
+        1 RollupManager wakes up.
+        2 RollupManager tells BacklogManager to put everything into the _flush_queue if backlog data exists.
+            The _flush_queue is the threaded queue object that accepts MPG data obtained from the source transport.
+        3 RollupManager calls _flush_queue.join() (it pauses here).
+        4 _flush_worker finishes writing everything to the Hypertable and calls task_done() for each.
+        5 RollupManager resumes and calls refresh_continuous_aggregate.
+
+        Backlog Safety: The _refresh_rollup_loop wraps replay_to_queue() in the _backlog_lock and waits for completion via .join().
+        Attribute Persistence: All granular intervals (e.g., hourly_compress_after_interval) are mapped from the rollup_policy in __init__.
+        Live State: tsdb_connected and current_metric_count are implemented as @property to track the timescaledb class state in real-time.
+        SQL Execution: The SET work_mem uses the single-quote fix to prevent f-string placeholder errors.
+    """
+
+    # This dataclass is used to describe the SQL expressions needed to create rollup continuous aggregates for a given metric.
+    @dataclass(frozen=True)
+    class RollupMetricDescriptor:
+        """
+        Describe one logical metric stream for generic rollup SQL generation.
+
+        Narrow rollups use a single descriptor keyed by `metric_name`.
+        Wide rollups use one descriptor per protocol-specific metric column.
+        """
+
+        group_key_sql: str | None
+        raw_value_sql: str
+        rolled_min_sql: str
+        rolled_max_sql: str
+        rolled_summary_sql: str
+        min_alias: str
+        max_alias: str
+        summary_alias: str
+
+    def __init__(
+        self,
+        rollup_policy: dict[str, Any],
+        my_session_factory: sessionmaker[Session],
+        my_engine: Engine,
+        migration_in_progress: threading.Event,
+        log: logging.Logger,
+        send_message:  SendMessageProtocol,
+        backlog_lock: threading.RLock,
+        flush_queue: queue.Queue[dict[str, Any] | None],
+        backlog: BacklogManager,
+        reconnect_lock: threading.RLock,
+        hypertable_mgr: "HyperTableManager",
+        ) -> None:
+
+        self.rollup_policy: dict[str, Any] = rollup_policy
+        self.SessionFactory: sessionmaker[Session] = my_session_factory
+        self.engine: Engine = my_engine
+        self.migration_in_progress: threading.Event = migration_in_progress
+        self._log: logging.Logger = log
+        self.send_message:  SendMessageProtocol = send_message
+        self._backlog_lock: threading.RLock = backlog_lock
+        self._flush_queue: queue.Queue[dict[str, Any] | None]  = flush_queue
+        self.backlog: 'BacklogManager'  = backlog
+        self._reconnect_lock: threading.RLock = reconnect_lock
+
+        # Hypertable-level mechanics (create/compress/retain the raw
+        # source tables, dynamic chunk sizing, pause/resume compression
+        # jobs, background-job/resource-tier plumbing) live on
+        # HyperTableManager, constructed by the bridge before this class
+        # and passed in here -- see HyperTableManager's class docstring
+        # for why the split follows TimescaleDB's own hypertable/
+        # continuous-aggregate distinction rather than an arbitrary one.
+        self.hypertable_mgr: "HyperTableManager" = hypertable_mgr
+
+        self._refresh_rollup_thread = threading.Thread(target=self._refresh_rollup_loop_helper, daemon=True, name="RollupAutoRefreshThread")
+        self._stop_refresh_rollup_event: threading.Event = getattr(self, "_stop_refresh_rollup_event", threading.Event())
+
+        """
+        Rollup and Compression Timing Defaults comments only:
+        Rollup Type
+            refresh rollup    start_offset   compress_after   reason
+            1 Hour	          3 hours	     3 days	          Allows a 3-hour window for late data before locking it via compression.
+            1 Day	          3 days	     2 weeks	      Ensures daily rollups are finalized before compressing.
+            1 Week	          3 weeks	     2 months	      Larger window helps capture any delayed source data updates.
+            1 Month	          3 months	     6 months	      Maximum safety for long-term historical accuracy.
+        """
+
+        # rollup defaults, continuous aggregate bucket sizes.
+        self.rollup_defaults: dict[str, str] = {
+            "hourly_rollup_bucket": "1 hour",
+            "hourly_rollup_start": "3 hours",
+            "daily_rollup_bucket": "1 day",
+            "daily_rollup_start": "3 days",
+            "weekly_rollup_bucket": "1 week",
+            "weekly_rollup_start": "3 weeks",
+            "monthly_rollup_bucket": "1 month",
+            "monthly_rollup_start": "3 months",
+            "anchor_start_time_utc": "2000-01-01 00:00:00+00",  # default anchor time for rollup alignment
+        }
+
+        # Rollup /Hypertable Settings extracted from rollup_policy  (user can override defaults via rollup_policy)
+        self.current_metric_count: int = self.rollup_policy.get("current_metric_count", 0)
+        self.machine_timezone: str = self.rollup_policy.get("machine_timezone", "UTC")
+        self.auto_refresh_interval: int = self.rollup_policy.get("auto_refresh_interval",21600)
+        self.enable_auto_refresh:bool = self.rollup_policy.get("enable_auto_refresh", True)
+        self.enable_rollups = bool(self.rollup_policy.get("enable_rollups", True))
+        self.migrate_data = bool(self.rollup_policy.get("migrate_data",True))
+
+        # Rollup-view (CAGG) granularity settings -- each of the four
+        # hierarchical views' own chunk_time_interval / compress_after.
+        # Read out of HyperTableManager.hypertable_defaults (the one
+        # canonical copy of this config dict -- see that class's
+        # __init__) rather than duplicating it here. NOT the same thing
+        # as HyperTableManager's raw_narrow_*/raw_wide_* settings, which
+        # govern the two RAW hypertables instead -- see setup_rollup's
+        # docstring for the history of that distinction.
+        _htd = self.hypertable_mgr.hypertable_defaults
+        self.hourly_chunk_time_interval: str = _htd["hourly_chunk_time_interval"]
+        self.daily_chunk_time_interval: str = _htd["daily_chunk_time_interval"]
+        self.weekly_chunk_time_interval: str = _htd["weekly_chunk_time_interval"]
+        self.monthly_chunk_time_interval: str = _htd["monthly_chunk_time_interval"]
+
+        self.hourly_compress_after_interval: str = _htd["hourly_compress_after_interval"]
+        self.daily_compress_after_interval: str = _htd["daily_compress_after_interval"]
+        self.weekly_compress_after_interval: str = _htd["weekly_compress_after_interval"]
+        self.monthly_compress_after_interval: str = _htd["monthly_compress_after_interval"]
+
+        # Rollup view settings
+        self.anchor_start_time_utc: str = self.rollup_defaults["anchor_start_time_utc"]
+
+        self.hourly_rollup_bucket: str = self.rollup_defaults["hourly_rollup_bucket"]
+        self.daily_rollup_bucket: str = self.rollup_defaults["daily_rollup_bucket"]
+        self.weekly_rollup_bucket: str = self.rollup_defaults["weekly_rollup_bucket"]
+        self.monthly_rollup_bucket: str = self.rollup_defaults["monthly_rollup_bucket"]
+
+        self.hourly_rollup_start: str = self.rollup_defaults["hourly_rollup_start"]
+        self.daily_rollup_start: str = self.rollup_defaults["daily_rollup_start"]
+        self.weekly_rollup_start: str = self.rollup_defaults["weekly_rollup_start"]
+        self.monthly_rollup_start: str = self.rollup_defaults["monthly_rollup_start"]
+
+        # Tracks whether the shared narrow CAGG views have been created.
+        # Narrow rollup views (hourly/daily/weekly/monthly_rollup_narrow) are shared
+        # across all protocols, so they only need to be built once.
+        self._narrow_rollups_created: bool = False
+
+        # Registry of all CAGG view names this manager is responsible for refreshing.
+        # Populated by add_wide_rollup and _ensure_narrow_cagg_views.
+        # Keyed as view_name -> start_offset string, preserving insertion order
+        # so the refresh loop always runs hourly -> daily -> weekly -> monthly.
+        self.known_rollup_views: dict[str, str] = {}
+
+
+    @property
+    def tsdb_connected(self) -> bool:
+        """Always returns the live connection state from the shared policy dict.
+            This allows the RollupManager to react immediately to changes in TSDB connection status,
+            which is critical for coordinating rollup refreshes and backlog replays.
+        """
+        val: Any = self.rollup_policy.get("tsdb_connected", False)
+        # If val is the boolean False, the expression 'val is True or val == "True"' will return False.
+        # basically tries to capture string "True" as well as boolean True if somehow the config was passed as a string.
+        if val is True or val == "True":
+
+            return val is True
+        else:
+            return False
+
+    def setup_narrow_rollup(self) -> None:
+        """
+        Build the shared narrow-table post-creation stack.
+
+        This method preserves the original narrow bootstrap behavior while
+        routing the work through a single lifecycle helper so shared and
+        protocol-specific paths use the same orchestration shape.
+        """
+        chunk_interval, compress_after, band_name = self.hypertable_mgr.get_dynamic_raw_table_settings_helper(
+            target_protocol_name=None,
+            static_chunk_interval=self.hypertable_mgr.raw_narrow_chunk_time_interval,
+            static_compress_after=self.hypertable_mgr.raw_narrow_compress_after_interval,
+        )
+        self._log.info(f"Narrow raw table sizing: {band_name} -> chunk={chunk_interval}, compress_after={compress_after}")
+        if band_name == "Static (no live data yet)":
+            self.hypertable_mgr.flag_pending_retune(None)
+
+        self.setup_rollup(
+            table_name="device_metrics_narrow",
+            segment_by=self.hypertable_mgr.compress_segmentby_narrow,
+            # Dynamically sized (or falls back to the static raw_narrow_*
+            # settings) -- see get_dynamic_raw_table_settings_helper.
+            compress_after_interval=compress_after,
+            chunk_time_interval=chunk_interval,
+            protocol_name=None,
+            wide_table_name=None,
+            use_shared_rollup_flow=True,
+        )
+
+    def setup_rollup(
+        self,
+        table_name: str,
+        segment_by: str,
+        compress_after_interval: str,
+        chunk_time_interval: str,
+        protocol_name: str | None,
+        wide_table_name: str | None,
+        use_shared_rollup_flow: bool,
+        force: bool = False,
+    ) -> None:
+        """
+        Run the common post-table-processing lifecycle for both narrow and wide sources.
+
+        The shared narrow stack and protocol wide stack both apply the same
+        major categories of work: hypertable setup, compression setup,
+        retention policy, rollup creation, and initial refresh. This helper
+        centralizes that lifecycle while still allowing narrow-specific and
+        wide-specific rollup creation to diverge where required.
+
+        compress_after_interval / chunk_time_interval: both single values,
+        not lists. `table_name` is one raw hypertable, which can only ever
+        have one compression policy and one chunk_time_interval —
+        TimescaleDB doesn't support "4 different values" of either on one
+        object.
+        Callers should pass raw_narrow_compress_after_interval / raw_
+        narrow_chunk_time_interval (from setup_narrow_rollup) or raw_wide_
+        compress_after_interval / raw_wide_chunk_time_interval (from add_
+        wide_rollup) — settings dedicated to each raw table, deliberately
+        separate both from each other (narrow and wide have very different
+        write volume and row density, so their chunk sizing and
+        compression scheduling shouldn't be tied together either — see
+        hypertable_defaults' comments) and from the four rollup-view
+        granularity settings
+        (hourly_compress_after_interval, hourly_chunk_time_interval,
+        etc.), since reusing one of those for the raw table would be an
+        undocumented assumption discoverable only by reading this code.
+
+        force: passed straight through to the rollup-creation step (see
+        ensure_rollups / _ensure_cagg_views_for_protocol) — when True, the
+        stack is purged and fully re-materialized even if its bucket
+        intervals already match config. Used by the admin's "Force Rebuild"
+        button; normal startup/reconnect calls leave this False.
+        """
+        # 1 Hypertable & Policies
+        try:
+            self.hypertable_mgr.ensure_hypertables([table_name], chunk_time_interval=chunk_time_interval)
+            self._log.info("Hypertable check/creation complete")
+        except Exception as e:
+            self._log.error(f"Hypertable creation failed: {e}")
+
+        # 2 Enable compression (if configured)
+        try:
+            if self.hypertable_mgr.enable_compression:
+                self.hypertable_mgr.configure_compression(
+                    table_name=table_name,
+                    segment_by=segment_by,
+                    compress_after_interval=compress_after_interval,
+                )
+        except Exception as e:
+            self._log.error(f"Enable compression failed: {e}")
+
+        # 3 Add retention policy
+        try:
+            self.hypertable_mgr.apply_retention_policy(table_name)
+        except Exception as e:
+            self._log.error(f"Add retention policy failed: {e}")
+
+        # 4 Setup continuous aggregate rollups
+        if self.enable_rollups:
+            if use_shared_rollup_flow:
+                # 4a
+                try:
+                    self.setup_with_retry(force=force)
+                except Exception as e:
+                    self._log.error(f"Aggregate Rollup setup failed: {e}")
+                # 4b
+                try:
+                    self.refresh_rollups(force_full=True)
+                except Exception as e:
+                    self._log.error(f"Refresh Rollup failed: {e}")
+            elif protocol_name is not None:
+                # 4a
+                try:
+                    self._ensure_cagg_views_for_protocol(protocol_name, wide_table_name, force=force)
+                except Exception as e:
+                    self._log.error(f"CAGG view creation failed for protocol '{protocol_name}': {e}")
+
+                # 4b
+                try:
+                    self._refresh_protocol_rollups_helper(protocol_name, wide_table_name)
+                except Exception as e:
+                    self._log.error(
+                        f"Initial rollup refresh failed for '{protocol_name}': {e}"
+                        f" — views exist but data may not be pre-aggregated."
+                    )
+
+    def start_auto_refresh(self) -> None:
+
+        if self._refresh_rollup_thread.is_alive():
+            self._log.debug("Auto refresh thread already running.")
+            return
+        else:
+            # start _refresh_rollup_thread after connect completes successfully
+            self._refresh_rollup_thread.start()
+            self._log.debug("Auto rollup refresh thread started.")
+
 
     def setup_with_retry(self, force: bool = False) -> None:
         """_summary_
@@ -4236,7 +5304,7 @@ class RollupManager:
                         # gran: str = view_key.split("_")[0]  # "hourly", "daily", etc.
                         view_name = rollup_segments[view_key]
 
-                        # Create if missing and register into _known_rollup_views
+                        # Create if missing and register into known_rollup_views
                         # regardless, so the refresh loop picks it up.
                         self._ensure_single_cagg_view_helper(
                             session=session,
@@ -4279,14 +5347,14 @@ class RollupManager:
         one generic SELECT using typed metric descriptors and then applies the
         standard view policies.
         """
-        r_settings: dict[str, Any] = self._get_dynamic_settings_helper()
+        r_settings: dict[str, Any] = self.hypertable_mgr.get_dynamic_settings_helper()
 
         if not session:
             self._log.error("Cannot create rollup — not connected.")
             return
 
         # Set local lock timeout to fail fast if blocked by flush thread.  Set dynamically from settings.
-        self._set_lock_timeout(session, r_settings['lock_timeout'])
+        self.hypertable_mgr.set_lock_timeout(session, r_settings['lock_timeout'])
 
         # Determine Aggregation Mode
         # If source is another view, we MUST use rollup(). If it's a hypertable, use stats_agg().
@@ -4424,7 +5492,7 @@ class RollupManager:
         drop_after: str = getattr(self, "drop_after", "1 year")  # Default retention if not specified
 
         try:
-            self._set_lock_timeout(session, "10s")
+            self.hypertable_mgr.set_lock_timeout(session, "10s")
 
             # 2. View's own chunk sizing — see docstring above for why this
             # is applied unconditionally here rather than only at creation.
@@ -4446,8 +5514,8 @@ class RollupManager:
             # 4. Data Retention Policy (specific to the view) — remove-
             # then-add so a drop_after change reaches an already-existing
             # view, but skipped entirely when nothing would actually
-            # change (see _policy_config_matches_helper).
-            if self._policy_config_matches_helper(session, view_name, "policy_retention", "drop_after", drop_after):
+            # change (see policy_config_matches_helper).
+            if self.hypertable_mgr.policy_config_matches_helper(session, view_name, "policy_retention", "drop_after", drop_after):
                 self._log.debug(
                     f"_add_aggregate_policy_helper: '{view_name}' already drop_after={drop_after}, "
                     f"skipping retention remove/re-add."
@@ -4464,16 +5532,16 @@ class RollupManager:
             # 5. Compression Policy — remove-then-add so a compress_after
             # change reaches an already-existing view, but skipped
             # entirely when nothing would actually change (see
-            # _policy_config_matches_helper). This is the specific
+            # policy_config_matches_helper). This is the specific
             # remove/re-add that raced TimescaleDB's own job scheduler
             # and produced a one-off Failed run against a freshly
             # retuned protocol's rollup-view compression job in practice.
-            if self.enable_compression:
+            if self.hypertable_mgr.enable_compression:
                 # ALTER ... SET is inherently idempotent (not a "create"
                 # call), safe to repeat on every pass.
                 session.execute(text(f"ALTER MATERIALIZED VIEW {view_name} SET (timescaledb.compress = true);"))
 
-                if self._policy_config_matches_helper(
+                if self.hypertable_mgr.policy_config_matches_helper(
                     session, view_name, "policy_compression", "compress_after", compress_after
                 ):
                     self._log.debug(
@@ -4593,21 +5661,21 @@ class RollupManager:
                 self.mark_rollup_setup_complete_helper(protocol_name, complete=True)
                 return
 
-            chunk_interval, compress_after, band_name = self.get_dynamic_raw_table_settings_helper(
+            chunk_interval, compress_after, band_name = self.hypertable_mgr.get_dynamic_raw_table_settings_helper(
                 target_protocol_name=protocol_name,
-                static_chunk_interval=self.raw_wide_chunk_time_interval,
-                static_compress_after=self.raw_wide_compress_after_interval,
+                static_chunk_interval=self.hypertable_mgr.raw_wide_chunk_time_interval,
+                static_compress_after=self.hypertable_mgr.raw_wide_compress_after_interval,
             )
             self._log.info(
                 f"Wide raw table sizing for '{protocol_name}': {band_name} -> "
                 f"chunk={chunk_interval}, compress_after={compress_after}"
             )
             if band_name == "Static (no live data yet)":
-                self._flag_pending_retune(protocol_name)
+                self.hypertable_mgr.flag_pending_retune(protocol_name)
 
             self.setup_rollup(
                 table_name=wide_table_name,
-                segment_by=self.compress_segmentby_wide,
+                segment_by=self.hypertable_mgr.compress_segmentby_wide,
                 # Dynamically sized (or falls back to the static raw_wide_*
                 # settings) -- see get_dynamic_raw_table_settings_helper.
                 # Narrow uses its own, independently-computed values — see
@@ -4632,7 +5700,7 @@ class RollupManager:
                             text("SELECT metric_count FROM protocol_registry WHERE protocol_name = :p"),
                             {"p": protocol_name}
                         ).scalar() or 0
-                    self._protocol_wide_column_counts[protocol_name] = cat_count
+                    self.hypertable_mgr.protocol_wide_column_counts[protocol_name] = cat_count
                 except SQLAlchemyError:
                     pass  # Non-fatal — _get_dynamic_settings falls back to 0
 
@@ -4798,7 +5866,7 @@ class RollupManager:
         transaction is rolled back before continuing so the session does not remain
         in the aborted state.
         """
-        r_settings: dict[str, Any] = self._get_dynamic_settings_helper()
+        r_settings: dict[str, Any] = self.hypertable_mgr.get_dynamic_settings_helper()
 
         ordered_view_names: list[str] = sorted(
             view_names,
@@ -4818,7 +5886,7 @@ class RollupManager:
             self._log.info(f"Purging rollup: {full_name}")
 
             try:
-                self._set_lock_timeout(session, r_settings['lock_timeout'])
+                self.hypertable_mgr.set_lock_timeout(session, r_settings['lock_timeout'])
 
                 # Disable compression first when present.
                 try:
@@ -4829,14 +5897,14 @@ class RollupManager:
                     self._log.info(f"View was already uncompressed: {full_name}")
 
                     # Re-enter a clean transaction for the remaining cleanup
-                    self._set_lock_timeout(session, r_settings['lock_timeout'])
+                    self.hypertable_mgr.set_lock_timeout(session, r_settings['lock_timeout'])
 
                 session.execute(text(f"SELECT remove_continuous_aggregate_policy('{full_name}', if_exists => true);"))
                 session.execute(text(f"SELECT remove_retention_policy('{full_name}', if_exists => true);"))
                 session.execute(text(f"DROP MATERIALIZED VIEW IF EXISTS {full_name} CASCADE;"))
 
                 session.commit()
-                self._known_rollup_views.pop(view_name, None)
+                self.known_rollup_views.pop(view_name, None)
 
             except Exception as e:
                 session.rollback()
@@ -4901,7 +5969,7 @@ class RollupManager:
         Idempotently creates one CAGG view if it does not already exist —
         AND, either way, ensures its refresh/retention/compression
         policies match current settings, then records it in
-        _known_rollup_views for the refresh loop.
+        known_rollup_views for the refresh loop.
 
         For a brand-new view, delegates to _create_rollup_helper (which
         branches wide vs narrow internally based on whether 'wide' appears
@@ -4938,8 +6006,8 @@ class RollupManager:
 
         # Register in the refresh registry regardless of whether we just created it
         # so the refresh loop picks it up on every run.
-        if view_name not in self._known_rollup_views:
-            self._known_rollup_views[view_name] = start_offset
+        if view_name not in self.known_rollup_views:
+            self.known_rollup_views[view_name] = start_offset
 
 
     def _refresh_protocol_rollups_helper(self, protocol_name: str, wide_table_name: str | None) -> None:
@@ -5074,7 +6142,7 @@ class RollupManager:
     # -------------------------
     #  Admin UI support — read-only inventory + on-demand full rebuild.
     #  Backs the "Timescale DB -> Rebuild Rollup Views" admin screen, the
-    #  same way WideTableFieldManager backs "Delete Columns". Both entry
+    #  same way BridgeAdminManager backs "Delete Columns". Both entry
     #  points below are thin orchestrators over methods that already exist
     #  (rollup_needs_rebuild, setup_with_retry/ensure_rollups, add_wide_rollup)
     #  rather than new rebuild logic, so a manual rebuild behaves identically
@@ -5422,7 +6490,7 @@ class RollupManager:
         # rebuild_compression -- the first progress event should already
         # know a correct denominator.
         candidates: list[tuple[str, str, Any]] = []
-        for view_name, start_offset in self._known_rollup_views.items():
+        for view_name, start_offset in self.known_rollup_views.items():
             group: str | None = view_to_group.get(view_name)
             if group is None:
                 # A view we're tracking that no longer maps to a registered
@@ -5480,877 +6548,63 @@ class RollupManager:
     #  modifies a policy or job.
     # -------------------------
 
-    def get_compression_retention_summary(self) -> dict[str, Any]:
-        """
-        Read-only summary of this bridge's compression and retention
-        configuration, for the "Compression & Retention Status" panel.
-        Every value here is a plain attribute read (set from rollup_policy
-        / hypertable_defaults in __init__) -- no DB round trip, since this
-        is config, not live state.
-
-        Compression is scheduled per rollup granularity (see
-        hypertable_defaults) — each interval is how long TimescaleDB waits
-        after a chunk's time range closes before compressing it. Retention
-        (drop_after) applies uniformly to raw data across the narrow and
-        wide hypertables.
-
-        `raw_narrow_compress_after_interval` / `raw_wide_compress_after_
-        interval` / `raw_narrow_chunk_time_interval` / `raw_wide_chunk_
-        time_interval` are listed separately, not folded into `schedule`:
-        they govern the RAW hypertables' own compression policy and chunk
-        sizing, while `schedule`'s four rows each govern a distinct ROLLUP
-        VIEW (four separate objects). Conflating raw with rollup-view
-        settings was the source of a real bug — see setup_rollup's
-        docstring for the history. Narrow and wide additionally get their
-        own values for BOTH settings, not shared ones — a wide table's row
-        density (one row per device per write cycle) is far lower than
-        narrow's (up to ~160 rows per write cycle, aggregated across every
-        protocol's wide table into the one shared narrow table), so
-        neither the same chunk_time_interval nor the same compress_after
-        (which TimescaleDB's own guidance ties to a table's own chunk_
-        time_interval, at roughly 2-3x it) produces safe, comparable
-        results for both. See hypertable_defaults' raw_narrow_chunk_time_
-        interval and raw_narrow_compress_after_interval comments for the
-        full reasoning.
-        """
-        return {
-            "enable_compression": self.enable_compression,
-            "enable_dynamic_chunk_sizing": self.enable_dynamic_chunk_sizing,
-            "retention_interval": self.drop_after,
-            "segment_by_narrow": self.compress_segmentby_narrow,
-            "segment_by_wide": self.compress_segmentby_wide,
-            "compress_orderby": self.compress_orderby,
-            "raw_narrow_compress_after_interval": self.raw_narrow_compress_after_interval,
-            "raw_wide_compress_after_interval": self.raw_wide_compress_after_interval,
-            "raw_narrow_chunk_time_interval": self.raw_narrow_chunk_time_interval,
-            "raw_wide_chunk_time_interval": self.raw_wide_chunk_time_interval,
-            "schedule": [
-                {"granularity": "hourly", "compress_after": self.hourly_compress_after_interval},
-                {"granularity": "daily", "compress_after": self.daily_compress_after_interval},
-                {"granularity": "weekly", "compress_after": self.weekly_compress_after_interval},
-                {"granularity": "monthly", "compress_after": self.monthly_compress_after_interval},
-            ],
-        }
-
     # -------------------------
-    # Rebuild Compression — backs the "Timescale DB -> Rebuild Compression"
-    # admin screen. Sibling to the Rebuild Rollup Views screen above and
-    # reuses its exact grouping (shared narrow stack, plus one entry per
-    # wide-table protocol) and JSON-body-via-fetch() convention, but is a
-    # fundamentally heavier, different kind of operation: rather than
-    # dropping/recreating a view's *definition*, this rewrites the on-disk
-    # storage format of chunks that are ALREADY compressed, via
-    # decompress_chunk() -> compress_chunk() on each one independently.
+    #  Dynamic ROLLUP VIEW chunk/compression sizing — a further extension
+    #  of the raw-table dynamic sizing above, for the four hourly/daily/
+    #  weekly/monthly views (narrow's shared ones AND each wide table's
+    #  own set). This uses a DIFFERENT formula than the raw-table one,
+    #  not the same one reapplied: a rollup view holds exactly one row per
+    #  (device, metric) series per time bucket, so its row rate is driven
+    #  by CARDINALITY (how many distinct series exist) x how many buckets
+    #  that granularity produces per day -- NOT by scrape frequency, which
+    #  aggregation already normalizes away entirely (an hourly view
+    #  produces 24 rows/day per series whether the raw data was scraped
+    #  every 15 seconds or every 5 minutes).
     #
-    # Why this is ever needed: compress_segmentby / compress_orderby (see
-    # hypertable_defaults) and a wide table's column set (after Delete
-    # Columns) only affect chunks compressed AFTER the change -- chunks
-    # compressed under the old settings keep their old physical layout
-    # until something re-compresses them. This screen is that "something",
-    # run on demand rather than waiting for those chunks to naturally
-    # cycle out via retention. decompress_table_chunks_best_effort() below
-    # is also this class's single source of truth for a plain "decompress
-    # everything on this table, best-effort" step -- WideTableFieldManager
-    # .delete_fields calls it before its ALTER TABLE DROP COLUMN instead
-    # of keeping its own private copy of the same logic.
+    #  Also fixes a real, separate pre-existing bug found while building
+    #  this: hourly_chunk_time_interval and its three siblings were
+    #  defined and loaded in __init__, referenced in the view-creation
+    #  orchestrators' config tuples, and then silently discarded at every
+    #  unpacking site (`for ..., _ in view_configs`) -- never once applied
+    #  to any view's own underlying materialization hypertable. Every
+    #  rollup view has been running on TimescaleDB's own implicit default
+    #  chunk sizing this whole time, regardless of this setting. See
+    #  _add_aggregate_policy_helper, which now actually applies it (and
+    #  the dynamically-computed replacement below) via set_chunk_time_
+    #  interval(), the same mechanism already used for the raw tables.
     # -------------------------
 
-    def _compression_group_tables(self, protocol_names: set[str] | None = None) -> list[dict[str, Any]]:
-        """
-        Resolves each compression group's member tables -- the group's raw
-        hypertable plus its hourly/daily/weekly/monthly rollup views (all
-        five are independently compressible hypertables in TimescaleDB;
-        continuous aggregates materialize into their own hypertable).
-
-        Uses the same group keys as rebuild_all_rollups() /
-        refresh_selected_rollups() above (a wide-table protocol_name, plus
-        the literal "shared_narrow" for the shared narrow stack) and the
-        same ordering (shared narrow stack first, then wide protocols
-        alphabetically) list_rollup_views() produces, so a group's
-        position/selection here always lines up with what the admin sees
-        on the Rebuild Rollup Views screen's checkboxes.
-
-        protocol_names=None resolves every group with selected=True. An
-        empty set resolves every group with selected=False -- callers use
-        `selected` to decide whether to act on a group, not whether to
-        include it in the returned list, so a group always has a result
-        row even when it's skipped.
-        """
-        groups: list[dict[str, Any]] = [{
-            "protocol_name": "shared_narrow",
-            "wide_table_name": "device_metrics_narrow",
-            "selected": protocol_names is None or "shared_narrow" in protocol_names,
-            "tables": [
-                "device_metrics_narrow",
-                "hourly_rollup_narrow",
-                "daily_rollup_narrow",
-                "weekly_rollup_narrow",
-                "monthly_rollup_narrow",
-            ],
-        }]
-
-        with self.SessionFactory() as session:
-            protocol_rows: Sequence[Row[Any]] = session.execute(
-                text("""
-                    SELECT protocol_name, rollup_prefix, wide_table_name
-                    FROM protocol_registry
-                    WHERE wide_table_name IS NOT NULL
-                    ORDER BY protocol_name
-                """)
-            ).fetchall()
-
-        for protocol_name, rollup_prefix, wide_table_name in protocol_rows:
-            tables: list[str] = [wide_table_name]
-            if rollup_prefix:
-                # Registered but rollup setup hasn't finished yet -- the
-                # wide table itself is still a valid compression target,
-                # it just doesn't have rollup views to add yet.
-                tables.extend(f"{gran}_{rollup_prefix}" for gran in ("hourly", "daily", "weekly", "monthly"))
-            groups.append({
-                "protocol_name": protocol_name,
-                "wide_table_name": wide_table_name,
-                "selected": protocol_names is None or protocol_name in protocol_names,
-                "tables": tables,
-            })
-
-        return groups
-
-    # Every group's tables follow the same [raw, hourly, daily, weekly,
-    # monthly] shape (see _compression_group_tables) -- this is just the
-    # granularity label for a table at a given position in that list, used
-    # to annotate each inventory row for the UI.
-    _GRANULARITY_BY_POSITION: tuple[str, ...] = ("raw", "hourly", "daily", "weekly", "monthly")
-
-    def list_compression_groups(self) -> list[dict[str, Any]]:
-        """
-        Read-only compression inventory for the Rebuild Compression screen
-        -- one row per group (shared narrow stack, plus each wide-table
-        protocol), each carrying a per-table breakdown (raw table + all
-        four rollup views) of chunk counts and on-disk size, so the admin
-        can see the actual cost of a rebuild before committing to it
-        rather than clicking blind.
-
-        Answered with a SINGLE query across every group's tables at once,
-        rather than the 2-queries-per-table loop this replaced. Two
-        reasons that's the better trade here, not just a micro-
-        optimization:
-          1. Round trips dominate: with ~5-10 groups x 5 tables each, the
-             old loop was 50-100 sequential round trips to Postgres before
-             the page could render. One batched query is one round trip,
-             and GROUP BY lets Postgres answer it off a single scan of
-             timescaledb_information.chunks instead of one scan per table.
-          2. Simpler error handling: to_regclass()/hypertable_size() on a
-             table that doesn't exist yet (rollups mid-setup for a
-             protocol) just yields NULL/0 inline, so there's no per-table
-             try/except -- one missing view no longer needs special-casing
-             to avoid blanking out an otherwise-valid group.
-
-        A view-vs-hypertable subtlety the single query has to account for:
-        a rollup view's NAME (e.g. "hourly_rollup_wide_eg4_18kpv") is not
-        the name TimescaleDB's chunk/size catalogs index by -- continuous
-        aggregates materialize into a separate, internally-named
-        hypertable, and that's what timescaledb_information.chunks and
-        hypertable_size() need. The query below resolves that via
-        timescaledb_information.continuous_aggregates (the public,
-        version-stable catalog view) before joining chunks/computing size,
-        falling back to the table's own name unchanged for the raw wide/
-        narrow tables, which aren't continuous aggregates and don't need
-        resolving.
-
-        raw_size_bytes is the sum of chunk_compression_stats().
-        before_compression_total_bytes across the table's currently-
-        compressed chunks -- the size that data would take up UNcompressed,
-        i.e. what "Rebuild Compression" is shrinking it back down from.
-        Unlike size_bytes (chunk_compression_stats() is called directly
-        with the table/view's own name here, same as rebuild_compression()
-        already does -- TimescaleDB resolves a continuous aggregate's
-        public view to its materialization hypertable internally for this
-        function, no manual resolution needed the way size_bytes needs
-        for hypertable_size()). Deliberately only covers chunks that ARE
-        compressed: an uncompressed chunk has no separate before/after
-        distinction to query -- its current on-disk size already IS its
-        raw size, so a table with nothing compressed yet reports
-        raw_size_bytes=0 rather than double-counting via size_bytes.
-
-        (There's also a lower-level variant of this same query that joins
-        _timescaledb_catalog.* system tables directly by OID instead of
-        timescaledb_information.* -- probably marginally faster, but those
-        catalog tables are TimescaleDB's internal implementation detail,
-        not its supported public API, and can change shape across
-        versions without notice. This inventory isn't a hot path -- it
-        loads once per page view and once after a rebuild -- so the public
-        catalog views are the safer choice here.)
-        """
-        groups: list[dict[str, Any]] = self._compression_group_tables(protocol_names=None)
-
-        granularity_by_table: dict[str, str] = {}
-        all_table_names: list[str] = []
-        for group in groups:
-            for i, table_name in enumerate(group["tables"]):
-                granularity_by_table[table_name] = self._GRANULARITY_BY_POSITION[i]
-                all_table_names.append(table_name)
-
-        with self.SessionFactory() as session:
-            stat_rows: Sequence[Row[Any]] = session.execute(
-                text("""
-                    WITH target_tables AS (
-                        SELECT unnest(CAST(:table_names AS text[])) AS view_name
-                    ),
-                    resolved AS (
-                        SELECT
-                            t.view_name,
-                            coalesce(
-                                ca.materialization_hypertable_schema || '.' || ca.materialization_hypertable_name,
-                                t.view_name
-                            ) AS qualified_relation_name,
-                            coalesce(ca.materialization_hypertable_name, t.view_name) AS hypertable_name
-                        FROM target_tables t
-                        LEFT JOIN timescaledb_information.continuous_aggregates ca
-                            ON ca.view_name = t.view_name
-                    ),
-                    chunk_counts AS (
-                        SELECT
-                            r.view_name,
-                            r.qualified_relation_name,
-                            count(ch.chunk_name) AS total_chunks,
-                            count(ch.chunk_name) FILTER (WHERE ch.is_compressed) AS compressed_chunks
-                        FROM resolved r
-                        LEFT JOIN timescaledb_information.chunks ch
-                            ON ch.hypertable_name = r.hypertable_name
-                        GROUP BY r.view_name, r.qualified_relation_name
-                    ),
-                    raw_size AS (
-                        SELECT
-                            t.view_name,
-                            coalesce(sum(s.before_compression_total_bytes), 0) AS raw_size_bytes
-                        FROM target_tables t
-                        LEFT JOIN LATERAL (
-                            SELECT before_compression_total_bytes
-                            FROM chunk_compression_stats(to_regclass(t.view_name))
-                        ) s ON to_regclass(t.view_name) IS NOT NULL
-                        GROUP BY t.view_name
-                    )
-                    SELECT
-                        c.view_name,
-                        c.total_chunks,
-                        c.compressed_chunks,
-                        coalesce(hypertable_size(to_regclass(c.qualified_relation_name)), 0) AS size_bytes,
-                        coalesce(rs.raw_size_bytes, 0) AS raw_size_bytes
-                    FROM chunk_counts c
-                    LEFT JOIN raw_size rs ON rs.view_name = c.view_name
-                """),
-                {"table_names": all_table_names},
-            ).fetchall()
-
-        stats_by_table: dict[str, dict[str, int]] = {
-            row.view_name: {
-                "total_chunks": row.total_chunks or 0,
-                "compressed_chunks": row.compressed_chunks or 0,
-                "size_bytes": row.size_bytes or 0,
-                "raw_size_bytes": row.raw_size_bytes or 0,
-            }
-            for row in stat_rows
-        }
-
-        rows_out: list[dict[str, Any]] = []
-        for group in groups:
-            table_rows: list[dict[str, Any]] = []
-            total_chunks = 0
-            compressed_chunks = 0
-            size_bytes = 0
-            raw_size_bytes = 0
-            for table_name in group["tables"]:
-                stats: dict[str, int] = stats_by_table.get(
-                    table_name,
-                    {"total_chunks": 0, "compressed_chunks": 0, "size_bytes": 0, "raw_size_bytes": 0},
-                )
-                table_rows.append({
-                    "table_name": table_name,
-                    "granularity": granularity_by_table[table_name],
-                    "total_chunks": stats["total_chunks"],
-                    "compressed_chunks": stats["compressed_chunks"],
-                    "size_bytes": stats["size_bytes"],
-                    "raw_size_bytes": stats["raw_size_bytes"],
-                })
-                total_chunks += stats["total_chunks"]
-                compressed_chunks += stats["compressed_chunks"]
-                size_bytes += stats["size_bytes"]
-                raw_size_bytes += stats["raw_size_bytes"]
-
-            rows_out.append({
-                "protocol_name": group["protocol_name"],
-                "wide_table_name": group["wide_table_name"],
-                "tables": table_rows,
-                "total_chunks": total_chunks,
-                "compressed_chunks": compressed_chunks,
-                "size_bytes": size_bytes,
-                "raw_size_bytes": raw_size_bytes,
-            })
-
-        return rows_out
-
-    def _pause_compression_job_for_table(self, session: Session, table_name: str) -> list[int]:
-        """
-        Same job-pause pattern as WideTableFieldManager._pause_compression_
-        job (see the Delete Columns flow, further down in this file) --
-        duplicated here in a couple of lines rather than shared across the
-        two classes, since neither holds a reference to the other and this
-        is a small, self-contained query. Returns the job_id(s) paused, so
-        _resume_compression_job_for_table can re-enable them afterward.
-        """
-        try:
-            rows: Sequence[Row[Any]] = session.execute(
-                text("""
-                    SELECT job_id FROM timescaledb_information.jobs
-                    WHERE hypertable_name = :table_name
-                      AND proc_name ILIKE :search_term
-                      AND scheduled = true
-                """),
-                {"table_name": table_name, "search_term": "%compress%"}
-            ).fetchall()
-            job_ids: list[int] = [r[0] for r in rows]
-            for job_id in job_ids:
-                session.execute(text("SELECT alter_job(:job_id, scheduled := false)"), {"job_id": job_id})
-            if job_ids:
-                self._log.info(f"_pause_compression_job_for_table: paused job(s) {job_ids} for '{table_name}'")
-        except Exception as e:
-            self._log.warning(
-                f"_pause_compression_job_for_table: could not pause compression job for '{table_name}': {e}"
-            )
-            return []
-        else:
-            return job_ids
-
-    def _resume_compression_job_for_table(self, session: Session, job_ids: list[int]) -> None:
-        """Re-enables (scheduled => true) job_ids previously paused by _pause_compression_job_for_table."""
-        for job_id in job_ids:
-            try:
-                session.execute(text("SELECT alter_job(:job_id, scheduled => true)"), {"job_id": job_id})
-            except Exception as e:
-                self._log.warning(f"_resume_compression_job_for_table: could not resume job {job_id}: {e}")
-        if job_ids:
-            self._log.info(f"_resume_compression_job_for_table: resumed job(s) {job_ids}")
-
-    def decompress_table_chunks_best_effort(self, session: Session, table_name: str) -> None:
-        """
-        Decompresses every currently-compressed chunk of table_name,
-        best-effort. This is the one place that kind of decompress lives
-        now -- it used to be a private copy
-        (WideTableFieldManager._decompress_chunks_best_effort) kept next
-        to the Delete Columns flow, but decompressing a table's chunks is
-        exactly what this class's Rebuild Compression machinery already
-        does as half of its decompress -> compress cycle, so
-        WideTableFieldManager.delete_fields now calls this instead of
-        keeping its own copy of the same logic. Support for dropping
-        columns directly on compressed hypertable chunks is inconsistent
-        across TimescaleDB versions, so delete_fields calls this
-        proactively, ahead of its ALTER TABLE ... DROP COLUMN. Newly
-        written data is recompressed on the normal compression policy
-        schedule; running the full "Rebuild Compression" screen
-        afterward is what re-compresses these particular chunks under
-        the now-smaller column set (see rebuild_compression's docstring).
-
-        Best-effort: a table with no compressed chunks (or not yet a
-        hypertable) simply no-ops here rather than failing the caller's
-        edit.
-
-        Runs inside a SAVEPOINT (session.begin_nested()), not directly in
-        the caller's transaction. Postgres aborts an entire transaction --
-        not just the one failing statement -- the moment any statement in
-        it errors, and that abort can only be cleared by a ROLLBACK (or
-        ROLLBACK TO SAVEPOINT), never by simply catching the Python
-        exception. Without the SAVEPOINT here, a failure in this
-        best-effort step would silently poison the caller's transaction:
-        the except block below would swallow the Python-level exception,
-        but every statement after it -- including the ALTER TABLE DROP
-        COLUMN this is meant to prepare for -- would then fail with
-        "current transaction is aborted, commands ignored until end of
-        transaction block", surfacing as a confusing failure far from its
-        real cause. begin_nested() ensures only the SAVEPOINT is rolled
-        back on failure, leaving the rest of the caller's transaction
-        (including the DROP COLUMN that follows) usable.
-
-        Deliberately takes and reuses the CALLER's session/transaction
-        (unlike list_compression_groups/rebuild_compression above, which
-        each open their own short-lived sessions) -- delete_fields needs
-        this decompress step and its subsequent DROP COLUMN to be atomic
-        with each other, inside the single advisory-locked transaction it
-        already holds.
-
-        Applies the same dynamic lock_timeout (_get_dynamic_settings_
-        helper -> _set_lock_timeout) every other lock-risky operation in
-        this class applies before touching a hypertable/CAGG (see
-        _create_rollup_helper, drop_protocol_rollup,
-        _drop_all_continuous_aggregates) -- decompress_chunk() takes an
-        exclusive lock same as those, and can be blocked by the same
-        sources (the flush thread, an in-flight refresh). Without it this
-        step would hang on that lock indefinitely instead of failing fast
-        like everything else here does; it was inconsistent for this
-        decompress to be the one exception.
-        """
-        r_settings: dict[str, Any] = self._get_dynamic_settings_helper()
-        try:
-            with session.begin_nested():
-                self._set_lock_timeout(session, r_settings["lock_timeout"])
-                session.execute(
-                    text("""
-                        SELECT decompress_chunk(c, true)
-                        FROM show_chunks(:tname) AS c;
-                    """),
-                    {"tname": table_name}
-                )
-        except Exception as e:
-            # the common case -- no compressed chunks yet
-            # -- is entirely expected, but logged at warning so an
-            # unexpected failure here is never silent again.
-            self._log.warning(
-                f"decompress_table_chunks_best_effort: could not decompress chunks for '{table_name}' "
-                f"(continuing -- this step is best-effort): {e}"
-            )
-
-    def _get_hypertable_total_sizes(self, table_names: list[str]) -> dict[str, int]:
-        """
-        Returns {table_name: hypertable_size_bytes} for the given table/
-        view names -- same view-resolution technique as
-        list_compression_groups (a rollup view's public name isn't what
-        timescaledb_information.chunks/hypertable_size() index by; this
-        resolves it via timescaledb_information.continuous_aggregates
-        first), but scoped to just total on-disk size, no chunk counts.
-        This is what rebuild_compression uses for its before/after size
-        snapshot, so that a rebuild's reported size change is the SAME
-        metric list_compression_groups' "Size" column already shows the
-        admin, not some other narrower figure that happens to look
-        similar. A name that doesn't resolve to an existing relation
-        yields 0 rather than raising. Empty input short-circuits to `{}`
-        without a round trip.
-        """
-        if not table_names:
-            return {}
-        with self.SessionFactory() as session:
-            rows: Sequence[Row[Any]] = session.execute(
-                text("""
-                    WITH target_tables AS (
-                        SELECT unnest(CAST(:table_names AS text[])) AS view_name
-                    ),
-                    resolved AS (
-                        SELECT
-                            t.view_name,
-                            coalesce(
-                                ca.materialization_hypertable_schema || '.' || ca.materialization_hypertable_name,
-                                t.view_name
-                            ) AS qualified_relation_name
-                        FROM target_tables t
-                        LEFT JOIN timescaledb_information.continuous_aggregates ca
-                            ON ca.view_name = t.view_name
-                    )
-                    SELECT
-                        r.view_name,
-                        coalesce(hypertable_size(to_regclass(r.qualified_relation_name)), 0) AS size_bytes
-                    FROM resolved r
-                """),
-                {"table_names": table_names},
-            ).fetchall()
-        return {row.view_name: row.size_bytes or 0 for row in rows}
-
-    def rebuild_compression(self, protocol_names: set[str] | None = None) -> Generator[dict[str, Any], None, None]:
-        """
-        Full decompress -> recompress pass across every already-compressed
-        chunk of the selected group(s)' raw table and all four rollup
-        views, for the admin's "Rebuild Compression" button.
-
-        This is a GENERATOR, not a plain method -- see routers/timescale
-        .py's PATCH /compression/rebuild, which streams each yielded
-        event straight to the browser as one line of newline-delimited
-        JSON per event, over the single request/response connection
-        already open for the rebuild itself. No background job, no
-        second polling endpoint: the request just stays open and the
-        browser reads it incrementally (see triggerRebuildCompression in
-        timescale_rebuild_compression.html). Trade-off worth knowing:
-        if that connection drops mid-run (tab closed, laptop sleeps),
-        the rebuild keeps going server-side same as always, but nothing
-        is watching it anymore -- there's no job ID to reattach to.
-
-        Yields:
-            {"type": "progress", "protocol_name", "table_name",
-             "bytes_processed", "bytes_total"} once per chunk (success or
-             failure) -- bytes_total is fixed for the whole run, computed
-             during the planning pass below from the pre-rebuild size of
-             every table that actually has compressed chunks to touch
-             (tables with nothing compressed contribute nothing to the
-             denominator, so progress reaches 100% exactly when the last
-             real chunk finishes, not before). bytes_processed is
-             cumulative and WEIGHTED BY EACH TABLE'S BYTE SIZE, split
-             evenly across that table's own chunks. This matters because
-             chunk counts are wildly incomparable across a group's own
-             members -- an hourly rollup view routinely has 4-5x the raw
-             table's chunk count for the same wall-clock span, while the
-             raw table's chunks are individually far heavier -- so a
-             naive chunks-done/chunks-total fraction would race through
-             a big rollup view and then appear to stall on the raw
-             table, or the reverse, depending on iteration order. There's
-             no cheaper way to get a single chunk's actual individual
-             byte size without yet another query per chunk; splitting a
-             table's already-known total evenly across its own chunks is
-             a much better proxy than treating every chunk everywhere as
-             equal, since within ONE table chunks are far more
-             comparable to each other than they are across tables/views.
-            {"type": "done", "result": {"groups": [...]}} exactly once,
-             at the end -- the same per-group/per-table/per-chunk result
-             shape this method used to simply return, unchanged.
-
-        Unlike rebuild_all_rollups() / refresh_selected_rollups(), this
-        never drops or recreates a view or a chunk -- it only rewrites
-        each already-compressed chunk's on-disk storage format in place
-        (decompress_chunk() followed by compress_chunk() against the
-        hypertable's CURRENT compress_segmentby/compress_orderby/column
-        set). No row data is touched or lost. This is what actually
-        applies a compress_segmentby/compress_orderby change, or cleans
-        up the physical layout after Delete Columns has dropped wide-
-        table columns, to data that was compressed under the old
-        settings -- editing hypertable_defaults or dropping a column only
-        changes what NEW compression uses; it does nothing to chunks
-        already on disk until something like this rewrites them.
-
-        Args:
-            protocol_names: Same group keys as rebuild_all_rollups() -- a
-                wide-table protocol_name, plus "shared_narrow". None acts
-                on every group. An empty set does nothing -- every group
-                comes back in the result with skipped=True.
-
-        Only touches chunks TimescaleDB already reports as compressed
-        (is_compressed=true in timescaledb_information.chunks) -- an
-        uncompressed chunk (typically the newest one, still inside its
-        compress_after window) is left alone, so this never fights the
-        compression policy schedule or compresses data early.
-
-        Runs in two passes rather than one combined loop:
-          1. PLANNING -- for every table in a selected group, look up
-             which chunks are currently compressed (a read-only query,
-             nothing mutated yet). This is what makes bytes_total known
-             BEFORE the first progress event, instead of discovering it
-             incrementally as tables happen to get visited.
-          2. WORK -- decompress/recompress each planned chunk, in the
-             same order the plan was built (group order, then each
-             group's [raw, hourly, daily, weekly, monthly] order),
-             yielding a progress event after every chunk.
-        Each table's scheduled compression job is paused for the
-        duration of that table's chunk loop in the work pass (mirrors
-        WideTableFieldManager.delete_fields' pause-around-DDL pattern) so
-        the background scheduler can't race a chunk this is already
-        mid-rewrite on, and is always resumed afterward even if a chunk
-        failed. Every chunk gets its own try/except: one chunk failing to
-        decompress or recompress (e.g. a concurrent lock) does not abort
-        the rest of that table, the rest of the group, or any other
-        selected group.
-
-        size_before_bytes/size_after_bytes on the final "done" result (at
-        both the table and group level) are the TABLE's/GROUP's total
-        on-disk size -- via _get_hypertable_total_sizes(), i.e. the exact
-        same hypertable_size() metric list_compression_groups' "Size"
-        column already shows -- snapshotted once for every table the
-        planning pass found work for, right before the work pass starts,
-        and again once for all of them right after the work pass
-        finishes. Two round trips total (not per-table, not per-chunk),
-        regardless of how many groups/tables/chunks are involved.
-
-        This is deliberately NOT a sum of chunk_compression_stats() before/
-        after figures per chunk (an earlier version of this method did
-        that). That approach only measured the chunks actually rewritten,
-        which is a different, narrower quantity than a table's total size
-        (it excludes any never-compressed chunk sitting alongside them,
-        and TOAST/index overhead) -- comparable to nothing else on this
-        screen, and prone to reporting a "before" and "after" that don't
-        visibly relate to the table's actual "Size" column at all. Taking
-        the same total-size measurement before and after means: a rebuild
-        that doesn't change compress_segmentby/compress_orderby/the
-        column set correctly reports ~0% (nothing to shrink), and a
-        rebuild that DOES change one of those reports a percentage that
-        lines up with what the admin already sees in "Size".
-
-        chunk_name values come back from timescaledb_information.chunks
-        unqualified (e.g. "_hyper_3_42_chunk", no schema prefix) -- fine
-        for the WHERE chunk_name comparison, but decompress_chunk()/
-        compress_chunk() need a regclass that actually resolves, which
-        means schema-qualifying it against _timescaledb_internal (where
-        TimescaleDB always creates chunks) before passing it to either
-        call.
-
-        Applies the same dynamic work_mem/lock_timeout tier
-        (_get_dynamic_settings_helper) every other lock-risky operation
-        in this class applies before touching a hypertable/CAGG (see
-        _create_rollup_helper, drop_protocol_rollup,
-        _refresh_single_rollup_helper) -- decompress_chunk()/
-        compress_chunk() take the same kind of exclusive chunk lock as
-        those and decompression is memory-heavy, so this was the one
-        compression-adjacent operation in the class NOT getting that
-        tuning. Computed once up front (cheap -- reads in-memory counts,
-        no DB hit) and applied per chunk transaction below, rather than
-        per table, since it doesn't change over the course of one run.
-        """
-        r_settings: dict[str, Any] = self._get_dynamic_settings_helper()
-        all_groups: list[dict[str, Any]] = self._compression_group_tables(protocol_names=protocol_names)
-
-        selected_table_names: list[str] = [
-            table_name for group in all_groups if group["selected"] for table_name in group["tables"]
-        ]
-        old_total_sizes: dict[str, int] = self._get_hypertable_total_sizes(selected_table_names)
-
-        # -------- Planning pass: find out what actually needs doing, and
-        # its total byte weight, before touching anything. This is what
-        # lets the very first progress event already know a real,
-        # correct bytes_total instead of discovering it incrementally.
-        plan: list[dict[str, Any]] = []  # [{protocol_name, table_name, chunk_names}, ...]
-
-        for group in all_groups:
-            if not group["selected"]:
-                continue
-            for table_name in group["tables"]:
-                try:
-                    with self.SessionFactory() as session:
-                        with session.begin():
-                            self._set_lock_timeout(session, r_settings["lock_timeout"])
-                            chunk_rows: Sequence[Row[Any]] = session.execute(
-                                text("""
-                                    SELECT chunk_name
-                                    FROM timescaledb_information.chunks
-                                    WHERE hypertable_name = :tname AND is_compressed = true
-                                """),
-                                {"tname": table_name},
-                            ).fetchall()
-                except SQLAlchemyError as e:
-                    # Table/view doesn't exist yet (rollups not set up for
-                    # this protocol), or has no compressed chunks at all --
-                    # nothing to rebuild here, but don't fail the rest of
-                    # the group over it.
-                    self._log.debug(f"rebuild_compression: skipping '{table_name}': {e}")
-                    continue
-
-                if not chunk_rows:
-                    continue
-
-                plan.append({
-                    "protocol_name": group["protocol_name"],
-                    "table_name": table_name,
-                    "chunk_names": [row.chunk_name for row in chunk_rows],
-                })
-
-        touched_table_names: list[str] = [item["table_name"] for item in plan]
-        bytes_total: int = sum(old_total_sizes.get(t, 0) for t in touched_table_names)
-        bytes_processed: float = 0.0
-
-        # -------- Per-group accumulators for the eventual "done" event,
-        # seeded for every group up front so a selected group that ends
-        # up with nothing to do (every table had zero compressed chunks)
-        # still reports cleanly rather than being absent.
-        group_acc: dict[str, dict[str, Any]] = {
-            group["protocol_name"]: {"chunk_results": [], "table_results": [], "chunks_ok": 0, "chunks_failed": 0}
-            for group in all_groups
-            if group["selected"]
-        }
-
-        # -------- Work pass: actually decompress/recompress, in plan
-        # order, yielding one progress event per chunk.
-        for item in plan:
-            protocol_name: str = item["protocol_name"]
-            table_name: str = item["table_name"]
-            chunk_names: list[str] = item["chunk_names"]
-            acc: dict[str, Any] = group_acc[protocol_name]
-
-            table_weight: int = old_total_sizes.get(table_name, 0)
-            per_chunk_weight: float = (table_weight / len(chunk_names)) if chunk_names else 0.0
-
-            table_chunks_ok = 0
-            table_chunks_failed = 0
-
-            paused_job_ids: list[int] = []
-            try:
-                with self.SessionFactory() as session:
-                    with session.begin():
-                        paused_job_ids = self._pause_compression_job_for_table(session, table_name)
-
-                for chunk_name in chunk_names:
-                    # Ensure the chunk name is fully qualified with its internal schema
-                    if not chunk_name.startswith("_timescaledb_internal."):
-                        qualified_chunk: str = f"_timescaledb_internal.{chunk_name}"
-                    else:
-                        qualified_chunk = chunk_name
-
-                    try:
-                        with self.SessionFactory() as session:
-                            with session.begin():
-                                self._set_lock_timeout(session, r_settings["lock_timeout"])
-                                session.execute(
-                                    text(f"SET LOCAL work_mem = '{r_settings['work_mem']}';")
-                                )
-                                session.execute(text("SELECT decompress_chunk(:c, true)"), {"c": qualified_chunk})
-                                session.execute(text("SELECT compress_chunk(:c, true)"), {"c": qualified_chunk})
-
-                        acc["chunks_ok"] += 1
-                        table_chunks_ok += 1
-                        acc["chunk_results"].append({
-                            "table_name": table_name, "chunk_name": chunk_name,
-                            "ok": True, "error": None,
-                        })
-                    except Exception as e:
-                        acc["chunks_failed"] += 1
-                        table_chunks_failed += 1
-                        self._log.error(
-                            f"rebuild_compression: chunk '{chunk_name}' on '{table_name}' failed: {e}"
-                        )
-                        acc["chunk_results"].append({
-                            "table_name": table_name, "chunk_name": chunk_name,
-                            "ok": False, "error": str(e),
-                        })
-
-                    bytes_processed += per_chunk_weight
-                    yield {
-                        "type": "progress",
-                        "protocol_name": protocol_name,
-                        "table_name": table_name,
-                        "bytes_processed": int(min(bytes_processed, bytes_total)),
-                        "bytes_total": bytes_total,
-                    }
-            finally:
-                if paused_job_ids:
-                    try:
-                        with self.SessionFactory() as session:
-                            with session.begin():
-                                self._resume_compression_job_for_table(session, paused_job_ids)
-                    except Exception as e:
-                        # Never let a resume failure mask chunk results
-                        # already recorded above -- logged so a human
-                        # notices and re-enables the job manually.
-                        self._log.warning(
-                            f"rebuild_compression: could not resume compression job(s) "
-                            f"{paused_job_ids} for '{table_name}': {e}"
-                        )
-
-            acc["table_results"].append({
-                "table_name": table_name,
-                "ok": table_chunks_failed == 0,
-                "chunks_ok": table_chunks_ok,
-                "chunks_failed": table_chunks_failed,
-                "size_before_bytes": old_total_sizes.get(table_name, 0),
-                # size_after_bytes filled in below, once every table has
-                # finished -- see the batched "after" snapshot below.
-            })
-
-        # Single batched "after" snapshot covering every table the
-        # planning pass found work for -- one round trip for everything,
-        # same reasoning as old_total_sizes above.
-        new_total_sizes: dict[str, int] = self._get_hypertable_total_sizes(touched_table_names)
-
-        group_results: list[dict[str, Any]] = []
-        for group in all_groups:
-            protocol_name = group["protocol_name"]
-            if not group["selected"]:
-                group_results.append({
-                    "protocol_name": protocol_name,
-                    "skipped": True,
-                    "ok": True,
-                    "chunks_attempted": 0,
-                    "chunks_ok": 0,
-                    "chunks_failed": 0,
-                    "size_before_bytes": 0,
-                    "size_after_bytes": 0,
-                    "tables": [],
-                    "chunks": [],
-                })
-                continue
-
-            acc = group_acc[protocol_name]
-            group_before = 0
-            group_after = 0
-            for table_entry in acc["table_results"]:
-                after: int = new_total_sizes.get(table_entry["table_name"], 0)
-                table_entry["size_after_bytes"] = after
-                group_before += table_entry["size_before_bytes"]
-                group_after += after
-
-            group_results.append({
-                "protocol_name": protocol_name,
-                "skipped": False,
-                "ok": acc["chunks_failed"] == 0,
-                "chunks_attempted": acc["chunks_ok"] + acc["chunks_failed"],
-                "chunks_ok": acc["chunks_ok"],
-                "chunks_failed": acc["chunks_failed"],
-                "tables": acc["table_results"],
-                "chunks": acc["chunk_results"],
-                "size_before_bytes": group_before,
-                "size_after_bytes": group_after,
-            })
-
-        ok_count: int = sum(1 for g in group_results if g["ok"] and not g["skipped"])
-        attempted_count: int = sum(1 for g in group_results if not g["skipped"])
-        self._log.info(
-            "rebuild_compression: %d/%d selected group(s) fully ok.", ok_count, attempted_count,
-        )
-
-        yield {"type": "done", "result": {"groups": group_results}}
-
-    def get_dynamic_raw_table_overview(self) -> list[dict[str, Any]]:
-        """
-        Read-only, per-raw-table snapshot of the values get_dynamic_raw_
-        table_settings_helper would currently resolve — the shared narrow
-        table plus every protocol with a wide table — for the Compression
-        & Retention Status panel. Unlike the static raw_narrow_*/raw_wide_*
-        settings (which apply the same value to every wide table
-        regardless of its own load), this shows each table's OWN band,
-        since two different protocols' wide tables can easily land in
-        different bands depending on their own metric count and scrape
-        interval.
-
-        Purely observational: computing this never changes any policy or
-        creates/drops anything, unlike calling get_dynamic_raw_table_
-        settings_helper from setup_narrow_rollup/add_wide_rollup (which
-        this reuses read-only).
-        """
-        rows: list[dict[str, Any]] = []
-
-        narrow_chunk, narrow_compress, narrow_band = self.get_dynamic_raw_table_settings_helper(
-            target_protocol_name=None,
-            static_chunk_interval=self.raw_narrow_chunk_time_interval,
-            static_compress_after=self.raw_narrow_compress_after_interval,
-        )
-        rows.append({
-            "table_name": "device_metrics_narrow",
-            "protocol_name": "shared_narrow",
-            "load_score": self._compute_metric_writes_per_day_helper(None),
-            "band_name": narrow_band,
-            "chunk_time_interval": narrow_chunk,
-            "compress_after_interval": narrow_compress,
-        })
-
-        try:
-            with self.SessionFactory() as session:
-                protocol_rows: Sequence[Row[Any]] = session.execute(
-                    text("""
-                        SELECT protocol_name, wide_table_name
-                        FROM protocol_registry
-                        WHERE wide_table_name IS NOT NULL
-                        ORDER BY protocol_name
-                    """)
-                ).fetchall()
-        except SQLAlchemyError as e:
-            self._log.error(f"get_dynamic_raw_table_overview: protocol_registry query failed: {e}")
-            protocol_rows = []
-
-        for protocol_name, wide_table_name in protocol_rows:
-            chunk, compress, band = self.get_dynamic_raw_table_settings_helper(
-                target_protocol_name=protocol_name,
-                static_chunk_interval=self.raw_wide_chunk_time_interval,
-                static_compress_after=self.raw_wide_compress_after_interval,
-            )
-            rows.append({
-                "table_name": wide_table_name,
-                "protocol_name": protocol_name,
-                "load_score": self._compute_metric_writes_per_day_helper(protocol_name),
-                "band_name": band,
-                "chunk_time_interval": chunk,
-                "compress_after_interval": compress,
-            })
-
-        return rows
+    # Bucket-per-day constants used to convert a view's cardinality into a
+    # modeled rows/day figure, comparable across granularities.
+    _GRANULARITY_BUCKETS_PER_DAY: dict[str, float] = {
+        "hourly": 24.0,
+        "daily": 1.0,
+        "weekly": 1.0 / 7.0,
+        "monthly": 1.0 / 30.0,   # 30-day month approximation, matches this module's own "N months" convention elsewhere
+    }
+
+    # Unlike the raw-table bands (independent absolute presets per band),
+    # views scale each GRANULARITY'S OWN static baseline by a factor --
+    # a view's natural time-scale already varies enormously by granularity
+    # (hours vs. months), so "shrink/grow this granularity's own baseline"
+    # preserves that relative ordering at every band; one shared absolute
+    # preset table (as used for the raw tables) would not. Band edges are
+    # in modeled rows/day (cardinality x buckets/day for that view's
+    # granularity) -- deliberately much smaller than the raw-table bands,
+    # since aggregation inherently produces far fewer rows/day than the
+    # raw scrape stream does. For most small/medium deployments, every
+    # view will land in Group 1 (i.e. exactly the existing static
+    # defaults) -- that's expected, not a sign dynamic sizing "isn't
+    # doing anything": view row-rates only become chunk-sizing-relevant
+    # at genuinely large device/metric fleets.
+    _VIEW_LOAD_BANDS: list[tuple[float | None, float, str]] = [
+        # (upper bound modeled rows/day, scale factor on this granularity's own baseline, band_name)
+        (10_000.0,   1.0,    "Group 1 (light)"),
+        (50_000.0,   0.5,    "Group 2"),
+        (200_000.0,  0.25,   "Group 3"),
+        (800_000.0,  0.125,  "Group 4"),
+        (None,       0.0625, "Group 5 (heavy)"),
+    ]
 
     def get_dynamic_view_overview(self) -> list[dict[str, Any]]:
         """
@@ -6432,571 +6686,10 @@ class RollupManager:
 
         return rows
 
-    def get_background_jobs(self) -> list[dict[str, Any]]:
-        """
-        Read-only snapshot of TimescaleDB's own background scheduler jobs
-        (compression, retention, and continuous-aggregate refresh
-        policies) for every hypertable/view this bridge manages -- the
-        shared narrow table, every wide table, and every rollup view
-        currently in _known_rollup_views. Lets an admin catch a job that's
-        silently failing or falling behind before it becomes a bigger
-        problem; see _purge_ghost_jobs_helper for the related cleanup path
-        when a job's target no longer exists at all.
-        """
-        try:
-            with self.SessionFactory() as session:
-                wide_table_names: Sequence[str] = session.execute(
-                    text("SELECT wide_table_name FROM protocol_registry WHERE wide_table_name IS NOT NULL")
-                ).scalars().all()
-        except SQLAlchemyError as e:
-            self._log.error(f"get_background_jobs: protocol_registry query failed: {e}")
-            wide_table_names = []
-
-        target_names: list[str] = (
-            ["device_metrics_narrow"] + list(wide_table_names) + list(self._known_rollup_views.keys())
-        )
-        if not target_names:
-            return []
-
-        try:
-            with self.SessionFactory() as session:
-                rows: Sequence[Row[Any]] = session.execute(
-                    text("""
-                        SELECT
-                            j.job_id, j.proc_name, j.hypertable_name, j.schedule_interval,
-                            js.last_run_status, js.last_successful_finish, js.next_start,
-                            js.total_runs, js.total_failures
-                        FROM timescaledb_information.jobs j
-                        LEFT JOIN timescaledb_information.job_stats js ON j.job_id = js.job_id
-                        WHERE j.hypertable_name = ANY(:names)
-                        ORDER BY j.hypertable_name, j.proc_name
-                    """),
-                    {"names": target_names},
-                ).fetchall()
-        except SQLAlchemyError as e:
-            self._log.error(f"get_background_jobs: jobs query failed: {e}")
-            return []
-
-        return [
-            {
-                "job_id": r.job_id,
-                "proc_name": r.proc_name,
-                "hypertable_name": r.hypertable_name,
-                "schedule_interval": str(r.schedule_interval) if r.schedule_interval is not None else None,
-                "last_run_status": r.last_run_status,
-                "last_successful_finish": r.last_successful_finish,
-                "next_start": r.next_start,
-                "total_runs": r.total_runs,
-                "total_failures": r.total_failures,
-            }
-            for r in rows
-        ]
-
 
     # -------------------------
     #  Determine wide vs narrow table usage for resource settings
     # -------------------------
-    def _set_lock_timeout(self, session: Session, timeout: str) -> None:
-        """
-        Sets a transaction-scoped lock_timeout via SET LOCAL.
-
-        SET LOCAL only takes effect (and only avoids Postgres's "SET LOCAL
-        can only be used in transaction blocks" warning) when an explicit
-        transaction is already open on the connection. Session normally
-        autobegins one lazily on first use, but several callers here issue
-        SET LOCAL right after a mid-function session.commit()/rollback()
-        (e.g. drop_protocol_rollup's compression-disable retry, or the
-        per-view commit loop in _drop_all_continuous_aggregates) -- exactly
-        the gap where that lazy autobegin can lose the race and leave the
-        statement running outside any transaction block.
-
-        session.begin() is a no-op if a transaction is already open (guarded
-        by in_transaction() so it never raises "already begun"), and
-        guarantees one is in place -- with BEGIN actually sent -- before
-        SET LOCAL runs.
-        """
-        if not session.in_transaction():
-            session.begin()
-        session.execute(text(f"SET LOCAL lock_timeout = '{timeout}';"))
-
-    def _get_dynamic_settings_helper(self) -> dict[str, Any]:
-        """
-        Returns performance tier settings based on the actual workload drivers
-        in a multi-protocol environment.
-
-        Two axes determine lock pressure:
-        1. Protocol count — more protocols = more CAGG views refreshed per cycle
-            = longer total lock hold time across the refresh window.
-        2. Wide table presence — wide rollups generate one stats_agg() expression
-            per metric column, which is significantly more CPU and memory intensive
-            than a single stats_agg(metric_value) on the narrow table.
-
-        Tier selection:
-        tier_low    — many protocols (>4) or any wide table with many columns (>100):
-                        conservative work_mem and short lock_timeout to yield quickly.
-        tier_medium — few protocols with wide tables, or many protocols narrow-only:
-                        balanced settings.
-        tier_high   — single or few protocols, narrow-only or small wide tables:
-                        can afford longer lock windows and higher memory.
-        """
-        protocol_count: int = len(self._known_rollup_views)
-        # Proxy for wide table complexity: any wide views registered means
-        # at least one protocol has per-column rollup expressions in play.
-        has_wide_views: bool = any("wide__" in v for v in self._known_rollup_views)
-
-        # Max column count across all wide protocols from protocol_registry.
-        # Cached after registration, so no DB hit on the hot path.
-        max_wide_columns: int = self._max_wide_column_count_helper()
-
-        if protocol_count > 4 or max_wide_columns > 100:
-            return self.performance_tiers["tier_low"]
-        elif has_wide_views or protocol_count > 2:
-            return self.performance_tiers["tier_medium"]
-        else:
-            return self.performance_tiers["tier_high"]
-
-
-    def _max_wide_column_count_helper(self) -> int:
-        """
-        Returns the highest metric_count across all registered wide-table protocols.
-        Used by _get_dynamic_settings to tune lock/memory settings.
-        Reads from the in-memory _protocol_wide_column_counts dict populated
-        during add_wide_rollup, so there is no DB hit on the hot path.
-        """
-        if not self._protocol_wide_column_counts:
-            return 0
-        return max(self._protocol_wide_column_counts.values(), default=0)
-
-
-    # -------------------------
-    #  Dynamic raw-table chunk/compression sizing — a DIFFERENT concern
-    #  from _get_dynamic_settings_helper above (which tunes rollup-refresh
-    #  lock/memory behavior). This sizes chunk_time_interval and compress_
-    #  after for the two raw tables based on modeled real-world write load,
-    #  per TimescaleDB's own sizing guidance (chunks should hold a roughly
-    #  comparable, bounded amount of data; compress_after should scale with
-    #  a table's own chunk_time_interval, not be picked independently).
-    # -------------------------
-
-    # Band edges are in "metric-writes/day" -- (metric_count contributed by
-    # a protocol) x (writes/day from its transport(s)' read_interval),
-    # summed across whichever protocols are relevant (all of them, for
-    # narrow; just the one protocol sharing a wide table, for wide). This
-    # single unit works for BOTH raw tables despite their very different
-    # row-count behavior: narrow's actual row rate literally equals
-    # metric_count x writes/day (one row per metric per scrape), while a
-    # wide table's row COUNT stays flat at 1 row/scrape regardless of
-    # column count -- but its BYTE width per row scales with metric_count,
-    # so metric_count x writes/day approximates its data-volume rate too.
-    #
-    # Boundaries were translated from a 50/100/160/350-metric tiering
-    # example at a 15-second scrape interval (50 x 5760 = 288,000, etc.)
-    # into this interval-independent unit, so the same bands apply
-    # correctly regardless of a deployment's actual scrape interval(s).
-    # chunk_time_interval / compress_after pairs follow TimescaleDB's own
-    # ~2-3x multiple guidance at each tier.
-    #
-    # This table is intentionally a plain, easily-edited list rather than
-    # a settings-UI-exposed structure -- tune the values here directly if
-    # real chunk sizes (see the Storage Overview panel) suggest a boundary
-    # or preset needs adjusting for your hardware.
-    _DYNAMIC_CHUNK_BANDS: list[tuple[float | None, str, str, str]] = [
-        # (upper bound metric-writes/day, chunk_time_interval, compress_after_interval, band_name)
-        (288_000.0,   "7 days",   "14 days",   "Group 1 (light)"),
-        (576_000.0,   "3 days",   "7 days",    "Group 2"),
-        (1_152_000.0, "1 day",    "3 days",    "Group 3"),
-        (2_016_000.0, "12 hours", "36 hours",  "Group 4"),
-        (None,        "6 hours",  "18 hours",  "Group 5 (heavy)"),
-    ]
-
-    def _classify_chunk_band_helper(self, metric_writes_per_day: float) -> tuple[str, str, str]:
-        """
-        Maps a metric-writes/day load score to a (chunk_time_interval,
-        compress_after_interval, band_name) preset from _DYNAMIC_CHUNK_
-        BANDS. Bands are checked in ascending order; the first whose upper
-        bound the score doesn't exceed wins, and the final (None-bounded)
-        entry always matches as the top band.
-        """
-        for upper_bound, chunk_interval, compress_after, band_name in self._DYNAMIC_CHUNK_BANDS:
-            if upper_bound is None or metric_writes_per_day <= upper_bound:
-                return chunk_interval, compress_after, band_name
-        # Unreachable -- the table's last entry has upper_bound=None.
-        return self._DYNAMIC_CHUNK_BANDS[-1][1], self._DYNAMIC_CHUNK_BANDS[-1][2], self._DYNAMIC_CHUNK_BANDS[-1][3]
-
-    def _compute_metric_writes_per_day_helper(self, target_protocol_name: str | None) -> float:
-        """
-        Computes the metric-writes/day load score for one raw table.
-
-        target_protocol_name=None -> narrow's score: sum across EVERY
-            transport currently tracked in _transport_read_intervals (every
-            protocol's metrics land in the one shared narrow table).
-        target_protocol_name=<name> -> that one wide table's score: only
-            transports whose protocol matches this name (more than one
-            transport instance of the same protocol -- e.g. two battery
-            packs sharing one wide table -- correctly sums their combined
-            contribution here, since this operates per transport_name).
-
-        Computed PER TRANSPORT (per physical device), not per protocol.
-        protocol_registry.metric_count is a schema-wide figure (the wide
-        table's column count, sized for the union of every device's
-        metric set) and wrongly assumes every device of a protocol
-        scrapes the same metric set. In practice, different devices of
-        the same protocol can have very different variable_mask
-        configurations -- one battery might get the full register list,
-        another only a curated few. Each device's own actual figure --
-        captured once at startup in device_info.metric_count, from the
-        real write payload size (see _get_or_create_device) -- is used
-        instead, and summed per transport rather than assumed uniform.
-
-        Returns 0.0 if there's no live tracking data yet for the relevant
-        protocol(s) (e.g. right after a fresh connect, before any scraper
-        has written through this bridge) -- callers should treat 0.0 as
-        "not enough data, fall back to static config" rather than as a
-        genuinely idle table.
-        """
-        relevant_transports: dict[str, float] = {
-            transport_name: read_interval
-            for transport_name, (protocol_name, read_interval) in self._transport_read_intervals.items()
-            if (target_protocol_name is None or protocol_name == target_protocol_name) and read_interval > 0
-        }
-        if not relevant_transports:
-            return 0.0
-
-        try:
-            with self.SessionFactory() as session:
-                rows: Sequence[Row[Any]] = session.execute(
-                    text("SELECT transport, metric_count FROM device_info WHERE transport = ANY(:transports)"),
-                    {"transports": list(relevant_transports.keys())},
-                ).fetchall()
-        except SQLAlchemyError as e:
-            self._log.warning(f"_compute_metric_writes_per_day_helper: device_info lookup failed: {e}")
-            return 0.0
-
-        metric_counts_by_transport: dict[str, int] = {row.transport: (row.metric_count or 0) for row in rows}
-
-        total: float = 0.0
-        for transport_name, read_interval in relevant_transports.items():
-            metric_count: int = metric_counts_by_transport.get(transport_name, 0)
-            if metric_count > 0:
-                total += metric_count * (86400.0 / read_interval)
-
-        return total
-
-    def get_dynamic_raw_table_settings_helper(
-        self, target_protocol_name: str | None, static_chunk_interval: str, static_compress_after: str
-    ) -> tuple[str, str, str]:
-        """
-        Resolves the (chunk_time_interval, compress_after_interval, band_
-        name) to actually use for one raw table -- narrow (target_
-        protocol_name=None) or one wide table (target_protocol_name=that
-        protocol).
-
-        Falls back to (static_chunk_interval, static_compress_after,
-        "Static (manual)") when enable_dynamic_chunk_sizing is False, or
-        when there isn't yet enough live data to compute a load score
-        (returns 0.0 -- see _compute_metric_writes_per_day_helper). This
-        means a freshly connected bridge behaves exactly as it did before
-        dynamic sizing existed until real scrape data starts flowing
-        through it, rather than defaulting to the lightest or heaviest
-        band by guesswork.
-        """
-        if not self.enable_dynamic_chunk_sizing:
-            return static_chunk_interval, static_compress_after, "Static (manual)"
-
-        load_score: float = self._compute_metric_writes_per_day_helper(target_protocol_name)
-        if load_score <= 0.0:
-            return static_chunk_interval, static_compress_after, "Static (no live data yet)"
-
-        chunk_interval, compress_after, band_name = self._classify_chunk_band_helper(load_score)
-        return chunk_interval, compress_after, band_name
-
-    # -------------------------
-    #  Dynamic-sizing retune -- see the _retune_reported block in __init__
-    #  for the full rationale. Four pieces:
-    #    _flag_pending_retune       -- called from setup_narrow_rollup /
-    #                                  add_wide_rollup when they land on the
-    #                                  static fallback, to start tracking.
-    #    note_device_metric_count_known -- called by timescaledb.
-    #                                  _get_or_create_device the first time
-    #                                  a transport's real metric_count is
-    #                                  known; checks it off and fires the
-    #                                  retune once its key is fully covered.
-    #    _start_retune_timer_if_needed / _fire_retune -- the bounded
-    #                                  fallback and the actual (threaded,
-    #                                  off the caller's thread) re-run.
-    # -------------------------
-
-    def _flag_pending_retune(self, key: str | None) -> None:
-        """
-        Marks `key` (a protocol_name, or None for narrow) as needing a
-        one-shot dynamic-sizing retune once enough live data exists.
-        No-op if this key was already retuned this process lifetime, or is
-        already pending -- setup_narrow_rollup/add_wide_rollup can be
-        called more than once for the same key (reconnect, force rebuild)
-        and this must not reset progress each time.
-        """
-        with self._retune_lock:
-            if key in self._retuned or key in self._retune_reported:
-                return
-            self._retune_reported[key] = set()
-            self._log.debug(f"Dynamic sizing retune armed for {key!r} — waiting on live data.")
-
-    def note_device_metric_count_known(self, transport_name: str, protocol_name: str) -> None:
-        """
-        Called once per transport, the first time its real
-        device_info.metric_count becomes known (see timescaledb.
-        _get_or_create_device) -- i.e. the first successful write for that
-        transport this session.
-
-        Checks transport_name off against every key currently pending a
-        retune that it's relevant to: its own protocol (wide), and narrow
-        (key None, since narrow's load score sums every protocol). A
-        transport irrelevant to a given key (already retuned, or never
-        flagged pending) is a cheap no-op for that key.
-
-        Fires the retune for a key once every transport
-        _transport_read_intervals currently knows about for that key has
-        reported -- computed fresh here rather than snapshotted when the
-        key was flagged, since add_wide_rollup for a protocol can run (and
-        fall back to static) before every transport sharing that protocol
-        has even called record_transport_interval yet, e.g. protocol
-        registration is driven by whichever of several same-protocol
-        transports happens to initialize first.
-        """
-        do_fire: list[str | None] = []
-        with self._retune_lock:
-            for key in (None, protocol_name):
-                if key not in self._retune_reported or key in self._retuned:
-                    continue
-                reported: set[str] = self._retune_reported[key]
-                first_report_for_key: bool = not reported
-                reported.add(transport_name)
-
-                if first_report_for_key:
-                    self._start_retune_timer_if_needed(key)
-
-                expected: set[str] = {
-                    t_name for t_name, (p_name, _interval) in self._transport_read_intervals.items()
-                    if key is None or p_name == key
-                }
-                if expected and expected <= reported:
-                    do_fire.append(key)
-
-        # Fired outside the lock -- _fire_retune only hands off to a
-        # background thread, but keeping that handoff out of the lock
-        # avoids holding it across anything unexpected.
-        for key in do_fire:
-            self._fire_retune(key)
-
-    def _start_retune_timer_if_needed(self, key: str | None) -> None:
-        """
-        Arms the bounded fallback timer for `key`, once, the first time any
-        transport relevant to it reports. Must be called with
-        self._retune_lock held. If not every expected transport ever
-        reports (an offline/misconfigured device sharing a wide table with
-        others that ARE reporting), this fires the retune anyway after
-        retune_timeout_seconds using whatever device_info rows exist by
-        then, rather than leaving the table on static settings forever.
-        """
-        if key in self._retune_timer:
-            return
-        timer = threading.Timer(self.retune_timeout_seconds, self._fire_retune, args=(key,))
-        timer.daemon = True
-        self._retune_timer[key] = timer
-        timer.start()
-
-    def _fire_retune(self, key: str | None) -> None:
-        """
-        Marks `key` as retuned (idempotent -- safe to call from both the
-        "every expected transport reported" path and the timeout path,
-        whichever wins the race) and hands the actual re-run off to a
-        short-lived background thread. Must never run the DB work
-        synchronously on the caller's thread: the "every transport
-        reported" path is called from note_device_metric_count_known,
-        which is called from timescaledb._get_or_create_device on a live
-        scraper/write thread, and add_wide_rollup / setup_narrow_rollup do
-        real DDL (ALTER TABLE, compression policy changes, CAGG view
-        checks) that has no business blocking a write.
-        """
-        with self._retune_lock:
-            if key in self._retuned:
-                return
-            self._retuned.add(key)
-            self._retune_reported.pop(key, None)
-            timer: threading.Timer | None = self._retune_timer.pop(key, None)
-
-        if timer is not None:
-            timer.cancel()
-
-        threading.Thread(
-            target=self._do_retune_work,
-            args=(key,),
-            daemon=True,
-            name=f"DynamicSizingRetune-{key or 'narrow'}",
-        ).start()
-
-    def _do_retune_work(self, key: str | None) -> None:
-        """
-        Actual re-run, on its own thread. Re-invoking setup_narrow_rollup /
-        add_wide_rollup with force=False is deliberate and sufficient here
-        -- it unconditionally re-applies chunk_time_interval (see
-        _ensure_hypertables' docstring) and the compression policy (see
-        ensure_compression_policy's docstring) even when nothing changed,
-        and only re-materializes CAGGs if their bucket intervals actually
-        differ from what's already there (_ensure_cagg_views_for_protocol).
-        force=True is for the admin's explicit "Force Rebuild" action, not
-        this — there's no reason to purge and re-materialize views whose
-        bucket intervals haven't changed just because we're retuning the
-        raw table's chunk/compression sizing.
-        """
-        try:
-            if key is None:
-                self._log.info(
-                    "Dynamic sizing retune: live data now available for every known "
-                    "transport — re-tuning the narrow raw table."
-                )
-                self.setup_narrow_rollup()
-                return
-
-            wide_table_name: str | None = self._lookup_wide_table_name_helper(key)
-            if wide_table_name is None:
-                self._log.debug(
-                    f"Dynamic sizing retune: '{key}' has no wide table (narrow-only "
-                    f"protocol) — nothing to retune."
-                )
-                return
-
-            self._log.info(
-                f"Dynamic sizing retune: live data now available from every known "
-                f"transport of '{key}' — re-tuning '{wide_table_name}'."
-            )
-            self.add_wide_rollup(protocol_name=key, wide_table_name=wide_table_name)
-
-        except Exception as e:
-            # Best-effort: a failed retune leaves the table on its current
-            # (static) settings rather than failing anything user-facing.
-            # _retuned already has `key` at this point, so this is a
-            # one-time miss, not a retry loop — logged at error since a
-            # human should notice and can trigger a manual Force Rebuild.
-            self._log.error(f"Dynamic sizing retune failed for {key!r}: {e}")
-
-    def _lookup_wide_table_name_helper(self, protocol_name: str) -> str | None:
-        """Looks up protocol_registry.wide_table_name for one protocol."""
-        try:
-            with self.SessionFactory() as session:
-                return session.execute(
-                    text("SELECT wide_table_name FROM protocol_registry WHERE protocol_name = :p"),
-                    {"p": protocol_name}
-                ).scalar()
-        except SQLAlchemyError as e:
-            self._log.warning(f"_lookup_wide_table_name_helper failed for '{protocol_name}': {e}")
-            return None
-
-    # -------------------------
-    #  Dynamic ROLLUP VIEW chunk/compression sizing — a further extension
-    #  of the raw-table dynamic sizing above, for the four hourly/daily/
-    #  weekly/monthly views (narrow's shared ones AND each wide table's
-    #  own set). This uses a DIFFERENT formula than the raw-table one,
-    #  not the same one reapplied: a rollup view holds exactly one row per
-    #  (device, metric) series per time bucket, so its row rate is driven
-    #  by CARDINALITY (how many distinct series exist) x how many buckets
-    #  that granularity produces per day -- NOT by scrape frequency, which
-    #  aggregation already normalizes away entirely (an hourly view
-    #  produces 24 rows/day per series whether the raw data was scraped
-    #  every 15 seconds or every 5 minutes).
-    #
-    #  Also fixes a real, separate pre-existing bug found while building
-    #  this: hourly_chunk_time_interval and its three siblings were
-    #  defined and loaded in __init__, referenced in the view-creation
-    #  orchestrators' config tuples, and then silently discarded at every
-    #  unpacking site (`for ..., _ in view_configs`) -- never once applied
-    #  to any view's own underlying materialization hypertable. Every
-    #  rollup view has been running on TimescaleDB's own implicit default
-    #  chunk sizing this whole time, regardless of this setting. See
-    #  _add_aggregate_policy_helper, which now actually applies it (and
-    #  the dynamically-computed replacement below) via set_chunk_time_
-    #  interval(), the same mechanism already used for the raw tables.
-    # -------------------------
-
-    # Bucket-per-day constants used to convert a view's cardinality into a
-    # modeled rows/day figure, comparable across granularities.
-    _GRANULARITY_BUCKETS_PER_DAY: dict[str, float] = {
-        "hourly": 24.0,
-        "daily": 1.0,
-        "weekly": 1.0 / 7.0,
-        "monthly": 1.0 / 30.0,   # 30-day month approximation, matches this module's own "N months" convention elsewhere
-    }
-
-    # Unlike the raw-table bands (independent absolute presets per band),
-    # views scale each GRANULARITY'S OWN static baseline by a factor --
-    # a view's natural time-scale already varies enormously by granularity
-    # (hours vs. months), so "shrink/grow this granularity's own baseline"
-    # preserves that relative ordering at every band; one shared absolute
-    # preset table (as used for the raw tables) would not. Band edges are
-    # in modeled rows/day (cardinality x buckets/day for that view's
-    # granularity) -- deliberately much smaller than the raw-table bands,
-    # since aggregation inherently produces far fewer rows/day than the
-    # raw scrape stream does. For most small/medium deployments, every
-    # view will land in Group 1 (i.e. exactly the existing static
-    # defaults) -- that's expected, not a sign dynamic sizing "isn't
-    # doing anything": view row-rates only become chunk-sizing-relevant
-    # at genuinely large device/metric fleets.
-    _VIEW_LOAD_BANDS: list[tuple[float | None, float, str]] = [
-        # (upper bound modeled rows/day, scale factor on this granularity's own baseline, band_name)
-        (10_000.0,   1.0,    "Group 1 (light)"),
-        (50_000.0,   0.5,    "Group 2"),
-        (200_000.0,  0.25,   "Group 3"),
-        (800_000.0,  0.125,  "Group 4"),
-        (None,       0.0625, "Group 5 (heavy)"),
-    ]
-
-    # Only understands the small set of unit words this module's own
-    # interval settings ever use -- not a general PostgreSQL INTERVAL
-    # parser. "month" approximated as 30 days, consistent with
-    # _GRANULARITY_BUCKETS_PER_DAY's monthly bucket constant above.
-    _INTERVAL_UNIT_HOURS: dict[str, float] = {
-        "hour": 1.0, "hours": 1.0,
-        "day": 24.0, "days": 24.0,
-        "week": 168.0, "weeks": 168.0,
-        "month": 720.0, "months": 720.0,
-    }
-
-    def _parse_interval_to_hours_helper(self, interval_str: str) -> float:
-        """
-        Parses a simple "<number> <unit>" interval string (e.g. "1 day",
-        "2 weeks", "4 months") into hours, using _INTERVAL_UNIT_HOURS.
-        Returns 0.0 for anything that doesn't match that shape -- callers
-        treat 0.0 as "unparseable, fall back to the static value" rather
-        than guessing.
-        """
-        parts: list[str] = interval_str.strip().split()
-        if len(parts) != 2:
-            return 0.0
-        try:
-            value: float = float(parts[0])
-        except ValueError:
-            return 0.0
-        hours_per_unit: float | None = self._INTERVAL_UNIT_HOURS.get(parts[1].lower())
-        if hours_per_unit is None:
-            return 0.0
-        return value * hours_per_unit
-
-    def _format_hours_to_interval_helper(self, hours: float) -> str:
-        """
-        Formats an hours value back into a clean "<int> <unit>" interval
-        string, picking the coarsest unit that keeps the value >= 1.
-        Floors at 1 hour so a very aggressive scale-down never produces a
-        zero or negative interval.
-        """
-        hours = max(1.0, hours)
-        if hours >= 720:
-            return f"{max(1, round(hours / 720))} months"
-        if hours >= 168:
-            return f"{max(1, round(hours / 168))} weeks"
-        if hours >= 24:
-            return f"{max(1, round(hours / 24))} days"
-        return f"{round(hours)} hours"
-
     def _compute_view_cardinality_helper(self, target_protocol_name: str | None) -> int:
         """
         Computes the number of distinct (device, metric) series feeding
@@ -7019,7 +6712,7 @@ class RollupManager:
         """
         relevant_transports: list[str] = [
             transport_name
-            for transport_name, (protocol_name, _read_interval) in self._transport_read_intervals.items()
+            for transport_name, (protocol_name, _read_interval) in self.hypertable_mgr.transport_read_intervals.items()
             if target_protocol_name is None or protocol_name == target_protocol_name
         ]
         if not relevant_transports:
@@ -7063,7 +6756,7 @@ class RollupManager:
         parse (a safety net, not an expected path) -- same reasoning as
         get_dynamic_raw_table_settings_helper.
         """
-        if not self.enable_dynamic_chunk_sizing:
+        if not self.hypertable_mgr.enable_dynamic_chunk_sizing:
             return static_chunk_interval, static_compress_after, "Static (manual)"
 
         cardinality: int = self._compute_view_cardinality_helper(target_protocol_name)
@@ -7074,13 +6767,13 @@ class RollupManager:
         rows_per_day: float = cardinality * buckets_per_day
         scale_factor, band_name = self._classify_view_band_helper(rows_per_day)
 
-        static_chunk_hours: float = self._parse_interval_to_hours_helper(static_chunk_interval)
-        static_compress_hours: float = self._parse_interval_to_hours_helper(static_compress_after)
+        static_chunk_hours: float = self.hypertable_mgr.parse_interval_to_hours_helper(static_chunk_interval)
+        static_compress_hours: float = self.hypertable_mgr.parse_interval_to_hours_helper(static_compress_after)
         if static_chunk_hours <= 0.0 or static_compress_hours <= 0.0:
             return static_chunk_interval, static_compress_after, "Static (unparseable baseline)"
 
-        new_chunk: str = self._format_hours_to_interval_helper(static_chunk_hours * scale_factor)
-        new_compress: str = self._format_hours_to_interval_helper(static_compress_hours * scale_factor)
+        new_chunk: str = self.hypertable_mgr.format_hours_to_interval_helper(static_chunk_hours * scale_factor)
+        new_compress: str = self.hypertable_mgr.format_hours_to_interval_helper(static_compress_hours * scale_factor)
         return new_chunk, new_compress, band_name
 
     def _derive_target_protocol_from_view_name_helper(self, session: Session, view_name: str, granularity: str) -> str | None:
@@ -7138,7 +6831,7 @@ class RollupManager:
 
     def repopulate_known_rollup_views(self) -> None:
         """
-        Rebuilds _known_rollup_views from protocol_registry after a reconnect.
+        Rebuilds known_rollup_views from protocol_registry after a reconnect.
         Queries all registered protocols and reconstructs view name -> start_offset
         mappings in the correct hierarchical order (hourly -> daily -> weekly -> monthly).
         """
@@ -7149,12 +6842,12 @@ class RollupManager:
             ("monthly", self.monthly_rollup_start),
         ]
 
-        self._known_rollup_views.clear()
+        self.known_rollup_views.clear()
 
         # Always add the shared narrow views first
         for gran, start_offset in granularities:
             view_name = f"{gran}_rollup_narrow"
-            self._known_rollup_views[view_name] = start_offset
+            self.known_rollup_views[view_name] = start_offset
 
         # Then per-protocol wide views
         try:
@@ -7172,10 +6865,10 @@ class RollupManager:
             for (rollup_prefix,) in rows:
                 for gran, start_offset in granularities:
                     view_name: str = f"{gran}_{rollup_prefix}"
-                    self._known_rollup_views[view_name] = start_offset
+                    self.known_rollup_views[view_name] = start_offset
 
             self._log.info(
-                f"Repopulated {len(self._known_rollup_views)} "
+                f"Repopulated {len(self.known_rollup_views)} "
                 f"rollup views after reconnect."
             )
         except SQLAlchemyError as e:
@@ -7211,14 +6904,14 @@ class RollupManager:
             5) Drop the view with CASCADE to clean up dependencies,
             6) Commit after each drop to release locks and allow the next drop to proceed.
         """
-        r_settings: dict[str, Any] = self._get_dynamic_settings_helper()
+        r_settings: dict[str, Any] = self.hypertable_mgr.get_dynamic_settings_helper()
         try:
             # 1. Fetch current aggregates
-            result = session.execute(text("""
+            result: Result[Any] = session.execute(text("""
                 SELECT view_schema, view_name
                 FROM timescaledb_information.continuous_aggregates;
             """))
-            views = result.fetchall()
+            views: Sequence[Row[Any]] = result.fetchall()
 
             if not views:
                 self._log.info("No continuous aggregates found to drop.")
@@ -7244,7 +6937,7 @@ class RollupManager:
                 self._log.info(f"Purging rollup: {full_name}")
 
                 # 3b. Fail-fast if locked by background flush or refresh jobs
-                self._set_lock_timeout(session, r_settings['lock_timeout'])
+                self.hypertable_mgr.set_lock_timeout(session, r_settings['lock_timeout'])
 
                 # 4. Disable Compression (Mandatory for a clean drop of compressed CAGGs)
                 try:
@@ -7269,7 +6962,7 @@ class RollupManager:
             self._log.info("Full rollup stack teardown complete.")
             # Clear the refresh registry — views are dropped, _ensure_single_cagg_view
             # will re-populate it during the creation phase.
-            self._known_rollup_views.clear()
+            self.known_rollup_views.clear()
 
         except Exception as e:
             session.rollback()
@@ -7302,7 +6995,7 @@ class RollupManager:
             try:
                 # 1. Define the refresh sequence: Smallest Grain -> Largest Grain
                 # Monthly is independent (from hypertable), so it can go anywhere.
-                for view_name, start_offset in self._known_rollup_views.items():
+                for view_name, start_offset in self.known_rollup_views.items():
                     if self._view_exists_helper(session, view_name):
                         self._refresh_single_rollup_helper(view_name, start_offset, force_full)
                     else:
@@ -7322,7 +7015,7 @@ class RollupManager:
             force_full: If True, performs a full refresh from the beginning of time to now. If
             False, performs an incremental refresh based on the start_offset.
         """
-        r_settings: dict[str, Any] = self._get_dynamic_settings_helper()
+        r_settings: dict[str, Any] = self.hypertable_mgr.get_dynamic_settings_helper()
 
         stop_signal: List[bool] = self._start_refresh_watchdog_helper(view_name)
 
@@ -7392,7 +7085,7 @@ class RollupManager:
 
         # 2. Create the new stop signal
         stop_signal: List[bool] = [False]
-        self._current_watchdog_signal = stop_signal
+        self._current_watchdog_signal: List[bool] | None = stop_signal
 
         def monitor() -> None:
             # Use a short-lived session specifically for monitoring
@@ -7490,13 +7183,13 @@ class RollupManager:
                 with self.engine.connect() as conn:
                     conn: Connection = conn.execution_options(isolation_level="AUTOCOMMIT")
                     # Apply dynamic session settings from performance tiers
-                    tier: dict[str, Any] = self._get_dynamic_settings_helper()
+                    tier: dict[str, Any] = self.hypertable_mgr.get_dynamic_settings_helper()
                     conn.execute(text(f"SET work_mem = '{tier['work_mem']}';"))
                     conn.execute(text(f"SET lock_timeout = '{tier['lock_timeout']}';"))
 
                     # Refresh all registered CAGG views in insertion order
                     # (hourly -> daily -> weekly -> monthly, narrow before wide per protocol).
-                    for view_name in list(self._known_rollup_views):
+                    for view_name in list(self.known_rollup_views):
                         if not self._view_exists_conn_helper(conn, view_name):
                             self._log.warning(f"Skipping refresh: '{view_name}' not found.")
                             continue
@@ -7558,9 +7251,9 @@ class RollupManager:
         # disconnects/reconnects within one process lifetime should not
         # leave stale timers armed against a RollupManager instance that's
         # being torn down.
-        with self._retune_lock:
-            pending_timers: list[threading.Timer] = list(self._retune_timer.values())
-            self._retune_timer.clear()
+        with self.hypertable_mgr.retune_lock:
+            pending_timers: list[threading.Timer] = list(self.hypertable_mgr.retune_timer.values())
+            self.hypertable_mgr.retune_timer.clear()
         for timer in pending_timers:
             timer.cancel()
 
@@ -7678,14 +7371,14 @@ class WideTableField:
     table (see timescaledb._clean_column_name); metric_name is the original
     source/registry name it was derived from. The two can differ, so the UI
     should key off column_name and echo it back unchanged to
-    WideTableFieldManager.delete_fields().
+    BridgeAdminManager.delete_fields().
 
     stale is True when metric_name is no longer produced by the protocol's
     current variable_mask/variable_screen-filtered registry map -- the same
     "column exists in the wide table but the live scrape data doesn't have
     it" condition timescaledb._validate_wide_row logs as `fewer_keys` at
     row-scrape time, computed proactively here instead of waiting for it to
-    show up in a log line. See WideTableFieldManager.list_fields().
+    show up in a log line. See BridgeAdminManager.list_fields().
     """
     metric_name: str
     column_name: str
@@ -7697,7 +7390,7 @@ class WideTableField:
 
 @dataclass
 class WideTableFieldDeletionResult:
-    """Outcome of a WideTableFieldManager.delete_fields() call."""
+    """Outcome of a BridgeAdminManager.delete_fields() call."""
     protocol_name: str
     wide_table_name: str
     deleted: list[str]              # column_names actually dropped
@@ -7706,15 +7399,26 @@ class WideTableFieldDeletionResult:
     rollups_rebuilt: bool           # whether the protocol's rollups were successfully rebuilt
 
 
-class WideTableFieldManager:
+class BridgeAdminManager:
     """
-    Administrative helper for deleting dynamic metric columns ("fields")
-    from a protocol's wide table. Intended to be driven by the encapsulating
-    web app that manages bridge administration -- the web UI lists fields
-    with checkboxes, the admin selects some for removal, and on commit the
-    UI calls delete_fields() with the selected column names.
+    Backs the bridge-level admin/diagnostics surface of the web UI:
+    editing a protocol's wide-table columns ("fields"), and composing the
+    read-only diagnostic summaries every admin panel shows (Bridge
+    Health, Storage Overview, Indexes, Compression & Retention Status,
+    Background Job Status). Originally only did the former (as
+    WideTableFieldManager); get_compression_retention_summary and
+    get_background_jobs moved in as the admin UI grew panels that blend
+    HyperTableManager's raw-table state with RollupManager's rollup-view
+    state, and get_health_snapshot/get_storage_overview/get_index_overview
+    joined from the bridge class itself for the same reason -- every one
+    of these panels is bridge-administration/diagnostics, and splitting
+    that surface across two classes by historical accident of where each
+    was first written didn't reflect any real difference in what they
+    are. Intended to be driven by the encapsulating web app -- the UI
+    lists fields/panels, the admin acts, and this class carries out the
+    DB work.
 
-    Why this can't be a plain ALTER TABLE:
+    Why field deletion can't be a plain ALTER TABLE:
     Wide tables are dynamically shaped -- every metric a protocol reports
     becomes its own column (see timescaledb._ensure_columns_for_metrics).
     RollupManager then builds four hierarchical continuous aggregates
@@ -7726,18 +7430,26 @@ class WideTableFieldManager:
     have to be torn down first, or TimescaleDB will either block the
     ALTER TABLE or leave the views referencing a column that no longer
     exists. This class always performs a delete as a single
-    tear-down / alter / rebuild sequence, never a bare column drop.
+    tear-down / alter / rebuild sequence, never a bare column drop. The
+    underlying pause/resume-compression-job and decompress-chunks
+    mechanics that step needs live on HyperTableManager (bridge.
+    hypertable_mgr) -- this class calls into those rather than keeping
+    its own copy.
 
     Typical usage from the web app:
 
-        field_mgr = WideTableFieldManager(bridge)
+        admin_mgr = BridgeAdminManager(bridge)
 
         # populate the admin screen
-        protocols = field_mgr.list_editable_protocols()
-        fields = field_mgr.list_fields("eg4_18kpv")
+        protocols = admin_mgr.list_editable_protocols()
+        fields = admin_mgr.list_fields("eg4_18kpv")
 
         # ... admin checks some boxes and hits "Delete" ...
-        result = field_mgr.delete_fields("eg4_18kpv", ["soc_percent", "grid_voltage"])
+        result = admin_mgr.delete_fields("eg4_18kpv", ["soc_percent", "grid_voltage"])
+
+        # diagnostic panels
+        summary = admin_mgr.get_compression_retention_summary()
+        jobs = admin_mgr.get_background_jobs()
     """
 
     # Structural columns that exist on every wide table and can never be
@@ -7946,9 +7658,14 @@ class WideTableFieldManager:
             raise RuntimeError(
                 "RollupManager is not initialized -- bridge must be connected before editing wide tables."
             )
+        if self._bridge.hypertable_mgr is None:
+            raise RuntimeError(
+                "HyperTableManager is not initialized -- bridge must be connected before editing wide tables."
+            )
 
         protocol_id, wide_table_name = self._resolve_wide_table(protocol_name)
         rollup_mgr: "RollupManager" = self._bridge.rollup_mgr
+        hypertable_mgr: "HyperTableManager" = self._bridge.hypertable_mgr
 
         # Pause the flush worker for the duration of the edit. add_wide_rollup()
         # (called below) also sets/clears this same event around its own work;
@@ -7978,7 +7695,7 @@ class WideTableFieldManager:
 
             if not to_delete:
                 self._log.info(
-                    f"WideTableFieldManager: none of {requested} matched existing fields on "
+                    f"BridgeAdminManager: none of {requested} matched existing fields on "
                     f"'{wide_table_name}' — nothing to delete."
                 )
                 return WideTableFieldDeletionResult(
@@ -7998,7 +7715,7 @@ class WideTableFieldManager:
                 )
 
             self._log.info(
-                f"WideTableFieldManager: deleting {len(to_delete)} field(s) from "
+                f"BridgeAdminManager: deleting {len(to_delete)} field(s) from "
                 f"'{wide_table_name}' (protocol='{protocol_name}'): {to_delete}"
             )
 
@@ -8014,7 +7731,7 @@ class WideTableFieldManager:
             # affect unrelated protocols. Always resumed in the finally
             # block below, including on failure.
             with self.SessionFactory() as session:
-                paused_job_ids = self._pause_compression_job(session, wide_table_name)
+                paused_job_ids = hypertable_mgr.pause_compression_job_for_table(session, wide_table_name)
                 session.commit()
 
             # 1. Tear down this protocol's rollups first. They SELECT every
@@ -8040,7 +7757,7 @@ class WideTableFieldManager:
                     with session.begin():
                         self._bridge.schema_advisory_lock(session)
 
-                        rollup_mgr.decompress_table_chunks_best_effort(session, wide_table_name)
+                        hypertable_mgr.decompress_table_chunks_best_effort(session, wide_table_name)
 
                         # table_name/col come from _safe_table_name() /
                         # _clean_column_name() at creation time and are
@@ -8086,7 +7803,7 @@ class WideTableFieldManager:
 
             remaining_fields: list[str] = sorted(set(existing_columns.keys()) - set(to_delete))
 
-            self._log.info(f"WideTableFieldManager: deleted {to_delete} from '{wide_table_name}' and rebuilt rollups.")
+            self._log.info(f"BridgeAdminManager: deleted {to_delete} from '{wide_table_name}' and rebuilt rollups.")
 
             return WideTableFieldDeletionResult(
                 protocol_name=protocol_name,
@@ -8098,7 +7815,7 @@ class WideTableFieldManager:
             )
 
         except Exception as e:
-            self._log.error(f"WideTableFieldManager.delete_fields failed for '{protocol_name}': {e}")
+            self._log.error(f"BridgeAdminManager.delete_fields failed for '{protocol_name}': {e}")
             raise
 
         finally:
@@ -8111,7 +7828,7 @@ class WideTableFieldManager:
             if paused_job_ids:
                 try:
                     with self.SessionFactory() as session:
-                        self._resume_compression_job(session, paused_job_ids)
+                        hypertable_mgr.resume_compression_job_for_table(session, paused_job_ids)
                         session.commit()
                 except Exception as e:
                     # Never let a resume failure mask the original error (if
@@ -8125,46 +7842,548 @@ class WideTableFieldManager:
                         f"for '{wide_table_name}': {e}"
                     )
 
-    def _pause_compression_job(self, session: Session, table_name: str) -> list[int]:
+    # -------------------------
+    # Bridge-level diagnostic panels -- moved here from the timescaledb
+    # bridge class itself (get_health_snapshot/get_storage_overview/
+    # get_index_overview), which is now purely transport/write-path
+    # plumbing plus a couple of read-only bridge-status properties;
+    # every panel-facing read lives here instead, alongside the
+    # compression/jobs composers just below. Each queries bridge-level
+    # state (self._bridge) and plain source-table metadata directly --
+    # unlike get_compression_retention_summary/get_background_jobs
+    # further down, none of these three need to know HyperTableManager's
+    # or RollupManager's internal shapes.
+    # -------------------------
+
+    def get_health_snapshot(self) -> dict[str, Any]:
         """
-        Temporarily disables (scheduled => false) any compression policy
-        job(s) TimescaleDB has configured specifically for table_name.
-        Returns the job_id(s) paused, so the caller can re-enable them
-        afterward via _resume_compression_job.
+        Read-only snapshot of the bridge's live connection and background-
+        worker state, for the "Bridge Health" panel. Pulls together state
+        that's otherwise scattered across the bridge class, its backlog
+        manager, and RollupManager. The only DB round trip is a single
+        cheap COUNT against protocol_registry (skipped entirely if not
+        currently connected).
         """
-        try:
-            # Pass wildcards as parameter values to avoid SQLAlchemy bind errors
-            rows: Sequence[Row[Any]] = session.execute(
-                text("""
-                    SELECT job_id FROM timescaledb_information.jobs
-                    WHERE hypertable_name = :table_name
-                      AND proc_name ILIKE :search_term
-                      AND scheduled = true
-                """),
-                {"table_name": table_name, "search_term": "%compress%"}
-            ).fetchall()
+        reconnecting: bool = bool(getattr(self._bridge, "_reconnect_thread_running", False))
+        migration_in_progress: bool | None = (
+            self._bridge.rollup_mgr.migration_in_progress.is_set() if self._bridge.rollup_mgr is not None else None
+        )
+        backlog_count: int = (
+            len(self._bridge.backlog.backlog_points) if getattr(self._bridge, "backlog", None) is not None else 0
+        )
 
-            job_ids: list[int] = [r[0] for r in rows]
+        protocols_rollup_complete: int = 0
+        protocols_rollup_total: int = 0
+        if self._bridge.tsdb_connected:
+            try:
+                with self.SessionFactory() as session:
+                    row: Row[Any] = session.execute(
+                        text("""
+                            SELECT
+                                COUNT(*) FILTER (WHERE rollup_setup_complete = true) AS complete,
+                                COUNT(*) AS total
+                            FROM protocol_registry
+                            WHERE rollup_enabled = true
+                        """)
+                    ).one()
+                protocols_rollup_complete = row.complete or 0
+                protocols_rollup_total = row.total or 0
+            except SQLAlchemyError as e:
+                self._log.error(f"get_health_snapshot: protocol_registry tally failed: {e}")
 
-            for job_id in job_ids:
-                session.execute(
-                    text("SELECT alter_job(:job_id, scheduled := false)"),
-                    {"job_id": job_id}
-                )
+        return {
+            "tsdb_connected": self._bridge.tsdb_connected,
+            "reconnecting": reconnecting,
+            "migration_in_progress": migration_in_progress,
+            "backlog_count": backlog_count,
+            "max_backlog_size": self._bridge.max_backlog_size,
+            "max_backlog_age": self._bridge.max_backlog_age,
+            "enable_auto_refresh": self._bridge.rollup_mgr.enable_auto_refresh if self._bridge.rollup_mgr else None,
+            "auto_refresh_interval": self._bridge.rollup_mgr.auto_refresh_interval if self._bridge.rollup_mgr else None,
+            "protocols_rollup_complete": protocols_rollup_complete,
+            "protocols_rollup_total": protocols_rollup_total,
+        }
 
-            if job_ids:
-                self._log.info(f"_pause_compression_job: paused job(s) {job_ids} for '{table_name}'")
+    def get_storage_overview(self) -> list[dict[str, Any]]:
+        """
+        Read-only per-source-table storage snapshot for the "Storage
+        Overview" panel: the shared narrow table plus every wide table
+        this bridge has created. Row counts use TimescaleDB's own
+        approximate_row_count(), which sums each chunk's analyzed
+        reltuples rather than an exact COUNT(*) (too slow on a large
+        hypertable purely to populate an info panel). This is NOT the
+        same as querying pg_stat_user_tables directly on the hypertable
+        name -- a hypertable's own catalog row holds no tuples itself
+        (the data lives in its per-chunk child tables), so n_live_tup on
+        the parent is always ~0 regardless of how much data exists.
 
-        except Exception as e:
-            self._log.warning(f"_pause_compression_job: could not pause compression job for '{table_name}': {e}")
+        Each table is queried independently and failures are recorded
+        per-row rather than aborting the whole snapshot, so one table
+        having a transient issue doesn't blank out the rest.
+        """
+        if not self._bridge.tsdb_connected:
             return []
-        else:
-            return job_ids
 
+        tables: list[tuple[str, str]] = [("shared_narrow", "device_metrics_narrow")]
+        try:
+            with self.SessionFactory() as session:
+                wide_rows: Sequence[Row[Any]] = session.execute(
+                    text("""
+                        SELECT protocol_name, wide_table_name
+                        FROM protocol_registry
+                        WHERE wide_table_name IS NOT NULL
+                        ORDER BY protocol_name
+                    """)
+                ).fetchall()
+        except SQLAlchemyError as e:
+            self._log.error(f"get_storage_overview: protocol_registry query failed: {e}")
+            wide_rows = []
 
-    def _resume_compression_job(self, session: Session, job_ids: list[int]) -> None:
-        """Re-enables (scheduled => true) job_ids previously paused by _pause_compression_job."""
-        for job_id in job_ids:
-            session.execute(text("SELECT alter_job(:job_id, scheduled => true)"), {"job_id": job_id})
-        if job_ids:
-            self._log.info(f"_resume_compression_job: resumed job(s) {job_ids}")
+        tables.extend((protocol_name, wide_table_name) for protocol_name, wide_table_name in wide_rows)
+
+        results: list[dict[str, Any]] = []
+        for protocol_name, table_name in tables:
+            try:
+                with self.SessionFactory() as session:
+                    row: Row[Any] = session.execute(
+                        text(f"""
+                            SELECT
+                                approximate_row_count('{table_name}') AS approx_rows,
+                                hypertable_size('{table_name}'::regclass) AS size_bytes,
+                                (SELECT count(*) FROM timescaledb_information.chunks
+                                    WHERE hypertable_name = '{table_name}') AS chunk_count,
+                                (SELECT min(m_time) FROM {table_name}) AS oldest,
+                                (SELECT max(m_time) FROM {table_name}) AS newest
+                        """)  # noqa: S608
+                    ).one()
+                results.append({
+                    "protocol_name": protocol_name,
+                    "table_name": table_name,
+                    "approx_rows": row.approx_rows or 0,
+                    "size_bytes": row.size_bytes or 0,
+                    "chunk_count": row.chunk_count or 0,
+                    "oldest": row.oldest,
+                    "newest": row.newest,
+                    "error": None,
+                })
+            except SQLAlchemyError as e:
+                self._log.error(f"get_storage_overview: query failed for '{table_name}': {e}")
+                results.append({
+                    "protocol_name": protocol_name, "table_name": table_name,
+                    "approx_rows": None, "size_bytes": None, "chunk_count": None,
+                    "oldest": None, "newest": None, "error": str(e),
+                })
+
+        return results
+
+    # Plain (non-hypertable) validation/lookup tables to include in the
+    # Indexes panel alongside the hypertables below -- these back the
+    # protocol/metric/device registries every write path validates
+    # against, so their indexes matter for the same "is this table
+    # healthy" question the panel is answering, even though they're not
+    # time-series data. Queried the same way regardless of which bridge
+    # instance is asking, so this is safe as a module-level constant.
+    _LOOKUP_TABLE_NAMES: tuple[str, ...] = ("protocol_registry", "metric_catalog", "device_info")
+
+    # SQL shared by both branches of get_index_overview() for pulling an
+    # index's ordered key column list out of pg_index.indkey (a raw int2
+    # vector of attnums, one entry per key column in index order --
+    # WITH ORDINALITY over unnest() is what keeps that order, since a
+    # plain join would give Postgres no reason to preserve it). Returns
+    # NULL for an expression index (attnum 0 has no pg_attribute row),
+    # which the panel falls back to displaying the raw index definition
+    # for instead.
+    _INDEX_KEY_COLUMNS_SQL: str = """
+        (
+            SELECT array_agg(a.attname ORDER BY k.ord)
+            FROM unnest(idx.indkey) WITH ORDINALITY AS k(attnum, ord)
+            JOIN pg_attribute a ON a.attrelid = idx.indrelid AND a.attnum = k.attnum
+        ) AS key_columns
+    """
+
+    def get_index_overview(self) -> list[dict[str, Any]]:
+        """
+        Read-only per-index snapshot for the "Indexes" panel: every index
+        on the shared narrow table, every wide table (the same source-
+        table scope as get_storage_overview -- not the rollup views
+        themselves), and the plain validation/lookup tables in
+        _LOOKUP_TABLE_NAMES (protocol_registry, metric_catalog,
+        device_info).
+
+        Hypertables (narrow/wide) and plain tables need different queries
+        here, not one -- an index defined on a hypertable is real DDL on
+        the parent relation, but the parent itself never holds rows (data
+        lives in per-chunk child tables, same point get_storage_overview's
+        docstring makes about hypertable_size() vs n_live_tup), so a
+        naive pg_relation_size()/pg_stat_user_indexes lookup keyed off the
+        parent index only ever sees an almost-empty catalog entry --
+        every hypertable index reporting the same ~8kB minimum-page size
+        regardless of table size, and idx_scan permanently stuck at 0
+        since Postgres always executes the actual scan against a chunk's
+        own copy of the index, never the parent's. For the hypertable
+        branch below:
+          - size_bytes uses hypertable_index_size(), TimescaleDB's own
+            public sizing function, which sums the index across every
+            chunk instead of reading the parent's near-empty entry.
+          - idx_scan/idx_tup_read/idx_tup_fetch are summed from pg_stat_
+            user_indexes across every chunk's own copy of the index (chunk
+            list from timescaledb_information.chunks, a public, version-
+            stable view -- NOT from TimescaleDB's internal
+            _timescaledb_catalog schema, which an earlier version of this
+            method used to map a chunk-local index back to its parent by
+            name; that schema is TimescaleDB's own private implementation
+            detail, not a supported API, and turned out not to have the
+            expected shape in practice, exactly the risk flagged for a
+            similar shortcut in list_compression_groups' docstring).
+            Lacking that name-based mapping, chunk-level index rows are
+            matched back to the parent index by key-column signature
+            instead (same ordered column list computed for key_columns
+            below) -- reliable here since a chunk's indexes are always
+            struct-for-struct copies of the parent's, propagated
+            automatically when an index is created on the hypertable.
+          - This scan-stats query is best-effort and kept separate from
+            the metadata query below: if it fails for any reason (e.g. a
+            restricted role, or a chunk mid-creation), that table's rows
+            still get real names/sizes/key columns, just with idx_scan
+            etc. left as None ("not available") rather than blanking the
+            whole table out the way one shared query would.
+        Plain lookup tables need neither workaround -- pg_relation_size()
+        and pg_stat_user_indexes already read the real (only) copy of
+        the table/index directly, in one query.
+
+        Each table's metadata query is independent and failures are
+        recorded via a single synthetic error row for that table rather
+        than aborting the whole snapshot, so one table having a
+        transient issue doesn't blank out the rest — same pattern as
+        get_storage_overview.
+        """
+        if not self._bridge.tsdb_connected:
+            return []
+
+        tables: list[tuple[str, bool]] = [("device_metrics_narrow", True)]
+        try:
+            with self.SessionFactory() as session:
+                wide_table_names: Sequence[str] = session.execute(
+                    text("""
+                        SELECT wide_table_name
+                        FROM protocol_registry
+                        WHERE wide_table_name IS NOT NULL
+                        ORDER BY protocol_name
+                    """)
+                ).scalars().all()
+        except SQLAlchemyError as e:
+            self._log.error(f"get_index_overview: protocol_registry query failed: {e}")
+            wide_table_names = []
+
+        tables.extend((name, True) for name in wide_table_names)
+        tables.extend((name, False) for name in self._LOOKUP_TABLE_NAMES)
+
+        hypertable_metadata_sql: TextClause = text(f"""
+            SELECT
+                pi.indexname AS index_name,
+                pi.indexdef,
+                hypertable_index_size(quote_ident(pi.indexname)::regclass) AS size_bytes,
+                idx.indisunique AS is_unique,
+                idx.indisprimary AS is_primary,
+                {self._INDEX_KEY_COLUMNS_SQL}
+            FROM pg_indexes pi
+            JOIN pg_index idx ON idx.indexrelid = quote_ident(pi.indexname)::regclass
+            WHERE pi.tablename = :table_name
+            ORDER BY pi.indexname
+        """)  # noqa: S608
+
+        # Best-effort only -- see docstring. Sums pg_stat_user_indexes
+        # across every chunk of the hypertable (chunk list from the
+        # public timescaledb_information.chunks view) and groups by each
+        # chunk-local index's own key-column signature, so the result can
+        # be matched back to the parent index of the same signature in
+        # Python without needing any TimescaleDB-internal name mapping.
+        hypertable_scan_stats_sql: TextClause = text(f"""
+            WITH chunk_list AS (
+                SELECT chunk_schema, chunk_name
+                FROM timescaledb_information.chunks
+                WHERE hypertable_name = :table_name
+            ),
+            chunk_idx AS (
+                SELECT
+                    {self._INDEX_KEY_COLUMNS_SQL},
+                    psui.idx_scan,
+                    psui.idx_tup_read,
+                    psui.idx_tup_fetch
+                FROM chunk_list cl
+                JOIN pg_indexes pi ON pi.schemaname = cl.chunk_schema AND pi.tablename = cl.chunk_name
+                JOIN pg_index idx
+                    ON idx.indexrelid = (quote_ident(pi.schemaname) || '.' || quote_ident(pi.indexname))::regclass
+                LEFT JOIN pg_stat_user_indexes psui
+                    ON psui.schemaname = pi.schemaname AND psui.indexrelname = pi.indexname
+            )
+            SELECT
+                key_columns,
+                coalesce(sum(idx_scan), 0) AS idx_scan,
+                coalesce(sum(idx_tup_read), 0) AS idx_tup_read,
+                coalesce(sum(idx_tup_fetch), 0) AS idx_tup_fetch
+            FROM chunk_idx
+            GROUP BY key_columns
+        """)  # noqa: S608
+
+        plain_table_sql: TextClause = text(f"""
+            SELECT
+                pi.indexname AS index_name,
+                pi.indexdef,
+                pg_relation_size(quote_ident(pi.indexname)::regclass) AS size_bytes,
+                idx.indisunique AS is_unique,
+                idx.indisprimary AS is_primary,
+                {self._INDEX_KEY_COLUMNS_SQL},
+                coalesce(psui.idx_scan, 0) AS idx_scan,
+                coalesce(psui.idx_tup_read, 0) AS idx_tup_read,
+                coalesce(psui.idx_tup_fetch, 0) AS idx_tup_fetch
+            FROM pg_indexes pi
+            JOIN pg_index idx ON idx.indexrelid = quote_ident(pi.indexname)::regclass
+            LEFT JOIN pg_stat_user_indexes psui
+                ON psui.indexrelname = pi.indexname AND psui.schemaname = pi.schemaname
+            WHERE pi.tablename = :table_name
+            ORDER BY pi.indexname
+        """)  # noqa: S608
+
+        results: list[dict[str, Any]] = []
+        for table_name, is_hypertable in tables:
+            if not is_hypertable:
+                try:
+                    with self.SessionFactory() as session:
+                        rows: Sequence[Row[Any]] = session.execute(
+                            plain_table_sql, {"table_name": table_name}
+                        ).fetchall()
+                    for r in rows:
+                        results.append({
+                            "table_name": table_name,
+                            "is_hypertable": False,
+                            "index_name": r.index_name,
+                            "size_bytes": r.size_bytes or 0,
+                            "idx_scan": r.idx_scan or 0,
+                            "idx_tup_read": r.idx_tup_read or 0,
+                            "idx_tup_fetch": r.idx_tup_fetch or 0,
+                            "is_unique": bool(r.is_unique),
+                            "is_primary": bool(r.is_primary),
+                            "key_columns": list(r.key_columns) if r.key_columns else [],
+                            "indexdef": r.indexdef,
+                            "error": None,
+                        })
+                except SQLAlchemyError as e:
+                    self._log.error(f"get_index_overview: query failed for '{table_name}': {e}")
+                    results.append({
+                        "table_name": table_name, "is_hypertable": False,
+                        "index_name": None, "size_bytes": None, "idx_scan": None,
+                        "idx_tup_read": None, "idx_tup_fetch": None,
+                        "is_unique": None, "is_primary": None, "key_columns": [],
+                        "indexdef": None, "error": str(e),
+                    })
+                continue
+
+            try:
+                with self.SessionFactory() as session:
+                    meta_rows: Sequence[Row[Any]] = session.execute(
+                        hypertable_metadata_sql, {"table_name": table_name}
+                    ).fetchall()
+            except SQLAlchemyError as e:
+                self._log.error(f"get_index_overview: metadata query failed for '{table_name}': {e}")
+                results.append({
+                    "table_name": table_name, "is_hypertable": True,
+                    "index_name": None, "size_bytes": None, "idx_scan": None,
+                    "idx_tup_read": None, "idx_tup_fetch": None,
+                    "is_unique": None, "is_primary": None, "key_columns": [],
+                    "indexdef": None, "error": str(e),
+                })
+                continue
+
+            scan_stats_by_key: dict[tuple[str, ...], Row[Any]] = {}
+            try:
+                with self.SessionFactory() as session:
+                    scan_rows: Sequence[Row[Any]] = session.execute(
+                        hypertable_scan_stats_sql, {"table_name": table_name}
+                    ).fetchall()
+                scan_stats_by_key = {
+                    tuple(r.key_columns) if r.key_columns else (): r for r in scan_rows
+                }
+            except SQLAlchemyError as e:
+                # Degrade gracefully -- names/sizes/key columns from the
+                # metadata query above are still good, just without scan
+                # counts for this table. Logged at warning, not error:
+                # this is an expected fallback path, not a broken bridge.
+                self._log.warning(f"get_index_overview: scan-stats query failed for '{table_name}': {e}")
+
+            for r in meta_rows:
+                key_columns: list[str] = list(r.key_columns) if r.key_columns else []
+                scan_row: Row[Any] | None = scan_stats_by_key.get(tuple(key_columns))
+                results.append({
+                    "table_name": table_name,
+                    "is_hypertable": True,
+                    "index_name": r.index_name,
+                    "size_bytes": r.size_bytes or 0,
+                    "idx_scan": scan_row.idx_scan if scan_row is not None else None,
+                    "idx_tup_read": scan_row.idx_tup_read if scan_row is not None else None,
+                    "idx_tup_fetch": scan_row.idx_tup_fetch if scan_row is not None else None,
+                    "is_unique": bool(r.is_unique),
+                    "is_primary": bool(r.is_primary),
+                    "key_columns": key_columns,
+                    "indexdef": r.indexdef,
+                    "error": None,
+                })
+
+        return results
+
+    # -------------------------
+    # Diagnostic composers -- backs the Bridge Health, Storage Overview,
+    # Indexes, Compression & Retention Status, and Background Job Status
+    # panels. get_health_snapshot/get_storage_overview/get_index_overview
+    # (just above) query bridge-level connection/backlog state and plain
+    # source-table metadata directly; get_compression_retention_summary/
+    # get_background_jobs below additionally blend HyperTableManager's
+    # raw-table config/state with RollupManager's rollup-view config/
+    # state. Moved here (from the bridge class itself, for the first
+    # three) so every admin/diagnostic panel's data has exactly one home,
+    # rather than being split across the bridge class and this one by
+    # historical accident of where each was originally written.
+    # -------------------------
+
+    def get_compression_retention_summary(self) -> dict[str, Any]:
+        """
+        Read-only summary of this bridge's compression and retention
+        configuration, for the "Compression & Retention Status" panel.
+        Every value here is a plain attribute read (set from rollup_policy
+        / hypertable_defaults in HyperTableManager/RollupManager __init__)
+        -- no DB round trip, since this is config, not live state. Returns
+        {} if the bridge isn't connected yet (hypertable_mgr/rollup_mgr
+        don't exist until then) -- callers treat that the same as "still
+        connecting", matching the other panels' `not summary` template check.
+
+        Compression is scheduled per rollup granularity (see
+        RollupManager.hourly_compress_after_interval and siblings) — each
+        interval is how long TimescaleDB waits after a chunk's time range
+        closes before compressing it. Retention (drop_after) applies
+        uniformly to raw data across the narrow and wide hypertables.
+
+        `raw_narrow_compress_after_interval` / `raw_wide_compress_after_
+        interval` / `raw_narrow_chunk_time_interval` / `raw_wide_chunk_
+        time_interval` are listed separately, not folded into `schedule`:
+        they govern the RAW hypertables' own compression policy and chunk
+        sizing (HyperTableManager), while `schedule`'s four rows each
+        govern a distinct ROLLUP VIEW (RollupManager, four separate
+        objects). Conflating raw with rollup-view settings was the source
+        of a real bug — see RollupManager.setup_rollup's docstring for the
+        history. Narrow and wide additionally get their own values for
+        BOTH settings, not shared ones — a wide table's row density (one
+        row per device per write cycle) is far lower than narrow's (up to
+        ~160 rows per write cycle, aggregated across every protocol's wide
+        table into the one shared narrow table), so neither the same
+        chunk_time_interval nor the same compress_after (which
+        TimescaleDB's own guidance ties to a table's own chunk_time_
+        interval, at roughly 2-3x it) produces safe, comparable results
+        for both. See HyperTableManager.hypertable_defaults' raw_narrow_
+        chunk_time_interval and raw_narrow_compress_after_interval
+        comments for the full reasoning.
+        """
+        htm: "HyperTableManager | None" = self._bridge.hypertable_mgr
+        rm: "RollupManager | None" = self._bridge.rollup_mgr
+        if htm is None or rm is None:
+            return {}
+
+        return {
+            "enable_compression": htm.enable_compression,
+            "enable_dynamic_chunk_sizing": htm.enable_dynamic_chunk_sizing,
+            "retention_interval": htm.drop_after,
+            "segment_by_narrow": htm.compress_segmentby_narrow,
+            "segment_by_wide": htm.compress_segmentby_wide,
+            "compress_orderby": htm.compress_orderby,
+            "raw_narrow_compress_after_interval": htm.raw_narrow_compress_after_interval,
+            "raw_wide_compress_after_interval": htm.raw_wide_compress_after_interval,
+            "raw_narrow_chunk_time_interval": htm.raw_narrow_chunk_time_interval,
+            "raw_wide_chunk_time_interval": htm.raw_wide_chunk_time_interval,
+            "schedule": [
+                {"granularity": "hourly", "compress_after": rm.hourly_compress_after_interval},
+                {"granularity": "daily", "compress_after": rm.daily_compress_after_interval},
+                {"granularity": "weekly", "compress_after": rm.weekly_compress_after_interval},
+                {"granularity": "monthly", "compress_after": rm.monthly_compress_after_interval},
+            ],
+            # Freshly computed on every panel load, not stored config --
+            # see HyperTableManager.get_dynamic_raw_table_overview.
+            # Already in the flat, per-table shape the
+            # bridge_timescale_compression_panel.html template expects
+            # for summary.dynamic_raw_tables.
+            #
+            # dynamic_view_groups is deliberately NOT built here:
+            # RollupManager.get_dynamic_view_overview() returns a flat
+            # list (one row per (table, granularity) pair), and the
+            # caller (timescale_service.get_compression_retention_
+            # summary) groups it into the {protocol_name, views: [...]}
+            # shape the template needs via itertools.groupby, preserving
+            # get_dynamic_view_overview()'s narrow-first ordering. That
+            # grouping is a display-shape concern for the service layer,
+            # not something this composer should duplicate.
+            "dynamic_raw_tables": htm.get_dynamic_raw_table_overview(),
+        }
+
+    def get_background_jobs(self) -> list[dict[str, Any]]:
+        """
+        Read-only snapshot of TimescaleDB's own background scheduler jobs
+        (compression, retention, and continuous-aggregate refresh
+        policies) for every hypertable/view this bridge manages -- the
+        shared narrow table, every wide table, and every rollup view
+        currently registered on RollupManager. Lets an admin catch a job
+        that's silently failing or falling behind before it becomes a
+        bigger problem; see RollupManager._purge_ghost_jobs_helper for the
+        related cleanup path when a job's target no longer exists at all.
+        Returns [] if the bridge isn't connected yet.
+        """
+        rm: "RollupManager | None" = self._bridge.rollup_mgr
+        if rm is None:
+            return []
+
+        try:
+            with self.SessionFactory() as session:
+                wide_table_names: Sequence[str] = session.execute(
+                    text("SELECT wide_table_name FROM protocol_registry WHERE wide_table_name IS NOT NULL")
+                ).scalars().all()
+        except SQLAlchemyError as e:
+            self._log.error(f"get_background_jobs: protocol_registry query failed: {e}")
+            wide_table_names = []
+
+        target_names: list[str] = (
+            ["device_metrics_narrow"] + list(wide_table_names) + list(rm.known_rollup_views.keys())
+        )
+        if not target_names:
+            return []
+
+        try:
+            with self.SessionFactory() as session:
+                rows: Sequence[Row[Any]] = session.execute(
+                    text("""
+                        SELECT
+                            j.job_id, j.proc_name, j.hypertable_name, j.schedule_interval,
+                            js.last_run_status, js.last_successful_finish, js.next_start,
+                            js.total_runs, js.total_failures
+                        FROM timescaledb_information.jobs j
+                        LEFT JOIN timescaledb_information.job_stats js ON j.job_id = js.job_id
+                        WHERE j.hypertable_name = ANY(:names)
+                        ORDER BY j.hypertable_name, j.proc_name
+                    """),
+                    {"names": target_names},
+                ).fetchall()
+        except SQLAlchemyError as e:
+            self._log.error(f"get_background_jobs: jobs query failed: {e}")
+            return []
+
+        return [
+            {
+                "job_id": r.job_id,
+                "proc_name": r.proc_name,
+                "hypertable_name": r.hypertable_name,
+                "schedule_interval": str(r.schedule_interval) if r.schedule_interval is not None else None,
+                "last_run_status": r.last_run_status,
+                "last_successful_finish": r.last_successful_finish,
+                "next_start": r.next_start,
+                "total_runs": r.total_runs,
+                "total_failures": r.total_failures,
+            }
+            for r in rows
+        ]
+
