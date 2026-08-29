@@ -62,7 +62,7 @@
 <div class="col-span-12 flex flex-col gap-2" style="height: calc(100vh - 56px); overflow: hidden;">
 
   <!-- ══ HEADER + REBUILD BUTTON ══ -->
-  <div class="flex-shrink-0 flex items-start justify-between gap-4 px-1 py-2">
+  <div class="shrink-0 flex items-start justify-between gap-4 px-1 py-2">
     <div>
       <h1 class="surface-title text-xs font-semibold uppercase tracking-widest">Rollup Views</h1>
       <p class="surface-muted text-xs mt-1 max-w-2xl">
@@ -85,12 +85,10 @@
       </div>
     </div>
 
-    <div class="flex-shrink-0 flex items-center gap-2">
+    <div class="shrink-0 flex items-center gap-2">
       <button type="button"
               id="refresh-rollups-btn"
-              class="px-4 py-2 rounded text-xs font-semibold bg-transparent text-accent
-                     border border-accent/50 hover:bg-accent/10
-                     disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              class="w-max btn-tertiary text-xs flex items-center gap-2"
               aria-label="Pull the latest data into the checked rollup groups' existing views"
               title="Pulls the latest raw data into each checked group's existing views without dropping or recreating them — much faster than a rebuild, but won't fix a missing view or a bucket-interval mismatch"
               onclick="triggerRefreshRollups(false)">
@@ -98,9 +96,7 @@
       </button>
       <button type="button"
               id="rebuild-rollups-btn"
-              class="px-4 py-2 rounded text-xs font-semibold bg-accent text-white
-                     hover:bg-accent/80 disabled:opacity-50 disabled:cursor-not-allowed
-                     transition-colors"
+              class="w-max btn-tertiary text-xs flex items-center gap-2"
               aria-label="Rebuild the checked rollup groups if they need it"
               title="Purges and recreates a checked group's views only if their bucket intervals no longer match config or a view is missing — a group that's already correct is just re-verified, not touched"
               onclick="triggerRebuildRollups(false)">
@@ -108,9 +104,7 @@
       </button>
       <button type="button"
               id="force-rebuild-btn"
-              class="px-4 py-2 rounded text-xs font-semibold bg-transparent text-danger
-                     border border-danger/50 hover:bg-danger/10
-                     disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              class="w-max btn-tertiary text-xs flex items-center gap-2"
               aria-label="Force-rebuild the checked rollup groups regardless of status"
               title="Purges and fully re-materializes every checked group, even if it's already OK"
               onclick="triggerRebuildRollups(true)">
@@ -122,7 +116,7 @@
   <!-- ══ PROGRESS THERMOMETER — filled in by show/update/hideRollupProgress()
        below. Shared by all three actions since only one ever runs at a
        time (see setRollupActionButtonsDisabled). ══ -->
-  <div id="rollup-progress-track" class="flex-shrink-0 px-1 hidden">
+  <div id="rollup-progress-track" class="shrink-0 px-1 hidden">
     <div class="h-1.5 w-full rounded-full bg-mpg-800/10 overflow-hidden">
       <div id="rollup-progress-fill"
            class="h-full bg-accent transition-all duration-150 ease-out"
@@ -131,7 +125,7 @@
   </div>
 
   <!-- ══ STATUS BANNER — filled in by renderRebuildStatus() / renderRefreshStatus() below ══ -->
-  <div id="rebuild-status" class="flex-shrink-0 px-1" role="status" aria-live="polite"></div>
+  <div id="rebuild-status" class="shrink-0 px-1" role="status" aria-live="polite"></div>
 
   <!-- ══ ROLLUP VIEW GROUPS (one checkbox per source table) ══ -->
   <section class="flex-1 overflow-y-auto px-1" aria-label="Rollup view inventory">
