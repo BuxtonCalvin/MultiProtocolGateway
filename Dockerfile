@@ -15,7 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-FROM python:3.13-alpine AS base
+FROM python:3.14-alpine AS base
 
 FROM base AS builder
 RUN mkdir /install
