@@ -1,41 +1,11 @@
 name-template: "v$RESOLVED_VERSION"
 tag-template: "v$RESOLVED_VERSION"
 
-categories:
-  - title: "🚨 Breaking Changes"
-    labels:
-      - "major"
-      - "breaking"
-  - title: "🚀 Features"
-    labels:
-      - "minor"
-      - "feature"
-      - "enhancement"
-  - title: "🐛 Bug Fixes"
-    labels:
-      - "patch"
-      - "fix"
-      - "bugfix"
-      - "bug"
-  - title: "🧰 Maintenance"
-    labels:
-      - "chore"
-      - "dependencies"
-      - "ci"
-      - "github-actions"
-      - "docker"
-      - "python"
-  - title: "📚 Documentation"
-    labels:
-      - "documentation"
-      - "docs"
-
-# Autolabeler inspects each PR's title (and branch name, as a fallback)
+# Autolabeler inspects each PR's title so you don't have to manually
+# label every PR. Write PR titles like:
 #   feat: add support for X        -> labeled "minor"
 #   fix: correct Y calculation     -> labeled "patch"
 #   breaking: change config format -> labeled "major"
-# Falls back to Dependabot's own commit-message prefixes too, so those
-# PRs land in "Maintenance" automatically.
 autolabeler:
   - label: "major"
     title:
@@ -60,33 +30,81 @@ autolabeler:
       - "/^refactor(\\(.*\\))?:/i"
       - "/^test(\\(.*\\))?:/i"
 
-# Decides how the next version number is computed from whichever
-# labels are present on PRs merged since the last release.
-# Highest severity wins: any "major" label -> bump major version, else
-# any "minor"/"feature" -> bump minor, else default to a patch bump.
-version-resolver:
-  major:
-    labels:
-      - "major"
-      - "breaking"
-  minor:
-    labels:
-      - "minor"
-      - "feature"
-      - "enhancement"
-  patch:
-    labels:
-      - "patch"
-      - "fix"
-      - "bugfix"
-      - "bug"
-      - "chore"
-      - "dependencies"
-      - "documentation"
-  default: patch
+# Unified categorization + version-bump rules (current schema).
+# Each category's "when" filters which PRs land in it by label;
+# "type: version-resolver" entries (no title) don't create a section
+# in the changelog, they only decide the semver bump.
+categories:
+  - title: "🚨 Breaking Changes"
+    when:
+      labels:
+        - "major"
+        - "breaking"
 
-exclude-labels:
-  - "skip-changelog"
+  - title: "🚀 Features"
+    when:
+      labels:
+        - "minor"
+        - "feature"
+        - "enhancement"
+
+  - title: "🐛 Bug Fixes"
+    when:
+      labels:
+        - "patch"
+        - "fix"
+        - "bugfix"
+        - "bug"
+
+  - title: "🧰 Maintenance"
+    when:
+      labels:
+        - "chore"
+        - "dependencies"
+        - "ci"
+        - "github-actions"
+        - "docker"
+        - "python"
+
+  - title: "📚 Documentation"
+    when:
+      labels:
+        - "documentation"
+        - "docs"
+
+  - type: "pre-exclude"
+    when:
+      label: "skip-changelog"
+
+  - type: "version-resolver"
+    semver-increment: "major"
+    when:
+      labels:
+        - "major"
+        - "breaking"
+
+  - type: "version-resolver"
+    semver-increment: "minor"
+    when:
+      labels:
+        - "minor"
+        - "feature"
+        - "enhancement"
+
+  - type: "version-resolver"
+    semver-increment: "patch"
+    when:
+      labels:
+        - "patch"
+        - "fix"
+        - "bugfix"
+        - "bug"
+        - "chore"
+        - "dependencies"
+        - "documentation"
+
+  - type: "version-resolver"
+    semver-increment: "patch"
 
 template: |
   ## Changes
@@ -94,3 +112,4 @@ template: |
   $CHANGES
 
   **Full Changelog**: https://github.com/$OWNER/$REPOSITORY/compare/$PREVIOUS_TAG...v$RESOLVED_VERSION
+ 
