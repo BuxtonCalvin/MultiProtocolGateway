@@ -19,50 +19,57 @@
 from __future__ import annotations
 
 import json
+from typing import Any
 
-from modbus_tk import hooks, modbus_tcp
-from modbus_tk.defines import HOLDING_REGISTERS, READ_INPUT_REGISTERS
+from modbus_tk import hooks, modbus_tcp  # type: ignore[import-untyped]
+from modbus_tk.defines import (  # type: ignore[import-untyped]
+    HOLDING_REGISTERS,  # type: ignore[import-untyped]
+    READ_INPUT_REGISTERS,  # type: ignore[import-untyped]
+)
 
 
-def on_write_request(request) -> None:
+def on_write_request(request: Any) -> None:
     print(f"Write request: {request}")
 
 
-server = modbus_tcp.TcpServer(address="0.0.0.0", port=5020)  # noqa: S104
-slave = server.add_slave(1)
+server = modbus_tcp.TcpServer(address="0.0.0.0", port=5020)  # type: ignore[import-untyped]  # noqa: S104
+slave = server.add_slave(1) # type: ignore[import-untyped]
 
 #load registries
-input_save_path = "input_registry.json"
-holding_save_path = "holding_registry.json"
+input_save_path: str = "input_registry.json"
+holding_save_path: str = "holding_registry.json"
 
 #load previous scan if enabled and exists
 with open(input_save_path, "r") as file:
-    input_registry = json.load(file)
+    raw_input_registry: dict[str, int] = json.load(file)
 
 with open(holding_save_path, "r") as file:
-    holding_registry = json.load(file)
+    raw_holding_registry: dict[str, int] = json.load(file)
 
 # Convert keys to integers
-input_registry = {int(key): value for key, value in input_registry.items()}
-holding_registry = {int(key): value for key, value in holding_registry.items()}
+input_registry: dict[int, int] = {int(key): value for key, value in raw_input_registry.items()}
+holding_registry: dict[int, int] = {int(key): value for key, value in raw_holding_registry.items()}
 
-slave.add_block('INPUT', READ_INPUT_REGISTERS, 0, max(input_registry.keys()) +1 )
-slave.add_block('HOLDING', HOLDING_REGISTERS,  0, max(holding_registry.keys()) +1)
+if not input_registry or not holding_registry:
+    raise ValueError("input_registry and holding_registry must each contain at least one entry")
+
+slave.add_block('INPUT', READ_INPUT_REGISTERS, 0, max(input_registry.keys()) + 1) # type: ignore[import-untyped]
+slave.add_block('HOLDING', HOLDING_REGISTERS, 0, max(holding_registry.keys()) + 1) # type: ignore[import-untyped]
 
 for address, value in input_registry.items():
-    slave.set_values('INPUT', address, [value])
+    slave.set_values('INPUT', address, [value]) # type: ignore[import-untyped]
 
 for address, value in holding_registry.items():
-    slave.set_values('HOLDING', address, [value])
+    slave.set_values('HOLDING', address, [value]) # type: ignore[import-untyped]
 
-server.start()
+server.start() # type: ignore[import-untyped]
 print("Modbus server is running on port 5020...")
 
-hooks.install_hook("modbus.Server.before_handle_request", on_write_request)
+hooks.install_hook("modbus.Server.before_handle_request", on_write_request) # type: ignore[import-untyped]
 
 try:
     while True:
         pass
 except KeyboardInterrupt:
     print("Stopping server...")
-    server.stop()
+    server.stop() # type: ignore[import-untyped]
