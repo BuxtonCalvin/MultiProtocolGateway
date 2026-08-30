@@ -104,6 +104,33 @@
   color: rgb(var(--color-accent));
 }
 
+/* ── Semantic color utility fix ──────────────────────────────────────── */
+/* The --color-* tokens above are stored as bare "R G B" channel triples, */
+/* not full CSS colors, because most of this file consumes them via       */
+/* rgb(var(--color-X)) or rgb(var(--color-X) / <alpha>) for opacity       */
+/* control (badges, tabs, cards, ...). Tailwind's OWN generated utilities */
+/* for these same token names — text-success, bg-success, text-danger,    */
+/* text-warning, text-accent, bg-accent, bg-danger, border-warning,       */
+/* border-accent — instead do e.g. `color: var(--color-success)` directly,*/
+/* which needs a complete CSS color, not a bare triple. Both consume the  */
+/* same custom property name, so only one format can be "correct" at the  */
+/* property level; the triple form wins (used far more widely, including  */
+/* for opacity variants that would otherwise need a second token), and     */
+/* the small set of Tailwind utilities that assume a full color are        */
+/* re-declared here instead. This is what silently turned status text      */
+/* like "Connected" black instead of green via .text-success — the        */
+/* underlying variable was never actually invalid for badges, just for    */
+/* Tailwind's own direct-var utilities.                                    */
+.text-success   { color: rgb(var(--color-success))            !important; }
+.bg-success     { background-color: rgb(var(--color-success)) !important; }
+.text-danger    { color: rgb(var(--color-danger))              !important; }
+.bg-danger      { background-color: rgb(var(--color-danger))   !important; }
+.text-warning   { color: rgb(var(--color-warning))             !important; }
+.border-warning { border-color: rgb(var(--color-warning))      !important; }
+.text-accent    { color: rgb(var(--color-accent))              !important; }
+.bg-accent      { background-color: rgb(var(--color-accent))   !important; }
+.border-accent  { border-color: rgb(var(--color-accent))       !important; }
+
 
 /* ══════════════════════════════════════════════════════════════════════
    1. ACCESSIBILITY & BASE ELEMENT DEFAULTS
