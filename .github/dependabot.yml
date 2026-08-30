@@ -18,6 +18,8 @@ updates:
         update-types:
           - "minor"
           - "patch"
+        patterns:
+          - "*"
 
   # --- GitHub Actions used in workflows ---
   - package-ecosystem: "github-actions"
@@ -37,6 +39,8 @@ updates:
         update-types:
           - "minor"
           - "patch"
+        patterns:
+          - "*"
 
   # --- Docker base image(s) used to build/publish the container ---
   - package-ecosystem: "docker"
