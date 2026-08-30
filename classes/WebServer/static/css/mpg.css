@@ -229,6 +229,28 @@ aside .card {
   border-color: rgb(var(--color-warning));
 }
 
+/* ── Bridge panes grid (bridge_panes.html) ── */
+/* Two-column split at the lg breakpoint: left pane 1.5in narrower than   */
+/* 50%, right pane 1.5in wider — left holds the compact config tree,      */
+/* right holds the wider live-data table. Previously written inline as a  */
+/* Tailwind arbitrary value:                                              */
+/*   lg:grid-cols-[calc(50%_-_1.5in)_calc(50%_+_1.5in)]                   */
+/* Moved here because the underscore-as-space syntax that arbitrary value */
+/* requires is easy to break: a formatter or find/replace that strips     */
+/* underscores turns `50%_-_1.5in` into `50%-1.5in`, which is invalid     */
+/* CSS (calc() requires whitespace around binary +/-), silently killing   */
+/* the whole declaration and collapsing the two-pane layout. As a plain   */
+/* named class, this can't be "canonicalized" or reformatted by the       */
+/* Tailwind toolchain since it isn't a Tailwind utility.                  */
+.bridge-panes-grid {
+  grid-template-columns: 1fr;
+}
+@media (min-width: 1024px) {
+  .bridge-panes-grid {
+    grid-template-columns: calc(50% - 1.5in) calc(50% + 1.5in);
+  }
+}
+
 
 /* ══════════════════════════════════════════════════════════════════════
    4. FORM COMPONENTS
