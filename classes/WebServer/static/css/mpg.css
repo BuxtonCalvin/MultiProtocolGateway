@@ -764,6 +764,23 @@ aside .theme-input {
 .htmx-request .htmx-indicator,
 .htmx-request.htmx-indicator { opacity: 1; }
 
+/* ── Flex-on-show toggle ── */
+/* For elements that start hidden via Tailwind's `hidden` class and are   */
+/* revealed later with JS (`classList.remove('hidden')`) into a flex      */
+/* layout — e.g. #analysis-elapsed-wrap in analyze_device.html, same      */
+/* pattern as .modal-overlay above. Pairing `hidden` with Tailwind's own  */
+/* `flex` utility triggers a tailwindcss(cssConflict) lint warning,       */
+/* because both are recognized `display` utilities present on the same    */
+/* element — even though it's intentional (`hidden` = initial state,      */
+/* `flex` = revealed layout, never both active at once at runtime).       */
+/* Use this class instead of `flex` in that specific pattern: it's not a  */
+/* Tailwind utility, so the linter has nothing to flag, and the name      */
+/* documents the intent. Usage:                                           */
+/*   <div class="hidden flex-on-show items-center gap-2" ...>             */
+.flex-on-show {
+  display: flex;
+}
+
 /* ── Dropdown animation ── */
 .dropdown-menu {
   animation: fadeIn 0.1s ease-out;
