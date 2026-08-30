@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import csv
 import json
+from typing import Sequence
 
 path = "protocols/eg4_v58.holding_registry_map.csv"
 save_path = "protocols/eg4_v58.holding_registry_map.csv"
@@ -35,8 +36,8 @@ with open(common_path, "r") as file:
 new_csv : list[dict[str,str]] = []
 with open(path, newline="") as csvfile:
     # Create a CSV reader object
-    reader = csv.DictReader(csvfile, delimiter=";") #compensate for openoffice
-    fieldnames = reader.fieldnames
+    reader: csv.DictReader[str] = csv.DictReader(csvfile, delimiter=";") #compensate for openoffice
+    fieldnames: Sequence[str] | None = reader.fieldnames
 
     # Iterate over each row in the CSV file
     for row in reader:
@@ -55,7 +56,9 @@ with open(path, newline="") as csvfile:
 
 # Write data to the output CSV
 with open(save_path, "w", newline="") as outfile:
-    writer = csv.DictWriter(outfile, fieldnames=fieldnames)
+    if fieldnames is None:
+        raise ValueError("CSV file has no header row.")
+    writer: csv.DictWriter[str] = csv.DictWriter(outfile, fieldnames=fieldnames)
     writer.writeheader()
     writer.writerows(new_csv)
 

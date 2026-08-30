@@ -19,36 +19,49 @@ from __future__ import annotations
 
 import atexit
 import os
+import re
 import signal
 import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import NoReturn
+from typing import Final, NoReturn
 
 import can
 
-VCAN_IFACE : str = 'vcan0'
-VCAN_BUSTYPE : str = 'socketcan'
-vcan_messages = []
+VCAN_IFACE: Final[str] = 'vcan0'
+VCAN_BUSTYPE: Final[str] = 'socketcan'
+vcan_messages: list[can.Message] = []
+
+# Linux network interface names are limited to IFNAMSIZ-1 (15) characters and
+# may not contain path separators, whitespace, or shell metacharacters.
+_IFACE_NAME_RE: Final[re.Pattern[str]] = re.compile(r'^[A-Za-z0-9_.-]{1,15}$')
 
 
-def load_candump_file(filepath):
+def _validate_interface_name(interface: str) -> str:
+    """Ensure `interface` is safe to pass to subprocess before it reaches a command line."""
+    if not _IFACE_NAME_RE.fullmatch(interface):
+        msg: str = f"Refusing to use unsafe interface name: {interface!r}"
+        raise ValueError(msg)
+    return interface
+
+
+def load_candump_file(filepath: str) -> list[can.Message]:
     os.chdir(Path(__file__).resolve().parent)
 
-    messages = []
+    messages: list[can.Message] = []
 
     with open(filepath, 'r') as f:
-        for line in f:
-            line: str = line.strip()
-            if not line or '#' not in line:
+        for raw_line in f:
+            stripped_line: str = raw_line.strip()
+            if not stripped_line or '#' not in stripped_line:
                 continue
 
             try:
-                can_data: str = line.split(' ')[-1]
+                can_data: str = stripped_line.split(' ')[-1]
 
-                can_id_str, data_str = can_data.split('#')
-                can_id = int(can_id_str, 16)
+                can_id_str, data_str = can_data.split('#', 1)
+                can_id: int = int(can_id_str, 16)
                 data: bytes = bytes.fromhex(data_str)
 
                 msg = can.Message(
@@ -58,13 +71,13 @@ def load_candump_file(filepath):
                 )
                 messages.append(msg)
             except Exception as e:
-                print(f"Failed to parse line '{line}': {e}")
+                print(f"Failed to parse line '{stripped_line}': {e}")
 
     return messages
 
 
-def emulate_device() -> NoReturn:
-    bus: can.BusABC = can.interface.Bus(channel=VCAN_IFACE, interface=VCAN_BUSTYPE, bitrate=500000)
+def emulate_device(bustype: str = VCAN_BUSTYPE) -> NoReturn:
+    bus: can.BusABC = can.interface.Bus(channel=VCAN_IFACE, interface=bustype, bitrate=500000)
 
     while True:
         for msg in vcan_messages:
@@ -75,33 +88,49 @@ def emulate_device() -> NoReturn:
                 print("Message NOT sent")
             time.sleep(1)  # Send message every 1 second
 
-def setup_vcan(interface=VCAN_IFACE) -> bool:
+def setup_vcan(interface: str = VCAN_IFACE) -> bool:
     # Safely skip Linux network setup if running on Windows
     if sys.platform == "win32":
         print("Windows detected. Using software virtual CAN bus fallback.")
         return False
+
+    interface = _validate_interface_name(interface)
 
     try:
         # Absolute paths for Linux systems to satisfy the linter
-        subprocess.run(['/usr/bin/sudo', '/sbin/modprobe', 'vcan'], check=True)
-        subprocess.run(['/usr/bin/sudo', '/sbin/ip', 'link', 'add', 'dev', interface, 'type', 'vcan'], check=True)
-        subprocess.run(['/usr/bin/sudo', '/sbin/ip', 'link', 'set', 'up', interface], check=True)
+        # interface is validated by _validate_interface_name() above, so this
+        # is not attacker-controlled input reaching subprocess.
+        subprocess.run(['/usr/bin/sudo', '/sbin/modprobe', 'vcan'], check=True)  # nosec B603
+        subprocess.run(  # noqa: S603  # nosec B603
+            ['/usr/bin/sudo', '/sbin/ip', 'link', 'add', 'dev', interface, 'type', 'vcan'], check=True
+        )
+        subprocess.run(  # noqa: S603  # nosec B603
+            ['/usr/bin/sudo', '/sbin/ip', 'link', 'set', 'up', interface], check=True
+        )
 
         print(f"Virtual CAN interface {interface} is ready.")
-        return True
     except subprocess.CalledProcessError as e:
         print(f"Failed to set up {interface}: {e}")
+        return False
+    else:
+        return True
 
-    return False
 
-
-def cleanup_vcan(interface=VCAN_IFACE) -> bool | None:
+def cleanup_vcan(interface: str = VCAN_IFACE) -> bool:
     # Safely skip Linux network setup if running on Windows
     if sys.platform == "win32":
         print("Windows detected. Using software virtual CAN bus fallback.")
         return False
+
+    interface = _validate_interface_name(interface)
+
     try:
-        subprocess.run(['sudo', 'ip', 'link', 'delete', interface], check=True)
+        # Absolute paths for Linux systems to satisfy the linter
+        # interface is validated by _validate_interface_name() above, so this
+        # is not attacker-controlled input reaching subprocess.
+        subprocess.run(  # noqa: S603  # nosec B603
+            ['/usr/bin/sudo', '/sbin/ip', 'link', 'delete', interface], check=True
+        )
         print(f"Removed {interface}")
     except subprocess.CalledProcessError as e:
         print(f"Error removing {interface}: {e}")
@@ -118,16 +147,14 @@ signal.signal(signal.SIGINT, lambda sig, frame: sys.exit(0))
 
 if __name__ == "__main__":
 
-    filename = "candump.log"
+    filename: str = "candump.log"
     if len(sys.argv) > 1:
-        filename: str = sys.argv[1]
+        filename = sys.argv[1]
     else:
         print("Usage: python canbus_server_sim.py <candump_file>")
         print("Using default 'candump.log' file.")
 
-    if not setup_vcan():
-        VCAN_BUSTYPE = 'virtual'
+    bustype: str = VCAN_BUSTYPE if setup_vcan() else 'virtual'
 
     vcan_messages = load_candump_file(filename)
-    emulate_device()
-
+    emulate_device(bustype)

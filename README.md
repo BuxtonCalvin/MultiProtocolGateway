@@ -51,7 +51,7 @@ MPG is purpose-built for solar inverters, battery management systems (BMS), ener
 | **Protocol library** | 50+ pre-built device protocol maps; live register analysis tool to build new ones |
 | **Config management** | SQLite staging database; changes are previewed and committed — no raw file editing required |
 | **Python versions** | 3.10 – 3.14 |
-| **Deployment** | Script, systemd service, Docker container, Home Assistant add-on |
+| **Deployment** | Script, systemd service, Docker container |
 
 ---
 
@@ -100,7 +100,7 @@ The protocol editor provides a full in-browser spreadsheet-style view of the reg
 - Manage orphaned rows (registers present in the DB but no longer in the CSV)
 - Import and export register maps as CSV or JSON
 
-![Protocols](classes/WebServer/static/screenshots/protocols.png)
+![Protocols](classes/WebServer/static/screenshots/protocol_edit.png)
 
 You can also edit the protocol json file.  This file provides default configurations (which can be over-ridden in the config.cfg) and code lookup descriptions which will then populate your output data.
 
@@ -161,7 +161,7 @@ A reference page listing all available settings with their definitions.  You can
 
 Bridges receive data from scrapers and write it somewhere. They are passive — they do not poll.
 
-![Bridges](classes/WebServer/static/screenshots/device__bridge_generic.png)
+![Bridges](classes/WebServer/static/screenshots/device__bridge_timescaledb.png)
 
 Here are overviews of two database bridges:
 

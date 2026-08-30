@@ -23,7 +23,7 @@ import re
 # Given string
 input_string = "1=Charger Only;2=Inverter Only;3=On;4=Off"
 while True:
-    user_input = input("Enter Data: ")
+    user_input: str = input("Enter Data: ")
     user_input  = re.sub(r"\s+", " ", user_input)
     user_input  = re.sub(r"\:\s+", ":", user_input)
     user_input  = re.sub(r"\s+\:", ":", user_input)
@@ -31,7 +31,7 @@ while True:
     # Split the string into key-value pairs
 
     if user_input.find(";") != -1:
-        pairs = user_input.split(";")
+        pairs: list[str] = user_input.split(";")
     elif user_input.find("；") != -1:
         pairs = user_input.split("；")
     elif user_input.find("=") != -1:
