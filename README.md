@@ -297,6 +297,8 @@ derived values
 
 ↓
 
+### Publish
+
 publish to bridges
 
 ---
