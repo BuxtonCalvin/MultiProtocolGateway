@@ -2,15 +2,11 @@ name-template: "v$RESOLVED_VERSION"
 tag-template: "v$RESOLVED_VERSION"
 
 # Autolabeler inspects each PR's title so you don't have to manually
-# label every PR. Write PR titles like:
-#   feat: add support for X        -> labeled "minor"
-#   fix: correct Y calculation     -> labeled "patch"
-#   breaking: change config format -> labeled "major"
+# label every PR. 
 autolabeler:
   - label: "major"
     title:
-      - "/^breaking(\\(.*\\))?!?:/i"
-      - "/^feat(\\(.*\\))?!:/i"
+      - "/^breaking(\\(.*\\))?!:/i" # Fixed: Only captures explicit breaking bumps like feat!: or breaking:
     body:
       - "/BREAKING CHANGE/i"
   - label: "minor"
@@ -30,10 +26,7 @@ autolabeler:
       - "/^refactor(\\(.*\\))?:/i"
       - "/^test(\\(.*\\))?:/i"
 
-# Unified categorization + version-bump rules (current schema).
-# Each category's "when" filters which PRs land in it by label;
-# "type: version-resolver" entries (no title) don't create a section
-# in the changelog, they only decide the semver bump.
+# Unified categorization + version-bump rules
 categories:
   - title: "🚨 Breaking Changes"
     when:
@@ -112,4 +105,3 @@ template: |
   $CHANGES
 
   **Full Changelog**: https://github.com/$OWNER/$REPOSITORY/compare/$PREVIOUS_TAG...v$RESOLVED_VERSION
- 

@@ -36,7 +36,7 @@
     {# ================================================================ #}
     {# LEFT COLUMN — General settings + master enabled switch           #}
     {# ================================================================ #}
-    <div class="w-[28rem] flex-shrink-0">
+    <div class="w-md shrink-0">
       <div class="card mb-4" id="ms-panel-general">
         <div class="px-4 pt-3 pb-2 border-b border-mpg-700/40">
           <h2 class="font-semibold surface-text text-base">General</h2>
@@ -88,7 +88,7 @@
                 {% if s.is_dirty %}<span class="text-dirty text-xs" title="Unsaved change">*</span>{% endif %}
               </div>
               <input type="checkbox"
-                     class="accent-accent w-3.5 h-3.5 flex-shrink-0"
+                     class="accent-accent w-3.5 h-3.5 shrink-0"
                      {% if s.is_active %}checked{% endif %}
                      title="Include in config.cfg"
                      aria-label="Active: {{ s.key }}"
@@ -119,8 +119,7 @@
       {% if settings %}
       <div class="flex flex-col gap-2">
         <button type="button"
-                class="px-4 py-1.5 rounded bg-accent hover:bg-accent-dark text-white text-sm font-medium
-                       focus:outline-none focus:ring-2 focus:ring-accent"
+                class="w-full btn-tertiary text-xs mt-2"
                 hx-post="/api/devices/general/messages/test"
                 hx-swap="none"
                 hx-trigger="click">
