@@ -31,7 +31,19 @@ import can
 
 VCAN_IFACE: Final[str] = 'vcan0'
 VCAN_BUSTYPE: Final[str] = 'socketcan'
+
+# Windows has no SocketCAN/vcan support, so we fall back to python-can's
+# udp_multicast backend instead. Unlike the plain 'virtual' bustype (which
+# only works for buses that live in the same Python process), udp_multicast
+# uses real UDP sockets, so a separate process (e.g. the actual gateway
+# software under test) can join the same multicast group and receive the
+# simulated frames, just like it would with vcan0 on Linux.
+# Requires the optional 'msgpack' dependency: pip install msgpack
+WIN_CHANNEL: Final[str] = '239.74.163.2'  # python-can's default IPv4 mcast group
+WIN_BUSTYPE: Final[str] = 'udp_multicast'
+
 vcan_messages: list[can.Message] = []
+_vcan_ready: bool = False  # only True once setup_vcan() has actually created the interface
 
 # Linux network interface names are limited to IFNAMSIZ-1 (15) characters and
 # may not contain path separators, whitespace, or shell metacharacters.
@@ -76,8 +88,8 @@ def load_candump_file(filepath: str) -> list[can.Message]:
     return messages
 
 
-def emulate_device(bustype: str = VCAN_BUSTYPE) -> NoReturn:
-    bus: can.BusABC = can.interface.Bus(channel=VCAN_IFACE, interface=bustype, bitrate=500000)
+def emulate_device(bustype: str = VCAN_BUSTYPE, channel: str = VCAN_IFACE) -> NoReturn:
+    bus: can.BusABC = can.interface.Bus(channel=channel, interface=bustype, bitrate=500000)
 
     while True:
         for msg in vcan_messages:
@@ -89,9 +101,10 @@ def emulate_device(bustype: str = VCAN_BUSTYPE) -> NoReturn:
             time.sleep(1)  # Send message every 1 second
 
 def setup_vcan(interface: str = VCAN_IFACE) -> bool:
+    global _vcan_ready
+
     # Safely skip Linux network setup if running on Windows
     if sys.platform == "win32":
-        print("Windows detected. Using software virtual CAN bus fallback.")
         return False
 
     interface = _validate_interface_name(interface)
@@ -109,17 +122,20 @@ def setup_vcan(interface: str = VCAN_IFACE) -> bool:
         )
 
         print(f"Virtual CAN interface {interface} is ready.")
-    except subprocess.CalledProcessError as e:
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
         print(f"Failed to set up {interface}: {e}")
         return False
     else:
+        _vcan_ready = True
         return True
 
 
 def cleanup_vcan(interface: str = VCAN_IFACE) -> bool:
-    # Safely skip Linux network setup if running on Windows
-    if sys.platform == "win32":
-        print("Windows detected. Using software virtual CAN bus fallback.")
+    global _vcan_ready
+
+    # Nothing to tear down on Windows, or if setup never actually succeeded
+    # (e.g. it failed, or we're on Windows and never touched a vcan interface).
+    if sys.platform == "win32" or not _vcan_ready:
         return False
 
     interface = _validate_interface_name(interface)
@@ -132,11 +148,35 @@ def cleanup_vcan(interface: str = VCAN_IFACE) -> bool:
             ['/usr/bin/sudo', '/sbin/ip', 'link', 'delete', interface], check=True
         )
         print(f"Removed {interface}")
-    except subprocess.CalledProcessError as e:
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
         print(f"Error removing {interface}: {e}")
         return False
+    else:
+        _vcan_ready = False
+        return True
 
-    return True
+
+def setup_transport() -> tuple[str, str]:
+    """Pick a (channel, bustype) pair appropriate for the current OS.
+
+    Linux: real vcan/SocketCAN interface (falls back to an in-process
+    'virtual' bus if vcan setup fails, e.g. no sudo/root).
+    Windows: UDP-multicast virtual bus (no admin rights or kernel driver
+    needed, and unlike 'virtual' it's visible to other processes).
+    """
+    if sys.platform == "win32":
+        print(
+            "Windows detected: SocketCAN/vcan isn't available, "
+            f"using UDP-multicast virtual CAN bus ({WIN_CHANNEL})."
+        )
+        return WIN_CHANNEL, WIN_BUSTYPE
+
+    if setup_vcan():
+        return VCAN_IFACE, VCAN_BUSTYPE
+
+    print("Falling back to an in-process virtual CAN bus (no external listeners).")
+    return VCAN_IFACE, 'virtual'
+
 
 # Register cleanup to run at program exit
 atexit.register(cleanup_vcan)
@@ -154,7 +194,7 @@ if __name__ == "__main__":
         print("Usage: python canbus_server_sim.py <candump_file>")
         print("Using default 'candump.log' file.")
 
-    bustype: str = VCAN_BUSTYPE if setup_vcan() else 'virtual'
+    channel, bustype = setup_transport()
 
     vcan_messages = load_candump_file(filename)
-    emulate_device(bustype)
+    emulate_device(bustype, channel)
