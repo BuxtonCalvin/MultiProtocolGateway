@@ -409,6 +409,8 @@ Each supported device has a protocol directory under `protocols/` containing:
 
 - **`<name>.json`** — device metadata: transport type, default settings, lookup descriptions for codes
 - **`<name>.holding_registry_map.csv`** — read/write (holding) Modbus registers
+
+  **additional optional registers**  - per manufacturer device properties
   - **`<name>.input_registry_map.csv`** — read-only (input) Modbus registers
   - **`<name>.coil_registry_map.csv`** — read/write (coil) Modbus registers
   - **`<name>.discrete_registry_map.csv`** — read-only (discrete) Modbus registers
