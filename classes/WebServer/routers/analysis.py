@@ -24,6 +24,7 @@ import logging
 import queue
 import shutil
 import threading
+from _thread import lock
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -69,7 +70,7 @@ ProgressQueueItem = ProgressMessage | _ScanDoneSentinel
 
 _SCAN_DONE = _ScanDoneSentinel()
 _progress_queues: dict[str, "queue.Queue[ProgressQueueItem]"] = {}
-_progress_queues_lock = threading.Lock()
+_progress_queues_lock: lock = threading.Lock()
 
 
 def _register_progress_queue(device_name: str) -> "queue.Queue[ProgressQueueItem]":
@@ -241,24 +242,84 @@ def _set_cell(row: list[str], mapping: dict[str, int], canonical: str, value: st
     row[index] = value
 
 
+# Canonical column set shared by every hand-written and generated protocol
+# map in protocols/ (see e.g. protocols/pace/pace_bms_v1.3.holding_registry_map.csv).
+# Used when a brand-new registry-map CSV must be created from scratch for a
+# stub-only protocol (a manufacturer folder with a JSON descriptor but no
+# CSV yet) so the new file is immediately readable by protocol_settings,
+# the Protocol Editor, and any other transport that loads registry maps.
+STANDARD_REGISTRY_HEADER: list[str] = [
+    "register",
+    "variable_name",
+    "documented_name",
+    "unit",
+    "data_type",
+    "values",
+    "read_interval",
+    "writable",
+    "adjustments",
+    "note",
+]
+
+
+def _resolve_protocol_dir(protocols_dir: Path, protocol_name: str) -> Path:
+    """Resolve the folder a protocol's files live (or should live) in.
+
+    Uses the same prefix-matching convention as protocol_settings /
+    _find_protocol_csv: the longest existing protocols/ subfolder name that
+    protocol_name starts with. Falls back to protocols_dir itself if no
+    folder matches (e.g. a protocol name that doesn't share a prefix with
+    any existing manufacturer folder).
+    """
+    protocols_dir = Path(protocols_dir)
+    protocol_lower: str = protocol_name.lower()
+
+    existing_folders: list[Path] = [f for f in protocols_dir.iterdir() if f.is_dir()]
+    existing_folders.sort(key=lambda f: len(f.name), reverse=True)
+
+    for folder in existing_folders:
+        if protocol_lower.startswith(folder.name.lower()):
+            return folder
+
+    return protocols_dir
+
+
+def _create_protocol_csv(protocols_dir: Path, protocol_name: str, registry_type: str) -> Path:
+    """Create a new, header-only registry-map CSV for a protocol that doesn't
+    have one yet — the stub-protocol case (a manufacturer folder with only a
+    JSON descriptor). Follows the same ``<protocol>.<type>_registry_map.csv``
+    naming convention as ``protocol_settings.load_registry_map`` and writes
+    the standard column header, so the result is a normal, editable registry
+    map — no different from one written by hand or shipped with MPG.
+
+    The only real decision here is *which* registry type to create (holding,
+    input, coil, or discrete) — that comes from the analysis change itself
+    (each live register is scored against a specific register type during
+    the scan), so no guessing is needed.
+    """
+    target_dir: Path = _resolve_protocol_dir(protocols_dir, protocol_name)
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    registry_type_lower: str = registry_type.lower()
+    csv_path: Path = target_dir / f"{protocol_name}.{registry_type_lower}_registry_map.csv"
+
+    with open(csv_path, "w", newline="", encoding="latin-1") as handle:
+        writer: Writer = csv.writer(handle, delimiter=",")
+        writer.writerow(STANDARD_REGISTRY_HEADER)
+
+    _log.info(
+        "Commit: created new %s registry map for protocol %r at %s",
+        registry_type, protocol_name, csv_path,
+    )
+    return csv_path
+
+
 def _find_protocol_csv(protocols_dir: Path, protocol_name: str, registry_type: str) -> Path:
     protocols_dir = Path(protocols_dir)
     registry_type = registry_type.lower()
     protocol_lower: str = protocol_name.lower()
 
-    # --- Start Dynamic Folder Matching Logic ---
-    # Get all available subdirectories in the protocols root
-    existing_folders: list[Path] = [f for f in protocols_dir.iterdir() if f.is_dir()]
-
-    # Sort folders by name length descending to prevent partial match conflicts
-    existing_folders.sort(key=lambda f: len(f.name), reverse=True)
-
-    # Find if the protocol_name starts with any of the existing folder names
-    target_dir: Path = protocols_dir
-    for folder in existing_folders:
-        if protocol_lower.startswith(folder.name.lower()):
-            target_dir = folder
-            break
+    target_dir: Path = _resolve_protocol_dir(protocols_dir, protocol_name)
 
     token: str = f"{registry_type}_"
 
@@ -438,7 +499,7 @@ async def run_analysis(device_name: str, payload: AnalyzeRequest, request: Reque
 
     clean: str = _clean_device_name(device_name)
 
-    # Register the progress queue BEFORE entering the thread so the SSE
+    # Register the progress queue before entering the thread so the SSE
     # endpoint can find it immediately after the browser issues the POST.
     progress_queue: queue.Queue[ProgressMessage | _ScanDoneSentinel] = _register_progress_queue(clean)
 
@@ -493,9 +554,24 @@ async def commit_analysis(device_name: str, payload: CommitAnalysisRequest, requ
         try:
             csv_path: Path = _find_protocol_csv(protocols_dir, protocol_name, registry_type)
         except FileNotFoundError as exc:
-            _log.error("Commit: %s", exc)
-            errors.append(str(exc))
-            continue
+            # No registry-map CSV exists yet for this protocol/registry type —
+            # expected for a stub protocol (JSON descriptor only, no map).
+            # If we're only being asked to remove rows, there's nothing to
+            # do. If we're adding rows, create the map now: the standard
+            # column header is fixed, and the registry type to create is
+            # already given by the change itself, so this is safe to do
+            # without any further input.
+            if not any(change.action.lower() == "add" for change in changes):
+                _log.error("Commit: %s", exc)
+                errors.append(str(exc))
+                continue
+            try:
+                csv_path = _create_protocol_csv(protocols_dir, protocol_name, registry_type)
+            except OSError as create_exc:
+                msg: str = f"Unable to create {registry_type} registry CSV for protocol '{protocol_name}': {create_exc}"
+                _log.error("Commit: %s", msg)
+                errors.append(msg)
+                continue
         _log.info("Commit: writing to %s", csv_path)
         file_changed, file_change_count = _apply_protocol_changes(csv_path, changes)
         if file_changed:
