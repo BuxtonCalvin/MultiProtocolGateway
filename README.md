@@ -4,9 +4,9 @@
 
 If you have a device that speaks Modbus RTU/TCP, CAN bus, or one of the supported proprietary serial protocols and you want its data in Home Assistant, Grafana, Prometheus, or a time-series database, this app should work for you.
 
-[![Python 3.10](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.10.yml/badge.svg)](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.10.yml) ➔ [![Python 3.14](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.14.yml/badge.svg)](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.14.yml) [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/LICENSE) [![Ruff](https://img.shields.io/badge/Linter-Ruff-brightgreen?style=flat-square)](https://github.com/charliermarsh/ruff) [![CodeQL Status](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/codeql.yml/badge.svg)](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/codeql.yml)
+[![Python 3.10](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.10.yml/badge.svg)](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.10.yml) ➔ [![Python 3.14](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.14.yml/badge.svg)](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.14.yml) [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://github.comLICENSE) [![Ruff](https://img.shields.io/badge/Linter-Ruff-brightgreen?style=flat-square)](https://github.com/charliermarsh/ruff) [![CodeQL Status](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/codeql.yml/badge.svg)](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/codeql.yml)
 
-[![Dashboard](https://github.com/BuxtonCalvin/MultiProtocolGateway/raw/master/classes/WebServer/static/screenshots/dashboard.png)](/BuxtonCalvin/MultiProtocolGateway/blob/master/classes/WebServer/static/screenshots/dashboard.png)
+[![Dashboard](classes/WebServer/static/screenshots/dashboard.png)](classes/WebServer/static/screenshots/dashboard.png)
 
 ---
 
@@ -28,7 +28,7 @@ Then open **`http://localhost:1717`** and configure everything from the web UI �
 
 **Prerequisites:** Python 3.10+, and (for real hardware) a device connected via USB serial adapter, RS-485 adapter, or network.
 
-[![Hardware](https://github.com/BuxtonCalvin/MultiProtocolGateway/raw/master/documentation/assets/waveshare_mpg_eg4.png)](/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/assets/waveshare_mpg_eg4.png)
+[![Hardware](documentation/assets/waveshare_mpg_eg4.png)](documentation/assets/waveshare_mpg_eg4.png)
 
 MPG includes simulators so you can evaluate the full scrape → decode → bridge pipeline before you have a device wired up:
 
@@ -91,7 +91,7 @@ The web UI is available at **`http://localhost:1717`** as soon as the gateway st
 
 MPG ships with a **FastAPI + Jinja2 web server** on port **1717**. The server is not a simple settings editor — it is the primary interface for managing the entire gateway lifecycle.
 
-[WebUI Architecture](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/architecture/mermaid-diagrams.md#sequence-diagram--web-ui-configuration-commit)
+[WebUI Architecture](documentation/architecture/mermaid-diagrams.md#sequence-diagram--web-ui-configuration-commit)
 
 ### Dashboard — Device Overview
 
@@ -106,13 +106,13 @@ On the left side of the page, each created device (scraper) gets a dedicated set
 - **Value** — the value that will be written on the next commit; highlighted amber when it differs from the on-disk value
 - **Default** — the fallback value from the transport module, shown for reference
 
-[![Scrapers](https://github.com/BuxtonCalvin/MultiProtocolGateway/raw/master/classes/WebServer/static/screenshots/device__scraper_read_generic.png)](/BuxtonCalvin/MultiProtocolGateway/blob/master/classes/WebServer/static/screenshots/device__scraper_read_generic.png)
+[![Scrapers](classes/WebServer/static/screenshots/device__scraper_read_generic.png)](classes/WebServer/static/screenshots/device__scraper_read_generic.png)
 
 Changes are submitted via HTMX PATCH calls and buffered in a SQLite staging database. Nothing touches `config.cfg` until you explicitly commit.
 
 There is an integrated help screen for each key listed in the left hand pane. Click on the default value to show help for that key.
 
-[![Devices](https://github.com/BuxtonCalvin/MultiProtocolGateway/raw/master/classes/WebServer/static/screenshots/device__device_help.png)](/BuxtonCalvin/MultiProtocolGateway/blob/master/classes/WebServer/static/screenshots/device__device_help.png)
+[![Devices](classes/WebServer/static/screenshots/device__device_help.png)](classes/WebServer/static/screenshots/device__device_help.png)
 
 ### Config Safety: Backups, Rollback & Auto-Reload
 
@@ -124,7 +124,7 @@ A file watcher also monitors `config.cfg` and the `protocols/` directory for cha
 
 The create device wizard walks you through creating a scraper device from scratch.
 
-[![Create Device](https://github.com/BuxtonCalvin/MultiProtocolGateway/raw/master/classes/WebServer/static/screenshots/create_device.png)](/BuxtonCalvin/MultiProtocolGateway/blob/master/classes/WebServer/static/screenshots/create_device.png)
+[![Create Device](classes/WebServer/static/screenshots/create_device.png)](classes/WebServer/static/screenshots/create_device.png)
 
 ### Protocol Editor
 
@@ -136,11 +136,11 @@ The protocol editor provides a full in-browser spreadsheet-style view of the reg
 - Manage orphaned rows (registers present in the DB but no longer in the CSV)
 - Import and export register maps as CSV or JSON
 
-[![Protocols](https://github.com/BuxtonCalvin/MultiProtocolGateway/raw/master/classes/WebServer/static/screenshots/protocol_edit.png)](/BuxtonCalvin/MultiProtocolGateway/blob/master/classes/WebServer/static/screenshots/protocol_edit.png)
+[![Protocols](classes/WebServer/static/screenshots/protocol_edit.png)](classes/WebServer/static/screenshots/protocol_edit.png)
 
 You can also edit the protocol json file. This file provides default configurations (which can be over-ridden in the config.cfg) and code lookup descriptions which will then populate your output data.
 
-[![Protocol JSON](https://github.com/BuxtonCalvin/MultiProtocolGateway/raw/master/classes/WebServer/static/screenshots/protocol_json.png)](/BuxtonCalvin/MultiProtocolGateway/blob/master/classes/WebServer/static/screenshots/protocol_json.png)
+[![Protocol JSON](classes/WebServer/static/screenshots/protocol_json.png)](classes/WebServer/static/screenshots/protocol_json.png)
 
 All edits go through a structured diff engine — the UI shows exactly which rows will be added, modified, or removed before anything is written.
 
@@ -148,7 +148,7 @@ All edits go through a structured diff engine — the UI shows exactly which row
 
 The create protocol wizard walks you through creating a hardware protocol from scratch.
 
-[![Create Device](https://github.com/BuxtonCalvin/MultiProtocolGateway/raw/master/classes/WebServer/static/screenshots/create_protocol.png)](/BuxtonCalvin/MultiProtocolGateway/blob/master/classes/WebServer/static/screenshots/create_protocol.png)
+[![Create Device](classes/WebServer/static/screenshots/create_protocol.png)](classes/WebServer/static/screenshots/create_protocol.png)
 
 ### Live Device Analysis
 
@@ -159,7 +159,7 @@ The **Analyze** page is the tool for working with new or undocumented hardware �
 3. Scores each protocol map by accuracy — how many documented registers actually appear in the scan within value ranges set in the protocol
 4. Produces per-protocol **Add** and **Remove** action lists, flagging registers that are present in the scan but absent from the default protocol map (candidates to add) and registers in the map that were not found on the device (candidates to remove)
 
-[![Analysis](https://github.com/BuxtonCalvin/MultiProtocolGateway/raw/master/classes/WebServer/static/screenshots/analysis.png)](/BuxtonCalvin/MultiProtocolGateway/blob/master/classes/WebServer/static/screenshots/analysis.png)
+[![Analysis](classes/WebServer/static/screenshots/analysis.png)](classes/WebServer/static/screenshots/analysis.png)
 
 Each suggested change can be individually toggled into or out of the commit queue. When you click **Commit**, MPG writes only the selected changes back to the protocol CSV files and rescans the web database — no manual CSV editing required. If the device's protocol has no register map yet at all — the stub case — committing an **Add** action creates the register-map CSV from scratch using the standard column layout, so building out a brand-new protocol from a live scan works the same way as refining an existing one.
 
@@ -169,54 +169,54 @@ Analysis results stream back to the browser in real time via **Server-Sent Event
 
 Separate pages manage gateway-wide settings: Read mode and dynamic configuration enable, logging configuration (log level per transport, log rotation), messages. These top level pages write through the same staging/commit pipeline as device settings.
 
-[![Read Mode/ Dynamic Configuration](https://github.com/BuxtonCalvin/MultiProtocolGateway/raw/master/classes/WebServer/static/screenshots/general_settings.png)](/BuxtonCalvin/MultiProtocolGateway/blob/master/classes/WebServer/static/screenshots/general_settings.png)
+[![Read Mode/ Dynamic Configuration](classes/WebServer/static/screenshots/general_settings.png)](classes/WebServer/static/screenshots/general_settings.png)
 
-[![Logging](https://github.com/BuxtonCalvin/MultiProtocolGateway/raw/master/classes/WebServer/static/screenshots/logging-settings.png)](/BuxtonCalvin/MultiProtocolGateway/blob/master/classes/WebServer/static/screenshots/logging-settings.png)
+[![Logging](classes/WebServer/static/screenshots/logging-settings.png)](classes/WebServer/static/screenshots/logging-settings.png)
 
-[![Messages](https://github.com/BuxtonCalvin/MultiProtocolGateway/raw/master/classes/WebServer/static/screenshots/messages.png)](/BuxtonCalvin/MultiProtocolGateway/blob/master/classes/WebServer/static/screenshots/messages.png)
+[![Messages](classes/WebServer/static/screenshots/messages.png)](classes/WebServer/static/screenshots/messages.png)
 
 ### Log Viewer
 
 A dedicated page streams the live gateway log to the browser, making it easy to watch register reads, MQTT publishes, and error traces without SSH access.
 
-[![Log Viewer](https://github.com/BuxtonCalvin/MultiProtocolGateway/raw/master/classes/WebServer/static/screenshots/view_log.png)](/BuxtonCalvin/MultiProtocolGateway/blob/master/classes/WebServer/static/screenshots/view_log.png)
+[![Log Viewer](classes/WebServer/static/screenshots/view_log.png)](classes/WebServer/static/screenshots/view_log.png)
 
 ### Transport Library
 
 A reference page listing all available transport classes — scraper types (Modbus variants, CAN bus, serial) and bridge types (MQTT, TimescaleDB, InfluxDB, InfluxDB3, Prometheus, JSON) — with their configurable parameters.
 
-[![Transport Library](https://github.com/BuxtonCalvin/MultiProtocolGateway/raw/master/classes/WebServer/static/screenshots/transport_library.png)](/BuxtonCalvin/MultiProtocolGateway/blob/master/classes/WebServer/static/screenshots/transport_library.png)
+[![Transport Library](classes/WebServer/static/screenshots/transport_library.png)](classes/WebServer/static/screenshots/transport_library.png)
 
 ### Settings
 
 A reference page listing all available settings with their definitions. You can also access these descriptions from the Scraper and Bridge pages by clicking on the default value, located in the panel on the left side of the screen.
 
-[![Settings](https://github.com/BuxtonCalvin/MultiProtocolGateway/raw/master/classes/WebServer/static/screenshots/transport_settings_trunc.png)](/BuxtonCalvin/MultiProtocolGateway/blob/master/classes/WebServer/static/screenshots/transport_settings_trunc.png)
+[![Settings](classes/WebServer/static/screenshots/transport_settings_trunc.png)](classes/WebServer/static/screenshots/transport_settings_trunc.png)
 
 ### Bridges
 
 Bridges receive data from scrapers and write it somewhere. They are passive — they do not poll.
 
-[![Bridges](https://github.com/BuxtonCalvin/MultiProtocolGateway/raw/master/classes/WebServer/static/screenshots/device__bridge_timescaledb.png)](/BuxtonCalvin/MultiProtocolGateway/blob/master/classes/WebServer/static/screenshots/device__bridge_timescaledb.png)
+[![Bridges](classes/WebServer/static/screenshots/device__bridge_timescaledb.png)](classes/WebServer/static/screenshots/device__bridge_timescaledb.png)
 
 Here are overviews of two database bridges:
 
 - InfluxDB 1.X and 3.x versions [![InfluxDB](https://img.shields.io/badge/influxdb-22ADF6?logo=influxdb&logoColor=fff)](https://influxdata.com)
 
-  - Advanced Features [`influxdb_advanced_features.md`](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/bridges/InfluxDB/influxdb_advanced_features.md)
-  - Troubleshooting [`troubleshooting_influxdb.md`](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/bridges/InfluxDB/troubleshooting_influxdb.md)
-  - InfluxDB3 Special setup [`influxDB3.md`](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/bridges/InfluxDB/InfluxDB3.md)
+  - Advanced Features [influxdb advanced features](documentation/bridges/InfluxDB/influxdb_advanced_features.md)
+  - Troubleshooting [troubleshooting influxdb](documentation/bridges/InfluxDB/troubleshooting_influxdb.md)
+  - InfluxDB3 Special setup [influxDB3](documentation/bridges/InfluxDB/InfluxDB3.md)
 
 - TimeScale DB [![Timescale DB](https://img.shields.io/badge/postgres-%2331648C.svg?logo=postgresql&logoColor=white)](https://timescale.com)
 
-  - Readme [`Timescale DB`](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/bridges/TimeScaleDB/timescaledb.md)
-  - Mermaid schema [Timescale DB Architecture](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/architecture/mermaid-diagrams.md#timescaledb-telemetry-schema-created-by-timescaledb-bridge)
+  - Readme [`Timescale DB`](documentation/bridges/TimeScaleDB/timescaledb.md)
+  - Mermaid schema [Timescale DB Architecture](documentation/architecture/mermaid-diagrams.md#timescaledb-telemetry-schema-created-by-timescaledb-bridge)
 
 Here are the overviews of the MQTT, Prometheus and JSON bridges:
 
-- MQTT [![Mosquitto](https://img.shields.io/badge/Eclipse-FE7A16?logo=Eclipse&logoColor=white)](https://mosquitto.org) — Readme: [`MQTT`](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/bridges/MQTT/MQTT_bridge.md)
-- Prometheus [![Prometheus](https://img.shields.io/badge/Prometheus-E6522C?style=for-the-badge&logo=prometheus&logoColor=white)](https://prometheus.io/) — Readme: [`Prometheus`](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/bridges/prometheus/prometheus.md)
-- JSON — Readme: [`JSON`](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/bridges/JSON/json_out_example.md)
+- MQTT [![Mosquitto](https://img.shields.io/badge/Eclipse-FE7A16?logo=Eclipse&logoColor=white)](https://mosquitto.org) — Readme: [`MQTT`](documentation/bridges/MQTT/MQTT_bridge.md)
+- Prometheus [![Prometheus](https://img.shields.io/badge/Prometheus-E6522C?style=for-the-badge&logo=prometheus&logoColor=white)](https://prometheus.io/) — Readme: [`Prometheus`](documentation/bridges/prometheus/prometheus.md)
+- JSON — Readme: [`JSON`](documentation/bridges/JSON/json_out_example.md)
 
 ---
 
@@ -226,39 +226,39 @@ MPG ships with pre-built, tested protocol maps for the following manufacturers. 
 
 | Manufacturer | Models / Protocols | Link |
 | --- | --- | --- |
-| **APsystems** | APsystems ECU SunSpec gateway (`apsystems_ecu_sunspec` via Modbus ) | **[`View APsystems`](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/devices/APsystems.md)** |
-| **Deye Sunsynk** | Hybrid Inverters (`deye_sunsynk` via Modbus), Extended Map (`deye_sunsynk_hybrid` via Modbus) | **[`View Deye Sunsynk`](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/devices/Deye_Sunsynk.md)** |
-| **EG4** | 18KPV Inverter (`eg4_18kpv` via Modbus), 3000EHV Inverter (`eg4_3000ehv_v1` via Modbus ), GridBOSS / Related Equipment (`eg4_gridboss_re` via Modbus ), LL-S Battery (`eg4_ll_s` via Modbus ), 6000XP / 12000XP / 18KPV Family (`eg4_v58` via Modbus) | **[`View EG4`](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/devices/EG4.md)** |
-| **Enphase** | Enphase IQ Gateway SunSpec (`enphase_iq_gateway_sunspec` via Modbus) | **[`View Enphase`](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/devices/Enphase.md)** |
-| **FoxESS** | H1 LAN / KH / H3-style holding-register map (`foxess_h1_lan` via Modbus ) | **[`View FoxESS`](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/devices/FoxESS.md)** |
-| **Fronius** | Fronius SunSpec Inverters (`fronius_sunspec` via Modbus) | **[`View Fronius`](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/devices/Fronius.md)** |
-| **GoodWe** | Energy Storage / Hybrid Inverters (`goodwe_energy_storage` via Modbus ) — *partial map, verify against your firmware version* | **[`View GoodWe`](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/devices/GoodWe.md)** |
-| **Growatt** | Inverter Protocol v1.24 (`growatt_2020_v1.24` via Modbus ), BMS CAN Bus v1.04 (`growatt_bms_canbus_v1.04` via CAN bus), BMS RS-485 1xSxxP ESS v2.01 (`growatt_bms_rs485_1xsxxp_ess_v2.01` via Modbus ), SPF / Off-Grid Protocol v0.14 (`growatt_v0.14` via Modbus ) | **[`View Growatt`](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/devices/Growatt.md)** |
-| **HDHK** | 16-channel AC Power Monitor (`hdhk_16ch_ac_module` via Modbus ) | **[`View HDHK`](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/devices/HDHK.md)** |
-| **Huawei** | Huawei SUN2000 Inverters (`huawei_sun2000` via Modbus ) | **[`View Huawei`](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/devices/Huawei.md)** |
+| **APsystems** | APsystems ECU SunSpec gateway (`apsystems_ecu_sunspec` via Modbus ) | **[`View APsystems`](documentation/devices/APsystems.md)** |
+| **Deye Sunsynk** | Hybrid Inverters (`deye_sunsynk` via Modbus), Extended Map (`deye_sunsynk_hybrid` via Modbus) | **[`View Deye Sunsynk`](documentation/devices/Deye_Sunsynk.md)** |
+| **EG4** | 18KPV Inverter (`eg4_18kpv` via Modbus), 3000EHV Inverter (`eg4_3000ehv_v1` via Modbus ), GridBOSS / Related Equipment (`eg4_gridboss_re` via Modbus ), LL-S Battery (`eg4_ll_s` via Modbus ), 6000XP / 12000XP / 18KPV Family (`eg4_v58` via Modbus) | **[`View EG4`](documentation/devices/EG4.md)** |
+| **Enphase** | Enphase IQ Gateway SunSpec (`enphase_iq_gateway_sunspec` via Modbus) | **[`View Enphase`](documentation/devices/Enphase.md)** |
+| **FoxESS** | H1 LAN / KH / H3-style holding-register map (`foxess_h1_lan` via Modbus ) | **[`View FoxESS`](documentation/devices/FoxESS.md)** |
+| **Fronius** | Fronius SunSpec Inverters (`fronius_sunspec` via Modbus) | **[`View Fronius`](documentation/devices/Fronius.md)** |
+| **GoodWe** | Energy Storage / Hybrid Inverters (`goodwe_energy_storage` via Modbus ) — *partial map, verify against your firmware version* | **[`View GoodWe`](documentation/devices/GoodWe.md)** |
+| **Growatt** | Inverter Protocol v1.24 (`growatt_2020_v1.24` via Modbus ), BMS CAN Bus v1.04 (`growatt_bms_canbus_v1.04` via CAN bus), BMS RS-485 1xSxxP ESS v2.01 (`growatt_bms_rs485_1xsxxp_ess_v2.01` via Modbus ), SPF / Off-Grid Protocol v0.14 (`growatt_v0.14` via Modbus ) | **[`View Growatt`](documentation/devices/Growatt.md)** |
+| **HDHK** | 16-channel AC Power Monitor (`hdhk_16ch_ac_module` via Modbus ) | **[`View HDHK`](documentation/devices/HDHK.md)** |
+| **Huawei** | Huawei SUN2000 Inverters (`huawei_sun2000` via Modbus ) | **[`View Huawei`](documentation/devices/Huawei.md)** |
 | **LuxPower** | 12K Hybrid Inverter (`lxp_12k_hybrid` via Modbus ) | *No dedicated guide yet but should be the same as EG4— [open an issue](https://github.com/BuxtonCalvin/MultiProtocolGateway/issues) if you'd like to write one* |
-| **Next Power** | Next Power Victor NM RE (`next_power_victor_nm_re` via Modbus ) | **[`View Next Power`](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/devices/Next_Power.md)** |
-| **PACE BMS** | PACE BMS RS-485 v1.3 (`pace_bms_v1.3` via Modbus ) | **[`View PACE BMS`](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/devices/PACE.md)** |
+| **Next Power** | Next Power Victor NM RE (`next_power_victor_nm_re` via Modbus ) | **[`View Next Power`](documentation/devices/Next_Power.md)** |
+| **PACE BMS** | PACE BMS RS-485 v1.3 (`pace_bms_v1.3` via Modbus ) | **[`View PACE BMS`](documentation/devices/PACE.md)** |
 | **PowMr** | Off-Grid / Hybrid Inverter (`powmr` via Modbus ) | *No dedicated guide yet — [open an issue](https://github.com/BuxtonCalvin/MultiProtocolGateway/issues) if you'd like to write one* |
-| **Pylon** | CAN Bus (`pylon_can` via CAN bus), RS-485 v3.3 (`pylon_rs485_v3.3` via Pylon serial) | **[`View Pylon`](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/devices/Pylon.md)** |
-| **Sigenergy** | SigenStor Plant Data (`sigenergy_plant` via Modbus ), Sigen Hybrid / SigenStor EC Device Data (`sigenergy_hybrid` via Modbus ) | **[`View Sigenergy`](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/devices/Sigenergy.md)** |
-| **Sigineer** | Solar Inverter / Charger v0.11 (`sigineer_v0.11` via Modbus ) | **[`View Sigineer`](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/devices/Sigineer.md)** |
-| **SMA** | Energy Meter Speedwire (`sma_energy_meter_speedwire` via Modbus ), CAN / Modbus RTU Map (`sma_modbus_rtu` via CAN bus), Sunny Home Manager (`sma_sunny_home_manager` via Modbus ), Sunny Island (`sma_sunny_island` via Modbus ), Sunny Island v1 (`sma_sunny_island_v1` via Modbus ), Sunny Boy / Tripower (`sma_sunnyboy_tripower` via Modbus ), Tripower Storage Hybrid (`sma_tripower_storage_hybrid` via Modbus ) | **[`View SMA`](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/devices/SMA.md)** |
-| **SOK** | SOK SK48V100 / PACE BMS (`sok_sk48v100_pace_bms` via Modbus ) | **[`View SOK`](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/devices/SOK.md)** |
-| **Solar Edge** | SolarEdge SunSpec Inverters (`solaredge_sunspec` via Modbus) | **[`View Solar Edge`](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/devices/SolarEdge.md)** |
-| **SolaX** | X1/X3 Hybrid G4-style Inverters (`solax_hybrid_g4` via Modbus ) | **[`View SolaX`](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/devices/SolaX.md)** |
-| **SolArk** | Hybrid Inverter (`solark_hybrid` via Modbus ), Modbus v1.1 (`solark_v1.1` via Modbus ) | **[`View SolArk`](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/devices/SolArk.md)** |
-| **Solinteg** | INTEG MHT 25–50K Hybrid (`solinteg_integ_mht_25_50_k` via Modbus ) — *partial map from public Modbus PDF* | **[`View Solinteg`](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/devices/Solinteg.md)** |
-| **Solis** | Hybrid Inverters (`solis_hybrid` via Modbus ), String Inverters (`solis_string` via Modbus ) | **[`View Solis`](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/devices/Solis.md)** |
-| **SRNE** | Energy-Storage Inverter v1.96 (`srne_2021_v1.96` via Modbus ), Energy-Storage Inverter v1.7 (`srne_v1.7` via Modbus ), Controller / Inverter v3.9 (`srne_v3.9` via Modbus ) | **[`View SRNE`](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/devices/SRNE.md)** |
-| **Sungrow** | SH / RS / RT Hybrid Inverters (`sungrow_hybrid` via Modbus ), SG-series String Inverters (`sungrow_sg` via Modbus ) | **[`View Sungrow`](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/devices/Sungrow.md)** |
+| **Pylon** | CAN Bus (`pylon_can` via CAN bus), RS-485 v3.3 (`pylon_rs485_v3.3` via Pylon serial) | **[`View Pylon`](documentation/devices/Pylon.md)** |
+| **Sigenergy** | SigenStor Plant Data (`sigenergy_plant` via Modbus ), Sigen Hybrid / SigenStor EC Device Data (`sigenergy_hybrid` via Modbus ) | **[`View Sigenergy`](documentation/devices/Sigenergy.md)** |
+| **Sigineer** | Solar Inverter / Charger v0.11 (`sigineer_v0.11` via Modbus ) | **[`View Sigineer`](documentation/devices/Sigineer.md)** |
+| **SMA** | Energy Meter Speedwire (`sma_energy_meter_speedwire` via Modbus ), CAN / Modbus RTU Map (`sma_modbus_rtu` via CAN bus), Sunny Home Manager (`sma_sunny_home_manager` via Modbus ), Sunny Island (`sma_sunny_island` via Modbus ), Sunny Island v1 (`sma_sunny_island_v1` via Modbus ), Sunny Boy / Tripower (`sma_sunnyboy_tripower` via Modbus ), Tripower Storage Hybrid (`sma_tripower_storage_hybrid` via Modbus ) | **[`View SMA`](documentation/devices/SMA.md)** |
+| **SOK** | SOK SK48V100 / PACE BMS (`sok_sk48v100_pace_bms` via Modbus ) | **[`View SOK`](documentation/devices/SOK.md)** |
+| **Solar Edge** | SolarEdge SunSpec Inverters (`solaredge_sunspec` via Modbus) | **[`View Solar Edge`](documentation/devices/SolarEdge.md)** |
+| **SolaX** | X1/X3 Hybrid G4-style Inverters (`solax_hybrid_g4` via Modbus ) | **[`View SolaX`](documentation/devices/SolaX.md)** |
+| **SolArk** | Hybrid Inverter (`solark_hybrid` via Modbus ), Modbus v1.1 (`solark_v1.1` via Modbus ) | **[`View SolArk`](documentation/devices/SolArk.md)** |
+| **Solinteg** | INTEG MHT 25–50K Hybrid (`solinteg_integ_mht_25_50_k` via Modbus ) — *partial map from public Modbus PDF* | **[`View Solinteg`](documentation/devices/Solinteg.md)** |
+| **Solis** | Hybrid Inverters (`solis_hybrid` via Modbus ), String Inverters (`solis_string` via Modbus ) | **[`View Solis`](documentation/devices/Solis.md)** |
+| **SRNE** | Energy-Storage Inverter v1.96 (`srne_2021_v1.96` via Modbus ), Energy-Storage Inverter v1.7 (`srne_v1.7` via Modbus ), Controller / Inverter v3.9 (`srne_v3.9` via Modbus ) | **[`View SRNE`](documentation/devices/SRNE.md)** |
+| **Sungrow** | SH / RS / RT Hybrid Inverters (`sungrow_hybrid` via Modbus ), SG-series String Inverters (`sungrow_sg` via Modbus ) | **[`View Sungrow`](documentation/devices/Sungrow.md)** |
 | **Sunmart** | Off-Grid Inverter (`sunmart` via Modbus ) | *No dedicated guide yet — [open an issue](https://github.com/BuxtonCalvin/MultiProtocolGateway/issues) if you'd like to write one* |
-| **Victron** | BMV Battery Monitor (`victron_bmv_battery_monitor` via Modbus ), GX Generic CAN Bus (`victron_gx_generic_canbus` via CAN bus), GX v3.3 (`victron_gx_v3.3` via Modbus ), MK3-USB VE.Bus (`victron_mk3usb_vebus` via Modbus ), MultiPlus / Quattro (`victron_multiplus_quattro` via Modbus ), Phoenix Inverter (`victron_phoenix_inverter` via Modbus ), SmartSolar MPPT (`victron_smartsolar_mppt` via Modbus ), VE.Direct Serial Devices (`victron_vedirect_serial` via VE.Direct serial), Venus GX System (`victron_venus_gx_system` via Modbus ) | **[`View Victron`](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/devices/Victron.md)** |
-| **Voltronic** | BMS 2020-03-25 (`voltronic_bms_2020_03_25` via Modbus ), BMS v1.1 (`voltronic_bms_v1.1` via Modbus ) | **[`View Voltronic`](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/devices/Voltronic.md)** |
+| **Victron** | BMV Battery Monitor (`victron_bmv_battery_monitor` via Modbus ), GX Generic CAN Bus (`victron_gx_generic_canbus` via CAN bus), GX v3.3 (`victron_gx_v3.3` via Modbus ), MK3-USB VE.Bus (`victron_mk3usb_vebus` via Modbus ), MultiPlus / Quattro (`victron_multiplus_quattro` via Modbus ), Phoenix Inverter (`victron_phoenix_inverter` via Modbus ), SmartSolar MPPT (`victron_smartsolar_mppt` via Modbus ), VE.Direct Serial Devices (`victron_vedirect_serial` via VE.Direct serial), Venus GX System (`victron_venus_gx_system` via Modbus ) | **[`View Victron`](documentation/devices/Victron.md)** |
+| **Voltronic** | BMS 2020-03-25 (`voltronic_bms_2020_03_25` via Modbus ), BMS v1.1 (`voltronic_bms_v1.1` via Modbus ) | **[`View Voltronic`](documentation/devices/Voltronic.md)** |
 
-Battery packs that speak an existing protocol are also covered even without their own folder — e.g. **AOLithium** 48V server-rack batteries work over the Voltronic RS485, Victron GX CAN, or SMA Sunny Island CAN maps depending on DIP-switch mode; see **[`View AOLithium`](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/devices/AOLithium.md)**.
+Battery packs that speak an existing protocol are also covered even without their own folder — e.g. **AOLithium** 48V server-rack batteries work over the Voltronic RS485, Victron GX CAN, or SMA Sunny Island CAN maps depending on DIP-switch mode; see **[`View AOLithium`](documentation/devices/AOLithium.md)**.
 
-For a full list of tested devices and community-reported compatibility, see [`devices_and_protocols.csv`](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/usage/devices_and_protocols.csv).
+For a full list of tested devices and community-reported compatibility, see [`devices_and_protocols.csv`](documentation/usage/devices_and_protocols.csv).
 
 MPG also supports any generic Modbus RTU or TCP device when given a register map: the [Live Analysis tool](#live-device-analysis) is specifically designed to help build maps for undocumented hardware.
 
@@ -268,7 +268,7 @@ MPG also supports any generic Modbus RTU or TCP device when given a register map
 
 Beyond the 29 manufacturers above, MPG has device metadata already stubbed in for **74 more manufacturers** — a JSON descriptor with the transport type and default settings, but no register map yet. These exist because someone requested or started the device but a full map hasn't been built. If you own one of these and can run the [Live Analysis tool](#live-device-analysis) against it, you can generate and commit a working register map directly from the web UI — no CSV editing required, and no need to already know the register layout.
 
-A few of these already have a wiring/protocol reference guide to jump-start the work, even though the register map itself is still pending: **[Kostal](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/devices/Kostal.md)**, **[KSTAR](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/devices/KSTAR.md)**, and **[Sofar](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/devices/Sofar.md)**.
+A few of these already have a wiring/protocol reference guide to jump-start the work, even though the register map itself is still pending: **[Kostal](documentation/devices/Kostal.md)**, **[KSTAR](documentation/devices/KSTAR.md)**, and **[Sofar](documentation/devices/Sofar.md)**.
 
 ### Full list of stub-protocol manufacturers
 
@@ -298,7 +298,7 @@ Hardware Device
 
 Each transport is independently configurable with its own scan interval, log level, variable mask, and protocol version. A scraper and bridge sharing the same `device_name` are linked — the scraper reads data, the bridge publishes it.
 
-[Complete Transport Architecture](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/architecture/mermaid-diagrams.md#2-sequence-diagram--scrape-cycle--bridge-output)
+[Complete Transport Architecture](documentation/architecture/mermaid-diagrams.md#2-sequence-diagram--scrape-cycle--bridge-output)
 
 **Transport** — `read_registers()`: one Modbus transaction, block of registers or a single register.
 
@@ -312,7 +312,7 @@ Each transport is independently configurable with its own scan interval, log lev
 
 ## Full Docker Compose Stack
 
-For a complete monitoring stack — MPG + Timescale DB + InfluxDB + InfluxDB3 + MQTT + Prometheus + pgAdmin + Chronograf + Grafana — see the included [`docker-compose.yml`](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/docker/docker-compose.yml) in this repository.
+For a complete monitoring stack — MPG + Timescale DB + InfluxDB + InfluxDB3 + MQTT + Prometheus + pgAdmin + Chronograf + Grafana — see the included [`docker-compose.yml`](documentation/docker/docker-compose.yml) in this repository.
 
 The stack provides:
 
@@ -340,7 +340,7 @@ cp .env.example .env
 docker compose up -d
 ```
 
-Full documentation for the compose stack is in [`docker-compose.yml`](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/docker/docker-compose.yml).
+Full documentation for the compose stack is in [`docker-compose.yml`](documentation/docker/docker-compose.yml).
 
 ---
 
@@ -390,16 +390,16 @@ If all MQTT values appear as "Unknown" immediately after setup, this is a known 
 
 Data produced by any of the MPG bridges can be visualized in Grafana. This example is using the influxdb bridge.
 
-[![Grafana Dashboard](https://github.com/BuxtonCalvin/MultiProtocolGateway/raw/master/documentation/assets/GrafanaSolar.png)](/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/assets/GrafanaSolar.png)
+[![Grafana Dashboard](documentation/assets/GrafanaSolar.png)](documentation/assets/GrafanaSolar.png)
 
-The code for this InfluxDB dashboard: [Grafana InfluxDB JSON](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/dashboards/GrafanaInfluxDBDashboard.json)
+The code for this InfluxDB dashboard: [Grafana InfluxDB JSON](documentation/dashboards/GrafanaInfluxDBDashboard.json)
 
-The code for the same InfluxDB3 dashboard can be found here: [Grafana InfluxDB3 JSON](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/dashboards/GrafanaInfluxDB3Dashboard.json)
+The code for the same InfluxDB3 dashboard can be found here: [Grafana InfluxDB3 JSON](documentation/dashboards/GrafanaInfluxDB3Dashboard.json)
 
 The code for the exact same style TimescaleDB dashboards:
 
-- [Grafana TimescaleDB Wide Table JSON](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/dashboards/GrafanaTimescaleDBWideDashboard.json)
-- [Grafana TimescaleDB Narrow Table JSON](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/dashboards/GrafanaTimescaleDBNarrowDashboard.json)
+- [Grafana TimescaleDB Wide Table JSON](documentation/dashboards/GrafanaTimescaleDBWideDashboard.json)
+- [Grafana TimescaleDB Narrow Table JSON](documentation/dashboards/GrafanaTimescaleDBNarrowDashboard.json)
 
 ---
 
@@ -432,7 +432,7 @@ The CSV files use `,` as delimiter (OpenOffice/LibreOffice compatible) and suppo
 
 Variable names have been normalized for readability. To use original documented names, clear the `variable_name` column in the CSV or edit via the Protocol Editor in the web UI.
 
-Find more protocol documentation here: [protocols](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/usage/protocols.md)
+Find more protocol documentation here: [protocols](documentation/usage/protocols.md)
 
 ### Using the Live Analysis Tool to Build New Maps
 
@@ -475,7 +475,7 @@ debug_register_42
 
 The register failure tracking system automatically detects and soft-disables problematic register ranges that consistently fail to read. This helps improve system reliability by avoiding repeated attempts to read from registers that are known to be problematic.
 
-Find more register failure documentation here: [register failure tracking](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/usage/register_failure_tracking.md)
+Find more register failure documentation here: [register failure tracking](documentation/usage/register_failure_tracking.md)
 
 Register failures appear as red high-lit rows in the transport scraper window.
 
@@ -502,9 +502,9 @@ Key settings available on every transport:
 
 For Modbus transports, additional keys include `host`, `port`, `unit_id`, `max_retries_per_block`, and `disable_duration_hours`.
 
-Full configuration documentation: [transports](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/usage/transports.md)
+Full configuration documentation: [transports](documentation/usage/transports.md)
 
-For manufacturer device-specific wiring and installation guides: [devices](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/documentation/devices)
+For manufacturer device-specific wiring and installation guides: [devices](documentation/devices)
 
 ---
 
@@ -513,7 +513,7 @@ For manufacturer device-specific wiring and installation guides: [devices](https
 Beyond the core gateway, `tools/` includes a few standalone utilities:
 
 - **`modbus_server_sim.py`** / **`canbus_server_sim.py`** — simulate a Modbus TCP server or virtual CAN bus for testing MPG without physical hardware (see [Try It Without Hardware](#try-it-with-or-without-hardware))
-- **`InfluxDateConverter.py`** — export, repair, and re-import InfluxDB time-series data, including importing EG4 inverter CSV exports and shifting timestamps into a new range; see [Influx Date Converter](https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/master/tools/ReadmeInfluxDateConverter.md) for the full guide
+- **`InfluxDateConverter.py`** — export, repair, and re-import InfluxDB time-series data, including importing EG4 inverter CSV exports and shifting timestamps into a new range; see [Influx Date Converter](tools/ReadmeInfluxDateConverter.md) for the full guide
 
 ---
 
