@@ -24,7 +24,6 @@ import logging
 import queue
 import shutil
 import threading
-from _thread import lock
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -70,7 +69,7 @@ ProgressQueueItem = ProgressMessage | _ScanDoneSentinel
 
 _SCAN_DONE = _ScanDoneSentinel()
 _progress_queues: dict[str, "queue.Queue[ProgressQueueItem]"] = {}
-_progress_queues_lock: lock = threading.Lock()
+_progress_queues_lock: threading.Lock = threading.Lock()
 
 
 def _register_progress_queue(device_name: str) -> "queue.Queue[ProgressQueueItem]":
