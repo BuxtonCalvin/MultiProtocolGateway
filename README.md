@@ -340,8 +340,6 @@ cp .env.example .env
 docker compose up -d
 ```
 
-Full documentation for the compose stack is in [`docker-compose.yml`](documentation/docker/docker-compose.yml).
-
 ---
 
 ## Installation as a System Service
