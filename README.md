@@ -118,11 +118,15 @@ Every commit to `config.cfg` is automatically versioned. If a change causes a pr
 
 A file watcher also monitors `config.cfg` and the `protocols/` directory for changes made outside the web UI (e.g. editing files directly over SSH). When it detects a change, MPG automatically rescans and reloads — the dashboard shows a live reload-status banner while this happens, so you always know the running configuration matches what's on disk.
 
+See the [Staging / Commit Workflow diagram](documentation/architecture/mermaid-diagrams.md#7-state-diagram--staging--commit-workflow-web-ui) for the full state machine, including the rollback and file-watcher-resync paths.
+
 ### Create Device
 
 The create device wizard walks you through creating a scraper device from scratch.
 
 [![Create Device](classes/WebServer/static/screenshots/create_device.png)](classes/WebServer/static/screenshots/create_device.png)
+
+New to MPG? [**Analyze.md**](documentation/usage/Analyze.md) is a beginner-friendly, start-to-finish walkthrough of Create Protocol → Create Device → Analyze, written for readers with no prior MPG experience. For the technical step-by-step of what happens under the hood when you save a new device (including the config.cfg write and the reload-on-restart behavior), see the [Device Creation Wizard diagram](documentation/architecture/mermaid-diagrams.md#17-flowchart--device-creation-wizard).
 
 ### Protocol Editor
 
@@ -148,20 +152,29 @@ The create protocol wizard walks you through creating a hardware protocol from s
 
 [![Create Device](classes/WebServer/static/screenshots/create_protocol.png)](classes/WebServer/static/screenshots/create_protocol.png)
 
+This is typically the first step for undocumented hardware — see [Analyze.md](documentation/usage/Analyze.md) for the full walkthrough, and the [Protocol Map Directory Structure diagram](documentation/architecture/mermaid-diagrams.md#16-mindmap--protocol-map-directory-structure) for how the resulting JSON descriptor and register-map CSVs are laid out on disk.
+
 ### Live Device Analysis
 
-The **Analyze** page is the tool for working with new or undocumented hardware — including any of the 74 [stub protocols](#community-help-wanted-stub-protocols) that don't have a register map yet. Select a physical device from the scraper page. Then in the analysis page, select one or more reference protocol maps, then click **Run Analysis**. MPG then:
+The **Analyze** page is the tool for working with new or undocumented hardware — including any of the 74 [stub protocols](#community-help-wanted-stub-protocols) that don't have a register map yet. For a plain-language, no-prior-experience walkthrough of this whole workflow, see [**Analyze.md**](documentation/usage/Analyze.md).
 
-1. Performs a live Modbus scan across all input and holding registers in the hardware device
-2. Compares the live scan against every selected protocol map
-3. Scores each protocol map by accuracy — how many documented registers actually appear in the scan within value ranges set in the protocol
-4. Produces per-protocol **Add** and **Remove** action lists, flagging registers that are present in the scan but absent from the default protocol map (candidates to add) and registers in the map that were not found on the device (candidates to remove)
+Select a physical device from the scraper page. Then in the analysis page, select one or more reference protocol maps, then click **Run Analysis**. MPG then:
+
+1. Runs a quick probe against all four register categories (Input, Holding, Coil, Discrete), sampling a handful of addresses spread across the full address space to determine which categories the device actually responds to — this works even for a brand-new protocol that's nothing but an empty JSON stub, and doesn't depend on which "Send Holding/Input/Coil/Discrete" boxes were checked when the device was created
+2. Performs a full live Modbus scan of every category that probed as supported
+3. Compares the live scan against every selected protocol map
+4. Scores each protocol map by accuracy — how many documented registers actually appear in the scan within value ranges set in the protocol
+5. Produces per-protocol **Add** and **Remove** action lists, flagging registers that are present in the scan but absent from the default protocol map (candidates to add) and registers in the map that were not found on the device (candidates to remove)
 
 [![Analysis](classes/WebServer/static/screenshots/analysis.png)](classes/WebServer/static/screenshots/analysis.png)
+
+If a category shows no response during the probe, it's reported to you as skipped (with a reason) rather than silently ignored — a **Scan Checked Anyway** control lets you force a full scan of any skipped category if you believe the probe missed it.
 
 Each suggested change can be individually toggled into or out of the commit queue. When you click **Commit**, MPG writes only the selected changes back to the protocol CSV files and rescans the web database — no manual CSV editing required. If the device's protocol has no register map yet at all — the stub case — committing an **Add** action creates the register-map CSV from scratch using the standard column layout, so building out a brand-new protocol from a live scan works the same way as refining an existing one.
 
 Analysis results stream back to the browser in real time via **Server-Sent Events (SSE)**, so you see scan progress line by line as registers are polled.
+
+For the full technical breakdown of this workflow — the probe algorithm, the SSE progress plumbing, and exactly what gets written on commit — see the [Live Protocol Analysis Workflow diagram](documentation/architecture/mermaid-diagrams.md#12-flowchart--live-protocol-analysis-workflow).
 
 ### Global & Logging Settings
 
@@ -264,7 +277,7 @@ MPG also supports any generic Modbus RTU or TCP device when given a register map
 
 ## Community Help Wanted: Stub Protocols
 
-Beyond the 29 manufacturers above, MPG has device metadata already stubbed in for **74 more manufacturers** — a JSON descriptor with the transport type and default settings, but no register map yet. These exist because someone requested or started the device but a full map hasn't been built. If you own one of these and can run the [Live Analysis tool](#live-device-analysis) against it, you can generate and commit a working register map directly from the web UI — no CSV editing required, and no need to already know the register layout.
+Beyond the 29 manufacturers above, MPG has device metadata already stubbed in for **74 more manufacturers** — a JSON descriptor with the transport type and default settings, but no register map yet. These exist because someone requested or started the device but a full map hasn't been built. If you own one of these and can run the [Live Analysis tool](#live-device-analysis) against it, you can generate and commit a working register map directly from the web UI — no CSV editing required, and no need to already know the register layout. New to MPG? [**Analyze.md**](documentation/usage/Analyze.md) walks through this exact scenario (Create Protocol → Create Device → Analyze) start to finish for readers with no prior experience.
 
 A few of these already have a wiring/protocol reference guide to jump-start the work, even though the register map itself is still pending: **[Kostal](documentation/devices/Kostal.md)**, **[KSTAR](documentation/devices/KSTAR.md)**, and **[Sofar](documentation/devices/Sofar.md)**.
 
@@ -296,7 +309,7 @@ Hardware Device
 
 Each transport is independently configurable with its own scan interval, log level, variable mask, and protocol version. A scraper and bridge sharing the same `device_name` are linked — the scraper reads data, the bridge publishes it.
 
-[Complete Transport Architecture](documentation/architecture/mermaid-diagrams.md#2-sequence-diagram--scrape-cycle--bridge-output)
+[Complete Transport Architecture](documentation/architecture/mermaid-diagrams.md#2-sequence-diagram--scrape-cycle--bridge-output) · [Connection Lifecycle & Alerting](documentation/architecture/mermaid-diagrams.md#6-state-diagram--transport-connection-lifecycle)
 
 **Transport** — `read_registers()`: one Modbus transaction, block of registers or a single register.
 
@@ -310,7 +323,7 @@ Each transport is independently configurable with its own scan interval, log lev
 
 ## Full Docker Compose Stack
 
-For a complete monitoring stack — MPG + Timescale DB + InfluxDB + InfluxDB3 + MQTT + Prometheus + pgAdmin + Chronograf + Grafana — see the included [`docker-compose.yml`](documentation/docker/docker-compose.yml) in this repository.
+For a complete monitoring stack — MPG + Timescale DB + InfluxDB + InfluxDB3 + MQTT + Prometheus + pgAdmin + Chronograf + Grafana — see the included [`docker-compose.yml`](documentation/docker/docker-compose.yml) in this repository, or the [Deployment / Container diagram](documentation/architecture/mermaid-diagrams.md#14-deployment--container-diagram--docker-stack) for the full topology, ports, and data paths.
 
 The stack provides:
 
@@ -471,7 +484,7 @@ debug_register_42
 
 The register failure tracking system automatically detects and soft-disables problematic register ranges that consistently fail to read. This helps improve system reliability by avoiding repeated attempts to read from registers that are known to be problematic.
 
-Find more register failure documentation here: [register failure tracking](documentation/usage/register_failure_tracking.md)
+Find more register failure documentation here: [register failure tracking](documentation/usage/register_failure_tracking.md) · [state diagram](documentation/architecture/mermaid-diagrams.md#15-state-diagram--register-failure-tracker)
 
 Register failures appear as red high-lit rows in the transport scraper window.
 

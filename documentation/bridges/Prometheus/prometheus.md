@@ -48,13 +48,18 @@ counter_metric_suffixes = _total
 histogram_fields =
 histogram_buckets =
 
-# Mount path (when attached to an existing FastAPI app)
+# Mount path (this bridge is always mounted onto the WebServer's own
+# FastAPI app, on whatever port the web UI already runs on, e.g. 1717 —
+# see classes/WebServer/main.py's _mount_prometheus_bridges())
 metrics_path = /metrics
 
-# Standalone server (headless deployments only)
-enable_standalone_server = false
-standalone_host = 0.0.0.0
-standalone_port = 9110
+# Optional: also expose metrics_path on this additional port. This does
+# NOT start a second server -- it's one extra listening socket on the
+# SAME uvicorn.Server/event loop, restricted so that port serves nothing
+# but metrics_path (see RestrictPortMiddleware in main.py). Useful for
+# firewalling metrics access away from the config UI. Leave unset to
+# serve only on the main WebServer port.
+metrics_port =
 
 # Staleness / target-health monitoring
 staleness_multiplier = 3.0
@@ -71,13 +76,48 @@ stale_check_interval = 5.0
 | `counter_metric_suffixes` | `_total` | Comma-separated field-name suffixes treated as Prometheus Counters rather than Gauges |
 | `histogram_fields` | `` (none) | Comma-separated exact field names to record as Histograms instead of Gauges — opt-in only, never inferred automatically |
 | `histogram_buckets` | `` (default buckets) | Comma-separated float bucket boundaries for histogram fields |
-| `metrics_path` | `/metrics` | Path this bridge's metrics are served under when mounted into an existing FastAPI app |
-| `enable_standalone_server` | `false` | Run this bridge's own uvicorn/FastAPI HTTP server instead of relying on an already-running WebServer to mount it |
-| `standalone_host` | `0.0.0.0` | Bind host for the standalone server |
-| `standalone_port` | `9110` | Bind port for the standalone server |
+| `metrics_path` | `/metrics` | Path this bridge's metrics are served under on the WebServer's own app (default port 1717) |
+| `metrics_port` | (none) | Optional additional port also serving `metrics_path`, restricted to serve nothing else — one extra socket on the same server/event loop, not a second process. See "Dedicated Metrics Port" below |
+| `host` / `port` | `0.0.0.0` / `1717` | Display-only — shown on the dashboard's Host column. Not read by this bridge at runtime; keep in sync with `metrics_port` yourself. See "Dashboard Host/Port Display" below |
 | `staleness_multiplier` | `3.0` | A machine is flagged stale once this many multiples of its own `read_interval` have elapsed since its last write |
 | `staleness_check_interval` | `5.0` | Seconds between background staleness sweeps |
 | `device_name` | `Prometheus MPG Bridge` | Name for the bridge itself, used only in logs/notifications — distinct from any individual machine's `device_name` label value |
+
+## Dedicated Metrics Port
+
+By default, this bridge's `/metrics` is served on the same port as the MPG web UI (1717) — anyone who can reach the UI can also scrape metrics, and vice versa. Setting `metrics_port` opens one additional listening socket dedicated to metrics:
+
+```ini
+[prometheus_output]
+type = prometheus_out
+metrics_path = /metrics
+metrics_port = 9110
+```
+
+**This is not a second web server.** It's the exact same `uvicorn.Server`, event loop, thread, and FastAPI app as the main UI — just one more bound socket. A lightweight ASGI middleware (`RestrictPortMiddleware` in `classes/WebServer/main.py`) checks which port a request arrived on: on `metrics_port`, only `metrics_path` is servable and everything else 404s; on the main port, nothing changes. So `metrics_port` gives you a real firewall boundary — e.g. allow a monitoring subnet to reach 9110 while keeping 1717 (which can edit device configuration) unreachable from that same network — without the operational cost of a second process. Note it does *not* give fault isolation: it's still the same Python interpreter and event loop either way, so a slow web UI request can still delay a metrics scrape on the dedicated port too.
+
+Leave `metrics_port` unset (the default) if you don't need that separation — the web UI's port already serves metrics fine on its own.
+
+If more than one Prometheus bridge is configured with the same `metrics_port`, they share that one socket; each bridge's own `metrics_path` still needs to be distinct (see the config-loading error logged otherwise). If the port is already in use by something else on the host, MPG logs an error at startup and that bridge simply falls back to being reachable only on the main WebServer port — it does not crash the whole process.
+
+## Dashboard Host/Port Display
+
+The "Configured Devices" dashboard (the app's home page) shows a Host column for every scraper and bridge. For most bridges (timescaledb, influxdb3_out, etc.) that column is a real, literal `host`/`port` config key the bridge connects *out* to. `prometheus_out` is different — it doesn't connect out anywhere, it's *scraped*, so those two keys don't exist there naturally.
+
+To make the dashboard show something meaningful anyway, `host`/`port` were added as informational, display-only config keys for `prometheus_out` in `transport_defaults.json` (default `0.0.0.0` / `1717`, matching what the bridge serves on by default). **These are display-only** — `prometheus_out.py` itself never reads a `host`/`port` config key; the bridge's actual serving address is governed entirely by `metrics_path`/`metrics_port` (above).
+
+**This means they can drift.** If you set `metrics_port = 9110`, the dashboard's `port` value won't automatically follow unless you also set `port = 9110` yourself:
+
+```ini
+[prometheus_output]
+type = prometheus_out
+metrics_path = /metrics
+metrics_port = 9110
+host = 0.0.0.0
+port = 9110
+```
+
+**If you already had a `[prometheus_output]` section configured before this `host`/`port` display feature existed**, adding these keys to `transport_defaults.json` alone won't retroactively populate your dashboard — the scanner only writes a real (non-empty) value into the database when the key is *literally present in config.cfg*; a JSON-registry default alone only makes it appear as an available-but-empty field in the settings editor. Add the two lines above directly to your existing `[prometheus_output]` section, then let MPG rescan (save the file, or restart) to pick them up.
 
 ## Metric Type Classification
 
@@ -154,18 +194,18 @@ metrics_path = /metrics
    prometheus_client
    ```
 
-This uses `prometheus_client.make_asgi_app()` under the hood to mount at `bridge.metrics_path` (default `/metrics`). If you mount more than one Prometheus bridge into the same app, give each a distinct `metrics_path`.
+This uses `prometheus_client.make_asgi_app()` under the hood, auto-mounted at `bridge.metrics_path` (default `/metrics`) onto the WebServer's own FastAPI app by `classes/WebServer/main.py`'s `_mount_prometheus_bridges()` — every configured `prometheus_out` bridge is picked up automatically at startup, on the same port as the web UI (default 1717). No separate port or process is needed, since MPG always runs its WebServer. If you mount more than one Prometheus bridge, give each a distinct `metrics_path`.
 
 ## Prometheus Server Setup
 
-Point a Prometheus server's scrape config at whichever host/port is serving this bridge's endpoint:
+Point a Prometheus server's scrape config at the MPG WebServer's own host/port:
 
 ```yaml
 scrape_configs:
   - job_name: "mpg_devices"
     scrape_interval: 15s
     static_configs:
-      - targets: ["localhost:9110"]
+      - targets: ["localhost:1717"]
     metrics_path: /metrics
 ```
 
@@ -199,9 +239,11 @@ mpg_prometheus_bridge_scrape_failures_total
 
 ### No Data Appearing in Prometheus
 
-- Confirm the endpoint is reachable: `curl http://<host>:<port>/metrics`
-- Check whether the bridge is mounted (Option A) or running standalone (Option B) — a bridge with `enable_standalone_server = false` and no `attach_metrics_route()` call has nowhere to be scraped from
-- Verify your Prometheus server's `scrape_configs` target and `metrics_path` match this bridge's actual host/port/`metrics_path`
+- Confirm the endpoint is reachable: `curl http://<mpg-host>:1717/metrics` (or `:<metrics_port>/metrics` if you've set one)
+- Check the MPG startup logs for a line like `Prometheus bridge '...' mounted at /metrics on the web UI app` — if it's missing, confirm `[prometheus_output]` has `type = prometheus_out` and `prometheus_client` is installed
+- If you set `metrics_port` and it's not reachable, check the startup logs for a bind error (port already in use) — MPG falls back to the main port only in that case, without crashing; look for `Could not bind Prometheus metrics_port ...`
+- If `metrics_port` is set and reachable but every other path 404s (including the config UI) — that's `RestrictPortMiddleware` working as intended, not a bug; use the main WebServer port for the UI
+- Verify your Prometheus server's `scrape_configs` target matches the MPG WebServer's actual host/port (default 1717, or `metrics_port` if set) and this bridge's `metrics_path`
 - Check Prometheus's own "Targets" page (`<prometheus>:9090/targets`) for scrape errors
 
 ### A Field Isn't Showing Up

@@ -55,6 +55,18 @@
 
   <div id="analysis-message" class="mb-4" aria-live="polite"></div>
 
+  <!-- Running-scan warning — shown for the ENTIRE duration of an active
+       analysis (not just while probing). Bridges only get data from the
+       normal scheduled read/write cycle, which is suspended on this device
+       for the whole scan (see the transport/bus/port locks held throughout
+       analyze_protocols), so anything downstream — Home Assistant, Grafana,
+       TimescaleDB, etc — sees no updates for this device until it finishes. -->
+  <div id="analysis-running-banner" class="mb-4 hidden">
+    <div class="rounded border border-warning/40 bg-warning/10 px-4 py-3 text-sm text-warning font-medium">
+      Warning: data is not scraped for bridge use for the duration of the analysis.
+    </div>
+  </div>
+
   <!-- Progress bar — hidden until analysis starts -->
   <div id="analysis-progress-wrap" class="mb-4 hidden">
     <div class="flex items-center justify-between text-xs surface-muted mb-1">
@@ -68,6 +80,27 @@
       <div id="analysis-progress-bar"
            class="h-2 rounded-full bg-accent transition-all duration-200"
            style="width: 0%">
+      </div>
+    </div>
+  </div>
+
+  <!-- Skipped-types warning — hidden unless the last scan skipped a registry
+       type (probe found no evidence it's supported). Lets the operator force
+       a full scan anyway, since the probe is a heuristic and can be wrong. -->
+  <div id="analysis-skipped-wrap" class="mb-4 hidden">
+    <div class="rounded border border-warning/40 bg-warning/10 px-4 py-3 text-sm space-y-2">
+      <div class="text-warning font-medium">
+        Some register types showed no response and were skipped:
+      </div>
+      <div id="analysis-skipped-list" class="space-y-1"></div>
+      <div class="flex items-center justify-between gap-3 pt-1">
+        <p class="surface-muted text-xs">
+          This is a quick probe, not a certainty — some devices only answer under specific conditions.
+          Check any type you still want scanned and try again.
+        </p>
+        <button id="analysis-scan-anyway-btn" type="button" class="btn-secondary text-xs whitespace-nowrap">
+          Scan Checked Anyway
+        </button>
       </div>
     </div>
   </div>
@@ -161,6 +194,10 @@
   const batchSizeInput = document.getElementById('analysis-batch-size');
   const elapsedWrap = document.getElementById('analysis-elapsed-wrap');
   const elapsedDisplay = document.getElementById('analysis-elapsed');
+  const skippedWrap = document.getElementById('analysis-skipped-wrap');
+  const runningBanner = document.getElementById('analysis-running-banner');
+  const skippedList = document.getElementById('analysis-skipped-list');
+  const scanAnywayBtn = document.getElementById('analysis-scan-anyway-btn');
 
   const state = {
     analysisResult: null,
@@ -237,6 +274,31 @@
     }
     const names = Object.keys(state.analysisResult?.protocols || {});
     state.focusedProtocol = names.includes(currentProtocol) ? currentProtocol : (names[0] || null);
+  }
+
+  const REGISTRY_LABELS = { input: 'Input', holding: 'Holding', coil: 'Coil', discrete: 'Discrete' };
+
+  function renderSkippedTypes() {
+    const skipped = state.analysisResult?.skipped_types || {};
+    const types = Object.keys(skipped);
+    if (!types.length) {
+      skippedWrap.classList.add('hidden');
+      skippedList.innerHTML = '';
+      return;
+    }
+    skippedList.innerHTML = types.map((t) => `
+      <label class="flex items-start gap-2 text-xs surface-text cursor-pointer select-none">
+        <input type="checkbox" class="analysis-skipped-check accent-accent w-3.5 h-3.5 mt-0.5" data-type="${t}">
+        <span><strong>${REGISTRY_LABELS[t] || t}:</strong> <span class="surface-muted">${skipped[t]}</span></span>
+      </label>
+    `).join('');
+    skippedWrap.classList.remove('hidden');
+  }
+
+  function selectedForceTypes() {
+    return Array.from(document.querySelectorAll('.analysis-skipped-check'))
+      .filter((input) => input.checked)
+      .map((input) => input.dataset.type);
   }
 
   function renderScores() {
@@ -580,8 +642,14 @@
   // Progress tracking — phases are discovered dynamically from SSE events so
   // that the thermometer spans only the register types the device actually has.
   // ---------------------------------------------------------------------------
-  const _PHASE_ORDER = ['input', 'holding', 'coil', 'discrete'];
-  const _PHASE_NAMES = { input: 'Input', holding: 'Holding', coil: 'Coil', discrete: 'Discrete' };
+  const _PHASE_ORDER = ['probe_input', 'probe_holding', 'probe_coil', 'probe_discrete', 'input', 'holding', 'coil', 'discrete'];
+  const _PHASE_NAMES = {
+    probe_input: 'Probing Input registers',
+    probe_holding: 'Probing Holding registers',
+    probe_coil: 'Probing Coil registers',
+    probe_discrete: 'Probing Discrete registers',
+    input: 'Input', holding: 'Holding', coil: 'Coil', discrete: 'Discrete',
+  };
 
   let _scanStartTime   = null;   // wall-clock ms when scan began
   let _elapsedTimer    = null;   // setInterval handle for elapsed display
@@ -617,7 +685,7 @@
     // Leave the final time visible until next run starts
   }
 
-  function showProgress(phase, phasePct) {
+  function showProgress(phase, phasePct, done, total) {
     const p = String(phase).toLowerCase();
 
     // Register this phase the first time we see it (preserves arrival order)
@@ -635,7 +703,18 @@
     ));
 
     progressWrap.classList.remove('hidden');
-    progressLabel.textContent = `Scanning ${_PHASE_NAMES[p] || p} registers…`;
+    if (p.startsWith('probe_')) {
+      // Probing a single unresponsive register type can legitimately take a
+      // long time (up to 8 spread-out addresses, each capped by the modbus
+      // client's own timeout). Showing which attempt we're on — not just a
+      // static "checking which types respond" message — is what actually
+      // proves to the operator that something is still happening, rather
+      // than leaving the same sentence on screen for the whole duration.
+      const attemptText = (done && total) ? ` (address ${done} of ${total})` : '…';
+      progressLabel.textContent = `${_PHASE_NAMES[p] || 'Probing device'}${attemptText}`;
+    } else {
+      progressLabel.textContent = `Scanning ${_PHASE_NAMES[p] || p} registers…`;
+    }
     progressBar.style.width   = `${overallPct}%`;
     progressPct.textContent   = `${Math.round(overallPct)}%`;
 
@@ -650,6 +729,7 @@
 
   function hideProgress() {
     progressWrap.classList.add('hidden');
+    runningBanner.classList.add('hidden');
     progressBar.style.width   = '0%';
     progressLabel.textContent = 'Scanning…';
     progressPct.textContent   = '0%';
@@ -658,7 +738,8 @@
     _currentPhaseIdx = 0;
   }
 
-  async function runAnalysis() {
+  async function runAnalysis(forceTypes) {
+    forceTypes = forceTypes || [];
     const protocols = selectedProtocols();
     if (!protocols.length) {
       showMessage('error', 'Select at least one protocol to analyze.');
@@ -681,10 +762,12 @@
     state.queuedChanges.clear();
     state.abortController = new AbortController();
     _seenPhases = [];
+    skippedWrap.classList.add('hidden');
+    runningBanner.classList.remove('hidden');
     elapsedWrap.classList.add('hidden');   // hide stale value while timer resets
     _startElapsedTimer();
     setBusy();
-    showProgress('input', 0);
+    showProgress('probe_input', 0);
 
     let evtSource = null;
     try {
@@ -693,7 +776,7 @@
         try {
           const msg = JSON.parse(e.data);
           if (msg.type === 'progress') {
-            showProgress(msg.phase, msg.pct);
+            showProgress(msg.phase, msg.pct, msg.done, msg.total);
           } else if (msg.type === 'done' || msg.type === 'error') {
             evtSource.close();
           }
@@ -711,6 +794,7 @@
           protocol_names: protocols,
           current_protocol: currentProtocol || null,
           batch_size: parseInt(batchSizeInput.value, 10) || 40,
+          force_types: forceTypes,
         }),
       });
       const data = await response.json();
@@ -721,8 +805,15 @@
       state.analysisResult = data.result;
       renderScores();
       renderFocusedProtocol();
+      renderSkippedTypes();
       updateQueueSummary();
-      showMessage('success', 'Analysis complete. Click "Queue Add" or "Queue Remove" on the changes you want, then commit.');
+      const skippedCount = Object.keys(data.result.skipped_types || {}).length;
+      showMessage(
+        'success',
+        skippedCount
+          ? `Analysis complete — ${skippedCount} register type(s) showed no response and were skipped (see warning above). Click "Queue Add" or "Queue Remove" on the changes you want, then commit.`
+          : 'Analysis complete. Click "Queue Add" or "Queue Remove" on the changes you want, then commit.',
+      );
     } catch (error) {
       if (error.name === 'AbortError') {
         showMessage('info', 'Analysis cancelled. Normal device reads will resume shortly.');
@@ -848,8 +939,17 @@
     }
   });
 
-  runBtn.addEventListener('click', runAnalysis);
+  runBtn.addEventListener('click', () => runAnalysis());
   commitBtn.addEventListener('click', commitAnalysis);
+
+  scanAnywayBtn.addEventListener('click', function () {
+    const forced = selectedForceTypes();
+    if (!forced.length) {
+      showMessage('error', 'Check at least one skipped type before scanning anyway.');
+      return;
+    }
+    runAnalysis(forced);
+  });
 
   resultShell.addEventListener('click', function (event) {
     const toggle = event.target.closest('.analysis-action-toggle');

@@ -5,17 +5,18 @@
 # =============================================================================
 #
 # Services included:
-#   mpg            - Multi Protocol Gateway (web UI on :1717)
+#   mpg            - Multi Protocol Gateway (web UI on :1717; Prometheus
+#                    metrics also on a dedicated :9110 port if you configure it in config.cfg)
 #   timescaledb    - TimescaleDB / PostgreSQL (:5432)
 #   influxdb       - InfluxDB v1.x (:8086)
-#   influxdb3      - InfluxDB v3.x (:8181)
-#   influxdb3-explorer - influxdb3-explorer v1.8 (8888)
+#   influxdb3      - InfluxDB v3.x (host :8100 -> container :8181)
+#   influxdb3-explorer - influxdb3-explorer v1.8 (host :8889/:8887/:8886)
 #   mosquitto      - Eclipse Mosquitto MQTT broker (:1883, :9001 websocket)
 #   pgadmin        - pgAdmin 4 web UI (:5050)
 #   chronograf     - InfluxDB web dashboard (:8888)
 #   grafana        - Grafana visualization (:3000)
-#   prometheus      - Prometheus monitoring (:9090)
-#   portainer       - Portainer Docker management (:9000)
+#   prometheus     - Prometheus monitoring (:9090)
+#   portainer      - Portainer Docker management (:9000)
 #
 # Usage:
 #   1. Copy this file and the companion configs to your docker compose deployment directory:
@@ -28,14 +29,41 @@
 #   3. Create required config directories:
 #        mkdir -p config/mosquitto/{config,data,log}
 #        mkdir -p config/grafana/provisioning/{datasources,dashboards}
+#        mkdir -p config/prometheus
 #
 #   4. Drop your mosquitto.conf into config/mosquitto/config/
 #      (see the mosquitto.conf example block at the bottom of this file)
 #
-#   5. Start the stack:
+#   5. Drop prometheus.yml into config/prometheus/ (a starter file scraping
+#      the mpg service on its metrics port is provided alongside this file —
+#      see prometheus.yml). This file MUST exist before first "docker compose up",
+#      or Docker will bind-mount an empty directory in its place and the
+#      prometheus container will fail to start.
+#
+#   6. In your MPG config.cfg, add a Prometheus bridge section, e.g.:
+#        [prometheus_output]
+#        type = prometheus_out
+#        metric_prefix = device_
+#        metrics_path = /metrics
+#        metrics_port = 9110
+#      metrics_port is optional -- omit it and MPG serves /metrics on the
+#      same port as the web UI (1717), nothing else to configure. This
+#      compose file uses it anyway, as a segmentation example: the mpg
+#      service below does NOT publish 9110 to the host, only 1717. That
+#      means 9110 is reachable solely by other containers on the
+#      mpg_internal network (i.e. the "prometheus" service here) -- not
+#      from outside Docker -- while 1717 (which can edit device config)
+#      stays the one port you actually expose. This is one process, one
+#      web server; metrics_port is just an additional restricted socket
+#      on it, not a second server (see classes/WebServer/main.py).
+#
+#
+#   7. Start the stack:
 #        docker compose up -d
 #
-#   6. Open the MPG web UI at http://localhost:1717 to configure your devices.
+#   8. Open the MPG web UI at http://localhost:1717 to configure your devices.
+#      Open the Prometheus UI at http://localhost:9090 to confirm the "mpg"
+#      target under Status -> Targets shows as UP.
 #
 # Notes:
 #   - MPG requires access to a serial/USB device for Modbus RTU if
@@ -47,6 +75,9 @@
 #     Override VOLUME_BASE in .env to store data on the host filesystem.
 #   - Grafana is pre-configured to discover TimescaleDB and InfluxDB
 #     as data sources on first boot via provisioning files.
+#   - influxdb3 / influxdb3-explorer host ports intentionally differ from
+#     their container-internal ports (8100->8181, 8889/8887/8886->80/443/8080).
+#     Use the HOST-side port when connecting from outside Docker.
 # =============================================================================
 
 x-restart-policy: &restart-policy
@@ -83,12 +114,19 @@ services:
     <<: [*restart-policy, *default-logging]
     ports:
       - "${MPG_PORT:-1717}:1717"
+      # /metrics is always reachable here 1717 too. 
+      
+      # - "9110:9110"
+      # add "9110:9110" here for Prometheus metrics to be reachable from the host,
+      # but it's not required for Prometheus to scrape it from the internal network.
+      #  Only add this line if you specifically want it reachable from the host too.
+
     volumes:
       - mpg/mpg_config:/app/config
       - mpg/mpg_protocols:/app/protocols
-      # if you want to persist the backlog and logs, uncomment these lines 
+      # if you want to persist the backlog and logs, uncomment these lines
       #- mpg/backlogs:/app/backlogs
-      #- mpg/logs:/app/logs      
+      #- mpg/logs:/app/logs
       # Mount your config.cfg directly if you manage it outside the UI:
       # - mpg/config/config.cfg:/app/config/config.cfg
     environment:
@@ -124,9 +162,8 @@ services:
     ports:
       - "${TIMESCALE_PORT:-5432}:5432"
     volumes:
-     # note the ha version of timescaledb uses a different data storage path compared to the standard postgres database
+      # note the ha version of timescaledb uses a different data storage path compared to the standard postgres database
       - mpg/timescaledb/timescaledb_data:/var/lib/postgresql/data
-
     environment:
       POSTGRES_DB: ${TIMESCALE_DB:-mpg}
       POSTGRES_USER: ${TIMESCALE_USER:-mpg}
@@ -180,10 +217,12 @@ services:
     <<: [*restart-policy, *default-logging]
     user: root
     environment:
-    # This env tells the engine process which token string matches the operational layer. Generate the key per above.
-      - INFLUXDB3_AUTH_TOKEN=apiv3_CiLCKXAAbiCBxSzqvjT09Ev1ZK5DBDFo1I-Z11ALvJm-oh9XqoFQmZ_99im0D4r2xkm6toTX3XzSspaKj1XB4A
+      # This env tells the engine process which token string matches the operational layer.
+      # FIX: do not hardcode a real token in a shared compose file — generate your own and
+      # put it in .env instead (see .env.example: INFLUXDB3_AUTH_TOKEN=...).
+      - INFLUXDB3_AUTH_TOKEN=${INFLUXDB3_AUTH_TOKEN:?INFLUXDB3_AUTH_TOKEN must be set in .env}
     ports:
-      - "8100:8181" # Native v3 API port
+      - "8100:8181" # Host 8100 -> container 8181 (native v3 API port)
     volumes:
       - mpg/influxdb3/data:/var/lib/influxdb3/data:z
       - mpg/influxdb3/influxdb3_plugins:/var/lib/influxdb3/plugins
@@ -201,25 +240,22 @@ services:
       #- --tls-key=/etc/ssl/influxdb/server-key.key
     networks:
       - mpg_internal
-  
+
   # Only if using influxdb3 -- influxdb3 configuration ui tool
   influxdb3-explorer:
     image: influxdata/influxdb3-ui:latest
     container_name: influxdb3-explorer
-    <<: [*restart-policy, *default-logging]    
+    <<: [*restart-policy, *default-logging]
     user: root
     ports:
       - "8889:80"
       - "8887:443"
       - "8886:8080"
     environment:
-      - SESSION_SECRET_KEY=${SESSION_SECRET_KEY:-}
+      - SESSION_SECRET_KEY=${SESSION_SECRET_KEY:?SESSION_SECRET_KEY must be set in .env}
     command: ["--mode=admin"]
-    restart: unless-stopped 
     networks:
       - mpg_internal
-                 
-
 
   # ---------------------------------------------------------------------------
   # Eclipse Mosquitto  (MQTT broker)
@@ -272,7 +308,7 @@ services:
         condition: service_healthy
 
   # ---------------------------------------------------------------------------
-  # Chronograf  (InfluxDB 1.x web dashboard)  
+  # Chronograf  (InfluxDB 1.x web dashboard)
   # ---------------------------------------------------------------------------
   chronograf:
     image: chronograf:latest
@@ -331,15 +367,20 @@ services:
       influxdb:
         condition: service_healthy
 
+  # ---------------------------------------------------------------------------
+  # Prometheus  (scrapes MPG's prometheus_out bridge — see prometheus.yml)
+  # ---------------------------------------------------------------------------
   prometheus:
     container_name: prometheus
     image: prom/prometheus:latest
     <<: [*restart-policy, *default-logging]
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - mpg/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      # FIX: dropped the docker.sock bind-mount and `user: root` — this stack's
+      # prometheus.yml uses static_configs, not docker_sd_configs, so Prometheus
+      # never needs Docker API / socket access. Add both back only if you
+      # switch to Docker service discovery.
+      - mpg/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - mpg/prometheus/prometheus_data:/prometheus
-    user: root   
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
@@ -350,11 +391,19 @@ services:
       - '--enable-feature=promql-experimental-functions'
       - '--storage.tsdb.retention.time=30d'
     ports:
-      - 9090:9090
-    expose:
-      - 9090
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    # FIX: removed the redundant `expose: [9090]` — already published above,
+    # and containers on mpg_internal can reach each other regardless of
+    # "expose"/"ports" either way.
     networks:
       - mpg_internal
+    # FIX: added — not strictly required (Prometheus retries scrape targets
+    # on its own schedule regardless of startup order) but avoids a burst
+    # of "connection refused" scrape errors on first boot.
+    depends_on:
+      mpg:
+        condition: service_healthy
+
   portainer:
     image: portainer/portainer-ce:latest
     container_name: portainer

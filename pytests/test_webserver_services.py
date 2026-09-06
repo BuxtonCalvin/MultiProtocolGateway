@@ -17,6 +17,11 @@
 
 """Unit tests for WebServer service and diff helpers."""
 
+# pyright: reportPrivateUsage=false
+# White-box testing of internal helpers (_classify_transport, etc.) is the
+# point of these tests, not a bug. See test_transports.py's copy of this
+# comment for the full rationale.
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -38,19 +43,19 @@ from classes.WebServer.services.device_service import TransportLibraryRow
 class QueryStub:
     """Tiny SQLAlchemy query test double for all/filter/order_by/limit chains."""
 
-    def __init__(self, rows):
-        self.rows = rows
+    def __init__(self, rows: list[object]) -> None:
+        self.rows: list[object] = rows
 
-    def all(self):
+    def all(self) -> list[object]:
         return self.rows
 
-    def filter(self, *args, **kwargs):
+    def filter(self, *args: object, **kwargs: object) -> QueryStub:
         return self
 
-    def order_by(self, *args, **kwargs):
+    def order_by(self, *args: object, **kwargs: object) -> QueryStub:
         return self
 
-    def limit(self, *args, **kwargs):
+    def limit(self, *args: object, **kwargs: object) -> QueryStub:
         return self
 
 

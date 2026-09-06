@@ -321,18 +321,18 @@
     "write_requires_complete_cycle": "true"
   },
   "prometheus_out": {
-    "standalone_host": "0.0.0.0",
     "stale_check_interval": "5.0",
     "histogram_fields": "",
     "include_protocol_label": "True",
     "counter_metric_suffixes": "_total",
     "histogram_buckets": "",
-    "enable_standalone_server": "False",
     "metric_prefix": "device_",
     "device_name": "Prometheus MPG Bridge",
     "metrics_path": "/metrics",
-    "standalone_port": "9110",
     "staleness_multiplier": "3.0",
-    "max_label_value_length": "128"
+    "max_label_value_length": "128",
+    "metrics_port": "",
+    "host": "0.0.0.0",
+    "port": "1717"
   }
 }

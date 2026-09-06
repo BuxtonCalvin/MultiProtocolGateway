@@ -588,7 +588,19 @@ Though you can hand craft your config, it's best to use the UI to configure your
 
 ```ini
 [general]
-log_level = INFO
+read_mode = sequential
+enable_dynamic_configuration = true
+
+[logging]
+log_dir = logs
+log_file = MPG.log
+level = DEBUG
+rotation = weekly
+when = W0
+interval = 1
+backup_count = 4
+max_bytes = 104857600
+console = true
 
 [transport.inverter]
 # Scraper: reads Growatt inverter over RS-485
@@ -622,13 +634,18 @@ discovery_topic = homeassistant
 
 ```ini
 [general]
-log_level = INFO
+read_mode = sequential
+enable_dynamic_configuration = true
 
 [logging]
 log_dir = logs
-log_file = gateway.log
+log_file = MPG.log
+level = DEBUG
 rotation = weekly
+when = W0
+interval = 1
 backup_count = 4
+max_bytes = 104857600
 console = true
 
 [transport.Inverter1]
@@ -663,7 +680,19 @@ drop_after = 1 year
 
 ```ini
 [general]
-log_level = INFO
+read_mode = sequential
+enable_dynamic_configuration = true
+
+[logging]
+log_dir = logs
+log_file = MPG.log
+level = DEBUG
+rotation = weekly
+when = W0
+interval = 1
+backup_count = 4
+max_bytes = 104857600
+console = true
 
 [transport.inverter]
 transport = modbus_rtu
@@ -702,7 +731,19 @@ batch_size = 50
 
 ```ini
 [general]
-log_level = INFO
+read_mode = sequential
+enable_dynamic_configuration = true
+
+[logging]
+log_dir = logs
+log_file = MPG.log
+level = DEBUG
+rotation = weekly
+when = W0
+interval = 1
+backup_count = 4
+max_bytes = 104857600
+console = true
 
 [transport.bms]
 transport = canbus
@@ -731,7 +772,19 @@ discovery_enabled = true
 
 ```ini
 [general]
-log_level = DEBUG
+read_mode = concurrent
+enable_dynamic_configuration = true
+
+[logging]
+log_dir = logs
+log_file = MPG.log
+level = DEBUG
+rotation = weekly
+when = W0
+interval = 1
+backup_count = 4
+max_bytes = 104857600
+console = true
 
 [transport.inverter]
 transport = modbus_rtu

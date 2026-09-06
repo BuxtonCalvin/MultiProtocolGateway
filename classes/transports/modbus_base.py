@@ -25,7 +25,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass, field
-from threading import Lock
+from threading import Lock, RLock
 from typing import Callable, Iterator, Literal, Optional, Protocol
 
 from pymodbus.client.base import ModbusBaseSyncClient
@@ -272,6 +272,11 @@ class ProtocolAnalysisReport(TypedDict):
     current_protocol: str
     scan_counts: dict[str, int]
     protocols: dict[str, _ProtocolAnalysisResult]
+    skipped_types: dict[str, str]
+    """Registry types that failed probing, keyed by lowercase type name
+    ('input'/'holding'/'coil'/'discrete'), mapped to a short human-readable
+    reason (e.g. an ILLEGAL_FUNCTION exception, or "no response across N
+    sampled addresses"). Empty when every type responded to probing."""
 
 
 class modbus_base(transport_base):
@@ -285,8 +290,12 @@ class modbus_base(transport_base):
     # Threading locks for concurrency control
     _clients_lock : threading.Lock = threading.Lock()
     ''' Lock for accessing the shared clients dictionary '''
-    _client_locks : dict[str, threading.Lock] = {}
-    ''' Port-specific locks to allow concurrent access to different ports '''
+    _client_locks : dict[str, threading.RLock] = {}
+    ''' Port-specific locks to allow concurrent access to different ports.
+    RLock (not Lock): analyze_protocols() holds this continuously for an
+    entire scan, while every individual read_registers() call it makes
+    internally re-acquires the SAME lock from the SAME thread via
+    _get_port_lock() -- a plain Lock would deadlock on that self-reentry. '''
 
     # Connection attributes — declared here with defaults so methods
     # in modbus_base can reference them without type errors.
@@ -688,7 +697,7 @@ class modbus_base(transport_base):
         start_addr, count = register_range
 
         if registry_type in (Registry_Type.COIL, Registry_Type.DISCRETE):
-            bits = getattr(response, "bits", None)
+            bits: list[bool] | None = getattr(response, "bits", None)
             if bits is None:
                 return None
             return {
@@ -696,7 +705,7 @@ class modbus_base(transport_base):
                 for i in range(min(count, len(bits)))
             }
         else:
-            registers = getattr(response, "registers", None)
+            registers: list[int] | None = getattr(response, "registers", None)
             if registers is None:
                 return None
             return {
@@ -748,7 +757,7 @@ class modbus_base(transport_base):
             error_msg: str = str(response)
             function_code: int | None = getattr(response, "function_code", None)
             if function_code is not None and hasattr(response, "exception_code"):
-                exception_code = function_code | 0x80
+                exception_code: int = function_code | 0x80
                 interpreted_error: str = interpret_modbus_exception_code(exception_code)
                 self._log.error(f"{label} failed: {error_msg} - {interpreted_error}")
             else:
@@ -778,7 +787,7 @@ class modbus_base(transport_base):
             return False
         client: ModbusBaseSyncClient = self.client
         resolved_device_id: int = self._get_device_id(device_id)
-        port_lock: Lock = self._get_port_lock()
+        port_lock: RLock = self._get_port_lock()
         with port_lock:
             try:
                 response: ModbusPDU = client.write_registers(start_register, values, device_id=resolved_device_id)
@@ -805,7 +814,7 @@ class modbus_base(transport_base):
             return False
         client: ModbusBaseSyncClient = self.client
         resolved_device_id: int = self._get_device_id(device_id)
-        port_lock: Lock = self._get_port_lock()
+        port_lock: RLock = self._get_port_lock()
         with port_lock:
             try:
                 response: ModbusPDU = client.write_coil(register, value, device_id=resolved_device_id)
@@ -840,7 +849,7 @@ class modbus_base(transport_base):
             return None
         client: ModbusBaseSyncClient = self.client
         resolved_device_id: int = self._get_device_id(device_id)
-        port_lock: Lock = self._get_port_lock()
+        port_lock: RLock = self._get_port_lock()
         with port_lock:
             try:
                 if registry_type == Registry_Type.COIL:
@@ -883,15 +892,20 @@ class modbus_base(transport_base):
             self._log.warning(f"No port or host set for transport '{self.transport_name}' — using transport name as port identifier")
             return self.transport_name
 
-    def _get_port_lock(self) -> threading.Lock:
+    def _get_port_lock(self) -> threading.RLock:
         """Scheduling path: All (Sequential, Concurrent, Interleaved).
 
-        Get or create a lock for this transport's port"""
+        Get or create a lock for this transport's port. Shared across every
+        transport instance with the same _get_port_identifier() (e.g. every
+        battery on one TCP gateway IP:port, or every device on one serial
+        port) — this is the SAME granularity as the client-pooling key, so
+        it's the correct lock for excluding sibling transports that share a
+        physical connection but each have their OWN separate _transport_lock."""
         port_id: str = self._get_port_identifier()
 
         with self._clients_lock:
             if port_id not in self._client_locks:
-                self._client_locks[port_id] = threading.Lock()
+                self._client_locks[port_id] = threading.RLock()
 
         return self._client_locks[port_id]
 
@@ -1500,7 +1514,13 @@ class modbus_base(transport_base):
 
     def write_data(self, data: dict[str, int | float | str ], from_transport: transport_base) -> None:
         """Scheduling path: All (Sequential, Concurrent, Interleaved) — bridge-side receiver called from both _process_group_read and _forward_to_bridges."""
+        self._lock_forensic("_transport_lock", self._transport_lock, "WAIT-START", "(write_data)")
+        _write_wait_t0: float = time.monotonic()
         with self._transport_lock:
+            self._lock_forensic(
+                "_transport_lock", self._transport_lock, "ACQUIRED",
+                f"waited={time.monotonic() - _write_wait_t0:.3f}s (write_data)",
+            )
             if not self.write_enabled:  # guard for checking inverter scraper flag to allow write back to the inverter.
                 return
 
@@ -1538,13 +1558,58 @@ class modbus_base(transport_base):
 
             time.sleep(self.modbus_delay) #sleep in between requests so modbus can rest
 
+    def get_lock_diagnostic_ids(self) -> dict[str, str | None]:
+        """
+        Scheduling path: N/A — diagnostic helper only.
+
+        Public accessor for the forensic lock ids used to correlate log
+        lines across the router and this transport (e.g. confirming the
+        Analyze feature and the normal scheduler are actually contending
+        for the SAME lock object, not two separate ones). Exists so
+        external callers like classes/WebServer/routers/analysis.py don't
+        need to reach into the protected _transport_lock attribute directly.
+        """
+        return {
+            "transport_lock_id": hex(id(self._transport_lock)),
+            "bus_lock_id": hex(id(self.bus_lock)) if self.bus_lock is not None else None,
+        }
+
+    def _lock_forensic(self, lock_name: str, lock_obj: object, event: str, extra: str = "") -> None:
+        """
+        Scheduling path: N/A — diagnostic helper only, not part of any
+        scheduling or analyze path itself.
+
+        Emits a structured, easy-to-search-for INFO-level log line for diagnosing
+        lock contention between the normal scheduler and the Analyze
+        feature (or any other concurrent caller). Logged at INFO (not
+        DEBUG) so it's visible even in default-verbosity deployments while
+        this is under active investigation.
+
+        Includes id(lock_obj) so two code paths that are SUPPOSED to be
+        serializing against the same lock can be directly confirmed (or
+        ruled out) as actually sharing the same Python object, rather than
+        two different Lock() instances that happen to have the same name.
+        """
+        thread = threading.current_thread()
+        self._log.info(
+            "[LOCK-FORENSIC] transport=%s lock=%s id=%s event=%s thread=%s(%s) %s",
+            self.transport_name, lock_name, hex(id(lock_obj)), event,
+            thread.name, thread.ident, extra,
+        )
+
     def read_data(self) -> dict[str, int | float | str ]:
         """
         Scheduling path: Sequential, Concurrent (via _process_group_read for a solo/standalone transport).
         Not used by interleaved mode — see read_data_iter.
         """
         # Use transport lock to prevent concurrent access to this transport instance
+        self._lock_forensic("_transport_lock", self._transport_lock, "WAIT-START")
+        _wait_t0: float = time.monotonic()
         with self._transport_lock:
+            self._lock_forensic(
+                "_transport_lock", self._transport_lock, "ACQUIRED",
+                f"waited={time.monotonic() - _wait_t0:.3f}s",
+            )
             self._start_cycle_tracking()
             # Add debugging information
             port_info: str| int = getattr(self, 'port', 'unknown')
@@ -1603,6 +1668,7 @@ class modbus_base(transport_base):
                 self._last_disabled_status_log = time.time()
 
             self.finish_cycle_tracking(info)
+            self._lock_forensic("_transport_lock", self._transport_lock, "RELEASING", "(read_data returning)")
             return info
 
     def read_group_data(self, members: list[transport_base]) -> dict[str, int | float | str]:
@@ -1619,7 +1685,16 @@ class modbus_base(transport_base):
         so per-member adjustments, unit modifiers, and code lookups are applied
         correctly regardless of whether all members share the same protocol.
         """
+        self._lock_forensic(
+            "_transport_lock", self._transport_lock, "WAIT-START",
+            f"(read_group_data, primary={self.transport_name}, members={[m.transport_name for m in members]})",
+        )
+        _wait_t0: float = time.monotonic()
         with self._transport_lock:
+            self._lock_forensic(
+                "_transport_lock", self._transport_lock, "ACQUIRED",
+                f"waited={time.monotonic() - _wait_t0:.3f}s (read_group_data)",
+            )
             self._start_cycle_tracking()
             port_info: str | int = getattr(self, 'port', 'unknown')
             address_info: str = getattr(self, 'address', 'unknown')
@@ -1707,6 +1782,7 @@ class modbus_base(transport_base):
                 self._log.info("Grouped register read returned no data; transport busy?")
 
             self.finish_cycle_tracking(info)
+            self._lock_forensic("_transport_lock", self._transport_lock, "RELEASING", "(read_group_data returning)")
             return info
 
     def interleaved_cycle_timeout(self) -> float:
@@ -1780,6 +1856,150 @@ class modbus_base(transport_base):
         )
         return percent
 
+    # ------------------------------------------------------------------
+    # Analyze feature — cheap "is this function code alive at all" probe,
+    # used by analyze_protocols() to decide which of the four registry
+    # types are worth a full 0-65535 dense sweep.
+    # ------------------------------------------------------------------
+
+    # Spread across the address space rather than clustered at the bottom.
+    # Real protocols frequently place their first register well above 0 —
+    # e.g. victron_smartsolar_mppt's holding map starts at register 771 —
+    # so N *consecutive* probes starting at 0 can walk right past a live
+    # device's actual data and misreport it as unsupported. Capped at 8
+    # addresses so the worst case (a type that times out on every probe)
+    # costs at most 8 transport-level timeouts instead of a multi-minute
+    # 0-65535 dense-sweep freeze.
+    _PROBE_OFFSETS: tuple[int, ...] = (0, 100, 500, 1000, 3000, 9000, 30000, 60000)
+    _PROBE_COUNT: int = 8  # registers/bits requested per probe read
+
+    def _probe_registry_type(
+        self,
+        registry_type: Registry_Type,
+        progress_cb: Callable[[str, int, int], None] | None = None,
+    ) -> tuple[bool, str]:
+        """
+        Scheduling path: N/A — Analyze feature helper, not part of the
+        read-scheduling loop.
+
+        Cheaply determine whether ``registry_type`` appears to be supported
+        by the connected device, without committing to a full 0-65535 dense
+        sweep. This intentionally does NOT consult self._protocol.registry_map
+        or send_holding_register / send_input_register / etc — those reflect
+        what the *user* configured (or a stub protocol's defaults), not what
+        the hardware actually answers, which is exactly the question Analyze
+        exists to answer from scratch.
+
+        Distinguishes three outcomes that read_registers() /
+        _extract_response_values() otherwise flatten into a single ``None``:
+
+          - Real .registers/.bits data came back  -> alive, stop probing.
+          - ExcCodes.ILLEGAL_FUNCTION              -> definitive and cheap:
+            the device does not implement this function code at all. One
+            probe settles it; no point trying the other offsets.
+          - ExcCodes.ILLEGAL_ADDRESS / ILLEGAL_VALUE / DEVICE_FAILURE / etc,
+            or no response (timeout) -> inconclusive for THIS address only;
+            keep probing the remaining spread offsets before giving up.
+
+        Returns (alive, reason) — reason is a short human-readable string
+        suitable for surfacing to the operator when a type gets skipped.
+
+        progress_cb, if given, fires once PER OFFSET ATTEMPT (not just once
+        per completed type) via a distinct phase name per registry type
+        (e.g. "probe_holding"), with done/total reflecting how far through
+        this type's spread offsets we are. A single unresponsive type can
+        legitimately take a long time here — up to 8 offsets, each capped by
+        the pymodbus client's own timeout*retries — and without per-offset
+        callbacks the UI has nothing new to show for the entire duration,
+        which is what made a slow-but-working probe look identical to a
+        frozen one.
+        """
+        last_reason: str = "no response"
+        phase_name: str = f"probe_{registry_type.name.lower()}"
+        total_offsets: int = len(self._PROBE_OFFSETS)
+
+        for attempt, offset in enumerate(self._PROBE_OFFSETS, start=1):
+            if progress_cb is not None:
+                try:
+                    progress_cb(phase_name, attempt, total_offsets)
+                except Exception as exc:
+                    self._log.debug(
+                        "[%s] Progress callback failed during probe (%s)",
+                        self.transport_name, str(exc),
+                    )
+            # Pace probe reads the same way normal scraping paces its reads —
+            # using modbus_delay_setting (the stable, user-configured base
+            # delay) rather than self.modbus_delay (which can be temporarily
+            # elevated to as much as 60s by the backoff logic in
+            # read_modbus_registers if this transport recently had read
+            # failures). Reusing the live, possibly-backed-off value here
+            # would risk turning an 8-offset probe into many minutes of
+            # sleeping for a transport that happened to be in backoff right
+            # before the operator clicked Analyze.
+            time.sleep(self.modbus_delay_setting)
+            register_range: tuple[int, int] = (offset, self._PROBE_COUNT)
+            try:
+                response: ModbusResponseLike | bytes | None = self.read_registers(offset, self._PROBE_COUNT, registry_type=registry_type)
+            except Exception as exc:
+                self._log.debug(
+                    "[%s] Probe %s @ %d raised an exception: %s",
+                    self.transport_name, registry_type.name, offset, str(exc),
+                )
+                last_reason = f"exception at register {offset} ({exc})"
+                continue
+
+            if response is None:
+                last_reason = f"no response at register {offset}"
+                continue
+
+            if isinstance(response, bytes):
+                # Raw bytes means something (transport layer, a misbehaving
+                # device) returned an unparsed error string instead of a
+                # proper Modbus response object — treat this address as
+                # inconclusive, same as a timeout, and keep sampling.
+                last_reason = f"malformed byte response at register {offset}"
+                continue
+
+            # response is narrowed to ModbusResponseLike from here on, so
+            # .isError() below resolves to a fully known bool -- no hasattr
+            # guard needed once bytes/None are excluded.
+            extracted: dict[int, int] | None = self._extract_response_values(response, registry_type, register_range)
+            if extracted:
+                self._log.debug(
+                    "[%s] Probe %s alive — data at register %d",
+                    self.transport_name, registry_type.name, offset,
+                )
+                return True, f"data at register {offset}"
+
+            # No usable .registers/.bits. If this is a genuine Modbus
+            # exception response, inspect exception_code to tell "this
+            # function code doesn't exist" from "this address doesn't".
+            if response.isError():
+                exception_code: int | None = getattr(response, "exception_code", None)
+                if exception_code == ExcCodes.ILLEGAL_FUNCTION:
+                    reason: str = (
+                        f"ILLEGAL_FUNCTION at register {offset} — "
+                        f"device does not implement {registry_type.name} reads at all"
+                    )
+                    self._log.debug("[%s] Probe %s: %s", self.transport_name, registry_type.name, reason)
+                    return False, reason
+                # ILLEGAL_ADDRESS / ILLEGAL_VALUE / DEVICE_FAILURE / etc only
+                # rules out this address — the function code itself may still
+                # be live elsewhere, so keep sampling the other offsets.
+                # NOTE: deliberately read response.exception_code directly
+                # here rather than reconstructing via function_code | 0x80
+                # (the pattern used elsewhere in this file for write-response
+                # logging) — that reconstruction maps the wrong axis through
+                # MODBUS_EXCEPTION_CODES and mislabels the exception.
+                exc_name: str = MODBUS_EXCEPTION_CODES.get(exception_code, f"exception code {exception_code}") \
+                    if exception_code is not None else "unrecognized exception response"
+                last_reason = f"{exc_name} at register {offset}"
+                continue
+
+            last_reason = f"malformed response at register {offset}"
+
+        return False, f"{last_reason} (sampled {len(self._PROBE_OFFSETS)} addresses)"
+
     def capture_analysis_scan(
         self,
         start: int = 0,
@@ -1835,9 +2055,9 @@ class modbus_base(transport_base):
                 # out-of-protocol addresses as disabled after the first failed
                 # read.  We also do not write back to the failure tracker so
                 # this scan never pollutes the scraper's disabled-range state.
-                response = None
+                response: ModbusResponseLike | bytes | None = None
                 try:
-                    response = self.read_registers(addr, range_count, registry_type=registry_type)
+                    response: ModbusResponseLike | bytes | None = self.read_registers(addr, range_count, registry_type=registry_type)
                     # Only assign extracted if response is valid
                     extracted: dict[int, int] | None = self._extract_response_values(response, registry_type, register_range) if response is not None else None
                 except Exception as exc:
@@ -1888,19 +2108,21 @@ class modbus_base(transport_base):
                 len(result_dict),
             )
 
-        # Acquire the transport lock for the entire scan so the normal scraper
-        # read/write cycle cannot interleave with analysis reads on the same
-        # physical connection.  read_data() and read_group_data() both acquire
-        # this lock, so they will block until the scan completes.
-        with self._transport_lock:
-            if include_input:
-                scan_range(Registry_Type.INPUT, input_result)
-            if include_holding:
-                scan_range(Registry_Type.HOLDING, holding_result)
-            if include_coil:
-                scan_range(Registry_Type.COIL, coil_result)
-            if include_discrete:
-                scan_range(Registry_Type.DISCRETE, discrete_result)
+        # NOTE: the transport lock covering this scan is acquired by the
+        # CALLER (analyze_protocols), spanning both the probe phase and this
+        # dense sweep as one continuous critical section. self._transport_lock
+        # is a plain threading.Lock (not reentrant), so this method must NOT
+        # also acquire it here — capture_analysis_scan() is only ever called
+        # from analyze_protocols(), which already holds the lock by the time
+        # this runs.
+        if include_input:
+            scan_range(Registry_Type.INPUT, input_result)
+        if include_holding:
+            scan_range(Registry_Type.HOLDING, holding_result)
+        if include_coil:
+            scan_range(Registry_Type.COIL, coil_result)
+        if include_discrete:
+            scan_range(Registry_Type.DISCRETE, discrete_result)
 
         return {"input": input_result, "holding": holding_result, "coil": coil_result, "discrete": discrete_result}
 
@@ -2009,6 +2231,7 @@ class modbus_base(transport_base):
         current_protocol: str | None = None,
         progress_cb: Callable[[str, int, int], None] | None = None,
         batch_size: int = 40,
+        force_types: set[str] | None = None,
     ) -> ProtocolAnalysisReport:
         """
         Scheduling path: N/A — Analyze feature, invoked on demand via the web API; not part of the read-scheduling loop.
@@ -2029,36 +2252,184 @@ class modbus_base(transport_base):
         Entries whose values column cannot be parsed as a numeric constraint
         (e.g. free text) are treated as in-range (no penalty) so that
         unspecified ranges do not unfairly reduce the score.
+
+        force_types: registry type names ('input'/'holding'/'coil'/'discrete',
+            lowercase) to scan unconditionally, bypassing the probe entirely.
+            This is the "Scan anyway" override — the probe is a heuristic and
+            can be wrong (e.g. a device that only responds to a function code
+            under some runtime condition the probe didn't happen to hit), so
+            the operator always has the final say over what gets scanned.
         """
-        # Determine which register types actually have a map loaded so we only
-        # scan what the device can answer.  Scanning an unsupported type causes
-        # the transport to block until retries are exhausted for every batch in
-        # the 0-65535 range — a multi-minute freeze for a map that yields nothing.
-        _has_input    = bool(self._protocol.registry_map.get(Registry_Type.INPUT))
-        _has_holding  = bool(self._protocol.registry_map.get(Registry_Type.HOLDING))
-        _has_coil     = bool(self._protocol.registry_map.get(Registry_Type.COIL))
-        _has_discrete = bool(self._protocol.registry_map.get(Registry_Type.DISCRETE))
-
-        if not (_has_input or _has_holding or _has_coil or _has_discrete):
-            self._log.warning(
-                "[%s] analyze_protocols: no registry maps loaded — scan skipped",
-                self.transport_name,
-            )
-            return {
-                "transport_name": self.transport_name,
-                "current_protocol": current_protocol or "",
-                "scan_counts": {"input": 0, "holding": 0},
-                "protocols": {},
-            }
-
-        scan: dict[str, dict[int, int]] = self.capture_analysis_scan(
-            progress_cb=progress_cb,
-            batch_size=batch_size,
-            include_input=_has_input,
-            include_holding=_has_holding,
-            include_coil=_has_coil,
-            include_discrete=_has_discrete,
+        # Determine which register types are actually supported by the
+        # connected hardware via a cheap spread-probe (see
+        # _probe_registry_type) rather than by checking self._protocol's
+        # loaded CSV maps or the send_holding_register/send_input_register/
+        # etc transport settings.
+        #
+        # This is deliberate: Analyze exists specifically to discover what a
+        # piece of hardware actually supports, including the "protocol is a
+        # bare JSON stub with no registry-map CSVs at all yet" case. Gating
+        # on registry_map truthiness (the old behavior) or on send_* flags
+        # both fail that case for different reasons — registry_map is empty
+        # by definition for a stub, and send_* flags reflect what the user
+        # guessed when creating the device, not what the hardware answers.
+        # A user who checked "send_holding" when the device only speaks
+        # Coil, or who left every box unchecked, should still get a useful
+        # scan rather than a silent zero-result abort.
+        # Acquire the transport lock for the ENTIRE analyze operation —
+        # probing AND the dense sweep inside capture_analysis_scan() — as one
+        # continuous critical section, so the normal scraper read/write cycle
+        # cannot interleave with EITHER phase on the same physical connection.
+        # read_data() and read_group_data() both acquire this same lock, so
+        # they will block until the whole analyze call below completes.
+        #
+        # This must be a single `with` block spanning both phases: splitting
+        # it into two separate `with self._transport_lock:` blocks (one around
+        # probing, one around the sweep) would release the lock in between,
+        # letting the normal scheduler sneak a read in right as probing
+        # finishes — which is exactly what caused the original bug where
+        # probing ran fully unlocked and fought the scheduler for the wire,
+        # showing up as "No response after 3 retries" / garbled decodes in
+        # the log and an analyze run that never seemed to progress.
+        self._log.info(
+            "[LOCK-FORENSIC] transport=%s ANALYZE-ENTER thread=%s(%s) protocol_names=%s "
+            "current_protocol=%s batch_size=%s force_types=%s",
+            self.transport_name, threading.current_thread().name, threading.current_thread().ident,
+            protocol_names, current_protocol, batch_size, force_types,
         )
+        self._lock_forensic("_transport_lock", self._transport_lock, "WAIT-START", "(analyze_protocols)")
+        _analyze_lock_wait_t0: float = time.monotonic()
+        with self._transport_lock:
+            self._lock_forensic(
+                "_transport_lock", self._transport_lock, "ACQUIRED",
+                f"waited={time.monotonic() - _analyze_lock_wait_t0:.3f}s (analyze_protocols)",
+            )
+            # bus_lock (interleaved mode only; None in sequential/concurrent
+            # mode) is held for the WHOLE operation here, unlike normal
+            # interleaved reads which take/release it per block — this is
+            # what gives analyze exclusive use of a shared physical bus for
+            # peer transports too, not just this one.
+            bus_lock: Lock | None = self.bus_lock
+            if bus_lock is not None:
+                self._lock_forensic("bus_lock", bus_lock, "WAIT-START", "(analyze_protocols)")
+                _bus_wait_t0: float = time.monotonic()
+                bus_lock.acquire()
+                self._lock_forensic(
+                    "bus_lock", bus_lock, "ACQUIRED",
+                    f"waited={time.monotonic() - _bus_wait_t0:.3f}s (analyze_protocols)",
+                )
+
+            # port_lock is shared across every transport with the same
+            # _get_port_identifier() -- e.g. every battery on one TCP gateway
+            # IP:port, or every device on one serial port. Each such sibling
+            # transport has its OWN separate _transport_lock (that lock only
+            # protects one instance from itself), but they all share the SAME
+            # underlying pymodbus client object (see modbus_tcp.py/modbus_rtu.py
+            # client pooling, keyed by this same identifier). Without also
+            # holding port_lock here, analyzing one battery would correctly
+            # block ONLY that battery's own scheduled reads while a sibling
+            # battery on the same physical wire keeps reading concurrently on
+            # the same socket -- the same class of corruption this whole fix
+            # was meant to close, just one level up. read_registers() already
+            # acquires this same lock per individual call, which is why it
+            # must be an RLock: this outer acquisition and each of those many
+            # inner ones happen on the same thread throughout the scan.
+            port_lock: RLock = self._get_port_lock()
+            self._lock_forensic("port_lock", port_lock, "WAIT-START", "(analyze_protocols)")
+            _port_wait_t0: float = time.monotonic()
+            port_lock.acquire()
+            self._lock_forensic(
+                "port_lock", port_lock, "ACQUIRED",
+                f"waited={time.monotonic() - _port_wait_t0:.3f}s (analyze_protocols)",
+            )
+            try:
+                force_types = force_types or set()
+                probe_results: dict[Registry_Type, tuple[bool, str]] = {}
+                for r_type in (Registry_Type.INPUT, Registry_Type.HOLDING, Registry_Type.COIL, Registry_Type.DISCRETE):
+                    _probe_t0: float = time.monotonic()
+                    if r_type.name.lower() in force_types:
+                        # Operator override — skip the probe, go straight to the full
+                        # dense sweep regardless of what a probe would have found.
+                        probe_results[r_type] = (True, "forced by operator (Scan anyway)")
+                        if progress_cb is not None:
+                            try:
+                                progress_cb(f"probe_{r_type.name.lower()}", 1, 1)
+                            except Exception as exc:
+                                self._log.debug("[%s] Progress callback failed during forced probe skip (%s)", self.transport_name, str(exc))
+                    else:
+                        # progress_cb fires once PER OFFSET inside here (up to
+                        # 8 times for this type alone), not just once when the
+                        # whole type finishes -- see _probe_registry_type's
+                        # docstring for why that granularity matters: a single
+                        # unresponsive type can legitimately take a long time,
+                        # and without per-offset updates the UI has nothing new
+                        # to show for the entire duration.
+                        probe_results[r_type] = self._probe_registry_type(r_type, progress_cb)
+                    self._log.info(
+                        "[LOCK-FORENSIC] transport=%s PROBE-DONE type=%s elapsed=%.3fs result=%s",
+                        self.transport_name, r_type.name, time.monotonic() - _probe_t0, probe_results[r_type],
+                    )
+
+                _has_input, _input_reason = probe_results[Registry_Type.INPUT]
+                _has_holding, _holding_reason = probe_results[Registry_Type.HOLDING]
+                _has_coil, _coil_reason = probe_results[Registry_Type.COIL]
+                _has_discrete, _discrete_reason = probe_results[Registry_Type.DISCRETE]
+
+                skipped_types: dict[str, str] = {}
+                if not _has_input:
+                    skipped_types["input"] = _input_reason
+                if not _has_holding:
+                    skipped_types["holding"] = _holding_reason
+                if not _has_coil:
+                    skipped_types["coil"] = _coil_reason
+                if not _has_discrete:
+                    skipped_types["discrete"] = _discrete_reason
+
+                if not (_has_input or _has_holding or _has_coil or _has_discrete):
+                    self._log.warning(
+                        "[%s] analyze_protocols: no registry type responded to probing — scan skipped (%s)",
+                        self.transport_name, skipped_types,
+                    )
+                    return {
+                        "transport_name": self.transport_name,
+                        "current_protocol": current_protocol or "",
+                        "scan_counts": {"input": 0, "holding": 0, "coil": 0, "discrete": 0},
+                        "protocols": {},
+                        "skipped_types": skipped_types,
+                    }
+
+                self._log.info(
+                    "[%s] analyze_protocols: probe results — input=%s holding=%s coil=%s discrete=%s",
+                    self.transport_name, _has_input, _has_holding, _has_coil, _has_discrete,
+                )
+
+                self._log.info(
+                    "[LOCK-FORENSIC] transport=%s CAPTURE-SCAN-START", self.transport_name,
+                )
+                _scan_t0: float = time.monotonic()
+                scan: dict[str, dict[int, int]] = self.capture_analysis_scan(
+                    progress_cb=progress_cb,
+                    batch_size=batch_size,
+                    include_input=_has_input,
+                    include_holding=_has_holding,
+                    include_coil=_has_coil,
+                    include_discrete=_has_discrete,
+                )
+                self._log.info(
+                    "[LOCK-FORENSIC] transport=%s CAPTURE-SCAN-DONE elapsed=%.3fs",
+                    self.transport_name, time.monotonic() - _scan_t0,
+                )
+            finally:
+                port_lock.release()
+                self._lock_forensic("port_lock", port_lock, "RELEASED", "(analyze_protocols)")
+                if bus_lock is not None:
+                    bus_lock.release()
+                    self._lock_forensic("bus_lock", bus_lock, "RELEASED", "(analyze_protocols)")
+        self._lock_forensic("_transport_lock", self._transport_lock, "RELEASED", "(analyze_protocols)")
+        # --- transport lock released here; everything below is pure
+        # scoring/comparison against already-collected data, no more I/O,
+        # so there's no reason to keep the normal scheduler blocked further.
+
         raw_input: dict[int, int] = scan["input"]
         raw_holding: dict[int, int] = scan["holding"]
         raw_coil: dict[int, int] = scan["coil"]
@@ -2231,8 +2602,11 @@ class modbus_base(transport_base):
             "scan_counts": {
                 "input": len(raw_input),
                 "holding": len(raw_holding),
+                "coil": len(raw_coil),
+                "discrete": len(raw_discrete),
             },
             "protocols": results,
+            "skipped_types": skipped_types,
         }
 
 

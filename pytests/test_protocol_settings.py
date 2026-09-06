@@ -17,6 +17,11 @@
 
 """Unit tests for classes.protocol_settings and classes.data_adjustments."""
 
+# pyright: reportPrivateUsage=false
+# White-box testing of internal state (_log, _adjustments, _16BIT, etc.) is
+# the point of these tests, not a bug. See test_transports.py's copy of
+# this comment for the full rationale.
+
 from __future__ import annotations
 
 import logging
@@ -358,7 +363,7 @@ class TestApplyAdjustmentsPostDecode:
         adj: DataAdjustments = make_adjustments()
         entry: registry_map_entry = make_entry(unit_mod=0.1)
         result: int | float | str = adj.apply_adjustments(123, entry, "post_decode")
-        assert result == pytest.approx(12.3)
+        assert result == pytest.approx(12.3) # type: ignore
 
     def test_string_value_returned_unchanged(self) -> None:
         adj: DataAdjustments = make_adjustments()

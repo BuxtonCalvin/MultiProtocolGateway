@@ -329,14 +329,14 @@ async def mqtt_health_partial(device_name: str, request: Request):
 async def prometheus_health_partial(device_name: str, request: Request):
     """
     Bridge Health panel for a Prometheus device page — in-memory metrics
-    registry summary (metrics registered, standalone-server state, machine
-    counts by connectivity bucket) plus uptime. Read-only; lazy-loaded like
+    registry summary (metrics registered, mount path, machine counts by
+    connectivity bucket) plus uptime. Read-only; lazy-loaded like
     the other bridge panels.
 
     Scoped by device_name rather than assuming "the" Prometheus bridge,
     since a gateway can have more than one configured (e.g. separate
-    /metrics endpoints on different ports) — see services/bridge_service
-    .get_prometheus_bridge.
+    /metrics paths mounted on the same WebServer app) — see
+    services/bridge_service.get_prometheus_bridge.
     """
     gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
     device_section: str = f"transport.{device_name}"

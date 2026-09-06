@@ -17,15 +17,33 @@
 
 """Unit tests for transport classes with external systems mocked."""
 
+# pyright: reportPrivateUsage=false
+#
+# This file deliberately reaches into private/protected members of the
+# classes under test (_start_cycle_tracking, _connected, _write_topics,
+# etc.) -- that's the whole point of white-box unit testing internal
+# behavior, not a bug to fix. The alternative (making 50+ internal
+# implementation details public across transport_base, mqtt, canbus, and
+# others) would weaken encapsulation project-wide for no real benefit.
+# Everything else in this file still runs under the project's normal
+# strict-mode rules -- this comment overrides only this one rule, only in
+# this one file, and (unlike a pyrightconfig.json executionEnvironments
+# entry) correctly inherits extraPaths/module resolution from the project
+# config rather than needing them re-declared.
+
 from __future__ import annotations
 
 import json
 import threading
 import time
 from types import SimpleNamespace
-from unittest.mock import MagicMock, mock_open, patch  # noqa: F401
+from unittest.mock import MagicMock, patch
 
 import pytest
+from conftest import DummySettings
+from paho.mqtt.client import ConnectFlags, DisconnectFlags
+from paho.mqtt.packettypes import PacketTypes
+from paho.mqtt.reasoncodes import ReasonCode
 
 from classes.protocol_settings import (
     WORD_ORDER_ABCD,
@@ -50,7 +68,7 @@ from classes.transports.serial_frame_transport import serial_frame_transport
 from classes.transports.transport_base import TransportWriteMode, transport_base
 
 
-def test_transport_base_tracks_cycle_and_emits_messages(dummy_settings) -> None:
+def test_transport_base_tracks_cycle_and_emits_messages(dummy_settings: type[DummySettings]) -> None:
     """Happy path: base transport tracks read-cycle completeness and calls the message callback."""
     transport = transport_base(dummy_settings(device_serial_number="ABC", device_manufacturer="EG4"))
     entry = MagicMock()
@@ -79,7 +97,7 @@ def test_transport_write_mode_maps_edge_values() -> None:
     assert TransportWriteMode.fromString("surprise") is TransportWriteMode.READ
 
 
-def test_json_out_writes_structured_payload_to_mock_file(dummy_settings) -> None:
+def test_json_out_writes_structured_payload_to_mock_file(dummy_settings: type[DummySettings]) -> None:
     """Mocks filesystem I/O: json_out writes device metadata, timestamp, and data as JSON."""
     settings = dummy_settings(
         output_file="output/test.json",
@@ -102,7 +120,7 @@ def test_json_out_writes_structured_payload_to_mock_file(dummy_settings) -> None
 
 
 @patch("classes.transports.mqtt.MQTTClient")
-def test_mqtt_requires_host_and_publishes_values(mock_mqtt_client: MagicMock, dummy_settings) -> None:
+def test_mqtt_requires_host_and_publishes_values(mock_mqtt_client: MagicMock, dummy_settings: type[DummySettings]) -> None:
     """Happy path and error handling: MQTT requires a host and publishes scalar values via a mocked client."""
     with pytest.raises(ValueError, match="Host"):
         mqtt(dummy_settings(host=""))
@@ -122,7 +140,7 @@ def test_mqtt_requires_host_and_publishes_values(mock_mqtt_client: MagicMock, du
 
 
 @patch("classes.transports.mqtt.MQTTClient")
-def test_mqtt_write_data_syncs_connected_state_from_client(mock_mqtt_client: MagicMock, dummy_settings) -> None:
+def test_mqtt_write_data_syncs_connected_state_from_client(mock_mqtt_client: MagicMock, dummy_settings: type[DummySettings]) -> None:
     """write_data unconditionally syncs self.connected from client.is_connected() on every call."""
     publish_info = SimpleNamespace(rc=0)
     client = MagicMock()
@@ -143,7 +161,7 @@ def test_mqtt_write_data_syncs_connected_state_from_client(mock_mqtt_client: Mag
 
 
 @patch("classes.transports.mqtt.MQTTClient")
-def test_mqtt_write_data_aborts_on_publish_failure(mock_mqtt_client: MagicMock, dummy_settings) -> None:
+def test_mqtt_write_data_aborts_on_publish_failure(mock_mqtt_client: MagicMock, dummy_settings: type[DummySettings]) -> None:
     """write_data sets connected=False and returns early when the availability publish fails."""
     from paho.mqtt.client import MQTT_ERR_NO_CONN
 
@@ -165,7 +183,7 @@ def test_mqtt_write_data_aborts_on_publish_failure(mock_mqtt_client: MagicMock, 
 
 
 @patch("classes.transports.mqtt.MQTTClient")
-def test_mqtt_on_connect_resubscribes_write_topics(mock_mqtt_client: MagicMock, dummy_settings) -> None:
+def test_mqtt_on_connect_resubscribes_write_topics(mock_mqtt_client: MagicMock, dummy_settings: type[DummySettings]) -> None:
     """on_connect re-subscribes all registered write topics so subscriptions survive a broker reconnect."""
     client = MagicMock()
     mock_mqtt_client.return_value = client
@@ -176,8 +194,11 @@ def test_mqtt_on_connect_resubscribes_write_topics(mock_mqtt_client: MagicMock, 
         "base/dev/write/discharge_limit": MagicMock(),
     }
 
-    # Simulate the paho CONNACK callback
-    out.on_connect(client, None, None, "Success", None)
+    # Simulate the paho CONNACK callback — paho-mqtt v2's real callback API
+    # passes typed ConnectFlags/ReasonCode objects, not a bare None/string;
+    # constructing real ones (rather than loosening on_connect's signature)
+    # keeps this test honest about what the broker actually calls back with.
+    out.on_connect(client, None, ConnectFlags(session_present=False), ReasonCode(PacketTypes.CONNACK, "Success"), None)
 
     assert out.connected is True
     subscribed_topics = {call.args[0] for call in client.subscribe.call_args_list}
@@ -185,7 +206,7 @@ def test_mqtt_on_connect_resubscribes_write_topics(mock_mqtt_client: MagicMock, 
 
 
 @patch("classes.transports.mqtt.MQTTClient")
-def test_mqtt_on_disconnect_spawns_reconnect_thread(mock_mqtt_client: MagicMock, dummy_settings) -> None:
+def test_mqtt_on_disconnect_spawns_reconnect_thread(mock_mqtt_client: MagicMock, dummy_settings: type[DummySettings]) -> None:
     """on_disconnect sets connected=False and starts exactly one background reconnect thread."""
     client = MagicMock()
     mock_mqtt_client.return_value = client
@@ -194,14 +215,19 @@ def test_mqtt_on_disconnect_spawns_reconnect_thread(mock_mqtt_client: MagicMock,
     out._connected = True
 
     with patch.object(out, "_start_reconnect_thread") as mock_start:
-        out.on_disconnect(client, None, None, 0, None)
+        out.on_disconnect(
+            client, None,
+            DisconnectFlags(is_disconnect_packet_from_server=False),
+            ReasonCode(PacketTypes.DISCONNECT, identifier=0),
+            None,
+        )
 
     assert out.connected is False
     mock_start.assert_called_once()
 
 
 @patch("classes.transports.mqtt.MQTTClient")
-def test_mqtt_start_reconnect_thread_no_duplicate(mock_mqtt_client: MagicMock, dummy_settings) -> None:
+def test_mqtt_start_reconnect_thread_no_duplicate(mock_mqtt_client: MagicMock, dummy_settings: type[DummySettings]) -> None:
     """_start_reconnect_thread does not spawn a second thread when one is already alive."""
     client = MagicMock()
     mock_mqtt_client.return_value = client
@@ -217,7 +243,7 @@ def test_mqtt_start_reconnect_thread_no_duplicate(mock_mqtt_client: MagicMock, d
 
 
 @patch("classes.transports.mqtt.MQTTClient")
-def test_mqtt_reconnect_loop_clears_thread_ref_on_success(mock_mqtt_client: MagicMock, dummy_settings) -> None:
+def test_mqtt_reconnect_loop_clears_thread_ref_on_success(mock_mqtt_client: MagicMock, dummy_settings: type[DummySettings]) -> None:
     """_reconnect_loop clears _reconnect_thread in its finally block so future disconnects can spawn a fresh thread."""
     client = MagicMock()
     mock_mqtt_client.return_value = client
@@ -239,7 +265,7 @@ def test_mqtt_reconnect_loop_clears_thread_ref_on_success(mock_mqtt_client: Magi
 
 
 @patch("classes.transports.mqtt.MQTTClient")
-def test_mqtt_reconnect_loop_clears_thread_ref_on_exhaustion(mock_mqtt_client: MagicMock, dummy_settings) -> None:
+def test_mqtt_reconnect_loop_clears_thread_ref_on_exhaustion(mock_mqtt_client: MagicMock, dummy_settings: type[DummySettings]) -> None:
     """_reconnect_loop clears _reconnect_thread even when all attempts are exhausted without connecting."""
     client = MagicMock()
     client.reconnect.side_effect = OSError("refused")
@@ -256,7 +282,7 @@ def test_mqtt_reconnect_loop_clears_thread_ref_on_exhaustion(mock_mqtt_client: M
     assert out._reconnect_thread is None
 
 
-def test_mqtt_init_bridge_subscribes_only_allowlisted_holding_write_topics(dummy_settings) -> None:
+def test_mqtt_init_bridge_subscribes_only_allowlisted_holding_write_topics(dummy_settings: type[DummySettings]) -> None:
     """Edge case: MQTT holding write topics are subscribed only for registers present in the override allowlist."""
     out: mqtt = mqtt.__new__(mqtt)
     out.client = MagicMock()
@@ -276,16 +302,18 @@ def test_mqtt_init_bridge_subscribes_only_allowlisted_holding_write_topics(dummy
         [], write_mode=WriteMode.WRITE,
     )
     source.protocolSettings = MagicMock()
-    source.protocolSettings.get_registry_map.side_effect = lambda rt: (
-        [writable, blocked] if rt == Registry_Type.HOLDING else []
-    )
+
+    def _registry_map_side_effect(rt: Registry_Type) -> list[registry_map_entry]:
+        return [writable, blocked] if rt == Registry_Type.HOLDING else []
+
+    source.protocolSettings.get_registry_map.side_effect = _registry_map_side_effect
 
     out.init_bridge(source)
 
     out.client.subscribe.assert_called_once_with("base/sn1/charge_limit/write")
 
 
-def test_mqtt_init_bridge_subscribes_allowlisted_coil_write_topics(dummy_settings) -> None:
+def test_mqtt_init_bridge_subscribes_allowlisted_coil_write_topics(dummy_settings: type[DummySettings]) -> None:
     """New behavior: MQTT coil write topics are subscribed alongside holding topics when allowlisted."""
     out: mqtt = mqtt.__new__(mqtt)
     out.client = MagicMock()
@@ -301,9 +329,11 @@ def test_mqtt_init_bridge_subscribes_allowlisted_coil_write_topics(dummy_setting
         [], write_mode=WriteMode.WRITE,
     )
     source.protocolSettings = MagicMock()
-    source.protocolSettings.get_registry_map.side_effect = lambda rt: (
-        [coil_entry] if rt == Registry_Type.COIL else []
-    )
+
+    def _registry_map_side_effect(rt: Registry_Type) -> list[registry_map_entry]:
+        return [coil_entry] if rt == Registry_Type.COIL else []
+
+    source.protocolSettings.get_registry_map.side_effect = _registry_map_side_effect
 
     out.init_bridge(source)
 
@@ -311,7 +341,7 @@ def test_mqtt_init_bridge_subscribes_allowlisted_coil_write_topics(dummy_setting
     assert "base/sn1/grid_charge_enable/write" in out._write_topics
 
 
-def test_mqtt_init_bridge_coil_topic_not_in_allowlist_not_subscribed(dummy_settings) -> None:
+def test_mqtt_init_bridge_coil_topic_not_in_allowlist_not_subscribed(dummy_settings: type[DummySettings]) -> None:
     """Edge case: a writable coil entry absent from the allowlist must not be subscribed."""
     out: mqtt = mqtt.__new__(mqtt)
     out.client = MagicMock()
@@ -327,9 +357,11 @@ def test_mqtt_init_bridge_coil_topic_not_in_allowlist_not_subscribed(dummy_setti
         [], write_mode=WriteMode.WRITE,
     )
     source.protocolSettings = MagicMock()
-    source.protocolSettings.get_registry_map.side_effect = lambda rt: (
-        [coil_entry] if rt == Registry_Type.COIL else []
-    )
+
+    def _registry_map_side_effect(rt: Registry_Type) -> list[registry_map_entry]:
+        return [coil_entry] if rt == Registry_Type.COIL else []
+
+    source.protocolSettings.get_registry_map.side_effect = _registry_map_side_effect
 
     out.init_bridge(source)
 
@@ -337,7 +369,7 @@ def test_mqtt_init_bridge_coil_topic_not_in_allowlist_not_subscribed(dummy_setti
 
 
 @patch("classes.transports.mqtt.MQTTClient")
-def test_mqtt_discovery_skips_availability_publish_on_empty_registry(mock_mqtt_client: MagicMock, dummy_settings) -> None:
+def test_mqtt_discovery_skips_availability_publish_on_empty_registry(mock_mqtt_client: MagicMock, dummy_settings: type[DummySettings]) -> None:
     """Edge case: mqtt_discovery does not publish availability when the registry map is empty (guards KeyError)."""
     client = MagicMock()
     mock_mqtt_client.return_value = client
@@ -353,7 +385,7 @@ def test_mqtt_discovery_skips_availability_publish_on_empty_registry(mock_mqtt_c
 
 
 @patch("classes.transports.mqtt.MQTTClient")
-def test_mqtt_instance_write_topics_not_shared_between_instances(mock_mqtt_client: MagicMock, dummy_settings) -> None:
+def test_mqtt_instance_write_topics_not_shared_between_instances(mock_mqtt_client: MagicMock, dummy_settings: type[DummySettings]) -> None:
     """Regression: _write_topics is per-instance; populating one instance must not affect another."""
     client = MagicMock()
     mock_mqtt_client.return_value = client
@@ -377,7 +409,7 @@ def test_register_failure_tracker_disables_then_resets() -> None:
     assert tracker.failure_count == 0
 
 
-def test_modbus_helpers_interpret_exceptions_and_validate_client_presence(dummy_settings) -> None:
+def test_modbus_helpers_interpret_exceptions_and_validate_client_presence(dummy_settings: type[DummySettings]) -> None:
     """Error handling: Modbus helpers describe exception codes, and read/write
     methods log and return a sentinel (None/False) — rather than raising —
     when called before the client is initialized."""
@@ -434,7 +466,7 @@ def test_modbus_base_register_word_helpers_all_four_encodings() -> None:
 
 
 @patch("classes.transports.influxdb_out.InfluxDBClient")
-def test_influxdb_out_connect_and_builds_points_with_mock_client(mock_client_cls: MagicMock, dummy_settings) -> None:
+def test_influxdb_out_connect_and_builds_points_with_mock_client(mock_client_cls: MagicMock, dummy_settings: type[DummySettings]) -> None:
     """Mocks database API: InfluxDB output connects, creates missing DBs, and builds typed points."""
     client = MagicMock()
     client.get_list_database.return_value = []
@@ -464,7 +496,7 @@ def test_serial_frame_client_reads_and_writes_framed_data(mock_serial_cls: Magic
     serial.write.assert_called_once_with(b"<PING>")
 
 
-def test_serial_frame_transport_marker_parsing_and_raw_decode(dummy_settings) -> None:
+def test_serial_frame_transport_marker_parsing_and_raw_decode(dummy_settings: type[DummySettings]) -> None:
     """Happy path: serial_frame_transport parses hex/literal markers and returns raw hex without a protocol map."""
     assert serial_frame_transport._parse_frame_marker("0x7E") == b"~"
     assert serial_frame_transport._parse_frame_marker("END") == b"END"
@@ -473,7 +505,7 @@ def test_serial_frame_transport_marker_parsing_and_raw_decode(dummy_settings) ->
     assert transport._decode_frame(b"\x01\x02") == {"raw_frame": "0102"}
 
 
-def test_canbus_serial_number_scoring_and_cache_cleanup(dummy_settings) -> None:
+def test_canbus_serial_number_scoring_and_cache_cleanup(dummy_settings: type[DummySettings]) -> None:
     """Happy path and edge case: CAN serial-number heuristics score ASCII payloads and drop stale cache."""
     instance = canbus.__new__(canbus)
     instance._SN_ASCII_RATIO = canbus._SN_ASCII_RATIO
