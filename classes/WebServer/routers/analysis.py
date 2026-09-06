@@ -93,6 +93,14 @@ class AnalyzeRequest(BaseModel):
     protocol_names: list[str] = Field(default_factory=list[str])
     current_protocol: str | None = None
     batch_size: int = Field(default=40, ge=1, le=125)
+    force_types: list[str] = Field(
+        default_factory=list[str],
+        description=(
+            "Registry types ('input'/'holding'/'coil'/'discrete') to scan "
+            "unconditionally, bypassing the probe. Used by the 'Scan anyway' "
+            "override when the operator disagrees with a skipped-type result."
+        ),
+    )
 
 
 class AnalysisChange(BaseModel):
@@ -492,6 +500,12 @@ async def analysis_progress(device_name: str, request: Request):
 @router.post("/{device_name}")
 async def run_analysis(device_name: str, payload: AnalyzeRequest, request: Request)-> dict[str, str | ProtocolAnalysisReport]:
     transport: modbus_base = _require_modbus_transport(request, device_name)
+    _lock_ids: dict[str, str | None] = transport.get_lock_diagnostic_ids()
+    _log.info(
+        "[LOCK-FORENSIC] POST /api/analyze/%s RECEIVED thread=%s(%s) transport_id=%s transport_lock_id=%s bus_lock_id=%s",
+        device_name, threading.current_thread().name, threading.current_thread().ident,
+        hex(id(transport)), _lock_ids["transport_lock_id"], _lock_ids["bus_lock_id"],
+    )
     protocol_names: list[str] = [name for name in payload.protocol_names if name]
     if not protocol_names:
         raise HTTPException(status_code=400, detail="Select at least one protocol to analyze")
@@ -507,14 +521,26 @@ async def run_analysis(device_name: str, payload: AnalyzeRequest, request: Reque
         progress_queue.put({"type": "progress", "phase": phase, "done": done, "total": total, "pct": pct})
 
     try:
+        _log.info(
+            "[LOCK-FORENSIC] transport=%s asyncio.to_thread(analyze_protocols) DISPATCHING from thread=%s(%s)",
+            device_name, threading.current_thread().name, threading.current_thread().ident,
+        )
         result: ProtocolAnalysisReport = await asyncio.to_thread(
             transport.analyze_protocols,
             protocol_names,
             payload.current_protocol,
             progress_cb,
             payload.batch_size,
+            set(payload.force_types),
+        )
+        _log.info(
+            "[LOCK-FORENSIC] transport=%s analyze_protocols RETURNED successfully, skipped_types=%s",
+            device_name, result.get("skipped_types"),
         )
     except Exception as exc:
+        _log.exception(
+            "[LOCK-FORENSIC] transport=%s analyze_protocols RAISED: %s", device_name, exc,
+        )
         progress_queue.put({"type": "error", "detail": str(exc)})
         raise
     finally:

@@ -56,11 +56,16 @@ field name, by ``DynamicMetricsRegistry`` -- see that class's docstring for
 the Gauge vs. Counter vs. Histogram classification rules.
 
 FastAPI integration: ``attach_metrics_route()`` mounts this bridge's
-registry onto an existing FastAPI app (e.g. the WebServer UI already
-running in this process) via ``prometheus_client.make_asgi_app()``. For
-headless deployments with no WebServer running at all, set
-``enable_standalone_server = true`` and this bridge runs its own tiny
-uvicorn server on ``standalone_host:standalone_port`` instead.
+registry onto the WebServer's own FastAPI app (the process that's always
+running -- see classes.WebServer.main._mount_prometheus_bridges(), which
+calls this automatically for every configured prometheus_out bridge) via
+``prometheus_client.make_asgi_app()``. There is no standalone-server mode
+-- MPG always runs the WebServer (protocol_gateway.main() calls
+start_webserver() unconditionally) -- but a bridge MAY request an
+additional, restricted listening socket via ``metrics_port``; that's still
+the same server/event loop, not a second process (see
+classes.WebServer.main._collect_metrics_ports() and
+RestrictPortMiddleware).
 """
 from __future__ import annotations
 
@@ -81,12 +86,10 @@ from defs.common import TransportSettings
 from .transport_base import transport_base
 
 if TYPE_CHECKING:
-    # Soft dependency only. This transport module must import cleanly even
-    # in a headless deployment that has neither fastapi nor uvicorn
-    # installed (enable_standalone_server=False, no WebServer attached --
-    # the bridge just accumulates metrics nobody scrapes yet). Only used
-    # for the type annotation on attach_metrics_route() below; never
-    # evaluated at runtime under `from __future__ import annotations`.
+    # Soft dependency only, for the type annotation on
+    # attach_metrics_route() below -- never evaluated at runtime under
+    # `from __future__ import annotations`. main.py imports fastapi
+    # directly for its own app; this module doesn't need it at runtime.
     from fastapi import FastAPI
 
 
@@ -450,10 +453,14 @@ class prometheus_out(transport_base):
     # FastAPI mount-in-existing-app path
     metrics_path: str = "/metrics"
 
-    # Standalone server (for headless deployments with no WebServer attached)
-    enable_standalone_server: bool = False
-    standalone_host: str = "0.0.0.0"  # noqa: S104
-    standalone_port: int = 9110
+    # Optional: also expose metrics_path on this additional port, in
+    # addition to the main WebServer port. This does NOT start a second
+    # server -- see classes.WebServer.main._collect_metrics_ports() and
+    # start_webserver(), which bind one extra socket on the SAME
+    # uvicorn.Server/event loop and restrict it (via RestrictPortMiddleware)
+    # to serving only metrics_path. None (the default) means this bridge
+    # is reachable only on the main WebServer port.
+    metrics_port: int  = 9110
 
     # Staleness / target-health monitoring
     staleness_multiplier: float = 3.0
@@ -465,8 +472,7 @@ class prometheus_out(transport_base):
 
         Args:
             settings (TransportSettings): Configuration section containing
-                metric-naming, labeling, and (optional) standalone-server
-                options.
+                metric-naming, labeling, and mount-path options.
 
         Configuration options:
             - metric_prefix (str): Prefix applied to every device metric
@@ -486,15 +492,18 @@ class prometheus_out(transport_base):
               boundaries for histogram fields (default: "", i.e. use
               prometheus_client's default buckets).
             - metrics_path (str): Path this bridge's metrics are served
-              under when mounted into an existing FastAPI app via
-              attach_metrics_route() (default: "/metrics").
-            - enable_standalone_server (bool): Run this bridge's own
-              uvicorn/FastAPI HTTP server instead of relying on an
-              already-running WebServer to mount it (default: False).
-            - standalone_host (str): Bind host for the standalone server
-              (default: "0.0.0.0").
-            - standalone_port (int): Bind port for the standalone server
-              (default: 9110).
+              under, mounted onto the WebServer's own FastAPI app via
+              attach_metrics_route() -- see
+              classes.WebServer.main._mount_prometheus_bridges(), which
+              does this automatically at startup for every configured
+              prometheus_out bridge (default: "/metrics").
+            - metrics_port (int | None): Optional additional port that
+              also serves metrics_path, restricted (via
+              classes.WebServer.main.RestrictPortMiddleware) to serve
+              nothing else -- not a second server, just an extra socket
+              on the same WebServer process/event loop. Useful for
+              firewalling metrics access separately from the config UI.
+              Default: None (reachable only on the main WebServer port).
             - staleness_multiplier (float): A machine is flagged stale
               (and scrape_failures_total incremented) once this many
               multiples of its own read_interval have elapsed since its
@@ -508,8 +517,6 @@ class prometheus_out(transport_base):
             - Starts a lightweight background thread that periodically
               sweeps per-machine state for staleness (see
               _stale_monitor_loop).
-            - Optionally starts a uvicorn server thread when
-              enable_standalone_server is True.
             - All registry mutation is protected by locks internal to
               DynamicMetricsRegistry and this class's own _state_lock, so
               concurrent write_data() calls from multiple scraper threads
@@ -534,14 +541,22 @@ class prometheus_out(transport_base):
         self.histogram_buckets = settings.get("histogram_buckets", fallback=self.histogram_buckets)
 
         # -------------------------
-        # FastAPI mount / standalone server
+        # FastAPI mount path
         # -------------------------
         self.metrics_path = settings.get("metrics_path", fallback=self.metrics_path)
-        self.enable_standalone_server = settings.getboolean(
-            "enable_standalone_server", fallback=self.enable_standalone_server
-        )
-        self.standalone_host = settings.get("standalone_host", fallback=self.standalone_host)
-        self.standalone_port = settings.getint("standalone_port", fallback=self.standalone_port)
+        # cast() (not just an annotation -- that alone doesn't work here,
+        # since Pyright narrows based on the RHS expression's inferred type
+        # regardless of the declared target type) is needed because
+        # TransportSettings.getint()'s own signature declares `-> int`
+        # unconditionally (see defs/common.py), even though passing
+        # fallback=self.metrics_port (None, the dataclass default) means it
+        # can genuinely return None when the key is absent from config.cfg.
+        # Without this cast, Pyright takes getint()'s declared return type
+        # at face value and narrows self.metrics_port to plain `int` from
+        # this line onward -- which then makes every later `is not None`
+        # check on it (here, and in main._mount_prometheus_bridges()) look
+        # tautological, even though it isn't.
+        self.metrics_port: int  = settings.getint("metrics_port", fallback=self.metrics_port)
 
         # -------------------------
         # Staleness monitoring
@@ -559,11 +574,19 @@ class prometheus_out(transport_base):
         # resolution order (see influxdb_out / timescaledb for why this is
         # re-read here rather than trusted from the base class alone).
         self.device_name = settings.get("device_name", fallback="Prometheus MPG Bridge")
-        # host/port surfaced for transport_base's connection-notification
-        # log lines only; this bridge has no single "connection" to lose in
-        # the way a database client does (see close()/self.connected below).
-        self.host = self.standalone_host
-        self.port = self.standalone_port
+        # host/port set for interface consistency with other transport_base
+        # subclasses (which use these for their outbound connection target).
+        # For this bridge they're not read by anything in this codebase --
+        # verified no code reads .host/.port off a live transport instance
+        # anywhere, including transport_base itself. The "Configured
+        # Devices" dashboard's Host column does NOT come from here: it
+        # reads literal host/port Setting DB rows sourced from config.cfg
+        # text (see device_service.get_nav_data() and
+        # transport_defaults.json's prometheus_out entry for the actual
+        # display mechanism, documented in documentation/bridges/Prometheus
+        # /prometheus.md's "Dashboard Host/Port Display" section).
+        self.host = "0.0.0.0"  # noqa: S104
+        self.port: int = self.metrics_port if self.metrics_port else 1717
 
         # -------------------------
         # Runtime state
@@ -635,17 +658,13 @@ class prometheus_out(transport_base):
         )
         self._stale_thread.start()
 
-        self._standalone_server: Any = None
-        self._standalone_thread: threading.Thread | None = None
-        if self.enable_standalone_server:
-            self._start_standalone_server()
-
         # This bridge has no single external connection to lose the way a
-        # database client does -- once the registry and (optional)
-        # standalone server are up, it's ready to be scraped. Setting this
-        # True (rather than leaving the base class default) avoids a
-        # spurious "connection lost" notification on shutdown -- see the
-        # connected-setter docs in transport_base.
+        # database client does -- once the registry exists, it's ready to
+        # be scraped as soon as main._mount_prometheus_bridges() mounts it
+        # onto the WebServer's app. Setting this True (rather than leaving
+        # the base class default) avoids a spurious "connection lost"
+        # notification on shutdown -- see the connected-setter docs in
+        # transport_base.
         self.connected = True
 
     # ------------------------------------------------------------------
@@ -846,18 +865,13 @@ class prometheus_out(transport_base):
 
         Returns:
           {metrics_registered, total_machines, connected_count,
-           stale_count, never_reported_count, standalone_server_enabled,
-           standalone_server_running, metrics_path, standalone_host,
-           standalone_port, uptime_seconds}
+           stale_count, never_reported_count, metrics_path, metrics_port,
+           uptime_seconds}
         """
         targets: list[dict[str, Any]] = self.get_target_health()
         connected_count: int = sum(1 for t in targets if t["connected"])
         never_reported_count: int = sum(1 for t in targets if t["last_scrape_timestamp"] is None)
         stale_count: int = len(targets) - connected_count - never_reported_count
-
-        server_running: bool = bool(
-            self._standalone_thread is not None and self._standalone_thread.is_alive()
-        )
 
         return {
             "metrics_registered": self._metrics.metric_count(),
@@ -865,16 +879,13 @@ class prometheus_out(transport_base):
             "connected_count": connected_count,
             "stale_count": stale_count,
             "never_reported_count": never_reported_count,
-            "standalone_server_enabled": self.enable_standalone_server,
-            "standalone_server_running": server_running,
             "metrics_path": self.metrics_path,
-            "standalone_host": self.standalone_host,
-            "standalone_port": self.standalone_port,
+            "metrics_port": self.metrics_port,
             "uptime_seconds": time.time() - self._start_time,
         }
 
     # ------------------------------------------------------------------
-    # FastAPI / standalone server integration
+    # FastAPI integration
     # ------------------------------------------------------------------
 
     def get_asgi_app(self) -> Any:
@@ -882,71 +893,12 @@ class prometheus_out(transport_base):
         Returns a Starlette ASGI app serving this bridge's in-memory
         registry, suitable for ``app.mount(path, bridge.get_asgi_app())``.
         See module-level attach_metrics_route() for the one-line helper
-        most callers want instead of calling this directly.
+        most callers want instead of calling this directly -- this is what
+        classes.WebServer.main._mount_prometheus_bridges() calls
+        automatically at startup for every configured prometheus_out
+        bridge.
         """
         return _make_asgi_app(registry=self.registry) # type: ignore
-
-    def _start_standalone_server(self) -> None:
-        """
-        Scheduling path: N/A -- setup, runs once during __init__ when
-        enable_standalone_server is True.
-
-        Runs a minimal FastAPI app (this bridge's /metrics only, plus a
-        trivial /healthz) under its own uvicorn server on a background
-        thread, for deployments where no WebServer/FastAPI app is already
-        running to mount into. Soft-imports fastapi/uvicorn so this module
-        still imports cleanly when those packages aren't installed and
-        this feature simply isn't used.
-        """
-        try:
-            import uvicorn
-            from fastapi import FastAPI
-        except ImportError as exc:
-            self._log.error(
-                f"enable_standalone_server=True but fastapi/uvicorn are not "
-                f"installed ({exc}); the standalone metrics server will not start. "
-                f"Install them, or mount this bridge into an existing FastAPI app "
-                f"instead via attach_metrics_route()."
-            )
-            return
-
-        app: FastAPI = FastAPI(
-            title=f"MPG Prometheus Bridge ({self.transport_name})",
-            docs_url=None,
-            redoc_url=None,
-        )
-        attach_metrics_route(app, self, self.metrics_path)
-
-        @app.get("/healthz")
-        def _healthz() -> dict[str, Any]:
-            return {"status": "ok", "machines_tracked": len(self._machine_state)}
-
-        config: Any = uvicorn.Config(
-            app,
-            host=self.standalone_host,
-            port=self.standalone_port,
-            log_level="warning",
-        )
-        server: Any = uvicorn.Server(config)
-        self._standalone_server = server
-
-        def _run() -> None:
-            try:
-                server.run()
-            except Exception as exc:
-                self._log.error(f"Standalone Prometheus metrics server crashed: {exc}")
-
-        thread: threading.Thread = threading.Thread(
-            target=_run,
-            name=f"{self.transport_name}-metrics-http",
-            daemon=True,
-        )
-        self._standalone_thread = thread
-        thread.start()
-        self._log.info(
-            f"Standalone Prometheus metrics server starting on "
-            f"http://{self.standalone_host}:{self.standalone_port}{self.metrics_path}"
-        )
 
     # ------------------------------------------------------------------
     # Close / cleanup
@@ -954,30 +906,18 @@ class prometheus_out(transport_base):
 
     def close(self) -> None:
         """
-        Gracefully terminate this bridge. Stops the stale-monitor thread
-        and, if running, the standalone uvicorn server. There is no
-        network connection or write batch to flush -- the registry simply
-        stops being updated; any still-mounted /metrics endpoint (embedded
-        in a WebServer app that outlives this bridge) will keep serving
-        the last values it had until that app itself shuts down.
+        Gracefully terminate this bridge. Stops the stale-monitor thread.
+        There is no network connection or write batch to flush -- the
+        registry simply stops being updated; the still-mounted /metrics
+        endpoint (embedded in the WebServer app, which outlives this
+        bridge) will keep serving the last values it had until that app
+        itself shuts down.
         """
         self._log.debug(f"Closing Prometheus transport bridge '{self.transport_name}'...")
 
         self._stop_event.set()
         if self._stale_thread.is_alive():
             self._stale_thread.join(timeout=5.0)
-
-        server: Any = getattr(self, "_standalone_server", None)
-        if server is not None:
-            try:
-                server.should_exit = True
-                thread: threading.Thread | None = getattr(self, "_standalone_thread", None)
-                if thread is not None and thread.is_alive():
-                    thread.join(timeout=5.0)
-            except Exception as exc:
-                self._log.warning(f"Error stopping standalone metrics server: {exc}")
-            finally:
-                self._standalone_server = None
 
         self.connected = False
         self._log.info(f"Prometheus transport bridge '{self.transport_name}' closed cleanly.")

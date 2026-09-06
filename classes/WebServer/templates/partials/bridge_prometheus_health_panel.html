@@ -65,21 +65,17 @@
     <div class="flex items-center justify-between">
       <dt class="surface-muted text-xs">Metrics endpoint</dt>
       <dd class="surface-title text-xs font-mono font-medium truncate" title="{{ health.metrics_path }}">
-        {{ health.metrics_path }}
+        {{ health.metrics_path }} <span class="surface-muted">(on WebServer app)</span>
       </dd>
     </div>
 
     <div class="flex items-center justify-between">
-      <dt class="surface-muted text-xs">Standalone server</dt>
-      <dd class="surface-title text-xs font-medium">
-        {% if not health.standalone_server_enabled %}
-        <span class="surface-muted">Disabled (mounted into WebServer app)</span>
-        {% elif health.standalone_server_running %}
-        <span class="text-green-600 dark:text-green-400 font-mono">
-          Running — {{ health.standalone_host }}:{{ health.standalone_port }}
-        </span>
+      <dt class="surface-muted text-xs">Dedicated metrics port</dt>
+      <dd class="surface-title text-xs font-mono font-medium">
+        {% if health.metrics_port %}
+        <span class="text-green-600 dark:text-green-400">:{{ health.metrics_port }}</span>
         {% else %}
-        <span class="text-danger">Enabled but not running</span>
+        <span class="surface-muted">Not set (main port only)</span>
         {% endif %}
       </dd>
     </div>

@@ -1150,9 +1150,9 @@ def _format_duration(seconds: float | None) -> str:
 def get_prometheus_health(gateway: "Protocol_Gateway | None", device_section: str) -> dict[str, Any]:
     """
     Read-only in-memory-registry summary for the "Bridge Health" panel —
-    metrics registered, standalone-server state, and machine counts by
-    connectivity bucket. See prometheus_out.get_bridge_summary for the raw
-    field list; this adds a human-readable `uptime_display`.
+    metrics registered, mount path, and machine counts by connectivity
+    bucket. See prometheus_out.get_bridge_summary for the raw field list;
+    this adds a human-readable `uptime_display`.
 
     Raises RuntimeError if no Prometheus bridge with this name is attached
     to the gateway.

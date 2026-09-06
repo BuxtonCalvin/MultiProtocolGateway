@@ -17,6 +17,11 @@
 
 """Unit tests for messaging clients and message dispatch."""
 
+# pyright: reportPrivateUsage=false
+# White-box testing of internal state (_clients, _handler, _initialized,
+# etc.) is the point of these tests, not a bug. See test_transports.py's
+# copy of this comment for the full rationale.
+
 from __future__ import annotations
 
 from configparser import ConfigParser
@@ -79,9 +84,12 @@ def test_message_handler_dispatch_filters_services_and_clamps_priority() -> None
     handler._default_title = "Default"
     pushover_client = MagicMock()
     telegram_client = MagicMock()
+    def _capture_kwargs(**kw: object) -> dict[str, object]:
+        return kw
+
     handler._clients = [
-        {"name": "pushover", "client": pushover_client, "Message": MagicMock(side_effect=lambda **kw: kw)},
-        {"name": "telegram", "client": telegram_client, "Message": MagicMock(side_effect=lambda **kw: kw)},
+        {"name": "pushover", "client": pushover_client, "Message": MagicMock(side_effect=_capture_kwargs)},
+        {"name": "telegram", "client": telegram_client, "Message": MagicMock(side_effect=_capture_kwargs)},
     ]
 
     handler.dispatch("hello", priority=99, services="pushover")

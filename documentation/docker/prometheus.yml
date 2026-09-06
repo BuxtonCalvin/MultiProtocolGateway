@@ -1,0 +1,46 @@
+# prometheus.yml
+# Place this at: config/prometheus/prometheus.yml
+# (bind-mounted by docker-compose.yml to /etc/prometheus/prometheus.yml)
+#
+# This must exist BEFORE the first `docker compose up`. If the path doesn't
+# exist on the host, Docker will silently create an empty directory there
+# instead of mounting a file, and the prometheus container will fail to start
+# with a "config.file" read error.
+#
+# This targets "mpg:9110" — the mpg container's own hostname on the
+# mpg_internal network, on the dedicated metrics_port this docker-compose
+# setup's config.cfg example configures:
+#
+#   [prometheus_output]
+#   type = prometheus_out
+#   metric_prefix = device_
+#   metrics_path = /metrics
+#   metrics_port = 9110
+#
+# This is one extra restricted socket on the same MPG web server process
+# (see classes/WebServer/main.py's RestrictPortMiddleware) -- not a
+# second server. Docker-internal container-to-container traffic (this
+# Prometheus container reaching "mpg") works over mpg_internal regardless
+# of what's published to the host, so no "ports:" entry for 9110 is
+# needed on the mpg service for this to work.
+#
+# If you didn't set metrics_port in config.cfg (the default), remove
+# ":9110" below and target "mpg:1717" instead -- metrics are served on
+# the main web UI port in that case.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Prometheus scraping itself — useful baseline sanity check
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # Multi Protocol Gateway — prometheus_out bridge's dedicated metrics_port
+  - job_name: "mpg"
+    scrape_interval: 15s
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["mpg:9110"]
