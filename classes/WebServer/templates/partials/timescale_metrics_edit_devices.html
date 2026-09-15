@@ -1,0 +1,61 @@
+<!--
+  Description: partials/timescale_metrics_edit_devices.html HTMX partial — device picker for one Metrics Edit table.
+  File: timescale_metrics_edit_devices.html
+
+  Copyright 2026 Kevin Burke
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://apache.org
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+
+{#
+  partials/timescale_metrics_edit_devices.html
+  Swapped into #metrics-edit-devices-container whenever the admin picks a
+  table on the left (see pages/timescale_metrics_edit.html). Only devices
+  with at least one existing row in the selected table are listed (see
+  BridgeAdminManager.list_metric_edit_devices) — never every registered
+  device.
+
+  Context: table_kind, protocol_name, devices — [{device_info_id,
+  device_identifier, device_name}, ...] in device_identifier order.
+
+  Selecting a device loads its field checklist via HTMX (see
+  onMetricsEditDeviceChange() in pages/timescale_metrics_edit.html) and
+  clears any stale preview/staging inputs left over from a previous
+  selection.
+
+  Styling: this partial renders into the right-hand content area, which
+  sits on the app's normal light-panel background (see the styling note
+  in pages/timescale_metrics_edit.html) — so the select uses `.theme-input`
+  (adapts to light/dark) rather than a hardcoded dark background, and the
+  empty-state caption uses `.mini-table-meta`, matching the "No wide
+  tables found" / "No rollup views found" convention elsewhere.
+#}
+<select id="metrics-edit-device-select"
+        class="theme-input w-full text-xs rounded px-2 py-1.5
+               focus:outline-none focus:ring-1 focus:ring-accent"
+        aria-label="Device to edit"
+        data-table-kind="{{ table_kind }}"
+        data-protocol-name="{{ protocol_name or '' }}"
+        onchange="onMetricsEditDeviceChange(this)">
+  <option value="" disabled selected>Select a device…</option>
+  {% for d in devices %}
+  <option value="{{ d.device_info_id }}"
+          data-label="{{ d.device_identifier or d.device_name or ('device #' ~ d.device_info_id) }}">
+    {{ d.device_identifier or ('device #' ~ d.device_info_id) }}
+    {% if d.device_name and d.device_name != d.device_identifier %} — {{ d.device_name }}{% endif %}
+  </option>
+  {% endfor %}
+</select>
+{% if not devices %}
+<p class="mini-table-meta text-xs italic mt-2">No devices have any rows in this table yet.</p>
+{% endif %}

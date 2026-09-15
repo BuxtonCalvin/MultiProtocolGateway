@@ -1514,13 +1514,7 @@ class modbus_base(transport_base):
 
     def write_data(self, data: dict[str, int | float | str ], from_transport: transport_base) -> None:
         """Scheduling path: All (Sequential, Concurrent, Interleaved) — bridge-side receiver called from both _process_group_read and _forward_to_bridges."""
-        self._lock_forensic("_transport_lock", self._transport_lock, "WAIT-START", "(write_data)")
-        _write_wait_t0: float = time.monotonic()
         with self._transport_lock:
-            self._lock_forensic(
-                "_transport_lock", self._transport_lock, "ACQUIRED",
-                f"waited={time.monotonic() - _write_wait_t0:.3f}s (write_data)",
-            )
             if not self.write_enabled:  # guard for checking inverter scraper flag to allow write back to the inverter.
                 return
 
@@ -1558,58 +1552,13 @@ class modbus_base(transport_base):
 
             time.sleep(self.modbus_delay) #sleep in between requests so modbus can rest
 
-    def get_lock_diagnostic_ids(self) -> dict[str, str | None]:
-        """
-        Scheduling path: N/A — diagnostic helper only.
-
-        Public accessor for the forensic lock ids used to correlate log
-        lines across the router and this transport (e.g. confirming the
-        Analyze feature and the normal scheduler are actually contending
-        for the SAME lock object, not two separate ones). Exists so
-        external callers like classes/WebServer/routers/analysis.py don't
-        need to reach into the protected _transport_lock attribute directly.
-        """
-        return {
-            "transport_lock_id": hex(id(self._transport_lock)),
-            "bus_lock_id": hex(id(self.bus_lock)) if self.bus_lock is not None else None,
-        }
-
-    def _lock_forensic(self, lock_name: str, lock_obj: object, event: str, extra: str = "") -> None:
-        """
-        Scheduling path: N/A — diagnostic helper only, not part of any
-        scheduling or analyze path itself.
-
-        Emits a structured, easy-to-search-for INFO-level log line for diagnosing
-        lock contention between the normal scheduler and the Analyze
-        feature (or any other concurrent caller). Logged at INFO (not
-        DEBUG) so it's visible even in default-verbosity deployments while
-        this is under active investigation.
-
-        Includes id(lock_obj) so two code paths that are SUPPOSED to be
-        serializing against the same lock can be directly confirmed (or
-        ruled out) as actually sharing the same Python object, rather than
-        two different Lock() instances that happen to have the same name.
-        """
-        thread = threading.current_thread()
-        self._log.info(
-            "[LOCK-FORENSIC] transport=%s lock=%s id=%s event=%s thread=%s(%s) %s",
-            self.transport_name, lock_name, hex(id(lock_obj)), event,
-            thread.name, thread.ident, extra,
-        )
-
     def read_data(self) -> dict[str, int | float | str ]:
         """
         Scheduling path: Sequential, Concurrent (via _process_group_read for a solo/standalone transport).
         Not used by interleaved mode — see read_data_iter.
         """
         # Use transport lock to prevent concurrent access to this transport instance
-        self._lock_forensic("_transport_lock", self._transport_lock, "WAIT-START")
-        _wait_t0: float = time.monotonic()
         with self._transport_lock:
-            self._lock_forensic(
-                "_transport_lock", self._transport_lock, "ACQUIRED",
-                f"waited={time.monotonic() - _wait_t0:.3f}s",
-            )
             self._start_cycle_tracking()
             # Add debugging information
             port_info: str| int = getattr(self, 'port', 'unknown')
@@ -1668,7 +1617,6 @@ class modbus_base(transport_base):
                 self._last_disabled_status_log = time.time()
 
             self.finish_cycle_tracking(info)
-            self._lock_forensic("_transport_lock", self._transport_lock, "RELEASING", "(read_data returning)")
             return info
 
     def read_group_data(self, members: list[transport_base]) -> dict[str, int | float | str]:
@@ -1685,16 +1633,7 @@ class modbus_base(transport_base):
         so per-member adjustments, unit modifiers, and code lookups are applied
         correctly regardless of whether all members share the same protocol.
         """
-        self._lock_forensic(
-            "_transport_lock", self._transport_lock, "WAIT-START",
-            f"(read_group_data, primary={self.transport_name}, members={[m.transport_name for m in members]})",
-        )
-        _wait_t0: float = time.monotonic()
         with self._transport_lock:
-            self._lock_forensic(
-                "_transport_lock", self._transport_lock, "ACQUIRED",
-                f"waited={time.monotonic() - _wait_t0:.3f}s (read_group_data)",
-            )
             self._start_cycle_tracking()
             port_info: str | int = getattr(self, 'port', 'unknown')
             address_info: str = getattr(self, 'address', 'unknown')
@@ -1782,7 +1721,6 @@ class modbus_base(transport_base):
                 self._log.info("Grouped register read returned no data; transport busy?")
 
             self.finish_cycle_tracking(info)
-            self._lock_forensic("_transport_lock", self._transport_lock, "RELEASING", "(read_group_data returning)")
             return info
 
     def interleaved_cycle_timeout(self) -> float:
@@ -2291,19 +2229,7 @@ class modbus_base(transport_base):
         # probing ran fully unlocked and fought the scheduler for the wire,
         # showing up as "No response after 3 retries" / garbled decodes in
         # the log and an analyze run that never seemed to progress.
-        self._log.info(
-            "[LOCK-FORENSIC] transport=%s ANALYZE-ENTER thread=%s(%s) protocol_names=%s "
-            "current_protocol=%s batch_size=%s force_types=%s",
-            self.transport_name, threading.current_thread().name, threading.current_thread().ident,
-            protocol_names, current_protocol, batch_size, force_types,
-        )
-        self._lock_forensic("_transport_lock", self._transport_lock, "WAIT-START", "(analyze_protocols)")
-        _analyze_lock_wait_t0: float = time.monotonic()
         with self._transport_lock:
-            self._lock_forensic(
-                "_transport_lock", self._transport_lock, "ACQUIRED",
-                f"waited={time.monotonic() - _analyze_lock_wait_t0:.3f}s (analyze_protocols)",
-            )
             # bus_lock (interleaved mode only; None in sequential/concurrent
             # mode) is held for the WHOLE operation here, unlike normal
             # interleaved reads which take/release it per block — this is
@@ -2311,13 +2237,7 @@ class modbus_base(transport_base):
             # peer transports too, not just this one.
             bus_lock: Lock | None = self.bus_lock
             if bus_lock is not None:
-                self._lock_forensic("bus_lock", bus_lock, "WAIT-START", "(analyze_protocols)")
-                _bus_wait_t0: float = time.monotonic()
                 bus_lock.acquire()
-                self._lock_forensic(
-                    "bus_lock", bus_lock, "ACQUIRED",
-                    f"waited={time.monotonic() - _bus_wait_t0:.3f}s (analyze_protocols)",
-                )
 
             # port_lock is shared across every transport with the same
             # _get_port_identifier() -- e.g. every battery on one TCP gateway
@@ -2335,18 +2255,11 @@ class modbus_base(transport_base):
             # must be an RLock: this outer acquisition and each of those many
             # inner ones happen on the same thread throughout the scan.
             port_lock: RLock = self._get_port_lock()
-            self._lock_forensic("port_lock", port_lock, "WAIT-START", "(analyze_protocols)")
-            _port_wait_t0: float = time.monotonic()
             port_lock.acquire()
-            self._lock_forensic(
-                "port_lock", port_lock, "ACQUIRED",
-                f"waited={time.monotonic() - _port_wait_t0:.3f}s (analyze_protocols)",
-            )
             try:
                 force_types = force_types or set()
                 probe_results: dict[Registry_Type, tuple[bool, str]] = {}
                 for r_type in (Registry_Type.INPUT, Registry_Type.HOLDING, Registry_Type.COIL, Registry_Type.DISCRETE):
-                    _probe_t0: float = time.monotonic()
                     if r_type.name.lower() in force_types:
                         # Operator override — skip the probe, go straight to the full
                         # dense sweep regardless of what a probe would have found.
@@ -2365,10 +2278,6 @@ class modbus_base(transport_base):
                         # and without per-offset updates the UI has nothing new
                         # to show for the entire duration.
                         probe_results[r_type] = self._probe_registry_type(r_type, progress_cb)
-                    self._log.info(
-                        "[LOCK-FORENSIC] transport=%s PROBE-DONE type=%s elapsed=%.3fs result=%s",
-                        self.transport_name, r_type.name, time.monotonic() - _probe_t0, probe_results[r_type],
-                    )
 
                 _has_input, _input_reason = probe_results[Registry_Type.INPUT]
                 _has_holding, _holding_reason = probe_results[Registry_Type.HOLDING]
@@ -2403,10 +2312,6 @@ class modbus_base(transport_base):
                     self.transport_name, _has_input, _has_holding, _has_coil, _has_discrete,
                 )
 
-                self._log.info(
-                    "[LOCK-FORENSIC] transport=%s CAPTURE-SCAN-START", self.transport_name,
-                )
-                _scan_t0: float = time.monotonic()
                 scan: dict[str, dict[int, int]] = self.capture_analysis_scan(
                     progress_cb=progress_cb,
                     batch_size=batch_size,
@@ -2415,17 +2320,10 @@ class modbus_base(transport_base):
                     include_coil=_has_coil,
                     include_discrete=_has_discrete,
                 )
-                self._log.info(
-                    "[LOCK-FORENSIC] transport=%s CAPTURE-SCAN-DONE elapsed=%.3fs",
-                    self.transport_name, time.monotonic() - _scan_t0,
-                )
             finally:
                 port_lock.release()
-                self._lock_forensic("port_lock", port_lock, "RELEASED", "(analyze_protocols)")
                 if bus_lock is not None:
                     bus_lock.release()
-                    self._lock_forensic("bus_lock", bus_lock, "RELEASED", "(analyze_protocols)")
-        self._lock_forensic("_transport_lock", self._transport_lock, "RELEASED", "(analyze_protocols)")
         # --- transport lock released here; everything below is pure
         # scoring/comparison against already-collected data, no more I/O,
         # so there's no reason to keep the normal scheduler blocked further.

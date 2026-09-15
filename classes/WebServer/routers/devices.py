@@ -45,7 +45,12 @@ from ..scanner import (
     scan_transport_library,
 )
 from ..services.analysis_service import get_transport_connection_status
-from ..services.bridge_service import has_staged_deletions, staged_deletion_count
+from ..services.bridge_service import (
+    has_staged_deletions,
+    has_staged_metric_edits,
+    staged_deletion_count,
+    staged_metric_edit_count,
+)
 from ..services.device_service import (
     delete_orphans_bulk,
     ensure_bridge_sections_exist,
@@ -191,14 +196,15 @@ def app_state(request: Request, db: Session = Depends(get_session)) -> dict[str,
     return {
         "has_dirty_settings": state.has_dirty_settings,
         "has_dirty_protocols": state.has_dirty_protocols,
-        # Timescale column deletions are staged in-memory on app.state
-        # (see services/bridge_service.py), not in the staging DB, since
-        # they're live Postgres schema rather than config.cfg settings.
-        "has_dirty_timescale": has_staged_deletions(request.app.state),
+        # Timescale column deletions and Metrics Edit value edits/deletes
+        # are both staged in-memory on app.state (see
+        # services/bridge_service.py), not in the staging DB, since
+        # they're live Postgres work rather than config.cfg settings.
+        "has_dirty_timescale": has_staged_deletions(request.app.state) or has_staged_metric_edits(request.app.state),
         "has_orphans": state.has_orphans,
         "dirty_settings_count": state.dirty_settings_count,
         "dirty_protocols_count": state.dirty_protocols_count,
-        "dirty_timescale_count": staged_deletion_count(request.app.state),
+        "dirty_timescale_count": staged_deletion_count(request.app.state) + staged_metric_edit_count(request.app.state),
         "orphan_count": state.orphan_count,
         "last_scan_at": state.last_scan_at.isoformat() if state.last_scan_at else None,
         "last_commit_at": state.last_commit_at.isoformat() if state.last_commit_at else None,
@@ -388,8 +394,8 @@ def reconcile_settings(
 
     # Render the settings rows partial with the computed display list
     summary: DeviceSummary | None = get_device_summary(db, device_name)
-    templates = request.app.state.templates
-    html = templates.get_template("partials/settings_rows.html").render(
+    templates: Any = request.app.state.templates
+    html: Any = templates.get_template("partials/settings_rows.html").render(
         {"device": summary, "settings": display_rows, "request": request}
     )
     return HTMLResponse(content=html)

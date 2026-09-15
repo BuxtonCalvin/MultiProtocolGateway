@@ -1,0 +1,95 @@
+<!--
+  Description: partials/timescale_metrics_edit_staged.html — staged Metrics Edit changes list, pending "Commit All Changes".
+  File: timescale_metrics_edit_staged.html
+
+  Copyright 2026 Kevin Burke
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://apache.org
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+
+{#
+  partials/timescale_metrics_edit_staged.html
+  Swapped into #metrics-edit-staged-container on page load, after "Add to
+  Staged Changes", and after removing one entry. Context: staged_edits —
+  a list of StagedMetricEdit dicts (services/bridge_service.py):
+  {edit_id, table_kind, protocol_name, table_name, device_info_id,
+  device_label, field_names, start_time, end_time, action, new_value}.
+
+  Nothing here is written to TimescaleDB until the admin presses the
+  existing header "Commit All Changes" button, which runs
+  commit_staged_metric_edits() (routers/commit.py) — the same button that
+  already applies Delete Columns' staged column drops. Removing a row
+  here (hx-delete) only clears it from in-memory staging; nothing on disk
+  or in Postgres has been touched yet either way.
+
+  Styling: renders into a plain light-panel container (see the styling
+  note in pages/timescale_metrics_edit.html) — the table header row is
+  the one hardcoded-dark strip (.mini-table-header), body cells use the
+  theme-adaptive .mini-table-value, matching timescale_field_checklist.html
+  and timescale_rollup_view_list.html's own tables.
+#}
+<div>
+  <div class="flex items-center justify-between mb-2 px-1">
+    <h3 class="surface-title font-semibold text-xs uppercase tracking-widest">
+      Staged Changes
+      {% if staged_edits %}<span class="surface-muted font-normal">({{ staged_edits|length }})</span>{% endif %}
+    </h3>
+  </div>
+
+  {% if staged_edits %}
+  <table class="w-auto text-xs border-collapse">
+    <thead>
+      <tr class="mini-table-header uppercase tracking-wide">
+        <th class="px-2 py-1.5 text-left font-semibold whitespace-nowrap">Table</th>
+        <th class="px-2 py-1.5 text-left font-semibold whitespace-nowrap">Device</th>
+        <th class="px-2 py-1.5 text-left font-semibold whitespace-nowrap">Fields</th>
+        <th class="px-2 py-1.5 text-left font-semibold whitespace-nowrap">Range</th>
+        <th class="px-2 py-1.5 text-left font-semibold whitespace-nowrap">Action</th>
+        <th class="px-2 py-1.5 text-center w-10 font-semibold" title="Remove from staging">Del</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for e in staged_edits %}
+      <tr class="border-t border-mpg-700/50 bg-dirty/5">
+        <td class="px-2 py-1.5 font-mono mini-table-value whitespace-nowrap">{{ e.table_name }}</td>
+        <td class="px-2 py-1.5 mini-table-value whitespace-nowrap">{{ e.device_label }}</td>
+        <td class="px-2 py-1.5 font-mono mini-table-value">{{ e.field_names|join(', ') }}</td>
+        <td class="px-2 py-1.5 mini-table-value whitespace-nowrap">
+          {{ e.start_time.strftime('%Y-%m-%d %H:%M') }} → {{ e.end_time.strftime('%Y-%m-%d %H:%M') }}
+        </td>
+        <td class="px-2 py-1.5 whitespace-nowrap">
+          {% if e.action == 'delete' %}
+          <span class="text-danger font-semibold">Delete</span>
+          {% else %}
+          <span class="text-accent font-semibold">Set = {{ e.new_value }}</span>
+          {% endif %}
+        </td>
+        <td class="px-2 py-1.5 text-center">
+          <button type="button"
+                  class="text-danger hover:text-danger/70"
+                  aria-label="Remove this staged change"
+                  title="Remove from staging (does not undo anything already committed)"
+                  hx-delete="/api/timescale/metrics-edit/stage/{{ e.edit_id }}"
+                  hx-target="#metrics-edit-staged-container"
+                  hx-swap="innerHTML scroll:false">
+            ✕
+          </button>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="mini-table-meta text-xs italic px-1">Nothing staged yet.</p>
+  {% endif %}
+</div>
