@@ -70,7 +70,9 @@ import logging
 import sys
 import threading
 import time
-from typing import TYPE_CHECKING, Any, Generator, cast
+import uuid
+from datetime import datetime
+from typing import TYPE_CHECKING, Any, Generator, Literal, cast
 
 from starlette.datastructures import State
 
@@ -140,6 +142,11 @@ if TYPE_CHECKING:
 
     from ...transports.timescaledb import (
         BridgeAdminManager,
+        MetricEditDevice,
+        MetricEditField,
+        MetricEditPreview,
+        MetricEditResult,
+        MetricEditTable,
         WideTableField,
         WideTableFieldDeletionResult,
         timescaledb,
@@ -374,6 +381,90 @@ def list_wide_table_fields(
         }
         for f in fields
     ]
+
+
+# ---------------------------------------------------------------------------
+# Metrics Edit — read-only listings + preview for the "Timescale DB ->
+# Metrics Edit" admin screen. Unlike Delete Columns, this edits/deletes
+# metric VALUES (rows on the narrow table, or one or more columns on a wide
+# table's rows) rather than the wide table's shape. See the staging +
+# commit section further below for the actual mutation.
+# ---------------------------------------------------------------------------
+
+def list_metric_edit_tables(gateway: "Protocol_Gateway | None") -> list[dict[str, str | None]]:
+    """
+    Returns [{table_kind, protocol_name, table_name}, ...] for the Metrics
+    Edit table picker — the shared narrow table first, then every
+    wide-table protocol, same set list_wide_tables() returns for Delete
+    Columns plus the narrow entry.
+    """
+    mgr: BridgeAdminManager = _field_manager(gateway)
+    tables: list[MetricEditTable] = mgr.list_metric_edit_tables()
+    return [
+        {"table_kind": t.table_kind, "protocol_name": t.protocol_name, "table_name": t.table_name}
+        for t in tables
+    ]
+
+
+def list_metric_edit_devices(
+    gateway: "Protocol_Gateway | None", table_kind: str, protocol_name: str | None = None
+    ) -> list[dict[str, str | int | None]]:
+    """Returns [{device_info_id, device_identifier, device_name}, ...] for the Metrics Edit device picker."""
+    mgr: BridgeAdminManager = _field_manager(gateway)
+    devices: list[MetricEditDevice] = mgr.list_metric_edit_devices(table_kind, protocol_name)
+    return [
+        {
+            "device_info_id": d.device_info_id,
+            "device_identifier": d.device_identifier,
+            "device_name": d.device_name,
+        }
+        for d in devices
+    ]
+
+
+def list_metric_edit_fields(
+    gateway: "Protocol_Gateway | None",
+    table_kind: str,
+    protocol_name: str | None = None,
+    device_info_id: int | None = None,
+    ) -> list[dict[str, str | None]]:
+    """Returns [{name, data_type}, ...] for the Metrics Edit field checklist."""
+    mgr: BridgeAdminManager = _field_manager(gateway)
+    fields: list[MetricEditField] = mgr.list_metric_edit_fields(
+        table_kind, protocol_name=protocol_name, device_info_id=device_info_id
+    )
+    return [{"name": f.name, "data_type": f.data_type} for f in fields]
+
+
+def preview_metric_edit(
+    gateway: "Protocol_Gateway | None",
+    table_kind: str,
+    protocol_name: str | None,
+    device_info_id: int,
+    field_names: list[str],
+    start_time: datetime,
+    end_time: datetime,
+    ) -> dict[str, Any]:
+    """
+    Returns {row_count, sample: [{m_time, field_name, value}, ...]} for the
+    Metrics Edit "Preview" step — a read-only look at what a matching
+    edit_metric_values() call would affect, before it's staged.
+    """
+    mgr: BridgeAdminManager = _field_manager(gateway)
+    preview: MetricEditPreview = mgr.preview_metric_edit(
+        table_kind, protocol_name, device_info_id, field_names, start_time, end_time
+    )
+    return {
+        "row_count": preview.row_count,
+        "sample": [
+            {
+                "m_time": s.m_time.isoformat(),
+                "field_name": s.field_name,
+                "value": s.value,
+            }
+            for s in preview.sample
+        ],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -924,6 +1015,202 @@ def commit_staged_deletions(gateway: "Protocol_Gateway | None", app_state: State
     _log.info(
         "commit_staged_deletions: committed %d protocol(s), %d column(s) total.",
         len(results), sum(len(r["deleted"]) for r in results),
+    )
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Metrics Edit — staging + commit. Each staged entry is one complete
+# edit/delete request (table, device, field selection, time range, action) —
+# unlike the column-deletion staging above, which accumulates individual
+# checkbox toggles into a per-protocol set, a Metrics Edit selection is
+# staged as a single atomic unit via "Add to Staged Changes" on the Metrics
+# Edit screen, so there's nothing to merge/toggle here: stage adds one
+# entry, unstage removes it by id. Multiple entries can be staged at once
+# (even against the same table/device) before a single "Commit All
+# Changes" applies all of them in order.
+# ---------------------------------------------------------------------------
+
+class StagedMetricEdit(TypedDict):
+    edit_id: str
+    table_kind: str
+    protocol_name: str | None
+    table_name: str
+    device_info_id: int
+    device_label: str
+    field_names: list[str]
+    start_time: datetime
+    end_time: datetime
+    action: Literal["delete", "set_value"]                    # "delete" or "set_value"
+    new_value: float | str | None
+
+
+def _metric_edit_store(app_state: State) -> dict[str, StagedMetricEdit]:
+    """Lazily initializes and returns the Metrics Edit staging dict (edit_id -> entry) on app.state."""
+    if not hasattr(app_state, "timescale_pending_metric_edits"):
+        setattr(app_state, "timescale_pending_metric_edits", {})
+    store: dict[str, StagedMetricEdit] = getattr(app_state, "timescale_pending_metric_edits")
+    return store
+
+
+def _metric_edit_lock(app_state: State) -> threading.RLock:
+    """Lazily initializes and returns the Metrics Edit staging lock on app.state."""
+    if not hasattr(app_state, "timescale_pending_metric_edits_lock"):
+        app_state.timescale_pending_metric_edits_lock = threading.RLock()
+    return app_state.timescale_pending_metric_edits_lock
+
+
+def stage_metric_edit(
+    gateway: "Protocol_Gateway | None",
+    app_state: State,
+    table_kind: str,
+    protocol_name: str | None,
+    table_name: str,
+    device_info_id: int,
+    device_label: str,
+    field_names: list[str],
+    start_time: datetime,
+    end_time: datetime,
+    action: Literal["delete", "set_value"],
+    new_value: float | str | None = None,
+    ) -> str:
+    """
+    Stages one Metrics Edit request. Called from the "Add to Staged
+    Changes" button on the Metrics Edit screen, after the admin has
+    reviewed a preview_metric_edit() result. Nothing is written to
+    TimescaleDB until the admin presses the existing "Commit All Changes"
+    button, which calls commit_staged_metric_edits() below.
+
+    Runs BridgeAdminManager.validate_metric_edit_value() first (a
+    "set_value" edit's replacement value against the field's declared/
+    inferred type) so an obviously invalid value is rejected here, at
+    staging time, rather than only surfacing when "Commit All Changes" is
+    pressed. Raises ValueError straight through on failure -- nothing is
+    staged.
+
+    Returns the generated edit_id, so the caller can render it into the
+    staged-changes list with a matching "remove" control.
+    """
+    mgr: BridgeAdminManager = _field_manager(gateway)
+    mgr.validate_metric_edit_value(table_kind, protocol_name, device_info_id, field_names, action, new_value)
+
+    edit_id: str = uuid.uuid4().hex
+    with _metric_edit_lock(app_state):
+        # Instantiating the TypedDict class directly forces the type checker
+        # to recognize and validate the exact shape of your StagedMetricEdit.
+        _metric_edit_store(app_state)[edit_id] = StagedMetricEdit(
+            edit_id=edit_id,
+            table_kind=table_kind,
+            protocol_name=protocol_name,
+            table_name=table_name,
+            device_info_id=device_info_id,
+            device_label=device_label,
+            field_names=list(field_names),
+            start_time=start_time,
+            end_time=end_time,
+            action=action,
+            new_value=new_value,
+        )
+    return edit_id
+
+
+def unstage_metric_edit(app_state: State, edit_id: str) -> bool:
+    """Removes one staged Metrics Edit entry by id. Returns False if it was already gone."""
+    with _metric_edit_lock(app_state):
+        return _metric_edit_store(app_state).pop(edit_id, None) is not None
+
+
+def get_staged_metric_edits(app_state: State) -> list[StagedMetricEdit]:
+    """Returns every currently staged Metrics Edit entry, in stage order, for the staged-changes panel."""
+    with _metric_edit_lock(app_state):
+        return list(_metric_edit_store(app_state).values())
+
+
+def has_staged_metric_edits(app_state: State) -> bool:
+    """Drives the commit/discard buttons' lit-up state, alongside has_staged_deletions/has_dirty_settings/etc."""
+    with _metric_edit_lock(app_state):
+        return bool(_metric_edit_store(app_state))
+
+
+def staged_metric_edit_count(app_state: State) -> int:
+    """Total number of staged Metrics Edit entries, for the header's dirty-count badge."""
+    with _metric_edit_lock(app_state):
+        return len(_metric_edit_store(app_state))
+
+
+def clear_staged_metric_edits(app_state: State) -> None:
+    """Discards all staged Metrics Edit entries without touching the database. Wired into /api/commit/discard."""
+    with _metric_edit_lock(app_state):
+        _metric_edit_store(app_state).clear()
+
+
+def commit_staged_metric_edits(gateway: "Protocol_Gateway | None", app_state: State) -> list[dict[str, Any]]:
+    """
+    Executes every staged Metrics Edit entry against the live TimescaleDB
+    bridge, in the order they were staged. Called from routers/commit.py's
+    do_commit() as part of the global "Commit All Changes" flow, alongside
+    commit_staged_deletions() (Delete Columns) — independent staging
+    stores, both applied on the same commit.
+
+    Each entry that completes successfully is cleared from staging
+    immediately, so a failure partway through does not re-offer
+    already-applied edits for retry on the next commit attempt. Any
+    failure aborts the remaining entries and re-raises so the caller's
+    existing try/except turns it into a 500, matching commit_staged_
+    deletions' all-or-error behavior.
+
+    Returns a list of per-entry result summaries (successes only — the
+    caller's except block handles the failure case).
+
+    No-ops (returns []) if nothing is staged, without requiring a live
+    bridge — so a commit with no pending metric edits never fails here
+    even if TimescaleDB happens to be disconnected.
+    """
+    if not has_staged_metric_edits(app_state):
+        return []
+
+    mgr: BridgeAdminManager = _field_manager(gateway)
+    staged: list[StagedMetricEdit] = get_staged_metric_edits(app_state)
+    results: list[dict[str, Any]] = []
+
+    with _metric_edit_lock(app_state):
+        store: dict[str, StagedMetricEdit] = _metric_edit_store(app_state)
+        for entry in staged:
+            try:
+                result: MetricEditResult = mgr.edit_metric_values(
+                    table_kind=entry["table_kind"],
+                    protocol_name=entry["protocol_name"],
+                    device_info_id=entry["device_info_id"],
+                    field_names=entry["field_names"],
+                    start_time=entry["start_time"],
+                    end_time=entry["end_time"],
+                    action=entry["action"],
+                    new_value=entry["new_value"],
+                )
+            except Exception:
+                _log.error(
+                    "commit_staged_metric_edits: failed applying edit_id=%s (%s on %s, device=%s) — "
+                    "leaving it staged for retry.",
+                    entry["edit_id"], entry["action"], entry["table_name"], entry["device_info_id"],
+                )
+                raise
+            else:
+                store.pop(entry["edit_id"], None)
+                results.append({
+                    "edit_id": entry["edit_id"],
+                    "table_kind": result.table_kind,
+                    "protocol_name": result.protocol_name,
+                    "table_name": result.table_name,
+                    "device_info_id": result.device_info_id,
+                    "field_names": result.field_names,
+                    "action": result.action,
+                    "rows_affected": result.rows_affected,
+                    "rollups_refreshed": result.rollups_refreshed,
+                })
+
+    _log.info(
+        "commit_staged_metric_edits: committed %d edit(s), %d row(s) total.",
+        len(results), sum(r["rows_affected"] for r in results),
     )
     return results
 

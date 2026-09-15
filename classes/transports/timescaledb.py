@@ -78,6 +78,7 @@ from typing import (
     Sequence,
     Tuple,
     Union,
+    cast,
 )
 
 from sqlalchemy import (
@@ -106,6 +107,7 @@ from sqlalchemy.dialects.postgresql import Insert
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 # from sqlalchemy.engine.interfaces import ReflectedColumn
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.engine.interfaces import ReflectedColumn
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.orm import (
@@ -3954,6 +3956,51 @@ class HyperTableManager:
                 f"(continuing -- this step is best-effort): {e}"
             )
 
+    def decompress_chunks_in_range(
+        self, session: Session, table_name: str, start_time: datetime, end_time: datetime
+    ) -> None:
+        """
+        Decompresses only the chunks of table_name overlapping
+        [start_time, end_time], best-effort -- the range-scoped sibling
+        of decompress_table_chunks_best_effort() just above (used by
+        Delete Columns, which needs every chunk touched since a column
+        drop applies table-wide). BridgeAdminManager.edit_metric_values()
+        uses this instead: a Metrics Edit value change/delete only ever
+        writes inside its requested time range, so limiting the
+        decompress to chunks that could contain it avoids needlessly
+        decompressing -- and leaving to be recompressed on the next
+        scheduled pass -- historical chunks nowhere near the edit.
+
+        show_chunks()'s older_than/newer_than bounds are chunk-RANGE
+        bounds, not row-level filters -- passing them here returns every
+        chunk whose range overlaps [start_time, end_time] even partially,
+        which is exactly what's needed since decompress_chunk() only ever
+        operates on a whole chunk at a time regardless.
+
+        Same SAVEPOINT / dynamic lock_timeout reasoning as
+        decompress_table_chunks_best_effort() -- see that method's
+        docstring for why both are necessary here.
+
+        Best-effort: a table with no compressed chunks in range (or not a
+        hypertable) simply no-ops rather than failing the caller's edit.
+        """
+        r_settings: dict[str, Any] = self.get_dynamic_settings_helper()
+        try:
+            with session.begin_nested():
+                self.set_lock_timeout(session, r_settings["lock_timeout"])
+                session.execute(
+                    text("""
+                        SELECT decompress_chunk(c, true)
+                        FROM show_chunks(:tname, older_than => :end_time, newer_than => :start_time) AS c;
+                    """),
+                    {"tname": table_name, "end_time": end_time, "start_time": start_time},
+                )
+        except Exception as e:
+            self._log.warning(
+                f"decompress_chunks_in_range: could not decompress chunks for '{table_name}' "
+                f"in [{start_time}, {end_time}] (continuing -- this step is best-effort): {e}"
+            )
+
 
     # === moved: _get_hypertable_total_sizes (5912-5955) ===
     def _get_hypertable_total_sizes(self, table_names: list[str]) -> dict[str, int]:
@@ -7059,6 +7106,106 @@ class RollupManager:
                 # Ensure the watchdog thread stops
                 stop_signal[0] = True
 
+    def _bucket_interval_for_view(self, view_name: str) -> str:
+        """
+        Maps a rollup view name to its configured bucket width
+        (self.rollup_defaults), by matching the hourly_/daily_/weekly_/
+        monthly_ prefix every view name in this file uses (see
+        BridgeAdminManager._wide_view_names / _narrow_view_names, the only
+        callers that ever produce a view_name) -- never a caller-supplied
+        arbitrary string, so a simple prefix match is enough.
+
+        Falls back to "1 hour" (the smallest/safest bucket) for anything
+        unrecognized, rather than raising -- refresh_view_range widening
+        by a slightly wrong amount is harmless; failing to widen at all
+        is what actually breaks the refresh.
+        """
+        for granularity in ("hourly", "daily", "weekly", "monthly"):
+            if view_name.startswith(f"{granularity}_"):
+                return self.rollup_defaults.get(f"{granularity}_rollup_bucket", "1 hour")
+        return "1 hour"
+
+    def _widen_window_to_buckets(
+        self, start_time: datetime, end_time: datetime, bucket_interval: str, min_buckets: float = 2.0
+        ) -> tuple[datetime, datetime]:
+        """
+        Widens [start_time, end_time] symmetrically around its midpoint,
+        if needed, so it spans at least `min_buckets` of bucket_interval.
+        refresh_continuous_aggregate() rejects a window narrower than one
+        full bucket ("refresh window too small... must cover at least one
+        bucket of data"), which any Metrics Edit range shorter than a
+        day/week/month always is relative to the daily/weekly/monthly
+        rollup tiers, even when the hourly tier's own window was wide
+        enough. Two buckets (not one) is used as the floor so a window
+        that happens to land exactly on a bucket boundary still safely
+        covers at least one whole bucket regardless of exactly where that
+        boundary falls.
+
+        A window already wide enough is returned unchanged. Uses
+        HyperTableManager.parse_interval_to_hours_helper to turn
+        bucket_interval (e.g. "1 month") into hours; that helper returns
+        0.0 for anything it can't parse, in which case this is a no-op --
+        refresh_continuous_aggregate can still reject an unwidened window,
+        but only for a bucket_interval shape this module has never
+        actually configured.
+        """
+        bucket_hours: float = self.hypertable_mgr.parse_interval_to_hours_helper(bucket_interval)
+        if bucket_hours <= 0:
+            return start_time, end_time
+        min_span: timedelta = timedelta(hours=bucket_hours * min_buckets)
+        span: timedelta = end_time - start_time
+        if span >= min_span:
+            return start_time, end_time
+        pad: timedelta = (min_span - span) / 2
+        return start_time - pad, end_time + pad
+
+    def refresh_view_range(self, view_name: str, start_time: datetime, end_time: datetime) -> None:
+        """
+        Refreshes one continuous aggregate over an explicit [start_time,
+        end_time] window, rather than "now() - start_offset" like
+        _refresh_single_rollup_helper's normal incremental refresh.
+
+        Used by BridgeAdminManager.edit_metric_values() after a Metrics
+        Edit commit: an edit can target any historical range, not just
+        the recent window each view's background policy already keeps
+        current, so the CAGG(s) covering the edited bucket(s) need an
+        explicit, range-scoped refresh_continuous_aggregate() call
+        instead of waiting for (or triggering) a normal incremental pass.
+
+        The requested [start_time, end_time] is widened first if it's
+        narrower than this view's own bucket (see
+        _widen_window_to_buckets) -- a short Metrics Edit range (seconds
+        or minutes) is routinely narrower than a daily/weekly/monthly
+        bucket, and refresh_continuous_aggregate() rejects a window that
+        doesn't cover at least one full bucket outright rather than just
+        rounding it up itself. Widening here means every rollup tier still
+        gets refreshed after an edit, just over a slightly larger window
+        than the literal edited range -- re-refreshing a few already-
+        correct buckets alongside the changed one is harmless.
+
+        Raises on failure (e.g. the view doesn't exist yet) rather than
+        swallowing it -- the caller (edit_metric_values) logs and
+        continues past a single view's failure rather than failing the
+        whole edit, since the edit itself already committed successfully
+        by the time this runs.
+
+        view_name always comes from this class's own naming helpers
+        (_wide_view_names / _narrow_view_names on BridgeAdminManager),
+        never directly from a caller-supplied string, so the f-string
+        below is safe -- same trust model _refresh_single_rollup_helper
+        above already uses for the identical CALL.
+
+        AUTOCOMMIT is mandatory for CALL refresh_continuous_aggregate,
+        same reasoning as _refresh_single_rollup_helper.
+        """
+        bucket_interval: str = self._bucket_interval_for_view(view_name)
+        start_time, end_time = self._widen_window_to_buckets(start_time, end_time, bucket_interval)
+        with self.engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+            conn.execute(
+                text(f"CALL refresh_continuous_aggregate('{view_name}', :start_time, :end_time);"),
+                {"start_time": start_time, "end_time": end_time},
+            )
+
     # watchdog refresh management
     def _stop_existing_watchdog_helper(self) -> None:
         """Signals the existing watchdog to exit immediately.
@@ -7397,6 +7544,150 @@ class WideTableFieldDeletionResult:
     not_found: list[str]            # requested column_names that didn't match any existing field
     remaining_fields: list[str]     # column_names still present on the wide table after the operation
     rollups_rebuilt: bool           # whether the protocol's rollups were successfully rebuilt
+
+
+@dataclass
+class MetricEditTable:
+    """
+    One selectable source table for the "Metrics Edit" admin screen --
+    either the single shared narrow table, or one protocol's wide table.
+    Mirrors the (protocol_name, wide_table_name) pairs
+    list_editable_protocols() already returns for Delete Columns, but
+    includes the narrow table too. Delete Columns has no narrow entry
+    point (device_metrics_narrow's shape is fixed -- there are no
+    per-metric columns to drop), but the raw metric VALUES it stores are
+    exactly what Metrics Edit edits/deletes, so it belongs on this list
+    even though it never appears on the Delete Columns one.
+    """
+    table_kind: Literal["narrow", "wide"]
+    protocol_name: str | None   # None for narrow; the protocol for wide
+    table_name: str             # "device_metrics_narrow" or a wide table name
+
+
+@dataclass
+class MetricEditDevice:
+    """One device with existing rows in a MetricEditTable, for the Metrics Edit device picker."""
+    device_info_id: int
+    device_identifier: str | None
+    device_name: str | None
+
+
+@dataclass
+class MetricEditField:
+    """One editable metric/column name for a MetricEditTable, for the Metrics Edit field checklist."""
+    name: str
+    data_type: str | None
+
+
+@dataclass
+class MetricValueSample:
+    """One matched (m_time, field, value) triple, for the Metrics Edit preview."""
+    m_time: datetime
+    field_name: str
+    value: float | str | None
+
+
+@dataclass
+class MetricEditPreview:
+    """Read-only preview of what a BridgeAdminManager.edit_metric_values() call would affect, before it's staged."""
+    row_count: int
+    sample: list[MetricValueSample]
+
+
+@dataclass
+class MetricEditResult:
+    """Outcome of a BridgeAdminManager.edit_metric_values() call."""
+    table_kind: str
+    protocol_name: str | None
+    table_name: str
+    device_info_id: int
+    field_names: list[str]
+    action: str                       # "delete" or "set_value"
+    new_value: float | str | None
+    start_time: datetime
+    end_time: datetime
+    rows_affected: int
+    rollups_refreshed: bool
+
+
+# Wide-column data_type buckets, keyed off the exact strings
+# BridgeAdminManager.timescale_type_map's values can produce (see that map
+# and _timescale_type()) -- used only by _coerce_value_for_data_type below
+# to basic-validate a Metrics Edit "set_value" replacement against the
+# column's declared type before it's written.
+_METRIC_EDIT_INTEGER_TYPES: dict[str, tuple[int, int]] = {
+    "SMALLINT": (-32768, 32767),
+    "INTEGER": (-2147483648, 2147483647),
+    "BIGINT": (-9223372036854775808, 9223372036854775807),
+}
+_METRIC_EDIT_NUMERIC_TYPES: frozenset[str] = frozenset(
+    {"REAL", "DOUBLE PRECISION", "NUMERIC"} | set(_METRIC_EDIT_INTEGER_TYPES)
+)
+
+
+def _coerce_value_for_data_type(value: Any, data_type: str | None) -> float | str | bool:
+    """
+    Basic validation/coercion of one admin-entered Metrics Edit
+    replacement value against a wide-table column's declared
+    metric_catalog.data_type (one of timescale_type_map's values -- see
+    BridgeAdminManager._timescale_type) before BridgeAdminManager.
+    edit_metric_values() writes it. A value that doesn't fit the declared
+    type is rejected outright rather than silently truncated/rounded/
+    reinterpreted, since this writes directly to historical data with no
+    further review step once committed.
+
+    data_type=None means "no declared type to check against" (the narrow
+    table has none -- edit_metric_values()/validate_metric_edit_value()
+    handle that case themselves via _infer_narrow_field_kinds() instead of
+    calling this function at all), so it's treated as a pass-through here.
+
+    Returns:
+        The value coerced to the Python type that matches data_type --
+        float for any numeric type, bool for BOOLEAN, str for TEXT (and
+        anything else not recognized, treated permissively as text).
+
+    Raises:
+        ValueError: value doesn't parse as the declared type, an integer
+                    type's value isn't a whole number, or is out of that
+                    integer type's range.
+    """
+    if data_type is None:
+        return value if isinstance(value, str) else float(value)
+
+    dtype: str = data_type.upper()
+
+    if dtype == "BOOLEAN":
+        if isinstance(value, bool):
+            return value
+        text_val: str = str(value).strip().lower()
+        if text_val in ("true", "t", "1", "yes", "on"):
+            return True
+        if text_val in ("false", "f", "0", "no", "off"):
+            return False
+        msg: str = f"'{value}' is not a valid boolean for a {data_type} field (use true/false)."
+        raise ValueError(msg)
+
+    if dtype not in _METRIC_EDIT_NUMERIC_TYPES:
+        # TEXT, or any other/unrecognized declared type -- accept as text.
+        return str(value)
+
+    try:
+        parsed: float = float(value)
+    except (TypeError, ValueError):
+        msg = f"'{value}' is not a valid number for a {data_type} field."
+        raise ValueError(msg) from None
+
+    int_bounds: tuple[int, int] | None = _METRIC_EDIT_INTEGER_TYPES.get(dtype)
+    if int_bounds is not None:
+        if not float(parsed).is_integer():
+            msg = f"'{value}' is not a whole number, but '{data_type}' requires an integer."
+            raise ValueError(msg)
+        lo, hi = int_bounds
+        if not (lo <= parsed <= hi):
+            msg = f"'{value}' is out of range for {data_type} ({lo} to {hi})."
+            raise ValueError(msg)
+
+    return parsed
 
 
 class BridgeAdminManager:
@@ -7843,9 +8134,678 @@ class BridgeAdminManager:
                     )
 
     # -------------------------
-    # Bridge-level diagnostic panels -- moved here from the timescaledb
-    # bridge class itself (get_health_snapshot/get_storage_overview/
-    # get_index_overview), which is now purely transport/write-path
+    # Metric value edit/delete -- "Metrics Edit" admin screen.
+    #
+    # Unlike delete_fields() above, this never touches the wide table's
+    # SHAPE (no columns are added or dropped) -- it edits or removes
+    # existing VALUES for one device over a caller-chosen time range, on
+    # either the narrow table (one row per metric per timestamp) or a
+    # wide table (one row per timestamp holding every metric as its own
+    # column). That difference in shape is why "delete" means something
+    # different on each: on the narrow table it's a real DELETE of the
+    # matching rows; on a wide table a row also holds every OTHER metric
+    # for that timestamp, so "delete" there can only mean setting the
+    # selected column(s) to NULL, never removing the row itself.
+    #
+    # Still runs through the same category of lock-safety machinery as
+    # delete_fields() -- pause the flush worker, pause+decompress around
+    # the write, take the same schema advisory lock -- because an
+    # UPDATE/DELETE against a compressed hypertable chunk is blocked by
+    # (and can deadlock against) the same background jobs a DDL change
+    # is. The one deliberate difference: decompression here is scoped to
+    # just the chunks overlapping the edited range (see
+    # HyperTableManager.decompress_chunks_in_range), not the whole table,
+    # since -- unlike a column drop -- this write never touches rows
+    # outside [start_time, end_time].
+    # -------------------------
+
+    def _narrow_view_names(self) -> list[str]:
+        """
+        The shared narrow rollup view names, fixed regardless of protocol
+        -- see RollupManager.ensure_rollups' `contexts` list, which
+        hard-codes these same four names for the "device_metrics_narrow"
+        source table. Narrow sibling of _wide_view_names() above.
+        """
+        return ["hourly_rollup_narrow", "daily_rollup_narrow", "weekly_rollup_narrow", "monthly_rollup_narrow"]
+
+    def _resolve_metric_edit_table(self, table_kind: str, protocol_name: str | None) -> tuple[str, int | None]:
+        """
+        Validates and resolves one Metrics Edit table selection to its
+        physical table name and (for wide tables) protocol_id -- the
+        narrow/wide-aware counterpart of _resolve_wide_table() above.
+
+        Raises:
+            ValueError: table_kind isn't "narrow"/"wide", or table_kind is
+                        "wide" and protocol_name is missing/unregistered/
+                        narrow-only.
+        """
+        if table_kind == "narrow":
+            return "device_metrics_narrow", None
+        if table_kind != "wide":
+            msg: str = f"Unknown table_kind '{table_kind}' -- expected 'narrow' or 'wide'."
+            raise ValueError(msg)
+        if not protocol_name:
+            raise ValueError("protocol_name is required when table_kind is 'wide'.")
+        protocol_id, wide_table_name = self._resolve_wide_table(protocol_name)
+        return wide_table_name, protocol_id
+
+    def _load_existing_wide_columns(self, protocol_id: int) -> dict[str, tuple[int, str]]:
+        """
+        column_name -> (catalog_id, data_type) map for every metric
+        currently on protocol_id's wide table. Shared by
+        preview_metric_edit(), validate_metric_edit_value(), and
+        edit_metric_values() -- the same untrusted-name whitelist query
+        delete_fields() runs inline (there just keeping catalog_id, since
+        it doesn't need to validate a replacement value's type), plus
+        data_type so a "set_value" edit's new_value can be validated/
+        coerced against each column's declared type
+        (_coerce_value_for_data_type) before it's written. A
+        caller-supplied wide column name is a SQL identifier here (used
+        to build a SELECT/UPDATE column list), never trusted directly.
+        """
+        with self.SessionFactory() as session:
+            rows: Sequence[Row[Any]] = session.execute(
+                text("SELECT catalog_id, clean_column_name, data_type FROM metric_catalog WHERE protocol_id = :pid"),
+                {"pid": protocol_id},
+            ).fetchall()
+        return {col: (cid, dtype) for cid, col, dtype in rows}
+
+    def _infer_narrow_field_kinds(
+        self, table_name: str, device_info_id: int, metric_names: list[str]
+    ) -> dict[str, str]:
+        """
+        Best-effort per-metric type inference for the narrow table, where
+        (unlike a wide column's metric_catalog.data_type) there's no
+        declared schema type per metric_name -- every metric shares the
+        same two nullable columns (metric_value FLOAT, metric_ascii TEXT).
+        Looks at whether any existing row for (device_info_id,
+        metric_name) has metric_ascii populated to decide "text" vs
+        "numeric"; a metric_name with no existing rows at all defaults to
+        "numeric" (metric_value is the far more common shape).
+
+        Used by validate_metric_edit_value() and edit_metric_values() to
+        basic-validate a "set_value" replacement against what's already
+        stored, in lieu of a real declared type.
+        """
+        kinds: dict[str, str] = dict.fromkeys(metric_names, "numeric")
+        if not metric_names:
+            return kinds
+        with self.SessionFactory() as session:
+            rows: Sequence[Row[Any]] = session.execute(
+                text(f"""
+                    SELECT metric_name, bool_or(metric_ascii IS NOT NULL) AS is_text
+                    FROM {table_name}
+                    WHERE device_info_id = :did AND metric_name = ANY(:names)
+                    GROUP BY metric_name
+                """),  # noqa: S608
+                {"did": device_info_id, "names": metric_names},
+            ).fetchall()
+        for name, is_text in rows:
+            kinds[name] = "text" if is_text else "numeric"
+        return kinds
+
+    # -------------------------
+    # Read-only listing for the UI
+    # -------------------------
+
+    def list_metric_edit_tables(self) -> list[MetricEditTable]:
+        """
+        Returns every source table the Metrics Edit screen may target:
+        the single shared narrow table, always first, followed by every
+        wide-table protocol (same set as list_editable_protocols()).
+        """
+        tables: list[MetricEditTable] = [
+            MetricEditTable(table_kind="narrow", protocol_name=None, table_name="device_metrics_narrow")
+        ]
+        for protocol_name, wide_table_name in self.list_editable_protocols():
+            tables.append(MetricEditTable(table_kind="wide", protocol_name=protocol_name, table_name=wide_table_name))
+        return tables
+
+    def list_metric_edit_devices(self, table_kind: str, protocol_name: str | None = None) -> list[MetricEditDevice]:
+        """
+        Returns every device with at least one existing row in the given
+        table, for the Metrics Edit device picker -- device_info joined
+        against DISTINCT device_info_id actually present in table_name,
+        not every registered device, so the picker never offers a device
+        that has no rows to edit in this particular table (a narrow-only
+        device won't show up when a wide table is selected, and vice
+        versa).
+
+        Raises:
+            ValueError: see _resolve_metric_edit_table.
+        """
+        table_name, _protocol_id = self._resolve_metric_edit_table(table_kind, protocol_name)
+        with self.SessionFactory() as session:
+            rows: Sequence[Row[Any]] = session.execute(
+                text(f"""
+                    SELECT d.device_info_id, d.device_identifier, d.device_name
+                    FROM device_info d
+                    WHERE d.device_info_id IN (SELECT DISTINCT device_info_id FROM {table_name})
+                    ORDER BY d.device_identifier
+                """)  # noqa: S608
+            ).fetchall()
+        return [MetricEditDevice(device_info_id=r[0], device_identifier=r[1], device_name=r[2]) for r in rows]
+
+    def list_metric_edit_fields(
+        self,
+        table_kind: str,
+        protocol_name: str | None = None,
+        device_info_id: int | None = None,
+        ) -> list[MetricEditField]:
+        """
+        Returns the editable metric/column names for one Metrics Edit
+        table, for the field checklist.
+
+        For a wide table this is the same metric_catalog-backed list
+        list_fields() already returns for Delete Columns (minus the
+        `stale` annotation, which is about deletable-because-unproduced
+        columns, not relevant to editing a value). For the narrow table
+        there's no fixed column per metric -- every metric_name is a ROW
+        value, not a column -- so this queries DISTINCT metric_name out
+        of the table itself instead, scoped to device_info_id when given.
+        Scoping to a device is strongly recommended: an unscoped scan of
+        the shared narrow table mixes metric names from every device and
+        protocol writing into it, most of which won't even apply to the
+        device the admin is about to edit.
+
+        Raises:
+            ValueError: see _resolve_metric_edit_table.
+        """
+        if table_kind == "wide":
+            fields: list[WideTableField] = self.list_fields(protocol_name or "", active_metric_names=None)
+            return [MetricEditField(name=f.column_name, data_type=f.data_type) for f in fields]
+
+        table_name, _protocol_id = self._resolve_metric_edit_table(table_kind, protocol_name)
+        with self.SessionFactory() as session:
+            if device_info_id is not None:
+                rows: Sequence[Row[Any]] = session.execute(
+                    text(f"""
+                        SELECT DISTINCT metric_name FROM {table_name}
+                        WHERE device_info_id = :did
+                        ORDER BY metric_name
+                    """),  # noqa: S608
+                    {"did": device_info_id},
+                ).fetchall()
+            else:
+                rows = session.execute(
+                    text(f"SELECT DISTINCT metric_name FROM {table_name} ORDER BY metric_name")  # noqa: S608
+                ).fetchall()
+        return [MetricEditField(name=r[0], data_type=None) for r in rows]
+
+    def preview_metric_edit(
+        self,
+        table_kind: str,
+        protocol_name: str | None,
+        device_info_id: int,
+        field_names: list[str],
+        start_time: datetime,
+        end_time: datetime,
+        sample_limit: int = 25,
+        ) -> MetricEditPreview:
+        """
+        Read-only count + small sample of what an edit_metric_values()
+        call with the same arguments would affect -- lets the Metrics
+        Edit screen show the admin what's about to change before they
+        stage it, same spirit as GET /api/commit/diff for config changes.
+        Never locks, pauses compression, or decompresses anything; it's a
+        plain SELECT.
+
+        Raises:
+            ValueError: unknown table_kind/protocol_name, no field_names
+                        given, or end_time before start_time.
+        """
+        if not field_names:
+            raise ValueError("Select at least one field to preview.")
+        if end_time < start_time:
+            raise ValueError("End time must not be before start time.")
+
+        table_name, protocol_id = self._resolve_metric_edit_table(table_kind, protocol_name)
+        sample: list[MetricValueSample] = []
+
+        with self.SessionFactory() as session:
+            if table_kind == "narrow":
+                row_count: int = session.execute(
+                    text(f"""
+                        SELECT COUNT(*) FROM {table_name}
+                        WHERE device_info_id = :did
+                          AND metric_name = ANY(:names)
+                          AND m_time BETWEEN :start AND :end
+                    """),  # noqa: S608
+                    {"did": device_info_id, "names": field_names, "start": start_time, "end": end_time},
+                ).scalar_one()
+
+                sample_rows: Sequence[Row[Any]] = session.execute(
+                    text(f"""
+                        SELECT m_time, metric_name, metric_value, metric_ascii FROM {table_name}
+                        WHERE device_info_id = :did
+                          AND metric_name = ANY(:names)
+                          AND m_time BETWEEN :start AND :end
+                        ORDER BY m_time DESC
+                        LIMIT :lim
+                    """),  # noqa: S608
+                    {"did": device_info_id, "names": field_names, "start": start_time, "end": end_time, "lim": sample_limit},
+                ).fetchall()
+                sample = [
+                    MetricValueSample(
+                        m_time=r[0],
+                        field_name=r[1],
+                        value=r[3] if r[3] is not None else r[2],
+                    )
+                    for r in sample_rows
+                ]
+            else:
+                # Whitelist requested column names against metric_catalog
+                # for this protocol before building a SELECT list from
+                # them -- same discipline delete_fields() applies before
+                # touching DDL.
+                existing_columns: dict[str, tuple[int, str]] = self._load_existing_wide_columns(protocol_id or -1)
+                to_read: list[str] = [f for f in field_names if f in existing_columns]
+                if not to_read:
+                    return MetricEditPreview(row_count=0, sample=[])
+
+                select_cols: str = ", ".join(to_read)
+                row_count = session.execute(
+                    text(f"""
+                        SELECT COUNT(*) FROM {table_name}
+                        WHERE device_info_id = :did AND m_time BETWEEN :start AND :end
+                    """),  # noqa: S608
+                    {"did": device_info_id, "start": start_time, "end": end_time},
+                ).scalar_one()
+
+                sample_rows = session.execute(
+                    text(f"""
+                        SELECT m_time, {select_cols} FROM {table_name}
+                        WHERE device_info_id = :did AND m_time BETWEEN :start AND :end
+                        ORDER BY m_time DESC
+                        LIMIT :lim
+                    """),  # noqa: S608
+                    {"did": device_info_id, "start": start_time, "end": end_time, "lim": sample_limit},
+                ).fetchall()
+                for r in sample_rows:
+                    m_time = r[0]
+                    for i, col in enumerate(to_read, start=1):
+                        sample.append(MetricValueSample(m_time=m_time, field_name=col, value=r[i]))
+
+        return MetricEditPreview(row_count=int(row_count), sample=sample)
+
+    def validate_metric_edit_value(
+        self,
+        table_kind: str,
+        protocol_name: str | None,
+        device_info_id: int,
+        field_names: list[str],
+        action: str,
+        new_value: float | str | None,
+        ) -> None:
+        """
+        Read-only type-check of a "set_value" edit's replacement value
+        before it's staged -- runs the exact same per-field
+        coercion/validation edit_metric_values() runs at commit time (wide:
+        _coerce_value_for_data_type against each column's declared
+        metric_catalog.data_type; narrow: numeric/text inference via
+        _infer_narrow_field_kinds), without touching the database. Lets
+        the Metrics Edit screen reject an obviously-wrong value (e.g.
+        "abc" into an INTEGER column) at "Add to Staged Changes" time
+        instead of only discovering it when "Commit All Changes" is
+        pressed, possibly much later.
+
+        A no-op for action == "delete" (no value to validate). This is
+        purely advisory -- edit_metric_values() re-validates again at
+        commit time regardless, since a column's declared type (or its
+        very existence) can still change between staging and commit, e.g.
+        a Delete Columns edit committed in the meantime.
+
+        Raises:
+            ValueError: bad table_kind/protocol_name, no field_names,
+                        missing new_value for "set_value", fields that mix
+                        numeric and text narrow metrics, or a value that
+                        doesn't fit the field's type.
+        """
+        if action not in ("delete", "set_value"):
+            msg: str = f"Unknown action '{action}' -- expected 'delete' or 'set_value'."
+            raise ValueError(msg)
+        if action == "delete":
+            return
+        if new_value is None:
+            raise ValueError("new_value is required when action is 'set_value'.")
+        if not field_names:
+            raise ValueError("No fields were provided to edit.")
+
+        table_name, protocol_id = self._resolve_metric_edit_table(table_kind, protocol_name)
+        requested: list[str] = [f for f in dict.fromkeys(field_names) if f]
+        if not requested:
+            raise ValueError("No usable field names were provided to edit.")
+
+        if table_kind == "wide":
+            existing_columns: dict[str, tuple[int, str]] = self._load_existing_wide_columns(protocol_id or -1)
+            to_check: list[str] = [f for f in requested if f in existing_columns]
+            if not to_check:
+                raise ValueError("None of the requested fields exist on this wide table.")
+            for col in to_check:
+                _coerce_value_for_data_type(new_value, existing_columns[col][1])
+        else:
+            kinds: dict[str, str] = self._infer_narrow_field_kinds(table_name, device_info_id, requested)
+            distinct_kinds: set[str] = set(kinds.values())
+            if len(distinct_kinds) > 1:
+                msg = (
+                    f"Selected fields mix numeric and text metrics ({kinds}); edit them in "
+                    "separate operations so a single value can be validated consistently."
+                )
+                raise ValueError(msg)
+            if distinct_kinds and next(iter(distinct_kinds)) == "numeric":
+                try:
+                    float(new_value)
+                except (TypeError, ValueError):
+                    msg = f"'{new_value}' is not a valid number for the selected metric(s)."
+                    raise ValueError(msg) from None
+
+    # -------------------------
+    # Edit / delete
+    # -------------------------
+
+    def edit_metric_values(
+        self,
+        table_kind: str,
+        protocol_name: str | None,
+        device_info_id: int,
+        field_names: list[str],
+        start_time: datetime,
+        end_time: datetime,
+        action: Literal["delete", "set_value"],
+        new_value: float | str | None = None,
+        ) -> MetricEditResult:
+        """
+        Edits or deletes existing metric VALUES for one device over
+        [start_time, end_time], on either the narrow table or a wide
+        table.
+
+          - Narrow table: "delete" removes the matching (m_time,
+            device_info_id, metric_name) rows outright. "set_value"
+            updates metric_value (numeric new_value) or metric_ascii
+            (string new_value) in place for the matching rows, clearing
+            whichever of the two columns doesn't apply.
+          - Wide table: "delete" sets the selected column(s) to NULL for
+            the matching rows -- a wide row also holds every OTHER metric
+            for that timestamp, so the row itself can never be removed
+            just because one metric is being cleared. "set_value"
+            overwrites the selected column(s) with new_value in place.
+
+        Runs the same category of lock-safety machinery delete_fields()
+        uses around a raw-table write that continuous aggregates depend
+        on:
+          1. Pause the flush worker (migration_in_progress) so the write
+             path doesn't race the edit.
+          2. Pause any compression job configured for this table, then
+             decompress just the chunks overlapping [start_time, end_time]
+             (HyperTableManager.decompress_chunks_in_range) -- scoped to
+             the edited range, not the whole table, since this write only
+             ever touches rows inside that range.
+          3. Run the UPDATE/DELETE inside the same advisory-locked
+             transaction schema changes use (schema_advisory_lock) -- a
+             concurrent Delete Columns commit against the same wide table
+             has to serialize against this edit, not race it, since both
+             can touch the same columns.
+          4. Refresh (never rebuild) just the rollup views covering the
+             edited range, for this table's stack only, so pre-aggregated
+             rollups don't keep serving stale numbers for historical data
+             that just changed. Never structural: the edit didn't add or
+             remove a metric, only changed values the existing view
+             definitions already account for.
+          5. Resume the paused compression job, always, even on failure.
+
+        Args:
+            table_kind: "narrow" or "wide".
+            protocol_name: required (and must resolve to an existing wide
+                        table) when table_kind is "wide"; ignored for
+                        "narrow".
+            device_info_id: the device whose rows are being edited.
+            field_names: metric_name values (narrow) or column_name
+                        values (wide, as returned by list_metric_edit_
+                        fields()) to target. For "wide", untrusted names
+                        are whitelisted against metric_catalog exactly
+                        like delete_fields(), since they're used to build
+                        a SQL column list, not just a filter value.
+            start_time / end_time: inclusive bounds on m_time.
+            action: "delete" or "set_value".
+            new_value: required when action is "set_value"; ignored for
+                        "delete".
+
+        Returns:
+            MetricEditResult summarizing what happened.
+
+        Raises:
+            ValueError: bad table_kind/protocol_name, empty field_names,
+                        end_time before start_time, an unknown action,
+                        "set_value" without new_value, protected columns
+                        requested, (wide) none of the requested columns
+                        exist, or new_value doesn't fit the field's
+                        declared (wide) or inferred (narrow) type -- see
+                        _coerce_value_for_data_type / _infer_narrow_field_kinds.
+            RuntimeError: RollupManager/HyperTableManager not initialized
+                        yet (bridge not connected to TimescaleDB).
+            Exception: any failure partway through the decompress/write
+                        sequence is logged and re-raised so the caller
+                        (and the admin) know the operation did not
+                        complete cleanly.
+        """
+        if not field_names:
+            raise ValueError("No fields were provided to edit.")
+        if end_time < start_time:
+            raise ValueError("End time must not be before start time.")
+        if action not in ("delete", "set_value"):
+            msg: str = f"Unknown action '{action}' -- expected 'delete' or 'set_value'."
+            raise ValueError(msg)
+        if action == "set_value" and new_value is None:
+            raise ValueError("new_value is required when action is 'set_value'.")
+
+        if self._bridge.rollup_mgr is None:
+            raise RuntimeError(
+                "RollupManager is not initialized -- bridge must be connected before editing metric values."
+            )
+        if self._bridge.hypertable_mgr is None:
+            raise RuntimeError(
+                "HyperTableManager is not initialized -- bridge must be connected before editing metric values."
+            )
+
+        table_name, protocol_id = self._resolve_metric_edit_table(table_kind, protocol_name)
+        rollup_mgr: "RollupManager" = self._bridge.rollup_mgr
+        hypertable_mgr: "HyperTableManager" = self._bridge.hypertable_mgr
+
+        # de-dupe, preserve order, drop blanks -- same pattern as delete_fields.
+        requested: list[str] = [f for f in dict.fromkeys(field_names) if f]
+        if not requested:
+            raise ValueError("No usable field names were provided to edit.")
+
+        to_edit: list[str]
+        existing_columns: dict[str, tuple[int, str]] = {}
+        wide_coerced_values: dict[str, float | str | bool] = {}
+        narrow_coerced_value: float | str | None = new_value
+
+        if table_kind == "wide":
+            protected_requested: list[str] = [f for f in requested if f in self.PROTECTED_COLUMNS]
+            if protected_requested:
+                msg = f"Refusing to edit protected columns: {protected_requested}"
+                raise ValueError(msg)
+            existing_columns = self._load_existing_wide_columns(protocol_id or -1)
+            to_edit = [f for f in requested if f in existing_columns]
+            if not to_edit:
+                raise ValueError("None of the requested fields exist on this wide table.")
+            if action == "set_value":
+                # Validate/coerce independently per column -- selected
+                # columns can have different declared types, and each gets
+                # its own type-appropriate value derived from the same raw
+                # new_value input (see _coerce_value_for_data_type).
+                for col in to_edit:
+                    wide_coerced_values[col] = _coerce_value_for_data_type(new_value, existing_columns[col][1])
+        else:
+            to_edit = requested
+            if action == "set_value":
+                kinds: dict[str, str] = self._infer_narrow_field_kinds(table_name, device_info_id, to_edit)
+                distinct_kinds: set[str] = set(kinds.values())
+                if len(distinct_kinds) > 1:
+                    msg = (
+                        f"Selected fields mix numeric and text metrics ({kinds}); edit them in "
+                        "separate operations so a single value can be validated consistently."
+                    )
+                    raise ValueError(msg)
+                if next(iter(distinct_kinds)) == "text":
+                    narrow_coerced_value = str(new_value)
+                else:
+                    try:
+                        narrow_coerced_value = float(new_value)  # type: ignore[arg-type]
+                    except (TypeError, ValueError):
+                        msg = f"'{new_value}' is not a valid number for numeric metric(s) {to_edit}."
+                        raise ValueError(msg) from None
+
+        view_names: list[str] = self._wide_view_names(table_name) if table_kind == "wide" else self._narrow_view_names()
+
+        # Pause the flush worker for the duration of the edit -- same
+        # widened-window reasoning delete_fields() uses.
+        self._bridge.migration_in_progress.set()
+        paused_job_ids: list[int] = []
+        rows_affected: int = 0
+
+        try:
+            with self.SessionFactory() as session:
+                paused_job_ids = hypertable_mgr.pause_compression_job_for_table(session, table_name)
+                session.commit()
+
+            with self.SessionFactory() as session:
+                hypertable_mgr.decompress_chunks_in_range(session, table_name, start_time, end_time)
+                session.commit()
+
+            with self._bridge.schema_lock:
+                with self.SessionFactory() as session:
+                    with session.begin():
+                        self._bridge.schema_advisory_lock(session)
+
+                        result: CursorResult[Any]
+
+                        if table_kind == "narrow":
+                            if action == "delete":
+                                result = cast(CursorResult[Any], session.execute(
+                                    text(f"""
+                                        DELETE FROM {table_name}
+                                        WHERE device_info_id = :did
+                                          AND metric_name = ANY(:names)
+                                          AND m_time BETWEEN :start AND :end
+                                    """),  # noqa: S608
+                                    {"did": device_info_id, "names": to_edit, "start": start_time, "end": end_time},
+                                ))
+                            elif isinstance(narrow_coerced_value, str):
+                                result = cast(CursorResult[Any], session.execute(
+                                    text(f"""
+                                        UPDATE {table_name}
+                                        SET metric_ascii = :val, metric_value = 0
+                                        WHERE device_info_id = :did
+                                          AND metric_name = ANY(:names)
+                                          AND m_time BETWEEN :start AND :end
+                                    """),  # noqa: S608
+                                    {
+                                        "val": narrow_coerced_value, "did": device_info_id,
+                                        "names": to_edit, "start": start_time, "end": end_time,
+                                    },
+                                ))
+                            else:
+                                # narrow_coerced_value is only ever None here if the field
+                                # somehow reached "set_value" without going through the
+                                # numeric/text inference above -- guard it explicitly rather
+                                # than letting float(None) raise, and so float() type-checks.
+                                float_val: float = 0.0 if narrow_coerced_value is None else float(narrow_coerced_value)
+                                result = cast(CursorResult[Any], session.execute(
+                                    text(f"""
+                                        UPDATE {table_name}
+                                        SET metric_value = :val, metric_ascii = NULL
+                                        WHERE device_info_id = :did
+                                          AND metric_name = ANY(:names)
+                                          AND m_time BETWEEN :start AND :end
+                                    """),  # noqa: S608
+                                    {
+                                        "val": float_val, "did": device_info_id,
+                                        "names": to_edit, "start": start_time, "end": end_time,
+                                    },
+                                ))
+                            rows_affected = result.rowcount or 0
+                        else:
+                            # to_edit entries were just re-validated against
+                            # metric_catalog for this protocol_id above --
+                            # safe as SQL identifiers here, same trust model
+                            # delete_fields' ALTER TABLE DROP COLUMN loop uses.
+                            params: dict[str, Any] = {"did": device_info_id, "start": start_time, "end": end_time}
+                            if action == "delete":
+                                set_clause: str = ", ".join(f"{col} = NULL" for col in to_edit)
+                            else:
+                                # Each column already has its own type-coerced
+                                # value from wide_coerced_values above -- a
+                                # distinct bind param per column, not one
+                                # shared :val, since selected columns can have
+                                # different declared types (e.g. one INTEGER,
+                                # one BOOLEAN) needing different Python types.
+                                set_clause = ", ".join(f"{col} = :val_{i}" for i, col in enumerate(to_edit))
+                                for i, col in enumerate(to_edit):
+                                    params[f"val_{i}"] = wide_coerced_values[col]
+                            result = cast(CursorResult[Any], session.execute(
+                                text(f"""
+                                    UPDATE {table_name}
+                                    SET {set_clause}
+                                    WHERE device_info_id = :did AND m_time BETWEEN :start AND :end
+                                """),  # noqa: S608
+                                params,
+                            ))
+                            rows_affected = result.rowcount or 0
+
+            rollups_refreshed = True
+            for view_name in view_names:
+                try:
+                    rollup_mgr.refresh_view_range(view_name, start_time, end_time)
+                except Exception as e:
+                    rollups_refreshed = False
+                    self._log.warning(
+                        f"edit_metric_values: could not refresh '{view_name}' over "
+                        f"[{start_time}, {end_time}] after editing '{table_name}': {e}"
+                    )
+
+            self._log.info(
+                f"BridgeAdminManager: {action} on {to_edit} for device {device_info_id} in "
+                f"'{table_name}' over [{start_time}, {end_time}] -- {rows_affected} row(s) affected."
+            )
+
+            return MetricEditResult(
+                table_kind=table_kind,
+                protocol_name=protocol_name,
+                table_name=table_name,
+                device_info_id=device_info_id,
+                field_names=to_edit,
+                action=action,
+                new_value=new_value,
+                start_time=start_time,
+                end_time=end_time,
+                rows_affected=rows_affected,
+                rollups_refreshed=rollups_refreshed,
+            )
+
+        except Exception as e:
+            self._log.error(
+                f"BridgeAdminManager.edit_metric_values failed for '{table_name}' device {device_info_id}: {e}"
+            )
+            raise
+
+        finally:
+            self._bridge.migration_in_progress.clear()
+
+            if paused_job_ids:
+                try:
+                    with self.SessionFactory() as session:
+                        hypertable_mgr.resume_compression_job_for_table(session, paused_job_ids)
+                        session.commit()
+                except Exception as e:
+                    self._log.warning(
+                        f"edit_metric_values: could not resume compression job(s) {paused_job_ids} "
+                        f"for '{table_name}': {e}"
+                    )
+
+    # -------------------------
+    # Bridge-level diagnostic panels which is now purely transport/write-path
     # plumbing plus a couple of read-only bridge-status properties;
     # every panel-facing read lives here instead, alongside the
     # compression/jobs composers just below. Each queries bridge-level
@@ -8386,4 +9346,3 @@ class BridgeAdminManager:
             }
             for r in rows
         ]
-

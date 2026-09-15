@@ -70,61 +70,7 @@ When data becomes stale:
 
 ## 4. Database Schemas
 
-```mermaid
-erDiagram
-    ProtocolRegistry {
-        int protocol_id PK
-        text protocol_name UK
-        text wide_table_name
-        int metric_count
-        text rollup_prefix
-        boolean rollup_enabled
-        boolean rollup_setup_complete
-        datetime last_refresh_at
-    }
-
-    MetricCatalog {
-        int catalog_id PK
-        int protocol_id FK
-        text metric_name
-        text clean_column_name
-        text data_type
-        float unit_mod
-        text notes
-    }
-
-    DeviceInfo {
-        int device_info_id PK
-        int protocol_id FK
-        text device_identifier
-        text device_serial_number
-        text device_name
-        text device_manufacturer
-        text device_model
-        text transport UK
-    }
-
-    DeviceMetricsNarrow {
-        datetime m_time PK, FK
-        int device_info_id PK, FK
-        text metric_name PK
-        float metric_value
-        text metric_ascii
-    }
-
-    DeviceMetricsWide {
-        datetime m_time PK, FK
-        int device_info_id PK, FK
-        float dynamic_metric_columns
-    }
-
-    ProtocolRegistry ||--o{ MetricCatalog : "has metrics"
-    ProtocolRegistry ||--o{ DeviceInfo : "has devices"
-    DeviceInfo ||--o{ DeviceMetricsNarrow : "time-series rows"
-    DeviceInfo ||--o{ DeviceMetricsWide : "wide rows (metric_count &lt;= 200)"
-    ProtocolRegistry ||--o{ DeviceMetricsWide : "creates per-protocol table"
-    Application ||--o{ DeviceMetricsWide : "adds dynamic metric columns"
-```
+  ! [Timescale DB Architecture](../../../documentation/architecture/mermaid-diagrams.md#timescaledb-telemetry-schema-created-by-timescaledb-bridge)
 
 ### 4.1 Narrow Table
 
@@ -165,7 +111,9 @@ One row per timestamp with multiple metric columns.
 
 - You may add and subtract metrics from the wide table to your liking via the mask and screen settings detailed in the MPG readme.  However, if you subtract a metric from the timescaledb bridge, you should delete the column in the wide table that captures that metric.  
 
-![Timescale Delete](../../../classes/WebServer/static/screenshots/timescaleDelete.png)
+![Timescale Delete](../../../classes/WebServer/static/screenshots/timescale_delete.png)
+
+> **Note:** Delete Columns changes a wide table's *shape* — it drops a column outright, for every device and every timestamp. To correct or remove specific *values* (e.g. a bad reading from a sensor fault, or data captured during a known test/outage) for one device over a chosen time range without touching the schema, use **Metrics Edit** instead — see section 4.5 below.
 
 ### 4.3 Device Info Table
 
@@ -197,6 +145,119 @@ One row per timestamp with multiple metric columns.
 Here is a screen shot of how the schema looks in PGadmin.  The tables reside in the public folder.
 
 ![PGAdmin for TimescaleDB](pgAdminImage.png)
+
+---
+
+### 4.5 Metrics Edit — Editing or Deleting Historical Metric Values
+
+The **Timescale DB → Metrics Edit** admin screen lets an administrator correct or remove specific metric *values* — for one device, over a chosen date/time range — on either the shared narrow table or a wide table, without changing either table's schema. This is the tool to reach for when a sensor fault, a mis-wired input, a device test, or a known outage window put bad or unwanted values into the database and you want them fixed or cleared, as opposed to Wide Table Column Deletion (section 4.2), which permanently drops an entire metric column, table-wide, for every device and timestamp.
+
+![Timescale Metrics Edit](../../../classes/WebServer/static/screenshots/timescale_metrics_edit.png)
+
+#### Using the Metrics Edit Screen
+
+1. Open **Timescale DB → Metrics Edit** from the admin menu.
+2. Pick a **table** on the left — either the shared `device_metrics_narrow` table, or one wide-table protocol.
+3. Pick the **device** whose data you want to edit.
+4. Check the **field(s)** (metric names, or wide-table columns) to target.
+5. Pick a **start** and **end** date/time for the range to affect.
+6. Choose an **action**:
+   - **Delete value(s)** — clears the selected field(s) over the range.
+   - **Set value** — overwrites the selected field(s) with a replacement value you enter.
+7. Click **Preview** to see how many rows match and a sample of their current values before changing anything.
+8. Click **Add to Staged Changes**.
+9. Use the existing **Commit All Changes** button in the header to apply every staged Metrics Edit (and any staged Delete Columns changes) at once. Nothing is written to TimescaleDB before this step — staged edits can be reviewed and individually removed from the staged-changes list, or abandoned entirely with **Discard Changes**.
+
+#### Narrow vs. Wide Behavior
+
+The two table shapes require slightly different semantics for "delete," since a narrow row holds a single metric while a wide row holds every metric for that device/timestamp:
+
+| Table | Delete | Set Value |
+| --- | --- | --- |
+| Narrow (`device_metrics_narrow`) | Removes the matching `(m_time, device_info_id, metric_name)` rows outright | Overwrites `metric_value` (numeric) or `metric_ascii` (text) for the matching rows |
+| Wide (`device_metrics_wide__*`) | Sets the selected column(s) to `NULL` for the matching rows — the row itself can't be removed, since it also holds every other metric recorded at that timestamp | Overwrites the selected column(s) in place |
+
+#### Value Type Validation
+
+A replacement value entered for **Set Value** is checked against the field's type before it is even staged:
+
+- **Wide table columns** are checked against their declared `metric_catalog.data_type` (e.g. an `INTEGER` column rejects non-whole numbers and out-of-range values, a `BOOLEAN` column only accepts recognizable spellings like `true`/`false`, a `TEXT` column accepts anything).
+- **Narrow table metrics** have no fixed declared type (every metric shares the same `metric_value`/`metric_ascii` pair), so the screen instead infers numeric vs. text from what's already been recorded for that device/metric, and validates the new value against that inference.
+
+An invalid value is rejected immediately, with a clear error, rather than only surfacing when Commit All Changes is pressed.
+
+#### What Happens on Commit
+
+Applying a Metrics Edit runs through the same category of safety measures as a wide-table column deletion:
+
+1. Data ingestion is briefly paused so the write path can't race the edit.
+2. Any compression job configured for the affected table is paused, and just the chunks overlapping the edited time range are decompressed (not the whole table, since the edit never writes outside that range).
+3. The delete/update itself runs under the same schema advisory lock used for structural changes, so it can't race a concurrent Delete Columns commit against the same table.
+4. The hourly/daily/weekly/monthly rollup views covering the edited time range are refreshed afterward, so pre-aggregated rollups reflect the correction rather than continuing to serve stale numbers for that period.
+5. The paused compression job is resumed automatically, whether or not the edit succeeded.
+
+No row data outside the selected device, fields, and time range is ever touched.
+
+### 4.6  Rebuilds:  Compression and Rollups
+
+#### Rebuild Compression
+
+The **Timescale DB → Rebuild Compression** admin screen decompresses and recompresses every already-compressed chunk of a raw table (narrow or wide) and its four rollup views, in place, against whatever compression settings are configured **right now**. It never touches a view's definition and never adds, removes, or modifies a single row of data — this is purely a rewrite of how existing rows are stored on disk.
+
+You need this after a change that alters a table's physical layout but doesn't retroactively apply to data already compressed:
+
+- Changing `compress_segmentby` / `compress_orderby` in `hypertable_defaults` — new chunks pick up the change automatically, but chunks compressed under the old settings won't until they're rewritten.
+- Running **Wide Table Column Deletion** or **Metrics Edit** against a wide table — the dropped/edited columns are gone from new compressed chunks, but older compressed chunks still carry the old column layout internally until rewritten.
+
+![Timescale Rebuild Compression](../../../classes/WebServer/static/screenshots/timescale_rebuild_compression.png)
+
+##### Using the Rebuild Compression Screen
+
+1. Open **Timescale DB → Rebuild Compression** from the admin menu.
+2. Check the group(s) to rebuild — the shared narrow stack, and/or one or more wide-table protocols. **Select all** / **Select none** are provided for convenience.
+3. Click **Rebuild Compression**. You'll be asked to confirm, since this touches every compressed chunk in the selected group(s) — the operation itself is safe (no data is lost), but it can take a while on a large table.
+4. Progress streams live as chunks are rewritten, with a single progress bar covering every selected group.
+5. When finished, each group (and each table within it — the raw table plus its hourly/daily/weekly/monthly rollup views) reports its size before and after, and the percentage reduced.
+
+##### What Gets Touched
+
+For each selected group, every table in its stack — the raw narrow/wide table, plus its hourly, daily, weekly, and monthly rollup views — is checked for compressed chunks. Only chunks TimescaleDB already reports as compressed are touched; the newest chunk(s), still inside their `compress_after` window and not yet compressed by the background policy, are left alone. Each touched chunk is decompressed and immediately recompressed against the hypertable's current compression settings.
+
+##### Progress and Results
+
+Progress is weighted by each table's on-disk byte size rather than by a simple chunk count, since chunk counts aren't comparable across a group's members — a rollup view routinely has several times as many chunks as its raw table for the same span of time, while the raw table's individual chunks are much larger. Splitting each table's own known size evenly across its own chunks gives a progress bar that advances smoothly instead of racing through one table and stalling on another.
+
+Each table's scheduled compression job is paused only while that table's own chunks are being rewritten, and is always resumed afterward, whether or not every chunk succeeded. Every chunk is attempted independently — one chunk failing to decompress or recompress (for example, due to a momentary lock conflict) does not stop the rest of that table, the rest of its group, or any other selected group.
+
+#### Rebuild Rollup Views
+
+The **Timescale DB → Rebuild Rollup Views** admin screen manages the four-tier continuous aggregate rollups (hourly → daily → weekly → monthly) built on top of the narrow table and each wide table. Each tier is materialized from the one below it, so the whole hourly/daily/weekly/monthly stack for a given source table is always treated as a single unit — there's no way to rebuild or refresh just one tier in isolation without risking it being built against a stale or mismatched source.
+
+![Timescale Rebuild Rollups](../../../classes/WebServer/static/screenshots/timescale_rebuild_rollups.png)
+
+##### Using the Rebuild Rollup Views Screen
+
+1. Open **Timescale DB → Rebuild Rollup Views** from the admin menu.
+2. Check the group(s) to act on — the shared narrow stack, and/or one or more wide-table protocols. **Select all** / **Select none** are provided for convenience.
+3. Choose one of the three actions below. **Force Rebuild** asks for confirmation first, since it always drops and recreates every selected group's views regardless of whether anything looks wrong.
+4. Progress streams live as each group (or, for **Refresh Now**, each individual view) is processed.
+5. When finished, the screen reports each group's/view's outcome, including whether it was actually changed or left as-is.
+
+##### The Three Actions
+
+| Action | What It Does | When To Use It |
+| --- | --- | --- |
+| **Refresh Now** | Pulls the latest raw data into each selected view's *existing* definition (`CALL refresh_continuous_aggregate`) — the same thing the background refresh policy does on its own schedule. Never drops or recreates a view. | Routine catch-up between scheduled refreshes, or after a **Metrics Edit** corrected historical values outside a view's normal incremental refresh window. |
+| **Rebuild Rollups** | Purges and fully re-materializes a selected group's whole rollup stack, but only for groups that actually need it — a missing view, or one whose bucket configuration no longer matches `config.cfg`. A group that already checks out is left untouched. | After changing rollup bucket/backfill settings, or after wide-table columns changed via **Delete Columns**/**Metrics Edit** and the rollups look out of sync. |
+| **Force Rebuild** | Purges and fully re-materializes every selected group's whole stack unconditionally, regardless of whether it looked out of date. | When you suspect drift or corruption the normal check wouldn't catch, or you simply want a guaranteed clean rebuild. |
+
+##### Why Whole Stacks, Not Individual Views
+
+The daily rollup is built from the hourly rollup, the weekly rollup from the daily, and the monthly rollup from the weekly. Because of that hierarchy, rebuilding or force-rebuilding always operates at the level of a whole source-table stack (the shared narrow stack, or one wide-table protocol) — never an individual hourly/daily/weekly/monthly view on its own — so a rebuilt tier is never left pointing at a stale or mismatched layer beneath it. **Refresh Now** is the exception: since it never drops or recreates anything, it can and does report progress per individual view.
+
+##### Progress and Results
+
+**Rebuild Rollups** and **Force Rebuild** report progress per group, since each one delegates to the same internal setup routine the bridge uses on startup/reconnect, which rebuilds its whole stack as a single step. **Refresh Now** reports progress per individual view, since it already loops over each one independently. In every case, each group or view is attempted on its own — one failure doesn't block the rest of the selection from completing.
 
 ---
 
@@ -470,7 +531,7 @@ write_requires_complete_cycle = True
 
 ### 6.5 UTC Timestamp Toggle Feature
 
-#### Overview
+#### Timestamp Overview
 
 This feature allows you to configure the TimescaleDB transport to use UTC timestamps instead of the local machine timezone for all time-series data. This is particularly useful for:
 

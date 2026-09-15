@@ -1,0 +1,424 @@
+<!--
+  Description: Defines the Timescale DB "Metrics Edit" admin screen.
+  File: timescale_metrics_edit.html
+
+  Copyright 2026 Kevin Burke
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://apache.org
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+
+{#
+  pages/timescale_metrics_edit.html
+  Left  (aside):  list of selectable tables — the shared narrow table
+                   first, then one entry per wide-table protocol.
+  Right (section): device picker -> field picker -> date/time range ->
+                   action (Delete / Set Value) -> Preview -> Add to Staged
+                   Changes, with the staged-changes list underneath.
+
+  Context: tables — [{table_kind, protocol_name, table_name}, ...];
+  staged_edits — the same StagedMetricEdit list partials/
+  timescale_metrics_edit_staged.html renders (pre-populated here so
+  navigating away and back doesn't lose anything already staged).
+
+  Unlike Delete Columns, a field selection here is never staged on its own
+  — the whole selection (table, device, ONE field, time range, action,
+  and replacement value if any) is staged as one atomic unit via "Add to
+  Staged Changes" (see stageMetricsEdit() below), which POSTs to
+  /api/timescale/metrics-edit/stage. Nothing is written to TimescaleDB
+  until the admin presses the existing "Commit All Changes" button in the
+  header, which runs commit_staged_metric_edits() (routers/commit.py).
+
+  Field selection is a single <select>, not a checklist — a "set value"
+  edit applies one replacement value to whatever's chosen, and letting an
+  admin pick several fields of possibly different types at once (e.g. one
+  INTEGER metric and one BOOLEAN metric) for a single value made the
+  outcome ambiguous. BridgeAdminManager.edit_metric_values() still accepts
+  a field_names *list* underneath (services/bridge_service.py's staging
+  and the API payload both keep that shape) — this screen just only ever
+  populates it with one entry.
+
+  Layout: Device, Field, the Start/End range, the Action/New Value row,
+  and the Preview panel all share ONE fixed max-width (METRICS_EDIT_PANEL_
+  WIDTH below, applied to their common wrapper div), and the Staged
+  Changes panel below is capped to that same width — so every one of
+  those pieces lines up at the same width instead of the form stretching
+  to fill the whole right-hand section.
+
+  Styling notes (mirrors timescale_delete_columns.html /
+  timescale_rebuild_rollups.html): only the LEFT aside is a hardcoded-dark
+  panel (bg-mpg-800 with plain text-mpg-* utilities, never the surface-*/
+  mini-table-* classes) — same as those two screens' own table/protocol
+  pickers. The right-hand content (device/field/range/action form, and
+  the staged-changes list) sits on the app's normal light-panel
+  background (`rounded border border-mpg-700`, no bg-mpg-800) and uses
+  the theme-adaptive surface-*/mini-table-*/theme-input classes
+  throughout, exactly like #timescale-fields-container and
+  #rollup-views-container do. Mixing the two — surface-*/mini-table-*
+  classes inside a hardcoded-dark container — renders as low-contrast
+  dark-on-dark text, since those classes only switch to their light
+  variant under a `.dark` ancestor, not just any dark background.
+#}
+
+{% extends "base.html" %}
+{% block title %}Timescale DB — Metrics Edit — MPG Admin{% endblock %}
+{% block content %}
+<div class="col-span-12 flex gap-4" style="height: calc(100vh - 56px); overflow: hidden;">
+
+  <!-- ══ LEFT: TABLE PICKER ══ -->
+  <aside class="shrink-0 overflow-y-auto
+                bg-mpg-800 rounded border border-mpg-700 p-3"
+         style="width: 26%; min-width: 250px; max-width: 340px;">
+
+    <h2 class="text-mpg-200 text-xs font-semibold uppercase tracking-widest mb-1">
+      Tables
+    </h2>
+    <p class="text-mpg-400 text-xs mb-3">
+      Pick a table and device, choose the field to edit or clear, choose a
+      date/time range, then <span class="text-mpg-200 font-medium">Add to Staged
+      Changes</span> and use <span class="text-mpg-200 font-medium">Commit All
+      Changes</span> in the header to apply.
+    </p>
+
+    <ul class="space-y-1" role="list" aria-label="Metrics Edit tables">
+      {% for t in tables %}
+      <li>
+        <button type="button"
+                class="metrics-edit-table-btn w-full text-left px-3 py-2 rounded text-xs
+                       text-mpg-200 hover:bg-mpg-600 hover:text-white
+                       border border-transparent transition-colors"
+                data-table-kind="{{ t.table_kind }}"
+                data-protocol-name="{{ t.protocol_name or '' }}"
+                data-table-name="{{ t.table_name }}"
+                aria-label="Edit metrics in {{ t.table_name }}"
+                hx-get="/pages/timescale/metrics-edit/devices?table_kind={{ t.table_kind }}{% if t.protocol_name %}&protocol_name={{ t.protocol_name }}{% endif %}"
+                hx-target="#metrics-edit-devices-container"
+                hx-swap="innerHTML scroll:false"
+                hx-headers='{"Cache-Control": "no-cache"}'
+                onclick="selectMetricsEditTable(this)">
+          <div class="font-mono">{{ t.protocol_name or 'device_metrics_narrow' }}</div>
+          <div class="text-mpg-500 text-[10px] truncate">
+            {{ t.table_name }}
+            {% if t.table_kind == 'narrow' %}<span class="italic">(shared)</span>{% endif %}
+          </div>
+        </button>
+      </li>
+      {% endfor %}
+      {% if not tables %}
+      <li class="text-mpg-500 text-xs italic px-1 py-2">No tables found on this bridge.</li>
+      {% endif %}
+    </ul>
+  </aside>
+
+  <!-- ══ RIGHT: DEVICE / FIELD / RANGE / ACTION / PREVIEW / STAGED ══ -->
+  <section class="flex-1 overflow-y-auto flex flex-col gap-4" aria-label="Metrics Edit form">
+
+    {# Device, Field, the date range, Action/New Value, and Preview all share this one width so they
+       line up — see the "Layout" note at the top of this file. Widened ~10 characters past the Field
+       select's own natural width (~420px) at the previous request. #}
+    <div class="rounded border border-mpg-700 p-3 flex flex-col gap-3" style="max-width: 500px;">
+
+      <!-- Device picker -->
+      <div>
+        <label class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">Device</label>
+        <div id="metrics-edit-devices-container">
+          <p class="mini-table-meta text-xs">Select a table on the left to load its devices.</p>
+        </div>
+      </div>
+
+      <!-- Field picker -- a single <select>, not a checklist: one "set value" edit can only
+           unambiguously apply to one field at a time (see the "Field selection" note above). -->
+      <div>
+        <label class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">Field</label>
+        <div id="metrics-edit-fields-container">
+          <p class="mini-table-meta text-xs">Select a device to load its fields.</p>
+        </div>
+      </div>
+
+      <!-- Date/time range -->
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label for="metrics-edit-start-time" class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">
+            Start
+          </label>
+          <input type="datetime-local"
+                 id="metrics-edit-start-time"
+                 step="1"
+                 class="theme-input w-full text-xs rounded px-2 py-1.5
+                        focus:outline-none focus:ring-1 focus:ring-accent">
+        </div>
+        <div>
+          <label for="metrics-edit-end-time" class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">
+            End
+          </label>
+          <input type="datetime-local"
+                 id="metrics-edit-end-time"
+                 step="1"
+                 class="theme-input w-full text-xs rounded px-2 py-1.5
+                        focus:outline-none focus:ring-1 focus:ring-accent">
+        </div>
+      </div>
+
+      <!-- Action + replacement value -->
+      <div class="grid grid-cols-2 gap-3 items-end">
+        <div>
+          <label for="metrics-edit-action-select" class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">
+            Action
+          </label>
+          <select id="metrics-edit-action-select"
+                  class="theme-input w-full text-xs rounded px-2 py-1.5
+                         focus:outline-none focus:ring-1 focus:ring-accent"
+                  onchange="onMetricsEditActionChange(this)">
+            <option value="delete">Delete value(s)</option>
+            <option value="set_value">Set value</option>
+          </select>
+        </div>
+        <div id="metrics-edit-value-wrap" class="hidden">
+          <label for="metrics-edit-new-value" class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">
+            New Value
+          </label>
+          <input type="text"
+                 id="metrics-edit-new-value"
+                 placeholder="e.g. 12.5 or true"
+                 class="theme-input w-full text-xs rounded px-2 py-1.5
+                        focus:outline-none focus:ring-1 focus:ring-accent"
+                 aria-describedby="metrics-edit-value-hint">
+        </div>
+      </div>
+      <p id="metrics-edit-value-hint" class="surface-subtle text-[10px] -mt-2">
+        Validated against the selected field's data type before it's staged (e.g. a whole number for an
+        INTEGER column, true/false for BOOLEAN) — an invalid value is rejected immediately.
+      </p>
+
+      <!-- Buttons -->
+      <div class="flex items-center gap-2">
+        <button type="button" class="btn-tertiary text-xs" onclick="runMetricsEditPreview()">
+          Preview
+        </button>
+        <button type="button" class="btn-tertiary text-xs" onclick="stageMetricsEdit()">
+          Add to Staged Changes
+        </button>
+      </div>
+
+      <div id="metrics-edit-form-status"></div>
+      <div id="metrics-edit-preview-container"></div>
+    </div>
+
+    <!-- Staged changes -- capped to the same width as the form panel above (see the "Layout" note). -->
+    <div id="metrics-edit-staged-container"
+         class="rounded border border-mpg-700 p-3 overflow-x-auto"
+         style="max-width: 500px;"
+         hx-get="/pages/timescale/metrics-edit/staged"
+         hx-trigger="load"
+         hx-swap="innerHTML scroll:false">
+      <p class="mini-table-meta text-xs">Loading staged changes…</p>
+    </div>
+
+  </section>
+
+</div>
+
+<script>
+  const MetricsEditState = {
+    tableKind: null, protocolName: null, tableName: null, deviceInfoId: null, deviceLabel: null,
+  };
+
+  function selectMetricsEditTable(btn) {
+    document.querySelectorAll('.metrics-edit-table-btn').forEach(function (b) {
+      b.classList.remove('bg-mpg-600', 'text-white');
+    });
+    btn.classList.add('bg-mpg-600', 'text-white');
+
+    MetricsEditState.tableKind = btn.dataset.tableKind;
+    MetricsEditState.protocolName = btn.dataset.protocolName || null;
+    MetricsEditState.tableName = btn.dataset.tableName;
+    MetricsEditState.deviceInfoId = null;
+    MetricsEditState.deviceLabel = null;
+
+    // A new table means the device/field/preview selections below are
+    // stale -- clear them rather than leaving a mismatched field list
+    // visible against the newly picked table.
+    document.getElementById('metrics-edit-fields-container').innerHTML =
+      '<p class="mini-table-meta text-xs">Select a device to load its fields.</p>';
+    document.getElementById('metrics-edit-preview-container').innerHTML = '';
+    document.getElementById('metrics-edit-form-status').innerHTML = '';
+  }
+
+  function onMetricsEditDeviceChange(select) {
+    MetricsEditState.deviceInfoId = select.value || null;
+    const opt = select.options[select.selectedIndex];
+    MetricsEditState.deviceLabel = opt ? (opt.dataset.label || opt.textContent.trim()) : null;
+
+    document.getElementById('metrics-edit-preview-container').innerHTML = '';
+    document.getElementById('metrics-edit-form-status').innerHTML = '';
+
+    if (!MetricsEditState.deviceInfoId) { return; }
+
+    const params = new URLSearchParams({
+      table_kind: MetricsEditState.tableKind,
+      device_info_id: MetricsEditState.deviceInfoId,
+    });
+    if (MetricsEditState.protocolName) { params.set('protocol_name', MetricsEditState.protocolName); }
+
+    htmx.ajax('GET', '/pages/timescale/metrics-edit/fields?' + params.toString(), {
+      target: '#metrics-edit-fields-container',
+      swap: 'innerHTML scroll:false',
+    });
+  }
+
+  function getSelectedMetricsEditField() {
+    const select = document.getElementById('metrics-edit-field-select');
+    return select && select.value ? select.value : null;
+  }
+
+  function onMetricsEditFieldChange(select) {
+    document.getElementById('metrics-edit-preview-container').innerHTML = '';
+    document.getElementById('metrics-edit-form-status').innerHTML = '';
+  }
+
+  function onMetricsEditActionChange(select) {
+    document.getElementById('metrics-edit-value-wrap').classList.toggle('hidden', select.value !== 'set_value');
+  }
+
+  function showMetricsEditStatus(message, isError) {
+    document.getElementById('metrics-edit-form-status').innerHTML =
+      '<div class="text-xs px-3 py-2 rounded border ' +
+      (isError ? 'border-danger/30 bg-danger/10 text-danger' : 'border-success/30 bg-success/10 text-success') +
+      '">' + message + '</div>';
+  }
+
+  // Gathers + validates the current form state client-side (required
+  // fields present at all) before either Preview or Add to Staged
+  // Changes fires a request -- the server re-validates everything
+  // regardless (see BridgeAdminManager.validate_metric_edit_value /
+  // preview_metric_edit), this just avoids a round-trip for an obviously
+  // incomplete selection.
+  function buildMetricsEditSelection() {
+    if (!MetricsEditState.tableKind || !MetricsEditState.tableName) {
+      showMetricsEditStatus('Select a table first.', true);
+      return null;
+    }
+    if (!MetricsEditState.deviceInfoId) {
+      showMetricsEditStatus('Select a device first.', true);
+      return null;
+    }
+    const fieldName = getSelectedMetricsEditField();
+    if (!fieldName) {
+      showMetricsEditStatus('Select a field to edit.', true);
+      return null;
+    }
+    const startTime = document.getElementById('metrics-edit-start-time').value;
+    const endTime = document.getElementById('metrics-edit-end-time').value;
+    if (!startTime || !endTime) {
+      showMetricsEditStatus('Pick a start and end date/time.', true);
+      return null;
+    }
+    if (endTime < startTime) {
+      showMetricsEditStatus('End time must not be before start time.', true);
+      return null;
+    }
+    const action = document.getElementById('metrics-edit-action-select').value;
+    const newValue = action === 'set_value' ? document.getElementById('metrics-edit-new-value').value : null;
+    if (action === 'set_value' && !newValue) {
+      showMetricsEditStatus('Enter a replacement value.', true);
+      return null;
+    }
+
+    return {
+      table_kind: MetricsEditState.tableKind,
+      protocol_name: MetricsEditState.protocolName,
+      table_name: MetricsEditState.tableName,
+      device_info_id: parseInt(MetricsEditState.deviceInfoId, 10),
+      device_label: MetricsEditState.deviceLabel,
+      field_names: [fieldName],
+      start_time: startTime,
+      end_time: endTime,
+      action: action,
+      new_value: newValue,
+    };
+  }
+
+  async function runMetricsEditPreview() {
+    const sel = buildMetricsEditSelection();
+    if (!sel) { return; }
+    document.getElementById('metrics-edit-form-status').innerHTML = '';
+
+    let resp, html;
+    try {
+      resp = await fetch('/api/timescale/metrics-edit/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          table_kind: sel.table_kind,
+          protocol_name: sel.protocol_name,
+          device_info_id: sel.device_info_id,
+          field_names: sel.field_names,
+          start_time: sel.start_time,
+          end_time: sel.end_time,
+        }),
+      });
+      html = await resp.text();
+    } catch (e) {
+      showMetricsEditStatus('Preview request failed — see the browser console.', true);
+      return;
+    }
+
+    if (resp.ok) {
+      document.getElementById('metrics-edit-preview-container').innerHTML = html;
+    } else {
+      let detail = 'Preview failed.';
+      try { detail = JSON.parse(html).detail || detail; } catch (e) { /* non-JSON error body */ }
+      showMetricsEditStatus(detail, true);
+    }
+  }
+
+  async function stageMetricsEdit() {
+    const sel = buildMetricsEditSelection();
+    if (!sel) { return; }
+
+    const summary = sel.action === 'delete'
+      ? 'delete "' + sel.field_names[0] + '"'
+      : 'set "' + sel.field_names[0] + '" to "' + sel.new_value + '"';
+    const proceed = window.confirm(
+      'Stage: ' + summary + ' for ' + (sel.device_label || 'this device') + ' between ' +
+      sel.start_time + ' and ' + sel.end_time + '.\n\nNothing is written to TimescaleDB until you press ' +
+      '"Commit All Changes" in the header. Continue?'
+    );
+    if (!proceed) { return; }
+
+    let resp, html;
+    try {
+      resp = await fetch('/api/timescale/metrics-edit/stage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(sel),
+      });
+      html = await resp.text();
+    } catch (e) {
+      showMetricsEditStatus('Staging request failed — see the browser console.', true);
+      return;
+    }
+
+    if (resp.ok) {
+      const container = document.getElementById('metrics-edit-staged-container');
+      container.innerHTML = html;
+      htmx.process(container); // new hx-delete buttons weren't inserted through htmx's own swap
+      showMetricsEditStatus('Staged. Use "Commit All Changes" in the header to apply.', false);
+      if (typeof refreshState === 'function') { refreshState(); }
+    } else {
+      let detail = 'Could not stage this edit.';
+      try { detail = JSON.parse(html).detail || detail; } catch (e) { /* non-JSON error body */ }
+      showMetricsEditStatus(detail, true);
+    }
+  }
+</script>
+{% endblock %}

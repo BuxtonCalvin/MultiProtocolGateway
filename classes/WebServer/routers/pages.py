@@ -39,7 +39,7 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Sequence, Tuple
+from typing import TYPE_CHECKING, Any, List, Sequence, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import (
@@ -430,8 +430,8 @@ async def about_page(request: Request):
     )
 
 
-@router.get("/pages/create-device", response_class=HTMLResponse, response_model=None)
-async def create_device_page(request: Request):
+@router.get("/pages/create-scraper", response_class=HTMLResponse, response_model=None)
+async def create_scraper_page(request: Request) -> Any:
     with session_scope() as db:
         nav: NavData = get_nav_data(db)
     proto_groups: List[dict[str, str | list[str]]] = get_protocol_groups(
@@ -465,14 +465,13 @@ async def create_device_page(request: Request):
     }
     return request.app.state.templates.TemplateResponse(
         request=request,
-        name="pages/create_device.html",
+        name="pages/create_scraper.html",
         context={
             "nav": nav,
             "proto_groups": proto_groups,
             "create_device_data": create_device_data,
         },
     )
-
 
 
 def _protocol_create_groups(protocols_dir: Path) -> list[dict[str, str | list[str]]]:

@@ -47,28 +47,38 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, Iterator
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
+from ...transports.timescaledb import get_machine_timezone
 from ...transports.transport_base import transport_base
 from ..database import session_scope
 from ..services.bridge_service import (
     get_staged_columns,
+    get_staged_metric_edits,
     get_timescale_bridge,
     is_timescale_available,
     list_compression_groups,
+    list_metric_edit_devices,
+    list_metric_edit_fields,
+    list_metric_edit_tables,
     list_rollup_view_groups,
     list_wide_table_fields,
     list_wide_tables,
+    preview_metric_edit,
     rebuild_all_rollups,
     rebuild_compression,
     refresh_selected_rollups,
     resolve_wide_table_name,
     stage_field_deletion,
+    stage_metric_edit,
     staged_deletion_count,
+    unstage_metric_edit,
 )
 from ..services.device_service import NavData, get_nav_data
 from .pages import base_context
@@ -230,6 +240,268 @@ def stage_field(
         "checked": payload.checked,
         "staged_count": staged_deletion_count(request.app.state),
     }
+
+
+# ---------------------------------------------------------------------------
+# Metrics Edit — page shell + table/device/field pickers + preview +
+# staging endpoints for the "Timescale DB -> Metrics Edit" admin screen.
+#
+# Edits/deletes existing metric VALUES for one device over a caller-chosen
+# time range, on either the shared narrow table or one protocol's wide
+# table — distinct from Delete Columns above, which only ever changes a
+# wide table's SHAPE (dropping whole columns), never a value. Staged the
+# same way as Delete Columns (nothing written to TimescaleDB until "Commit
+# All Changes"), through an independent staging store (see
+# stage_metric_edit / commit_staged_metric_edits in
+# services/bridge_service.py) — a Metrics Edit selection is staged as one
+# complete, atomic request rather than accumulated checkbox-by-checkbox,
+# so there's a "stage" and "unstage by id" rather than a per-field toggle.
+# ---------------------------------------------------------------------------
+
+def _parse_local_datetime(value: str) -> datetime:
+    """
+    Parses a <input type="datetime-local"> value ("YYYY-MM-DDTHH:MM[:SS]")
+    from the Metrics Edit screen's date/time range picker into a tz-aware
+    datetime, localized to the app's configured machine timezone
+    (get_machine_timezone()) — the same timezone _now_tz() stamps every
+    row's m_time with when it's written, so a range picked in the browser
+    lines up with what's actually stored.
+    """
+    try:
+        naive: datetime = datetime.fromisoformat(value)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"'{value}' is not a valid date/time.")
+    return naive.replace(tzinfo=ZoneInfo(get_machine_timezone()))
+
+
+@router.get("/pages/timescale-metrics-edit", response_class=HTMLResponse, response_model=None)
+async def timescale_metrics_edit_page(request: Request)-> Any:
+    """
+    "Metrics Edit" screen — lists every selectable table (the shared
+    narrow table first, then every wide-table protocol). Selecting one
+    loads its device picker via HTMX (see
+    timescale_metrics_edit_devices_partial below), then its field
+    checklist (see timescale_metrics_edit_fields_partial) once a device is
+    chosen. The staged-changes panel is pre-populated here too, so
+    navigating away and back doesn't lose anything already staged.
+    """
+    gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
+    if not is_timescale_available(gateway):
+        raise HTTPException(
+            status_code=404,
+            detail="No TimescaleDB bridge is attached to this gateway.",
+        )
+
+    with session_scope() as db:
+        nav: NavData = get_nav_data(db)
+
+    try:
+        tables: list[dict[str, str | None]] = list_metric_edit_tables(gateway)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return request.app.state.templates.TemplateResponse(
+        request=request,
+        name="pages/timescale_metrics_edit.html",
+        context={
+            **base_context(request, nav),
+            "tables": tables,
+            "staged_edits": get_staged_metric_edits(request.app.state),
+        },
+    )
+
+
+@router.get("/pages/timescale/metrics-edit/devices", response_class=HTMLResponse, response_model=None)
+async def timescale_metrics_edit_devices_partial(
+    request: Request, table_kind: str, protocol_name: str | None = None
+    ) -> Any:
+    """Device picker (<option> list) for one Metrics Edit table selection."""
+    gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
+    if not is_timescale_available(gateway):
+        raise HTTPException(status_code=404, detail="No TimescaleDB bridge is attached to this gateway.")
+
+    try:
+        devices: list[dict[str, Any]] = list_metric_edit_devices(gateway, table_kind, protocol_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return request.app.state.templates.TemplateResponse(
+        request=request,
+        name="partials/timescale_metrics_edit_devices.html",
+        context={"table_kind": table_kind, "protocol_name": protocol_name, "devices": devices},
+    )
+
+
+@router.get("/pages/timescale/metrics-edit/fields", response_class=HTMLResponse, response_model=None)
+async def timescale_metrics_edit_fields_partial(
+    request: Request,
+    table_kind: str,
+    protocol_name: str | None = None,
+    device_info_id: int | None = None,
+    ) -> Any:
+    """Field checklist for one Metrics Edit table + device selection."""
+    gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
+    if not is_timescale_available(gateway):
+        raise HTTPException(status_code=404, detail="No TimescaleDB bridge is attached to this gateway.")
+
+    try:
+        fields: list[dict[str, str | None]] = list_metric_edit_fields(
+            gateway, table_kind, protocol_name=protocol_name, device_info_id=device_info_id
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return request.app.state.templates.TemplateResponse(
+        request=request,
+        name="partials/timescale_metrics_edit_fields.html",
+        context={"fields": fields},
+    )
+
+
+class MetricEditPreviewRequest(BaseModel):
+    table_kind: str
+    protocol_name: str | None = None
+    device_info_id: int
+    field_names: list[str]
+    start_time: str    # <input type="datetime-local"> value
+    end_time: str
+
+
+@router.post("/api/timescale/metrics-edit/preview", response_class=HTMLResponse, response_model=None)
+def timescale_metrics_edit_preview(payload: MetricEditPreviewRequest, request: Request):
+    """
+    Read-only "Preview" step — shows the admin what a matching
+    edit_metric_values() call would affect (row count + a small sample of
+    current values) before anything is staged. Renders straight to HTML
+    for the same HTMX-swap pattern the rest of this file uses, rather than
+    JSON, so the Metrics Edit screen needs no extra client-side
+    templating.
+    """
+    _require_bridge(request)
+    gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
+
+    if not payload.field_names:
+        raise HTTPException(status_code=400, detail="Select at least one field to preview.")
+
+    start_dt: datetime = _parse_local_datetime(payload.start_time)
+    end_dt: datetime = _parse_local_datetime(payload.end_time)
+    if end_dt < start_dt:
+        raise HTTPException(status_code=400, detail="End time must not be before start time.")
+
+    try:
+        preview: dict[str, Any] = preview_metric_edit(
+            gateway,
+            payload.table_kind,
+            payload.protocol_name,
+            payload.device_info_id,
+            payload.field_names,
+            start_dt,
+            end_dt,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return request.app.state.templates.TemplateResponse(
+        request=request,
+        name="partials/timescale_metrics_edit_preview.html",
+        context={"preview": preview},
+    )
+
+
+class MetricEditStageRequest(BaseModel):
+    table_kind: str
+    protocol_name: str | None = None
+    table_name: str
+    device_info_id: int
+    device_label: str
+    field_names: list[str]
+    start_time: str    # <input type="datetime-local"> value
+    end_time: str
+    action: str        # "delete" or "set_value"
+    new_value: str | None = None
+
+
+@router.post("/api/timescale/metrics-edit/stage", response_class=HTMLResponse, response_model=None)
+def timescale_metrics_edit_stage(payload: MetricEditStageRequest, request: Request):
+    """
+    Stages one Metrics Edit request ("Add to Staged Changes"). Validates
+    the replacement value against the field's declared/inferred type
+    (see BridgeAdminManager.validate_metric_edit_value, run from
+    stage_metric_edit) before anything is added to staging — an invalid
+    value (e.g. text into an INTEGER wide column) is rejected here with a
+    400 rather than only surfacing at commit time. Nothing is written to
+    TimescaleDB until "Commit All Changes" (routers/commit.py) runs
+    commit_staged_metric_edits().
+
+    Returns the refreshed staged-changes list partial, for an HTMX swap.
+    """
+    _require_bridge(request)
+    gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
+
+    if not payload.field_names:
+        raise HTTPException(status_code=400, detail="Select at least one field to edit.")
+    if payload.action not in ("delete", "set_value"):
+        raise HTTPException(status_code=400, detail=f"Unknown action '{payload.action}'.")
+    if payload.action == "set_value" and not payload.new_value:
+        raise HTTPException(status_code=400, detail="Enter a replacement value.")
+
+    start_dt: datetime = _parse_local_datetime(payload.start_time)
+    end_dt: datetime = _parse_local_datetime(payload.end_time)
+    if end_dt < start_dt:
+        raise HTTPException(status_code=400, detail="End time must not be before start time.")
+
+    try:
+        stage_metric_edit(
+            gateway,
+            request.app.state,
+            table_kind=payload.table_kind,
+            protocol_name=payload.protocol_name,
+            table_name=payload.table_name,
+            device_info_id=payload.device_info_id,
+            device_label=payload.device_label,
+            field_names=payload.field_names,
+            start_time=start_dt,
+            end_time=end_dt,
+            action=payload.action,
+            new_value=payload.new_value,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return request.app.state.templates.TemplateResponse(
+        request=request,
+        name="partials/timescale_metrics_edit_staged.html",
+        context={"staged_edits": get_staged_metric_edits(request.app.state)},
+    )
+
+
+@router.delete("/api/timescale/metrics-edit/stage/{edit_id}", response_class=HTMLResponse, response_model=None)
+def timescale_metrics_edit_unstage(edit_id: str, request: Request):
+    """Removes one staged Metrics Edit entry. Returns the refreshed staged-changes list partial for an HTMX swap."""
+    unstage_metric_edit(request.app.state, edit_id)
+    return request.app.state.templates.TemplateResponse(
+        request=request,
+        name="partials/timescale_metrics_edit_staged.html",
+        context={"staged_edits": get_staged_metric_edits(request.app.state)},
+    )
+
+
+@router.get("/pages/timescale/metrics-edit/staged", response_class=HTMLResponse, response_model=None)
+def timescale_metrics_edit_staged_partial(request: Request):
+    """Staged-changes list partial, used on the Metrics Edit page's initial load."""
+    return request.app.state.templates.TemplateResponse(
+        request=request,
+        name="partials/timescale_metrics_edit_staged.html",
+        context={"staged_edits": get_staged_metric_edits(request.app.state)},
+    )
 
 
 # ---------------------------------------------------------------------------
