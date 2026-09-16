@@ -28,9 +28,10 @@ import pickle
 import sys
 import threading
 import time
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Callable, Optional, TypedDict, cast
+from typing import Any, Callable, Literal, Optional, cast
 from urllib.parse import SplitResult, urlsplit
 
 import pyarrow as pa
@@ -1382,3 +1383,471 @@ class influxdb3_out(transport_base):
                     self._log.error(f"Exception in __del__: {e}")
                 except Exception:
                     self._log.error(f"Exception in __del__: {e}")
+
+
+# =============================================================================
+# Metrics Edit -- read/edit admin operations for InfluxDB v3, the v3
+# counterpart of InfluxDB v1's InfluxV1AdminManager (classes/transports/
+# influxdb_out.py) and TimescaleDB's BridgeAdminManager (classes/transports/
+# timescaledb.py). Lives in this module (not the web layer) per the same
+# separation those two use: routers/influxdb.py and services/
+# influxdb_service.py only orchestrate HTTP/staging concerns; every actual
+# InfluxDB v3 read/write happens here, against a live influxdb3_out bridge
+# instance, via SQL (DataFusion) rather than InfluxQL.
+#
+# InfluxDB 3 Core has NO row-level or field-level DELETE at all as of this
+# writing -- "row-level deletions" is an Enterprise-only 3.10+ feature, and
+# even that operates through a separate management command, not SQL. So
+# unlike InfluxV1AdminManager, this class only ever supports "set_value" --
+# SUPPORTS_DELETE is False here, and edit_metric_values()'s `action`
+# parameter is typed Literal["set_value"] accordingly (not
+# Literal["delete", "set_value"]) so this is enforced at the type level,
+# not just by convention. routers/influxdb.py checks SUPPORTS_DELETE before
+# ever offering a "Delete" action for a v3 measurement.
+#
+# "Editing" a value here means the same thing it does for v1: SQL SELECT *
+# the matching rows (capturing each row's full original tag set and exact
+# timestamp), then re-write ONE Point per row containing that same tag set,
+# timestamp, and ONLY the corrected field. InfluxDB 3's storage engine
+# merges writes per-column at the same (tag-set, timestamp) primary key,
+# the same last-write-wins-per-field behavior InfluxDB v1's TSM engine has,
+# so every other field already stored at that timestamp is left untouched.
+# =============================================================================
+
+# The six tags every influxdb3_out point carries (see _build_tags above) --
+# used by list_metric_edit_fields to exclude tag columns from the editable
+# field list (information_schema.columns has no separate "is this a tag"
+# flag to query instead), and by edit_metric_values to know which columns
+# of a fetched row to re-attach as tags rather than treat as a field.
+_INFLUX3_TAG_NAMES: frozenset[str] = frozenset({
+    "device_identifier", "device_name", "device_manufacturer",
+    "device_model", "device_serial_number", "transport",
+})
+
+# Arrow/DataFusion data_type strings (as reported by information_schema.
+# columns) bucketed by kind -- used only by _coerce_v3_field_value to
+# basic-validate a Metrics Edit replacement value before it's written.
+_INFLUX3_INTEGER_TYPES: frozenset[str] = frozenset({
+    "Int8", "Int16", "Int32", "Int64", "UInt8", "UInt16", "UInt32", "UInt64",
+})
+_INFLUX3_FLOAT_TYPES: frozenset[str] = frozenset({"Float16", "Float32", "Float64"})
+
+
+def _sql_quote_ident(name: str) -> str:
+    """
+    Double-quotes a SQL identifier (table/column name) for DataFusion SQL,
+    escaping any embedded double quote by doubling it -- the SQL-dialect
+    counterpart of InfluxQL's quote_ident (see influxdb_out.py, and
+    InfluxDBClient3.query() has no bind_params support at all to lean on
+    instead, unlike the v1 client).
+    """
+    return '"' + name.replace('"', '""') + '"'
+
+
+def _sql_quote_literal(value: str) -> str:
+    """
+    Single-quotes a SQL string literal for DataFusion SQL, escaping any
+    embedded single quote by doubling it -- the SQL-dialect counterpart of
+    InfluxQL's quote_literal. Used for every value (tag values, mainly)
+    that has to be inlined into a query string, since InfluxDBClient3.
+    query() offers no parameterized-query mechanism.
+    """
+    return "'" + value.replace("'", "''") + "'"
+
+
+def _sql_timestamp_literal(value: datetime) -> str:
+    """
+    Formats a datetime as a DataFusion TIMESTAMP literal, normalized to UTC
+    first so the literal is unambiguous regardless of the server's session
+    timezone.
+    """
+    return f"CAST({_sql_quote_literal(value.astimezone(timezone.utc).isoformat())} AS TIMESTAMP)"
+
+
+def _coerce_v3_field_value(value: object, data_type: str | None) -> float | int | str | bool:
+    """
+    Basic validation/coercion of one admin-entered Metrics Edit replacement
+    value against an InfluxDB v3 field's reported Arrow data_type (from
+    information_schema.columns) before Influx3AdminManager.
+    edit_metric_values() writes it. A value that doesn't fit the reported
+    type is rejected outright rather than silently reinterpreted, since
+    this writes directly to historical data with no further review step
+    once committed.
+
+    data_type=None (a column information_schema.columns didn't report,
+    which shouldn't normally happen for a field the admin picked from that
+    same listing) is treated permissively: numeric-looking input becomes a
+    float, anything else is kept as a string.
+
+    Returns:
+        The value coerced to the Python type that matches data_type.
+
+    Raises:
+        ValueError: value doesn't parse as the reported type, or an
+                    integer type's value isn't a whole number.
+    """
+    if data_type == "Boolean":
+        if isinstance(value, bool):
+            return value
+        text_val: str = str(value).strip().lower()
+        if text_val in ("true", "t", "1", "yes", "on"):
+            return True
+        if text_val in ("false", "f", "0", "no", "off"):
+            return False
+        msg: str = f"'{value}' is not a valid boolean for a BOOLEAN field (use true/false)."
+        raise ValueError(msg)
+
+    if data_type is None:
+        try:
+            return float(cast(Any, value))
+        except (TypeError, ValueError):
+            return str(value)
+
+    if data_type in _INFLUX3_INTEGER_TYPES or data_type in _INFLUX3_FLOAT_TYPES:
+        try:
+            parsed: float = float(cast(Any, value))
+        except (TypeError, ValueError):
+            msg = f"'{value}' is not a valid number for a {data_type} field."
+            raise ValueError(msg) from None
+
+        if data_type in _INFLUX3_INTEGER_TYPES:
+            if not parsed.is_integer():
+                msg = f"'{value}' is not a whole number, but this field is {data_type}."
+                raise ValueError(msg)
+            return int(parsed)
+        return parsed
+
+    # Utf8, Dictionary(...), or anything else not recognized as numeric -- text.
+    return str(value)
+
+
+@dataclass
+class Influx3MetricEditDevice:
+    """One device with existing rows in a measurement, for the Metrics Edit device picker."""
+    device_identifier: str
+    device_name: str | None
+
+
+@dataclass
+class Influx3MetricEditField:
+    """One editable field column in a measurement, for the Metrics Edit field picker."""
+    name: str
+    data_type: str | None  # Arrow type string, e.g. "Float64", "Int64", "Utf8", "Boolean"
+
+
+@dataclass
+class Influx3ValueSample:
+    """One matched (time, value) pair for the given field, for the Metrics Edit preview."""
+    time_iso: str
+    value: float | int | str | bool | None
+
+
+@dataclass
+class Influx3EditPreview:
+    """Read-only preview of what an Influx3AdminManager.edit_metric_values() call would affect."""
+    row_count: int
+    sample: list[Influx3ValueSample]
+
+
+@dataclass
+class Influx3EditResult:
+    """Outcome of an Influx3AdminManager.edit_metric_values() call."""
+    measurement: str
+    device_identifier: str
+    action: Literal["set_value"]
+    field_name: str
+    new_value: float | int | str | bool
+    start_time: datetime
+    end_time: datetime
+    points_affected: int
+
+
+class Influx3AdminManager:
+    """
+    Read/edit admin operations against one live influxdb3_out (v3) bridge's
+    stored data, for the "InfluxDB -> Metrics Edit 3.x" admin screen. See
+    the module-level comment above for what "edit" means on InfluxDB v3,
+    and why "delete" isn't offered at all (SUPPORTS_DELETE).
+
+    Usage:
+        admin_mgr = Influx3AdminManager(bridge)
+        measurements = admin_mgr.list_metric_edit_measurements()
+        devices = admin_mgr.list_metric_edit_devices("device_data")
+        fields = admin_mgr.list_metric_edit_fields("device_data")
+        preview = admin_mgr.preview_metric_edit("device_data", "4066670074", "cap_remaining", start, end)
+        result = admin_mgr.edit_metric_values(
+            "device_data", "4066670074", start, end, field_name="cap_remaining", new_value=80,
+        )
+    """
+
+    # InfluxDB 3 Core has no SQL DELETE (row- or field-level) -- see the
+    # module-level comment above. routers/influxdb.py reads this to decide
+    # whether "Delete value(s)" is even offered as an action for a v3
+    # measurement.
+    SUPPORTS_DELETE: bool = False
+
+    def __init__(self, bridge: influxdb3_out) -> None:
+        self._bridge: influxdb3_out = bridge
+        self._log: logging.Logger = logging.getLogger(__name__)
+
+    @property
+    def _client(self) -> InfluxDBClient3:
+        """The bridge's live client, or raises if the bridge isn't connected."""
+        client: InfluxDBClient3 | None = self._bridge.client
+        if client is None:
+            raise RuntimeError("Not connected to InfluxDB -- bridge must be connected before editing metric values.")
+        return client
+
+    def _query(self, sql: str) -> pa.Table:
+        """Runs one SQL query against this bridge's database and returns the raw pyarrow Table."""
+        return cast(pa.Table, self._client.query(sql, database=self._bridge.database, language="sql"))  # type: ignore[reportUnknownMemberType]
+
+    # -------------------------
+    # Read-only listing for the UI
+    # -------------------------
+
+    def list_metric_edit_measurements(self) -> list[str]:
+        """Returns every measurement (table) on this bridge's database, for the Metrics Edit measurement picker."""
+        table: pa.Table = self._query(
+            "SELECT table_name FROM information_schema.tables WHERE table_schema NOT IN ('information_schema', 'system')"
+        )
+        rows: list[dict[str, object]] = table.to_pylist()
+        names: set[str] = {cast(str, r["table_name"]) for r in rows if r.get("table_name")}
+        return sorted(names)
+
+    def list_metric_edit_devices(self, measurement: str) -> list[Influx3MetricEditDevice]:
+        """Returns every (device_identifier, device_name) pairing recorded in `measurement`, via a plain SQL DISTINCT."""
+        query: str = f"SELECT DISTINCT device_identifier, device_name FROM {_sql_quote_ident(measurement)}"  # noqa: S608
+        table: pa.Table = self._query(query)
+        rows: list[dict[str, object]] = table.to_pylist()
+
+        devices: list[Influx3MetricEditDevice] = [
+            Influx3MetricEditDevice(
+                device_identifier=cast(str, r["device_identifier"]),
+                device_name=cast(Optional[str], r.get("device_name")),
+            )
+            for r in rows if r.get("device_identifier")
+        ]
+        devices.sort(key=lambda d: d.device_identifier)
+        return devices
+
+    def list_metric_edit_fields(self, measurement: str) -> list[Influx3MetricEditField]:
+        """
+        Returns every editable field column in `measurement`, for the
+        Metrics Edit field picker -- every information_schema.columns
+        column for this table except "time" and the six known tag names
+        (_INFLUX3_TAG_NAMES), since a tag defines series identity rather
+        than holding an editable value (see the module-level comment).
+        """
+        query: str = (
+            "SELECT column_name, data_type FROM information_schema.columns "  # noqa: S608
+            f"WHERE table_schema NOT IN ('information_schema', 'system') AND table_name = {_sql_quote_literal(measurement)}"
+        )
+        table: pa.Table = self._query(query)
+        rows: list[dict[str, object]] = table.to_pylist()
+
+        fields: list[Influx3MetricEditField] = []
+        for row in rows:
+            column_name: str | None = cast(Optional[str], row.get("column_name"))
+            data_type: str | None = cast(Optional[str], row.get("data_type"))
+            if not column_name or column_name == "time" or column_name in _INFLUX3_TAG_NAMES:
+                continue
+            fields.append(Influx3MetricEditField(name=column_name, data_type=data_type))
+
+        fields.sort(key=lambda f: f.name)
+        return fields
+
+    def preview_metric_edit(
+        self,
+        measurement: str,
+        device_identifier: str,
+        field_name: str,
+        start_time: datetime,
+        end_time: datetime,
+        sample_limit: int = 25,
+        ) -> Influx3EditPreview:
+        """
+        Read-only count + small sample of what an edit_metric_values()
+        call with the same arguments would affect -- lets the Metrics Edit
+        screen show the admin what's about to change before they stage it.
+        Never writes anything.
+
+        measurement/field_name are embedded via _sql_quote_ident and must
+        already be validated against list_metric_edit_measurements()/
+        list_metric_edit_fields() by the caller; device_identifier is
+        embedded via _sql_quote_literal -- InfluxDBClient3.query() has no
+        parameterized-query mechanism to prefer instead (unlike the v1
+        client's bind_params).
+
+        Raises:
+            ValueError: end_time before start_time.
+        """
+        if end_time < start_time:
+            raise ValueError("End time must not be before start time.")
+
+        quoted_table: str = _sql_quote_ident(measurement)
+        quoted_field: str = _sql_quote_ident(field_name)
+        device_lit: str = _sql_quote_literal(device_identifier)
+        start_lit: str = _sql_timestamp_literal(start_time)
+        end_lit: str = _sql_timestamp_literal(end_time)
+        where_clause: str = f"WHERE device_identifier = {device_lit} AND time >= {start_lit} AND time <= {end_lit}"
+
+        count_table: pa.Table = self._query(
+            f"SELECT COUNT({quoted_field}) AS row_count FROM {quoted_table} {where_clause}"  # noqa: S608
+        )
+        count_rows: list[dict[str, object]] = count_table.to_pylist()
+        row_count: int = int(cast(Any, count_rows[0].get("row_count")) or 0) if count_rows else 0
+
+        sample_table: pa.Table = self._query(
+            f"SELECT time, {quoted_field} FROM {quoted_table} {where_clause} "  # noqa: S608
+            f"ORDER BY time DESC LIMIT {int(sample_limit)}"
+        )
+        sample_rows: list[dict[str, object]] = sample_table.to_pylist()
+        sample: list[Influx3ValueSample] = [
+            Influx3ValueSample(time_iso=str(row.get("time")), value=cast(Any, row.get(field_name)))
+            for row in sample_rows
+        ]
+
+        return Influx3EditPreview(row_count=row_count, sample=sample)
+
+    # -------------------------
+    # Edit (no delete -- see SUPPORTS_DELETE / module-level comment)
+    # -------------------------
+
+    def edit_metric_values(
+        self,
+        measurement: str,
+        device_identifier: str,
+        start_time: datetime,
+        end_time: datetime,
+        field_name: str,
+        new_value: object,
+        ) -> Influx3EditResult:
+        """
+        Sets one field to a new value for every point matching
+        device_identifier in [start_time, end_time], within `measurement`.
+
+        Queries every matching row via SELECT * (capturing each row's full
+        original tag values and exact timestamp), then re-writes ONE Point
+        per row containing that same tag set, the original timestamp, and
+        ONLY the corrected field -- InfluxDB 3's storage engine merges
+        writes per-column at the same (tag-set, timestamp) key, so every
+        other field already stored at that timestamp is left untouched.
+
+        Timestamp round-tripping note: pyarrow's to_pylist() converts a
+        nanosecond-precision Arrow timestamp to a Python datetime, which
+        only holds microsecond precision -- any true sub-microsecond
+        component would be lost on round-trip. This is a no-op in
+        practice for this application specifically: influxdb3_out's own
+        write path (_create_point_dict) only ever derives a point's
+        timestamp from Python's own datetime.timestamp(), which is
+        already microsecond-precision at the source -- there is no
+        sub-microsecond information to lose for data this bridge wrote
+        itself. A row written by some other client with genuine
+        sub-microsecond precision would not round-trip exactly and could
+        land as a near-duplicate point rather than a true overwrite.
+
+        Args:
+            measurement: the measurement to edit.
+            device_identifier: the device (via its device_identifier tag)
+                        whose rows are being edited.
+            start_time / end_time: inclusive bounds on time.
+            field_name: must be one of list_metric_edit_fields
+                        (measurement)'s names.
+            new_value: the replacement value.
+
+        Returns:
+            Influx3EditResult summarizing what happened.
+
+        Raises:
+            ValueError: end_time before start_time, no field_name/
+                        new_value given, or new_value doesn't fit the
+                        field's reported type.
+            RuntimeError: bridge isn't connected (see the _client property).
+            Exception: any failure querying/writing is logged and re-raised.
+        """
+        if end_time < start_time:
+            raise ValueError("End time must not be before start time.")
+        if not field_name:
+            raise ValueError("field_name is required.")
+        if new_value is None:
+            raise ValueError("new_value is required.")
+
+        try:
+            data_type: str | None = self._lookup_field_type(measurement, field_name)
+            coerced_value: float | int | str | bool = _coerce_v3_field_value(new_value, data_type)
+
+            quoted_table: str = _sql_quote_ident(measurement)
+            device_lit: str = _sql_quote_literal(device_identifier)
+            start_lit: str = _sql_timestamp_literal(start_time)
+            end_lit: str = _sql_timestamp_literal(end_time)
+            fetch_query: str = (
+                f"SELECT * FROM {quoted_table} "  # noqa: S608
+                f"WHERE device_identifier = {device_lit} AND time >= {start_lit} AND time <= {end_lit}"
+            )
+            fetch_table: pa.Table = self._query(fetch_query)
+            rows: list[dict[str, object]] = fetch_table.to_pylist()
+
+            points: list[Point] = []
+            for row in rows:
+                row_time: object = row.get("time")
+                if not isinstance(row_time, datetime):
+                    continue
+                point: Point = Point(measurement)
+                for tag_name in _INFLUX3_TAG_NAMES:
+                    tag_val: object = row.get(tag_name)
+                    if tag_val is not None:
+                        point = point.tag(tag_name, str(tag_val))  # type: ignore[reportUnknownMemberType]
+                point = point.field(field_name, coerced_value)  # type: ignore[reportUnknownMemberType]
+                point = point.time(int(row_time.timestamp() * 1e9))  # type: ignore[reportUnknownMemberType]
+                points.append(point)
+
+            if points:
+                self._client.write(record=points, database=self._bridge.database)  # type: ignore[reportUnknownMemberType]
+
+            self._log.info(
+                f"Influx3AdminManager: set '{field_name}' = {coerced_value!r} for device '{device_identifier}' in "
+                f"'{measurement}' over [{start_time}, {end_time}] -- {len(points)} point(s) rewritten."
+            )
+            return Influx3EditResult(
+                measurement=measurement, device_identifier=device_identifier, action="set_value",
+                field_name=field_name, new_value=coerced_value, start_time=start_time, end_time=end_time,
+                points_affected=len(points),
+            )
+
+        except Exception as e:
+            self._log.error(
+                f"Influx3AdminManager.edit_metric_values failed for '{measurement}' device "
+                f"'{device_identifier}': {e}"
+            )
+            raise
+
+    def _lookup_field_type(self, measurement: str, field_name: str) -> str | None:
+        """Best-effort lookup of one field's reported Arrow data_type, for _coerce_v3_field_value. None if not found."""
+        for field in self.list_metric_edit_fields(measurement):
+            if field.name == field_name:
+                return field.data_type
+        return None
+
+    def validate_metric_edit_value(self, measurement: str, field_name: str | None, new_value: object) -> None:
+        """
+        Read-only type-check of a "set_value" edit's replacement value
+        before it's staged -- looks up field_name's reported Arrow
+        data_type and runs it through the same _coerce_v3_field_value()
+        edit_metric_values() will run at commit time, without querying or
+        writing any row data. There's no "delete" action to no-op for here
+        (see SUPPORTS_DELETE) -- every call to this is a "set_value" check.
+        Purely advisory: edit_metric_values() re-validates again at commit
+        time regardless, since the field's reported type can still change
+        between staging and commit.
+
+        Raises:
+            ValueError: no field_name/new_value given, or new_value
+                        doesn't fit the field's reported type.
+        """
+        if not field_name:
+            raise ValueError("field_name is required.")
+        if new_value is None:
+            raise ValueError("new_value is required.")
+        data_type: str | None = self._lookup_field_type(measurement, field_name)
+        _coerce_v3_field_value(new_value, data_type)

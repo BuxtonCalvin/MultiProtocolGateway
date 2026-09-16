@@ -24,12 +24,15 @@ import math
 import pickle
 import threading
 import time
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Callable, Literal, Optional, cast
+from typing import Any, Callable, Literal, Optional, cast
 
 #  influx db methods are not recognized by type checker
 from influxdb import InfluxDBClient  # type: ignore
+from influxdb.client import quote_ident  # type: ignore
+from influxdb.resultset import ResultSet  # type: ignore
 from tzlocal import get_localzone_name
 
 from classes.protocol_settings import registry_map_entry
@@ -1039,3 +1042,510 @@ class influxdb_out(transport_base):
                     self._log.error(f"Exception in __del__: {e}")
                 except Exception:
                     self._log.error(f"Exception in __del__: {e}")
+
+
+# =============================================================================
+# Metrics Edit -- read/edit/delete admin operations for InfluxDB v1, the v1
+# counterpart of TimescaleDB's BridgeAdminManager (see classes/transports/
+# timescaledb.py). Lives in this module (not the web layer) per the same
+# separation the TimescaleDB admin screens use: routers/influxdb.py and
+# services/influxdb_service.py only orchestrate HTTP/staging concerns,
+# every actual InfluxDB read/write happens here, against a live
+# influxdb_out bridge instance.
+#
+# InfluxDB v1 has no SQL-style UPDATE or per-field DELETE -- both operations
+# below work within what InfluxQL actually supports:
+#
+#   - "Editing" a value means re-writing a point at the exact same
+#     measurement + tag set + timestamp with just the corrected field.
+#     InfluxDB's TSM storage engine merges writes per-field at that exact
+#     (series, timestamp) key, so a re-write containing only the corrected
+#     field leaves every other field already stored at that timestamp
+#     untouched -- there is no other way to change one stored value.
+#   - InfluxQL's DELETE statement filters by tag values and time only,
+#     never by field, so "delete" here removes the ENTIRE point (every
+#     field) at each matching timestamp for the selected device -- not
+#     just the one field chosen in the UI. See edit_metric_values' own
+#     docstring for how this is surfaced to the admin.
+# =============================================================================
+
+# InfluxQL field types, as reported by SHOW FIELD KEYS -- used only by
+# _coerce_v1_field_value to basic-validate a Metrics Edit replacement value
+# before it's written.
+_INFLUX_V1_FIELD_TYPES: frozenset[str] = frozenset({"float", "integer", "string", "boolean"})
+
+
+def _coerce_v1_field_value(value: object, field_type: str | None) -> float | int | str | bool:
+    """
+    Basic validation/coercion of one admin-entered Metrics Edit replacement
+    value against an InfluxDB v1 field's reported type (SHOW FIELD KEYS'
+    fieldType: "float", "integer", "string", or "boolean") before
+    InfluxV1AdminManager.edit_metric_values() writes it. A value that
+    doesn't fit the reported type is rejected outright rather than
+    silently reinterpreted, since this writes directly to historical data
+    with no further review step once committed.
+
+    field_type=None (a field SHOW FIELD KEYS didn't report, which shouldn't
+    normally happen for a field the admin picked from that same listing) is
+    treated permissively: numeric-looking input becomes a float, anything
+    else is kept as a string.
+
+    Returns:
+        The value coerced to the Python type that matches field_type.
+
+    Raises:
+        ValueError: value doesn't parse as the reported type, or (for
+                    "integer") isn't a whole number.
+    """
+    if field_type is None or field_type not in _INFLUX_V1_FIELD_TYPES:
+        if isinstance(value, str):
+            return value
+        try:
+            return float(cast(Any, value))
+        except (TypeError, ValueError):
+            return str(value)
+
+    if field_type == "string":
+        return str(value)
+
+    if field_type == "boolean":
+        if isinstance(value, bool):
+            return value
+        text_val: str = str(value).strip().lower()
+        if text_val in ("true", "t", "1", "yes", "on"):
+            return True
+        if text_val in ("false", "f", "0", "no", "off"):
+            return False
+        msg: str = f"'{value}' is not a valid boolean for a BOOLEAN field (use true/false)."
+        raise ValueError(msg)
+
+    # "float" or "integer" -- both numeric.
+    try:
+        parsed: float = float(cast(Any, value))
+    except (TypeError, ValueError):
+        msg = f"'{value}' is not a valid number for a {field_type.upper()} field."
+        raise ValueError(msg) from None
+
+    if field_type == "integer":
+        if not parsed.is_integer():
+            msg = f"'{value}' is not a whole number, but this field is INTEGER."
+            raise ValueError(msg)
+        return int(parsed)
+
+    return parsed
+
+
+@dataclass
+class InfluxV1MetricEditDevice:
+    """One device with existing points in a measurement, for the Metrics Edit device picker."""
+    device_identifier: str
+    device_name: str | None
+
+
+@dataclass
+class InfluxV1MetricEditField:
+    """One field key in a measurement, for the Metrics Edit field picker."""
+    name: str
+    field_type: str | None  # "float" | "integer" | "string" | "boolean", per SHOW FIELD KEYS
+
+
+@dataclass
+class InfluxV1ValueSample:
+    """One matched (time, value) pair for the given field, for the Metrics Edit preview."""
+    time_iso: str
+    value: float | int | str | bool | None
+
+
+@dataclass
+class InfluxV1EditPreview:
+    """Read-only preview of what an InfluxV1AdminManager.edit_metric_values() call would affect."""
+    row_count: int
+    sample: list[InfluxV1ValueSample]
+
+
+@dataclass
+class InfluxV1EditResult:
+    """Outcome of an InfluxV1AdminManager.edit_metric_values() call."""
+    measurement: str
+    device_identifier: str
+    action: Literal["delete", "set_value"]
+    field_name: str | None          # None for "delete" -- see class docstring: v1 delete drops the whole point
+    new_value: float | int | str | bool | None
+    start_time: datetime
+    end_time: datetime
+    points_affected: int
+
+
+class InfluxV1AdminManager:
+    """
+    Read/edit/delete admin operations against one live influxdb_out (v1)
+    bridge's stored data, for the "InfluxDB -> Metrics Edit 1.x" admin
+    screen. See the module-level comment above for what "edit" and
+    "delete" actually mean on InfluxDB v1.
+
+    Usage:
+        admin_mgr = InfluxV1AdminManager(bridge)
+        measurements = admin_mgr.list_metric_edit_measurements()
+        devices = admin_mgr.list_metric_edit_devices("device_data")
+        fields = admin_mgr.list_metric_edit_fields("device_data")
+        preview = admin_mgr.preview_metric_edit("device_data", "4066670074", "cap_remaining", start, end)
+        result = admin_mgr.edit_metric_values(
+            "device_data", "4066670074", "set_value", start, end, field_name="cap_remaining", new_value=80,
+        )
+    """
+
+    def __init__(self, bridge: influxdb_out) -> None:
+        self._bridge: influxdb_out = bridge
+        self._log: logging.Logger = logging.getLogger(__name__)
+
+    @property
+    def _client(self) -> InfluxDBClient:
+        """The bridge's live client, or raises if the bridge isn't connected."""
+        client: InfluxDBClient | None = self._bridge.client
+        if client is None:
+            raise RuntimeError("Not connected to InfluxDB -- bridge must be connected before editing metric values.")
+        return client
+
+    # -------------------------
+    # Read-only listing for the UI
+    # -------------------------
+
+    def list_metric_edit_measurements(self) -> list[str]:
+        """Returns every measurement on this bridge's database, for the Metrics Edit measurement picker."""
+        result: ResultSet = self._client.query(  # type: ignore[reportUnknownMemberType]
+            f"SHOW MEASUREMENTS ON {quote_ident(self._bridge.database)}"
+        )
+        names: list[str] = [
+            cast(str, p["name"]) for p in result.get_points() if "name" in p  # type: ignore[reportUnknownMemberType]
+        ]
+        names.sort()
+        return names
+
+    def list_metric_edit_devices(self, measurement: str) -> list[InfluxV1MetricEditDevice]:
+        """
+        Returns every (device_identifier, device_name) pairing recorded in
+        `measurement`, for the Metrics Edit device picker.
+
+        Grouping by both tags together (rather than two separate SHOW TAG
+        VALUES calls, one per key) is the only reliable way in InfluxQL to
+        get *paired* tag values -- SHOW TAG VALUES reports each tag key's
+        distinct values independently, with no way to see which
+        device_name goes with which device_identifier. GROUP BY returns
+        one result block per unique tag *combination*, each carrying its
+        own tags dict -- exactly the pairing this needs.
+        """
+        query: str = (
+            f"SELECT time FROM {quote_ident(measurement)} GROUP BY device_identifier, device_name LIMIT 1"  # noqa: S608
+        )
+        result: ResultSet = self._client.query(query, database=self._bridge.database)  # type: ignore[reportUnknownMemberType]
+
+        devices: list[InfluxV1MetricEditDevice] = []
+        for (_series_name, tags), _points in result.items():  # type: ignore[reportUnknownMemberType]
+            tag_map: dict[str, str] = cast(dict[str, str], tags) if tags else {}
+            identifier: str | None = tag_map.get("device_identifier")
+            if identifier:
+                devices.append(
+                    InfluxV1MetricEditDevice(device_identifier=identifier, device_name=tag_map.get("device_name"))
+                )
+        devices.sort(key=lambda d: d.device_identifier)
+        return devices
+
+    def list_metric_edit_fields(self, measurement: str) -> list[InfluxV1MetricEditField]:
+        """Returns every field key (and its reported type) in `measurement`, for the Metrics Edit field picker."""
+        query: str = f"SHOW FIELD KEYS FROM {quote_ident(measurement)}"
+        result: ResultSet = self._client.query(query, database=self._bridge.database)  # type: ignore[reportUnknownMemberType]
+
+        fields: list[InfluxV1MetricEditField] = [
+            InfluxV1MetricEditField(name=cast(str, p["fieldKey"]), field_type=cast(Optional[str], p.get("fieldType"))) # type: ignore
+            for p in result.get_points()  # type: ignore[reportUnknownMemberType]
+            if "fieldKey" in p
+        ]
+        fields.sort(key=lambda f: f.name)
+        return fields
+
+    def preview_metric_edit(
+        self,
+        measurement: str,
+        device_identifier: str,
+        field_name: str,
+        start_time: datetime,
+        end_time: datetime,
+        sample_limit: int = 25,
+        ) -> InfluxV1EditPreview:
+        """
+        Read-only count + small sample of what an edit_metric_values()
+        "set_value" call with the same arguments would affect -- lets the
+        Metrics Edit screen show the admin what's about to change before
+        they stage it. Never writes or deletes anything.
+
+        device_identifier and the time bounds are passed as InfluxQL bind
+        params ($device_id/$start/$end), never string-interpolated --
+        measurement and field_name are SQL-identifier-like (embedded via
+        quote_ident) and must already be validated against
+        list_metric_edit_measurements()/list_metric_edit_fields() by the
+        caller, same discipline TimescaleDB's wide-column whitelisting
+        uses for the same reason.
+
+        Raises:
+            ValueError: end_time before start_time.
+        """
+        if end_time < start_time:
+            raise ValueError("End time must not be before start time.")
+
+        quoted_measurement: str = quote_ident(measurement)
+        quoted_field: str = quote_ident(field_name)
+        bind_params: dict[str, str] = {
+            "device_id": device_identifier,
+            "start": start_time.isoformat(),
+            "end": end_time.isoformat(),
+        }
+
+        count_query: str = (
+            f"SELECT COUNT({quoted_field}) FROM {quoted_measurement} "  # noqa: S608
+            "WHERE device_identifier = $device_id AND time >= $start AND time <= $end"
+        )
+        count_result: ResultSet = self._client.query(  # type: ignore[reportUnknownMemberType]
+            count_query, bind_params=bind_params, database=self._bridge.database
+        )
+        count_points: list[dict[str, object]] = list(count_result.get_points())  # type: ignore[reportUnknownMemberType]
+        row_count: int = 0
+        if count_points:
+            raw_count: object = count_points[0].get(field_name)
+            row_count = int(cast(Any, raw_count)) if raw_count is not None else 0
+
+        sample_query: str = (
+            f"SELECT time, {quoted_field} FROM {quoted_measurement} "  # noqa: S608
+            "WHERE device_identifier = $device_id AND time >= $start AND time <= $end "
+            f"ORDER BY time DESC LIMIT {int(sample_limit)}"
+        )
+        sample_result: ResultSet = self._client.query(  # type: ignore[reportUnknownMemberType]
+            sample_query, bind_params=bind_params, database=self._bridge.database, epoch="ns"
+        )
+        sample: list[InfluxV1ValueSample] = []
+        for point in sample_result.get_points():  # type: ignore[reportUnknownMemberType]
+            point_map: dict[str, object] = cast(dict[str, object], point)
+            time_ns: object = point_map.get("time")
+            time_iso: str = self._ns_to_iso(cast(Optional[int], time_ns))
+            sample.append(InfluxV1ValueSample(time_iso=time_iso, value=cast(Any, point_map.get(field_name))))
+
+        return InfluxV1EditPreview(row_count=row_count, sample=sample)
+
+    @staticmethod
+    def _ns_to_iso(time_ns: int | None) -> str:
+        """Formats a nanosecond epoch timestamp (as returned by a query with epoch="ns") as an ISO 8601 string."""
+        if time_ns is None:
+            return ""
+        return datetime.fromtimestamp(time_ns / 1e9, tz=timezone.utc).isoformat()
+
+    # -------------------------
+    # Edit / delete
+    # -------------------------
+
+    def edit_metric_values(
+        self,
+        measurement: str,
+        device_identifier: str,
+        action: Literal["delete", "set_value"],
+        start_time: datetime,
+        end_time: datetime,
+        field_name: str | None = None,
+        new_value: object = None,
+        ) -> InfluxV1EditResult:
+        """
+        Edits or deletes existing points for one device over [start_time,
+        end_time] in `measurement`.
+
+          - "set_value": queries every point matching device_identifier in
+            range (grouped by every tag, so each distinct series' exact
+            tag set is known), then re-writes ONE point per matched point
+            containing that series' full original tag set, the original
+            timestamp, and ONLY the corrected field -- InfluxDB's TSM
+            engine merges per-field at that (series, timestamp) key, so
+            every other field already stored at that timestamp is left
+            untouched.
+          - "delete": runs InfluxQL DELETE FROM <measurement> WHERE
+            device_identifier = ... AND time BETWEEN ... -- InfluxQL's
+            DELETE has no field predicate, so this removes the ENTIRE
+            point (every field) at each matching timestamp for this
+            device, not just one field. field_name/new_value are ignored
+            for this action; the number of points about to be removed is
+            counted with a COUNT(*) query first (best-effort -- DELETE
+            itself reports no affected-row count).
+
+        Args:
+            measurement: the measurement to edit.
+            device_identifier: the device (via its device_identifier tag)
+                        whose points are being edited.
+            action: "delete" or "set_value".
+            start_time / end_time: inclusive bounds on time.
+            field_name: required for "set_value" -- must be one of
+                        list_metric_edit_fields(measurement)'s names.
+            new_value: required for "set_value"; ignored for "delete".
+
+        Returns:
+            InfluxV1EditResult summarizing what happened.
+
+        Raises:
+            ValueError: end_time before start_time, an unknown action,
+                        "set_value" without field_name/new_value, or
+                        new_value doesn't fit the field's reported type.
+            RuntimeError: bridge isn't connected (see the _client property).
+            Exception: any failure querying/writing is logged and re-raised.
+        """
+        if end_time < start_time:
+            raise ValueError("End time must not be before start time.")
+        if action not in ("delete", "set_value"):
+            msg: str = f"Unknown action '{action}' -- expected 'delete' or 'set_value'."
+            raise ValueError(msg)
+        if action == "set_value":
+            if not field_name:
+                raise ValueError("field_name is required when action is 'set_value'.")
+            if new_value is None:
+                raise ValueError("new_value is required when action is 'set_value'.")
+
+        quoted_measurement: str = quote_ident(measurement)
+        bind_params: dict[str, str] = {
+            "device_id": device_identifier,
+            "start": start_time.isoformat(),
+            "end": end_time.isoformat(),
+        }
+
+        try:
+            if action == "delete":
+                points_affected: int = self._count_points_in_range(measurement, device_identifier, start_time, end_time)
+
+                delete_query: str = (
+                    f"DELETE FROM {quoted_measurement} "  # noqa: S608
+                    "WHERE device_identifier = $device_id AND time >= $start AND time <= $end"
+                )
+                self._client.query(  # type: ignore[reportUnknownMemberType]
+                    delete_query, bind_params=bind_params, database=self._bridge.database, method="POST"
+                )
+
+                self._log.info(
+                    f"InfluxV1AdminManager: deleted points (every field) for device '{device_identifier}' in "
+                    f"'{measurement}' over [{start_time}, {end_time}] -- ~{points_affected} point(s)."
+                )
+                return InfluxV1EditResult(
+                    measurement=measurement, device_identifier=device_identifier, action=action,
+                    field_name=None, new_value=None, start_time=start_time, end_time=end_time,
+                    points_affected=points_affected,
+                )
+
+            # action == "set_value" -- field_name/new_value already validated non-empty above.
+            resolved_field_name: str = cast(str, field_name)
+            field_type: str | None = self._lookup_field_type(measurement, resolved_field_name)
+            coerced_value: float | int | str | bool = _coerce_v1_field_value(new_value, field_type)
+
+            fetch_query: str = (
+                f"SELECT * FROM {quoted_measurement} "  # noqa: S608
+                "WHERE device_identifier = $device_id AND time >= $start AND time <= $end GROUP BY *"
+            )
+            fetch_result: ResultSet = self._client.query(  # type: ignore[reportUnknownMemberType]
+                fetch_query, bind_params=bind_params, database=self._bridge.database, epoch="ns"
+            )
+
+            rewrite_points: list[InfluxPoint] = []
+            for (_series_name, tags), points in fetch_result.items():  # type: ignore[reportUnknownMemberType]
+                tag_map: dict[str, str] = cast(dict[str, str], tags) if tags else {}
+                for point in points:  # type: ignore[reportUnknownMemberType]
+                    point_map: dict[str, object] = cast(dict[str, object], point)
+                    time_ns: object = point_map.get("time")
+                    if time_ns is None:
+                        continue
+                    rewrite_points.append({
+                        "measurement": measurement,
+                        "tags": dict(tag_map),
+                        "fields": {resolved_field_name: coerced_value},
+                        "time": int(cast(Any, time_ns)),
+                    })
+
+            if rewrite_points:
+                self._client.write_points(rewrite_points, database=self._bridge.database)  # type: ignore[reportUnknownMemberType]
+
+            self._log.info(
+                f"InfluxV1AdminManager: set '{resolved_field_name}' = {coerced_value!r} for device "
+                f"'{device_identifier}' in '{measurement}' over [{start_time}, {end_time}] -- "
+                f"{len(rewrite_points)} point(s) rewritten."
+            )
+            return InfluxV1EditResult(
+                measurement=measurement, device_identifier=device_identifier, action=action,
+                field_name=resolved_field_name, new_value=coerced_value, start_time=start_time, end_time=end_time,
+                points_affected=len(rewrite_points),
+            )
+
+        except Exception as e:
+            self._log.error(
+                f"InfluxV1AdminManager.edit_metric_values failed for '{measurement}' device "
+                f"'{device_identifier}': {e}"
+            )
+            raise
+
+    def _lookup_field_type(self, measurement: str, field_name: str) -> str | None:
+        """Best-effort lookup of one field's reported type, for _coerce_v1_field_value. None if not found."""
+        for field in self.list_metric_edit_fields(measurement):
+            if field.name == field_name:
+                return field.field_type
+        return None
+
+    def validate_metric_edit_value(
+        self, measurement: str, field_name: str | None, action: Literal["delete", "set_value"], new_value: object
+        ) -> None:
+        """
+        Read-only type-check of a "set_value" edit's replacement value
+        before it's staged -- looks up field_name's reported type (SHOW
+        FIELD KEYS) and runs it through the same _coerce_v1_field_value()
+        edit_metric_values() will run at commit time, without querying or
+        writing any point data. A no-op for action == "delete" (no value
+        to validate). Purely advisory: edit_metric_values() re-validates
+        again at commit time regardless, since the field's reported type
+        can still change between staging and commit.
+
+        Raises:
+            ValueError: action == "set_value" with no field_name/new_value,
+                        or new_value doesn't fit the field's reported type.
+        """
+        if action != "set_value":
+            return
+        if not field_name:
+            raise ValueError("field_name is required when action is 'set_value'.")
+        if new_value is None:
+            raise ValueError("new_value is required when action is 'set_value'.")
+        field_type: str | None = self._lookup_field_type(measurement, field_name)
+        _coerce_v1_field_value(new_value, field_type)
+
+    def _count_points_in_range(
+        self, measurement: str, device_identifier: str, start_time: datetime, end_time: datetime
+        ) -> int:
+        """
+        Best-effort count of points matching device_identifier in
+        [start_time, end_time] -- used to report how many points a
+        "delete" is about to remove, since InfluxQL's DELETE itself
+        reports no affected-row count. COUNT(*) on InfluxDB v1 returns one
+        count per field column, not a single row count (not every point
+        necessarily has every field); the highest of those per-field
+        counts is used as the representative point estimate, same
+        approach get_storage_overview() already uses.
+        """
+        query: str = (
+            f"SELECT COUNT(*) FROM {quote_ident(measurement)} "  # noqa: S608
+            "WHERE device_identifier = $device_id AND time >= $start AND time <= $end"
+        )
+        bind_params: dict[str, str] = {
+            "device_id": device_identifier, "start": start_time.isoformat(), "end": end_time.isoformat(),
+        }
+        try:
+            result: ResultSet = self._client.query(  # type: ignore[reportUnknownMemberType]
+                query, bind_params=bind_params, database=self._bridge.database
+            )
+            points: list[dict[str, object]] = list(result.get_points())  # type: ignore[reportUnknownMemberType]
+            if not points:
+                return 0
+            field_counts: list[int] = [
+                int(cast(Any, v)) for k, v in points[0].items() if k != "time" and isinstance(v, (int, float))
+            ]
+            return max(field_counts) if field_counts else 0
+        except Exception as e:
+            self._log.warning(f"_count_points_in_range: COUNT(*) failed for '{measurement}': {e}")
+            return 0
+

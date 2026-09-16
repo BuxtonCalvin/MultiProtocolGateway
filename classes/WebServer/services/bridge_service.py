@@ -72,7 +72,7 @@ import threading
 import time
 import uuid
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Generator, Literal, cast
+from typing import TYPE_CHECKING, Any, Generator, cast
 
 from starlette.datastructures import State
 
@@ -1041,7 +1041,7 @@ class StagedMetricEdit(TypedDict):
     field_names: list[str]
     start_time: datetime
     end_time: datetime
-    action: Literal["delete", "set_value"]                    # "delete" or "set_value"
+    action: str                    # "delete" or "set_value"
     new_value: float | str | None
 
 
@@ -1071,7 +1071,7 @@ def stage_metric_edit(
     field_names: list[str],
     start_time: datetime,
     end_time: datetime,
-    action: Literal["delete", "set_value"],
+    action: str,
     new_value: float | str | None = None,
     ) -> str:
     """
@@ -1096,21 +1096,19 @@ def stage_metric_edit(
 
     edit_id: str = uuid.uuid4().hex
     with _metric_edit_lock(app_state):
-        # Instantiating the TypedDict class directly forces the type checker
-        # to recognize and validate the exact shape of your StagedMetricEdit.
-        _metric_edit_store(app_state)[edit_id] = StagedMetricEdit(
-            edit_id=edit_id,
-            table_kind=table_kind,
-            protocol_name=protocol_name,
-            table_name=table_name,
-            device_info_id=device_info_id,
-            device_label=device_label,
-            field_names=list(field_names),
-            start_time=start_time,
-            end_time=end_time,
-            action=action,
-            new_value=new_value,
-        )
+        _metric_edit_store(app_state)[edit_id] = {
+            "edit_id": edit_id,
+            "table_kind": table_kind,
+            "protocol_name": protocol_name,
+            "table_name": table_name,
+            "device_info_id": device_info_id,
+            "device_label": device_label,
+            "field_names": list(field_names),
+            "start_time": start_time,
+            "end_time": end_time,
+            "action": action,
+            "new_value": new_value,
+        }
     return edit_id
 
 
@@ -1184,7 +1182,7 @@ def commit_staged_metric_edits(gateway: "Protocol_Gateway | None", app_state: St
                     field_names=entry["field_names"],
                     start_time=entry["start_time"],
                     end_time=entry["end_time"],
-                    action=entry["action"],
+                    action=entry["action"],  # type: ignore[arg-type]
                     new_value=entry["new_value"],
                 )
             except Exception:

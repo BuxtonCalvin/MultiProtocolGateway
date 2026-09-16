@@ -1,0 +1,430 @@
+<!--
+  Description: Defines the InfluxDB "Metrics Edit 1.x / 3.x" admin screen.
+  File: influxdb_metrics_edit.html
+
+  Copyright 2026 Kevin Burke
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://apache.org
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+
+{#
+  pages/influxdb_metrics_edit.html
+  Shared by both "InfluxDB -> Metrics Edit 1.x" and "-> Metrics Edit 3.x"
+  nav items — one template, parameterized by `version` ("1" or "3"), rather
+  than two near-duplicate files, since the two screens only differ in a
+  couple of narrow, already-conditional spots (see "Version differences"
+  below). Every actual InfluxDB read/write still lives in each version's
+  own transport module (classes/transports/influxdb_out.py's
+  InfluxV1AdminManager / influxdb3_out.py's Influx3AdminManager) — this
+  template and its partials only render whatever
+  services/influxdb_service.py hands back.
+
+  Left  (aside):  list of measurements on the resolved bridge.
+  Right (section): device picker -> field picker -> date/time range ->
+                   action (Delete / Set Value) -> Preview -> Add to Staged
+                   Changes, with the staged-changes list underneath.
+
+  Context: version ("1"|"3"); measurements — [str, ...]; supports_delete —
+  bool (see services.influxdb_service.supports_delete: True for v1, always
+  False for v3 — InfluxDB 3 Core has no row/field-level DELETE at all);
+  staged_edits — the same StagedInfluxEdit list partials/
+  influxdb_metrics_edit_staged.html renders (pre-populated here so
+  navigating away and back doesn't lose anything already staged; v1 and v3
+  entries share one staging store, so this list can show both at once).
+
+  Version differences:
+  - The Action dropdown only offers "Delete value(s)" when supports_delete
+    is true (v1) — v3 only ever offers "Set value".
+  - v1's "Delete value(s)" removes the ENTIRE point (every field) at each
+    matching timestamp, not just the selected field — InfluxQL's DELETE
+    has no field predicate (see InfluxV1AdminManager's module docstring in
+    influxdb_out.py). A warning to that effect is shown whenever "Delete
+    value(s)" is selected.
+
+  Like TimescaleDB's Metrics Edit screen, field selection is a single
+  <select>, not a checklist — a "set value" edit applies one replacement
+  value to whatever's chosen, and the whole selection (measurement,
+  device, field, time range, action, and replacement value if any) is
+  staged as one atomic unit via "Add to Staged Changes"
+  (stageInfluxMetricsEdit() below), which POSTs to /api/influxdb/
+  metrics-edit/{version}/stage. Nothing is written to InfluxDB until the
+  admin presses the existing "Commit All Changes" button in the header,
+  which runs commit_staged_metric_edits() (services/influxdb_service.py,
+  wired into routers/commit.py).
+
+  Layout: mirrors timescale_metrics_edit.html — Device, Field, the
+  Start/End range, the Action/New Value row, and the Preview panel all
+  share one fixed max-width on their common wrapper div, and the Staged
+  Changes panel below is capped to that same width.
+
+  Styling notes: only the LEFT aside is a hardcoded-dark panel (bg-mpg-800
+  with plain text-mpg-* utilities, never the surface-*/mini-table-*
+  classes) — same as timescale_metrics_edit.html's table picker. The
+  right-hand content sits on the app's normal light-panel background
+  (`rounded border border-mpg-700`, no bg-mpg-800) and uses the
+  theme-adaptive surface-*/mini-table-*/theme-input classes throughout.
+#}
+
+{% extends "base.html" %}
+{% block title %}InfluxDB — Metrics Edit {{ version }}.x — MPG Admin{% endblock %}
+{% block content %}
+<div class="col-span-12 flex gap-4" style="height: calc(100vh - 56px); overflow: hidden;">
+
+  <!-- ══ LEFT: MEASUREMENT PICKER ══ -->
+  <aside class="shrink-0 overflow-y-auto
+                bg-mpg-800 rounded border border-mpg-700 p-3"
+         style="width: 26%; min-width: 250px; max-width: 340px;">
+
+    <h2 class="text-mpg-200 text-xs font-semibold uppercase tracking-widest mb-1">
+      Measurements
+    </h2>
+    <p class="text-mpg-400 text-xs mb-3">
+      Pick a measurement and device, choose the field to edit{% if supports_delete %} or clear{% endif %},
+      choose a date/time range, then <span class="text-mpg-200 font-medium">Add to Staged Changes</span>
+      and use <span class="text-mpg-200 font-medium">Commit All Changes</span> in the header to apply.
+    </p>
+
+    <ul class="space-y-1" role="list" aria-label="Metrics Edit measurements">
+      {% for m in measurements %}
+      <li>
+        <button type="button"
+                class="influx-metrics-edit-measurement-btn w-full text-left px-3 py-2 rounded text-xs
+                       font-mono text-mpg-200 hover:bg-mpg-600 hover:text-white
+                       border border-transparent transition-colors"
+                data-measurement="{{ m }}"
+                aria-label="Edit metrics in {{ m }}"
+                hx-get="/pages/influxdb/metrics-edit/{{ version }}/devices?measurement={{ m }}"
+                hx-target="#influx-metrics-edit-devices-container"
+                hx-swap="innerHTML scroll:false"
+                hx-headers='{"Cache-Control": "no-cache"}'
+                onclick="selectInfluxMeasurement(this)">
+          {{ m }}
+        </button>
+      </li>
+      {% endfor %}
+      {% if not measurements %}
+      <li class="text-mpg-500 text-xs italic px-1 py-2">No measurements found on this bridge.</li>
+      {% endif %}
+    </ul>
+  </aside>
+
+  <!-- ══ RIGHT: DEVICE / FIELD / RANGE / ACTION / PREVIEW / STAGED ══ -->
+  <section class="flex-1 overflow-y-auto flex flex-col gap-4" aria-label="Metrics Edit form">
+
+    {# Device, Field, the date range, Action/New Value, and Preview all share this one width so they
+       line up — same convention as timescale_metrics_edit.html. #}
+    <div class="rounded border border-mpg-700 p-3 flex flex-col gap-3" style="max-width: 500px;">
+
+      <!-- Device picker -->
+      <div>
+        <label class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">Device</label>
+        <div id="influx-metrics-edit-devices-container">
+          <p class="mini-table-meta text-xs">Select a measurement on the left to load its devices.</p>
+        </div>
+      </div>
+
+      <!-- Field picker -- a single <select>, not a checklist: one "set value" edit can only
+           unambiguously apply to one field at a time. -->
+      <div>
+        <label class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">Field</label>
+        <div id="influx-metrics-edit-fields-container">
+          <p class="mini-table-meta text-xs">Select a device to load its fields.</p>
+        </div>
+      </div>
+
+      <!-- Date/time range -->
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label for="influx-metrics-edit-start-time" class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">
+            Start
+          </label>
+          <input type="datetime-local"
+                 id="influx-metrics-edit-start-time"
+                 step="1"
+                 class="theme-input w-full text-xs rounded px-2 py-1.5
+                        focus:outline-none focus:ring-1 focus:ring-accent">
+        </div>
+        <div>
+          <label for="influx-metrics-edit-end-time" class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">
+            End
+          </label>
+          <input type="datetime-local"
+                 id="influx-metrics-edit-end-time"
+                 step="1"
+                 class="theme-input w-full text-xs rounded px-2 py-1.5
+                        focus:outline-none focus:ring-1 focus:ring-accent">
+        </div>
+      </div>
+
+      <!-- Action + replacement value -->
+      <div class="grid grid-cols-2 gap-3 items-end">
+        <div>
+          <label for="influx-metrics-edit-action-select" class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">
+            Action
+          </label>
+          <select id="influx-metrics-edit-action-select"
+                  class="theme-input w-full text-xs rounded px-2 py-1.5
+                         focus:outline-none focus:ring-1 focus:ring-accent"
+                  onchange="onInfluxActionChange(this)">
+            {% if supports_delete %}
+            <option value="delete">Delete value(s)</option>
+            {% endif %}
+            <option value="set_value">Set value</option>
+          </select>
+        </div>
+        <div id="influx-metrics-edit-value-wrap" class="{% if supports_delete %}hidden{% endif %}">
+          <label for="influx-metrics-edit-new-value" class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">
+            New Value
+          </label>
+          <input type="text"
+                 id="influx-metrics-edit-new-value"
+                 placeholder="e.g. 12.5 or true"
+                 class="theme-input w-full text-xs rounded px-2 py-1.5
+                        focus:outline-none focus:ring-1 focus:ring-accent"
+                 aria-describedby="influx-metrics-edit-value-hint">
+        </div>
+      </div>
+      <p id="influx-metrics-edit-value-hint" class="surface-subtle text-[10px] -mt-2">
+        Validated against the selected field's reported type before it's staged (e.g. a whole number for
+        an integer field, true/false for boolean) — an invalid value is rejected immediately.
+      </p>
+      {% if supports_delete %}
+      <p id="influx-metrics-edit-delete-warning" class="text-[10px] text-danger -mt-1 hidden">
+        InfluxDB v1 has no per-field delete — this removes the <strong>entire point</strong> (every field,
+        not just the selected one) at each matching timestamp for this device.
+      </p>
+      {% endif %}
+
+      <!-- Buttons -->
+      <div class="flex items-center gap-2">
+        <button type="button" class="btn-tertiary text-xs" onclick="runInfluxMetricsEditPreview()">
+          Preview
+        </button>
+        <button type="button" class="btn-tertiary text-xs" onclick="stageInfluxMetricsEdit()">
+          Add to Staged Changes
+        </button>
+      </div>
+
+      <div id="influx-metrics-edit-form-status"></div>
+      <div id="influx-metrics-edit-preview-container"></div>
+    </div>
+
+    <!-- Staged changes -- capped to the same width as the form panel above, and shared across both
+         InfluxDB versions (see partials/influxdb_metrics_edit_staged.html). -->
+    <div id="influx-metrics-edit-staged-container"
+         class="rounded border border-mpg-700 p-3 overflow-x-auto"
+         style="max-width: 500px;"
+         hx-get="/pages/influxdb/metrics-edit/staged"
+         hx-trigger="load"
+         hx-swap="innerHTML scroll:false">
+      <p class="mini-table-meta text-xs">Loading staged changes…</p>
+    </div>
+
+  </section>
+
+</div>
+
+<script>
+  const InfluxEditState = {
+    version: '{{ version|tojson }}', 
+    measurement: null, 
+    deviceIdentifier: null, 
+    deviceLabel: null,
+  };
+
+
+  function selectInfluxMeasurement(btn) {
+    document.querySelectorAll('.influx-metrics-edit-measurement-btn').forEach(function (b) {
+      b.classList.remove('bg-mpg-600', 'text-white');
+    });
+    btn.classList.add('bg-mpg-600', 'text-white');
+
+    InfluxEditState.measurement = btn.dataset.measurement;
+    InfluxEditState.deviceIdentifier = null;
+    InfluxEditState.deviceLabel = null;
+
+    // A new measurement means the device/field/preview selections below
+    // are stale -- clear them rather than leaving a mismatched field list
+    // visible against the newly picked measurement.
+    document.getElementById('influx-metrics-edit-fields-container').innerHTML =
+      '<p class="mini-table-meta text-xs">Select a device to load its fields.</p>';
+    document.getElementById('influx-metrics-edit-preview-container').innerHTML = '';
+    document.getElementById('influx-metrics-edit-form-status').innerHTML = '';
+  }
+
+  function onInfluxDeviceChange(select) {
+    InfluxEditState.deviceIdentifier = select.value || null;
+    const opt = select.options[select.selectedIndex];
+    InfluxEditState.deviceLabel = opt ? (opt.dataset.label || opt.textContent.trim()) : null;
+
+    document.getElementById('influx-metrics-edit-preview-container').innerHTML = '';
+    document.getElementById('influx-metrics-edit-form-status').innerHTML = '';
+
+    if (!InfluxEditState.deviceIdentifier) { return; }
+
+    const params = new URLSearchParams({ measurement: InfluxEditState.measurement });
+    htmx.ajax('GET', '/pages/influxdb/metrics-edit/' + InfluxEditState.version + '/fields?' + params.toString(), {
+      target: '#influx-metrics-edit-fields-container',
+      swap: 'innerHTML scroll:false',
+    });
+  }
+
+  function getSelectedInfluxField() {
+    const select = document.getElementById('influx-metrics-edit-field-select');
+    return select && select.value ? select.value : null;
+  }
+
+  function onInfluxFieldChange(select) {
+    document.getElementById('influx-metrics-edit-preview-container').innerHTML = '';
+    document.getElementById('influx-metrics-edit-form-status').innerHTML = '';
+  }
+
+  function onInfluxActionChange(select) {
+    document.getElementById('influx-metrics-edit-value-wrap').classList.toggle('hidden', select.value !== 'set_value');
+    const warning = document.getElementById('influx-metrics-edit-delete-warning');
+    if (warning) { warning.classList.toggle('hidden', select.value !== 'delete'); }
+  }
+
+  function showInfluxStatus(message, isError) {
+    document.getElementById('influx-metrics-edit-form-status').innerHTML =
+      '<div class="text-xs px-3 py-2 rounded border ' +
+      (isError ? 'border-danger/30 bg-danger/10 text-danger' : 'border-success/30 bg-success/10 text-success') +
+      '">' + message + '</div>';
+  }
+
+  // Gathers + validates the current form state client-side (required
+  // fields present at all) before either Preview or Add to Staged
+  // Changes fires a request -- the server re-validates everything
+  // regardless, this just avoids a round-trip for an obviously incomplete
+  // selection.
+  function buildInfluxSelection() {
+    if (!InfluxEditState.measurement) {
+      showInfluxStatus('Select a measurement first.', true);
+      return null;
+    }
+    if (!InfluxEditState.deviceIdentifier) {
+      showInfluxStatus('Select a device first.', true);
+      return null;
+    }
+    const action = document.getElementById('influx-metrics-edit-action-select').value;
+    const fieldName = getSelectedInfluxField();
+    if (action === 'set_value' && !fieldName) {
+      showInfluxStatus('Select a field to edit.', true);
+      return null;
+    }
+    const startTime = document.getElementById('influx-metrics-edit-start-time').value;
+    const endTime = document.getElementById('influx-metrics-edit-end-time').value;
+    if (!startTime || !endTime) {
+      showInfluxStatus('Pick a start and end date/time.', true);
+      return null;
+    }
+    if (endTime < startTime) {
+      showInfluxStatus('End time must not be before start time.', true);
+      return null;
+    }
+    const newValue = action === 'set_value' ? document.getElementById('influx-metrics-edit-new-value').value : null;
+    if (action === 'set_value' && !newValue) {
+      showInfluxStatus('Enter a replacement value.', true);
+      return null;
+    }
+
+    return {
+      measurement: InfluxEditState.measurement,
+      device_identifier: InfluxEditState.deviceIdentifier,
+      device_label: InfluxEditState.deviceLabel,
+      field_name: fieldName,
+      start_time: startTime,
+      end_time: endTime,
+      action: action,
+      new_value: newValue,
+    };
+  }
+
+  async function runInfluxMetricsEditPreview() {
+    const sel = buildInfluxSelection();
+    if (!sel) { return; }
+    if (!sel.field_name) {
+      showInfluxStatus('Select a field to preview.', true);
+      return;
+    }
+    document.getElementById('influx-metrics-edit-form-status').innerHTML = '';
+
+    let resp, html;
+    try {
+      resp = await fetch('/api/influxdb/metrics-edit/' + InfluxEditState.version + '/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          measurement: sel.measurement,
+          device_identifier: sel.device_identifier,
+          field_name: sel.field_name,
+          start_time: sel.start_time,
+          end_time: sel.end_time,
+        }),
+      });
+      html = await resp.text();
+    } catch (e) {
+      showInfluxStatus('Preview request failed — see the browser console.', true);
+      return;
+    }
+
+    if (resp.ok) {
+      document.getElementById('influx-metrics-edit-preview-container').innerHTML = html;
+    } else {
+      let detail = 'Preview failed.';
+      try { detail = JSON.parse(html).detail || detail; } catch (e) { /* non-JSON error body */ }
+      showInfluxStatus(detail, true);
+    }
+  }
+
+  async function stageInfluxMetricsEdit() {
+    const sel = buildInfluxSelection();
+    if (!sel) { return; }
+
+    const summary = sel.action === 'delete'
+      ? 'delete the ENTIRE point (every field)'
+      : 'set "' + sel.field_name + '" to "' + sel.new_value + '"';
+    const proceed = window.confirm(
+      'Stage: ' + summary + ' for ' + (sel.device_label || 'this device') + ' between ' +
+      sel.start_time + ' and ' + sel.end_time + '.\n\nNothing is written to InfluxDB until you press ' +
+      '"Commit All Changes" in the header. Continue?'
+    );
+    if (!proceed) { return; }
+
+    let resp, html;
+    try {
+      resp = await fetch('/api/influxdb/metrics-edit/' + InfluxEditState.version + '/stage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(sel),
+      });
+      html = await resp.text();
+    } catch (e) {
+      showInfluxStatus('Staging request failed — see the browser console.', true);
+      return;
+    }
+
+    if (resp.ok) {
+      const container = document.getElementById('influx-metrics-edit-staged-container');
+      container.innerHTML = html;
+      htmx.process(container); // new hx-delete buttons weren't inserted through htmx's own swap
+      showInfluxStatus('Staged. Use "Commit All Changes" in the header to apply.', false);
+      if (typeof refreshState === 'function') { refreshState(); }
+    } else {
+      let detail = 'Could not stage this edit.';
+      try { detail = JSON.parse(html).detail || detail; } catch (e) { /* non-JSON error body */ }
+      showInfluxStatus(detail, true);
+    }
+  }
+</script>
+{% endblock %}
