@@ -192,6 +192,14 @@ def do_commit(request: Request, db: Session = Depends(get_session))-> CommitResp
         if influx_edit_results:
             influx_summary["influxdb_points_edited"] = sum(r["points_affected"] for r in influx_edit_results)
             influx_summary["influxdb_edits_applied"] = len(influx_edit_results)
+            # A v3 "delete" is an asynchronous InfluxDB 3 Enterprise
+            # row-delete request (see influxdb3_out.py's module comment) --
+            # "applied" above only means the request was accepted, not
+            # that any row is actually gone yet. Counted separately so the
+            # admin isn't led to believe every edit took effect immediately.
+            pending_count: int = sum(1 for r in influx_edit_results if r.get("pending"))
+            if pending_count:
+                influx_summary["influxdb_edits_pending"] = pending_count
 
         # Recompute AppState dirty/orphan counts from the now-cleared flags so
         # the very next /api/devices/state poll (fired by base.html after the

@@ -33,6 +33,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Literal, Optional, cast
 from urllib.parse import SplitResult, urlsplit
+from zoneinfo import ZoneInfo
 
 import pyarrow as pa
 import requests
@@ -1396,22 +1397,46 @@ class influxdb3_out(transport_base):
 # instance, via SQL (DataFusion) rather than InfluxQL.
 #
 # InfluxDB 3 Core has NO row-level or field-level DELETE at all as of this
-# writing -- "row-level deletions" is an Enterprise-only 3.10+ feature, and
-# even that operates through a separate management command, not SQL. So
-# unlike InfluxV1AdminManager, this class only ever supports "set_value" --
-# SUPPORTS_DELETE is False here, and edit_metric_values()'s `action`
-# parameter is typed Literal["set_value"] accordingly (not
-# Literal["delete", "set_value"]) so this is enforced at the type level,
-# not just by convention. routers/influxdb.py checks SUPPORTS_DELETE before
-# ever offering a "Delete" action for a v3 measurement.
+# writing. "Delete value(s)" here uses InfluxDB 3 ENTERPRISE's row-delete
+# API (POST /api/v3/row_delete_requests, the same request the `influxdb3
+# delete rows` CLI command submits) -- an Enterprise-only feature that
+# requires the upgraded storage engine (--use-pacha-tree /
+# --upgrade-pacha-tree). SUPPORTS_DELETE is True here (this class always
+# offers the action; the ENTERPRISE REQUIREMENT is enforced by the server
+# itself, not pre-checked client-side) -- routers/influxdb.py shows
+# "Delete value(s)" for v3 the same as v1, and any failure (wrong edition,
+# missing permission, storage engine not upgraded) surfaces as a clear
+# error from _delete_rows_via_enterprise_api rather than being hidden.
 #
-# "Editing" a value here means the same thing it does for v1: SQL SELECT *
-# the matching rows (capturing each row's full original tag set and exact
-# timestamp), then re-write ONE Point per row containing that same tag set,
-# timestamp, and ONLY the corrected field. InfluxDB 3's storage engine
-# merges writes per-column at the same (tag-set, timestamp) primary key,
-# the same last-write-wins-per-field behavior InfluxDB v1's TSM engine has,
-# so every other field already stored at that timestamp is left untouched.
+# Three things make this delete meaningfully different from a v1 InfluxQL
+# DELETE, and both are surfaced to the admin (see edit_metric_values'
+# docstring and the UI warning in pages/influxdb_metrics_edit.html):
+#   1. Whole-row only: the row-delete predicate supports tag equality only
+#      (AND-combined, no OR/NOT/IN, no field columns) -- exactly like v1's
+#      InfluxQL DELETE, this removes the ENTIRE row (every field) at each
+#      matching timestamp, never just the one field chosen in the UI.
+#   2. Asynchronous: submitting the request only records it. The
+#      compactor applies it later -- by default, up to 24 hours afterward
+#      (tunable server-side via --pt-row-delete-min-age) -- and the
+#      targeted rows remain queryable in the meantime. This is nothing
+#      like a v1 InfluxQL DELETE or a database DELETE statement, which
+#      take effect (at least locally) as soon as they return.
+#   3. Enterprise + upgraded storage engine only: InfluxDB 3 Core, or an
+#      Enterprise cluster that hasn't run the storage engine upgrade,
+#      rejects the request outright; there is no client-side way to
+#      detect this in advance, so a clear server error is surfaced
+#      instead of pre-flighting it.
+#
+# "Editing" a value (the "set_value" action, unaffected by any of the
+# above) means the same thing it does for v1: SQL SELECT * the matching
+# rows (capturing each row's full original tag set and exact timestamp),
+# then re-write ONE Point per row containing that same tag set, timestamp,
+# and ONLY the corrected field. InfluxDB 3's storage engine merges writes
+# per-column at the same (tag-set, timestamp) primary key, the same
+# last-write-wins-per-field behavior InfluxDB v1's TSM engine has, so
+# every other field already stored at that timestamp is left untouched.
+# This part is synchronous and ordinary SQL/write-API traffic -- it works
+# identically on Core and Enterprise.
 # =============================================================================
 
 # The six tags every influxdb3_out point carries (see _build_tags above) --
@@ -1551,23 +1576,43 @@ class Influx3EditPreview:
 
 @dataclass
 class Influx3EditResult:
-    """Outcome of an Influx3AdminManager.edit_metric_values() call."""
+    """
+    Outcome of an Influx3AdminManager.edit_metric_values() call.
+
+    For "set_value": points_affected is the exact number of rows
+    rewritten, synchronously, by the time this returns -- field_name and
+    new_value are always set.
+
+    For "delete": points_affected is a best-effort SQL COUNT(*) taken
+    just before submitting the row-delete request (see
+    edit_metric_values), NOT a confirmation of anything actually deleted
+    yet -- field_name/new_value are None (the row-delete predicate has no
+    field concept; see the module-level comment), and `pending`/`sequence`
+    describe the request itself: the delete is asynchronous and may not
+    apply for up to 24 hours (server-configurable via
+    --pt-row-delete-min-age), during which the targeted rows remain
+    queryable.
+    """
     measurement: str
     device_identifier: str
-    action: Literal["set_value"]
-    field_name: str
-    new_value: float | int | str | bool
+    action: Literal["delete", "set_value"]
+    field_name: str | None
+    new_value: float | int | str | bool | None
     start_time: datetime
     end_time: datetime
     points_affected: int
+    pending: bool = False               # True for "delete" -- the request was accepted but not yet applied
+    sequence: int | None = None         # the row-delete request's sequence number, for "delete" only
 
 
 class Influx3AdminManager:
     """
-    Read/edit admin operations against one live influxdb3_out (v3) bridge's
-    stored data, for the "InfluxDB -> Metrics Edit 3.x" admin screen. See
-    the module-level comment above for what "edit" means on InfluxDB v3,
-    and why "delete" isn't offered at all (SUPPORTS_DELETE).
+    Read/edit/delete admin operations against one live influxdb3_out (v3)
+    bridge's stored data, for the "InfluxDB -> Metrics Edit 3.x" admin
+    screen. See the module-level comment above for what "edit" and
+    "delete" each mean on InfluxDB v3 -- delete in particular behaves very
+    differently from a normal DELETE statement (whole-row only,
+    asynchronous, Enterprise + upgraded-storage-engine only).
 
     Usage:
         admin_mgr = Influx3AdminManager(bridge)
@@ -1576,15 +1621,20 @@ class Influx3AdminManager:
         fields = admin_mgr.list_metric_edit_fields("device_data")
         preview = admin_mgr.preview_metric_edit("device_data", "4066670074", "cap_remaining", start, end)
         result = admin_mgr.edit_metric_values(
-            "device_data", "4066670074", start, end, field_name="cap_remaining", new_value=80,
+            "device_data", "4066670074", "set_value", start, end, field_name="cap_remaining", new_value=80,
         )
+        deleted = admin_mgr.edit_metric_values("device_data", "4066670074", "delete", start, end)
     """
 
-    # InfluxDB 3 Core has no SQL DELETE (row- or field-level) -- see the
-    # module-level comment above. routers/influxdb.py reads this to decide
-    # whether "Delete value(s)" is even offered as an action for a v3
-    # measurement.
-    SUPPORTS_DELETE: bool = False
+    # True: this class always offers "Delete value(s)" (see
+    # edit_metric_values / _delete_rows_via_enterprise_api) -- unlike v1,
+    # where delete support is unconditional, v3's delete requires InfluxDB
+    # 3 ENTERPRISE with the upgraded storage engine, which this class
+    # cannot detect in advance. routers/influxdb.py still shows the
+    # action; a Core server (or an un-upgraded Enterprise one) rejects the
+    # request with a clear error surfaced back to the admin, rather than
+    # this flag hiding the option pre-emptively.
+    SUPPORTS_DELETE: bool = True
 
     def __init__(self, bridge: influxdb3_out) -> None:
         self._bridge: influxdb3_out = bridge
@@ -1704,11 +1754,35 @@ class Influx3AdminManager:
         )
         sample_rows: list[dict[str, object]] = sample_table.to_pylist()
         sample: list[Influx3ValueSample] = [
-            Influx3ValueSample(time_iso=str(row.get("time")), value=cast(Any, row.get(field_name)))
+            Influx3ValueSample(time_iso=self._row_time_to_iso(row.get("time")), value=cast(Any, row.get(field_name)))
             for row in sample_rows
         ]
 
         return Influx3EditPreview(row_count=row_count, sample=sample)
+
+    def _row_time_to_iso(self, row_time: object) -> str:
+        """
+        Formats one row's "time" column (a Python datetime by the time
+        pyarrow's to_pylist() hands it here) as an ISO 8601 string in this
+        bridge's own configured machine_timezone -- "UTC" if
+        use_utc_timestamp is set, otherwise the local zone influxdb3_out
+        itself stamps every written point's time with (see
+        influxdb3_out.__init__). Using anything else here (the row's own
+        UTC-by-default Arrow timestamp, unconverted, say) would show
+        preview timestamps in a different zone than the Start/End range
+        the admin just typed, which routers/influxdb.py's
+        _parse_local_datetime() interprets in this exact same
+        machine_timezone.
+
+        Arrow's timestamp -> Python datetime conversion normally produces
+        a tz-aware value (UTC), but a naive one is treated as UTC first
+        (rather than raising) since that's the only timezone IOx itself
+        ever stores time in internally.
+        """
+        if not isinstance(row_time, datetime):
+            return str(row_time) if row_time is not None else ""
+        aware: datetime = row_time if row_time.tzinfo is not None else row_time.replace(tzinfo=timezone.utc)
+        return aware.astimezone(ZoneInfo(self._bridge.machine_timezone)).isoformat()
 
     # -------------------------
     # Edit (no delete -- see SUPPORTS_DELETE / module-level comment)
@@ -1718,31 +1792,46 @@ class Influx3AdminManager:
         self,
         measurement: str,
         device_identifier: str,
+        action: Literal["delete", "set_value"],
         start_time: datetime,
         end_time: datetime,
-        field_name: str,
-        new_value: object,
+        field_name: str | None = None,
+        new_value: object = None,
         ) -> Influx3EditResult:
         """
-        Sets one field to a new value for every point matching
-        device_identifier in [start_time, end_time], within `measurement`.
+        Edits or deletes existing rows for one device over [start_time,
+        end_time], within `measurement`.
 
-        Queries every matching row via SELECT * (capturing each row's full
-        original tag values and exact timestamp), then re-writes ONE Point
-        per row containing that same tag set, the original timestamp, and
-        ONLY the corrected field -- InfluxDB 3's storage engine merges
-        writes per-column at the same (tag-set, timestamp) key, so every
-        other field already stored at that timestamp is left untouched.
+          - "set_value": queries every matching row via SELECT * (capturing
+            each row's full original tag values and exact timestamp), then
+            re-writes ONE Point per row containing that same tag set, the
+            original timestamp, and ONLY the corrected field -- InfluxDB
+            3's storage engine merges writes per-column at the same
+            (tag-set, timestamp) key, so every other field already stored
+            at that timestamp is left untouched. Synchronous: every
+            rewritten point has been written by the time this returns.
+          - "delete": submits an InfluxDB 3 ENTERPRISE row-delete request
+            (see _delete_rows_via_enterprise_api and the module-level
+            comment) scoped to device_identifier and the time range. Not
+            available on InfluxDB 3 Core, or on an Enterprise cluster
+            without the storage engine upgrade -- the server rejects the
+            request and this raises RuntimeError with the server's own
+            error message. Removes the ENTIRE row (every field) at each
+            matching timestamp, never just one field -- field_name/
+            new_value are ignored for this action. Asynchronous: a
+            successful call here only means the request was accepted, not
+            that anything has been deleted yet (up to 24 hours by
+            default) -- see Influx3EditResult.pending.
 
-        Timestamp round-tripping note: pyarrow's to_pylist() converts a
-        nanosecond-precision Arrow timestamp to a Python datetime, which
-        only holds microsecond precision -- any true sub-microsecond
-        component would be lost on round-trip. This is a no-op in
-        practice for this application specifically: influxdb3_out's own
-        write path (_create_point_dict) only ever derives a point's
-        timestamp from Python's own datetime.timestamp(), which is
-        already microsecond-precision at the source -- there is no
-        sub-microsecond information to lose for data this bridge wrote
+        Timestamp round-tripping note (applies to "set_value"): pyarrow's
+        to_pylist() converts a nanosecond-precision Arrow timestamp to a
+        Python datetime, which only holds microsecond precision -- any
+        true sub-microsecond component would be lost on round-trip. This
+        is a no-op in practice for this application specifically:
+        influxdb3_out's own write path (_create_point_dict) only ever
+        derives a point's timestamp from Python's own datetime.timestamp(),
+        which is already microsecond-precision at the source -- there is
+        no sub-microsecond information to lose for data this bridge wrote
         itself. A row written by some other client with genuine
         sub-microsecond precision would not round-trip exactly and could
         land as a near-duplicate point rather than a true overwrite.
@@ -1751,30 +1840,62 @@ class Influx3AdminManager:
             measurement: the measurement to edit.
             device_identifier: the device (via its device_identifier tag)
                         whose rows are being edited.
+            action: "delete" or "set_value".
             start_time / end_time: inclusive bounds on time.
-            field_name: must be one of list_metric_edit_fields
-                        (measurement)'s names.
-            new_value: the replacement value.
+            field_name: required for "set_value" -- must be one of
+                        list_metric_edit_fields(measurement)'s names;
+                        ignored for "delete".
+            new_value: required for "set_value"; ignored for "delete".
 
         Returns:
             Influx3EditResult summarizing what happened.
 
         Raises:
-            ValueError: end_time before start_time, no field_name/
-                        new_value given, or new_value doesn't fit the
-                        field's reported type.
-            RuntimeError: bridge isn't connected (see the _client property).
-            Exception: any failure querying/writing is logged and re-raised.
+            ValueError: end_time before start_time, an unknown action,
+                        "set_value" without field_name/new_value, or
+                        new_value doesn't fit the field's reported type.
+            RuntimeError: bridge isn't connected (see the _client
+                        property), or (for "delete") the row-delete
+                        request was rejected by the server -- commonly
+                        because it's InfluxDB 3 Core, or an Enterprise
+                        cluster without the storage engine upgrade.
+            Exception: any other failure querying/writing is logged and
+                        re-raised.
         """
         if end_time < start_time:
             raise ValueError("End time must not be before start time.")
-        if not field_name:
-            raise ValueError("field_name is required.")
-        if new_value is None:
-            raise ValueError("new_value is required.")
+        if action not in ("delete", "set_value"):
+            msg: str = f"Unknown action '{action}' -- expected 'delete' or 'set_value'."
+            raise ValueError(msg)
+        if action == "set_value":
+            if not field_name:
+                raise ValueError("field_name is required when action is 'set_value'.")
+            if new_value is None:
+                raise ValueError("new_value is required when action is 'set_value'.")
 
         try:
-            data_type: str | None = self._lookup_field_type(measurement, field_name)
+            if action == "delete":
+                row_count: int = self._count_rows_in_range(measurement, device_identifier, start_time, end_time)
+                response: dict[str, Any] = self._delete_rows_via_enterprise_api(
+                    measurement, device_identifier, start_time, end_time
+                )
+                sequence: int | None = cast(Optional[int], response.get("sequence") or response.get("sequence_id"))
+
+                self._log.info(
+                    f"Influx3AdminManager: submitted an Enterprise row-delete request (every field) for device "
+                    f"'{device_identifier}' in '{measurement}' over [{start_time}, {end_time}] -- "
+                    f"~{row_count} row(s), sequence={sequence}. This is asynchronous and may take up to "
+                    "24 hours to actually apply."
+                )
+                return Influx3EditResult(
+                    measurement=measurement, device_identifier=device_identifier, action=action,
+                    field_name=None, new_value=None, start_time=start_time, end_time=end_time,
+                    points_affected=row_count, pending=True, sequence=sequence,
+                )
+
+            # action == "set_value" -- field_name/new_value already validated non-empty above.
+            resolved_field_name: str = cast(str, field_name)
+            data_type: str | None = self._lookup_field_type(measurement, resolved_field_name)
             coerced_value: float | int | str | bool = _coerce_v3_field_value(new_value, data_type)
 
             quoted_table: str = _sql_quote_ident(measurement)
@@ -1798,7 +1919,7 @@ class Influx3AdminManager:
                     tag_val: object = row.get(tag_name)
                     if tag_val is not None:
                         point = point.tag(tag_name, str(tag_val))  # type: ignore[reportUnknownMemberType]
-                point = point.field(field_name, coerced_value)  # type: ignore[reportUnknownMemberType]
+                point = point.field(resolved_field_name, coerced_value)  # type: ignore[reportUnknownMemberType]
                 point = point.time(int(row_time.timestamp() * 1e9))  # type: ignore[reportUnknownMemberType]
                 points.append(point)
 
@@ -1806,12 +1927,13 @@ class Influx3AdminManager:
                 self._client.write(record=points, database=self._bridge.database)  # type: ignore[reportUnknownMemberType]
 
             self._log.info(
-                f"Influx3AdminManager: set '{field_name}' = {coerced_value!r} for device '{device_identifier}' in "
-                f"'{measurement}' over [{start_time}, {end_time}] -- {len(points)} point(s) rewritten."
+                f"Influx3AdminManager: set '{resolved_field_name}' = {coerced_value!r} for device "
+                f"'{device_identifier}' in '{measurement}' over [{start_time}, {end_time}] -- "
+                f"{len(points)} point(s) rewritten."
             )
             return Influx3EditResult(
-                measurement=measurement, device_identifier=device_identifier, action="set_value",
-                field_name=field_name, new_value=coerced_value, start_time=start_time, end_time=end_time,
+                measurement=measurement, device_identifier=device_identifier, action=action,
+                field_name=resolved_field_name, new_value=coerced_value, start_time=start_time, end_time=end_time,
                 points_affected=len(points),
             )
 
@@ -1822,6 +1944,114 @@ class Influx3AdminManager:
             )
             raise
 
+    def _count_rows_in_range(
+        self, measurement: str, device_identifier: str, start_time: datetime, end_time: datetime
+        ) -> int:
+        """
+        Best-effort SQL COUNT(*) of rows matching device_identifier in
+        [start_time, end_time] -- used to report how many rows a "delete"
+        is about to affect, since the row-delete request itself is
+        asynchronous and reports no immediate count.
+        """
+        quoted_table: str = _sql_quote_ident(measurement)
+        device_lit: str = _sql_quote_literal(device_identifier)
+        start_lit: str = _sql_timestamp_literal(start_time)
+        end_lit: str = _sql_timestamp_literal(end_time)
+        query: str = (
+            f"SELECT COUNT(*) AS row_count FROM {quoted_table} "  # noqa: S608
+            f"WHERE device_identifier = {device_lit} AND time >= {start_lit} AND time <= {end_lit}"
+        )
+        try:
+            table: pa.Table = self._query(query)
+            rows: list[dict[str, object]] = table.to_pylist()
+            return int(cast(Any, rows[0].get("row_count")) or 0) if rows else 0
+        except Exception as e:
+            self._log.warning(f"_count_rows_in_range: COUNT(*) failed for '{measurement}': {e}")
+            return 0
+
+    def _delete_rows_via_enterprise_api(
+        self, table: str, device_identifier: str, start_time: datetime, end_time: datetime
+        ) -> dict[str, Any]:
+        """
+        Submits an InfluxDB 3 ENTERPRISE row-delete request: POST
+        /api/v3/row_delete_requests -- the same request the `influxdb3
+        delete rows` CLI command submits. Not available on InfluxDB 3
+        Core, and requires the upgraded storage engine
+        (--use-pacha-tree/--upgrade-pacha-tree) on Enterprise.
+
+        Not wrapped by InfluxDBClient3 -- its SDK exposes only query()/
+        write() as of this writing -- so the request is built and sent
+        directly with `requests`, reusing the bridge's own diagnostic
+        `self.session` when available (same fallback-to-bare-`requests`
+        pattern _probe_heap_profile() above already uses for endpoints
+        the SDK doesn't cover) but with an explicit "Bearer" Authorization
+        header for this call, matching the documented convention for
+        InfluxDB 3's `/api/v3/*` management endpoints specifically (the
+        session's own default "Token" header is a v1/v2-compatibility
+        convention used elsewhere, not for this endpoint).
+
+        The delete predicate supports tag equality only -- scoped here to
+        device_identifier alone, which is sufficient to target one
+        device's rows; there is no field predicate at all, so this always
+        removes every field at each matching row (see the module-level
+        comment). max_time is EXCLUSIVE per the API, so it's nudged one
+        nanosecond past end_time to keep this call's own [start_time,
+        end_time] contract inclusive on both ends, matching every other
+        edit_metric_values() implementation in this codebase.
+
+        Returns:
+            The parsed JSON response body (includes "sequence", the
+            request's tracking number) -- {} if the response had no body.
+
+        Raises:
+            RuntimeError: the request could not be sent (network failure),
+                        or the server rejected it -- commonly because the
+                        connected server is InfluxDB 3 Core, or an
+                        Enterprise cluster without the storage engine
+                        upgrade, or the token lacks delete permission on
+                        this database. The response body/status is
+                        included in the message to help distinguish these.
+        """
+        # host/port joined the same way influxdb3_out._endpoint_url does
+        # internally (that property is private to the bridge class, so
+        # this reconstructs the join here rather than reaching into it).
+        host_url: str = f"{self._bridge.host}:{self._bridge.port}" if self._bridge.port else self._bridge.host
+        url: str = f"{host_url}/api/v3/row_delete_requests"
+        escaped_device_id: str = device_identifier.replace("'", "''")
+        min_time_ns: int = int(start_time.timestamp() * 1e9)
+        max_time_ns: int = int(end_time.timestamp() * 1e9) + 1  # max_time is exclusive; nudge past end_time
+        body: dict[str, Any] = {
+            "db": self._bridge.database,
+            "table": table,
+            "delete_predicate": f"device_identifier = '{escaped_device_id}'",
+            "min_time": min_time_ns,
+            "max_time": max_time_ns,
+        }
+        headers: dict[str, str] = {"Authorization": f"Bearer {self._bridge.token}", "Content-Type": "application/json"}
+        session: requests.Session = cast(requests.Session, getattr(self._bridge, "session", None) or requests)
+
+        try:
+            resp: requests.Response = session.post(
+                url, json=body, headers=headers, timeout=self._bridge.connection_timeout
+            )
+        except requests.exceptions.RequestException as e:
+            msg = f"Could not reach the InfluxDB 3 row-delete API at {url}: {e}"
+            raise RuntimeError(msg) from e
+
+        if resp.status_code not in (200, 202):
+            msg = (
+                f"InfluxDB 3 row-delete request failed (HTTP {resp.status_code}): {resp.text[:500]} -- "
+                "this requires InfluxDB 3 ENTERPRISE with the storage engine upgrade "
+                "(--use-pacha-tree/--upgrade-pacha-tree) and db:<database>:delete permission; "
+                "it is never available on InfluxDB 3 Core."
+            )
+            raise RuntimeError(msg)
+
+        try:
+            return cast(dict[str, Any], resp.json())
+        except ValueError:
+            return {}
+
     def _lookup_field_type(self, measurement: str, field_name: str) -> str | None:
         """Best-effort lookup of one field's reported Arrow data_type, for _coerce_v3_field_value. None if not found."""
         for field in self.list_metric_edit_fields(measurement):
@@ -1829,22 +2059,27 @@ class Influx3AdminManager:
                 return field.data_type
         return None
 
-    def validate_metric_edit_value(self, measurement: str, field_name: str | None, new_value: object) -> None:
+    def validate_metric_edit_value(
+        self, measurement: str, field_name: str | None, action: Literal["delete", "set_value"], new_value: object
+        ) -> None:
         """
         Read-only type-check of a "set_value" edit's replacement value
         before it's staged -- looks up field_name's reported Arrow
         data_type and runs it through the same _coerce_v3_field_value()
         edit_metric_values() will run at commit time, without querying or
-        writing any row data. There's no "delete" action to no-op for here
-        (see SUPPORTS_DELETE) -- every call to this is a "set_value" check.
+        writing any row data. A no-op for action == "delete" (no value to
+        validate -- and no way to pre-validate that the connected server
+        even supports it; see SUPPORTS_DELETE / the module-level comment).
         Purely advisory: edit_metric_values() re-validates again at commit
         time regardless, since the field's reported type can still change
         between staging and commit.
 
         Raises:
-            ValueError: no field_name/new_value given, or new_value
-                        doesn't fit the field's reported type.
+            ValueError: action == "set_value" with no field_name/new_value,
+                        or new_value doesn't fit the field's reported type.
         """
+        if action != "set_value":
+            return
         if not field_name:
             raise ValueError("field_name is required.")
         if new_value is None:

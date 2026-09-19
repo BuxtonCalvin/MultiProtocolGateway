@@ -28,6 +28,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Literal, Optional, cast
+from zoneinfo import ZoneInfo
 
 #  influx db methods are not recognized by type checker
 from influxdb import InfluxDBClient  # type: ignore
@@ -1233,9 +1234,14 @@ class InfluxV1AdminManager:
         device_name goes with which device_identifier. GROUP BY returns
         one result block per unique tag *combination*, each carrying its
         own tags dict -- exactly the pairing this needs.
+
+        Selects "*" (every field), not just "time" -- InfluxQL rejects a
+        query that selects only "time" with no actual field ("at least 1
+        non-time field must be queried"); the field values themselves are
+        discarded here regardless, only each series' tags dict is used.
         """
         query: str = (
-            f"SELECT time FROM {quote_ident(measurement)} GROUP BY device_identifier, device_name LIMIT 1"  # noqa: S608
+            f"SELECT * FROM {quote_ident(measurement)} GROUP BY device_identifier, device_name LIMIT 1"  # noqa: S608
         )
         result: ResultSet = self._client.query(query, database=self._bridge.database)  # type: ignore[reportUnknownMemberType]
 
@@ -1255,9 +1261,16 @@ class InfluxV1AdminManager:
         query: str = f"SHOW FIELD KEYS FROM {quote_ident(measurement)}"
         result: ResultSet = self._client.query(query, database=self._bridge.database)  # type: ignore[reportUnknownMemberType]
 
+        # get_points() yields Unknown-typed items -- collected into an
+        # explicitly dict[str, object]-typed list first (same pattern used
+        # everywhere else in this file, e.g. list_metric_edit_devices'
+        # tag_map) so every subsequent [...]/.get() access below is fully
+        # typed, rather than needing its own per-call type: ignore.
+        points: list[dict[str, object]] = list(result.get_points())  # type: ignore[reportUnknownMemberType]
+
         fields: list[InfluxV1MetricEditField] = [
-            InfluxV1MetricEditField(name=cast(str, p["fieldKey"]), field_type=cast(Optional[str], p.get("fieldType"))) # type: ignore
-            for p in result.get_points()  # type: ignore[reportUnknownMemberType]
+            InfluxV1MetricEditField(name=cast(str, p["fieldKey"]), field_type=cast(Optional[str], p.get("fieldType")))
+            for p in points
             if "fieldKey" in p
         ]
         fields.sort(key=lambda f: f.name)
@@ -1330,12 +1343,22 @@ class InfluxV1AdminManager:
 
         return InfluxV1EditPreview(row_count=row_count, sample=sample)
 
-    @staticmethod
-    def _ns_to_iso(time_ns: int | None) -> str:
-        """Formats a nanosecond epoch timestamp (as returned by a query with epoch="ns") as an ISO 8601 string."""
+    def _ns_to_iso(self, time_ns: int | None) -> str:
+        """
+        Formats a nanosecond epoch timestamp (as returned by a query with
+        epoch="ns") as an ISO 8601 string in this bridge's own configured
+        machine_timezone -- "UTC" if use_utc_timestamp is set, otherwise
+        the local zone influxdb_out itself stamps every written point's
+        time with (see influxdb_out.__init__). Using anything else here
+        (UTC unconditionally, say) would show preview timestamps in a
+        different zone than the Start/End range the admin just typed,
+        which routers/influxdb.py's _parse_local_datetime() interprets in
+        this exact same machine_timezone.
+        """
         if time_ns is None:
             return ""
-        return datetime.fromtimestamp(time_ns / 1e9, tz=timezone.utc).isoformat()
+        tz: ZoneInfo = ZoneInfo(self._bridge.machine_timezone)
+        return datetime.fromtimestamp(time_ns / 1e9, tz=tz).isoformat()
 
     # -------------------------
     # Edit / delete
@@ -1548,4 +1571,3 @@ class InfluxV1AdminManager:
         except Exception as e:
             self._log.warning(f"_count_points_in_range: COUNT(*) failed for '{measurement}': {e}")
             return 0
-

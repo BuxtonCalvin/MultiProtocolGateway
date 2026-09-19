@@ -217,6 +217,7 @@ Here are overviews of two database bridges:
   - Advanced Features [influxdb advanced features](documentation/bridges/InfluxDB/influxdb_advanced_features.md)
   - Troubleshooting [troubleshooting influxdb](documentation/bridges/InfluxDB/troubleshooting_influxdb.md)
   - InfluxDB3 Special setup [influxDB3](documentation/bridges/InfluxDB/InfluxDB3.md)
+  - InfluxDB Metric Editing [Editing](documentation/bridges/InfluxDB/influxdb_metrics_edit.md)
 
 - TimeScale DB [![Timescale DB](https://img.shields.io/badge/postgres-%2331648C.svg?logo=postgresql&logoColor=white)](https://timescale.com)
 

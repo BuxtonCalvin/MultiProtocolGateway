@@ -29,7 +29,11 @@
   influxdb_service.py's module docstring) — a "Version" column
   disambiguates which bridge each row will be applied against, since
   otherwise two entries could look identical (same measurement name is
-  plausible across a v1 and a v3 bridge configured side by side).
+  plausible across a v1 and a v3 bridge configured side by side). A v3
+  "delete" is additionally labeled "(whole row, async)" since it submits
+  an InfluxDB 3 Enterprise row-delete request that the server applies
+  later (up to 24 hours by default), unlike every other action/version
+  here, which take effect as soon as Commit All Changes returns.
 
   Nothing here is written to InfluxDB until the admin presses the
   existing header "Commit All Changes" button, which runs
@@ -76,7 +80,9 @@
           {{ e.start_time.strftime('%Y-%m-%d %H:%M') }} → {{ e.end_time.strftime('%Y-%m-%d %H:%M') }}
         </td>
         <td class="px-2 py-1.5 whitespace-nowrap">
-          {% if e.action == 'delete' %}
+          {% if e.action == 'delete' and e.version == '3' %}
+          <span class="text-danger font-semibold">Delete (whole row, async)</span>
+          {% elif e.action == 'delete' %}
           <span class="text-danger font-semibold">Delete (whole point)</span>
           {% else %}
           <span class="text-accent font-semibold">Set = {{ e.new_value }}</span>

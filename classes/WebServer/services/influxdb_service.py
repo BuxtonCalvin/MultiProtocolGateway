@@ -331,13 +331,12 @@ def validate_metric_edit_value(
         msg: str = f"Unknown action '{action}' -- expected 'delete' or 'set_value'."
         raise ValueError(msg)
     if action == "delete" and not supports_delete(resolved):
-        raise ValueError("Deleting is not supported for InfluxDB v3 -- see the Action field's help text.")
+        raise ValueError("Deleting is not supported for this InfluxDB v3 server -- see the Action field's help text.")
 
     if resolved == "1":
         _v1_admin_manager(gateway).validate_metric_edit_value(measurement, field_name, action, new_value)  # type: ignore[arg-type]
     else:
-        # action == "set_value" is guaranteed here -- "delete" already raised above for v3.
-        _v3_admin_manager(gateway).validate_metric_edit_value(measurement, field_name, new_value)
+        _v3_admin_manager(gateway).validate_metric_edit_value(measurement, field_name, action, new_value)  # type: ignore[arg-type]
 
 
 def stage_metric_edit(
@@ -448,6 +447,7 @@ def commit_staged_metric_edits(gateway: "Protocol_Gateway | None", app_state: St
     with _influx_edit_lock(app_state):
         store: dict[str, StagedInfluxEdit] = _influx_edit_store(app_state)
         for entry in staged:
+            pending: bool = False
             try:
                 if entry["version"] == "1":
                     v1_result: "InfluxV1EditResult" = _v1_admin_manager(gateway).edit_metric_values(
@@ -464,12 +464,21 @@ def commit_staged_metric_edits(gateway: "Protocol_Gateway | None", app_state: St
                     v3_result: "Influx3EditResult" = _v3_admin_manager(gateway).edit_metric_values(
                         entry["measurement"],
                         entry["device_identifier"],
+                        entry["action"],  # type: ignore[arg-type]
                         entry["start_time"],
                         entry["end_time"],
-                        field_name=entry["field_name"],  # type: ignore[arg-type]
+                        field_name=entry["field_name"],
                         new_value=entry["new_value"],
                     )
                     points_affected = v3_result.points_affected
+                    # "delete" on v3 is an InfluxDB 3 Enterprise row-delete
+                    # request -- accepted here, but applied asynchronously
+                    # by the server (up to 24h by default), unlike every
+                    # other action/version, which are synchronous. Surfaced
+                    # in the result so the caller (routers/commit.py's
+                    # response, and ultimately the admin) doesn't read
+                    # "committed" as "already gone."
+                    pending = v3_result.pending
             except Exception:
                 _log.error(
                     "commit_staged_metric_edits: failed applying edit_id=%s (v%s, %s on %s, device=%s) -- "
@@ -488,6 +497,7 @@ def commit_staged_metric_edits(gateway: "Protocol_Gateway | None", app_state: St
                     "field_name": entry["field_name"],
                     "action": entry["action"],
                     "points_affected": points_affected,
+                    "pending": pending,
                 })
 
     _log.info(

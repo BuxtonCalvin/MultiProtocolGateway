@@ -35,21 +35,31 @@
                    Changes, with the staged-changes list underneath.
 
   Context: version ("1"|"3"); measurements — [str, ...]; supports_delete —
-  bool (see services.influxdb_service.supports_delete: True for v1, always
-  False for v3 — InfluxDB 3 Core has no row/field-level DELETE at all);
-  staged_edits — the same StagedInfluxEdit list partials/
-  influxdb_metrics_edit_staged.html renders (pre-populated here so
-  navigating away and back doesn't lose anything already staged; v1 and v3
-  entries share one staging store, so this list can show both at once).
+  bool (see services.influxdb_service.supports_delete: both InfluxV1Admin
+  Manager and Influx3AdminManager report True, so "Delete value(s)" shows
+  for both versions today); staged_edits — the same StagedInfluxEdit list
+  partials/influxdb_metrics_edit_staged.html renders (pre-populated here
+  so navigating away and back doesn't lose anything already staged; v1
+  and v3 entries share one staging store, so this list can show both at
+  once).
 
   Version differences:
-  - The Action dropdown only offers "Delete value(s)" when supports_delete
-    is true (v1) — v3 only ever offers "Set value".
-  - v1's "Delete value(s)" removes the ENTIRE point (every field) at each
-    matching timestamp, not just the selected field — InfluxQL's DELETE
-    has no field predicate (see InfluxV1AdminManager's module docstring in
-    influxdb_out.py). A warning to that effect is shown whenever "Delete
-    value(s)" is selected.
+  - Both versions' "Delete value(s)" remove the ENTIRE point/row (every
+    field) at each matching timestamp, never just the selected field —
+    neither InfluxQL's DELETE (v1) nor InfluxDB 3's row-delete predicate
+    (v3) supports a field predicate. A warning to that effect is shown
+    whenever "Delete value(s)" is selected, worded per-version (see
+    below).
+  - v1's delete (InfluxQL DELETE) is synchronous and needs nothing beyond
+    an ordinary v1 bridge. v3's delete submits an InfluxDB 3 ENTERPRISE
+    row-delete request (see Influx3AdminManager's module docstring in
+    influxdb3_out.py) — it only works against Enterprise with the
+    upgraded storage engine (Core rejects it outright, surfaced as a
+    clear error), and it is ASYNCHRONOUS: a successful submission only
+    means the request was accepted, not that anything is gone yet — rows
+    stay queryable for up to 24 hours (server-configurable) until the
+    compactor actually applies it. The warning text and the staged-changes
+    list both call this out for v3.
 
   Like TimescaleDB's Metrics Edit screen, field selection is a single
   <select>, not a checklist — a "set value" edit applies one replacement
@@ -200,8 +210,15 @@
       </p>
       {% if supports_delete %}
       <p id="influx-metrics-edit-delete-warning" class="text-[10px] text-danger -mt-1 hidden">
+        {% if version == '3' %}
+        InfluxDB 3 has no per-field delete — this submits an <strong>Enterprise-only, asynchronous</strong>
+        row-delete request that removes the <strong>entire row</strong> (every field, not just the selected
+        one) at each matching timestamp for this device. It requires InfluxDB 3 Enterprise with the storage
+        engine upgrade, and the rows stay queryable for up to 24 hours until the server actually applies it.
+        {% else %}
         InfluxDB v1 has no per-field delete — this removes the <strong>entire point</strong> (every field,
         not just the selected one) at each matching timestamp for this device.
+        {% endif %}
       </p>
       {% endif %}
 
@@ -235,13 +252,19 @@
 </div>
 
 <script>
+  // version is read from the current page's own URL rather than
+  // rendered via Jinja — this is the last segment of /pages/influxdb-
+  // metrics-edit/{version} by construction, and sidesteps any
+  // template-quoting ambiguity entirely (a previous version of this
+  // template rendered `version` through the `tojson` filter, which under
+  // some Jinja/autoescape combinations produced a JS string whose value
+  // was the literal 3 characters ", 3, " instead of the bare
+  // one-character string "3" — this can't happen when the value comes
+  // straight from the URL the browser is already on).
   const InfluxEditState = {
-    version: '{{ version|tojson }}', 
-    measurement: null, 
-    deviceIdentifier: null, 
-    deviceLabel: null,
+    version: window.location.pathname.split('/').filter(Boolean).pop(),
+    measurement: null, deviceIdentifier: null, deviceLabel: null,
   };
-
 
   function selectInfluxMeasurement(btn) {
     document.querySelectorAll('.influx-metrics-edit-measurement-btn').forEach(function (b) {
@@ -391,9 +414,15 @@
     const sel = buildInfluxSelection();
     if (!sel) { return; }
 
-    const summary = sel.action === 'delete'
-      ? 'delete the ENTIRE point (every field)'
-      : 'set "' + sel.field_name + '" to "' + sel.new_value + '"';
+    let summary;
+    if (sel.action === 'delete' && InfluxEditState.version === '3') {
+      summary = 'submit an Enterprise-only, ASYNCHRONOUS row-delete request for the ENTIRE row (every field) — ' +
+        'rows stay queryable for up to 24 hours until InfluxDB actually applies it';
+    } else if (sel.action === 'delete') {
+      summary = 'delete the ENTIRE point (every field)';
+    } else {
+      summary = 'set "' + sel.field_name + '" to "' + sel.new_value + '"';
+    }
     const proceed = window.confirm(
       'Stage: ' + summary + ' for ' + (sel.device_label || 'this device') + ' between ' +
       sel.start_time + ' and ' + sel.end_time + '.\n\nNothing is written to InfluxDB until you press ' +
