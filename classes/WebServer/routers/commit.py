@@ -45,6 +45,12 @@ from ..services.bridge_service import (
     commit_staged_deletions,
     commit_staged_metric_edits,
 )
+from ..services.influxdb_service import (
+    clear_staged_metric_edits as clear_staged_influx_edits,
+)
+from ..services.influxdb_service import (
+    commit_staged_metric_edits as commit_staged_influx_edits,
+)
 from ..services.setting_description_service import (
     commit_descriptions,
     discard_descriptions,
@@ -172,6 +178,29 @@ def do_commit(request: Request, db: Session = Depends(get_session))-> CommitResp
             )
             timescale_summary["timescale_metric_edits_applied"] = len(metric_edit_results)
 
+        # Apply any staged InfluxDB (v1 and/or v3) Metrics Edit value
+        # edits/deletes — an independent staging store from TimescaleDB's
+        # above (see services/influxdb_service.py), applied here so the
+        # same "Commit All Changes" press covers every admin screen at
+        # once. A failure here raises the same as any other step (see
+        # commit_staged_influx_edits' own docstring for its
+        # partial-progress/retry semantics).
+        influx_edit_results: list[dict[str, Any]] = commit_staged_influx_edits(
+            getattr(state, "gateway", None), state
+        )
+        influx_summary: dict[str, int] = {}
+        if influx_edit_results:
+            influx_summary["influxdb_points_edited"] = sum(r["points_affected"] for r in influx_edit_results)
+            influx_summary["influxdb_edits_applied"] = len(influx_edit_results)
+            # A v3 "delete" is an asynchronous InfluxDB 3 Enterprise
+            # row-delete request (see influxdb3_out.py's module comment) --
+            # "applied" above only means the request was accepted, not
+            # that any row is actually gone yet. Counted separately so the
+            # admin isn't led to believe every edit took effect immediately.
+            pending_count: int = sum(1 for r in influx_edit_results if r.get("pending"))
+            if pending_count:
+                influx_summary["influxdb_edits_pending"] = pending_count
+
         # Recompute AppState dirty/orphan counts from the now-cleared flags so
         # the very next /api/devices/state poll (fired by base.html after the
         # commit response) sees zero dirty items and disables the commit button
@@ -206,7 +235,7 @@ def do_commit(request: Request, db: Session = Depends(get_session))-> CommitResp
         _log.error(f"do_commit: commit failed: {exc}")
         raise HTTPException(status_code=500, detail=str(exc))
     else:
-        response: CommitResponse = {"status": "ok", **result, **timescale_summary}
+        response: CommitResponse = {"status": "ok", **result, **timescale_summary, **influx_summary}
         if gateway_reload is not None:
             response["gateway_reload"] = gateway_reload
         return response
@@ -268,9 +297,10 @@ def discard_changes(request: Request, db: Session = Depends(get_session)) -> dic
     row that's currently deactivated but still has a real value on disk
     (a staged key or bridge-section removal being undone; see the
     Setting-reset loop below). Does NOT touch the config file on disk.
-    Also clears any staged TimescaleDB column deletions and any staged
-    Metrics Edit value edits/deletes — both are in-memory only, so nothing
-    on disk or in Postgres needs reverting.
+    Also clears any staged TimescaleDB column deletions, any staged
+    TimescaleDB Metrics Edit value edits/deletes, and any staged InfluxDB
+    (v1/v3) Metrics Edit value edits/deletes — all three are in-memory
+    only, so nothing on disk, in Postgres, or in InfluxDB needs reverting.
     """
 
     # Reset Setting rows
@@ -318,6 +348,7 @@ def discard_changes(request: Request, db: Session = Depends(get_session)) -> dic
     discard_descriptions(db)
     clear_staged_deletions(request.app.state)
     clear_staged_metric_edits(request.app.state)
+    clear_staged_influx_edits(request.app.state)
     db.flush()
     refresh_app_state(db)
     db.commit()

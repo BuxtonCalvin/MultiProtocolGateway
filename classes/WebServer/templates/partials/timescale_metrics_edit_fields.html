@@ -54,7 +54,7 @@
   <option value="" disabled selected>Select a field…</option>
   {% for f in fields %}
   <option value="{{ f.name }}" data-type="{{ f.data_type or '' }}">
-    {{ f.name }}{% if f.data_type %} ({{ f.data_type }}){% endif %}
+    {{ f.name }}{% if f.data_type %}&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;({{ f.data_type }}){% endif %}
   </option>
   {% endfor %}
 </select>

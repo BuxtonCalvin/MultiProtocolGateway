@@ -23,7 +23,7 @@
   "coil_register_prefix": "MQTT topic sub-prefix used when publishing coil register values. Full topic: base_topic/coil_register_prefix/variable_name.",
   "connection_timeout": "Timeout in seconds when establishing a new connection to the remote server before raising a connection error.",
   "counter_metric_suffixes": "Prometheus counter metric suffixes to append to the base metric name when publishing counter values. Example: ['_total', '_count']",
-  "data_dir": "Optional local filesystem path to InfluxDB's own data directory. Not necessary if using containers",
+  "data_dir": "Optional local filesystem path to InfluxDB's own data directory (e.g. '/var/lib/influxdb/data'), used only to report on-disk size in the Storage Overview panel. Empty by default — MPG and InfluxDB are very often on different hosts, so this is opt-in, not assumed.",
   "database": "Database name to connect to on the TimescaleDB/PostgreSQL server.",
   "debug_pprof_url": "Optional URL to the Rust/pprof heap-profile Influxdb v3.x debug endpoint (e.g.' http://localhost:8089/debug/pprof/heap').",
   "device_location": "Physical or logical location of the device (e.g. home, site-A). Used for tagging metrics.",

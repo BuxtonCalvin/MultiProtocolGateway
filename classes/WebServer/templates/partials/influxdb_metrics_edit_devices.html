@@ -1,0 +1,57 @@
+<!--
+  Description: partials/influxdb_metrics_edit_devices.html HTMX partial — device picker for one InfluxDB Metrics Edit measurement.
+  File: influxdb_metrics_edit_devices.html
+
+  Copyright 2026 Kevin Burke
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://apache.org
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+
+{#
+  partials/influxdb_metrics_edit_devices.html
+  Swapped into #influx-metrics-edit-devices-container whenever the admin
+  picks a measurement on the left (see pages/influxdb_metrics_edit.html).
+  Shared by both InfluxDB versions — the device list itself is already a
+  plain [{device_identifier, device_name}, ...] by the time
+  services/influxdb_service.list_metric_edit_devices() hands it here,
+  regardless of whether it came from InfluxV1AdminManager (InfluxQL GROUP
+  BY) or Influx3AdminManager (SQL DISTINCT).
+
+  Context: version, measurement, devices — [{device_identifier,
+  device_name}, ...] in device_identifier order.
+
+  Selecting a device loads its field picker via HTMX (see
+  onInfluxDeviceChange() in pages/influxdb_metrics_edit.html) and clears
+  any stale preview/staging inputs left over from a previous selection.
+
+  Styling: matches partials/timescale_metrics_edit_devices.html — renders
+  into the right-hand content area's normal light-panel background, using
+  .theme-input for the select.
+#}
+<select id="influx-metrics-edit-device-select"
+        class="theme-input w-full text-xs rounded px-2 py-1.5
+               focus:outline-none focus:ring-1 focus:ring-accent"
+        aria-label="Device to edit"
+        onchange="onInfluxDeviceChange(this)">
+  <option value="" disabled selected>Select a device…</option>
+  {% for d in devices %}
+  <option value="{{ d.device_identifier }}"
+          data-label="{{ d.device_identifier or d.device_name or 'device' }}">
+    {{ d.device_identifier }}
+    {% if d.device_name and d.device_name != d.device_identifier %} — {{ d.device_name }}{% endif %}
+  </option>
+  {% endfor %}
+</select>
+{% if not devices %}
+<p class="mini-table-meta text-xs italic mt-2">No devices have any points in this measurement yet.</p>
+{% endif %}

@@ -1,0 +1,55 @@
+<!--
+  Description: partials/influxdb_metrics_edit_fields.html HTMX partial — single-field picker for one InfluxDB Metrics Edit measurement + device.
+  File: influxdb_metrics_edit_fields.html
+
+  Copyright 2026 Kevin Burke
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://apache.org
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+
+{#
+  partials/influxdb_metrics_edit_fields.html
+  Swapped into #influx-metrics-edit-fields-container once a device is
+  selected (see onInfluxDeviceChange() in pages/influxdb_metrics_edit.html).
+  Context: fields — [{name, data_type}, ...] in alphabetical order.
+  data_type is InfluxQL's SHOW FIELD KEYS fieldType for v1 ("float",
+  "integer", "string", "boolean") or the Arrow type from information_
+  schema.columns for v3 ("Float64", "Int64", "Utf8", "Boolean", ...).
+
+  A single <select>, not a checklist — same reasoning as
+  partials/timescale_metrics_edit_fields.html: a "set value" edit applies
+  one replacement value to whatever's chosen, so only one field can be
+  targeted per staged edit. Not used at all when the admin's chosen
+  "Delete value(s)" for InfluxDB v1 (that action has no field concept —
+  it removes the whole point — see the warning text in
+  pages/influxdb_metrics_edit.html), but the field list still loads
+  regardless, since Set value is always available to switch back to.
+
+  Styling: matches partials/timescale_metrics_edit_fields.html — .theme-
+  input for the select, same control class the Device picker uses.
+#}
+<select id="influx-metrics-edit-field-select"
+        class="theme-input w-full text-xs rounded px-2 py-1.5
+               focus:outline-none focus:ring-1 focus:ring-accent"
+        aria-label="Field to edit"
+        onchange="onInfluxFieldChange(this)">
+  <option value="" disabled selected>Select a field…</option>
+  {% for f in fields %}
+  <option value="{{ f.name }}" data-type="{{ f.data_type or '' }}">
+    {{ f.name }}{% if f.data_type %} ({{ f.data_type }}){% endif %}
+  </option>
+  {% endfor %}
+</select>
+{% if not fields %}
+<p class="mini-table-meta text-xs italic mt-2">No fields found for this measurement.</p>
+{% endif %}

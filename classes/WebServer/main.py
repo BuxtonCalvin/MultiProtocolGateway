@@ -64,12 +64,14 @@ from .routers.devices import router as devices_router
 from .routers.gateway_status import router as gateway_status_router
 from .routers.help import FileResponse
 from .routers.help import router as help_router
+from .routers.influxdb import router as influxdb_router
 from .routers.pages import router as pages_router
 from .routers.protocols import router as protocols_router
 from .routers.timescale import router as timescale_router
 from .routers.transport_settings import router as transport_settings_router
 from .scanner import Scanner
 from .services.bridge_service import is_timescale_available
+from .services.influxdb_service import is_influxdb1_available, is_influxdb3_available
 from .services.setting_description_service import seed_setting_descriptions
 
 _log: logging.Logger = logging.getLogger(__name__)
@@ -389,6 +391,18 @@ def create_app(
         lambda: is_timescale_available(getattr(app.state, "gateway", None))
     )
 
+    # Jinja globals — base.html's "InfluxDB" nav pad and its two version-
+    # specific menu items ("Metrics Edit 1.x" / "Metrics Edit 3.x"), same
+    # closure-over-app pattern as timescale_bridge_available above. Each
+    # gates independently, since a deployment can have either, both, or
+    # neither of the two InfluxDB bridge versions attached.
+    templates.env.globals["influxdb1_bridge_available"] = (  # type: ignore[reportArgumentType]
+        lambda: is_influxdb1_available(getattr(app.state, "gateway", None))
+    )
+    templates.env.globals["influxdb3_bridge_available"] = (  # type: ignore[reportArgumentType]
+        lambda: is_influxdb3_available(getattr(app.state, "gateway", None))
+    )
+
     # Jinja global — base.html's reload-status banner. Returns the
     # GatewayManager's current ReloadStatus (or None before the gateway has
     # ever been (re)built), same closure-over-app pattern as
@@ -406,6 +420,7 @@ def create_app(
     app.include_router(devices_router)
     app.include_router(gateway_status_router)
     app.include_router(help_router)
+    app.include_router(influxdb_router)
     app.include_router(pages_router)
     app.include_router(protocols_router)
     app.include_router(timescale_router)

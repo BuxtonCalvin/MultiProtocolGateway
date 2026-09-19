@@ -370,6 +370,52 @@
     </div>
     {% endif %}
 
+    <!-- INFLUXDB dropdown — shown when at least one live InfluxDB (v1 and/or
+         v3) bridge is attached to this gateway (see influxdb1_bridge_
+         available()/influxdb3_bridge_available() in main.py, backed by
+         services/influxdb_service.is_influxdb1_available/
+         is_influxdb3_available). Each menu item gates independently, so a
+         deployment with only one version attached sees only that one
+         "Metrics Edit" item, and both if it has both bridges configured. -->
+    {% if influxdb1_bridge_available() or influxdb3_bridge_available() %}
+    <div class="relative group dropdown-root" role="none" data-dropdown>
+      <button type="button"
+              class="nav-item px-3 py-1.5 rounded hover:bg-mpg-600 text-mpg-100
+                     focus:outline-none focus:ring-2 focus:ring-accent
+                     flex items-center gap-1"
+              data-dropdown-trigger
+              aria-haspopup="true" aria-expanded="false"
+              aria-label="InfluxDB menu">
+        InfluxDB
+        <svg class="w-3 h-3 opacity-60" fill="none" stroke="currentColor"
+             viewBox="0 0 24 24" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+        </svg>
+      </button>
+      <ul class="dropdown-menu absolute right-0 top-full mt-1 w-48 bg-mpg-800
+                 border border-mpg-600 rounded shadow-xl z-50
+                 hidden group-hover:block group-focus-within:block"
+          role="menu" aria-label="InfluxDB submenu">
+        {% if influxdb1_bridge_available() %}
+        <li role="none">
+          <a href="/pages/influxdb-metrics-edit/1" role="menuitem"
+             class="dropdown-item block px-4 py-2 text-mpg-200 hover:bg-mpg-600 hover:text-white">
+            Metrics Edit 1.x
+          </a>
+        </li>
+        {% endif %}
+        {% if influxdb3_bridge_available() %}
+        <li role="none">
+          <a href="/pages/influxdb-metrics-edit/3" role="menuitem"
+             class="dropdown-item block px-4 py-2 text-mpg-200 hover:bg-mpg-600 hover:text-white">
+            Metrics Edit 3.x
+          </a>
+        </li>
+        {% endif %}
+      </ul>
+    </div>
+    {% endif %}
+
     <!-- Create Scraper -->
     <a href="/pages/create-scraper"
        class="nav-item px-3 py-1.5 rounded hover:bg-mpg-600 text-mpg-100
@@ -599,7 +645,7 @@
         const btn = document.getElementById('commit-btn');
         const discardBtn = document.getElementById('discard-btn');
         if (!btn) return;
-        const dirty = data.has_dirty_settings || data.has_dirty_protocols || data.has_dirty_timescale;
+        const dirty = data.has_dirty_settings || data.has_dirty_protocols || data.has_dirty_timescale || data.has_dirty_influxdb;
         btn.dataset.dirty = dirty ? 'true' : 'false';
         btn.disabled = !dirty;
         if (discardBtn) {

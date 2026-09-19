@@ -60,6 +60,12 @@ from ..services.device_service import (
     get_nav_data,
     get_orphaned_settings,
 )
+from ..services.influxdb_service import (
+    has_staged_metric_edits as has_staged_influx_edits,
+)
+from ..services.influxdb_service import (
+    staged_metric_edit_count as staged_influx_edit_count,
+)
 from ..services.protocol_service import (
     get_device_metric_summary,
     get_protocols_for_device,
@@ -201,10 +207,16 @@ def app_state(request: Request, db: Session = Depends(get_session)) -> dict[str,
         # services/bridge_service.py), not in the staging DB, since
         # they're live Postgres work rather than config.cfg settings.
         "has_dirty_timescale": has_staged_deletions(request.app.state) or has_staged_metric_edits(request.app.state),
+        # InfluxDB (v1/v3) Metrics Edit value edits/deletes -- a separate
+        # staging store from TimescaleDB's (see services/influxdb_service.py),
+        # kept as its own field rather than folded into has_dirty_timescale
+        # so each name accurately reflects what it measures.
+        "has_dirty_influxdb": has_staged_influx_edits(request.app.state),
         "has_orphans": state.has_orphans,
         "dirty_settings_count": state.dirty_settings_count,
         "dirty_protocols_count": state.dirty_protocols_count,
         "dirty_timescale_count": staged_deletion_count(request.app.state) + staged_metric_edit_count(request.app.state),
+        "dirty_influxdb_count": staged_influx_edit_count(request.app.state),
         "orphan_count": state.orphan_count,
         "last_scan_at": state.last_scan_at.isoformat() if state.last_scan_at else None,
         "last_commit_at": state.last_commit_at.isoformat() if state.last_commit_at else None,
@@ -394,8 +406,8 @@ def reconcile_settings(
 
     # Render the settings rows partial with the computed display list
     summary: DeviceSummary | None = get_device_summary(db, device_name)
-    templates: Any = request.app.state.templates
-    html: Any = templates.get_template("partials/settings_rows.html").render(
+    templates = request.app.state.templates
+    html = templates.get_template("partials/settings_rows.html").render(
         {"device": summary, "settings": display_rows, "request": request}
     )
     return HTMLResponse(content=html)

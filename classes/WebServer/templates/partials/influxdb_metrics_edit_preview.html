@@ -1,0 +1,60 @@
+<!--
+  Description: partials/influxdb_metrics_edit_preview.html — read-only preview of a pending InfluxDB Metrics Edit selection.
+  File: influxdb_metrics_edit_preview.html
+
+  Copyright 2026 Kevin Burke
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://apache.org
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+
+{#
+  partials/influxdb_metrics_edit_preview.html
+  Swapped into #influx-metrics-edit-preview-container after "Preview" is
+  clicked (see runInfluxMetricsEditPreview() in pages/
+  influxdb_metrics_edit.html). Context: preview — {row_count, sample:
+  [{time_iso, value}, ...]} (see services/influxdb_service.
+  preview_metric_edit). Read-only — this never stages or writes anything;
+  it's purely "here's what currently matches your selection." No "Field"
+  column (unlike TimescaleDB's preview table) since exactly one field is
+  ever previewed here — there's nothing to disambiguate per row. Wrapped
+  in overflow-x-auto since its parent is capped to a fixed width (see the
+  "Layout" note in pages/influxdb_metrics_edit.html) and a wide
+  timestamp/value table shouldn't blow out that width.
+#}
+<div class="border border-mpg-700 rounded p-3 overflow-x-auto">
+  <p class="text-xs mb-2">
+    <span class="font-semibold surface-title">{{ preview.row_count }}</span>
+    <span class="surface-muted">matching point(s){% if preview.row_count > preview.sample|length %} — showing the most recent {{ preview.sample|length }}{% endif %}.</span>
+  </p>
+
+  {% if preview.sample %}
+  <table class="w-auto text-xs border-collapse">
+    <thead>
+      <tr class="mini-table-header uppercase tracking-wide">
+        <th class="px-2 py-1.5 text-left font-semibold whitespace-nowrap">Time</th>
+        <th class="px-2 py-1.5 text-left font-semibold whitespace-nowrap">Current Value</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for s in preview.sample %}
+      <tr class="border-t border-mpg-700/50">
+        <td class="px-2 py-1.5 mini-table-value font-mono whitespace-nowrap">{{ s.time_iso }}</td>
+        <td class="px-2 py-1.5 mini-table-value font-mono whitespace-nowrap">{{ s.value if s.value is not none else '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% elif preview.row_count == 0 %}
+  <p class="surface-subtle text-xs italic">Nothing in this measurement matches the selected device, field, and time range.</p>
+  {% endif %}
+</div>
