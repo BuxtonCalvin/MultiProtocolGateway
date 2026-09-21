@@ -1314,7 +1314,7 @@ class InfluxV1AdminManager:
         }
 
         count_query: str = (
-            f"SELECT COUNT({quoted_field}) FROM {quoted_measurement} "  # noqa: S608
+            f"SELECT COUNT({quoted_field}) AS matching_count FROM {quoted_measurement} "  # noqa: S608
             "WHERE device_identifier = $device_id AND time >= $start AND time <= $end"
         )
         count_result: ResultSet = self._client.query(  # type: ignore[reportUnknownMemberType]
@@ -1323,7 +1323,13 @@ class InfluxV1AdminManager:
         count_points: list[dict[str, object]] = list(count_result.get_points())  # type: ignore[reportUnknownMemberType]
         row_count: int = 0
         if count_points:
-            raw_count: object = count_points[0].get(field_name)
+            # InfluxQL names an unaliased COUNT(...) column "count", never
+            # after the field it counted -- looking it up by field_name
+            # (as an earlier version of this code did) always misses and
+            # silently reports 0 matches regardless of how many points
+            # actually match. Aliasing it explicitly above removes any
+            # doubt about the column name to look up here.
+            raw_count: object = count_points[0].get("matching_count")
             row_count = int(cast(Any, raw_count)) if raw_count is not None else 0
 
         sample_query: str = (

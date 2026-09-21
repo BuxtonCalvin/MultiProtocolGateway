@@ -1,0 +1,17 @@
+{#
+  partials/timeshift_fields_options.html
+  Raw <option> list for a measurement's existing InfluxDB fields —
+  returned by GET /pages/timeshift/fields for any future GUI element that
+  needs to re-scan a measurement's schema independently of an upload (the
+  main Field Matchup table in timeshift_field_mapping.html renders its own
+  <select> per row inline instead, since each row also needs the "+ New
+  field…" option and a disabled state tied to that row's Ignore checkbox).
+
+  Context: fields — [{name, data_type}, ...].
+#}
+{% for f in fields %}
+<option value="{{ f.name }}">{{ f.name }}{% if f.data_type %} ({{ f.data_type }}){% endif %}</option>
+{% endfor %}
+{% if not fields %}
+<option value="" disabled>No fields found for this measurement.</option>
+{% endif %}

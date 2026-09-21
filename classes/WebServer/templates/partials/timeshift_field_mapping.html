@@ -1,0 +1,92 @@
+{#
+  partials/timeshift_field_mapping.html
+  Swapped into #ts-mapping-container after "Upload & Scan Fields" — the
+  interactive replacement for InfluxDateConverter.py's
+  perform_schema_validation()/mapping_needed.csv hand-edit cycle.
+
+  Context: upload_id — str, the server-side stored upload this mapping
+  applies to; row_count — int, rows in the uploaded file; mapping_rows —
+  list[FieldMappingRow] (source_column, suggested_field, confidence,
+  default_ignored); influx_fields — [str, ...] existing field names on
+  the target measurement (empty for a brand-new measurement); columns —
+  every source column, for the page's Time Column <select>;
+  detected_time_column — best-guess column name for that select's default.
+
+  #ts-mapping-root carries upload_id/columns/detected_time_column as data
+  attributes purely so the page's own JS (uploadAndScan() in
+  pages/timeshift_data.html) can read them back out after this partial is
+  swapped in — no server round-trip needed to populate the Time Column
+  picker or to know which upload subsequent Preview/Import calls refer to.
+
+  Each row: source column name, the confidence-scored suggestion (or
+  "no confident match"), a target-field <select> (existing fields +
+  "+ New field…", which reveals a free-text input for a field name that
+  doesn't exist in InfluxDB yet), and an "Ignore" checkbox (pre-checked
+  for tag-shaped/reserved columns per default_ignored).
+#}
+<div id="ts-mapping-root"
+     data-upload-id="{{ upload_id }}"
+     data-columns='{{ columns|tojson }}'
+     data-detected-time-column="{{ detected_time_column or '' }}">
+
+  <div class="flex items-center justify-between mb-2">
+    <h3 class="surface-title text-xs font-semibold uppercase tracking-widest">
+      Field Matchup <span class="surface-muted font-normal">({{ row_count }} row{{ 's' if row_count != 1 }} in file)</span>
+    </h3>
+  </div>
+
+  <div class="overflow-x-auto border border-mpg-700 rounded">
+    <table class="w-full text-xs border-collapse">
+      <thead>
+        <tr class="mini-table-header uppercase tracking-wide">
+          <th class="px-2 py-1.5 text-left font-semibold whitespace-nowrap">Source Column</th>
+          <th class="px-2 py-1.5 text-left font-semibold whitespace-nowrap">Confidence</th>
+          <th class="px-2 py-1.5 text-left font-semibold whitespace-nowrap">InfluxDB Field</th>
+          <th class="px-2 py-1.5 text-center font-semibold whitespace-nowrap">Ignore</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in mapping_rows %}
+        <tr class="ts-map-row border-t border-mpg-700/50" data-source-column="{{ row.source_column }}">
+          <td class="px-2 py-1.5 font-mono mini-table-value whitespace-nowrap">{{ row.source_column }}</td>
+          <td class="px-2 py-1.5 mini-table-value whitespace-nowrap">
+            {% if row.suggested_field %}
+            <span class="{% if row.confidence >= 0.999 %}text-success{% else %}text-accent{% endif %} font-semibold">
+              {{ "%.0f"|format(row.confidence * 100) }}%
+            </span>
+            {% elif row.confidence > 0 %}
+            <span class="surface-subtle">{{ "%.0f"|format(row.confidence * 100) }}% (below threshold)</span>
+            {% else %}
+            <span class="surface-subtle italic">no match</span>
+            {% endif %}
+          </td>
+          <td class="px-2 py-1.5">
+            <select class="ts-map-target-select theme-input text-xs rounded px-1.5 py-1 w-full"
+                    style="max-width: 220px;"
+                    onchange="onMapTargetChange(this)"
+                    {% if row.default_ignored %}disabled{% endif %}>
+              <option value="" {% if not row.suggested_field %}selected{% endif %}>— unmapped —</option>
+              {% for f in influx_fields %}
+              <option value="{{ f }}" {% if f == row.suggested_field %}selected{% endif %}>{{ f }}</option>
+              {% endfor %}
+              <option value="__new__">+ New field…</option>
+            </select>
+            <input type="text" class="ts-map-target-custom theme-input text-xs rounded px-1.5 py-1 w-full mt-1 hidden"
+                   style="max-width: 220px;"
+                   placeholder="new field name"
+                   value="{{ row.source_column if not row.suggested_field and not row.default_ignored else '' }}">
+          </td>
+          <td class="px-2 py-1.5 text-center">
+            <input type="checkbox" class="ts-map-ignore" {% if row.default_ignored %}checked{% endif %}
+                   onchange="this.closest('.ts-map-row').querySelector('.ts-map-target-select').disabled = this.checked;">
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="surface-subtle text-[10px] mt-1">
+    Rows checked "Ignore" are dropped entirely (tag-shaped columns are pre-checked). Pick
+    "+ New field…" to write a column under a brand-new InfluxDB field name.
+  </p>
+</div>

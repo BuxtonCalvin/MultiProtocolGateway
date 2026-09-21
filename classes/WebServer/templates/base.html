@@ -392,29 +392,64 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
         </svg>
       </button>
-      <ul class="dropdown-menu absolute right-0 top-full mt-1 w-48 bg-mpg-800
+      <ul class="dropdown-menu absolute right-0 top-full mt-1 w-52 bg-mpg-800
                  border border-mpg-600 rounded shadow-xl z-50
                  hidden group-hover:block group-focus-within:block"
           role="menu" aria-label="InfluxDB submenu">
+        
+        {# --- INFLUXDB 1.x SECTION --- #}
         {% if influxdb1_bridge_available() %}
         <li role="none">
           <a href="/pages/influxdb-metrics-edit/1" role="menuitem"
-             class="dropdown-item block px-4 py-2 text-mpg-200 hover:bg-mpg-600 hover:text-white">
-            Metrics Edit 1.x
+             class="dropdown-item block px-4 py-2 hover:bg-mpg-600 hover:text-white text-xs font-semibold tracking-wider text-mpg-400 uppercase pointer-events-none mt-1">
+            InfluxDB 1.x
+          </a>
+        </li>
+        <li role="none">
+          <a href="/pages/influxdb-metrics-edit/1" role="menuitem"
+             class="dropdown-item block px-6 py-2 text-mpg-200 hover:bg-mpg-600 hover:text-white">
+            Metrics Edit
+          </a>
+        </li>
+        <li role="none">
+          <a href="/pages/timeshift-data?version=1" role="menuitem"
+             class="dropdown-item block px-6 py-2 text-mpg-200 hover:bg-mpg-600 hover:text-white">
+            Timeshift Data
           </a>
         </li>
         {% endif %}
+
+        {# --- DIVIDER (Only if both are active) --- #}
+        {% if influxdb1_bridge_available() and influxdb3_bridge_available() %}
+        <li class="border-t border-mpg-600 my-1" role="none"></li>
+        {% endif %}
+
+        {# --- INFLUXDB 3.x SECTION --- #}
         {% if influxdb3_bridge_available() %}
         <li role="none">
           <a href="/pages/influxdb-metrics-edit/3" role="menuitem"
-             class="dropdown-item block px-4 py-2 text-mpg-200 hover:bg-mpg-600 hover:text-white">
-            Metrics Edit 3.x
+             class="dropdown-item block px-4 py-2 hover:bg-mpg-600 hover:text-white text-xs font-semibold tracking-wider text-mpg-400 uppercase pointer-events-none mt-1">
+            InfluxDB 3.x
+          </a>
+        </li>
+        <li role="none">
+          <a href="/pages/influxdb-metrics-edit/3" role="menuitem"
+             class="dropdown-item block px-6 py-2 text-mpg-200 hover:bg-mpg-600 hover:text-white">
+            Metrics Edit
+          </a>
+        </li>
+        <li role="none">
+          <a href="/pages/timeshift-data?version=3" role="menuitem"
+             class="dropdown-item block px-6 py-2 text-mpg-200 hover:bg-mpg-600 hover:text-white">
+            Timeshift Data
           </a>
         </li>
         {% endif %}
+
       </ul>
     </div>
     {% endif %}
+
 
     <!-- Create Scraper -->
     <a href="/pages/create-scraper"

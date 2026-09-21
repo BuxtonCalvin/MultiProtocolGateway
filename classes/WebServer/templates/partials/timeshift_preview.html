@@ -1,0 +1,56 @@
+{#
+  partials/timeshift_preview.html
+  Swapped into #ts-preview-container after "Preview" — read-only, nothing
+  written to InfluxDB. Context: points_to_write — int; sample —
+  list[InfluxPointDict] (up to 10); result — TimeshiftImportResult, whose
+  skip/warning counters are shown so the admin can catch a wrong Time
+  Column or an unmapped field before running the real import.
+#}
+<div class="rounded border border-mpg-700 p-3 mt-2">
+  <h3 class="surface-title text-xs font-semibold uppercase tracking-widest mb-2">
+    Preview — {{ points_to_write }} point{{ 's' if points_to_write != 1 }} would be written
+  </h3>
+
+  {% if result.rows_skipped_no_fields or result.rows_skipped_bad_time or result.unmapped_columns or result.type_mismatches %}
+  <ul class="text-xs text-danger space-y-0.5 mb-2">
+    {% if result.rows_skipped_bad_time %}
+    <li>{{ result.rows_skipped_bad_time }} row(s) skipped — missing or unparsable time value.</li>
+    {% endif %}
+    {% if result.rows_skipped_no_fields %}
+    <li>{{ result.rows_skipped_no_fields }} row(s) skipped — no mapped fields produced a value.</li>
+    {% endif %}
+    {% if result.unmapped_columns %}
+    <li>Unmapped column(s) ignored: {{ result.unmapped_columns|join(', ') }}</li>
+    {% endif %}
+    {% if result.type_mismatches %}
+    <li>{{ result.type_mismatches|length }} value(s) skipped for a type conflict with the existing field, e.g. {{ result.type_mismatches[0] }}</li>
+    {% endif %}
+  </ul>
+  {% endif %}
+
+  {% if sample %}
+  <div class="overflow-x-auto">
+    <table class="w-auto text-xs border-collapse">
+      <thead>
+        <tr class="mini-table-header uppercase tracking-wide">
+          <th class="px-2 py-1 text-left font-semibold whitespace-nowrap">Time</th>
+          <th class="px-2 py-1 text-left font-semibold whitespace-nowrap">Fields</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in sample %}
+        <tr class="border-t border-mpg-700/50">
+          <td class="px-2 py-1 mini-table-value whitespace-nowrap">{{ p.time_iso }}</td>
+          <td class="px-2 py-1 font-mono mini-table-value">
+            {{ p.fields|dictsort|map('join', '=')|join(', ') }}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="surface-subtle text-[10px] mt-1">Showing the first {{ sample|length }} of {{ points_to_write }} points.</p>
+  {% else %}
+  <p class="mini-table-meta text-xs italic">Nothing would be written with the current mapping/settings.</p>
+  {% endif %}
+</div>
