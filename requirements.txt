@@ -7,10 +7,10 @@ influxdb3-python
 sqlalchemy-timescaledb
 sqlalchemy
 psycopg2-binary
-alembic
-tzlocal
-fastapi
-pydantic
+alembic               # for database migrations
+tzlocal               # for timezone handling in multiple services
+fastapi               # for building the web server and API
+pydantic              # for data validation and settings management in FastAPI
 uvicorn[standard]     # for running FastAPI applications
 jinja2                # for HTML templating in FastAPI
 python-multipart      # required for form parsing in FastAPI
@@ -23,4 +23,4 @@ Pygments              # for syntax highlighting in FastAPI docs
 python-telegram-bot   # for Telegram messaging support
 prometheus_client     # for prometheus metrics support
 typing_extensions     # for strict typing support in Python versions < 3.11
-
+xlrd                  # for reading Excel files for timeshift service

@@ -68,6 +68,7 @@ from .routers.influxdb import router as influxdb_router
 from .routers.pages import router as pages_router
 from .routers.protocols import router as protocols_router
 from .routers.timescale import router as timescale_router
+from .routers.timeshift import router as timeshift_router
 from .routers.transport_settings import router as transport_settings_router
 from .scanner import Scanner
 from .services.bridge_service import is_timescale_available
@@ -424,6 +425,7 @@ def create_app(
     app.include_router(pages_router)
     app.include_router(protocols_router)
     app.include_router(timescale_router)
+    app.include_router(timeshift_router)
     app.include_router(transport_settings_router)
 
     # ------------------------------------------------------------------

@@ -1,0 +1,515 @@
+<!--
+  Description: Defines the InfluxDB "Timeshift Data" admin screen.
+  File: timeshift_data.html
+
+  Copyright 2026 Kevin Burke
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://apache.org
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+
+{#
+  pages/timeshift_data.html
+  GUI counterpart of tools/InfluxDateConverter.py, reached from the
+  InfluxDB nav dropdown's "Timeshift Data" item. Every hand-edited
+  constant that script requires is a field on this page instead; nothing
+  here is written to InfluxDB until Preview has been reviewed and Import
+  is pressed (or, for the export path, until Export to CSV triggers a
+  browser download -- nothing is written anywhere for that path).
+
+  Context: version ("1"|"3"); v1_available/v3_available — bool, which
+  version toggle links are shown; measurements — [str, ...] on the
+  resolved bridge; eg4_available — bool, whether "Import EG4 Spreadsheet"
+  is selectable (services.timeshift_service.is_eg4_protocol_in_use);
+  default_confidence_threshold — float; machine_timezone — this bridge's
+  configured zone, used as the Local Timezone field's default.
+
+  Three source modes (radio buttons, JS-toggled panels):
+    - "export"     : pick a date range on this bridge, get a time-shifted
+                     CSV download (browser Save dialog = "a folder of
+                     one's choosing").
+    - "eg4"        : upload a spreadsheet exported from the EG4 website;
+                     only enabled when eg4_available.
+    - "influx_csv" : re-import a CSV this same screen (or InfluxDateConv
+                     erter.py) previously exported, optionally hand-edited.
+
+  Styling: mirrors pages/influxdb_metrics_edit.html — theme-input/
+  surface-title/mini-table-* classes, btn-tertiary buttons, the same
+  max-width form-panel convention.
+#}
+
+{% extends "base.html" %}
+{% block title %}InfluxDB — Timeshift Data — MPG Admin{% endblock %}
+{% block content %}
+<div class="col-span-12 flex flex-col gap-4" id="timeshift-root" data-version="{{ version }}" style="max-width: 900px;">
+
+  <div class="flex items-center justify-between">
+    <div>
+      <h1 class="surface-title text-lg font-semibold">Timeshift Data</h1>
+      <p class="surface-subtle text-xs mt-1">
+        Export a date range of InfluxDB data to CSV, or import an EG4 spreadsheet export / a previously
+        exported CSV back into InfluxDB — with the same field matchup and time-shift logic as
+        <code class="font-mono">tools/InfluxDateConverter.py</code>, done here through this screen instead
+        of hand-edited constants.
+      </p>
+    </div>
+    <div class="flex items-center gap-1 text-xs shrink-0">
+      {% if v1_available %}
+      <a href="/pages/timeshift-data?version=1"
+         class="px-3 py-1.5 rounded {{ 'bg-mpg-600 text-white' if version == '1' else 'btn-tertiary' }}">
+        InfluxDB 1.x
+      </a>
+      {% endif %}
+      {% if v3_available %}
+      <a href="/pages/timeshift-data?version=3"
+         class="px-3 py-1.5 rounded {{ 'bg-mpg-600 text-white' if version == '3' else 'btn-tertiary' }}">
+        InfluxDB 3.x
+      </a>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- ══ SOURCE MODE ══ -->
+  <div class="rounded border border-mpg-700 p-3">
+    <label class="surface-title text-xs font-semibold uppercase tracking-widest mb-2 block">Source</label>
+    <div class="flex flex-wrap gap-4 text-xs">
+      <label class="flex items-center gap-1.5">
+        <input type="radio" name="source-mode" value="export" checked onchange="onSourceModeChange(this)">
+        Export InfluxDB range to CSV
+      </label>
+      <label class="flex items-center gap-1.5 {% if not eg4_available %}opacity-40{% endif %}">
+        <input type="radio" name="source-mode" value="eg4" {% if not eg4_available %}disabled{% endif %}
+               onchange="onSourceModeChange(this)">
+        Import EG4 spreadsheet
+        {% if not eg4_available %}<span class="italic">(no eg4_* protocol configured)</span>{% endif %}
+      </label>
+      <label class="flex items-center gap-1.5">
+        <input type="radio" name="source-mode" value="influx_csv" onchange="onSourceModeChange(this)">
+        Re-import an exported/edited CSV
+      </label>
+    </div>
+  </div>
+
+  <!-- ══ COMMON SETTINGS ══ -->
+  <div class="rounded border border-mpg-700 p-3 flex flex-col gap-3">
+
+    <div class="grid grid-cols-2 gap-3">
+      <div>
+        <label for="ts-measurement" class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">
+          Measurement
+        </label>
+        <input type="text" id="ts-measurement" list="ts-measurement-list" placeholder="e.g. device_data"
+               class="theme-input w-full text-xs rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-accent"
+               onchange="onMeasurementChange()">
+        <datalist id="ts-measurement-list">
+          {% for m in measurements %}<option value="{{ m }}">{% endfor %}
+        </datalist>
+        <p class="surface-subtle text-[10px] mt-1">Existing measurements are suggested; type a new name to create one.</p>
+      </div>
+      <div>
+        <label for="ts-timezone" class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">
+          Local Timezone
+        </label>
+        <input type="text" id="ts-timezone" value="{{ machine_timezone }}"
+               class="theme-input w-full text-xs rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-accent">
+        <p class="surface-subtle text-[10px] mt-1">IANA zone name, e.g. America/Los_Angeles. Defaults to this bridge's configured zone.</p>
+      </div>
+    </div>
+
+    <!-- Tags -->
+    <div>
+      <div class="flex items-center justify-between mb-1">
+        <label class="surface-title text-xs font-semibold uppercase tracking-widest">Tags</label>
+        <button type="button" class="btn-tertiary text-xs" onclick="addTagRow('', '')">+ Add Tag</button>
+      </div>
+      <p class="surface-subtle text-[10px] mb-2">
+        Written as fixed InfluxDB tags on every point (device_identifier, device_name, device_manufacturer,
+        device_model, device_serial_number, transport, etc. — same role as STATIC_TAGS in
+        InfluxDateConverter.py). <span class="font-semibold">device_identifier is required.</span> A
+        source column whose name matches a tag key is ignored as a field by default.
+      </p>
+      <div id="ts-tags-rows" class="flex flex-col gap-1.5"></div>
+    </div>
+
+    <div class="grid grid-cols-3 gap-3 items-end">
+      <div>
+        <label for="ts-confidence" class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">
+          Match Confidence Threshold
+        </label>
+        <input type="number" id="ts-confidence" min="0" max="1" step="0.01" value="{{ default_confidence_threshold }}"
+               class="theme-input w-full text-xs rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-accent">
+      </div>
+      <label class="flex items-center gap-1.5 text-xs mb-1.5">
+        <input type="checkbox" id="ts-allow-coercion" checked>
+        Allow float coercion on type conflicts
+      </label>
+      <label id="ts-delete-existing-wrap" class="flex items-center gap-1.5 text-xs mb-1.5">
+        <input type="checkbox" id="ts-delete-existing" {% if version == '3' %}disabled{% endif %}>
+        Delete existing points in target range first
+        {% if version == '3' %}<span class="italic surface-subtle">(v3: use Metrics Edit instead)</span>{% endif %}
+      </label>
+    </div>
+  </div>
+
+  <!-- ══ EXPORT PANEL ══ -->
+  <div id="ts-panel-export" class="rounded border border-mpg-700 p-3 flex flex-col gap-3">
+    <h2 class="surface-title text-xs font-semibold uppercase tracking-widest">Export Range</h2>
+    <div class="grid grid-cols-3 gap-3">
+      <div>
+        <label for="ts-export-device" class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">
+          Device Identifier <span class="surface-subtle font-normal normal-case">(optional filter)</span>
+        </label>
+        <input type="text" id="ts-export-device" placeholder="e.g. 4066670074"
+               class="theme-input w-full text-xs rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-accent">
+      </div>
+      <div>
+        <label for="ts-export-start" class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">Source Start</label>
+        <input type="datetime-local" step="1" id="ts-export-start"
+               class="theme-input w-full text-xs rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-accent">
+      </div>
+      <div>
+        <label for="ts-export-end" class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">Source End</label>
+        <input type="datetime-local" step="1" id="ts-export-end"
+               class="theme-input w-full text-xs rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-accent">
+      </div>
+    </div>
+    <div>
+      <label for="ts-export-target" class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">
+        Target Start <span class="surface-subtle font-normal normal-case">(for the shifted timestamps in the CSV)</span>
+      </label>
+      <input type="datetime-local" step="1" id="ts-export-target"
+             class="theme-input w-full text-xs rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-accent" style="max-width: 260px;">
+      <p class="surface-subtle text-[10px] mt-1">Leave equal to Source Start to export with no shift.</p>
+    </div>
+    <div>
+      <button type="button" class="btn-tertiary text-xs" onclick="doExport()">Export to CSV</button>
+    </div>
+    <div id="ts-export-status"></div>
+  </div>
+
+  <!-- ══ IMPORT PANEL (EG4 / influx_csv) ══ -->
+  <div id="ts-panel-import" class="rounded border border-mpg-700 p-3 flex-on-show flex-col gap-3 hidden">
+    <h2 id="ts-import-title" class="surface-title text-xs font-semibold uppercase tracking-widest">Import Spreadsheet</h2>
+
+    <div>
+      <label for="ts-import-file" class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">File</label>
+      <input type="file" id="ts-import-file" accept=".csv,.xls,.xlsx"
+             class="theme-input w-full text-xs rounded px-2 py-1.5">
+    </div>
+
+    <div class="grid grid-cols-2 gap-3">
+      <div>
+        <label for="ts-import-start" class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">Source Start</label>
+        <input type="datetime-local" step="1" id="ts-import-start"
+               class="theme-input w-full text-xs rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-accent">
+      </div>
+      <div>
+        <label for="ts-import-target" class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">Target Start</label>
+        <input type="datetime-local" step="1" id="ts-import-target"
+               class="theme-input w-full text-xs rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-accent">
+      </div>
+    </div>
+    <p class="surface-subtle text-[10px] -mt-2">
+      Time delta = Target Start − Source Start, applied to every row's timestamp (same logic as
+      InfluxDateConverter.py's SOURCE_START_TIME/TARGET_START_TIME). Leave them equal for no shift.
+    </p>
+
+    <div>
+      <button type="button" class="btn-tertiary text-xs" onclick="uploadAndScan()">Upload &amp; Scan Fields</button>
+    </div>
+
+    <div id="ts-mapping-container"></div>
+
+    <div id="ts-import-actions" class="hidden flex-on-show items-center gap-2">
+      <div class="flex-1">
+        <label for="ts-time-column" class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">Time Column</label>
+        <select id="ts-time-column" class="theme-input w-full text-xs rounded px-2 py-1.5" style="max-width: 220px;"></select>
+      </div>
+    </div>
+    <div id="ts-import-buttons" class="hidden flex-on-show items-center gap-2">
+      <button type="button" class="btn-tertiary text-xs" onclick="runPreview()">Preview</button>
+      <button type="button" class="btn-tertiary text-xs" onclick="runImport()">Import to InfluxDB</button>
+    </div>
+
+    <div id="ts-import-status"></div>
+    <div id="ts-preview-container"></div>
+    <div id="ts-result-container"></div>
+  </div>
+
+</div>
+
+<script>
+  // version comes from a data attribute on #timeshift-root, not rendered
+  // directly via Jinja into this script block -- see the identical
+  // comment/fix in pages/influxdb_metrics_edit.html: rendering a Jinja
+  // expression straight into an inline script trips editor JS linters
+  // (raw template delimiters aren't valid JS syntax until the template
+  // engine substitutes them) and, worse, some Jinja/autoescape
+  // combinations have been known to mis-render the tojson filter's
+  // output inside inline scripts. Reading it from an ordinary HTML
+  // attribute sidesteps both problems. (Deliberately not spelled out
+  // literally here, either -- Jinja scans this whole file for its
+  // delimiters, comments included, so writing them out would itself
+  // become a template expression and fail to render.)
+  const TimeshiftState = {
+    version: document.getElementById('timeshift-root').dataset.version,
+    uploadId: null,
+    sourceMode: 'export',
+  };
+
+  // ---- Tags GUI ----
+  function addTagRow(key, value) {
+    const row = document.createElement('div');
+    row.className = 'flex items-center gap-2 ts-tag-row';
+    row.innerHTML =
+      '<input type="text" placeholder="key (e.g. device_identifier)" value="' + (key || '').replace(/"/g, '&quot;') + '" ' +
+        'class="theme-input flex-1 text-xs rounded px-2 py-1 ts-tag-key">' +
+      '<input type="text" placeholder="value" value="' + (value || '').replace(/"/g, '&quot;') + '" ' +
+        'class="theme-input flex-1 text-xs rounded px-2 py-1 ts-tag-value">' +
+      '<button type="button" class="text-danger hover:text-danger/70 text-xs" onclick="this.closest(\'.ts-tag-row\').remove()">✕</button>';
+    document.getElementById('ts-tags-rows').appendChild(row);
+  }
+
+  function collectTagsJson() {
+    const tags = {};
+    document.querySelectorAll('.ts-tag-row').forEach(function (row) {
+      const k = row.querySelector('.ts-tag-key').value.trim();
+      const v = row.querySelector('.ts-tag-value').value.trim();
+      if (k && v) { tags[k] = v; }
+    });
+    return JSON.stringify(tags);
+  }
+
+  // Seed a starter row set matching InfluxDateConverter.py's STATIC_TAGS keys, values blank.
+  ['device_identifier', 'device_name', 'device_manufacturer', 'device_model', 'device_serial_number', 'transport']
+    .forEach(function (k) { addTagRow(k, ''); });
+
+  // ---- Source mode toggling ----
+  function onSourceModeChange(radio) {
+    TimeshiftState.sourceMode = radio.value;
+    document.getElementById('ts-panel-export').classList.toggle('hidden', radio.value !== 'export');
+    document.getElementById('ts-panel-import').classList.toggle('hidden', radio.value === 'export');
+    const title = document.getElementById('ts-import-title');
+    if (radio.value === 'eg4') { title.textContent = 'Import EG4 Spreadsheet'; }
+    if (radio.value === 'influx_csv') { title.textContent = 'Re-import Exported CSV'; }
+    // A fresh source means any previously scanned mapping is stale.
+    document.getElementById('ts-mapping-container').innerHTML = '';
+    document.getElementById('ts-import-actions').classList.add('hidden');
+    document.getElementById('ts-import-buttons').classList.add('hidden');
+    document.getElementById('ts-preview-container').innerHTML = '';
+    document.getElementById('ts-result-container').innerHTML = '';
+    TimeshiftState.uploadId = null;
+  }
+
+  function onMeasurementChange() {
+    // Selecting a different measurement invalidates any already-scanned mapping
+    // (it was matched against the PREVIOUS measurement's schema).
+    document.getElementById('ts-mapping-container').innerHTML = '';
+    document.getElementById('ts-import-actions').classList.add('hidden');
+    document.getElementById('ts-import-buttons').classList.add('hidden');
+  }
+
+  function showStatus(containerId, message, isError) {
+    document.getElementById(containerId).innerHTML =
+      '<div class="text-xs px-3 py-2 rounded border ' +
+      (isError ? 'border-danger/30 bg-danger/10 text-danger' : 'border-success/30 bg-success/10 text-success') +
+      '">' + message + '</div>';
+  }
+
+  // ---- Export ----
+  function doExport() {
+    const measurement = document.getElementById('ts-measurement').value.trim();
+    const start = document.getElementById('ts-export-start').value;
+    const end = document.getElementById('ts-export-end').value;
+    const target = document.getElementById('ts-export-target').value || start;
+    if (!measurement) { showStatus('ts-export-status', 'Enter a measurement.', true); return; }
+    if (!start || !end) { showStatus('ts-export-status', 'Pick a source start and end.', true); return; }
+    if (end < start) { showStatus('ts-export-status', 'Source End must not be before Source Start.', true); return; }
+
+    const params = new URLSearchParams({
+      version: TimeshiftState.version,
+      measurement: measurement,
+      start_time: start,
+      end_time: end,
+      target_start: target,
+      local_timezone: document.getElementById('ts-timezone').value.trim(),
+      tags_json: collectTagsJson(),
+    });
+    const device = document.getElementById('ts-export-device').value.trim();
+    if (device) { params.set('device_identifier', device); }
+
+    document.getElementById('ts-export-status').innerHTML = '';
+    window.location.href = '/api/timeshift/export.csv?' + params.toString();
+  }
+
+  // ---- Upload & mapping ----
+  async function uploadAndScan() {
+    const measurement = document.getElementById('ts-measurement').value.trim();
+    const fileInput = document.getElementById('ts-import-file');
+    if (!measurement) { showStatus('ts-import-status', 'Enter a measurement.', true); return; }
+    if (!fileInput.files.length) { showStatus('ts-import-status', 'Choose a file first.', true); return; }
+
+    const form = new FormData();
+    form.append('version', TimeshiftState.version);
+    form.append('measurement', measurement);
+    form.append('source_kind', TimeshiftState.sourceMode);
+    form.append('tags_json', collectTagsJson());
+    form.append('confidence_threshold', document.getElementById('ts-confidence').value || '0.85');
+    form.append('file', fileInput.files[0]);
+
+    document.getElementById('ts-import-status').innerHTML = '';
+    document.getElementById('ts-preview-container').innerHTML = '';
+    document.getElementById('ts-result-container').innerHTML = '';
+
+    let resp, html;
+    try {
+      resp = await fetch('/api/timeshift/upload', { method: 'POST', body: form });
+      html = await resp.text();
+    } catch (e) {
+      showStatus('ts-import-status', 'Upload failed — see the browser console.', true);
+      return;
+    }
+
+    if (!resp.ok) {
+      let detail = 'Upload failed.';
+      try { detail = JSON.parse(html).detail || detail; } catch (e) { /* non-JSON error body */ }
+      showStatus('ts-import-status', detail, true);
+      return;
+    }
+
+    document.getElementById('ts-mapping-container').innerHTML = html;
+    const root = document.getElementById('ts-mapping-root');
+    TimeshiftState.uploadId = root ? root.dataset.uploadId : null;
+
+    // Populate the Time Column select from the mapping partial's own data-columns list.
+    const timeSelect = document.getElementById('ts-time-column');
+    timeSelect.innerHTML = '';
+    if (root) {
+      const columns = JSON.parse(root.dataset.columns || '[]');
+      const detected = root.dataset.detectedTimeColumn || '';
+      columns.forEach(function (col) {
+        const opt = document.createElement('option');
+        opt.value = col;
+        opt.textContent = col;
+        if (col === detected) { opt.selected = true; }
+        timeSelect.appendChild(opt);
+      });
+    }
+
+    document.getElementById('ts-import-actions').classList.remove('hidden');
+    document.getElementById('ts-import-buttons').classList.remove('hidden');
+  }
+
+  function collectMappingJson() {
+    const mapping = {};
+    document.querySelectorAll('.ts-map-row').forEach(function (row) {
+      const source = row.dataset.sourceColumn;
+      const ignore = row.querySelector('.ts-map-ignore').checked;
+      if (ignore) { mapping[source] = ''; return; }
+      const select = row.querySelector('.ts-map-target-select');
+      const custom = row.querySelector('.ts-map-target-custom');
+      const target = (select.value === '__new__' ? custom.value : select.value).trim();
+      // Leave a genuinely unmapped (not ignored) column OUT of the dict entirely --
+      // the server treats an absent key as "unmapped" (reported in the preview/
+      // result warnings) and a present-but-empty key as "explicitly ignored"
+      // (silent). Sending "" here for both would collapse that distinction.
+      if (target) { mapping[source] = target; }
+    });
+    return JSON.stringify(mapping);
+  }
+
+  function onMapTargetChange(select) {
+    const row = select.closest('.ts-map-row');
+    row.querySelector('.ts-map-target-custom').classList.toggle('hidden', select.value !== '__new__');
+  }
+
+  function buildRunPayload() {
+    const upload = TimeshiftState.uploadId;
+    if (!upload) { showStatus('ts-import-status', 'Upload a file first.', true); return null; }
+    const measurement = document.getElementById('ts-measurement').value.trim();
+    const timeColumn = document.getElementById('ts-time-column').value;
+    const start = document.getElementById('ts-import-start').value;
+    const target = document.getElementById('ts-import-target').value || start;
+    if (!timeColumn) { showStatus('ts-import-status', 'Select the time column.', true); return null; }
+    if (!start) { showStatus('ts-import-status', 'Pick a source start time.', true); return null; }
+
+    return {
+      upload_id: upload,
+      version: TimeshiftState.version,
+      measurement: measurement,
+      time_column: timeColumn,
+      mapping_json: collectMappingJson(),
+      tags_json: collectTagsJson(),
+      local_timezone: document.getElementById('ts-timezone').value.trim(),
+      source_is_local: TimeshiftState.sourceMode === 'eg4',
+      source_start: start,
+      target_start: target,
+      allow_float_coercion: document.getElementById('ts-allow-coercion').checked,
+    };
+  }
+
+  async function runPreview() {
+    const payload = buildRunPayload();
+    if (!payload) { return; }
+    document.getElementById('ts-import-status').innerHTML = '';
+    document.getElementById('ts-result-container').innerHTML = '';
+
+    let resp, html;
+    try {
+      resp = await fetch('/api/timeshift/preview', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      });
+      html = await resp.text();
+    } catch (e) {
+      showStatus('ts-import-status', 'Preview request failed — see the browser console.', true);
+      return;
+    }
+    if (resp.ok) {
+      document.getElementById('ts-preview-container').innerHTML = html;
+    } else {
+      let detail = 'Preview failed.';
+      try { detail = JSON.parse(html).detail || detail; } catch (e) { /* non-JSON error body */ }
+      showStatus('ts-import-status', detail, true);
+    }
+  }
+
+  async function runImport() {
+    const payload = buildRunPayload();
+    if (!payload) { return; }
+    const proceed = window.confirm(
+      'Import into measurement "' + payload.measurement + '" (InfluxDB v' + TimeshiftState.version + ')?\n\n' +
+      'This writes points to InfluxDB immediately — this is NOT part of the staged "Commit All Changes" flow. Continue?'
+    );
+    if (!proceed) { return; }
+
+    document.getElementById('ts-import-status').innerHTML = '';
+
+    let resp, html;
+    try {
+      resp = await fetch('/api/timeshift/import', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      });
+      html = await resp.text();
+    } catch (e) {
+      showStatus('ts-import-status', 'Import request failed — see the browser console.', true);
+      return;
+    }
+    if (resp.ok) {
+      document.getElementById('ts-result-container').innerHTML = html;
+    } else {
+      let detail = 'Import failed.';
+      try { detail = JSON.parse(html).detail || detail; } catch (e) { /* non-JSON error body */ }
+      showStatus('ts-import-status', detail, true);
+    }
+  }
+</script>
+{% endblock %}

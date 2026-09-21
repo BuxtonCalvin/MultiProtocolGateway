@@ -1,0 +1,28 @@
+{#
+  partials/timeshift_result.html
+  Swapped into #ts-result-container after "Import to InfluxDB" actually
+  writes points. Context: result — TimeshiftImportResult (points_written
+  now set to the real write count); action — "import" (reserved for
+  future reuse by other Timeshift actions using the same result shape).
+#}
+<div class="rounded border border-success/30 bg-success/10 p-3 mt-2">
+  <p class="text-success text-xs font-semibold">
+    Wrote {{ result.points_written }} point{{ 's' if result.points_written != 1 }} to InfluxDB.
+  </p>
+  {% if result.rows_skipped_no_fields or result.rows_skipped_bad_time or result.unmapped_columns or result.type_mismatches %}
+  <ul class="text-xs text-mpg-700 dark:text-mpg-200 space-y-0.5 mt-1">
+    {% if result.rows_skipped_bad_time %}
+    <li>{{ result.rows_skipped_bad_time }} row(s) skipped — missing or unparsable time value.</li>
+    {% endif %}
+    {% if result.rows_skipped_no_fields %}
+    <li>{{ result.rows_skipped_no_fields }} row(s) skipped — no mapped fields produced a value.</li>
+    {% endif %}
+    {% if result.unmapped_columns %}
+    <li>Unmapped column(s) ignored: {{ result.unmapped_columns|join(', ') }}</li>
+    {% endif %}
+    {% if result.type_mismatches %}
+    <li>{{ result.type_mismatches|length }} value(s) skipped for a type conflict with the existing field.</li>
+    {% endif %}
+  </ul>
+  {% endif %}
+</div>
