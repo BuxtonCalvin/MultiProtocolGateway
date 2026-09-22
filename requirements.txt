@@ -23,4 +23,5 @@ Pygments              # for syntax highlighting in FastAPI docs
 python-telegram-bot   # for Telegram messaging support
 prometheus_client     # for prometheus metrics support
 typing_extensions     # for strict typing support in Python versions < 3.11
-xlrd                  # for reading Excel files for timeshift service
+pandas                # for data manipulation and analysis
+openpyxl              # for reading/writing Excel files

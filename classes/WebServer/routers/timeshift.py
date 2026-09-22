@@ -50,6 +50,12 @@ Flow:
      inventing a server-side file-path field.
   7. DELETE /api/timeshift/upload/{upload_id}           -- discards a
      server-side upload the admin no longer needs (e.g. switched files).
+  8. GET  /api/timeshift/tag-values                    -- JSON: existing tag
+     keys and, per requested key, the distinct values already stored in a
+     measurement; feeds the Tags panel's dropdowns.
+  9. GET  /api/timeshift/upload/{upload_id}/earliest   -- JSON: the earliest
+     timestamp in a chosen time column of a stored upload; fills the EG4
+     import's "Source Start".
 
 Nothing here is part of the staged-config-changes/"Commit All Changes"
 pipeline (routers/commit.py) -- Timeshift Data writes/reads point DATA, not
@@ -67,6 +73,8 @@ type isn't immediately obvious from its initializer is annotated
 explicitly, per the same convention routers/influxdb.py already follows.
 """
 
+# pyright: strict
+
 from __future__ import annotations
 
 import csv
@@ -75,11 +83,11 @@ import json
 import logging
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, cast
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import pandas as pd
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from ..database import session_scope
@@ -91,24 +99,30 @@ from ..services.influxdb_service import (
 )
 from ..services.timeshift_service import (
     DEFAULT_CONFIDENCE_THRESHOLD,
+    STANDARD_TAG_KEYS,
     FieldMappingRow,
     InfluxPointDict,
+    ParsedSpreadsheet,
     SourceKind,
+    TagOptions,
     TimeshiftImportResult,
     TimeshiftUpload,
     build_points,
     compute_time_delta,
-    detect_time_column,
     discard_upload,
+    earliest_timestamp,
     export_range_rows,
+    find_time_column,
     get_upload,
     is_eg4_protocol_in_use,
     load_influx_field_types,
+    load_tag_options,
     machine_timezone_for,
     measurements_for,
-    parse_spreadsheet_bytes,
+    parse_upload,
     store_upload,
     suggest_field_mapping,
+    timezone_groups,
     write_points_v1,
     write_points_v3,
 )
@@ -236,6 +250,8 @@ async def timeshift_data_page(request: Request, version: str = "1") -> HTMLRespo
         _log.warning(f"[Timeshift] Could not list measurements for v{version}: {exc}")
         measurements = []
 
+    machine_timezone: str = machine_timezone_for(gateway, version)
+
     return request.app.state.templates.TemplateResponse(
         request=request,
         name="pages/timeshift_data.html",
@@ -247,7 +263,9 @@ async def timeshift_data_page(request: Request, version: str = "1") -> HTMLRespo
             "measurements": measurements,
             "eg4_available": is_eg4_protocol_in_use(nav),
             "default_confidence_threshold": DEFAULT_CONFIDENCE_THRESHOLD,
-            "machine_timezone": machine_timezone_for(gateway, version),
+            "machine_timezone": machine_timezone,
+            "timezone_groups": timezone_groups(machine_timezone),
+            "standard_tag_keys": STANDARD_TAG_KEYS,
         },
     )
 
@@ -289,6 +307,10 @@ async def timeshift_upload(
     Matchup table partial -- the interactive replacement for
     InfluxDateConverter.py's perform_schema_validation()/mapping_needed.csv
     hand-edit cycle.
+
+    An EG4 workbook with several sheets is consolidated into one table
+    first (services.timeshift_service.consolidate_sheets); the partial
+    reports which sheets were merged/skipped and any conflict warnings.
     """
     _require_bridge(request, version)
     if source_kind not in ("eg4", "influx_csv"):
@@ -298,15 +320,16 @@ async def timeshift_upload(
     if len(raw) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=400, detail=f"File is too large (limit {MAX_UPLOAD_BYTES // (1024 * 1024)} MB).")
 
-    df: pd.DataFrame
+    resolved_source_kind: SourceKind = cast_source_kind(source_kind)
+    parsed: ParsedSpreadsheet
     try:
-        df = parse_spreadsheet_bytes(file.filename or "upload", raw)
+        parsed = parse_upload(file.filename or "upload", raw, resolved_source_kind)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    df: pd.DataFrame = parsed.dataframe
 
     gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
     tags: dict[str, str] = _parse_tags_json(tags_json)
-    resolved_source_kind: SourceKind = cast_source_kind(source_kind)
 
     influx_fields: list[str]
     try:
@@ -329,8 +352,11 @@ async def timeshift_upload(
             "row_count": len(df),
             "mapping_rows": mapping_rows,
             "influx_fields": influx_fields,
-            "detected_time_column": detect_time_column(upload.columns),
+            "detected_time_column": parsed.time_column or find_time_column(df),
             "columns": upload.columns,
+            "sheets_used": parsed.sheets_used,
+            "sheets_skipped": parsed.sheets_skipped,
+            "parse_warnings": parsed.warnings,
         },
     )
 
@@ -339,6 +365,46 @@ async def timeshift_upload(
 def timeshift_discard_upload(upload_id: str, request: Request) -> dict[str, bool]:
     """Discards a server-side upload the admin no longer needs (e.g. picked the wrong file)."""
     return {"discarded": discard_upload(request.app.state, upload_id)}
+
+
+@router.get("/api/timeshift/upload/{upload_id}/earliest")
+def timeshift_upload_earliest(
+    upload_id: str, request: Request, time_column: str, local_timezone: str,
+    ) -> dict[str, str | None]:
+    """
+    Earliest timestamp in `time_column` of a stored upload (in `local_timezone`,
+    formatted for a datetime-local input), or null if there isn't a parsable
+    one. The EG4 import uses it as "Source Start" -- for a consolidated
+    multi-sheet workbook that is the earliest time across ALL sheets.
+    """
+    upload: TimeshiftUpload | None = get_upload(request.app.state, upload_id)
+    if upload is None:
+        raise HTTPException(status_code=404, detail="This upload has expired or was discarded -- please upload the file again.")
+    if time_column not in upload.columns:
+        raise HTTPException(status_code=400, detail=f"Time column '{time_column}' is not a column in the uploaded file.")
+    try:
+        ZoneInfo(local_timezone)
+    except (ZoneInfoNotFoundError, ValueError):
+        raise HTTPException(status_code=400, detail=f"'{local_timezone}' is not a valid IANA timezone name.")
+    return {"earliest": earliest_timestamp(upload.dataframe, time_column, local_timezone)}
+
+
+@router.get("/api/timeshift/tag-values")
+def timeshift_tag_values(
+    request: Request, version: str, measurement: str, key: list[str] = Query(default=[]),
+    ) -> JSONResponse:
+    """
+    JSON {tag_keys, tag_values, error} for the Tags panel: tag_keys are the
+    keys worth suggesting for `measurement` (the six standard MPG tags plus
+    any others found on it); tag_values maps each requested `key` (repeat the
+    parameter for several) to the distinct values already stored. A failed
+    lookup is reported in `error`, never as an HTTP failure -- the panel
+    just falls back to free-text entry.
+    """
+    _require_bridge(request, version)
+    gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
+    options: TagOptions = load_tag_options(gateway, version, measurement, key)
+    return JSONResponse({"tag_keys": options.tag_keys, "tag_values": options.tag_values, "error": options.error})
 
 
 # ---------------------------------------------------------------------------
