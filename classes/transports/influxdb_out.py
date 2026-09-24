@@ -1224,37 +1224,59 @@ class InfluxV1AdminManager:
 
     def list_metric_edit_devices(self, measurement: str) -> list[InfluxV1MetricEditDevice]:
         """
-        Returns every (device_identifier, device_name) pairing recorded in
-        `measurement`, for the Metrics Edit device picker.
+        Returns every device_identifier recorded in `measurement`, for the
+        Metrics Edit device picker.
 
-        Grouping by both tags together (rather than two separate SHOW TAG
-        VALUES calls, one per key) is the only reliable way in InfluxQL to
-        get *paired* tag values -- SHOW TAG VALUES reports each tag key's
-        distinct values independently, with no way to see which
-        device_name goes with which device_identifier. GROUP BY returns
-        one result block per unique tag *combination*, each carrying its
-        own tags dict -- exactly the pairing this needs.
+        Uses SHOW TAG VALUES, which is answered from InfluxDB's series
+        index alone -- it never reads a single data point, so it returns
+        near-instantly even on a very large measurement (the same class of
+        metadata query as SHOW FIELD KEYS). The previous implementation
+        ran "SELECT * ... GROUP BY device_identifier, device_name LIMIT 1",
+        which has to fetch the first point of every series across every
+        shard and was very slow on big measurements.
 
-        Selects "*" (every field), not just "time" -- InfluxQL rejects a
-        query that selects only "time" with no actual field ("at least 1
-        non-time field must be queried"); the field values themselves are
-        discarded here regardless, only each series' tags dict is used.
+        device_name is deliberately left None here: SHOW TAG VALUES cannot
+        pair values from two tag keys. Call get_metric_edit_device_name()
+        once a device has been picked to resolve its friendly name.
         """
-        query: str = (
-            f"SELECT * FROM {quote_ident(measurement)} GROUP BY device_identifier, device_name LIMIT 1"  # noqa: S608
-        )
+        query: str = f'SHOW TAG VALUES FROM {quote_ident(measurement)} WITH KEY = "device_identifier"'  # noqa: S608
         result: ResultSet = self._client.query(query, database=self._bridge.database)  # type: ignore[reportUnknownMemberType]
 
-        devices: list[InfluxV1MetricEditDevice] = []
-        for (_series_name, tags), _points in result.items():  # type: ignore[reportUnknownMemberType]
-            tag_map: dict[str, str] = cast(dict[str, str], tags) if tags else {}
-            identifier: str | None = tag_map.get("device_identifier")
-            if identifier:
-                devices.append(
-                    InfluxV1MetricEditDevice(device_identifier=identifier, device_name=tag_map.get("device_name"))
-                )
-        devices.sort(key=lambda d: d.device_identifier)
-        return devices
+        # get_points() yields Unknown-typed items -- collected into an
+        # explicitly dict[str, object]-typed list first (same pattern as
+        # list_metric_edit_fields below) so every access after it is fully typed.
+        points: list[dict[str, object]] = list(result.get_points())  # type: ignore[reportUnknownMemberType]
+        identifiers: set[str] = set()
+        for point in points:
+            value: object = point.get("value")
+            if isinstance(value, str) and value:
+                identifiers.add(value)
+        return [InfluxV1MetricEditDevice(device_identifier=i, device_name=None) for i in sorted(identifiers)]
+
+    def get_metric_edit_device_name(self, measurement: str, device_identifier: str) -> str | None:
+        """
+        Returns the device_name tag value(s) recorded alongside one
+        device_identifier in `measurement`, or None if it has no device_name.
+
+        Index-only like list_metric_edit_devices(). If a device has been
+        recorded under more than one name (e.g. it was renamed), the
+        distinct names are joined with " / ". device_identifier is passed as
+        an InfluxQL bind param, never string-interpolated.
+        """
+        query: str = (
+            f'SHOW TAG VALUES FROM {quote_ident(measurement)} '  # noqa: S608
+            'WITH KEY = "device_name" WHERE "device_identifier" = $device_id'
+        )
+        result: ResultSet = self._client.query(  # type: ignore[reportUnknownMemberType]
+            query, bind_params={"device_id": device_identifier}, database=self._bridge.database
+        )
+        points: list[dict[str, object]] = list(result.get_points())  # type: ignore[reportUnknownMemberType]
+        names: set[str] = set()
+        for point in points:
+            value: object = point.get("value")
+            if isinstance(value, str) and value:
+                names.add(value)
+        return " / ".join(sorted(names)) if names else None
 
     def list_metric_edit_fields(self, measurement: str) -> list[InfluxV1MetricEditField]:
         """Returns every field key (and its reported type) in `measurement`, for the Metrics Edit field picker."""

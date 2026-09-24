@@ -26,12 +26,31 @@
   is pressed (or, for the export path, until Export to CSV triggers a
   browser download -- nothing is written anywhere for that path).
 
-  Context: version ("1"|"3"); v1_available/v3_available — bool, which
-  version toggle links are shown; measurements — [str, ...] on the
-  resolved bridge; eg4_available — bool, whether "Import EG4 Spreadsheet"
-  is selectable (services.timeshift_service.is_eg4_protocol_in_use);
+  Context: version ("1"|"3"|"timescale"); v1_available/v3_available/
+  timescale_available — bool, which version toggle links are shown;
+  measurements — [str, ...] on the resolved InfluxDB bridge (unused for
+  timescale); timescale_tables — [{table_kind, protocol_name, table_name},
+  ...] from services.timeshift_service.timescale_tables_for, the shared
+  narrow table first then every wide-table protocol, backing the Table
+  <select> that replaces Measurement when version="timescale";
+  eg4_available — bool, whether "Import EG4 Spreadsheet" is selectable
+  (services.timeshift_service.is_eg4_protocol_in_use);
   default_confidence_threshold — float; machine_timezone — this bridge's
-  configured zone, used as the Local Timezone field's default.
+  configured zone, preselected in the Local Machine Timezone dropdown;
+  timezone_groups — [(region, [IANA name, ...]), ...] for that dropdown's
+  optgroups; standard_tag_keys — the six MPG tag keys seeded as Tags rows
+  (InfluxDB only -- TimescaleDB gets a Device <select> in the Tags
+  panel's place, see the "Device" block below).
+
+  Everything below the Measurement/Table field (Local Machine Timezone,
+  Tags/Device, the confidence/coercion/delete-existing row, and both the
+  Export and Import panels) is disabled -- via JS, not the "disabled"
+  attribute alone, see updateMeasurementGate() -- until a measurement (or,
+  for TimescaleDB, a table -- always true in practice, since a <select>
+  always has SOME option chosen, at minimum the ever-present shared narrow
+  table) is entered, since every one of those settings is meaningless
+  without a target. Clicking anywhere in a disabled section carries a
+  "pick a measurement/table first" warning rather than doing nothing.
 
   Three source modes (radio buttons, JS-toggled panels):
     - "export"     : pick a date range on this bridge, get a time-shifted
@@ -42,6 +61,15 @@
     - "influx_csv" : re-import a CSV this same screen (or InfluxDateConv
                      erter.py) previously exported, optionally hand-edited.
 
+  For TimescaleDB (version="timescale"): Measurement becomes a Table
+  <select> (timescale_tables) and the Tags panel becomes a Device
+  <select> (services.timeshift_service.timescale_devices_for, the same
+  picker the Metrics Edit screen uses, scoped to whichever table is
+  selected). Writing to a wide table's Import always mirrors the same
+  field values into the narrow table too; "+ New field..." is withheld
+  from the Field Matchup step for a wide table (an ALTER TABLE this
+  screen doesn't perform), but offered normally for the narrow table.
+
   Styling: mirrors pages/influxdb_metrics_edit.html — theme-input/
   surface-title/mini-table-* classes, btn-tertiary buttons, the same
   max-width form-panel convention.
@@ -50,14 +78,14 @@
 {% extends "base.html" %}
 {% block title %}InfluxDB — Timeshift Data — MPG Admin{% endblock %}
 {% block content %}
-<div class="col-span-12 flex flex-col gap-4" id="timeshift-root" data-version="{{ version }}" style="max-width: 900px;">
+<div class="col-span-12 flex flex-col gap-4" id="timeshift-root" data-version="{{ version }}" data-standard-tags='{{ standard_tag_keys|tojson }}' style="max-width: 900px;">
 
   <div class="flex items-center justify-between">
     <div>
       <h1 class="surface-title text-lg font-semibold">Timeshift Data</h1>
       <p class="surface-subtle text-xs mt-1">
-        Export a date range of InfluxDB data to CSV, or import an EG4 spreadsheet export / a previously
-        exported CSV back into InfluxDB.
+        Export a date range of data to CSV, or import an EG4 spreadsheet export / a previously
+        exported CSV back in.
       </p>
     </div>
     <div class="flex items-center gap-1 text-xs shrink-0">
@@ -71,6 +99,12 @@
       <a href="/pages/timeshift-data?version=3"
          class="px-3 py-1.5 rounded {{ 'bg-mpg-600 text-white' if version == '3' else 'btn-tertiary' }}">
         InfluxDB 3.x
+      </a>
+      {% endif %}
+      {% if timescale_available %}
+      <a href="/pages/timeshift-data?version=timescale"
+         class="px-3 py-1.5 rounded {{ 'bg-mpg-600 text-white' if version == 'timescale' else 'btn-tertiary' }}">
+        TimescaleDB
       </a>
       {% endif %}
     </div>
@@ -102,42 +136,85 @@
 
     <div class="grid grid-cols-2 gap-3">
       <div>
+        {% if version == 'timescale' %}
+        <label for="ts-table" class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">
+          Table
+        </label>
+        <select id="ts-table"
+                class="theme-input w-full text-xs rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-accent"
+                onchange="onTableChange()">
+          {% for t in timescale_tables %}
+          <option value="{{ t.table_name }}" data-table-kind="{{ t.table_kind }}" data-protocol-name="{{ t.protocol_name or '' }}">
+            {{ (t.protocol_name ~ ' (wide table)') if t.table_kind == 'wide' else 'Shared Narrow Table' }}
+          </option>
+          {% endfor %}
+        </select>
+        <p class="surface-subtle text-xs mt-1">
+          A protocol only appears as a wide table here once it has one; writing to a wide table also
+          writes the same data to the narrow table. Pick the narrow table directly for anything else.
+        </p>
+        {% else %}
         <label for="ts-measurement" class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">
           Measurement
         </label>
         <input type="text" id="ts-measurement" list="ts-measurement-list" placeholder="e.g. device_data"
                class="theme-input w-full text-xs rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-accent"
-               onchange="onMeasurementChange()">
+               oninput="updateMeasurementGate()" onchange="onMeasurementChange()">
         <datalist id="ts-measurement-list">
           {% for m in measurements %}<option value="{{ m }}">{% endfor %}
         </datalist>
-        <p class="surface-subtle text-[10px] mt-1">Existing measurements are suggested; type a new name to create one.</p>
+        <p class="surface-subtle text-xs mt-1">Existing measurements are suggested; type a new name to create one.</p>
+        {% endif %}
+        <p id="ts-measurement-warning" class="text-xs text-danger mt-1 hidden">
+          Pick a {{ 'table' if version == 'timescale' else 'measurement' }} above before using the fields below.
+        </p>
       </div>
-      <div>
+      <div class="ts-gate">
         <label for="ts-timezone" class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">
           Local Machine Timezone
         </label>
-        <input type="text" id="ts-timezone" value="{{ machine_timezone }}"
-               class="theme-input w-full text-xs rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-accent">
-        <p class="surface-subtle text-[10px] mt-1">IANA zone name, e.g. America/Los_Angeles. Defaults to this bridge's configured zone.</p>
+        <select id="ts-timezone"
+                class="theme-input w-full text-xs rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-accent">
+          {% for region, zones in timezone_groups %}
+          <optgroup label="{{ region }}">
+            {% for z in zones %}<option value="{{ z }}" {% if z == machine_timezone %}selected{% endif %}>{{ z }}</option>{% endfor %}
+          </optgroup>
+          {% endfor %}
+        </select>
+        <p class="surface-subtle text-xs mt-1">IANA zone name, e.g. America/Los_Angeles. Defaults to this bridge's configured zone.</p>
       </div>
     </div>
 
-    <!-- Tags -->
-    <div>
+    <!-- Tags (InfluxDB) / Device (TimescaleDB) -->
+    <div class="ts-gate">
+      {% if version == 'timescale' %}
+      <label class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">Device</label>
+      <p class="surface-subtle text-xs leading-relaxed mb-2">
+        The device every point in this export/import belongs to. Only devices that already have at
+        least one row in the selected table are listed here -- the same picker the Metrics Edit
+        screen itself uses.
+      </p>
+      <div id="ts-device-status" class="mb-2"></div>
+      <select id="ts-device" class="theme-input w-full text-xs rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-accent"></select>
+      {% else %}
       <div class="flex items-center justify-between mb-1">
         <label class="surface-title text-xs font-semibold uppercase tracking-widest">Tags</label>
         <button type="button" class="btn-tertiary text-xs" onclick="addTagRow('', '')">+ Add Tag</button>
       </div>
-      <p class="surface-subtle text-[10px] mb-2">
+      <p class="surface-subtle text-xs leading-relaxed mb-2">
         Written as fixed InfluxDB tags on every point (device_identifier, device_name, device_manufacturer,
-        device_model, device_serial_number, transport. <span class="font-semibold">device_identifier is required.</span> A
-        source column whose name matches a tag key is ignored as a field by default.
+        device_model, device_serial_number, transport). Pick a value already stored in the measurement, or choose
+        <span class="font-semibold">+ New value…</span> to enter your own.
+        <span class="font-semibold">device_identifier is required.</span> A source column whose name matches a tag
+        key is ignored as a field by default.
       </p>
+      <div id="ts-tags-status" class="mb-2"></div>
       <div id="ts-tags-rows" class="flex flex-col gap-1.5"></div>
+      <datalist id="ts-tag-key-list"></datalist>
+      {% endif %}
     </div>
 
-    <div class="grid grid-cols-3 gap-3 items-end">
+    <div class="ts-gate grid grid-cols-3 gap-3 items-end">
       <div>
         <label for="ts-confidence" class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">
           Metric Match Confidence Threshold
@@ -146,21 +223,24 @@
                class="theme-input w-full text-xs rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-accent">
       </div>
       <label class="flex items-center gap-1.5 text-xs mb-1.5">
-        <input type="checkbox" id="ts-allow-coercion" checked>
+        <input type="checkbox" id="ts-allow-coercion" checked {% if version == 'timescale' %}disabled{% endif %}>
         Allow float coercion on type value conflicts
+        {% if version == 'timescale' %}<span class="italic surface-subtle">(TimescaleDB: values are always coerced to each column's declared type)</span>{% endif %}
       </label>
       <label id="ts-delete-existing-wrap" class="flex items-center gap-1.5 text-xs mb-1.5">
-        <input type="checkbox" id="ts-delete-existing" {% if version == '3' %}disabled{% endif %}>
+        <input type="checkbox" id="ts-delete-existing" {% if version in ('3', 'timescale') %}disabled{% endif %}>
         Delete existing points in target range first
         {% if version == '3' %}<span class="italic surface-subtle">(v3: use Metrics Edit instead)</span>{% endif %}
+        {% if version == 'timescale' %}<span class="italic surface-subtle">(use Metrics Edit instead)</span>{% endif %}
       </label>
     </div>
   </div>
 
   <!-- ══ EXPORT PANEL ══ -->
-  <div id="ts-panel-export" class="rounded border border-mpg-700 p-3 flex flex-col gap-3">
+  <div id="ts-panel-export" class="ts-gate rounded border border-mpg-700 p-3 flex flex-col gap-3">
     <h2 class="surface-title text-xs font-semibold uppercase tracking-widest">Export Range</h2>
-    <div class="grid grid-cols-3 gap-3">
+    <div class="grid {{ 'grid-cols-2' if version == 'timescale' else 'grid-cols-3' }} gap-3">
+      {% if version != 'timescale' %}
       <div>
         <label for="ts-export-device" class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">
           Device Identifier <span class="surface-subtle font-normal normal-case">(optional filter)</span>
@@ -168,6 +248,7 @@
         <input type="text" id="ts-export-device" placeholder="e.g. 4066670074"
                class="theme-input w-full text-xs rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-accent">
       </div>
+      {% endif %}
       <div>
         <label for="ts-export-start" class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">Source Start</label>
         <input type="datetime-local" step="1" id="ts-export-start"
@@ -185,7 +266,7 @@
       </label>
       <input type="datetime-local" step="1" id="ts-export-target"
              class="theme-input w-full text-xs rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-accent" style="max-width: 260px;">
-      <p class="surface-subtle text-[10px] mt-1">Leave equal to Source Start to export with no shift.</p>
+      <p class="surface-subtle text-xs mt-1">Leave equal to Source Start to export with no shift.</p>
     </div>
     <div>
       <button type="button" class="btn-tertiary text-xs" onclick="doExport()">Export to CSV</button>
@@ -194,7 +275,7 @@
   </div>
 
   <!-- ══ IMPORT PANEL (EG4 / influx_csv) ══ -->
-  <div id="ts-panel-import" class="rounded border border-mpg-700 p-3 flex-on-show flex-col gap-3 hidden">
+  <div id="ts-panel-import" class="ts-gate rounded border border-mpg-700 p-3 flex-on-show flex-col gap-3 hidden">
     <h2 id="ts-import-title" class="surface-title text-xs font-semibold uppercase tracking-widest">Import Spreadsheet</h2>
 
     <div>
@@ -208,6 +289,7 @@
         <label for="ts-import-start" class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">Source Start</label>
         <input type="datetime-local" step="1" id="ts-import-start"
                class="theme-input w-full text-xs rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-accent">
+        <p id="ts-import-start-note" class="surface-subtle text-xs mt-1 hidden"></p>
       </div>
       <div>
         <label for="ts-import-target" class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">Target Start</label>
@@ -215,7 +297,7 @@
                class="theme-input w-full text-xs rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-accent">
       </div>
     </div>
-    <p class="surface-subtle text-[10px] -mt-2">
+    <p class="surface-subtle text-xs -mt-2">
       Time delta = Target Start − Source Start, applied to every row's timestamp (same logic as
       InfluxDateConverter.py's SOURCE_START_TIME/TARGET_START_TIME). Leave them equal for no shift.
     </p>
@@ -229,12 +311,13 @@
     <div id="ts-import-actions" class="hidden flex-on-show items-center gap-2">
       <div class="flex-1">
         <label for="ts-time-column" class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">Time Column</label>
-        <select id="ts-time-column" class="theme-input w-full text-xs rounded px-2 py-1.5" style="max-width: 220px;"></select>
+        <select id="ts-time-column" class="theme-input w-full text-xs rounded px-2 py-1.5" style="max-width: 220px;"
+                onchange="refreshImportSourceStart()"></select>
       </div>
     </div>
     <div id="ts-import-buttons" class="hidden flex-on-show items-center gap-2">
       <button type="button" class="btn-tertiary text-xs" onclick="runPreview()">Preview</button>
-      <button type="button" class="btn-tertiary text-xs" onclick="runImport()">Import to InfluxDB</button>
+      <button type="button" class="btn-tertiary text-xs" onclick="runImport()">Import to {{ 'TimescaleDB' if version == 'timescale' else 'InfluxDB' }}</button>
     </div>
 
     <div id="ts-import-status"></div>
@@ -261,34 +344,328 @@
     version: document.getElementById('timeshift-root').dataset.version,
     uploadId: null,
     sourceMode: 'export',
+    tagValues: {},        // tag key -> existing values in the current measurement (filled by refreshAllTagValues)
+    tagRequestId: 0,      // guards against an older tag-values response landing after a newer one
+    deviceRequestId: 0,   // guards against an older TimescaleDB devices response landing after a newer one
   };
+  const STANDARD_TAGS = JSON.parse(document.getElementById('timeshift-root').dataset.standardTags || '[]');
+  const NEW_TAG_VALUE = '__new__';
+
+  // ---- Destination-generic helpers ----
+  // "Measurement" (InfluxDB, free text) and "Table" (TimescaleDB, a fixed <select>) are the same
+  // concept in different shapes -- these centralize the version branching so the rest of the script
+  // (gating, Export, Upload, buildRunPayload) reads/writes ONE thing regardless of destination.
+  function isTimescale() { return TimeshiftState.version === 'timescale'; }
+
+  function selectedTableOption() {
+    const select = document.getElementById('ts-table');
+    return (select && select.selectedOptions.length) ? select.selectedOptions[0] : null;
+  }
+
+  // The current target identifier: the Table <select>'s value for TimescaleDB (its table_name,
+  // which doubles as the "measurement" field every endpoint already accepts), or the Measurement
+  // input's value for InfluxDB. A <select> always has SOME option selected once it has any options
+  // at all (unlike a free-text input, which starts empty) -- see updateMeasurementGate()'s doc
+  // comment for what that means for the gate's initial state.
+  function getMeasurement() {
+    if (isTimescale()) {
+      const opt = selectedTableOption();
+      return opt ? opt.value : '';
+    }
+    return document.getElementById('ts-measurement').value.trim();
+  }
+
+  function getTableKind() {
+    const opt = selectedTableOption();
+    return opt ? opt.dataset.tableKind : '';
+  }
+
+  function getProtocolName() {
+    const opt = selectedTableOption();
+    return (opt && opt.dataset.protocolName) || '';
+  }
+
+  function getDeviceInfoId() {
+    const select = document.getElementById('ts-device');
+    return (select && select.value) ? parseInt(select.value, 10) : null;
+  }
+
+  // The element the measurement/table gate's warning ring and focus target -- whichever of
+  // #ts-measurement/#ts-table actually exists in the DOM for this version (see the page's own
+  // Jinja conditional: only one of the two is ever rendered).
+  function primaryField() { return document.getElementById(isTimescale() ? 'ts-table' : 'ts-measurement'); }
+
+  function destinationLabel() { return isTimescale() ? 'TimescaleDB' : ('InfluxDB v' + TimeshiftState.version); }
 
   // ---- Tags GUI ----
+  // Each row is: key input | value dropdown (existing values from the DB, plus
+  // "+ New value…") with a free-text input that appears beside it for a new value | ✕.
+  // Everything is built with DOM calls, never innerHTML, since the values come from the database.
   function addTagRow(key, value) {
     const row = document.createElement('div');
     row.className = 'flex items-center gap-2 ts-tag-row';
-    row.innerHTML =
-      '<input type="text" placeholder="key (e.g. device_identifier)" value="' + (key || '').replace(/"/g, '&quot;') + '" ' +
-        'class="theme-input flex-1 text-xs rounded px-2 py-1 ts-tag-key">' +
-      '<input type="text" placeholder="value" value="' + (value || '').replace(/"/g, '&quot;') + '" ' +
-        'class="theme-input flex-1 text-xs rounded px-2 py-1 ts-tag-value">' +
-      '<button type="button" class="text-danger hover:text-danger/70 text-xs" onclick="this.closest(\'.ts-tag-row\').remove()">✕</button>';
+
+    const keyInput = document.createElement('input');
+    keyInput.type = 'text';
+    keyInput.placeholder = 'key (e.g. device_identifier)';
+    keyInput.value = key || '';
+    keyInput.setAttribute('list', 'ts-tag-key-list');
+    keyInput.className = 'theme-input flex-1 text-xs rounded px-2 py-1 ts-tag-key';
+    keyInput.addEventListener('change', function () { refreshTagRow(row); });
+
+    const valueWrap = document.createElement('div');
+    valueWrap.className = 'flex-1 flex items-center gap-2 min-w-0';
+
+    const select = document.createElement('select');
+    select.className = 'theme-input flex-1 min-w-0 text-xs rounded px-2 py-1 ts-tag-value-select';
+    select.addEventListener('change', function () {
+      syncTagCustomInput(row);
+      if (select.value === NEW_TAG_VALUE) { row.querySelector('.ts-tag-value-custom').focus(); }
+    });
+
+    const custom = document.createElement('input');
+    custom.type = 'text';
+    custom.placeholder = 'new value';
+    custom.className = 'theme-input flex-1 min-w-0 text-xs rounded px-2 py-1 ts-tag-value-custom hidden';
+
+    valueWrap.appendChild(select);
+    valueWrap.appendChild(custom);
+
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'text-danger hover:text-danger/70 text-xs';
+    remove.textContent = '✕';
+    remove.addEventListener('click', function () { row.remove(); });
+
+    row.appendChild(keyInput);
+    row.appendChild(valueWrap);
+    row.appendChild(remove);
     document.getElementById('ts-tags-rows').appendChild(row);
+
+    fillTagValueSelect(row, TimeshiftState.tagValues[(key || '').trim()] || [], value || '');
+    return row;
+  }
+
+  function tagKeyOf(row) { return row.querySelector('.ts-tag-key').value.trim(); }
+
+  function currentTagValue(row) {
+    const select = row.querySelector('.ts-tag-value-select');
+    return (select.value === NEW_TAG_VALUE ? row.querySelector('.ts-tag-value-custom').value : select.value).trim();
+  }
+
+  function syncTagCustomInput(row) {
+    const isNew = row.querySelector('.ts-tag-value-select').value === NEW_TAG_VALUE;
+    row.querySelector('.ts-tag-value-custom').classList.toggle('hidden', !isNew);
+  }
+
+  // Rebuilds one row's dropdown from `values`, keeping `preferred` selected: if it is one of the
+  // existing values it is picked from the list, otherwise it is carried over as a typed "new value"
+  // (so a value the admin entered is never silently lost when the measurement/key changes).
+  function fillTagValueSelect(row, values, preferred) {
+    const select = row.querySelector('.ts-tag-value-select');
+    const custom = row.querySelector('.ts-tag-value-custom');
+    select.innerHTML = '';
+    select.appendChild(new Option('— select —', ''));
+    values.forEach(function (v) { select.appendChild(new Option(v, v)); });
+    select.appendChild(new Option('+ New value…', NEW_TAG_VALUE));
+
+    if (preferred && values.indexOf(preferred) !== -1) {
+      select.value = preferred;
+      custom.value = '';
+    } else if (preferred) {
+      select.value = NEW_TAG_VALUE;
+      custom.value = preferred;
+    } else {
+      select.value = '';
+      custom.value = '';
+    }
+    syncTagCustomInput(row);
+  }
+
+  function setTagKeySuggestions(keys) {
+    const list = document.getElementById('ts-tag-key-list');
+    list.innerHTML = '';
+    keys.forEach(function (k) {
+      const opt = document.createElement('option');
+      opt.value = k;
+      list.appendChild(opt);
+    });
+  }
+
+  // Asks the server for the existing tag keys/values of the current measurement. Resolves to the
+  // parsed JSON, or null if the request itself failed. No measurement yet -> nothing to look up.
+  async function fetchTagOptions(keys) {
+    const measurement = document.getElementById('ts-measurement').value.trim();
+    if (!measurement) { return { tag_keys: [], tag_values: {}, error: '' }; }
+    const params = new URLSearchParams({ version: TimeshiftState.version, measurement: measurement });
+    keys.forEach(function (k) { params.append('key', k); });
+    try {
+      const resp = await fetch('/api/timeshift/tag-values?' + params.toString());
+      if (!resp.ok) { return null; }
+      return await resp.json();
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // Reloads every row's dropdown for the current measurement, keeping whatever is currently chosen.
+  async function refreshAllTagValues() {
+    const requestId = ++TimeshiftState.tagRequestId;
+    const rows = Array.from(document.querySelectorAll('.ts-tag-row'));
+    const keys = [];
+    rows.forEach(function (row) {
+      const k = tagKeyOf(row);
+      if (k && keys.indexOf(k) === -1) { keys.push(k); }
+    });
+
+    const data = await fetchTagOptions(keys);
+    if (requestId !== TimeshiftState.tagRequestId) { return; }   // superseded by a newer request
+
+    document.getElementById('ts-tags-status').innerHTML = '';
+    if (data === null) {
+      showStatus('ts-tags-status', 'Could not load the existing tag values — you can still enter new ones.', true);
+      return;
+    }
+    if (data.error) {
+      showStatus('ts-tags-status', 'Could not load the existing tag values (' + data.error + ') — you can still enter new ones.', true);
+    }
+    TimeshiftState.tagValues = data.tag_values || {};
+    if (data.tag_keys && data.tag_keys.length) { setTagKeySuggestions(data.tag_keys); }
+    rows.forEach(function (row) {
+      fillTagValueSelect(row, TimeshiftState.tagValues[tagKeyOf(row)] || [], currentTagValue(row));
+    });
+  }
+
+  // A single row's key was edited: look up values for just that key.
+  async function refreshTagRow(row) {
+    const key = tagKeyOf(row);
+    const preferred = currentTagValue(row);
+    if (!key) { fillTagValueSelect(row, [], preferred); return; }
+    const data = await fetchTagOptions([key]);
+    if (data === null) { return; }
+    TimeshiftState.tagValues[key] = (data.tag_values || {})[key] || [];
+    fillTagValueSelect(row, TimeshiftState.tagValues[key], currentTagValue(row) || preferred);
   }
 
   function collectTagsJson() {
     const tags = {};
     document.querySelectorAll('.ts-tag-row').forEach(function (row) {
-      const k = row.querySelector('.ts-tag-key').value.trim();
-      const v = row.querySelector('.ts-tag-value').value.trim();
+      const k = tagKeyOf(row);
+      const v = currentTagValue(row);
       if (k && v) { tags[k] = v; }
     });
     return JSON.stringify(tags);
   }
 
-  // Seed a starter row set matching InfluxDateConverter.py's STATIC_TAGS keys, values blank.
-  ['device_identifier', 'device_name', 'device_manufacturer', 'device_model', 'device_serial_number', 'transport']
-    .forEach(function (k) { addTagRow(k, ''); });
+  // Seed one row per standard MPG tag key, then load their existing values if a measurement is
+  // already entered. InfluxDB only -- TimescaleDB has no Tags panel (#ts-tags-rows/#ts-tag-key-list
+  // don't exist in the DOM for it at all, see the page's Jinja conditional), it gets a Device
+  // <select> instead, populated below.
+  if (!isTimescale()) {
+    setTagKeySuggestions(STANDARD_TAGS);
+    STANDARD_TAGS.forEach(function (k) { addTagRow(k, ''); });
+    if (document.getElementById('ts-measurement').value.trim()) { refreshAllTagValues(); }
+  }
+
+  // ---- Table selection (TimescaleDB) ----
+  // Mirrors onMeasurementChange() below: a fresh table invalidates any already-scanned mapping and
+  // the Device list (a device with rows in one table may have none in another -- see
+  // timescale_devices_for's own docstring).
+  function onTableChange() {
+    updateMeasurementGate();
+    document.getElementById('ts-mapping-container').innerHTML = '';
+    document.getElementById('ts-import-actions').classList.add('hidden');
+    document.getElementById('ts-import-buttons').classList.add('hidden');
+    refreshDeviceOptions();
+  }
+
+  // Reloads the Device <select> for whichever table is currently selected. Devices with zero rows in
+  // this exact table are never listed -- same behavior the Metrics Edit screen's own picker has.
+  async function refreshDeviceOptions() {
+    const requestId = ++TimeshiftState.deviceRequestId;
+    const opt = selectedTableOption();
+    const select = document.getElementById('ts-device');
+    if (!opt || !select) { return; }
+
+    const params = new URLSearchParams({ table_kind: opt.dataset.tableKind });
+    if (opt.dataset.protocolName) { params.set('protocol_name', opt.dataset.protocolName); }
+
+    let data = null;
+    try {
+      const resp = await fetch('/api/timeshift/timescale/devices?' + params.toString());
+      if (resp.ok) { data = await resp.json(); }
+    } catch (e) { /* data stays null -- reported below */ }
+    if (requestId !== TimeshiftState.deviceRequestId) { return; }   // superseded by a newer request
+
+    document.getElementById('ts-device-status').innerHTML = '';
+    select.innerHTML = '';
+    if (data === null) {
+      showStatus('ts-device-status', 'Could not load devices for this table.', true);
+      return;
+    }
+    if (data.error) {
+      showStatus('ts-device-status', 'Could not load devices (' + data.error + ').', true);
+    }
+    if (!data.devices.length) {
+      select.appendChild(new Option('No devices with data in this table yet', ''));
+      return;
+    }
+    data.devices.forEach(function (d) {
+      const label = d.device_name ? (d.device_identifier + ' — ' + d.device_name) : d.device_identifier;
+      select.appendChild(new Option(label, d.device_info_id));
+    });
+  }
+
+  if (isTimescale()) { refreshDeviceOptions(); }
+
+  // ---- Measurement gate ----
+  // Everything under .ts-gate (Timezone, Tags, the confidence/coercion/delete-existing row, and both
+  // the Export and Import panels) is meaningless without a target measurement, so all of it is disabled
+  // until one is entered. This uses "disabled" on every input/select/textarea/button inside a .ts-gate
+  // container (blocks both mouse AND keyboard interaction, unlike a purely visual/CSS-only disable),
+  // PLUS an explicit pointer-events-none class on those same elements: browsers already skip a disabled
+  // control during click hit-testing (same effect as pointer-events: none) and fall through to the next
+  // element behind it -- normally whatever's on the page under the cursor, i.e. nothing in particular --
+  // but the belt-and-suspenders class guarantees that fallthrough is consistent across browsers/element
+  // types, so the click reliably lands on the .ts-gate container itself and reaches the delegated
+  // listener below, which raises the "pick a measurement first" warning.
+  function hasMeasurement() { return getMeasurement().length > 0; }
+
+  function updateMeasurementGate() {
+    const enabled = hasMeasurement();
+    document.querySelectorAll('.ts-gate').forEach(function (gate) {
+      gate.classList.toggle('opacity-50', !enabled);
+      gate.classList.toggle('cursor-not-allowed', !enabled);
+      gate.dataset.gated = enabled ? 'false' : 'true';
+      gate.querySelectorAll('input, select, textarea, button').forEach(function (el) {
+        el.disabled = !enabled;
+        el.classList.toggle('pointer-events-none', !enabled);
+      });
+    });
+    if (enabled) { hideMeasurementWarning(); }
+  }
+
+  function hideMeasurementWarning() {
+    document.getElementById('ts-measurement-warning').classList.add('hidden');
+    primaryField().classList.remove('ring-2', 'ring-danger');
+  }
+
+  function warnMeasurementRequired() {
+    document.getElementById('ts-measurement-warning').classList.remove('hidden');
+    primaryField().classList.add('ring-2', 'ring-danger');
+    primaryField().focus();
+    clearTimeout(warnMeasurementRequired._timer);
+    warnMeasurementRequired._timer = setTimeout(hideMeasurementWarning, 3000);
+  }
+
+  // One delegated listener (rather than one per .ts-gate) so it also covers content added later --
+  // the Field Matchup table, injected into #ts-panel-import well after this script runs.
+  document.getElementById('timeshift-root').addEventListener('click', function (evt) {
+    const gate = evt.target.closest('.ts-gate');
+    if (gate && gate.dataset.gated === 'true') { warnMeasurementRequired(); }
+  });
+
+  updateMeasurementGate();
 
   // ---- Source mode toggling ----
   function onSourceModeChange(radio) {
@@ -304,31 +681,40 @@
     document.getElementById('ts-import-buttons').classList.add('hidden');
     document.getElementById('ts-preview-container').innerHTML = '';
     document.getElementById('ts-result-container').innerHTML = '';
+    document.getElementById('ts-import-start-note').classList.add('hidden');
     TimeshiftState.uploadId = null;
   }
 
   function onMeasurementChange() {
+    updateMeasurementGate();
     // Selecting a different measurement invalidates any already-scanned mapping
     // (it was matched against the PREVIOUS measurement's schema).
     document.getElementById('ts-mapping-container').innerHTML = '';
     document.getElementById('ts-import-actions').classList.add('hidden');
     document.getElementById('ts-import-buttons').classList.add('hidden');
+    // ...and the Tags dropdowns list the values that exist in the measurement just chosen.
+    if (hasMeasurement()) { refreshAllTagValues(); }
   }
 
+  // message is inserted as text (not HTML): some messages carry server/database error strings.
   function showStatus(containerId, message, isError) {
-    document.getElementById(containerId).innerHTML =
-      '<div class="text-xs px-3 py-2 rounded border ' +
-      (isError ? 'border-danger/30 bg-danger/10 text-danger' : 'border-success/30 bg-success/10 text-success') +
-      '">' + message + '</div>';
+    const box = document.createElement('div');
+    box.className = 'text-xs px-3 py-2 rounded border ' +
+      (isError ? 'border-danger/30 bg-danger/10 text-danger' : 'border-success/30 bg-success/10 text-success');
+    box.textContent = message;
+    const container = document.getElementById(containerId);
+    container.innerHTML = '';
+    container.appendChild(box);
   }
 
   // ---- Export ----
   function doExport() {
-    const measurement = document.getElementById('ts-measurement').value.trim();
+    const measurement = getMeasurement();
     const start = document.getElementById('ts-export-start').value;
     const end = document.getElementById('ts-export-end').value;
     const target = document.getElementById('ts-export-target').value || start;
-    if (!measurement) { showStatus('ts-export-status', 'Enter a measurement.', true); return; }
+    if (!measurement) { showStatus('ts-export-status', 'Pick a ' + (isTimescale() ? 'table' : 'measurement') + '.', true); return; }
+    if (isTimescale() && getDeviceInfoId() === null) { showStatus('ts-export-status', 'Pick a device.', true); return; }
     if (!start || !end) { showStatus('ts-export-status', 'Pick a source start and end.', true); return; }
     if (end < start) { showStatus('ts-export-status', 'Source End must not be before Source Start.', true); return; }
 
@@ -339,10 +725,16 @@
       end_time: end,
       target_start: target,
       local_timezone: document.getElementById('ts-timezone').value.trim(),
-      tags_json: collectTagsJson(),
     });
-    const device = document.getElementById('ts-export-device').value.trim();
-    if (device) { params.set('device_identifier', device); }
+    if (isTimescale()) {
+      params.set('table_kind', getTableKind());
+      params.set('protocol_name', getProtocolName());
+      params.set('device_info_id', getDeviceInfoId());
+    } else {
+      params.set('tags_json', collectTagsJson());
+      const device = document.getElementById('ts-export-device').value.trim();
+      if (device) { params.set('device_identifier', device); }
+    }
 
     document.getElementById('ts-export-status').innerHTML = '';
     window.location.href = '/api/timeshift/export.csv?' + params.toString();
@@ -350,17 +742,24 @@
 
   // ---- Upload & mapping ----
   async function uploadAndScan() {
-    const measurement = document.getElementById('ts-measurement').value.trim();
+    const measurement = getMeasurement();
     const fileInput = document.getElementById('ts-import-file');
-    if (!measurement) { showStatus('ts-import-status', 'Enter a measurement.', true); return; }
+    if (!measurement) { showStatus('ts-import-status', 'Pick a ' + (isTimescale() ? 'table' : 'measurement') + '.', true); return; }
+    if (isTimescale() && getDeviceInfoId() === null) { showStatus('ts-import-status', 'Pick a device.', true); return; }
     if (!fileInput.files.length) { showStatus('ts-import-status', 'Choose a file first.', true); return; }
 
     const form = new FormData();
     form.append('version', TimeshiftState.version);
     form.append('measurement', measurement);
     form.append('source_kind', TimeshiftState.sourceMode);
-    form.append('tags_json', collectTagsJson());
     form.append('confidence_threshold', document.getElementById('ts-confidence').value || '0.85');
+    if (isTimescale()) {
+      form.append('table_kind', getTableKind());
+      form.append('protocol_name', getProtocolName());
+      form.append('device_info_id', getDeviceInfoId());
+    } else {
+      form.append('tags_json', collectTagsJson());
+    }
     form.append('file', fileInput.files[0]);
 
     document.getElementById('ts-import-status').innerHTML = '';
@@ -404,6 +803,37 @@
 
     document.getElementById('ts-import-actions').classList.remove('hidden');
     document.getElementById('ts-import-buttons').classList.remove('hidden');
+
+    refreshImportSourceStart();
+    refreshBelowThresholdOptions();
+  }
+
+  // EG4 imports: Source Start defaults to the earliest timestamp in the (consolidated) file, for the
+  // selected Time Column. The admin can still overwrite it. Other source kinds are left untouched.
+  async function refreshImportSourceStart() {
+    const uploadId = TimeshiftState.uploadId;
+    const timeColumn = document.getElementById('ts-time-column').value;
+    const note = document.getElementById('ts-import-start-note');
+    if (TimeshiftState.sourceMode !== 'eg4' || !uploadId || !timeColumn) { return; }
+
+    const params = new URLSearchParams({
+      time_column: timeColumn,
+      local_timezone: document.getElementById('ts-timezone').value.trim(),
+    });
+    try {
+      const resp = await fetch('/api/timeshift/upload/' + encodeURIComponent(uploadId) + '/earliest?' + params.toString());
+      if (!resp.ok || uploadId !== TimeshiftState.uploadId) { return; }
+      const data = await resp.json();
+      if (data.earliest) {
+        document.getElementById('ts-import-start').value = data.earliest;
+        note.textContent = 'Set to the earliest timestamp in the file (all sheets combined). You can still edit it.';
+        note.classList.remove('hidden');
+      } else {
+        note.classList.add('hidden');
+      }
+    } catch (e) {
+      /* leave Source Start as it was */
+    }
   }
 
   function collectMappingJson() {
@@ -426,32 +856,90 @@
 
   function onMapTargetChange(select) {
     const row = select.closest('.ts-map-row');
-    row.querySelector('.ts-map-target-custom').classList.toggle('hidden', select.value !== '__new__');
+    const custom = row.querySelector('.ts-map-target-custom');
+    const isNew = select.value === '__new__';
+    custom.classList.toggle('hidden', !isNew);
+    // Unmatched EG4 columns start ignored, so their new-field input isn't pre-filled by the server;
+    // default the new field's name to the source column's own name.
+    if (isNew && !custom.value.trim()) { custom.value = row.dataset.sourceColumn; }
+    refreshBelowThresholdOptions();
+  }
+
+  function onMapIgnoreChange(checkbox) {
+    const row = checkbox.closest('.ts-map-row');
+    row.querySelector('.ts-map-target-select').disabled = checkbox.checked;
+    // Ignoring a row frees whatever field it held for the below-threshold rows; un-ignoring claims it again.
+    refreshBelowThresholdOptions();
+  }
+
+  // Fields already chosen (and not ignored) by OTHER rows, so a below-threshold row's own current
+  // value is never excluded from its own dropdown -- only from every OTHER such row's.
+  function fieldsTakenElsewhere(excludeRow) {
+    const taken = new Set();
+    document.querySelectorAll('.ts-map-row').forEach(function (row) {
+      if (row === excludeRow || row.querySelector('.ts-map-ignore').checked) { return; }
+      const value = row.querySelector('.ts-map-target-select').value;
+      if (value && value !== '__new__') { taken.add(value); }
+    });
+    return taken;
+  }
+
+  // A row with no confident suggestion (data-below-threshold="true") only offers fields no other row
+  // has already claimed -- see the "A row with no confident suggestion" note in
+  // partials/timeshift_field_mapping.html. Confidently-matched rows are left showing every field.
+  function refreshBelowThresholdOptions() {
+    const root = document.getElementById('ts-mapping-root');
+    if (!root) { return; }
+    const allFields = JSON.parse(root.dataset.influxFields || '[]');
+    const allowNewField = root.dataset.allowNewField !== 'false';
+    document.querySelectorAll('.ts-map-row[data-below-threshold="true"]').forEach(function (row) {
+      const select = row.querySelector('.ts-map-target-select');
+      const current = select.value;
+      const taken = fieldsTakenElsewhere(row);
+
+      select.innerHTML = '';
+      select.appendChild(new Option('— unmapped —', ''));
+      allFields.forEach(function (f) {
+        if (f === current || !taken.has(f)) { select.appendChild(new Option(f, f)); }
+      });
+      if (allowNewField) { select.appendChild(new Option('+ New field…', '__new__')); }
+
+      select.value = Array.from(select.options).some(function (o) { return o.value === current; }) ? current : '';
+      row.querySelector('.ts-map-target-custom').classList.toggle('hidden', select.value !== '__new__');
+    });
   }
 
   function buildRunPayload() {
     const upload = TimeshiftState.uploadId;
     if (!upload) { showStatus('ts-import-status', 'Upload a file first.', true); return null; }
-    const measurement = document.getElementById('ts-measurement').value.trim();
+    const measurement = getMeasurement();
     const timeColumn = document.getElementById('ts-time-column').value;
     const start = document.getElementById('ts-import-start').value;
     const target = document.getElementById('ts-import-target').value || start;
     if (!timeColumn) { showStatus('ts-import-status', 'Select the time column.', true); return null; }
     if (!start) { showStatus('ts-import-status', 'Pick a source start time.', true); return null; }
+    if (isTimescale() && getDeviceInfoId() === null) { showStatus('ts-import-status', 'Pick a device.', true); return null; }
 
-    return {
+    const payload = {
       upload_id: upload,
       version: TimeshiftState.version,
       measurement: measurement,
       time_column: timeColumn,
       mapping_json: collectMappingJson(),
-      tags_json: collectTagsJson(),
       local_timezone: document.getElementById('ts-timezone').value.trim(),
       source_is_local: TimeshiftState.sourceMode === 'eg4',
       source_start: start,
       target_start: target,
       allow_float_coercion: document.getElementById('ts-allow-coercion').checked,
     };
+    if (isTimescale()) {
+      payload.table_kind = getTableKind();
+      payload.protocol_name = getProtocolName();
+      payload.device_info_id = getDeviceInfoId();
+    } else {
+      payload.tags_json = collectTagsJson();
+    }
+    return payload;
   }
 
   async function runPreview() {
@@ -483,8 +971,8 @@
     const payload = buildRunPayload();
     if (!payload) { return; }
     const proceed = window.confirm(
-      'Import into measurement "' + payload.measurement + '" (InfluxDB v' + TimeshiftState.version + ')?\n\n' +
-      'This writes points to InfluxDB immediately — this is NOT part of the staged "Commit All Changes" flow. Continue?'
+      'Import into ' + (isTimescale() ? 'table' : 'measurement') + ' "' + payload.measurement + '" (' + destinationLabel() + ')?\n\n' +
+      'This writes points to ' + destinationLabel() + ' immediately — this is NOT part of the staged "Commit All Changes" flow. Continue?'
     );
     if (!proceed) { return; }
 

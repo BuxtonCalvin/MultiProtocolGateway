@@ -55,12 +55,30 @@ edits/deletes what's already stored. Both go straight through each
 bridge's own `.client`, same access pattern InfluxV1AdminManager/
 Influx3AdminManager already use internally.
 
+TimescaleDB is a third, structurally different destination (see the
+"TimescaleDB" section far below): schema discovery is reused from
+services/bridge_service.py's own Metrics Edit functions (get_timescale_
+bridge/list_metric_edit_tables/list_metric_edit_devices/
+list_metric_edit_fields) exactly the way this file reuses influxdb_
+service's, but there is no free-typed "measurement" -- the admin picks a
+TABLE (the one shared narrow table, or one protocol's wide table, whichever
+exist) and a DEVICE from the same pickers Metrics Edit itself uses, in
+place of InfluxDB's free-typed measurement and Tags panel. Writing to a
+wide table always mirrors the same field values into the narrow table too
+(build_points_timescale/write_points_timescale below), since the narrow
+table is the durable long-format record and the wide table is a derived,
+schema-limited convenience -- see WIDE_TABLE_COLUMN_LIMIT in transports/
+timescaledb.py for why a heavily-instrumented protocol can lose its wide
+table entirely and fall back to narrow-only.
+
 Uploaded spreadsheets are parsed once and held server-side (in
 app.state, same locked-dict pattern services/influxdb_service.py uses for
 staged Metrics Edit entries) so the mapping GUI, preview, and import steps
 all operate on one already-parsed DataFrame instead of re-uploading or
 re-parsing the file at every step.
 """
+
+# pyright: strict
 
 from __future__ import annotations
 
@@ -71,14 +89,18 @@ import re
 import threading
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
-from typing import TYPE_CHECKING, Any, Generator, Literal, cast
-from zoneinfo import ZoneInfo
+from typing import TYPE_CHECKING, Any, Generator, Iterable, Literal, cast
+from zoneinfo import ZoneInfo, available_timezones
 
 import pandas as pd
 from starlette.datastructures import State
 
+from .bridge_service import get_timescale_bridge
+from .bridge_service import list_metric_edit_devices as _list_timescale_devices
+from .bridge_service import list_metric_edit_fields as _list_timescale_fields
+from .bridge_service import list_metric_edit_tables as _list_timescale_tables
 from .device_service import NavData
 from .influxdb_service import (
     get_influxdb1_bridge,
@@ -101,6 +123,17 @@ _log: logging.Logger = logging.getLogger(__name__)
 SourceKind = Literal["eg4", "influx_csv"]
 InfluxVersion = Literal["1", "3"]
 
+# The "version" string used throughout this module and routers/timeshift.py
+# is really "which destination bridge" -- InfluxDB v1, v3, or the single
+# TimescaleDB bridge. Kept as a plain str (not this Literal) in most
+# function signatures for the same reason InfluxVersion above isn't used
+# everywhere either: FastAPI path/query/body params arrive as str, and
+# every function here already validates the value itself (or delegates to
+# one that does) rather than trusting a static annotation alone.
+DestinationVersion = Literal["1", "3", "timescale"]
+
+TimescaleTableKind = Literal["narrow", "wide"]
+
 # Columns that are never offered as mapping targets/sources -- these are
 # either reserved (the timestamp itself) or become InfluxDB TAGS (supplied
 # separately, as fixed values, by the "Tags" panel on the page) rather than
@@ -112,6 +145,21 @@ RESERVED_COLUMN_NAMES: set[str] = {"time", "measurement"}
 
 DEFAULT_CONFIDENCE_THRESHOLD = 0.85
 _FUZZY_CUTOFF = 0.55
+
+# The tag keys MPG itself writes on every point (same six as
+# InfluxDateConverter.py's STATIC_TAGS and influxdb3_out._INFLUX3_TAG_NAMES).
+# Seeded as rows on the Tags panel, and always offered as tag-key suggestions
+# even for a brand-new measurement that has no schema to discover yet.
+STANDARD_TAG_KEYS: tuple[str, ...] = (
+    "device_identifier", "device_name", "device_manufacturer",
+    "device_model", "device_serial_number", "transport",
+)
+
+# Upper bound on how many distinct values are offered per tag key in the
+# Tags panel's dropdowns -- real tag cardinality here (a handful of devices)
+# is tiny; this only stops a mistyped/high-cardinality key from producing a
+# multi-thousand-entry <select>.
+MAX_TAG_VALUES: int = 500
 
 
 # ---------------------------------------------------------------------------
@@ -134,13 +182,51 @@ def is_eg4_protocol_in_use(nav: NavData) -> bool:
 
 def machine_timezone_for(gateway: "Protocol_Gateway | None", version: str) -> str:
     """
-    The configured machine_timezone for whichever InfluxDB bridge `version`
-    resolves to -- same helper as routers/influxdb.py's _machine_timezone,
-    duplicated here (rather than imported) since that one is private to
-    its module. Falls back to "UTC" if the bridge can't be resolved.
+    The configured machine_timezone for whichever bridge `version` resolves
+    to -- same helper as routers/influxdb.py's _machine_timezone, duplicated
+    here (rather than imported) since that one is private to its module.
+    Falls back to "UTC" if the bridge can't be resolved.
+
+    TimescaleDB doesn't carry its timezone on the bridge object the way the
+    InfluxDB transports do -- transports.timescaledb.get_machine_timezone()
+    is a free function reading the module's own _TZengine singleton
+    instead (see routers/timescale.py's identical call) -- so that branch
+    calls it directly rather than reading a `.machine_timezone` attribute
+    that wouldn't exist there.
     """
+    if version == "timescale":
+        if get_timescale_bridge(gateway) is None:
+            return "UTC"
+        from ...transports.timescaledb import (  # noqa: PLC0415 -- local: see write_points_timescale's identical note on deferring this transport's imports
+            get_machine_timezone,
+        )
+        try:
+            return get_machine_timezone()
+        except Exception:
+            return "UTC"
     bridge: Any | None = get_influxdb1_bridge(gateway) if version == "1" else get_influxdb3_bridge(gateway)
     return getattr(bridge, "machine_timezone", "UTC") if bridge is not None else "UTC"
+
+
+def timezone_groups(current: str = "") -> list[tuple[str, list[str]]]:
+    """
+    Every IANA zone name the runtime knows, grouped by region ("America",
+    "Europe", ...; slash-less names such as "UTC" land in "Other") for the
+    Local Machine Timezone <select>'s <optgroup>s -- about 600 names, far
+    easier to scan grouped. The posix/ and right/ mirror directories (and
+    "Factory") that some tzdata layouts expose are left out. `current` (the
+    bridge's configured zone) is always included even if the runtime doesn't
+    list it, so the page can still preselect it rather than silently
+    defaulting to whichever zone sorts first.
+    """
+    names: set[str] = {n for n in available_timezones() if not n.startswith(("posix/", "right/")) and n != "Factory"}
+    if current:
+        names.add(current)
+    groups: dict[str, list[str]] = {}
+    for name in sorted(names):
+        region: str = name.split("/", 1)[0] if "/" in name else "Other"
+        groups.setdefault(region, []).append(name)
+    return [(region, groups[region]) for region in sorted(groups, key=lambda r: (r == "Other", r))]
 
 
 # ---------------------------------------------------------------------------
@@ -205,7 +291,7 @@ class FieldMappingRow:
     source_column: str
     suggested_field: str            # "" if no confident guess (or identity, for influx_csv)
     confidence: float
-    default_ignored: bool           # pre-checked "Ignore this column" (reserved/tag-shaped names)
+    default_ignored: bool           # pre-checked "Ignore this column" (reserved/tag-shaped names, and unmatched EG4 metrics)
 
 
 def suggest_field_mapping(
@@ -228,9 +314,17 @@ def suggest_field_mapping(
 
     For source_kind == "eg4", each column is fuzzy-matched against
     `influx_fields` via guess_mapping(); a match scoring at or above
-    `confidence_threshold` is pre-filled, otherwise the row starts blank
-    for the admin to pick manually from the <select> partials/
-    timeshift_field_mapping.html renders.
+    `confidence_threshold` is pre-filled. A column that does NOT reach the
+    threshold starts with "Ignore" pre-checked -- an EG4 export carries
+    many columns MPG never records, and silently creating a new InfluxDB
+    field for each of them is rarely what the admin wants. The row is
+    still shown, so the admin can un-check Ignore and either pick an
+    existing field or "+ New field..." for it.
+
+    Exception: when `influx_fields` is empty (a brand-new measurement with
+    no schema yet) there is nothing for a column to match, so nothing is
+    pre-ignored on that basis -- otherwise every column would start
+    ignored and the whole file would be dropped by default.
 
     Columns in `tag_keys` (whatever the admin typed into the Tags panel)
     or RESERVED_COLUMN_NAMES are pre-checked "Ignore this column" by
@@ -258,7 +352,8 @@ def suggest_field_mapping(
         if score >= confidence_threshold:
             rows.append(FieldMappingRow(col, guess, score, False))  # noqa: FBT003
         else:
-            rows.append(FieldMappingRow(col, "", score, False))  # noqa: FBT003
+            # Unmatched EG4 metric -> Ignore pre-checked (see docstring), unless there is no schema to match against.
+            rows.append(FieldMappingRow(col, "", score, bool(influx_field_set)))
 
     return rows
 
@@ -304,6 +399,208 @@ def detect_time_column(columns: list[str]) -> str | None:
         if candidate in lowered:
             return lowered[candidate]
     return None
+
+
+# A header that IS a time word, optionally followed by a parenthetical or a timezone word:
+# "Date Time", "DateTime", "Time (UTC)", "Timestamp (PST)", "Date/Time Local". Anchored at both
+# ends so measurements that merely start with "Time" ("Time to Full", "Time Remaining") don't match.
+_TIME_NAME_RE: re.Pattern[str] = re.compile(
+    r"^\s*(?:date\s*/?\s*time|datetime|timestamp|time|date)(?:\s*\([^)]*\))?(?:\s+(?:local|utc|gmt|[ecmp][sd]t))?\s*$",
+    re.IGNORECASE,
+)
+
+
+def find_time_column(df: pd.DataFrame) -> str | None:
+    """
+    Best-guess timestamp column of a parsed sheet/file. Tried in order of
+    confidence: (1) an exact detect_time_column() name; (2) the first column
+    pandas already typed as a datetime (what a real Excel date/time cell
+    becomes, whatever the header says); (3) the first column whose header
+    is a time word, optionally with a unit/timezone ("Date Time",
+    "Timestamp (PST)", ...). Deliberately strict rather than a substring
+    match -- "Run Time (h)" or "Time to Full" are measurements, not the
+    timeline, and picking one of those silently would be worse than
+    finding nothing.
+    """
+    columns: list[str] = [str(c) for c in df.columns]
+    exact: str | None = detect_time_column(columns)
+    if exact is not None:
+        return exact
+    for col in df.columns:
+        if pd.api.types.is_datetime64_any_dtype(df[col]):
+            return str(col)
+    for name in columns:
+        if _TIME_NAME_RE.match(name):
+            return name
+    return None
+
+
+def earliest_timestamp(df: pd.DataFrame, time_column: str, local_tz: str) -> str | None:
+    """
+    The earliest valid timestamp in `time_column`, formatted for an
+    <input type="datetime-local" step="1"> (YYYY-MM-DDTHH:MM:SS), or None if
+    the column is missing or holds no parsable time. Drives the EG4 import's
+    "Source Start" default. Naive values (an EG4 export is naive local time)
+    are returned as-is; tz-aware ones are converted to `local_tz` first so
+    the result is always in the same zone the page interprets it in.
+    """
+    if time_column not in df.columns:
+        return None
+    ts: pd.Series[pd.Timestamp] = pd.to_datetime(df[time_column], errors="coerce").dropna()
+    if ts.empty:
+        return None
+    if ts.dt.tz is not None:
+        ts = ts.dt.tz_convert(ZoneInfo(local_tz)).dt.tz_localize(None)
+    return ts.min().strftime("%Y-%m-%dT%H:%M:%S")
+
+
+@dataclass
+class SheetSummary:
+    """One workbook sheet's outcome in a multi-sheet consolidation, shown in the Field Matchup panel."""
+    name: str
+    rows: int = 0
+    note: str = ""
+
+
+@dataclass
+class ParsedSpreadsheet:
+    """parse_upload()'s result: the DataFrame to store, plus what happened while building it."""
+    dataframe: pd.DataFrame
+    time_column: str | None = None          # set when consolidation normalized the time column's name
+    sheets_used: list[SheetSummary] = field(default_factory=list[SheetSummary])
+    sheets_skipped: list[SheetSummary] = field(default_factory=list[SheetSummary])
+    warnings: list[str] = field(default_factory=list[str])
+
+
+def consolidate_sheets(sheets: dict[str, pd.DataFrame], filename: str = "the workbook") -> ParsedSpreadsheet:
+    """
+    Merges every sheet of an EG4 workbook into ONE import table, keyed on
+    timestamp.
+
+    Each sheet needs a time column (found via find_time_column()); a sheet
+    without one (a "Summary"/"Info" tab, say) or without any data is skipped
+    and reported rather than failing the whole upload. The time column is
+    renamed to the first usable sheet's name for it, so the result has a
+    single time column no matter how each sheet labelled its own.
+
+    The merge is an outer join on timestamp, which covers both layouts an
+    export can plausibly have without having to guess which one it is:
+      - sheets that hold DIFFERENT time ranges with the same columns
+        (e.g. one sheet per day) -> the rows are simply stacked; and
+      - sheets that hold DIFFERENT columns for the SAME timestamps
+        (e.g. one sheet per device group) -> the columns are joined up
+        side by side.
+    Where two sheets both have a value for the same column at the same
+    timestamp, the earlier sheet's non-blank value wins; if those values
+    actually differ, a warning names the sheets and columns, so a
+    same-named-but-different metric doesn't get silently blended.
+
+    Raises:
+        ValueError: no sheet has both data and a recognizable time column.
+    """
+    used: list[SheetSummary] = []
+    skipped: list[SheetSummary] = []
+    warnings: list[str] = []
+    canonical: str | None = None
+    indexed: list[tuple[str, pd.DataFrame]] = []
+
+    for raw_name, raw_df in sheets.items():
+        name: str = str(raw_name)
+        df: pd.DataFrame = raw_df.copy()
+        df.columns = [str(c) for c in df.columns]
+        df = df.dropna(how="all").dropna(axis=1, how="all")
+        if df.empty:
+            skipped.append(SheetSummary(name, 0, "no data"))
+            continue
+
+        time_col: str | None = find_time_column(df)
+        if time_col is None:
+            skipped.append(SheetSummary(name, 0, "no time column found"))
+            continue
+        if canonical is None:
+            canonical = time_col
+
+        times: pd.Series[pd.Timestamp] = pd.to_datetime(df[time_col], errors="coerce")
+        if times.dt.tz is not None:
+            times = times.dt.tz_localize(None)  # keep wall-clock: the rest of the pipeline treats EG4 times as naive local
+        valid: pd.Series[bool] = times.notna()
+        bad_rows: int = int((~valid).sum())
+        df = df.loc[valid].drop(columns=[time_col])
+        if canonical in df.columns:
+            warnings.append(f"Sheet '{name}' has a second '{canonical}' column; it was dropped in favour of the sheet's time column.")
+            df = df.drop(columns=[canonical])
+        if df.empty:
+            skipped.append(SheetSummary(name, 0, "no rows with a valid time"))
+            continue
+        df.index = pd.DatetimeIndex(times.loc[valid], name=canonical)
+        if df.index.has_duplicates:
+            df = df.groupby(level=0, sort=False).first()  # repeated timestamps within one sheet -> first non-blank value per column
+
+        note: str = f"{bad_rows} row(s) without a valid time were dropped" if bad_rows else ""
+        used.append(SheetSummary(name, len(df), note))
+        indexed.append((name, df))
+
+    if not indexed or canonical is None:
+        msg: str = f"None of the {len(sheets)} sheet(s) in '{filename}' has both data and a recognizable time column."
+        raise ValueError(msg)
+
+    for i, (name_a, a) in enumerate(indexed):
+        for name_b, b in indexed[i + 1:]:
+            common_cols: list[str] = [c for c in a.columns if c in b.columns]
+            common_times: pd.Index[Any] = a.index.intersection(b.index)
+            if not common_cols or common_times.empty:
+                continue
+            sa: pd.DataFrame = a.loc[common_times, common_cols]
+            sb: pd.DataFrame = b.loc[common_times, common_cols]
+            differs: pd.DataFrame = sa.notna() & sb.notna() & sa.ne(sb)
+            conflicting: list[str] = [c for c in common_cols if bool(differs[c].any())]
+            if conflicting:
+                shown: str = ", ".join(conflicting[:5]) + (", ..." if len(conflicting) > 5 else "")
+                warnings.append(
+                    f"Sheets '{name_a}' and '{name_b}' both have values for {shown} at the same timestamps, "
+                    f"and they differ -- the value from '{name_a}' was kept."
+                )
+
+    combined: pd.DataFrame = pd.concat([d for _, d in indexed])
+    if combined.index.has_duplicates:
+        combined = combined.groupby(level=0, sort=False).first()
+    combined = combined.sort_index()
+    combined.index.name = canonical
+    combined = combined.reset_index()
+
+    return ParsedSpreadsheet(combined, canonical, used, skipped, warnings)
+
+
+_EXCEL_SUFFIXES: tuple[str, ...] = (".xlsx", ".xlsm", ".xls")
+
+
+def parse_upload(filename: str, data: bytes, source_kind: SourceKind) -> ParsedSpreadsheet:
+    """
+    Entry point used by the upload endpoint. An EG4 workbook (.xlsx/.xlsm/.xls)
+    with more than one sheet is read in full and consolidated (see
+    consolidate_sheets()); everything else -- a .csv, a single-sheet
+    workbook, or a re-import of this screen's own export -- goes through
+    parse_spreadsheet_bytes() exactly as before.
+
+    Raises:
+        ValueError: unsupported extension, no columns, or (multi-sheet) no usable sheet.
+    """
+    lower: str = filename.lower()
+    if source_kind != "eg4" or not lower.endswith(_EXCEL_SUFFIXES):
+        return ParsedSpreadsheet(parse_spreadsheet_bytes(filename, data))
+
+    engine: str | None = "openpyxl" if lower.endswith((".xlsx", ".xlsm")) else None
+    sheets: dict[str, pd.DataFrame] = pd.read_excel(io.BytesIO(data), sheet_name=None, engine=engine)  # pyright: ignore[reportUnknownMemberType]
+    if not sheets:
+        msg: str = f"'{filename}' has no sheets to import."
+        raise ValueError(msg)
+    if len(sheets) == 1:
+        only: pd.DataFrame = next(iter(sheets.values()))
+        if only.empty and len(only.columns) == 0:
+            msg = f"'{filename}' has no columns to import."
+            raise ValueError(msg)
+        return ParsedSpreadsheet(only)
+    return consolidate_sheets(sheets, filename)
 
 
 # ---------------------------------------------------------------------------
@@ -492,7 +789,26 @@ class TimeshiftImportResult:
 
 
 def compute_time_delta(source_start: datetime, target_start: datetime) -> timedelta:
-    """The same "hourly range on a different day" shift InfluxDateConverter.py applies to every point/row."""
+    """
+    The same "hourly range on a different day" shift InfluxDateConverter.py
+    applies to every point/row: the amount that moves `source_start` onto
+    `target_start`.
+
+    Timezone-aware inputs are compared as real instants (both converted to
+    UTC first). This matters when the two dates fall on opposite sides of a
+    daylight-saving change: Python's own `aware - aware` ignores the UTC
+    offsets whenever both values share the same tzinfo object -- which they
+    do here, both being stamped with the page's one Local Machine Timezone
+    -- and subtracts the wall-clock readings alone. Since every stored
+    timestamp is UTC, that left the shifted data an hour away from the
+    Target Start whenever a DST boundary lay between Source and Target
+    (e.g. a June source moved onto a January target).
+
+    Naive inputs (no tzinfo) are subtracted as-is.
+    """
+    if source_start.tzinfo is not None and target_start.tzinfo is not None:
+        utc = ZoneInfo("UTC")
+        return target_start.astimezone(utc) - source_start.astimezone(utc)
     return target_start - source_start
 
 
@@ -658,6 +974,125 @@ def measurements_for(gateway: "Protocol_Gateway | None", version: str) -> list[s
 
 
 # ---------------------------------------------------------------------------
+# Existing tag keys / values -- feeds the Tags panel's dropdowns, so the admin
+# picks the same device_identifier/device_name/... strings already stored
+# rather than retyping them (and creating a near-duplicate series with a typo).
+# Goes through each bridge's own `.client`, same as export_range_rows().
+# ---------------------------------------------------------------------------
+
+@dataclass
+class TagOptions:
+    tag_keys: list[str] = field(default_factory=list[str])                  # keys to suggest for the Tags panel's key inputs
+    tag_values: dict[str, list[str]] = field(default_factory=dict[str, list[str]])   # requested key -> distinct stored values, sorted
+    error: str = ""                                                          # non-empty if a query failed (whatever was found is still returned)
+
+
+def _v3_column_types(bridge: Any, measurement: str) -> dict[str, str]:
+    """[column_name] -> Arrow data_type for one v3 table, from information_schema.columns ({} for an unknown table)."""
+    sql: str = (
+        "SELECT column_name, data_type FROM information_schema.columns "  # noqa: S608
+        f"WHERE table_schema NOT IN ('information_schema', 'system') AND table_name = {_sql_quote_literal(measurement)}"
+    )
+    table: Any = bridge.client.query(sql, database=bridge.database, language="sql")
+    result: dict[str, str] = {}
+    for row in table.to_pylist():
+        record: dict[str, Any] = cast(dict[str, Any], row)
+        column: Any = record.get("column_name")
+        if column:
+            result[str(column)] = str(record.get("data_type") or "")
+    return result
+
+
+def load_tag_options(
+    gateway: "Protocol_Gateway | None",
+    version: str,
+    measurement: str,
+    tag_keys: Iterable[str] = (),
+    ) -> TagOptions:
+    """
+    Existing tag keys and, for each key in `tag_keys`, its distinct stored
+    values in `measurement`.
+
+    `tag_keys` in the result always starts with STANDARD_TAG_KEYS (so a
+    brand-new measurement still gets sensible suggestions), followed by any
+    other tag keys discovered on the measurement:
+      - v1: SHOW TAG KEYS / SHOW TAG VALUES ... WITH KEY IN (...), both
+        answered from the tag index (fast regardless of data volume).
+      - v3: tags are the table's dictionary-typed columns in
+        information_schema.columns; each requested key's values come from a
+        SELECT DISTINCT.
+
+    Never raises for a query problem: a brand-new/unknown measurement just
+    yields no values, and any other failure is logged and reported in
+    `.error` alongside whatever was found, so the Tags panel degrades to
+    plain "type a new value" instead of breaking.
+    """
+    options = TagOptions(tag_keys=list(STANDARD_TAG_KEYS))
+    wanted: list[str] = list(dict.fromkeys(k for k in tag_keys if k and k.strip()))
+    if not measurement.strip():
+        return options
+
+    def add_discovered(found: Iterable[str]) -> None:
+        for key in sorted(set(found)):
+            if key not in options.tag_keys:
+                options.tag_keys.append(key)
+
+    bridge: Any = get_influxdb1_bridge(gateway) if version == "1" else get_influxdb3_bridge(gateway)
+    if bridge is None or bridge.client is None:
+        options.error = f"No connected InfluxDB v{version} bridge is attached to this gateway."
+        return options
+
+    try:
+        if version == "1":
+            from influxdb.client import (  # pyright: ignore[reportMissingTypeStubs]
+                quote_ident,  # pyright: ignore[reportUnknownVariableType]
+            )
+
+            quoted_measurement: str = quote_ident(measurement)
+            key_result: Any = bridge.client.query(f"SHOW TAG KEYS FROM {quoted_measurement}", database=bridge.database)
+            add_discovered(str(p["tagKey"]) for p in key_result.get_points() if "tagKey" in p)
+
+            if wanted:
+                keys_in: str = ", ".join(quote_ident(k) for k in wanted)
+                value_result: Any = bridge.client.query(
+                    f"SHOW TAG VALUES FROM {quoted_measurement} WITH KEY IN ({keys_in})", database=bridge.database,
+                )
+                found_values: dict[str, set[str]] = {k: set() for k in wanted}
+                for point in value_result.get_points():
+                    key: Any = point.get("key")
+                    value: Any = point.get("value")
+                    if key in found_values and value not in (None, ""):
+                        found_values[key].add(str(value))
+                options.tag_values = {k: sorted(v)[:MAX_TAG_VALUES] for k, v in found_values.items()}
+        else:
+            column_types: dict[str, str] = _v3_column_types(bridge, measurement)
+            add_discovered(
+                c for c, t in column_types.items()
+                if c != "time" and (t.startswith("Dictionary") or c in STANDARD_TAG_KEYS)
+            )
+            for key in wanted:
+                if key not in column_types:
+                    options.tag_values[key] = []
+                    continue
+                sql: str = (
+                    f"SELECT DISTINCT {_sql_quote_ident(key)} FROM {_sql_quote_ident(measurement)} "  # noqa: S608
+                    f"WHERE {_sql_quote_ident(key)} IS NOT NULL LIMIT {MAX_TAG_VALUES}"
+                )
+                table: Any = bridge.client.query(sql, database=bridge.database, language="sql")
+                values: set[str] = set()
+                for row in table.to_pylist():
+                    cell: Any = cast(dict[str, Any], row).get(key)
+                    if cell not in (None, ""):
+                        values.add(str(cell))
+                options.tag_values[key] = sorted(values)
+    except Exception as exc:
+        _log.warning(f"[Timeshift] Could not load tag values for '{measurement}' (v{version}): {exc}")
+        options.error = str(exc)
+
+    return options
+
+
+# ---------------------------------------------------------------------------
 # Export (InfluxDB date range -> CSV), with the same time-shift math as
 # InfluxDateConverter.export_influx_data_to_csv().
 # ---------------------------------------------------------------------------
@@ -794,6 +1229,416 @@ def export_range_rows(
                     continue
                 new_row[k] = v
             rows.append(new_row)
+
+    header: list[str] = ["time"]
+    seen: set[str] = {"time"}
+    for row in rows:
+        for k in row:
+            if k not in seen:
+                seen.add(k)
+                header.append(k)
+
+    return header, rows
+
+
+# ---------------------------------------------------------------------------
+# TimescaleDB -- a structurally different destination from InfluxDB v1/v3.
+# There is no free-typed measurement: the admin picks a TABLE (the shared
+# narrow table, or one protocol's wide table -- table listing/resolution is
+# entirely reused from services/bridge_service.py's Metrics Edit functions,
+# same as this file already reuses influxdb_service's for InfluxDB) and a
+# DEVICE (also reused from Metrics Edit) in place of InfluxDB's Tags panel.
+#
+# Writing to a wide table always mirrors the same field values into the
+# narrow table too (build_points_timescale/write_points_timescale below) --
+# the narrow table is the durable long-format record of everything a wide
+# table also holds, and every wide column's underlying metric_name is
+# exactly its own column_name (see transports.timescaledb._process_raw_
+# metrics, whose `clean_key` feeds both), so "the same data" is a direct,
+# unambiguous mirror with no separate name mapping to maintain.
+# ---------------------------------------------------------------------------
+
+def timescale_tables_for(gateway: "Protocol_Gateway | None") -> list[dict[str, str | None]]:
+    """
+    Thin re-export of bridge_service.list_metric_edit_tables(), named for
+    this module's own "Table" picker on the Timeshift Data screen --
+    [{table_kind, protocol_name, table_name}, ...], the shared narrow table
+    first, then every protocol that has a wide table. A protocol with no
+    wide table (narrow-only, e.g. it exceeds transports.timescaledb.
+    timescaledb.WIDE_TABLE_COLUMN_LIMIT) simply has no entry of its own
+    here -- its data still lives in the one shared narrow entry -- which is
+    exactly what keeps a wide-table CHOICE off the picker unless a wide
+    table genuinely exists, with no extra filtering needed on this end.
+    """
+    return _list_timescale_tables(gateway)
+
+
+def timescale_devices_for(
+    gateway: "Protocol_Gateway | None", table_kind: str, protocol_name: str | None = None,
+    ) -> list[dict[str, str | int | None]]:
+    """
+    Thin re-export of bridge_service.list_metric_edit_devices() -- the
+    Device picker that replaces InfluxDB's Tags panel for a TimescaleDB
+    destination, scoped to whichever table is currently selected exactly
+    the way the Metrics Edit screen's own device picker is.
+
+    Raises:
+        ValueError: unknown table_kind, or table_kind="wide" with an
+                    unregistered/narrow-only protocol_name.
+    """
+    return _list_timescale_devices(gateway, table_kind, protocol_name)
+
+
+def timescale_fields_for(
+    gateway: "Protocol_Gateway | None",
+    table_kind: str,
+    protocol_name: str | None = None,
+    device_info_id: int | None = None,
+    ) -> list[dict[str, str | None]]:
+    """
+    Thin re-export of bridge_service.list_metric_edit_fields() -- existing
+    column names (wide) or distinct metric_name values (narrow, optionally
+    scoped to one device) for the selected table, feeding the Field Matchup
+    step's target-field list the same way influx_fields does for InfluxDB.
+
+    Raises:
+        ValueError: see timescale_devices_for.
+    """
+    return _list_timescale_fields(gateway, table_kind, protocol_name=protocol_name, device_info_id=device_info_id)
+
+
+def load_timescale_field_types(gateway: "Protocol_Gateway | None", table_kind: str, protocol_name: str | None) -> dict[str, str]:
+    """
+    [column_name] -> declared Postgres type string (e.g. "DOUBLE
+    PRECISION", "SMALLINT", "TEXT") for a wide table's existing columns,
+    for build_points_timescale's value coercion
+    (transports.timescaledb._coerce_value_for_data_type). Always {} for a
+    narrow table -- there is no per-metric declared type there (every
+    metric shares the same two nullable columns), so no coercion is needed
+    or possible; build_points_timescale falls back to write_points_
+    timescale's own isinstance-based numeric/text split for those, the same
+    decision transports.timescaledb._flush_batch_narrow makes for live data.
+    """
+    if table_kind != "wide":
+        return {}
+    fields: list[dict[str, str | None]] = timescale_fields_for(gateway, "wide", protocol_name)
+    return {name: dtype for f in fields if (name := f.get("name")) and (dtype := f.get("data_type"))}
+
+
+@dataclass
+class TimescalePointDict:
+    """
+    One source row's contribution, ready for write_points_timescale().
+    Unlike InfluxPointDict there is no per-point measurement/tags -- every
+    point in one import shares the same table_kind/table_name/protocol_name
+    and device_info_id (a Timeshift import always targets one table and one
+    device), so those are write_points_timescale() parameters instead of
+    being repeated on every point.
+
+    `fields` keys are column_name (wide) or metric_name (narrow) -- see the
+    module-section docstring above for why those are the same string
+    either way. Wide-table values have already been coerced to match each
+    column's declared Postgres type (transports.timescaledb._coerce_value_
+    for_data_type); narrow-table values have not, since narrow has no
+    declared per-metric type to coerce against.
+    """
+    time_iso: str
+    fields: dict[str, int | float | str | bool]
+
+
+def build_points_timescale(
+    df: pd.DataFrame,
+    *,
+    table_kind: str,
+    mapping: dict[str, str],           # source_column -> column_name (wide) or metric_name (narrow); only mapped, non-ignored columns
+    time_column: str,
+    source_is_local: bool,
+    local_tz: str,
+    time_delta: timedelta,
+    wide_field_types: dict[str, str],  # column_name -> declared Postgres type; {} for a narrow target (see load_timescale_field_types)
+    ) -> tuple[list[TimescalePointDict], TimeshiftImportResult]:
+    """
+    TimescaleDB counterpart of build_points() -- same row-by-row time-shift
+    math (identical to the letter, since it doesn't depend on the
+    destination), but coercing each mapped value against a wide column's
+    declared Postgres type instead of InfluxDB's own field-type bucket, and
+    with no tags (the whole point set shares one device_info_id, attached
+    by write_points_timescale() rather than per-point here).
+
+    A wide-table value that fails transports.timescaledb._coerce_value_for_
+    data_type (wrong shape for its column, e.g. text into a numeric column,
+    a fractional value into an INTEGER column, or out of an integer type's
+    range) is recorded in result.type_mismatches and dropped from that row,
+    the same "skip and report, don't fail the whole import" behavior
+    check_field_type() gives build_points() for InfluxDB. A narrow-table
+    value is never rejected this way -- there is no declared type to
+    conflict with; normalize_value() is all it gets, and write_points_
+    timescale() sorts it into metric_value/metric_ascii by its Python type
+    at write time, exactly as transports.timescaledb._flush_batch_narrow
+    does for live data.
+    """
+    from ...transports.timescaledb import (  # noqa: PLC0415 -- local: see write_points_timescale's note on deferring this transport's imports
+        _coerce_value_for_data_type,  # pyright: ignore[reportPrivateUsage] -- reused deliberately, see this function's own docstring
+    )
+
+    result = TimeshiftImportResult()
+    points: list[TimescalePointDict] = []
+    tz = ZoneInfo(local_tz)
+
+    for row in df.to_dict("records"):
+        time_val: Any = row.get(time_column)
+        if time_val is None or (isinstance(time_val, float) and math.isnan(time_val)):
+            result.rows_skipped_bad_time += 1
+            continue
+
+        try:
+            ts: pd.Timestamp = pd.to_datetime(time_val)
+            if ts.tzinfo is None:
+                ts = ts.tz_localize(tz, nonexistent="shift_forward") if source_is_local else ts.tz_localize("UTC")
+            new_time: pd.Timestamp = (ts.tz_convert("UTC") + time_delta).tz_localize(None)
+        except (ValueError, TypeError):
+            result.rows_skipped_bad_time += 1
+            continue
+
+        if pd.isna(new_time):
+            result.rows_skipped_bad_time += 1
+            continue
+
+        fields: dict[str, int | float | str | bool] = {}
+        for col, raw_val in row.items():
+            col = str(col)
+            if col == time_column:
+                continue
+            target: str | None = mapping.get(col)
+            if not target:
+                if col in mapping:
+                    continue  # admin explicitly mapped this column to "" (Ignore checked) -- silently skip, no warning
+                result.unmapped_columns.add(col)
+                continue
+
+            val: Any = normalize_value(raw_val)
+            if val is None:
+                continue
+
+            if table_kind == "wide":
+                try:
+                    val = _coerce_value_for_data_type(val, wide_field_types.get(target))
+                except ValueError as exc:
+                    result.type_mismatches.append(f"{target}={val!r} (row time {new_time.isoformat()}): {exc}")
+                    continue
+            fields[target] = val
+
+        if not fields:
+            result.rows_skipped_no_fields += 1
+            continue
+
+        points.append(TimescalePointDict(time_iso=new_time.isoformat(), fields=fields))
+
+    return points, result
+
+
+# device_metrics_narrow's PK is (m_time, device_info_id, metric_name) -- see transports.timescaledb.
+# DeviceMetricsNarrow. ON CONFLICT DO UPDATE (not DO NOTHING, unlike the live flush worker's own narrow
+# write) so re-running a Timeshift import over the same target range is idempotent/overwriting, the
+# same expectation InfluxDB's line-protocol writes already give this screen's other two destinations.
+_NARROW_UPSERT_SQL: str = (
+    "INSERT INTO device_metrics_narrow (m_time, device_info_id, metric_name, metric_value, metric_ascii) "
+    "VALUES (:m_time, :device_info_id, :metric_name, :metric_value, :metric_ascii) "
+    "ON CONFLICT (m_time, device_info_id, metric_name) DO UPDATE SET "
+    "metric_value = EXCLUDED.metric_value, metric_ascii = EXCLUDED.metric_ascii"
+)
+
+
+def _narrow_value_pair(value: int | float | str | bool) -> tuple[float, str | None]:
+    """Mirrors transports.timescaledb._flush_batch_narrow's numeric-vs-ascii split, for the narrow mirror of a wide-table write (and for a narrow-only write)."""
+    if isinstance(value, bool):
+        return (1.0 if value else 0.0), None
+    if isinstance(value, (int, float)):
+        return float(value), None
+    return 0.0, str(value)
+
+
+def _wide_upsert_sql(table_name: str, columns: list[str]) -> str:
+    """
+    ON CONFLICT (m_time, device_info_id) DO UPDATE -- that pair is the wide
+    table's own primary key (see transports.timescaledb.timescaledb.
+    _ensure_wide_table_exists), so this is the same idempotent-overwrite
+    reasoning _NARROW_UPSERT_SQL's docstring gives, for the wide side of a
+    dual write. `table_name`/`columns` are trusted SQL identifiers by the
+    time they reach here -- table_name from bridge_service.
+    resolve_wide_table_name() (itself sourced from protocol_registry, only
+    ever a name this app created), columns from metric_catalog.
+    clean_column_name (sanitized at wide-table-creation time) -- the same
+    trust level transports.timescaledb.BridgeAdminManager._wide_view_names
+    already extends to a wide_table_name it's given.
+    """
+    col_list: str = ", ".join(["m_time", "device_info_id", *columns])
+    val_list: str = ", ".join([":m_time", ":device_info_id", *(f":{c}" for c in columns)])
+    update_list: str = ", ".join(f"{c} = EXCLUDED.{c}" for c in columns)
+    return (
+        f"INSERT INTO {table_name} ({col_list}) VALUES ({val_list}) "  # noqa: S608
+        f"ON CONFLICT (m_time, device_info_id) DO UPDATE SET {update_list}"
+    )
+
+
+def write_points_timescale(
+    gateway: "Protocol_Gateway | None",
+    table_kind: str,
+    table_name: str,
+    device_info_id: int,
+    points: list[TimescalePointDict],
+    ) -> tuple[int, int]:
+    """
+    Writes points to the live TimescaleDB bridge -- for table_kind="wide",
+    each point's fields are upserted into `table_name` AND mirrored into
+    device_metrics_narrow with the same field/value pairs (see this
+    section's module docstring); for table_kind="narrow", only the narrow
+    write happens.
+
+    Returns (rows_written, narrow_metric_rows_written):
+      - rows_written counts one per point (the same "one point per source
+        row" convention TimeshiftImportResult.points_written already uses
+        for InfluxDB), regardless of table_kind.
+      - narrow_metric_rows_written counts individual (m_time, device_info_
+        id, metric_name) rows placed into device_metrics_narrow -- always
+        >= rows_written whenever any point has more than one field, since
+        every field of every point becomes its own narrow row.
+
+    Both writes for one point share a single transaction (a wide row and
+    its narrow mirror are never left half-written), and the whole batch
+    shares one more (all points, or none, per the same all-or-nothing
+    expectation write_points_v1/write_points_v3 give InfluxDB imports).
+
+    Raises:
+        RuntimeError: no TimescaleDB bridge is attached to this gateway, or it isn't connected.
+        ValueError: table_kind isn't "narrow"/"wide".
+    """
+    from sqlalchemy import (  # noqa: PLC0415 -- local: see build_points_timescale's identical note on deferring this transport's imports
+        text as _sql_text,
+    )
+
+    if table_kind not in ("narrow", "wide"):
+        msg: str = f"Unknown table_kind '{table_kind}' -- expected 'narrow' or 'wide'."
+        raise ValueError(msg)
+
+    bridge: Any | None = get_timescale_bridge(gateway)
+    if bridge is None:
+        raise RuntimeError("No TimescaleDB bridge is attached to this gateway.")
+    if not getattr(bridge, "tsdb_connected", True):
+        raise RuntimeError("TimescaleDB bridge is not connected.")
+    if not points:
+        return 0, 0
+
+    narrow_rows: list[dict[str, Any]] = []
+    rows_written = 0
+
+    with bridge.SessionFactory() as session:
+        with session.begin():
+            for p in points:
+                # p.time_iso is a naive-UTC ISO string (see TimescalePointDict/build_points_timescale,
+                # and InfluxPointDict's identical convention). Explicitly re-attaching UTC here, rather
+                # than binding the naive string/datetime directly, matters because these columns are
+                # TIMESTAMPTZ: a naive value would otherwise be interpreted in the DB session's own
+                # timezone setting (not necessarily UTC), silently shifting every written timestamp.
+                m_time: datetime = datetime.fromisoformat(p.time_iso).replace(tzinfo=timezone.utc)
+                if table_kind == "wide":
+                    sql: str = _wide_upsert_sql(table_name, list(p.fields.keys()))
+                    params: dict[str, Any] = {"m_time": m_time, "device_info_id": device_info_id, **p.fields}
+                    session.execute(_sql_text(sql), params)
+                for name, value in p.fields.items():
+                    metric_value, metric_ascii = _narrow_value_pair(value)
+                    narrow_rows.append({
+                        "m_time": m_time, "device_info_id": device_info_id,
+                        "metric_name": name, "metric_value": metric_value, "metric_ascii": metric_ascii,
+                    })
+                rows_written += 1
+
+            if narrow_rows:
+                session.execute(_sql_text(_NARROW_UPSERT_SQL), narrow_rows)
+
+    return rows_written, len(narrow_rows)
+
+
+def export_range_rows_timescale(
+    gateway: "Protocol_Gateway | None",
+    table_kind: str,
+    table_name: str,
+    protocol_name: str | None,
+    device_info_id: int,
+    start_time: datetime,
+    end_time: datetime,
+    target_start: datetime,
+    ) -> tuple[list[str], list[dict[str, Any]]]:
+    """
+    TimescaleDB counterpart of export_range_rows() -- same time-shift math
+    and (header, rows) shape, for one table + device over a date range.
+
+    A wide table is already column-shaped, so its rows come back as-is
+    (minus m_time, replaced by the shifted "time"). A narrow table stores
+    one row per (m_time, metric_name) -- these are pivoted into the same
+    wide-shaped CSV rows (one row per distinct shifted timestamp, one
+    column per distinct metric_name seen in the range) so a narrow export
+    and a wide export produce an identically-shaped file, and so the file
+    re-imports the same way through this same screen's "influx_csv"-style
+    source path regardless of which table it came from.
+
+    Raises:
+        ValueError: end_time before start_time, no bridge attached/
+                    connected, or table_kind isn't "narrow"/"wide".
+    """
+    if end_time < start_time:
+        raise ValueError("End time must not be before start time.")
+    if table_kind not in ("narrow", "wide"):
+        msg: str = f"Unknown table_kind '{table_kind}' -- expected 'narrow' or 'wide'."
+        raise ValueError(msg)
+
+    bridge: Any | None = get_timescale_bridge(gateway)
+    if bridge is None or not getattr(bridge, "tsdb_connected", True):
+        raise ValueError("No connected TimescaleDB bridge is attached to this gateway.")
+
+    from sqlalchemy import (  # noqa: PLC0415 -- local: see build_points_timescale's identical note on deferring this transport's imports
+        text as _sql_text,
+    )
+
+    time_delta: timedelta = compute_time_delta(start_time, target_start)
+    rows: list[dict[str, Any]] = []
+
+    def shift(raw_time: Any) -> str:
+        ts = pd.Timestamp(raw_time)
+        if ts.tzinfo is None:
+            ts = ts.tz_localize("UTC")
+        return (ts.tz_convert("UTC") + time_delta).tz_localize(None).isoformat()
+
+    with bridge.SessionFactory() as session:
+        if table_kind == "narrow":
+            result: Any = session.execute(
+                _sql_text(
+                    "SELECT m_time, metric_name, metric_value, metric_ascii FROM device_metrics_narrow "
+                    "WHERE device_info_id = :did AND m_time BETWEEN :start AND :end ORDER BY m_time"
+                ),
+                {"did": device_info_id, "start": start_time, "end": end_time},
+            )
+            by_time: dict[str, dict[str, Any]] = {}
+            for m_time, metric_name, metric_value, metric_ascii in result:
+                new_row: dict[str, Any] = by_time.setdefault(shift(m_time), {})
+                new_row[metric_name] = metric_ascii if metric_ascii is not None else metric_value
+            rows = [{"time": t, **fields} for t, fields in by_time.items()]
+        else:
+            field_names: list[str] = [name for f in timescale_fields_for(gateway, "wide", protocol_name) if (name := f.get("name"))]
+            if field_names:
+                select_cols: str = ", ".join(_sql_quote_ident(c) for c in field_names)
+                result = session.execute(
+                    _sql_text(
+                        f"SELECT m_time, {select_cols} FROM {table_name} "  # noqa: S608 -- table_name/select_cols are trusted identifiers, see _wide_upsert_sql's docstring
+                        "WHERE device_info_id = :did AND m_time BETWEEN :start AND :end ORDER BY m_time"
+                    ),
+                    {"did": device_info_id, "start": start_time, "end": end_time},
+                )
+                for record in result:
+                    new_row = {"time": shift(record[0])}
+                    for name, value in zip(field_names, record[1:]):
+                        new_row[name] = value
+                    rows.append(new_row)
 
     header: list[str] = ["time"]
     seen: set[str] = {"time"}

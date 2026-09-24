@@ -1,13 +1,15 @@
 {#
   partials/timeshift_result.html
-  Swapped into #ts-result-container after "Import to InfluxDB" actually
-  writes points. Context: result — TimeshiftImportResult (points_written
-  now set to the real write count); action — "import" (reserved for
-  future reuse by other Timeshift actions using the same result shape).
+  Swapped into #ts-result-container after "Import to InfluxDB"/"Import to
+  TimescaleDB" actually writes points. Context: result — TimeshiftImportResult
+  (points_written now set to the real write count); action — "import"
+  (reserved for future reuse by other Timeshift actions using the same
+  result shape); destination — "InfluxDB" | "TimescaleDB", which bridge
+  was actually written to.
 #}
 <div class="rounded border border-success/30 bg-success/10 p-3 mt-2">
   <p class="text-success text-xs font-semibold">
-    Wrote {{ result.points_written }} point{{ 's' if result.points_written != 1 }} to InfluxDB.
+    Wrote {{ result.points_written }} point{{ 's' if result.points_written != 1 }} to {{ destination }}.
   </p>
   {% if result.rows_skipped_no_fields or result.rows_skipped_bad_time or result.unmapped_columns or result.type_mismatches %}
   <ul class="text-xs text-mpg-700 dark:text-mpg-200 space-y-0.5 mt-1">
@@ -23,6 +25,13 @@
     {% if result.type_mismatches %}
     <li>{{ result.type_mismatches|length }} value(s) skipped for a type conflict with the existing field.</li>
     {% endif %}
+  </ul>
+  {% endif %}
+  {% if result.warnings %}
+  <ul class="text-xs text-mpg-700 dark:text-mpg-200 space-y-0.5 mt-1">
+    {% for warning in result.warnings %}
+    <li>{{ warning }}</li>
+    {% endfor %}
   </ul>
   {% endif %}
 </div>

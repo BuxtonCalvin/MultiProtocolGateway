@@ -7,27 +7,50 @@
   Context: upload_id — str, the server-side stored upload this mapping
   applies to; row_count — int, rows in the uploaded file; mapping_rows —
   list[FieldMappingRow] (source_column, suggested_field, confidence,
-  default_ignored); influx_fields — [str, ...] existing field names on
-  the target measurement (empty for a brand-new measurement); columns —
+  default_ignored); influx_fields — [str, ...] existing target field/
+  column names (empty for a brand-new InfluxDB measurement, or a brand-new
+  TimescaleDB narrow metric_name); allow_new_field — bool, whether
+  "+ New field…" is offered at all; False for a TimescaleDB wide table,
+  since a genuinely new wide column needs an ALTER TABLE this screen
+  doesn't perform (see services.timeshift_service module docstring's
+  TimescaleDB section) -- always True for InfluxDB and a TimescaleDB
+  narrow table, where any field/metric name is freely writable; columns —
   every source column, for the page's Time Column <select>;
-  detected_time_column — best-guess column name for that select's default.
+  detected_time_column — best-guess column name for that select's default;
+  sheets_used / sheets_skipped — [SheetSummary(name, rows, note), ...] when
+  a multi-sheet EG4 workbook was consolidated (empty otherwise);
+  parse_warnings — [str, ...] consolidation warnings (e.g. two sheets
+  disagreeing about a value at the same timestamp).
 
-  #ts-mapping-root carries upload_id/columns/detected_time_column as data
-  attributes purely so the page's own JS (uploadAndScan() in
-  pages/timeshift_data.html) can read them back out after this partial is
-  swapped in — no server round-trip needed to populate the Time Column
-  picker or to know which upload subsequent Preview/Import calls refer to.
+  #ts-mapping-root carries upload_id/columns/detected_time_column/
+  influx_fields as data attributes purely so the page's own JS
+  (uploadAndScan() in pages/timeshift_data.html) can read them back out
+  after this partial is swapped in — no server round-trip needed to
+  populate the Time Column picker, to know which upload subsequent
+  Preview/Import calls refer to, or to rebuild a row's own dropdown (see
+  below).
 
   Each row: source column name, the confidence-scored suggestion (or
-  "no confident match"), a target-field <select> (existing fields +
-  "+ New field…", which reveals a free-text input for a field name that
-  doesn't exist in InfluxDB yet), and an "Ignore" checkbox (pre-checked
-  for tag-shaped/reserved columns per default_ignored).
+  "no confident match"), a target-field <select> (existing fields, plus
+  "+ New field…" when allow_new_field -- which reveals a free-text input
+  for a field name that doesn't exist yet), and an "Ignore" checkbox
+  (pre-checked per default_ignored: tag-shaped/reserved columns and, for
+  EG4 imports, columns with no confident match to an existing field).
+
+  A row with no confident suggestion (row.suggested_field == "") carries
+  data-below-threshold="true". The page's JS (refreshBelowThresholdOptions())
+  narrows such a row's <select> to fields no OTHER row currently has
+  selected, so two low-confidence columns can't be walked into silently
+  overwriting the same field — a confidently-matched row's dropdown is
+  left showing every field, unrestricted, since that guess is presumed
+  correct rather than a guess the admin is actively choosing between.
 #}
 <div id="ts-mapping-root"
      data-upload-id="{{ upload_id }}"
      data-columns='{{ columns|tojson }}'
-     data-detected-time-column="{{ detected_time_column or '' }}">
+     data-detected-time-column="{{ detected_time_column or '' }}"
+     data-influx-fields='{{ influx_fields|tojson }}'
+     data-allow-new-field="{{ 'true' if allow_new_field is not defined or allow_new_field else 'false' }}">
 
   <div class="flex items-center justify-between mb-2">
     <h3 class="surface-title text-xs font-semibold uppercase tracking-widest">
@@ -35,19 +58,41 @@
     </h3>
   </div>
 
+  {% if sheets_used|length > 1 or sheets_skipped or parse_warnings %}
+  <div class="rounded border border-mpg-700 p-2 mb-2 text-xs">
+    {% if sheets_used|length > 1 %}
+    <p class="surface-title font-semibold">{{ sheets_used|length }} sheets consolidated into one import</p>
+    <ul class="surface-subtle mt-1 space-y-0.5">
+      {% for sheet in sheets_used %}
+      <li>{{ sheet.name }} — {{ sheet.rows }} row{{ 's' if sheet.rows != 1 }}{% if sheet.note %} ({{ sheet.note }}){% endif %}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    {% if sheets_skipped %}
+    <p class="text-warning mt-2">
+      Skipped: {% for sheet in sheets_skipped %}{{ sheet.name }} ({{ sheet.note }}){{ ', ' if not loop.last }}{% endfor %}
+    </p>
+    {% endif %}
+    {% for warning in parse_warnings %}
+    <p class="text-warning mt-1">{{ warning }}</p>
+    {% endfor %}
+  </div>
+  {% endif %}
+
   <div class="overflow-x-auto border border-mpg-700 rounded">
     <table class="w-full text-xs border-collapse">
       <thead>
         <tr class="mini-table-header uppercase tracking-wide">
           <th class="px-2 py-1.5 text-left font-semibold whitespace-nowrap">Source Column</th>
           <th class="px-2 py-1.5 text-left font-semibold whitespace-nowrap">Confidence</th>
-          <th class="px-2 py-1.5 text-left font-semibold whitespace-nowrap">InfluxDB Field</th>
+          <th class="px-2 py-1.5 text-left font-semibold whitespace-nowrap">Target Field</th>
           <th class="px-2 py-1.5 text-center font-semibold whitespace-nowrap">Ignore</th>
         </tr>
       </thead>
       <tbody>
         {% for row in mapping_rows %}
-        <tr class="ts-map-row border-t border-mpg-700/50" data-source-column="{{ row.source_column }}">
+        <tr class="ts-map-row border-t border-mpg-700/50" data-source-column="{{ row.source_column }}"
+            data-below-threshold="{{ 'true' if not row.suggested_field else 'false' }}">
           <td class="px-2 py-1.5 font-mono mini-table-value whitespace-nowrap">{{ row.source_column }}</td>
           <td class="px-2 py-1.5 mini-table-value whitespace-nowrap">
             {% if row.suggested_field %}
@@ -69,7 +114,7 @@
               {% for f in influx_fields %}
               <option value="{{ f }}" {% if f == row.suggested_field %}selected{% endif %}>{{ f }}</option>
               {% endfor %}
-              <option value="__new__">+ New field…</option>
+              {% if allow_new_field is not defined or allow_new_field %}<option value="__new__">+ New field…</option>{% endif %}
             </select>
             <input type="text" class="ts-map-target-custom theme-input text-xs rounded px-1.5 py-1 w-full mt-1 hidden"
                    style="max-width: 220px;"
@@ -78,15 +123,23 @@
           </td>
           <td class="px-2 py-1.5 text-center">
             <input type="checkbox" class="ts-map-ignore" {% if row.default_ignored %}checked{% endif %}
-                   onchange="this.closest('.ts-map-row').querySelector('.ts-map-target-select').disabled = this.checked;">
+                   onchange="onMapIgnoreChange(this)">
           </td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
-  <p class="surface-subtle text-[10px] mt-1">
-    Rows checked "Ignore" are dropped entirely (tag-shaped columns are pre-checked). Pick
-    "+ New field…" to write a column under a brand-new InfluxDB field name.
+  <p class="surface-subtle text-xs mt-1">
+    Rows checked "Ignore" are dropped entirely. Tag-shaped columns are pre-checked, and so are EG4
+    columns with no match to an existing field: un-check one to map it.
+    {% if allow_new_field is not defined or allow_new_field %}
+    Pick "+ New field…" to write a column under a brand-new field name.
+    {% else %}
+    This table's columns are fixed, so only existing fields are offered here -- write a genuinely new
+    metric to the narrow table instead.
+    {% endif %}
+    A row with no confident match only offers fields no other row is already using, so two columns
+    can't end up writing to the same field by accident.
   </p>
 </div>
