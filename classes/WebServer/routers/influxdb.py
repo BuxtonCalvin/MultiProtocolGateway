@@ -30,6 +30,7 @@ partial for the same HTMX-swap pattern routers/timescale.py uses.
 
 from __future__ import annotations
 
+import html
 import logging
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -42,12 +43,14 @@ from pydantic import BaseModel
 from ..database import session_scope
 from ..services.device_service import NavData, get_nav_data
 from ..services.influxdb_service import (
+    delete_unavailable_reason,
     get_influxdb1_bridge,
     get_influxdb3_bridge,
     get_staged_metric_edits,
     list_metric_edit_devices,
     list_metric_edit_fields,
     list_metric_edit_measurements,
+    lookup_metric_edit_device_name,
     preview_metric_edit,
     stage_metric_edit,
     supports_delete,
@@ -129,7 +132,7 @@ def _require_bridge(request: Request, version: str) -> Any:
 # ---------------------------------------------------------------------------
 
 @router.get("/pages/influxdb-metrics-edit/{version}", response_class=HTMLResponse, response_model=None)
-async def influxdb_metrics_edit_page(request: Request, version: str):
+def influxdb_metrics_edit_page(request: Request, version: str):
     """
     "Metrics Edit 1.x"/"Metrics Edit 3.x" screen — lists every measurement
     on the resolved bridge. Selecting one loads its device picker via HTMX
@@ -149,6 +152,12 @@ async def influxdb_metrics_edit_page(request: Request, version: str):
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
+    # supports_delete: this InfluxDB version has a delete action at all.
+    # delete_unavailable_reason: set when the connected server cannot perform it
+    # (InfluxDB 3 Core) -- the page then shows "Delete value(s)" disabled with this text.
+    delete_offered: bool = supports_delete(version)
+    delete_block_reason: str | None = delete_unavailable_reason(gateway, version)
+
     return request.app.state.templates.TemplateResponse(
         request=request,
         name="pages/influxdb_metrics_edit.html",
@@ -156,15 +165,23 @@ async def influxdb_metrics_edit_page(request: Request, version: str):
             **base_context(request, nav),
             "version": version,
             "measurements": measurements,
-            "supports_delete": supports_delete(version),
+            "supports_delete": delete_offered,
+            "delete_unavailable_reason": delete_block_reason,
+            "delete_enabled": delete_offered and delete_block_reason is None,
             "staged_edits": get_staged_metric_edits(request.app.state),
         },
     )
 
 
 @router.get("/pages/influxdb/metrics-edit/{version}/devices", response_class=HTMLResponse, response_model=None)
-async def influxdb_metrics_edit_devices_partial(request: Request, version: str, measurement: str):
-    """Device picker (<option> list) for one Metrics Edit measurement selection, for either InfluxDB version."""
+def influxdb_metrics_edit_devices_partial(request: Request, version: str, measurement: str):
+    """
+    Device picker (<option> list) for one Metrics Edit measurement selection, for either InfluxDB version.
+
+    Plain `def`, not `async def`: the InfluxDB clients are blocking, and FastAPI runs
+    a plain `def` route in its threadpool. An `async def` route calling them would
+    stall the whole event loop (every other request on the UI) until the query returned.
+    """
     _require_bridge(request, version)
     gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
 
@@ -173,6 +190,7 @@ async def influxdb_metrics_edit_devices_partial(request: Request, version: str, 
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except Exception as exc:
+        _log.exception("Metrics Edit device list failed (InfluxDB %s, measurement %s)", version, measurement)
         raise HTTPException(status_code=500, detail=str(exc))
 
     return request.app.state.templates.TemplateResponse(
@@ -182,9 +200,32 @@ async def influxdb_metrics_edit_devices_partial(request: Request, version: str, 
     )
 
 
+@router.get("/pages/influxdb/metrics-edit/{version}/device-name", response_class=HTMLResponse, response_model=None)
+def influxdb_metrics_edit_device_name(request: Request, version: str, measurement: str, device: str):
+    """
+    Friendly device_name for one picked device, as an escaped plain-text fragment ("" if none).
+
+    InfluxDB v1's device list carries identifiers only (see
+    InfluxV1AdminManager.list_metric_edit_devices), so the page fetches the
+    name here after a device is chosen. Always "" for v3, whose list already has names.
+    """
+    _require_bridge(request, version)
+    gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
+
+    try:
+        name: str | None = lookup_metric_edit_device_name(gateway, version, measurement, device)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        _log.exception("Metrics Edit device name lookup failed (InfluxDB %s, %s / %s)", version, measurement, device)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return HTMLResponse(html.escape(name or ""))
+
+
 @router.get("/pages/influxdb/metrics-edit/{version}/fields", response_class=HTMLResponse, response_model=None)
-async def influxdb_metrics_edit_fields_partial(request: Request, version: str, measurement: str):
-    """Field picker for one Metrics Edit measurement selection, for either InfluxDB version."""
+def influxdb_metrics_edit_fields_partial(request: Request, version: str, measurement: str):
+    """Field picker for one Metrics Edit measurement selection, for either InfluxDB version (plain `def` -- see the devices route)."""
     _require_bridge(request, version)
     gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
 
@@ -193,6 +234,7 @@ async def influxdb_metrics_edit_fields_partial(request: Request, version: str, m
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except Exception as exc:
+        _log.exception("Metrics Edit field list failed (InfluxDB %s, measurement %s)", version, measurement)
         raise HTTPException(status_code=500, detail=str(exc))
 
     return request.app.state.templates.TemplateResponse(
@@ -275,8 +317,12 @@ def influxdb_metrics_edit_stage(payload: InfluxMetricEditStageRequest, request: 
 
     if payload.action not in ("delete", "set_value"):
         raise HTTPException(status_code=400, detail=f"Unknown action '{payload.action}'.")
-    if payload.action == "delete" and not supports_delete(version):
-        raise HTTPException(status_code=400, detail="Deleting is not supported for InfluxDB v3.")
+    if payload.action == "delete":
+        if not supports_delete(version):
+            raise HTTPException(status_code=400, detail="Deleting is not supported for InfluxDB v3.")
+        block_reason: str | None = delete_unavailable_reason(gateway, version)
+        if block_reason:
+            raise HTTPException(status_code=400, detail=block_reason)
     if payload.action == "set_value":
         if not payload.field_name:
             raise HTTPException(status_code=400, detail="Select a field to edit.")

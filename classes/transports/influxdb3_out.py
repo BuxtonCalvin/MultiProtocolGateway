@@ -31,7 +31,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Callable, Literal, Optional, cast
+from typing import Any, Callable, Literal, Optional, TypeVar, cast
 from urllib.parse import SplitResult, urlsplit
 from zoneinfo import ZoneInfo
 
@@ -1444,6 +1444,11 @@ class influxdb3_out(transport_base):
 # field list (information_schema.columns has no separate "is this a tag"
 # flag to query instead), and by edit_metric_values to know which columns
 # of a fetched row to re-attach as tags rather than treat as a field.
+# Look-back windows, narrowest first, for the Metrics Edit device picker's
+# time-bounded DISTINCT query (see Influx3AdminManager.list_metric_edit_devices).
+# Hard-coded strings interpolated into SQL -- never user input.
+_V3_DEVICE_LOOKBACKS: tuple[str, ...] = ("3 days", "14 days")
+
 _INFLUX3_TAG_NAMES: frozenset[str] = frozenset({
     "device_identifier", "device_name", "device_manufacturer",
     "device_model", "device_serial_number", "transport",
@@ -1487,6 +1492,43 @@ def _sql_timestamp_literal(value: datetime) -> str:
     timezone.
     """
     return f"CAST({_sql_quote_literal(value.astimezone(timezone.utc).isoformat())} AS TIMESTAMP)"
+
+
+# The narrowest window Influx3AdminManager._query_time_slices() will bisect a
+# too-wide range down to. InfluxDB 3 Core writes a new Parquet file roughly every
+# 10 minutes (its default gen1 duration), so anything narrower cannot reduce the
+# file count any further and the server's own error is raised instead.
+_V3_MIN_SLICE: timedelta = timedelta(minutes=10)
+
+_SliceResult = TypeVar("_SliceResult")
+
+# Edition detection cache for Influx3AdminManager.detect_edition(), keyed by the
+# server's base URL and shared across manager instances (a new manager is built per
+# request). A definite Core/Enterprise answer is trusted for 10 minutes; an
+# inconclusive one is retried after 30 seconds so a brief outage is not remembered.
+_V3_EDITION_CACHE: dict[str, tuple[Literal["core", "enterprise"] | None, float]] = {}
+_V3_EDITION_TTL_SECONDS: float = 600.0
+_V3_EDITION_UNKNOWN_TTL_SECONDS: float = 30.0
+
+
+def _is_file_limit_error(exc: BaseException) -> bool:
+    """True if `exc` is InfluxDB 3 Core rejecting a query for scanning too many Parquet files."""
+    text: str = str(exc).lower()
+    return "file limit" in text or ("parquet files" in text and "exceeding" in text)
+
+
+def _device_time_where(device_identifier: str, start: datetime, end: datetime, end_inclusive: bool) -> str:
+    """
+    WHERE clause selecting one device's rows in [start, end] (end_inclusive)
+    or [start, end) -- half-open for every slice except the last, so adjacent
+    slices from Influx3AdminManager._query_time_slices() never double-count a
+    row that sits exactly on a slice boundary.
+    """
+    end_op: str = "<=" if end_inclusive else "<"
+    return (
+        f"WHERE device_identifier = {_sql_quote_literal(device_identifier)} "
+        f"AND time >= {_sql_timestamp_literal(start)} AND time {end_op} {_sql_timestamp_literal(end)}"
+    )
 
 
 def _coerce_v3_field_value(value: object, data_type: str | None) -> float | int | str | bool:
@@ -1626,14 +1668,14 @@ class Influx3AdminManager:
         deleted = admin_mgr.edit_metric_values("device_data", "4066670074", "delete", start, end)
     """
 
-    # True: this class always offers "Delete value(s)" (see
-    # edit_metric_values / _delete_rows_via_enterprise_api) -- unlike v1,
-    # where delete support is unconditional, v3's delete requires InfluxDB
-    # 3 ENTERPRISE with the upgraded storage engine, which this class
-    # cannot detect in advance. routers/influxdb.py still shows the
-    # action; a Core server (or an un-upgraded Enterprise one) rejects the
-    # request with a clear error surfaced back to the admin, rather than
-    # this flag hiding the option pre-emptively.
+    # True: this class offers "Delete value(s)" (see edit_metric_values /
+    # _delete_rows_via_enterprise_api) -- unlike v1, where delete support is
+    # unconditional, v3's delete requires InfluxDB 3 ENTERPRISE with the
+    # upgraded storage engine. detect_edition() can tell Core from Enterprise
+    # (GET /ping's x-influxdb-build header), so the UI shows the action
+    # disabled on a Core server and edit_metric_values() refuses it there. It
+    # cannot tell whether an Enterprise server has the storage engine upgrade,
+    # so that case still surfaces the server's own error at commit time.
     SUPPORTS_DELETE: bool = True
 
     def __init__(self, bridge: influxdb3_out) -> None:
@@ -1666,10 +1708,57 @@ class Influx3AdminManager:
         return sorted(names)
 
     def list_metric_edit_devices(self, measurement: str) -> list[Influx3MetricEditDevice]:
-        """Returns every (device_identifier, device_name) pairing recorded in `measurement`, via a plain SQL DISTINCT."""
-        query: str = f"SELECT DISTINCT device_identifier, device_name FROM {_sql_quote_ident(measurement)}"  # noqa: S608
-        table: pa.Table = self._query(query)
-        rows: list[dict[str, object]] = table.to_pylist()
+        """
+        Returns every (device_identifier, device_name) pairing recorded in
+        `measurement` within a recent look-back window, for the Metrics Edit
+        device picker.
+
+        The query is always time-bounded. InfluxDB 3 Core rejects any query
+        that would touch more than its Parquet file limit
+        (--query-file-limit, 432 by default) with "Query would scan N
+        Parquet files, exceeding the file limit", and an unbounded
+        SELECT DISTINCT over a large table exceeds it. The look-back widens
+        step by step (_V3_DEVICE_LOOKBACKS) only while no devices have been
+        found, so a device that has not written recently is still reachable
+        on a quiet table. If a widened window itself trips the file limit,
+        the devices found so far (none) are returned rather than failing.
+
+        The table's columns are checked first (cheap metadata query) so a
+        table that has never received a device_name tag does not fail with
+        "No field named device_name".
+        """
+        col_table: pa.Table = self._query(
+            "SELECT column_name FROM information_schema.columns "  # noqa: S608
+            "WHERE table_schema NOT IN ('information_schema', 'system') "
+            f"AND table_name = {_sql_quote_literal(measurement)}"
+        )
+        col_rows: list[dict[str, object]] = col_table.to_pylist()
+        cols: set[str] = {cast(str, r["column_name"]) for r in col_rows if r.get("column_name")}
+        if "device_identifier" not in cols:
+            return []
+        select_cols: list[str] = ['"device_identifier"']
+        if "device_name" in cols:
+            select_cols.append('"device_name"')
+
+        rows: list[dict[str, object]] = []
+        for index, window in enumerate(_V3_DEVICE_LOOKBACKS):
+            sql: str = (
+                f"SELECT DISTINCT {', '.join(select_cols)} FROM {_sql_quote_ident(measurement)} "  # noqa: S608
+                f"WHERE time >= now() - INTERVAL '{window}'"
+            )
+            try:
+                device_table: pa.Table = self._query(sql)
+                rows = device_table.to_pylist()
+            except Exception as exc:
+                if index > 0 and "file limit" in str(exc).lower():
+                    self._log.warning(
+                        "Device look-back of %s exceeded InfluxDB's query file limit for %s; "
+                        "showing no devices from the wider window.", window, measurement,
+                    )
+                    break
+                raise
+            if rows:
+                break
 
         devices: list[Influx3MetricEditDevice] = [
             Influx3MetricEditDevice(
@@ -1680,6 +1769,15 @@ class Influx3AdminManager:
         ]
         devices.sort(key=lambda d: d.device_identifier)
         return devices
+
+    def get_metric_edit_device_name(self, measurement: str, device_identifier: str) -> str | None:
+        """
+        Always None for v3: list_metric_edit_devices() already returns each
+        device_name paired with its identifier in the one bounded query, so
+        no separate lookup is needed. Present so both admin managers expose
+        the same interface to services/influxdb_service.py.
+        """
+        return None
 
     def list_metric_edit_fields(self, measurement: str) -> list[Influx3MetricEditField]:
         """
@@ -1706,6 +1804,91 @@ class Influx3AdminManager:
 
         fields.sort(key=lambda f: f.name)
         return fields
+
+    def detect_edition(self) -> Literal["core", "enterprise"] | None:
+        """
+        Whether the connected InfluxDB 3 server is "core" or "enterprise", or
+        None when that cannot be determined.
+
+        Reads the `x-influxdb-build` response header of GET /ping, which InfluxDB
+        3 documents as "Core" or "Enterprise". Never raises: an unreachable
+        server, an authentication failure that returns no header, or a server too
+        old to send the header all yield None, and callers must treat None as
+        "unknown -- do not block anything on it" (the server itself still
+        enforces what its edition allows). Cached per server for a few minutes
+        (see _V3_EDITION_CACHE), so this costs one request rarely, not one per
+        page load.
+        """
+        host_url: str = f"{self._bridge.host}:{self._bridge.port}" if self._bridge.port else self._bridge.host
+        cached: tuple[Literal["core", "enterprise"] | None, float] | None = _V3_EDITION_CACHE.get(host_url)
+        if cached is not None and cached[1] > time.time():
+            return cached[0]
+
+        edition: Literal["core", "enterprise"] | None = None
+        try:
+            session: requests.Session = cast(requests.Session, getattr(self._bridge, "session", None) or requests)
+            resp: requests.Response = session.get(
+                f"{host_url}/ping",
+                headers={"Authorization": f"Bearer {self._bridge.token}"},
+                timeout=min(float(self._bridge.connection_timeout), 5.0),
+            )
+            build: str = resp.headers.get("x-influxdb-build", "").strip().lower()
+            if build == "core":
+                edition = "core"
+            elif build == "enterprise":
+                edition = "enterprise"
+        except Exception as exc:
+            self._log.debug("Influx3AdminManager.detect_edition: GET /ping failed: %s", exc)
+
+        ttl: float = _V3_EDITION_TTL_SECONDS if edition is not None else _V3_EDITION_UNKNOWN_TTL_SECONDS
+        _V3_EDITION_CACHE[host_url] = (edition, time.time() + ttl)
+        return edition
+
+    def _query_time_slices(
+        self,
+        start_time: datetime,
+        end_time: datetime,
+        run: Callable[[datetime, datetime, bool], _SliceResult],
+        ) -> list[tuple[datetime, datetime, bool, _SliceResult]]:
+        """
+        Runs `run(slice_start, slice_end, end_inclusive)` over [start_time,
+        end_time], transparently splitting the range when InfluxDB 3 Core
+        rejects a query for touching too many Parquet files ("Query would scan
+        N Parquet files, exceeding the file limit").
+
+        Starts with the whole range in one query; on a file-limit error it
+        bisects the range and retries each half, recursing until every slice
+        is accepted (or a slice is already as narrow as _V3_MIN_SLICE, in which
+        case the server's own error is re-raised). Any other error is raised
+        immediately. Slices are half-open except the last, so a row exactly on
+        a boundary is seen once. Returns (slice_start, slice_end,
+        end_inclusive, result) tuples in chronological order -- the caller
+        combines the results (sums counts, concatenates rows, ...).
+
+        A file limit is a limit on files per *query*, so this changes nothing
+        on InfluxDB 3 Enterprise (which has no such limit): the first attempt
+        succeeds and there is exactly one slice.
+        """
+        slices: list[tuple[datetime, datetime, bool, _SliceResult]] = []
+
+        def _go(slice_start: datetime, slice_end: datetime, *, end_inclusive: bool) -> None:
+            try:
+                result: _SliceResult = run(slice_start, slice_end, end_inclusive)
+            except Exception as exc:
+                if not _is_file_limit_error(exc) or (slice_end - slice_start) <= _V3_MIN_SLICE:
+                    raise
+                midpoint: datetime = slice_start + (slice_end - slice_start) / 2
+                self._log.info(
+                    "Influx3AdminManager: query over [%s, %s] exceeded InfluxDB's file limit -- splitting the range.",
+                    slice_start, slice_end,
+                )
+                _go(slice_start, midpoint, end_inclusive=False)
+                _go(midpoint, slice_end, end_inclusive=end_inclusive)
+                return
+            slices.append((slice_start, slice_end, end_inclusive, result))
+
+        _go(start_time, end_time, end_inclusive=True)
+        return slices
 
     def preview_metric_edit(
         self,
@@ -1737,26 +1920,42 @@ class Influx3AdminManager:
 
         quoted_table: str = _sql_quote_ident(measurement)
         quoted_field: str = _sql_quote_ident(field_name)
-        device_lit: str = _sql_quote_literal(device_identifier)
-        start_lit: str = _sql_timestamp_literal(start_time)
-        end_lit: str = _sql_timestamp_literal(end_time)
-        where_clause: str = f"WHERE device_identifier = {device_lit} AND time >= {start_lit} AND time <= {end_lit}"
 
-        count_table: pa.Table = self._query(
-            f"SELECT COUNT({quoted_field}) AS row_count FROM {quoted_table} {where_clause}"  # noqa: S608
-        )
-        count_rows: list[dict[str, object]] = count_table.to_pylist()
-        row_count: int = int(cast(Any, count_rows[0].get("row_count")) or 0) if count_rows else 0
+        # A wide range can exceed InfluxDB 3 Core's per-query Parquet file limit,
+        # so the count runs per time slice (one slice, i.e. one query, when the
+        # range is accepted whole) and the per-slice counts are summed.
+        def _count_slice(slice_start: datetime, slice_end: datetime, end_inclusive: bool) -> int:
+            where: str = _device_time_where(device_identifier, slice_start, slice_end, end_inclusive)
+            count_table: pa.Table = self._query(
+                f"SELECT COUNT({quoted_field}) AS row_count FROM {quoted_table} {where}"  # noqa: S608
+            )
+            count_rows: list[dict[str, object]] = count_table.to_pylist()
+            return int(cast(Any, count_rows[0].get("row_count")) or 0) if count_rows else 0
 
-        sample_table: pa.Table = self._query(
-            f"SELECT time, {quoted_field} FROM {quoted_table} {where_clause} "  # noqa: S608
-            f"ORDER BY time DESC LIMIT {int(sample_limit)}"
+        counted_slices: list[tuple[datetime, datetime, bool, int]] = self._query_time_slices(
+            start_time, end_time, _count_slice
         )
-        sample_rows: list[dict[str, object]] = sample_table.to_pylist()
-        sample: list[Influx3ValueSample] = [
-            Influx3ValueSample(time_iso=self._row_time_to_iso(row.get("time")), value=cast(Any, row.get(field_name)))
-            for row in sample_rows
-        ]
+        row_count: int = sum(slice_count for (_s, _e, _i, slice_count) in counted_slices)
+
+        # Newest rows first: walk the slices newest to oldest, skipping empty ones,
+        # until the sample is full. These windows are already known to be accepted.
+        sample: list[Influx3ValueSample] = []
+        for slice_start, slice_end, end_inclusive, slice_count in reversed(counted_slices):
+            remaining: int = int(sample_limit) - len(sample)
+            if remaining <= 0:
+                break
+            if slice_count == 0:
+                continue
+            where = _device_time_where(device_identifier, slice_start, slice_end, end_inclusive)
+            sample_table: pa.Table = self._query(
+                f"SELECT time, {quoted_field} FROM {quoted_table} {where} "  # noqa: S608
+                f"ORDER BY time DESC LIMIT {remaining}"
+            )
+            sample_rows: list[dict[str, object]] = sample_table.to_pylist()
+            sample.extend(
+                Influx3ValueSample(time_iso=self._row_time_to_iso(row.get("time")), value=cast(Any, row.get(field_name)))
+                for row in sample_rows
+            )
 
         return Influx3EditPreview(row_count=row_count, sample=sample)
 
@@ -1872,6 +2071,12 @@ class Influx3AdminManager:
                 raise ValueError("field_name is required when action is 'set_value'.")
             if new_value is None:
                 raise ValueError("new_value is required when action is 'set_value'.")
+        if action == "delete" and self.detect_edition() == "core":
+            core_msg: str = (
+                "Deleting values is not available on InfluxDB 3 Core -- the row-delete API "
+                "requires InfluxDB 3 Enterprise."
+            )
+            raise RuntimeError(core_msg)
 
         try:
             if action == "delete":
@@ -1899,15 +2104,21 @@ class Influx3AdminManager:
             coerced_value: float | int | str | bool = _coerce_v3_field_value(new_value, data_type)
 
             quoted_table: str = _sql_quote_ident(measurement)
-            device_lit: str = _sql_quote_literal(device_identifier)
-            start_lit: str = _sql_timestamp_literal(start_time)
-            end_lit: str = _sql_timestamp_literal(end_time)
-            fetch_query: str = (
-                f"SELECT * FROM {quoted_table} "  # noqa: S608
-                f"WHERE device_identifier = {device_lit} AND time >= {start_lit} AND time <= {end_lit}"
+
+            # Every matching row is fetched (per time slice, so a range wider than
+            # InfluxDB 3 Core's per-query file limit still works) BEFORE anything is
+            # written, so a failure while reading leaves the data untouched.
+            def _fetch_slice(
+                slice_start: datetime, slice_end: datetime, end_inclusive: bool
+                ) -> list[dict[str, object]]:
+                where: str = _device_time_where(device_identifier, slice_start, slice_end, end_inclusive)
+                fetch_table: pa.Table = self._query(f"SELECT * FROM {quoted_table} {where}")  # noqa: S608
+                return fetch_table.to_pylist()
+
+            fetched_slices: list[tuple[datetime, datetime, bool, list[dict[str, object]]]] = (
+                self._query_time_slices(start_time, end_time, _fetch_slice)
             )
-            fetch_table: pa.Table = self._query(fetch_query)
-            rows: list[dict[str, object]] = fetch_table.to_pylist()
+            rows: list[dict[str, object]] = [row for (_s, _e, _i, chunk) in fetched_slices for row in chunk]
 
             points: list[Point] = []
             for row in rows:
@@ -1954,17 +2165,18 @@ class Influx3AdminManager:
         asynchronous and reports no immediate count.
         """
         quoted_table: str = _sql_quote_ident(measurement)
-        device_lit: str = _sql_quote_literal(device_identifier)
-        start_lit: str = _sql_timestamp_literal(start_time)
-        end_lit: str = _sql_timestamp_literal(end_time)
-        query: str = (
-            f"SELECT COUNT(*) AS row_count FROM {quoted_table} "  # noqa: S608
-            f"WHERE device_identifier = {device_lit} AND time >= {start_lit} AND time <= {end_lit}"
-        )
-        try:
-            table: pa.Table = self._query(query)
+
+        def _count_slice(slice_start: datetime, slice_end: datetime, end_inclusive: bool) -> int:
+            where: str = _device_time_where(device_identifier, slice_start, slice_end, end_inclusive)
+            table: pa.Table = self._query(f"SELECT COUNT(*) AS row_count FROM {quoted_table} {where}")  # noqa: S608
             rows: list[dict[str, object]] = table.to_pylist()
             return int(cast(Any, rows[0].get("row_count")) or 0) if rows else 0
+
+        try:
+            counted_slices: list[tuple[datetime, datetime, bool, int]] = self._query_time_slices(
+                start_time, end_time, _count_slice
+            )
+            return sum(slice_count for (_s, _e, _i, slice_count) in counted_slices)
         except Exception as e:
             self._log.warning(f"_count_rows_in_range: COUNT(*) failed for '{measurement}': {e}")
             return 0

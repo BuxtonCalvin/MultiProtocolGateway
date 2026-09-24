@@ -24,8 +24,11 @@
   Shared by both InfluxDB versions — the device list itself is already a
   plain [{device_identifier, device_name}, ...] by the time
   services/influxdb_service.list_metric_edit_devices() hands it here,
-  regardless of whether it came from InfluxV1AdminManager (InfluxQL GROUP
-  BY) or Influx3AdminManager (SQL DISTINCT).
+  regardless of whether it came from InfluxV1AdminManager (index-only SHOW
+  TAG VALUES — identifiers only, device_name None) or Influx3AdminManager
+  (time-bounded SQL DISTINCT — identifier and name together). Options with
+  no name get one filled in by onInfluxDeviceChange() once picked (see the
+  data-has-name attribute below).
 
   Context: version, measurement, devices — [{device_identifier,
   device_name}, ...] in device_identifier order.
@@ -46,7 +49,8 @@
   <option value="" disabled selected>Select a device…</option>
   {% for d in devices %}
   <option value="{{ d.device_identifier }}"
-          data-label="{{ d.device_identifier or d.device_name or 'device' }}">
+          data-label="{{ d.device_identifier or d.device_name or 'device' }}"
+          data-has-name="{{ '1' if d.device_name and d.device_name != d.device_identifier else '0' }}">
     {{ d.device_identifier }}
     {% if d.device_name and d.device_name != d.device_identifier %} — {{ d.device_name }}{% endif %}
   </option>

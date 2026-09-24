@@ -34,7 +34,9 @@
                    action (Delete / Set Value) -> Preview -> Add to Staged
                    Changes, with the staged-changes list underneath.
 
-  Context: version ("1"|"3"); measurements — [str, ...]; supports_delete —
+  Context: version ("1"|"3"); measurements — [str, ...]; delete_enabled / delete_unavailable_reason — set by
+  routers/influxdb.py from services.influxdb_service.delete_unavailable_reason() (v3 Core cannot delete: the option
+  renders disabled with the reason); supports_delete —
   bool (see services.influxdb_service.supports_delete: both InfluxV1Admin
   Manager and Influx3AdminManager report True, so "Delete value(s)" shows
   for both versions today); staged_edits — the same StagedInfluxEdit list
@@ -99,7 +101,7 @@
       Measurements
     </h2>
     <p class="text-mpg-400 text-xs mb-3">
-      Pick a measurement and device, choose the field to edit{% if supports_delete %} or clear{% endif %},
+      Pick a measurement and device, choose the field to edit{% if delete_enabled %} or clear{% endif %},
       choose a date/time range, then <span class="text-mpg-200 font-medium">Add to Staged Changes</span>
       and use <span class="text-mpg-200 font-medium">Commit All Changes</span> in the header to apply.
     </p>
@@ -187,12 +189,16 @@
                          focus:outline-none focus:ring-1 focus:ring-accent"
                   onchange="onInfluxActionChange(this)">
             {% if supports_delete %}
+            {% if delete_enabled %}
             <option value="delete">Delete value(s)</option>
+            {% else %}
+            <option value="delete" disabled title="{{ delete_unavailable_reason }}">Delete value(s) — requires InfluxDB 3 Enterprise</option>
             {% endif %}
-            <option value="set_value">Set value</option>
+            {% endif %}
+            <option value="set_value"{% if supports_delete and not delete_enabled %} selected{% endif %}>Set value</option>
           </select>
         </div>
-        <div id="influx-metrics-edit-value-wrap" class="{% if supports_delete %}hidden{% endif %}">
+        <div id="influx-metrics-edit-value-wrap" class="{% if delete_enabled %}hidden{% endif %}">
           <label for="influx-metrics-edit-new-value" class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">
             New Value
           </label>
@@ -208,7 +214,12 @@
         Validated against the selected field's reported type before it's staged (e.g. a whole number for
         an integer field, true/false for boolean) — an invalid value is rejected immediately.
       </p>
-      {% if supports_delete %}
+      {% if supports_delete and not delete_enabled %}
+      <p id="influx-metrics-edit-delete-unavailable" class="surface-subtle text-[10px] -mt-1">
+        {{ delete_unavailable_reason }}
+      </p>
+      {% endif %}
+      {% if delete_enabled %}
       <p id="influx-metrics-edit-delete-warning" class="text-[10px] text-danger -mt-1 hidden">
         {% if version == '3' %}
         InfluxDB 3 has no per-field delete — this submits an <strong>Enterprise-only, asynchronous</strong>
@@ -300,6 +311,24 @@
       target: '#influx-metrics-edit-fields-container',
       swap: 'innerHTML scroll:false',
     });
+
+    // InfluxDB v1's device list carries identifiers only (fast, index-only), so
+    // resolve the friendly device_name now that a device has been picked. Options
+    // that already show a name (v3) are skipped. The identifier check drops a slow
+    // response if the admin has since picked a different device.
+    if (opt && opt.dataset.hasName !== '1') {
+      const pickedId = InfluxEditState.deviceIdentifier;
+      const nameParams = new URLSearchParams({ measurement: InfluxEditState.measurement, device: pickedId });
+      fetch('/pages/influxdb/metrics-edit/' + InfluxEditState.version + '/device-name?' + nameParams.toString())
+        .then(function (r) { return r.ok ? r.text() : ''; })
+        .then(function (name) {
+          if (name && InfluxEditState.deviceIdentifier === pickedId) {
+            opt.textContent = pickedId + ' \u2014 ' + name;
+            opt.dataset.hasName = '1';
+          }
+        })
+        .catch(function () { /* the name is cosmetic -- ignore lookup failures */ });
+    }
   }
 
   function getSelectedInfluxField() {

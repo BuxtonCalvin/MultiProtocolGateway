@@ -22,7 +22,7 @@
 from __future__ import annotations
 
 import io
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -422,3 +422,295 @@ class TestExportAcrossDst:
 
         assert header == ["time", "soc"]
         assert rows[0]["time"] == "2026-01-01T08:00:00"
+
+
+# ---------------------------------------------------------------------------
+# TimescaleDB
+# ---------------------------------------------------------------------------
+
+class TestTimescaleListingWrappers:
+    """timescale_tables_for/timescale_devices_for/timescale_fields_for/load_timescale_field_types are thin re-exports of bridge_service's own Metrics Edit functions."""
+
+    def test_tables_for_passes_through(self) -> None:
+        with patch.object(ts, "_list_timescale_tables", return_value=[{"table_kind": "narrow", "protocol_name": None, "table_name": "device_metrics_narrow"}]) as mock:
+            result = ts.timescale_tables_for(None)
+        mock.assert_called_once_with(None)
+        assert result == [{"table_kind": "narrow", "protocol_name": None, "table_name": "device_metrics_narrow"}]
+
+    def test_devices_for_passes_through(self) -> None:
+        with patch.object(ts, "_list_timescale_devices", return_value=[{"device_info_id": 1}]) as mock:
+            result = ts.timescale_devices_for(None, "wide", "eg4_18kpv")
+        mock.assert_called_once_with(None, "wide", "eg4_18kpv")
+        assert result == [{"device_info_id": 1}]
+
+    def test_fields_for_passes_through_with_device_scope(self) -> None:
+        with patch.object(ts, "_list_timescale_fields", return_value=[{"name": "soc", "data_type": "REAL"}]) as mock:
+            result = ts.timescale_fields_for(None, "narrow", None, device_info_id=7)
+        mock.assert_called_once_with(None, "narrow", protocol_name=None, device_info_id=7)
+        assert result == [{"name": "soc", "data_type": "REAL"}]
+
+    def test_load_field_types_narrow_is_always_empty(self) -> None:
+        with patch.object(ts, "timescale_fields_for") as mock:
+            result = ts.load_timescale_field_types(None, "narrow", None)
+        mock.assert_not_called()
+        assert result == {}
+
+    def test_load_field_types_wide_maps_name_to_data_type(self) -> None:
+        fields = [{"name": "pv1_voltage", "data_type": "DOUBLE PRECISION"}, {"name": "soc", "data_type": "SMALLINT"}, {"name": "no_type", "data_type": None}]
+        with patch.object(ts, "timescale_fields_for", return_value=fields):
+            result = ts.load_timescale_field_types(None, "wide", "eg4_18kpv")
+        assert result == {"pv1_voltage": "DOUBLE PRECISION", "soc": "SMALLINT"}
+
+
+class TestBuildPointsTimescale:
+    def _df(self, **cols: list[Any]) -> pd.DataFrame:
+        return pd.DataFrame(cols)
+
+    def test_narrow_target_never_coerces(self) -> None:
+        df = self._df(Time=["2025-06-01 00:00:00"], soc=["not a number"])
+        points, result = ts.build_points_timescale(
+            df, table_kind="narrow", mapping={"soc": "soc"}, time_column="Time",
+            source_is_local=True, local_tz="UTC", time_delta=timedelta(0), wide_field_types={},
+        )
+        assert len(points) == 1
+        assert points[0].fields == {"soc": "not a number"}   # untouched -- narrow sorts numeric vs ascii at write time, not here
+        assert result.type_mismatches == []
+
+    def test_wide_target_coerces_against_declared_type(self) -> None:
+        df = self._df(Time=["2025-06-01 00:00:00"], soc=["42"], flag=["true"])
+        points, result = ts.build_points_timescale(
+            df, table_kind="wide", mapping={"soc": "soc", "flag": "flag"}, time_column="Time",
+            source_is_local=True, local_tz="UTC", time_delta=timedelta(0),
+            wide_field_types={"soc": "SMALLINT", "flag": "BOOLEAN"},
+        )
+        assert points[0].fields == {"soc": 42.0, "flag": True}
+        assert result.type_mismatches == []
+
+    def test_wide_type_conflict_is_skipped_and_reported(self) -> None:
+        df = self._df(Time=["2025-06-01 00:00:00"], soc=["not a number"], ok=["5"])
+        points, result = ts.build_points_timescale(
+            df, table_kind="wide", mapping={"soc": "soc", "ok": "ok"}, time_column="Time",
+            source_is_local=True, local_tz="UTC", time_delta=timedelta(0),
+            wide_field_types={"soc": "SMALLINT", "ok": "SMALLINT"},
+        )
+        assert points[0].fields == {"ok": 5.0}
+        assert len(result.type_mismatches) == 1
+        assert "soc" in result.type_mismatches[0]
+
+    def test_wide_out_of_range_integer_is_a_mismatch(self) -> None:
+        df = self._df(Time=["2025-06-01 00:00:00"], v=["99999"])
+        points, result = ts.build_points_timescale(
+            df, table_kind="wide", mapping={"v": "v"}, time_column="Time",
+            source_is_local=True, local_tz="UTC", time_delta=timedelta(0), wide_field_types={"v": "SMALLINT"},
+        )
+        assert points == []
+        assert result.rows_skipped_no_fields == 1
+        assert len(result.type_mismatches) == 1
+
+    def test_time_shift_matches_compute_time_delta(self) -> None:
+        df = self._df(Time=["2025-06-01 12:00:00"], v=[1])
+        source = datetime(2025, 6, 1, 12, 0, tzinfo=ZoneInfo("America/Los_Angeles"))
+        target = datetime(2026, 1, 1, 0, 0, tzinfo=ZoneInfo("America/Los_Angeles"))
+        points, _ = ts.build_points_timescale(
+            df, table_kind="narrow", mapping={"v": "v"}, time_column="Time", source_is_local=True,
+            local_tz="America/Los_Angeles", time_delta=ts.compute_time_delta(source, target), wide_field_types={},
+        )
+        assert points[0].time_iso == "2026-01-01T08:00:00"   # same DST-correct math as InfluxDB's build_points
+
+    def test_bad_time_and_no_fields_are_skipped(self) -> None:
+        df = self._df(Time=["not a time", "2025-06-01 00:00:00"], v=[1, None])
+        points, result = ts.build_points_timescale(
+            df, table_kind="narrow", mapping={"v": "v"}, time_column="Time", source_is_local=True,
+            local_tz="UTC", time_delta=timedelta(0), wide_field_types={},
+        )
+        assert points == []
+        assert result.rows_skipped_bad_time == 1
+        assert result.rows_skipped_no_fields == 1
+
+    def test_unmapped_column_is_reported_once(self) -> None:
+        df = self._df(Time=["2025-06-01 00:00:00"], v=[1], extra=["x"])
+        _points, result = ts.build_points_timescale(
+            df, table_kind="narrow", mapping={"v": "v"}, time_column="Time", source_is_local=True,
+            local_tz="UTC", time_delta=timedelta(0), wide_field_types={},
+        )
+        assert result.unmapped_columns == {"extra"}
+
+    def test_ignored_column_mapped_to_empty_string_is_silent(self) -> None:
+        df = self._df(Time=["2025-06-01 00:00:00"], v=[1], tag_col=["x"])
+        _points, result = ts.build_points_timescale(
+            df, table_kind="narrow", mapping={"v": "v", "tag_col": ""}, time_column="Time", source_is_local=True,
+            local_tz="UTC", time_delta=timedelta(0), wide_field_types={},
+        )
+        assert result.unmapped_columns == set()
+
+
+class TestWritePointsTimescale:
+    def _bridge(self) -> tuple[SimpleNamespace, MagicMock]:
+        session = MagicMock()
+        session.__enter__ = MagicMock(return_value=session)
+        session.__exit__ = MagicMock(return_value=False)
+        session.begin.return_value.__enter__ = MagicMock(return_value=None)
+        session.begin.return_value.__exit__ = MagicMock(return_value=False)
+        bridge = SimpleNamespace(SessionFactory=MagicMock(return_value=session), tsdb_connected=True)
+        return bridge, session
+
+    def test_narrow_only_writes_narrow(self) -> None:
+        bridge, session = self._bridge()
+        points = [ts.TimescalePointDict(time_iso="2025-06-01T00:00:00", fields={"soc": 50.0, "note": "ok"})]
+        with patch.object(ts, "get_timescale_bridge", return_value=bridge):
+            written, narrow_rows = ts.write_points_timescale(None, "narrow", "device_metrics_narrow", 7, points)
+        assert (written, narrow_rows) == (1, 2)
+        calls = session.execute.call_args_list
+        assert len(calls) == 1   # only the narrow batch -- no wide insert at all
+        sql_text, params = calls[0].args
+        assert "device_metrics_narrow" in str(sql_text)
+        assert len(params) == 2
+        by_name = {p["metric_name"]: p for p in params}
+        assert by_name["soc"] == {"m_time": datetime(2025, 6, 1, tzinfo=timezone.utc), "device_info_id": 7, "metric_name": "soc", "metric_value": 50.0, "metric_ascii": None}
+        assert by_name["note"]["metric_value"] == 0.0 and by_name["note"]["metric_ascii"] == "ok"
+
+    def test_wide_mirrors_same_fields_into_narrow(self) -> None:
+        bridge, session = self._bridge()
+        points = [ts.TimescalePointDict(time_iso="2025-06-01T00:00:00", fields={"pv1_voltage": 300.5})]
+        with patch.object(ts, "get_timescale_bridge", return_value=bridge):
+            written, narrow_rows = ts.write_points_timescale(None, "wide", "device_metrics_wide__eg4_18kpv", 7, points)
+        assert (written, narrow_rows) == (1, 1)
+        assert session.execute.call_count == 2   # one wide upsert, one narrow batch
+        wide_sql, wide_params = session.execute.call_args_list[0].args
+        assert "device_metrics_wide__eg4_18kpv" in str(wide_sql) and "ON CONFLICT (m_time, device_info_id)" in str(wide_sql)
+        assert wide_params == {"m_time": datetime(2025, 6, 1, tzinfo=timezone.utc), "device_info_id": 7, "pv1_voltage": 300.5}
+        _narrow_sql, narrow_params = session.execute.call_args_list[1].args
+        assert narrow_params == [{"m_time": datetime(2025, 6, 1, tzinfo=timezone.utc), "device_info_id": 7, "metric_name": "pv1_voltage", "metric_value": 300.5, "metric_ascii": None}]
+
+    def test_boolean_field_mirrors_as_zero_or_one_in_narrow(self) -> None:
+        bridge, session = self._bridge()
+        points = [ts.TimescalePointDict(time_iso="2025-06-01T00:00:00", fields={"is_charging": True})]
+        with patch.object(ts, "get_timescale_bridge", return_value=bridge):
+            ts.write_points_timescale(None, "wide", "device_metrics_wide__x", 1, points)
+        narrow_params = session.execute.call_args_list[1].args[1]
+        assert narrow_params[0]["metric_value"] == 1.0 and narrow_params[0]["metric_ascii"] is None
+
+    def test_no_points_is_a_no_op(self) -> None:
+        bridge, session = self._bridge()
+        with patch.object(ts, "get_timescale_bridge", return_value=bridge):
+            result = ts.write_points_timescale(None, "narrow", "device_metrics_narrow", 1, [])
+        assert result == (0, 0)
+        session.execute.assert_not_called()
+
+    def test_no_bridge_raises(self) -> None:
+        with patch.object(ts, "get_timescale_bridge", return_value=None):
+            with pytest.raises(RuntimeError, match="No TimescaleDB bridge"):
+                ts.write_points_timescale(None, "narrow", "device_metrics_narrow", 1, [ts.TimescalePointDict("2025-01-01T00:00:00", {"v": 1.0})])
+
+    def test_disconnected_bridge_raises(self) -> None:
+        bridge = SimpleNamespace(SessionFactory=MagicMock(), tsdb_connected=False)
+        with patch.object(ts, "get_timescale_bridge", return_value=bridge):
+            with pytest.raises(RuntimeError, match="not connected"):
+                ts.write_points_timescale(None, "narrow", "device_metrics_narrow", 1, [ts.TimescalePointDict("2025-01-01T00:00:00", {"v": 1.0})])
+
+    def test_unknown_table_kind_raises(self) -> None:
+        with pytest.raises(ValueError, match="Unknown table_kind"):
+            ts.write_points_timescale(None, "sideways", "x", 1, [ts.TimescalePointDict("2025-01-01T00:00:00", {"v": 1.0})])
+
+
+class TestWideUpsertSql:
+    def test_upsert_shape(self) -> None:
+        sql = ts._wide_upsert_sql("device_metrics_wide__x", ["a", "b"])  # pyright: ignore[reportPrivateUsage] -- exercising the SQL-shape helper directly
+        assert sql == (
+            "INSERT INTO device_metrics_wide__x (m_time, device_info_id, a, b) "
+            "VALUES (:m_time, :device_info_id, :a, :b) "
+            "ON CONFLICT (m_time, device_info_id) DO UPDATE SET a = EXCLUDED.a, b = EXCLUDED.b"
+        )
+
+
+class TestNarrowValuePair:
+    """Exercises the numeric/text split helper directly."""
+
+    def test_bool_becomes_one_or_zero(self) -> None:
+        assert ts._narrow_value_pair(value=True) == (1.0, None)  # pyright: ignore[reportPrivateUsage]
+        assert ts._narrow_value_pair(value=False) == (0.0, None)  # pyright: ignore[reportPrivateUsage]
+
+    def test_numeric_stays_numeric(self) -> None:
+        assert ts._narrow_value_pair(42) == (42.0, None)  # pyright: ignore[reportPrivateUsage]
+        assert ts._narrow_value_pair(3.5) == (3.5, None)  # pyright: ignore[reportPrivateUsage]
+
+    def test_string_goes_to_ascii(self) -> None:
+        assert ts._narrow_value_pair("hello") == (0.0, "hello")  # pyright: ignore[reportPrivateUsage]
+
+
+class TestExportRangeRowsTimescale:
+    def _bridge_with_rows(self, rows: list[tuple[Any, ...]]) -> SimpleNamespace:
+        session = MagicMock()
+        session.__enter__ = MagicMock(return_value=session)
+        session.__exit__ = MagicMock(return_value=False)
+        session.execute.return_value = rows
+        return SimpleNamespace(SessionFactory=MagicMock(return_value=session), tsdb_connected=True)
+
+    def test_narrow_pivots_metric_rows_into_wide_shaped_rows(self) -> None:
+        t0 = datetime(2025, 6, 1, 0, 0, tzinfo=timezone.utc)
+        t1 = datetime(2025, 6, 1, 0, 5, tzinfo=timezone.utc)
+        bridge = self._bridge_with_rows([
+            (t0, "soc", 50.0, None), (t0, "note", None, "ok"),
+            (t1, "soc", 51.0, None),
+        ])
+        with patch.object(ts, "get_timescale_bridge", return_value=bridge):
+            header, rows = ts.export_range_rows_timescale(
+                None, "narrow", "device_metrics_narrow", None, 1,
+                datetime(2025, 6, 1, tzinfo=timezone.utc), datetime(2025, 6, 2, tzinfo=timezone.utc), datetime(2025, 6, 1, tzinfo=timezone.utc),
+            )
+        assert header == ["time", "soc", "note"]
+        assert rows == [
+            {"time": "2025-06-01T00:00:00", "soc": 50.0, "note": "ok"},
+            {"time": "2025-06-01T00:05:00", "soc": 51.0},
+        ]
+
+    def test_wide_reads_declared_columns_directly(self) -> None:
+        t0 = datetime(2025, 6, 1, 0, 0, tzinfo=timezone.utc)
+        bridge = self._bridge_with_rows([(t0, 300.5, 12)])
+        with patch.object(ts, "get_timescale_bridge", return_value=bridge), \
+             patch.object(ts, "timescale_fields_for", return_value=[{"name": "pv1_voltage"}, {"name": "soc"}]):
+            header, rows = ts.export_range_rows_timescale(
+                None, "wide", "device_metrics_wide__x", "eg4_18kpv", 1,
+                datetime(2025, 6, 1, tzinfo=timezone.utc), datetime(2025, 6, 2, tzinfo=timezone.utc), datetime(2025, 6, 1, tzinfo=timezone.utc),
+            )
+        assert header == ["time", "pv1_voltage", "soc"]
+        assert rows == [{"time": "2025-06-01T00:00:00", "pv1_voltage": 300.5, "soc": 12}]
+
+    def test_applies_the_same_time_shift_as_influxdb_export(self) -> None:
+        t0 = datetime(2025, 6, 1, 23, 50, tzinfo=timezone.utc)
+        bridge = self._bridge_with_rows([(t0, "soc", 50.0, None)])
+        with patch.object(ts, "get_timescale_bridge", return_value=bridge):
+            _header, rows = ts.export_range_rows_timescale(
+                None, "narrow", "device_metrics_narrow", None, 1,
+                datetime(2025, 6, 1, 23, 50, tzinfo=timezone.utc), datetime(2025, 6, 2, tzinfo=timezone.utc),
+                datetime(2026, 1, 1, 8, 0, tzinfo=timezone.utc),
+            )
+        assert rows[0]["time"] == "2026-01-01T08:00:00"
+
+    def test_empty_wide_field_list_yields_no_rows(self) -> None:
+        bridge = self._bridge_with_rows([])
+        with patch.object(ts, "get_timescale_bridge", return_value=bridge), patch.object(ts, "timescale_fields_for", return_value=[]):
+            header, rows = ts.export_range_rows_timescale(
+                None, "wide", "x", "p", 1, datetime(2025, 6, 1, tzinfo=timezone.utc), datetime(2025, 6, 2, tzinfo=timezone.utc), datetime(2025, 6, 1, tzinfo=timezone.utc),
+            )
+        assert header == ["time"] and rows == []
+
+    def test_end_before_start_raises(self) -> None:
+        with pytest.raises(ValueError, match="End time"):
+            ts.export_range_rows_timescale(None, "narrow", "device_metrics_narrow", None, 1, datetime(2025, 6, 2, tzinfo=timezone.utc), datetime(2025, 6, 1, tzinfo=timezone.utc), datetime(2025, 6, 1, tzinfo=timezone.utc))
+
+    def test_no_bridge_raises(self) -> None:
+        with patch.object(ts, "get_timescale_bridge", return_value=None):
+            with pytest.raises(ValueError, match="No connected TimescaleDB"):
+                ts.export_range_rows_timescale(None, "narrow", "device_metrics_narrow", None, 1, datetime(2025, 6, 1, tzinfo=timezone.utc), datetime(2025, 6, 2, tzinfo=timezone.utc), datetime(2025, 6, 1, tzinfo=timezone.utc))
+
+
+class TestMachineTimezoneForTimescale:
+    def test_reads_from_transports_timescaledb(self) -> None:
+        with patch.object(ts, "get_timescale_bridge", return_value=SimpleNamespace()):
+            with patch("classes.transports.timescaledb.get_machine_timezone", return_value="America/Chicago"):
+                assert ts.machine_timezone_for(None, "timescale") == "America/Chicago"
+
+    def test_no_bridge_falls_back_to_utc(self) -> None:
+        with patch.object(ts, "get_timescale_bridge", return_value=None):
+            assert ts.machine_timezone_for(None, "timescale") == "UTC"

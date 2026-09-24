@@ -7,8 +7,14 @@
   Context: upload_id — str, the server-side stored upload this mapping
   applies to; row_count — int, rows in the uploaded file; mapping_rows —
   list[FieldMappingRow] (source_column, suggested_field, confidence,
-  default_ignored); influx_fields — [str, ...] existing field names on
-  the target measurement (empty for a brand-new measurement); columns —
+  default_ignored); influx_fields — [str, ...] existing target field/
+  column names (empty for a brand-new InfluxDB measurement, or a brand-new
+  TimescaleDB narrow metric_name); allow_new_field — bool, whether
+  "+ New field…" is offered at all; False for a TimescaleDB wide table,
+  since a genuinely new wide column needs an ALTER TABLE this screen
+  doesn't perform (see services.timeshift_service module docstring's
+  TimescaleDB section) -- always True for InfluxDB and a TimescaleDB
+  narrow table, where any field/metric name is freely writable; columns —
   every source column, for the page's Time Column <select>;
   detected_time_column — best-guess column name for that select's default;
   sheets_used / sheets_skipped — [SheetSummary(name, rows, note), ...] when
@@ -25,11 +31,11 @@
   below).
 
   Each row: source column name, the confidence-scored suggestion (or
-  "no confident match"), a target-field <select> (existing fields +
-  "+ New field…", which reveals a free-text input for a field name that
-  doesn't exist in InfluxDB yet), and an "Ignore" checkbox (pre-checked
-  per default_ignored: tag-shaped/reserved columns and, for EG4 imports,
-  columns with no confident match to an existing field).
+  "no confident match"), a target-field <select> (existing fields, plus
+  "+ New field…" when allow_new_field -- which reveals a free-text input
+  for a field name that doesn't exist yet), and an "Ignore" checkbox
+  (pre-checked per default_ignored: tag-shaped/reserved columns and, for
+  EG4 imports, columns with no confident match to an existing field).
 
   A row with no confident suggestion (row.suggested_field == "") carries
   data-below-threshold="true". The page's JS (refreshBelowThresholdOptions())
@@ -43,7 +49,8 @@
      data-upload-id="{{ upload_id }}"
      data-columns='{{ columns|tojson }}'
      data-detected-time-column="{{ detected_time_column or '' }}"
-     data-influx-fields='{{ influx_fields|tojson }}'>
+     data-influx-fields='{{ influx_fields|tojson }}'
+     data-allow-new-field="{{ 'true' if allow_new_field is not defined or allow_new_field else 'false' }}">
 
   <div class="flex items-center justify-between mb-2">
     <h3 class="surface-title text-xs font-semibold uppercase tracking-widest">
@@ -78,7 +85,7 @@
         <tr class="mini-table-header uppercase tracking-wide">
           <th class="px-2 py-1.5 text-left font-semibold whitespace-nowrap">Source Column</th>
           <th class="px-2 py-1.5 text-left font-semibold whitespace-nowrap">Confidence</th>
-          <th class="px-2 py-1.5 text-left font-semibold whitespace-nowrap">InfluxDB Field</th>
+          <th class="px-2 py-1.5 text-left font-semibold whitespace-nowrap">Target Field</th>
           <th class="px-2 py-1.5 text-center font-semibold whitespace-nowrap">Ignore</th>
         </tr>
       </thead>
@@ -107,7 +114,7 @@
               {% for f in influx_fields %}
               <option value="{{ f }}" {% if f == row.suggested_field %}selected{% endif %}>{{ f }}</option>
               {% endfor %}
-              <option value="__new__">+ New field…</option>
+              {% if allow_new_field is not defined or allow_new_field %}<option value="__new__">+ New field…</option>{% endif %}
             </select>
             <input type="text" class="ts-map-target-custom theme-input text-xs rounded px-1.5 py-1 w-full mt-1 hidden"
                    style="max-width: 220px;"
@@ -125,9 +132,14 @@
   </div>
   <p class="surface-subtle text-xs mt-1">
     Rows checked "Ignore" are dropped entirely. Tag-shaped columns are pre-checked, and so are EG4
-    columns with no match to an existing field: un-check one to map it. Pick
-    "+ New field…" to write a column under a brand-new InfluxDB field name. A row with no confident
-    match only offers fields no other row is already using, so two columns can't end up writing to
-    the same field by accident.
+    columns with no match to an existing field: un-check one to map it.
+    {% if allow_new_field is not defined or allow_new_field %}
+    Pick "+ New field…" to write a column under a brand-new field name.
+    {% else %}
+    This table's columns are fixed, so only existing fields are offered here -- write a genuinely new
+    metric to the narrow table instead.
+    {% endif %}
+    A row with no confident match only offers fields no other row is already using, so two columns
+    can't end up writing to the same field by accident.
   </p>
 </div>

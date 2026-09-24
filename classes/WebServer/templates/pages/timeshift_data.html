@@ -26,22 +26,31 @@
   is pressed (or, for the export path, until Export to CSV triggers a
   browser download -- nothing is written anywhere for that path).
 
-  Context: version ("1"|"3"); v1_available/v3_available — bool, which
-  version toggle links are shown; measurements — [str, ...] on the
-  resolved bridge; eg4_available — bool, whether "Import EG4 Spreadsheet"
-  is selectable (services.timeshift_service.is_eg4_protocol_in_use);
+  Context: version ("1"|"3"|"timescale"); v1_available/v3_available/
+  timescale_available — bool, which version toggle links are shown;
+  measurements — [str, ...] on the resolved InfluxDB bridge (unused for
+  timescale); timescale_tables — [{table_kind, protocol_name, table_name},
+  ...] from services.timeshift_service.timescale_tables_for, the shared
+  narrow table first then every wide-table protocol, backing the Table
+  <select> that replaces Measurement when version="timescale";
+  eg4_available — bool, whether "Import EG4 Spreadsheet" is selectable
+  (services.timeshift_service.is_eg4_protocol_in_use);
   default_confidence_threshold — float; machine_timezone — this bridge's
   configured zone, preselected in the Local Machine Timezone dropdown;
   timezone_groups — [(region, [IANA name, ...]), ...] for that dropdown's
-  optgroups; standard_tag_keys — the six MPG tag keys seeded as Tags rows.
+  optgroups; standard_tag_keys — the six MPG tag keys seeded as Tags rows
+  (InfluxDB only -- TimescaleDB gets a Device <select> in the Tags
+  panel's place, see the "Device" block below).
 
-  Everything below the Measurement field (Local Machine Timezone, Tags,
-  the confidence/coercion/delete-existing row, and both the Export and
-  Import panels) is disabled -- via JS, not the "disabled" attribute alone,
-  see updateMeasurementGate() -- until a measurement is entered, since
-  every one of those settings is meaningless without a target measurement.
-  Clicking anywhere in a disabled section carries a "pick a measurement
-  first" warning rather than doing nothing.
+  Everything below the Measurement/Table field (Local Machine Timezone,
+  Tags/Device, the confidence/coercion/delete-existing row, and both the
+  Export and Import panels) is disabled -- via JS, not the "disabled"
+  attribute alone, see updateMeasurementGate() -- until a measurement (or,
+  for TimescaleDB, a table -- always true in practice, since a <select>
+  always has SOME option chosen, at minimum the ever-present shared narrow
+  table) is entered, since every one of those settings is meaningless
+  without a target. Clicking anywhere in a disabled section carries a
+  "pick a measurement/table first" warning rather than doing nothing.
 
   Three source modes (radio buttons, JS-toggled panels):
     - "export"     : pick a date range on this bridge, get a time-shifted
@@ -51,6 +60,15 @@
                      only enabled when eg4_available.
     - "influx_csv" : re-import a CSV this same screen (or InfluxDateConv
                      erter.py) previously exported, optionally hand-edited.
+
+  For TimescaleDB (version="timescale"): Measurement becomes a Table
+  <select> (timescale_tables) and the Tags panel becomes a Device
+  <select> (services.timeshift_service.timescale_devices_for, the same
+  picker the Metrics Edit screen uses, scoped to whichever table is
+  selected). Writing to a wide table's Import always mirrors the same
+  field values into the narrow table too; "+ New field..." is withheld
+  from the Field Matchup step for a wide table (an ALTER TABLE this
+  screen doesn't perform), but offered normally for the narrow table.
 
   Styling: mirrors pages/influxdb_metrics_edit.html — theme-input/
   surface-title/mini-table-* classes, btn-tertiary buttons, the same
@@ -66,8 +84,8 @@
     <div>
       <h1 class="surface-title text-lg font-semibold">Timeshift Data</h1>
       <p class="surface-subtle text-xs mt-1">
-        Export a date range of InfluxDB data to CSV, or import an EG4 spreadsheet export / a previously
-        exported CSV back into InfluxDB.
+        Export a date range of data to CSV, or import an EG4 spreadsheet export / a previously
+        exported CSV back in.
       </p>
     </div>
     <div class="flex items-center gap-1 text-xs shrink-0">
@@ -81,6 +99,12 @@
       <a href="/pages/timeshift-data?version=3"
          class="px-3 py-1.5 rounded {{ 'bg-mpg-600 text-white' if version == '3' else 'btn-tertiary' }}">
         InfluxDB 3.x
+      </a>
+      {% endif %}
+      {% if timescale_available %}
+      <a href="/pages/timeshift-data?version=timescale"
+         class="px-3 py-1.5 rounded {{ 'bg-mpg-600 text-white' if version == 'timescale' else 'btn-tertiary' }}">
+        TimescaleDB
       </a>
       {% endif %}
     </div>
@@ -112,6 +136,24 @@
 
     <div class="grid grid-cols-2 gap-3">
       <div>
+        {% if version == 'timescale' %}
+        <label for="ts-table" class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">
+          Table
+        </label>
+        <select id="ts-table"
+                class="theme-input w-full text-xs rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-accent"
+                onchange="onTableChange()">
+          {% for t in timescale_tables %}
+          <option value="{{ t.table_name }}" data-table-kind="{{ t.table_kind }}" data-protocol-name="{{ t.protocol_name or '' }}">
+            {{ (t.protocol_name ~ ' (wide table)') if t.table_kind == 'wide' else 'Shared Narrow Table' }}
+          </option>
+          {% endfor %}
+        </select>
+        <p class="surface-subtle text-xs mt-1">
+          A protocol only appears as a wide table here once it has one; writing to a wide table also
+          writes the same data to the narrow table. Pick the narrow table directly for anything else.
+        </p>
+        {% else %}
         <label for="ts-measurement" class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">
           Measurement
         </label>
@@ -122,7 +164,10 @@
           {% for m in measurements %}<option value="{{ m }}">{% endfor %}
         </datalist>
         <p class="surface-subtle text-xs mt-1">Existing measurements are suggested; type a new name to create one.</p>
-        <p id="ts-measurement-warning" class="text-xs text-danger mt-1 hidden">Pick a measurement above before using the fields below.</p>
+        {% endif %}
+        <p id="ts-measurement-warning" class="text-xs text-danger mt-1 hidden">
+          Pick a {{ 'table' if version == 'timescale' else 'measurement' }} above before using the fields below.
+        </p>
       </div>
       <div class="ts-gate">
         <label for="ts-timezone" class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">
@@ -140,8 +185,18 @@
       </div>
     </div>
 
-    <!-- Tags -->
+    <!-- Tags (InfluxDB) / Device (TimescaleDB) -->
     <div class="ts-gate">
+      {% if version == 'timescale' %}
+      <label class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">Device</label>
+      <p class="surface-subtle text-xs leading-relaxed mb-2">
+        The device every point in this export/import belongs to. Only devices that already have at
+        least one row in the selected table are listed here -- the same picker the Metrics Edit
+        screen itself uses.
+      </p>
+      <div id="ts-device-status" class="mb-2"></div>
+      <select id="ts-device" class="theme-input w-full text-xs rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-accent"></select>
+      {% else %}
       <div class="flex items-center justify-between mb-1">
         <label class="surface-title text-xs font-semibold uppercase tracking-widest">Tags</label>
         <button type="button" class="btn-tertiary text-xs" onclick="addTagRow('', '')">+ Add Tag</button>
@@ -156,6 +211,7 @@
       <div id="ts-tags-status" class="mb-2"></div>
       <div id="ts-tags-rows" class="flex flex-col gap-1.5"></div>
       <datalist id="ts-tag-key-list"></datalist>
+      {% endif %}
     </div>
 
     <div class="ts-gate grid grid-cols-3 gap-3 items-end">
@@ -167,13 +223,15 @@
                class="theme-input w-full text-xs rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-accent">
       </div>
       <label class="flex items-center gap-1.5 text-xs mb-1.5">
-        <input type="checkbox" id="ts-allow-coercion" checked>
+        <input type="checkbox" id="ts-allow-coercion" checked {% if version == 'timescale' %}disabled{% endif %}>
         Allow float coercion on type value conflicts
+        {% if version == 'timescale' %}<span class="italic surface-subtle">(TimescaleDB: values are always coerced to each column's declared type)</span>{% endif %}
       </label>
       <label id="ts-delete-existing-wrap" class="flex items-center gap-1.5 text-xs mb-1.5">
-        <input type="checkbox" id="ts-delete-existing" {% if version == '3' %}disabled{% endif %}>
+        <input type="checkbox" id="ts-delete-existing" {% if version in ('3', 'timescale') %}disabled{% endif %}>
         Delete existing points in target range first
         {% if version == '3' %}<span class="italic surface-subtle">(v3: use Metrics Edit instead)</span>{% endif %}
+        {% if version == 'timescale' %}<span class="italic surface-subtle">(use Metrics Edit instead)</span>{% endif %}
       </label>
     </div>
   </div>
@@ -181,7 +239,8 @@
   <!-- ══ EXPORT PANEL ══ -->
   <div id="ts-panel-export" class="ts-gate rounded border border-mpg-700 p-3 flex flex-col gap-3">
     <h2 class="surface-title text-xs font-semibold uppercase tracking-widest">Export Range</h2>
-    <div class="grid grid-cols-3 gap-3">
+    <div class="grid {{ 'grid-cols-2' if version == 'timescale' else 'grid-cols-3' }} gap-3">
+      {% if version != 'timescale' %}
       <div>
         <label for="ts-export-device" class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">
           Device Identifier <span class="surface-subtle font-normal normal-case">(optional filter)</span>
@@ -189,6 +248,7 @@
         <input type="text" id="ts-export-device" placeholder="e.g. 4066670074"
                class="theme-input w-full text-xs rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-accent">
       </div>
+      {% endif %}
       <div>
         <label for="ts-export-start" class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">Source Start</label>
         <input type="datetime-local" step="1" id="ts-export-start"
@@ -257,7 +317,7 @@
     </div>
     <div id="ts-import-buttons" class="hidden flex-on-show items-center gap-2">
       <button type="button" class="btn-tertiary text-xs" onclick="runPreview()">Preview</button>
-      <button type="button" class="btn-tertiary text-xs" onclick="runImport()">Import to InfluxDB</button>
+      <button type="button" class="btn-tertiary text-xs" onclick="runImport()">Import to {{ 'TimescaleDB' if version == 'timescale' else 'InfluxDB' }}</button>
     </div>
 
     <div id="ts-import-status"></div>
@@ -286,9 +346,56 @@
     sourceMode: 'export',
     tagValues: {},        // tag key -> existing values in the current measurement (filled by refreshAllTagValues)
     tagRequestId: 0,      // guards against an older tag-values response landing after a newer one
+    deviceRequestId: 0,   // guards against an older TimescaleDB devices response landing after a newer one
   };
   const STANDARD_TAGS = JSON.parse(document.getElementById('timeshift-root').dataset.standardTags || '[]');
   const NEW_TAG_VALUE = '__new__';
+
+  // ---- Destination-generic helpers ----
+  // "Measurement" (InfluxDB, free text) and "Table" (TimescaleDB, a fixed <select>) are the same
+  // concept in different shapes -- these centralize the version branching so the rest of the script
+  // (gating, Export, Upload, buildRunPayload) reads/writes ONE thing regardless of destination.
+  function isTimescale() { return TimeshiftState.version === 'timescale'; }
+
+  function selectedTableOption() {
+    const select = document.getElementById('ts-table');
+    return (select && select.selectedOptions.length) ? select.selectedOptions[0] : null;
+  }
+
+  // The current target identifier: the Table <select>'s value for TimescaleDB (its table_name,
+  // which doubles as the "measurement" field every endpoint already accepts), or the Measurement
+  // input's value for InfluxDB. A <select> always has SOME option selected once it has any options
+  // at all (unlike a free-text input, which starts empty) -- see updateMeasurementGate()'s doc
+  // comment for what that means for the gate's initial state.
+  function getMeasurement() {
+    if (isTimescale()) {
+      const opt = selectedTableOption();
+      return opt ? opt.value : '';
+    }
+    return document.getElementById('ts-measurement').value.trim();
+  }
+
+  function getTableKind() {
+    const opt = selectedTableOption();
+    return opt ? opt.dataset.tableKind : '';
+  }
+
+  function getProtocolName() {
+    const opt = selectedTableOption();
+    return (opt && opt.dataset.protocolName) || '';
+  }
+
+  function getDeviceInfoId() {
+    const select = document.getElementById('ts-device');
+    return (select && select.value) ? parseInt(select.value, 10) : null;
+  }
+
+  // The element the measurement/table gate's warning ring and focus target -- whichever of
+  // #ts-measurement/#ts-table actually exists in the DOM for this version (see the page's own
+  // Jinja conditional: only one of the two is ever rendered).
+  function primaryField() { return document.getElementById(isTimescale() ? 'ts-table' : 'ts-measurement'); }
+
+  function destinationLabel() { return isTimescale() ? 'TimescaleDB' : ('InfluxDB v' + TimeshiftState.version); }
 
   // ---- Tags GUI ----
   // Each row is: key input | value dropdown (existing values from the DB, plus
@@ -450,10 +557,66 @@
     return JSON.stringify(tags);
   }
 
-  // Seed one row per standard MPG tag key, then load their existing values if a measurement is already entered.
-  setTagKeySuggestions(STANDARD_TAGS);
-  STANDARD_TAGS.forEach(function (k) { addTagRow(k, ''); });
-  if (document.getElementById('ts-measurement').value.trim()) { refreshAllTagValues(); }
+  // Seed one row per standard MPG tag key, then load their existing values if a measurement is
+  // already entered. InfluxDB only -- TimescaleDB has no Tags panel (#ts-tags-rows/#ts-tag-key-list
+  // don't exist in the DOM for it at all, see the page's Jinja conditional), it gets a Device
+  // <select> instead, populated below.
+  if (!isTimescale()) {
+    setTagKeySuggestions(STANDARD_TAGS);
+    STANDARD_TAGS.forEach(function (k) { addTagRow(k, ''); });
+    if (document.getElementById('ts-measurement').value.trim()) { refreshAllTagValues(); }
+  }
+
+  // ---- Table selection (TimescaleDB) ----
+  // Mirrors onMeasurementChange() below: a fresh table invalidates any already-scanned mapping and
+  // the Device list (a device with rows in one table may have none in another -- see
+  // timescale_devices_for's own docstring).
+  function onTableChange() {
+    updateMeasurementGate();
+    document.getElementById('ts-mapping-container').innerHTML = '';
+    document.getElementById('ts-import-actions').classList.add('hidden');
+    document.getElementById('ts-import-buttons').classList.add('hidden');
+    refreshDeviceOptions();
+  }
+
+  // Reloads the Device <select> for whichever table is currently selected. Devices with zero rows in
+  // this exact table are never listed -- same behavior the Metrics Edit screen's own picker has.
+  async function refreshDeviceOptions() {
+    const requestId = ++TimeshiftState.deviceRequestId;
+    const opt = selectedTableOption();
+    const select = document.getElementById('ts-device');
+    if (!opt || !select) { return; }
+
+    const params = new URLSearchParams({ table_kind: opt.dataset.tableKind });
+    if (opt.dataset.protocolName) { params.set('protocol_name', opt.dataset.protocolName); }
+
+    let data = null;
+    try {
+      const resp = await fetch('/api/timeshift/timescale/devices?' + params.toString());
+      if (resp.ok) { data = await resp.json(); }
+    } catch (e) { /* data stays null -- reported below */ }
+    if (requestId !== TimeshiftState.deviceRequestId) { return; }   // superseded by a newer request
+
+    document.getElementById('ts-device-status').innerHTML = '';
+    select.innerHTML = '';
+    if (data === null) {
+      showStatus('ts-device-status', 'Could not load devices for this table.', true);
+      return;
+    }
+    if (data.error) {
+      showStatus('ts-device-status', 'Could not load devices (' + data.error + ').', true);
+    }
+    if (!data.devices.length) {
+      select.appendChild(new Option('No devices with data in this table yet', ''));
+      return;
+    }
+    data.devices.forEach(function (d) {
+      const label = d.device_name ? (d.device_identifier + ' — ' + d.device_name) : d.device_identifier;
+      select.appendChild(new Option(label, d.device_info_id));
+    });
+  }
+
+  if (isTimescale()) { refreshDeviceOptions(); }
 
   // ---- Measurement gate ----
   // Everything under .ts-gate (Timezone, Tags, the confidence/coercion/delete-existing row, and both
@@ -466,7 +629,7 @@
   // but the belt-and-suspenders class guarantees that fallthrough is consistent across browsers/element
   // types, so the click reliably lands on the .ts-gate container itself and reaches the delegated
   // listener below, which raises the "pick a measurement first" warning.
-  function hasMeasurement() { return document.getElementById('ts-measurement').value.trim().length > 0; }
+  function hasMeasurement() { return getMeasurement().length > 0; }
 
   function updateMeasurementGate() {
     const enabled = hasMeasurement();
@@ -484,14 +647,13 @@
 
   function hideMeasurementWarning() {
     document.getElementById('ts-measurement-warning').classList.add('hidden');
-    document.getElementById('ts-measurement').classList.remove('ring-2', 'ring-danger');
+    primaryField().classList.remove('ring-2', 'ring-danger');
   }
 
   function warnMeasurementRequired() {
-    const measurementInput = document.getElementById('ts-measurement');
     document.getElementById('ts-measurement-warning').classList.remove('hidden');
-    measurementInput.classList.add('ring-2', 'ring-danger');
-    measurementInput.focus();
+    primaryField().classList.add('ring-2', 'ring-danger');
+    primaryField().focus();
     clearTimeout(warnMeasurementRequired._timer);
     warnMeasurementRequired._timer = setTimeout(hideMeasurementWarning, 3000);
   }
@@ -547,11 +709,12 @@
 
   // ---- Export ----
   function doExport() {
-    const measurement = document.getElementById('ts-measurement').value.trim();
+    const measurement = getMeasurement();
     const start = document.getElementById('ts-export-start').value;
     const end = document.getElementById('ts-export-end').value;
     const target = document.getElementById('ts-export-target').value || start;
-    if (!measurement) { showStatus('ts-export-status', 'Enter a measurement.', true); return; }
+    if (!measurement) { showStatus('ts-export-status', 'Pick a ' + (isTimescale() ? 'table' : 'measurement') + '.', true); return; }
+    if (isTimescale() && getDeviceInfoId() === null) { showStatus('ts-export-status', 'Pick a device.', true); return; }
     if (!start || !end) { showStatus('ts-export-status', 'Pick a source start and end.', true); return; }
     if (end < start) { showStatus('ts-export-status', 'Source End must not be before Source Start.', true); return; }
 
@@ -562,10 +725,16 @@
       end_time: end,
       target_start: target,
       local_timezone: document.getElementById('ts-timezone').value.trim(),
-      tags_json: collectTagsJson(),
     });
-    const device = document.getElementById('ts-export-device').value.trim();
-    if (device) { params.set('device_identifier', device); }
+    if (isTimescale()) {
+      params.set('table_kind', getTableKind());
+      params.set('protocol_name', getProtocolName());
+      params.set('device_info_id', getDeviceInfoId());
+    } else {
+      params.set('tags_json', collectTagsJson());
+      const device = document.getElementById('ts-export-device').value.trim();
+      if (device) { params.set('device_identifier', device); }
+    }
 
     document.getElementById('ts-export-status').innerHTML = '';
     window.location.href = '/api/timeshift/export.csv?' + params.toString();
@@ -573,17 +742,24 @@
 
   // ---- Upload & mapping ----
   async function uploadAndScan() {
-    const measurement = document.getElementById('ts-measurement').value.trim();
+    const measurement = getMeasurement();
     const fileInput = document.getElementById('ts-import-file');
-    if (!measurement) { showStatus('ts-import-status', 'Enter a measurement.', true); return; }
+    if (!measurement) { showStatus('ts-import-status', 'Pick a ' + (isTimescale() ? 'table' : 'measurement') + '.', true); return; }
+    if (isTimescale() && getDeviceInfoId() === null) { showStatus('ts-import-status', 'Pick a device.', true); return; }
     if (!fileInput.files.length) { showStatus('ts-import-status', 'Choose a file first.', true); return; }
 
     const form = new FormData();
     form.append('version', TimeshiftState.version);
     form.append('measurement', measurement);
     form.append('source_kind', TimeshiftState.sourceMode);
-    form.append('tags_json', collectTagsJson());
     form.append('confidence_threshold', document.getElementById('ts-confidence').value || '0.85');
+    if (isTimescale()) {
+      form.append('table_kind', getTableKind());
+      form.append('protocol_name', getProtocolName());
+      form.append('device_info_id', getDeviceInfoId());
+    } else {
+      form.append('tags_json', collectTagsJson());
+    }
     form.append('file', fileInput.files[0]);
 
     document.getElementById('ts-import-status').innerHTML = '';
@@ -715,6 +891,7 @@
     const root = document.getElementById('ts-mapping-root');
     if (!root) { return; }
     const allFields = JSON.parse(root.dataset.influxFields || '[]');
+    const allowNewField = root.dataset.allowNewField !== 'false';
     document.querySelectorAll('.ts-map-row[data-below-threshold="true"]').forEach(function (row) {
       const select = row.querySelector('.ts-map-target-select');
       const current = select.value;
@@ -725,7 +902,7 @@
       allFields.forEach(function (f) {
         if (f === current || !taken.has(f)) { select.appendChild(new Option(f, f)); }
       });
-      select.appendChild(new Option('+ New field…', '__new__'));
+      if (allowNewField) { select.appendChild(new Option('+ New field…', '__new__')); }
 
       select.value = Array.from(select.options).some(function (o) { return o.value === current; }) ? current : '';
       row.querySelector('.ts-map-target-custom').classList.toggle('hidden', select.value !== '__new__');
@@ -735,26 +912,34 @@
   function buildRunPayload() {
     const upload = TimeshiftState.uploadId;
     if (!upload) { showStatus('ts-import-status', 'Upload a file first.', true); return null; }
-    const measurement = document.getElementById('ts-measurement').value.trim();
+    const measurement = getMeasurement();
     const timeColumn = document.getElementById('ts-time-column').value;
     const start = document.getElementById('ts-import-start').value;
     const target = document.getElementById('ts-import-target').value || start;
     if (!timeColumn) { showStatus('ts-import-status', 'Select the time column.', true); return null; }
     if (!start) { showStatus('ts-import-status', 'Pick a source start time.', true); return null; }
+    if (isTimescale() && getDeviceInfoId() === null) { showStatus('ts-import-status', 'Pick a device.', true); return null; }
 
-    return {
+    const payload = {
       upload_id: upload,
       version: TimeshiftState.version,
       measurement: measurement,
       time_column: timeColumn,
       mapping_json: collectMappingJson(),
-      tags_json: collectTagsJson(),
       local_timezone: document.getElementById('ts-timezone').value.trim(),
       source_is_local: TimeshiftState.sourceMode === 'eg4',
       source_start: start,
       target_start: target,
       allow_float_coercion: document.getElementById('ts-allow-coercion').checked,
     };
+    if (isTimescale()) {
+      payload.table_kind = getTableKind();
+      payload.protocol_name = getProtocolName();
+      payload.device_info_id = getDeviceInfoId();
+    } else {
+      payload.tags_json = collectTagsJson();
+    }
+    return payload;
   }
 
   async function runPreview() {
@@ -786,8 +971,8 @@
     const payload = buildRunPayload();
     if (!payload) { return; }
     const proceed = window.confirm(
-      'Import into measurement "' + payload.measurement + '" (InfluxDB v' + TimeshiftState.version + ')?\n\n' +
-      'This writes points to InfluxDB immediately — this is NOT part of the staged "Commit All Changes" flow. Continue?'
+      'Import into ' + (isTimescale() ? 'table' : 'measurement') + ' "' + payload.measurement + '" (' + destinationLabel() + ')?\n\n' +
+      'This writes points to ' + destinationLabel() + ' immediately — this is NOT part of the staged "Commit All Changes" flow. Continue?'
     );
     if (!proceed) { return; }
 

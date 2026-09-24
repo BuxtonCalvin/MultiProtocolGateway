@@ -188,12 +188,33 @@ def supports_delete(version: str) -> bool:
     SUPPORTS_DELETE). Read directly off each admin manager's own
     SUPPORTS_DELETE where possible so this can never drift from what
     edit_metric_values() actually does; v1 has no such flag since delete
-    support there is unconditional, not bridge-dependent.
+    support there is unconditional, not bridge-dependent. This is a
+    version-level answer only -- whether the *connected* v3 server is Core
+    (and so cannot delete) is delete_unavailable_reason()'s job.
     """
     resolved: InfluxVersion = _validate_version(version)
     if resolved == "1":
         return True
     return bool(getattr(_Influx3AdminManagerImpl, "SUPPORTS_DELETE", False))
+
+
+def delete_unavailable_reason(gateway: "Protocol_Gateway | None", version: str) -> str | None:
+    """
+    Why "Delete value(s)" cannot be used against the connected server right now, or None if it can.
+
+    Only InfluxDB 3 Core is ever ruled out: it has no row-delete API, and
+    Influx3AdminManager.detect_edition() can identify it from GET /ping. When the
+    edition is Enterprise -- or cannot be determined -- this returns None and the
+    server itself remains the authority (an Enterprise server without the storage
+    engine upgrade still rejects the request with its own message). v1 never has
+    a reason: its InfluxQL DELETE is unconditional.
+    """
+    resolved: InfluxVersion = _validate_version(version)
+    if resolved == "1" or not supports_delete(version):
+        return None
+    if _v3_admin_manager(gateway).detect_edition() == "core":
+        return "Deleting values is not available on InfluxDB 3 Core — it requires InfluxDB 3 Enterprise."
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -218,6 +239,22 @@ def list_metric_edit_devices(
         return [{"device_identifier": d.device_identifier, "device_name": d.device_name} for d in v1_devices]
     v3_devices: list["Influx3MetricEditDevice"] = _v3_admin_manager(gateway).list_metric_edit_devices(measurement)
     return [{"device_identifier": d.device_identifier, "device_name": d.device_name} for d in v3_devices]
+
+
+def lookup_metric_edit_device_name(
+    gateway: "Protocol_Gateway | None", version: str, measurement: str, device_identifier: str
+    ) -> str | None:
+    """
+    Returns the friendly device_name for one device_identifier, or None, for either InfluxDB version.
+
+    v1's device list carries identifiers only (index-only SHOW TAG VALUES), so the
+    name is fetched here once a device is picked. v3's device list already
+    includes names, so its manager returns None.
+    """
+    resolved: InfluxVersion = _validate_version(version)
+    if resolved == "1":
+        return _v1_admin_manager(gateway).get_metric_edit_device_name(measurement, device_identifier)
+    return _v3_admin_manager(gateway).get_metric_edit_device_name(measurement, device_identifier)
 
 
 def list_metric_edit_fields(
