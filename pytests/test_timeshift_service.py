@@ -22,6 +22,7 @@
 from __future__ import annotations
 
 import io
+import re
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any
@@ -318,6 +319,87 @@ class TestLoadTagOptions:
         assert opts.tag_values["device_identifier"] == ["a", "b"]
         assert opts.tag_values["device_model"] == []            # not a column of this table -> no query, no values
         assert "site" in opts.tag_keys and "soc" not in opts.tag_keys and "time" not in opts.tag_keys
+
+    def test_v3_distinct_query_is_time_bounded_to_the_narrowest_lookback(self) -> None:
+        """Regression test: an unbounded SELECT DISTINCT over a whole measurement's history is exactly what trips InfluxDB 3 Core's Parquet file limit on an active/long-lived table."""
+        client = MagicMock()
+
+        def query(sql: str, database: str = "", language: str = "") -> _V3Table:
+            if "information_schema.columns" in sql:
+                return _V3Table([{"column_name": "device_identifier", "data_type": "Dictionary(Int32, Utf8)"}])
+            assert "now() - INTERVAL '3 days'" in sql, sql   # the narrowest window is tried first
+            return _V3Table([{"device_identifier": "42"}])
+
+        client.query.side_effect = query
+        with patch.object(ts, "get_influxdb3_bridge", return_value=SimpleNamespace(client=client, database="mpg")):
+            opts = ts.load_tag_options(None, "3", "device_data", ["device_identifier"])
+        assert opts.error == ""
+        assert opts.tag_values == {"device_identifier": ["42"]}
+
+    def test_v3_widens_the_lookback_only_when_the_narrow_one_found_nothing(self) -> None:
+        client = MagicMock()
+        calls: list[str] = []
+
+        def query(sql: str, database: str = "", language: str = "") -> _V3Table:
+            if "information_schema.columns" in sql:
+                return _V3Table([{"column_name": "device_identifier", "data_type": "Dictionary(Int32, Utf8)"}])
+            calls.append(sql)
+            if "3 days" in sql:
+                return _V3Table([])   # nothing recent -- should trigger the wider window
+            return _V3Table([{"device_identifier": "42"}])
+
+        client.query.side_effect = query
+        with patch.object(ts, "get_influxdb3_bridge", return_value=SimpleNamespace(client=client, database="mpg")):
+            opts = ts.load_tag_options(None, "3", "device_data", ["device_identifier"])
+        assert opts.tag_values == {"device_identifier": ["42"]}
+        assert len(calls) == 2 and "14 days" in calls[1]
+
+    def test_v3_narrowest_window_file_limit_error_is_raised_not_swallowed(self) -> None:
+        """A file-limit error on the FIRST (narrowest) window is unusual enough to surface as a real error, same as list_metric_edit_devices's own asymmetry -- it is not silently treated as 'no values'."""
+        client = MagicMock()
+
+        def query(sql: str, database: str = "", language: str = "") -> _V3Table:
+            if "information_schema.columns" in sql:
+                return _V3Table([{"column_name": "device_identifier", "data_type": "Dictionary(Int32, Utf8)"}])
+            raise _file_limit_error()
+
+        client.query.side_effect = query
+        with patch.object(ts, "get_influxdb3_bridge", return_value=SimpleNamespace(client=client, database="mpg")):
+            opts = ts.load_tag_options(None, "3", "device_data", ["device_identifier"])
+        assert "file limit" in opts.error.lower()   # surfaced via load_tag_options's own outer catch-all, not raised out of it
+        assert opts.tag_values == {}
+
+    def test_v3_wider_window_file_limit_error_is_swallowed(self) -> None:
+        """Unlike the narrowest window, a file-limit error on a WIDER window degrades to 'no values found' rather than failing the whole lookup -- some other key may still resolve fine."""
+        client = MagicMock()
+
+        def query(sql: str, database: str = "", language: str = "") -> _V3Table:
+            if "information_schema.columns" in sql:
+                return _V3Table([{"column_name": "device_identifier", "data_type": "Dictionary(Int32, Utf8)"}])
+            if "3 days" in sql:
+                return _V3Table([])
+            raise _file_limit_error()
+
+        client.query.side_effect = query
+        with patch.object(ts, "get_influxdb3_bridge", return_value=SimpleNamespace(client=client, database="mpg")):
+            opts = ts.load_tag_options(None, "3", "device_data", ["device_identifier"])
+        assert opts.error == ""                              # not reported as a failure...
+        assert opts.tag_values == {"device_identifier": []}  # ...just no suggestions from either window
+
+    def test_v3_non_file_limit_error_on_wider_window_still_raises(self) -> None:
+        client = MagicMock()
+
+        def query(sql: str, database: str = "", language: str = "") -> _V3Table:
+            if "information_schema.columns" in sql:
+                return _V3Table([{"column_name": "device_identifier", "data_type": "Dictionary(Int32, Utf8)"}])
+            if "3 days" in sql:
+                return _V3Table([])
+            raise RuntimeError("connection refused")
+
+        client.query.side_effect = query
+        with patch.object(ts, "get_influxdb3_bridge", return_value=SimpleNamespace(client=client, database="mpg")):
+            opts = ts.load_tag_options(None, "3", "device_data", ["device_identifier"])
+        assert "connection refused" in opts.error
 
     def test_failure_is_reported_not_raised(self) -> None:
         client = MagicMock()
@@ -714,3 +796,170 @@ class TestMachineTimezoneForTimescale:
     def test_no_bridge_falls_back_to_utc(self) -> None:
         with patch.object(ts, "get_timescale_bridge", return_value=None):
             assert ts.machine_timezone_for(None, "timescale") == "UTC"
+
+
+# ---------------------------------------------------------------------------
+# InfluxDB v3 Core's per-query Parquet file limit (export_range_rows)
+# ---------------------------------------------------------------------------
+
+def _file_limit_error() -> Exception:
+    return Exception("Query would scan 999 Parquet files, exceeding the file limit")
+
+
+class TestQueryV3TimeSlices:
+    """
+    Unit tests for services.timeshift_service._query_v3_time_slices, the
+    export-side counterpart of transports.influxdb3_out.Influx3AdminManager.
+    _query_time_slices -- reusing that module's own _is_file_limit_error/
+    _V3_MIN_SLICE so both agree on what a file-limit error is and how
+    narrow is worth retrying.
+    """
+
+    def test_whole_range_accepted_is_a_single_call(self) -> None:
+        calls: list[tuple[datetime, datetime, bool]] = []
+
+        def run(start: datetime, end: datetime, end_inclusive: bool) -> list[dict[str, Any]]:
+            calls.append((start, end, end_inclusive))
+            return [{"v": 1}]
+
+        start = datetime(2025, 6, 1, tzinfo=timezone.utc)
+        end = datetime(2025, 6, 2, tzinfo=timezone.utc)
+        result = ts._query_v3_time_slices(run, start, end)  # pyright: ignore[reportPrivateUsage]
+
+        assert calls == [(start, end, True)]   # whole range, end-inclusive -- matches a single ordinary query
+        assert result == [{"v": 1}]
+
+    def test_file_limit_error_bisects_into_two_accepted_halves(self) -> None:
+        calls: list[tuple[datetime, datetime, bool]] = []
+
+        def run(start: datetime, end: datetime, end_inclusive: bool) -> list[dict[str, Any]]:
+            calls.append((start, end, end_inclusive))
+            if (end - start) > timedelta(hours=1):
+                raise _file_limit_error()
+            return [{"start": start.isoformat()}]
+
+        start = datetime(2025, 6, 1, 0, 0, tzinfo=timezone.utc)
+        end = datetime(2025, 6, 1, 2, 0, tzinfo=timezone.utc)
+        result = ts._query_v3_time_slices(run, start, end)  # pyright: ignore[reportPrivateUsage]
+
+        midpoint = start + timedelta(hours=1)
+        assert calls == [
+            (start, end, True),                     # whole range -- rejected
+            (start, midpoint, False),                # first half -- half-open, so the shared boundary isn't double-queried
+            (midpoint, end, True),                   # second half -- keeps the original end_inclusive
+        ]
+        assert result == [{"start": start.isoformat()}, {"start": midpoint.isoformat()}]
+
+    def test_bisection_recurses_until_narrow_enough(self) -> None:
+        accepted_widths: list[timedelta] = []
+
+        def run(start: datetime, end: datetime, end_inclusive: bool) -> list[dict[str, Any]]:
+            width = end - start
+            if width > timedelta(minutes=20):
+                raise _file_limit_error()
+            accepted_widths.append(width)
+            return [{}]
+
+        start = datetime(2025, 6, 1, tzinfo=timezone.utc)
+        end = start + timedelta(hours=2)
+        result = ts._query_v3_time_slices(run, start, end)  # pyright: ignore[reportPrivateUsage]
+
+        assert all(w <= timedelta(minutes=20) for w in accepted_widths)
+        assert len(result) == len(accepted_widths) >= 4   # a 2-hour range needed more than one bisection to fit under 20 minutes
+
+    def test_slice_at_the_floor_still_failing_reraises(self) -> None:
+        def run(_start: datetime, _end: datetime, _end_inclusive: bool) -> list[dict[str, Any]]:
+            raise _file_limit_error()
+
+        start = datetime(2025, 6, 1, tzinfo=timezone.utc)
+        min_slice = timedelta(minutes=10)   # matches transports.influxdb3_out._V3_MIN_SLICE
+        with pytest.raises(Exception, match="file limit"):
+            ts._query_v3_time_slices(run, start, start + min_slice)  # pyright: ignore[reportPrivateUsage]
+
+    def test_non_file_limit_error_is_not_bisected(self) -> None:
+        calls = 0
+
+        def run(_start: datetime, _end: datetime, _end_inclusive: bool) -> list[dict[str, Any]]:
+            nonlocal calls
+            calls += 1
+            raise RuntimeError("connection refused")
+
+        with pytest.raises(RuntimeError, match="connection refused"):
+            ts._query_v3_time_slices(run, datetime(2025, 6, 1, tzinfo=timezone.utc), datetime(2025, 6, 2, tzinfo=timezone.utc))  # pyright: ignore[reportPrivateUsage]
+        assert calls == 1   # never retried/split for a non-file-limit error
+
+
+class TestExportRangeRowsV3FileLimit:
+    """export_range_rows()'s v3 branch, end to end, against a bridge whose query() enforces a (fake, narrow) file limit so the bisection path is actually exercised."""
+
+    def _bridge_with_width_limit(self, limit: timedelta) -> tuple[SimpleNamespace, MagicMock]:
+        client = MagicMock()
+
+        def fake_query(sql: str, database: str = "", language: str = "") -> Any:
+            literals = re.findall(r"'([\d\-T:.]+Z)'", sql)
+            slice_start = datetime.strptime(literals[0], "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=timezone.utc)
+            slice_end = datetime.strptime(literals[1], "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=timezone.utc)
+            if (slice_end - slice_start) > limit:
+                raise _file_limit_error()
+            return _V3Table([{"time": slice_start + timedelta(minutes=1), "soc": 50.0, "device_identifier": "42"}])
+
+        client.query.side_effect = fake_query
+        return SimpleNamespace(client=client, database="mpg"), client
+
+    def test_wide_range_is_split_and_every_slice_is_collected(self) -> None:
+        bridge, client = self._bridge_with_width_limit(timedelta(hours=1))
+        with patch.object(ts, "get_influxdb3_bridge", return_value=bridge):
+            header, rows = ts.export_range_rows(
+                None, "3", "device_data", "42",
+                datetime(2025, 6, 1, 0, 0, tzinfo=timezone.utc), datetime(2025, 6, 1, 5, 0, tzinfo=timezone.utc),
+                datetime(2025, 6, 1, 0, 0, tzinfo=timezone.utc), set(),
+            )
+        assert client.query.call_count > 1     # the whole-range attempt failed and was split
+        # Bisection halves the range regardless of remainder, so a 5-hour range under a 1-hour limit
+        # doesn't split into exactly 5 clean hour-long slices -- just assert every accepted slice's
+        # row made it through, and that splitting actually happened (checked above).
+        assert len(rows) >= 5
+        assert header == ["time", "soc", "device_identifier"]
+
+    def test_narrow_range_needs_no_splitting(self) -> None:
+        bridge, client = self._bridge_with_width_limit(timedelta(hours=1))
+        with patch.object(ts, "get_influxdb3_bridge", return_value=bridge):
+            _header, rows = ts.export_range_rows(
+                None, "3", "device_data", None,
+                datetime(2025, 6, 1, 0, 0, tzinfo=timezone.utc), datetime(2025, 6, 1, 0, 30, tzinfo=timezone.utc),
+                datetime(2025, 6, 1, 0, 0, tzinfo=timezone.utc), set(),
+            )
+        assert client.query.call_count == 1
+        assert len(rows) == 1
+
+    def test_device_identifier_filter_is_applied_to_every_slice(self) -> None:
+        bridge, client = self._bridge_with_width_limit(timedelta(hours=1))
+        with patch.object(ts, "get_influxdb3_bridge", return_value=bridge):
+            ts.export_range_rows(
+                None, "3", "device_data", "42",
+                datetime(2025, 6, 1, 0, 0, tzinfo=timezone.utc), datetime(2025, 6, 1, 3, 0, tzinfo=timezone.utc),
+                datetime(2025, 6, 1, 0, 0, tzinfo=timezone.utc), set(),
+            )
+        assert client.query.call_count > 1
+        assert all("device_identifier = '42'" in call.args[0] for call in client.query.call_args_list)
+
+    def test_time_shift_still_applies_per_slice(self) -> None:
+        bridge, _client = self._bridge_with_width_limit(timedelta(hours=1))
+        with patch.object(ts, "get_influxdb3_bridge", return_value=bridge):
+            _header, rows = ts.export_range_rows(
+                None, "3", "device_data", None,
+                datetime(2025, 6, 1, 0, 0, tzinfo=timezone.utc), datetime(2025, 6, 1, 3, 0, tzinfo=timezone.utc),
+                datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc), set(),
+            )
+        assert all(row["time"].startswith("2026-01-01") for row in rows)   # every slice's rows got the same shift, not just the first
+
+    def test_enterprise_like_bridge_never_splits(self) -> None:
+        """A bridge with no per-query limit at all (Enterprise) issues exactly one query regardless of range width."""
+        bridge, client = self._bridge_with_width_limit(timedelta(days=3650))
+        with patch.object(ts, "get_influxdb3_bridge", return_value=bridge):
+            ts.export_range_rows(
+                None, "3", "device_data", None,
+                datetime(2020, 1, 1, tzinfo=timezone.utc), datetime(2025, 1, 1, tzinfo=timezone.utc),
+                datetime(2020, 1, 1, tzinfo=timezone.utc), set(),
+            )
+        assert client.query.call_count == 1
