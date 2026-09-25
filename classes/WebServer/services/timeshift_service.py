@@ -91,7 +91,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
-from typing import TYPE_CHECKING, Any, Generator, Iterable, Literal, cast
+from typing import TYPE_CHECKING, Any, Callable, Generator, Iterable, Literal, cast
 from zoneinfo import ZoneInfo, available_timezones
 
 import pandas as pd
@@ -1020,7 +1020,13 @@ def load_tag_options(
         answered from the tag index (fast regardless of data volume).
       - v3: tags are the table's dictionary-typed columns in
         information_schema.columns; each requested key's values come from a
-        SELECT DISTINCT.
+        SELECT DISTINCT over a recent, widening look-back window (see the
+        inline comment above that loop) rather than the table's whole
+        history, since an unbounded SELECT DISTINCT can trip InfluxDB 3
+        Core's per-query Parquet file limit on an active/long-lived
+        measurement -- a value that hasn't been written in the widest
+        window tried is simply not offered as a suggestion; the admin can
+        still type it in as a new value.
 
     Never raises for a query problem: a brand-new/unknown measurement just
     yields no values, and any other failure is logged and reported in
@@ -1070,20 +1076,52 @@ def load_tag_options(
                 c for c, t in column_types.items()
                 if c != "time" and (t.startswith("Dictionary") or c in STANDARD_TAG_KEYS)
             )
+
+            # column_types comes from information_schema.columns (metadata only, cheap) and is safe
+            # unbounded; the per-key SELECT DISTINCT below reads actual data, so -- like
+            # transports.influxdb3_out.Influx3AdminManager.list_metric_edit_devices()'s own device
+            # picker -- it must be time-bounded, or an active/long-lived measurement can trip
+            # InfluxDB 3 CORE's per-query Parquet file limit ("Query would scan N Parquet files,
+            # exceeding the file limit") on a query with no time filter at all. Reusing that same
+            # look-back/widen sequence (_V3_DEVICE_LOOKBACKS, narrowest first, widening only while a
+            # key has found nothing) keeps every windowed v3 query in this codebase agreeing on how
+            # far back is worth trying, and _is_file_limit_error on what a file-limit failure even is.
+            from ...transports.influxdb3_out import (  # noqa: PLC0415 -- local: see build_points_timescale's identical note on deferring a transport's imports
+                _V3_DEVICE_LOOKBACKS,  # pyright: ignore[reportPrivateUsage] -- reused deliberately, see the comment above
+                _is_file_limit_error,  # pyright: ignore[reportPrivateUsage]
+            )
+
             for key in wanted:
                 if key not in column_types:
                     options.tag_values[key] = []
                     continue
-                sql: str = (
-                    f"SELECT DISTINCT {_sql_quote_ident(key)} FROM {_sql_quote_ident(measurement)} "  # noqa: S608
-                    f"WHERE {_sql_quote_ident(key)} IS NOT NULL LIMIT {MAX_TAG_VALUES}"
-                )
-                table: Any = bridge.client.query(sql, database=bridge.database, language="sql")
+                quoted_key: str = _sql_quote_ident(key)
                 values: set[str] = set()
-                for row in table.to_pylist():
-                    cell: Any = cast(dict[str, Any], row).get(key)
-                    if cell not in (None, ""):
-                        values.add(str(cell))
+                for index, window in enumerate(_V3_DEVICE_LOOKBACKS):
+                    sql = (
+                        f"SELECT DISTINCT {quoted_key} FROM {_sql_quote_ident(measurement)} "  # noqa: S608
+                        f"WHERE time >= now() - INTERVAL '{window}' AND {quoted_key} IS NOT NULL LIMIT {MAX_TAG_VALUES}"
+                    )
+                    try:
+                        table = bridge.client.query(sql, database=bridge.database, language="sql")
+                    except Exception as exc:
+                        # Only a WIDER window's file-limit failure is swallowed (same asymmetry as
+                        # list_metric_edit_devices): the narrowest window is expected to always fit,
+                        # so a file-limit error there is unusual enough to surface as a real error
+                        # rather than silently reporting "no values" for it.
+                        if index > 0 and _is_file_limit_error(exc):
+                            _log.warning(
+                                f"[Timeshift] Tag-value look-back of {window} exceeded InfluxDB's query "
+                                f"file limit for '{key}' on '{measurement}'; showing values from the narrower window only."
+                            )
+                            break
+                        raise
+                    values = {
+                        str(cell) for row in table.to_pylist()
+                        if (cell := cast(dict[str, Any], row).get(key)) not in (None, "")
+                    }
+                    if values:
+                        break
                 options.tag_values[key] = sorted(values)
     except Exception as exc:
         _log.warning(f"[Timeshift] Could not load tag values for '{measurement}' (v{version}): {exc}")
@@ -1110,6 +1148,67 @@ def _sql_quote_ident(name: str) -> str:
 def _sql_quote_literal(value: str) -> str:
     """Single-quotes a DataFusion SQL string literal, doubling any embedded single quote."""
     return "'" + value.replace("'", "''") + "'"
+
+
+def _query_v3_time_slices(
+    run: Callable[[datetime, datetime, bool], list[dict[str, Any]]], start_time: datetime, end_time: datetime,
+    ) -> list[dict[str, Any]]:
+    """
+    Runs `run(slice_start, slice_end, end_inclusive)` over [start_time,
+    end_time] and concatenates the results, transparently splitting the
+    range when InfluxDB 3 CORE rejects a query for touching too many
+    Parquet files ("Query would scan N Parquet files, exceeding the file
+    limit") -- Enterprise has no such per-query limit, so there this is a
+    no-op: the first attempt succeeds and `run` is called exactly once.
+
+    This is the same file-limit workaround transports.influxdb3_out.
+    Influx3AdminManager._query_time_slices() already gives Metrics Edit's
+    own device/field/edit queries (list_metric_edit_devices,
+    preview_metric_edit, edit_metric_values) -- export_range_rows()'s v3
+    branch was the one query in this file still shaped as a single SELECT
+    over the whole requested range, which is exactly the shape that trips
+    Core's limit on a wide date range. Reusing the transport's own
+    _is_file_limit_error/_V3_MIN_SLICE (rather than re-deciding what
+    counts as a file-limit error, or how narrow is worth trying, a second
+    time here) keeps both call sites in agreement should either ever
+    change; the recursive bisect-and-retry logic itself is duplicated
+    (not imported) since the original is a bound method closed over an
+    admin-manager instance this file has no reason to construct just to
+    borrow one method, and specialized to concatenating row lists rather
+    than Influx3AdminManager._query_time_slices()'s generic per-slice
+    result (a plain sum() or list-concatenation is all every caller of
+    that one has ever needed, including this one).
+
+    Starts with the whole range in one call; on a file-limit error it
+    bisects the range and retries each half, recursing until every slice
+    is accepted (or a slice is already as narrow as _V3_MIN_SLICE, in
+    which case the server's own error is re-raised). Any other error is
+    raised immediately. Slices are half-open except the last, so a row
+    exactly on a boundary is never counted twice.
+    """
+    from ...transports.influxdb3_out import (  # noqa: PLC0415 -- local: see build_points_timescale's identical note on deferring a transport's imports
+        _V3_MIN_SLICE,  # pyright: ignore[reportPrivateUsage] -- reused deliberately, see this function's docstring
+        _is_file_limit_error,  # pyright: ignore[reportPrivateUsage]
+    )
+
+    rows: list[dict[str, Any]] = []
+
+    def _go(slice_start: datetime, slice_end: datetime, *, end_inclusive: bool) -> None:
+        try:
+            rows.extend(run(slice_start, slice_end, end_inclusive))
+        except Exception as exc:
+            if not _is_file_limit_error(exc) or (slice_end - slice_start) <= _V3_MIN_SLICE:
+                raise
+            midpoint: datetime = slice_start + (slice_end - slice_start) / 2
+            _log.info(
+                f"[Timeshift] Export query over [{slice_start}, {slice_end}] exceeded InfluxDB's file limit -- splitting the range."
+            )
+            _go(slice_start, midpoint, end_inclusive=False)
+            _go(midpoint, slice_end, end_inclusive=end_inclusive)
+            return
+
+    _go(start_time, end_time, end_inclusive=True)
+    return rows
 
 
 def export_range_rows(
@@ -1196,26 +1295,35 @@ def export_range_rows(
         if bridge is None or bridge.client is None:
             raise ValueError("No connected InfluxDB v3 bridge is attached to this gateway.")
 
-        start_lit: str = start_time.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-        end_lit: str = end_time.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-        where = f"time >= {_sql_quote_literal(start_lit)} AND time <= {_sql_quote_literal(end_lit)}"
-        if device_identifier:
-            where += f" AND device_identifier = {_sql_quote_literal(device_identifier)}"
-        sql: str = f"SELECT * FROM {_sql_quote_ident(measurement)} WHERE {where}"  # noqa: S608
-        # InfluxDBClient3.query(..., mode="all") (the default we rely on by
-        # not passing `mode=`) returns a pyarrow.Table at runtime --
-        # undocumented in its own (untyped) signature, but true of the
-        # installed client per its source; `.to_pylist()` below is a real
-        # pyarrow.Table method, not a dynamic/guessed one. It's typed as
-        # Any rather than pyarrow.Table itself because pyarrow ships no
-        # py.typed marker and its Table class is a Cython/C-extension type
-        # pyright can't introspect -- annotating it "Table" wouldn't add
-        # real checking, only the appearance of it (confirmed: pyright
-        # resolves pyarrow.Table itself to Unknown even when imported).
-        table: Any = bridge.client.query(sql, database=bridge.database, language="sql")  # type: ignore[reportUnknownMemberType]
+        v3_bridge: Any = bridge  # narrowed non-None/non-.client-None just above; re-bound so the closure below doesn't need to re-prove that on every call
+        quoted_measurement: str = _sql_quote_ident(measurement)
 
-        for record in table.to_pylist():  # type: ignore[reportUnknownMemberType]  -- pyarrow.Table ships no py.typed marker, so pyright can't resolve its methods even through an Any-typed reference
-            record_map: dict[str, Any] = cast(dict[str, Any], record)
+        # A wide range can exceed InfluxDB 3 CORE's per-query Parquet file limit
+        # (Enterprise has none), so the query runs per time slice via
+        # _query_v3_time_slices -- one slice, i.e. one query, whenever the whole
+        # range is accepted as-is -- and every slice's rows are concatenated.
+        def _fetch_v3_slice(slice_start: datetime, slice_end: datetime, end_inclusive: bool) -> list[dict[str, Any]]:
+            end_op: str = "<=" if end_inclusive else "<"
+            slice_start_lit: str = slice_start.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+            slice_end_lit: str = slice_end.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+            slice_where: str = f"time >= {_sql_quote_literal(slice_start_lit)} AND time {end_op} {_sql_quote_literal(slice_end_lit)}"
+            if device_identifier:
+                slice_where += f" AND device_identifier = {_sql_quote_literal(device_identifier)}"
+            slice_sql: str = f"SELECT * FROM {quoted_measurement} WHERE {slice_where}"  # noqa: S608
+            # InfluxDBClient3.query(..., mode="all") (the default we rely on by
+            # not passing `mode=`) returns a pyarrow.Table at runtime --
+            # undocumented in its own (untyped) signature, but true of the
+            # installed client per its source; `.to_pylist()` below is a real
+            # pyarrow.Table method, not a dynamic/guessed one. It's typed as
+            # Any rather than pyarrow.Table itself because pyarrow ships no
+            # py.typed marker and its Table class is a Cython/C-extension type
+            # pyright can't introspect -- annotating it "Table" wouldn't add
+            # real checking, only the appearance of it (confirmed: pyright
+            # resolves pyarrow.Table itself to Unknown even when imported).
+            slice_table: Any = v3_bridge.client.query(slice_sql, database=v3_bridge.database, language="sql")  # type: ignore[reportUnknownMemberType]
+            return [cast(dict[str, Any], r) for r in slice_table.to_pylist()]  # type: ignore[reportUnknownMemberType]  -- pyarrow.Table ships no py.typed marker, so pyright can't resolve its methods even through an Any-typed reference
+
+        for record_map in _query_v3_time_slices(_fetch_v3_slice, start_time, end_time):
             time_value: Any = record_map.get("time")
             if time_value is None:
                 continue  # a record with no time value can't be placed on the timeline -- skip it

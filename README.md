@@ -214,10 +214,8 @@ Here are overviews of two database bridges:
 
 - InfluxDB 1.X and 3.x versions [![InfluxDB](https://img.shields.io/badge/influxdb-22ADF6?logo=influxdb&logoColor=fff)](https://influxdata.com)
 
-  - Advanced Features [influxdb advanced features](documentation/bridges/InfluxDB/influxdb_advanced_features.md)
-  - Troubleshooting [troubleshooting influxdb](documentation/bridges/InfluxDB/troubleshooting_influxdb.md)
+  - Full Readme (transport, advanced features, metrics edit, timeshift data, troubleshooting) [influxdb](documentation/bridges/InfluxDB/influxdb.md)
   - InfluxDB3 Special setup [influxDB3](documentation/bridges/InfluxDB/InfluxDB3.md)
-  - InfluxDB Metric Editing [Editing](documentation/bridges/InfluxDB/influxdb_metrics_edit.md)
 
 - TimeScale DB [![Timescale DB](https://img.shields.io/badge/postgres-%2331648C.svg?logo=postgresql&logoColor=white)](https://timescale.com)
 
@@ -523,7 +521,6 @@ For manufacturer device-specific wiring and installation guides: [devices](docum
 Beyond the core gateway, `tools/` includes a few standalone utilities:
 
 - **`modbus_server_sim.py`** / **`canbus_server_sim.py`** — simulate a Modbus TCP server or virtual CAN bus for testing MPG without physical hardware (see [Try It Without Hardware](#try-it-with-or-without-hardware))
-- **`InfluxDateConverter.py`** — export, repair, and re-import InfluxDB time-series data, including importing EG4 inverter CSV exports and shifting timestamps into a new range; see [Influx Date Converter](tools/ReadmeInfluxDateConverter.md) for the full guide
 
 ---
 

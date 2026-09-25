@@ -24,7 +24,9 @@
   influxdb_metrics_edit.html). Context: preview — {row_count, sample:
   [{time_iso, value}, ...]} (see services/influxdb_service.
   preview_metric_edit). Read-only — this never stages or writes anything;
-  it's purely "here's what currently matches your selection." No "Field"
+  it's purely "here's what currently matches your selection." It needs no
+  replacement value -- listing the existing values lets the admin narrow the
+  date range and see what a valid replacement looks like. No "Field"
   column (unlike TimescaleDB's preview table) since exactly one field is
   ever previewed here — there's nothing to disambiguate per row. Wrapped
   in overflow-x-auto since its parent is capped to a fixed width (see the

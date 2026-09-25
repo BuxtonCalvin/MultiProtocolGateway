@@ -358,8 +358,11 @@
   // fields present at all) before either Preview or Add to Staged
   // Changes fires a request -- the server re-validates everything
   // regardless, this just avoids a round-trip for an obviously incomplete
-  // selection.
-  function buildInfluxSelection() {
+  // selection. forPreview=true (the Preview button) skips the
+  // "replacement value required" check: Preview is read-only and only
+  // lists the values that currently exist in the range, which is often
+  // exactly what an admin needs to see BEFORE deciding what to enter.
+  function buildInfluxSelection(forPreview = false) {
     if (!InfluxEditState.measurement) {
       showInfluxStatus('Select a measurement first.', true);
       return null;
@@ -385,7 +388,7 @@
       return null;
     }
     const newValue = action === 'set_value' ? document.getElementById('influx-metrics-edit-new-value').value : null;
-    if (action === 'set_value' && !newValue) {
+    if (!forPreview && action === 'set_value' && !newValue) {
       showInfluxStatus('Enter a replacement value.', true);
       return null;
     }
@@ -403,7 +406,7 @@
   }
 
   async function runInfluxMetricsEditPreview() {
-    const sel = buildInfluxSelection();
+    const sel = buildInfluxSelection(true);
     if (!sel) { return; }
     if (!sel.field_name) {
       showInfluxStatus('Select a field to preview.', true);
