@@ -25,3 +25,4 @@ prometheus_client     # for prometheus metrics support
 typing_extensions     # for strict typing support in Python versions < 3.11
 pandas                # for data manipulation and analysis
 openpyxl              # for reading/writing Excel files
+xlrd                  # for reading/writing Excel files
