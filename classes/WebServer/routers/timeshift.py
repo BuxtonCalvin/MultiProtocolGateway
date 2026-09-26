@@ -94,7 +94,11 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from ..database import session_scope
-from ..services.bridge_service import get_timescale_bridge, is_timescale_available
+from ..services.bridge_service import (
+    get_timescale_bridge,
+    is_timescale_available,
+    resolve_wide_table_name,
+)
 from ..services.device_service import NavData, get_nav_data
 from ..services.influxdb_service import (
     get_influxdb1_bridge,
@@ -548,15 +552,66 @@ def _require_upload(payload: TimeshiftRunRequest, request: Request) -> Timeshift
     return upload
 
 
-def _run_common_timescale(payload: TimeshiftRunRequest, request: Request) -> tuple[TimeshiftUpload, dict[str, str], dict[str, str]]:
+def _resolve_timescale_table_name(
+    gateway: "Protocol_Gateway | None", table_kind: str, protocol_name: str | None,
+    ) -> str:
+    """
+    Resolves table_kind/protocol_name to the actual physical table name --
+    "device_metrics_narrow" for "narrow", or protocol_registry's own
+    wide_table_name (via resolve_wide_table_name()) for "wide".
+
+    SECURITY: every raw-SQL caller that needs a TimescaleDB table name
+    (write_points_timescale, export_range_rows_timescale) must be given a
+    name that came from here, never TimeshiftRunRequest.measurement /
+    the export endpoint's `measurement` query param directly -- those are
+    client-supplied strings, and both functions splice table_name straight
+    into an f-string SQL identifier (there being no way to parameterize a
+    table name). resolve_wide_table_name() only ever returns a name
+    protocol_registry itself recorded at wide-table-creation time, the
+    same trust level BridgeAdminManager's own _resolve_wide_table/
+    _resolve_metric_edit_table give Delete Columns and Metrics Edit.
+
+    Raises:
+        HTTPException: 404 (table_kind isn't "narrow"/"wide") or 400
+                        (protocol_name missing/unregistered/narrow-only
+                        for table_kind == "wide" -- resolve_wide_table_name's
+                        ValueError, translated the same way _require_bridge's
+                        callers already translate a bad selection).
+    """
+    if table_kind == "narrow":
+        return "device_metrics_narrow"
+    if table_kind != "wide":
+        raise HTTPException(status_code=404, detail=f"Unknown table_kind '{table_kind}'.")
+    try:
+        return resolve_wide_table_name(gateway, protocol_name or "")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+def _run_common_timescale(
+    payload: TimeshiftRunRequest, request: Request,
+    ) -> tuple[TimeshiftUpload, dict[str, str], dict[str, str], set[str], str]:
     """
     TimescaleDB counterpart of _run_common: resolves the bridge/upload and
     the mapping/wide-field-type dicts build_points_timescale() needs.
-    Returns (upload, mapping, wide_field_types) -- no `tags` (TimescaleDB
-    has no Tags panel; device_info_id is threaded through separately).
+    Returns (upload, mapping, wide_field_types, existing_wide_columns,
+    resolved_table_name) -- no `tags` (TimescaleDB has no Tags panel;
+    device_info_id is threaded through separately).
+
+    existing_wide_columns is the real, already-existing column-name
+    whitelist build_points_timescale() checks every "wide" mapping target
+    against (see that function's SECURITY note) -- {} for table_kind ==
+    "narrow", where a mapping target becomes a bind parameter, not a SQL
+    identifier, and so needs no such check. resolved_table_name is the
+    physical table name resolved server-side via
+    _resolve_timescale_table_name(), never payload.measurement (a
+    client-supplied string) directly -- see that function's own SECURITY
+    note.
 
     Raises:
-        HTTPException: 400 if table_kind/device_info_id weren't selected.
+        HTTPException: 400 if table_kind/device_info_id weren't selected,
+                        or table_kind/protocol_name doesn't resolve (see
+                        _resolve_timescale_table_name).
     """
     _require_bridge(request, "timescale")
     if not payload.table_kind or payload.device_info_id is None:
@@ -564,8 +619,17 @@ def _run_common_timescale(payload: TimeshiftRunRequest, request: Request) -> tup
     upload: TimeshiftUpload = _require_upload(payload, request)
     mapping: dict[str, str] = _parse_mapping_json(payload.mapping_json)
     gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
+    resolved_table_name: str = _resolve_timescale_table_name(gateway, payload.table_kind, payload.protocol_name)
     wide_field_types: dict[str, str] = load_timescale_field_types(gateway, payload.table_kind, payload.protocol_name)
-    return upload, mapping, wide_field_types
+    existing_wide_columns: set[str] = set()
+    if payload.table_kind == "wide":
+        try:
+            existing_wide_columns = {
+                name for f in timescale_fields_for(gateway, "wide", payload.protocol_name) if (name := f.get("name"))
+            }
+        except Exception:
+            existing_wide_columns = set()  # resolved_table_name above already raised if the protocol itself doesn't resolve
+    return upload, mapping, wide_field_types, existing_wide_columns, resolved_table_name
 
 
 @router.post("/api/timeshift/preview", response_class=HTMLResponse, response_model=None)
@@ -604,7 +668,11 @@ async def timeshift_preview(payload: TimeshiftRunRequest, request: Request) -> H
 
 
 def _build_timescale_points(
-    payload: TimeshiftRunRequest, upload: TimeshiftUpload, mapping: dict[str, str], wide_field_types: dict[str, str],
+    payload: TimeshiftRunRequest,
+    upload: TimeshiftUpload,
+    mapping: dict[str, str],
+    wide_field_types: dict[str, str],
+    existing_wide_columns: set[str],
     ) -> tuple[list[TimescalePointDict], TimeshiftImportResult]:
     """Shared time-shift + build_points_timescale() call for Preview and Import."""
     source_start: datetime = _parse_local_datetime(payload.source_start, payload.local_timezone)
@@ -619,15 +687,23 @@ def _build_timescale_points(
         local_tz=payload.local_timezone,
         time_delta=time_delta,
         wide_field_types=wide_field_types,
+        existing_wide_columns=existing_wide_columns,
     )
 
 
 def _render_timescale_preview(
-    upload: TimeshiftUpload, mapping: dict[str, str], wide_field_types: dict[str, str], *, payload: TimeshiftRunRequest, request: Request,
+    upload: TimeshiftUpload,
+    mapping: dict[str, str],
+    wide_field_types: dict[str, str],
+    existing_wide_columns: set[str],
+    _resolved_table_name: str,
+    *,
+    payload: TimeshiftRunRequest,
+    request: Request,
     ) -> HTMLResponse:
     points: list[TimescalePointDict]
     result: TimeshiftImportResult
-    points, result = _build_timescale_points(payload, upload, mapping, wide_field_types)
+    points, result = _build_timescale_points(payload, upload, mapping, wide_field_types, existing_wide_columns)
     sample: list[TimescalePointDict] = points[:10]
     return request.app.state.templates.TemplateResponse(
         request=request,
@@ -686,12 +762,19 @@ async def timeshift_import(payload: TimeshiftRunRequest, request: Request) -> HT
 
 
 def _run_timescale_import(
-    upload: TimeshiftUpload, mapping: dict[str, str], wide_field_types: dict[str, str], *, payload: TimeshiftRunRequest, request: Request,
+    upload: TimeshiftUpload,
+    mapping: dict[str, str],
+    wide_field_types: dict[str, str],
+    existing_wide_columns: set[str],
+    resolved_table_name: str,
+    *,
+    payload: TimeshiftRunRequest,
+    request: Request,
     ) -> HTMLResponse:
     """TimescaleDB counterpart of the InfluxDB import branch above -- builds points then calls write_points_timescale() for the dual (or narrow-only) write."""
     points: list[TimescalePointDict]
     result: TimeshiftImportResult
-    points, result = _build_timescale_points(payload, upload, mapping, wide_field_types)
+    points, result = _build_timescale_points(payload, upload, mapping, wide_field_types, existing_wide_columns)
 
     if not points:
         raise HTTPException(status_code=400, detail="Nothing to write -- every row was skipped (see the preview for why).")
@@ -700,7 +783,9 @@ def _run_timescale_import(
     table_kind: str = payload.table_kind or "narrow"
     device_info_id: int = payload.device_info_id if payload.device_info_id is not None else -1
     try:
-        written, narrow_metric_rows = write_points_timescale(gateway, table_kind, payload.measurement, device_info_id, points)
+        # resolved_table_name -- never payload.measurement -- see
+        # _resolve_timescale_table_name's SECURITY note.
+        written, narrow_metric_rows = write_points_timescale(gateway, table_kind, resolved_table_name, device_info_id, points)
     except Exception as exc:
         _log.exception("[Timeshift] TimescaleDB import failed")
         raise HTTPException(status_code=500, detail=f"Import failed: {exc}")
@@ -723,7 +808,7 @@ def _run_timescale_import(
 def timeshift_export_csv(
     request: Request,
     version: str,
-    measurement: str,             # for version="timescale": the resolved table_name (== table_kind/protocol_name)
+    measurement: str,             # for version="timescale": unused for the query itself (see SECURITY note below) -- kept only for the download filename
     start_time: str,
     end_time: str,
     target_start: str,
@@ -745,6 +830,13 @@ def timeshift_export_csv(
     For version="timescale" a narrow table's (m_time, metric_name) rows
     are pivoted into the same wide-shaped CSV a wide-table export produces
     (see services.timeshift_service.export_range_rows_timescale).
+
+    SECURITY: for version="timescale" the actual table queried is resolved
+    server-side from table_kind/protocol_name via
+    _resolve_timescale_table_name() -- `measurement` (a client-supplied
+    query parameter) is used only to name the downloaded file, never
+    passed to export_range_rows_timescale(), which splices its table_name
+    argument directly into a SQL identifier.
     """
     _require_bridge(request, version)
     gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
@@ -761,8 +853,11 @@ def timeshift_export_csv(
         if version == "timescale":
             resolved_table_kind: str = table_kind if table_kind is not None else "narrow"  # narrowed for the type checker -- the guard above already ensured it's set
             resolved_device_id: int = device_info_id if device_info_id is not None else -1  # same
+            # Resolved server-side, never `measurement` (a client-supplied query
+            # param) directly -- see _resolve_timescale_table_name's SECURITY note.
+            resolved_table_name: str = _resolve_timescale_table_name(gateway, resolved_table_kind, protocol_name)
             header, rows = export_range_rows_timescale(
-                gateway, resolved_table_kind, measurement, protocol_name, resolved_device_id, start_dt, end_dt, target_dt,
+                gateway, resolved_table_kind, resolved_table_name, protocol_name, resolved_device_id, start_dt, end_dt, target_dt,
             )
         else:
             tags: dict[str, str] = _parse_tags_json(tags_json) if tags_json and tags_json != "{}" else {}

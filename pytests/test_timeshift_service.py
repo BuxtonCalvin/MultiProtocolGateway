@@ -59,30 +59,30 @@ class TestSuggestFieldMappingDefaults:
     FIELDS: list[str] = ["pv1_voltage", "soc"]
 
     def test_eg4_unmatched_column_starts_ignored(self) -> None:
-        rows = ts.suggest_field_mapping(["pv1Voltage", "Totally Unrelated Metric"], self.FIELDS, set(), "eg4")
-        by_col = {r.source_column: r for r in rows}
+        rows: list[ts.FieldMappingRow] = ts.suggest_field_mapping(["pv1Voltage", "Totally Unrelated Metric"], self.FIELDS, set(), "eg4")
+        by_col: dict[str, ts.FieldMappingRow] = {r.source_column: r for r in rows}
         assert by_col["pv1Voltage"].suggested_field == "pv1_voltage"
         assert by_col["pv1Voltage"].default_ignored is False
         assert by_col["Totally Unrelated Metric"].suggested_field == ""
         assert by_col["Totally Unrelated Metric"].default_ignored is True
 
     def test_eg4_below_threshold_match_is_ignored_too(self) -> None:
-        rows = ts.suggest_field_mapping(["pv1Voltage"], self.FIELDS, set(), "eg4", confidence_threshold=1.5)
+        rows: list[ts.FieldMappingRow] = ts.suggest_field_mapping(["pv1Voltage"], self.FIELDS, set(), "eg4", confidence_threshold=1.5)
         assert rows[0].suggested_field == ""
         assert rows[0].default_ignored is True
 
     def test_eg4_new_measurement_does_not_ignore_everything(self) -> None:
         """No existing schema -> nothing can 'match', so nothing is pre-ignored on that basis."""
-        rows = ts.suggest_field_mapping(["pv1Voltage", "Anything"], [], set(), "eg4")
+        rows: list[ts.FieldMappingRow] = ts.suggest_field_mapping(["pv1Voltage", "Anything"], [], set(), "eg4")
         assert [r.default_ignored for r in rows] == [False, False]
 
     def test_tag_and_reserved_columns_still_ignored(self) -> None:
-        rows = ts.suggest_field_mapping(["device_name", "time"], self.FIELDS, {"device_name"}, "eg4")
+        rows: list[ts.FieldMappingRow] = ts.suggest_field_mapping(["device_name", "time"], self.FIELDS, {"device_name"}, "eg4")
         assert all(r.default_ignored for r in rows)
 
     def test_influx_csv_unmatched_column_is_not_ignored(self) -> None:
-        rows = ts.suggest_field_mapping(["soc", "brand_new"], self.FIELDS, set(), "influx_csv")
-        by_col = {r.source_column: r for r in rows}
+        rows: list[ts.FieldMappingRow] = ts.suggest_field_mapping(["soc", "brand_new"], self.FIELDS, set(), "influx_csv")
+        by_col: dict[str, ts.FieldMappingRow] = {r.source_column: r for r in rows}
         assert by_col["soc"].default_ignored is False
         assert by_col["brand_new"].default_ignored is False
 
@@ -95,8 +95,8 @@ class TestConsolidateSheets:
     def test_sheets_with_different_time_ranges_are_stacked(self) -> None:
         a = pd.DataFrame({"Time": _times("2025-06-02 00:00", 3), "SOC": [50, 51, 52]})
         b = pd.DataFrame({"Time": _times("2025-06-01 00:00", 3), "SOC": [10, 11, 12]})  # earlier, listed second
-        result = ts.consolidate_sheets({"Day2": a, "Day1": b})
-        df = result.dataframe
+        result: ts.ParsedSpreadsheet = ts.consolidate_sheets({"Day2": a, "Day1": b})
+        df: pd.DataFrame = result.dataframe
         assert len(df) == 6
         assert list(df.columns) == ["Time", "SOC"]
         assert df["Time"].is_monotonic_increasing          # sorted regardless of sheet order
@@ -108,7 +108,7 @@ class TestConsolidateSheets:
         t = _times("2025-06-01 00:00", 3)
         a = pd.DataFrame({"Time": t, "SOC": [50, 51, 52]})
         b = pd.DataFrame({"Time": t, "Grid Voltage": [240.0, 241.0, 239.5]})
-        df = ts.consolidate_sheets({"Battery": a, "Grid": b}).dataframe
+        df: pd.DataFrame = ts.consolidate_sheets({"Battery": a, "Grid": b}).dataframe
         assert len(df) == 3
         assert set(df.columns) == {"Time", "SOC", "Grid Voltage"}
         assert df["Grid Voltage"].tolist() == [240.0, 241.0, 239.5]
@@ -117,7 +117,7 @@ class TestConsolidateSheets:
     def test_time_column_names_may_differ_between_sheets(self) -> None:
         a = pd.DataFrame({"Time": _times("2025-06-01 00:00", 2), "SOC": [1, 2]})
         b = pd.DataFrame({"Date/Time": _times("2025-06-01 00:10", 2), "SOC": [3, 4]})
-        result = ts.consolidate_sheets({"A": a, "B": b})
+        result: ts.ParsedSpreadsheet = ts.consolidate_sheets({"A": a, "B": b})
         assert result.time_column == "Time"                # first usable sheet's name wins
         assert list(result.dataframe.columns) == ["Time", "SOC"]
         assert len(result.dataframe) == 4
@@ -125,13 +125,13 @@ class TestConsolidateSheets:
     def test_sheet_without_time_column_is_skipped_and_reported(self) -> None:
         data = pd.DataFrame({"Time": _times("2025-06-01 00:00", 2), "SOC": [1, 2]})
         info = pd.DataFrame({"Setting": ["Model", "Serial"], "Value": ["18kPV", "123"]})
-        result = ts.consolidate_sheets({"Data": data, "Info": info})
+        result: ts.ParsedSpreadsheet = ts.consolidate_sheets({"Data": data, "Info": info})
         assert len(result.dataframe) == 2
         assert [(s.name, s.note) for s in result.sheets_skipped] == [("Info", "no time column found")]
 
     def test_empty_sheet_is_skipped(self) -> None:
         data = pd.DataFrame({"Time": _times("2025-06-01 00:00", 2), "SOC": [1, 2]})
-        result = ts.consolidate_sheets({"Data": data, "Blank": pd.DataFrame()})
+        result: ts.ParsedSpreadsheet = ts.consolidate_sheets({"Data": data, "Blank": pd.DataFrame()})
         assert [s.name for s in result.sheets_skipped] == ["Blank"]
 
     def test_no_usable_sheet_raises(self) -> None:
@@ -139,10 +139,10 @@ class TestConsolidateSheets:
             ts.consolidate_sheets({"A": pd.DataFrame({"x": [1]}), "B": pd.DataFrame({"y": [2]})}, "f.xlsx")
 
     def test_conflicting_values_warn_and_first_sheet_wins(self) -> None:
-        t = _times("2025-06-01 00:00", 2)
+        t: pd.DatetimeIndex = _times("2025-06-01 00:00", 2)
         a = pd.DataFrame({"Time": t, "Voltage": [1.0, 2.0]})
         b = pd.DataFrame({"Time": t, "Voltage": [9.0, 2.0]})
-        result = ts.consolidate_sheets({"A": a, "B": b})
+        result: ts.ParsedSpreadsheet = ts.consolidate_sheets({"A": a, "B": b})
         assert result.dataframe["Voltage"].tolist() == [1.0, 2.0]
         assert len(result.warnings) == 1
         assert "Voltage" in result.warnings[0] and "'A'" in result.warnings[0]
@@ -151,25 +151,25 @@ class TestConsolidateSheets:
         """Adjacent day-sheets that repeat the boundary row shouldn't produce noise."""
         a = pd.DataFrame({"Time": _times("2025-06-01 00:00", 3), "SOC": [1, 2, 3]})
         b = pd.DataFrame({"Time": _times("2025-06-01 00:10", 3), "SOC": [3, 4, 5]})  # 00:10 shared, same value
-        result = ts.consolidate_sheets({"A": a, "B": b})
+        result: ts.ParsedSpreadsheet = ts.consolidate_sheets({"A": a, "B": b})
         assert result.warnings == []
         assert len(result.dataframe) == 5
 
     def test_rows_without_valid_time_are_dropped_and_noted(self) -> None:
         df = pd.DataFrame({"Time": ["2025-06-01 00:00", "Total", "2025-06-01 00:05"], "SOC": [1, 99, 2]})
         other = pd.DataFrame({"Time": ["2025-06-01 00:10"], "SOC": [3]})
-        result = ts.consolidate_sheets({"A": df, "B": other})
+        result: ts.ParsedSpreadsheet = ts.consolidate_sheets({"A": df, "B": other})
         assert len(result.dataframe) == 3
         assert "1 row(s) without a valid time" in result.sheets_used[0].note
 
 
 class TestParseUpload:
     def test_multi_sheet_eg4_workbook_is_consolidated(self) -> None:
-        data = _workbook_bytes({
+        data: bytes = _workbook_bytes({
             "Jun 1": pd.DataFrame({"Time": _times("2025-06-01 00:00", 3), "SOC": [1, 2, 3]}),
             "Jun 2": pd.DataFrame({"Time": _times("2025-06-02 00:00", 3), "SOC": [4, 5, 6]}),
         })
-        parsed = ts.parse_upload("export.xlsx", data, "eg4")
+        parsed: ts.ParsedSpreadsheet = ts.parse_upload("export.xlsx", data, "eg4")
         assert len(parsed.dataframe) == 6
         assert [s.name for s in parsed.sheets_used] == ["Jun 1", "Jun 2"]
         assert ts.earliest_timestamp(parsed.dataframe, parsed.time_column or "", "UTC") == "2025-06-01T00:00:00"
@@ -177,7 +177,7 @@ class TestParseUpload:
     def test_single_sheet_eg4_workbook_is_untouched(self) -> None:
         # Duplicate timestamps and unsorted rows must survive: the old code path did not dedupe or sort.
         df = pd.DataFrame({"Time": pd.to_datetime(["2025-06-01 00:05", "2025-06-01 00:00", "2025-06-01 00:00"]), "SOC": [1, 2, 3]})
-        parsed = ts.parse_upload("export.xlsx", _workbook_bytes({"Only": df}), "eg4")
+        parsed: ts.ParsedSpreadsheet = ts.parse_upload("export.xlsx", _workbook_bytes({"Only": df}), "eg4")
         assert len(parsed.dataframe) == 3
         assert parsed.time_column is None
         assert parsed.sheets_used == []
@@ -191,7 +191,7 @@ class TestParseUpload:
             "A": pd.DataFrame({"time": _times("2025-06-01 00:00", 2), "soc": [1, 2]}),
             "B": pd.DataFrame({"time": _times("2025-06-02 00:00", 2), "soc": [3, 4]}),
         })
-        parsed = ts.parse_upload("x.xlsx", data, "influx_csv")
+        parsed: ts.ParsedSpreadsheet = ts.parse_upload("x.xlsx", data, "influx_csv")
         assert len(parsed.dataframe) == 2
 
     def test_unsupported_extension_still_rejected(self) -> None:
@@ -227,7 +227,7 @@ class TestTimeColumnAndEarliest:
 
 class TestTimezoneGroups:
     def test_groups_by_region_and_contains_common_zones(self) -> None:
-        groups = dict(ts.timezone_groups("America/Los_Angeles"))
+        groups: dict[str, list[str]] = dict(ts.timezone_groups("America/Los_Angeles"))
         assert "America/Los_Angeles" in groups["America"]
         assert "Europe/London" in groups["Europe"]
         assert "UTC" in groups["Other"]
@@ -235,12 +235,12 @@ class TestTimezoneGroups:
 
     def test_current_zone_always_present_even_if_unlisted(self) -> None:
         with patch.object(ts, "available_timezones", return_value={"UTC"}):
-            groups = dict(ts.timezone_groups("Mars/Olympus_Mons"))
+            groups: dict[str, list[str]] = dict(ts.timezone_groups("Mars/Olympus_Mons"))
         assert "Mars/Olympus_Mons" in groups["Mars"]
 
     def test_posix_and_right_mirrors_excluded(self) -> None:
         with patch.object(ts, "available_timezones", return_value={"UTC", "posix/UTC", "right/UTC", "Factory"}):
-            groups = dict(ts.timezone_groups(""))
+            groups: dict[str, list[str]] = dict(ts.timezone_groups(""))
         assert groups == {"Other": ["UTC"]}
 
 
@@ -250,7 +250,7 @@ class TestTimezoneGroups:
 
 class _V1Result:
     def __init__(self, points: list[dict[str, Any]]) -> None:
-        self._points = points
+        self._points: list[dict[str, Any]] = points
 
     def get_points(self) -> list[dict[str, Any]]:
         return self._points
@@ -258,7 +258,7 @@ class _V1Result:
 
 class _V3Table:
     def __init__(self, rows: list[dict[str, Any]]) -> None:
-        self._rows = rows
+        self._rows: list[dict[str, Any]] = rows
 
     def to_pylist(self) -> list[dict[str, Any]]:
         return self._rows
@@ -281,7 +281,7 @@ class TestLoadTagOptions:
         client.query.side_effect = query
         bridge = SimpleNamespace(client=client, database="mpg")
         with patch.object(ts, "get_influxdb1_bridge", return_value=bridge):
-            opts = ts.load_tag_options(None, "1", "device_data", ["device_identifier", "site"])
+            opts: ts.TagOptions = ts.load_tag_options(None, "1", "device_data", ["device_identifier", "site"])
 
         assert opts.error == ""
         assert opts.tag_values == {"device_identifier": ["111", "222"], "site": ["garage"]}
@@ -313,7 +313,7 @@ class TestLoadTagOptions:
 
         client.query.side_effect = query
         with patch.object(ts, "get_influxdb3_bridge", return_value=SimpleNamespace(client=client, database="mpg")):
-            opts = ts.load_tag_options(None, "3", "device_data", ["device_identifier", "device_model"])
+            opts: ts.TagOptions = ts.load_tag_options(None, "3", "device_data", ["device_identifier", "device_model"])
 
         assert opts.error == ""
         assert opts.tag_values["device_identifier"] == ["a", "b"]
@@ -332,7 +332,7 @@ class TestLoadTagOptions:
 
         client.query.side_effect = query
         with patch.object(ts, "get_influxdb3_bridge", return_value=SimpleNamespace(client=client, database="mpg")):
-            opts = ts.load_tag_options(None, "3", "device_data", ["device_identifier"])
+            opts: ts.TagOptions = ts.load_tag_options(None, "3", "device_data", ["device_identifier"])
         assert opts.error == ""
         assert opts.tag_values == {"device_identifier": ["42"]}
 
@@ -350,7 +350,7 @@ class TestLoadTagOptions:
 
         client.query.side_effect = query
         with patch.object(ts, "get_influxdb3_bridge", return_value=SimpleNamespace(client=client, database="mpg")):
-            opts = ts.load_tag_options(None, "3", "device_data", ["device_identifier"])
+            opts: ts.TagOptions = ts.load_tag_options(None, "3", "device_data", ["device_identifier"])
         assert opts.tag_values == {"device_identifier": ["42"]}
         assert len(calls) == 2 and "14 days" in calls[1]
 
@@ -365,7 +365,7 @@ class TestLoadTagOptions:
 
         client.query.side_effect = query
         with patch.object(ts, "get_influxdb3_bridge", return_value=SimpleNamespace(client=client, database="mpg")):
-            opts = ts.load_tag_options(None, "3", "device_data", ["device_identifier"])
+            opts: ts.TagOptions = ts.load_tag_options(None, "3", "device_data", ["device_identifier"])
         assert "file limit" in opts.error.lower()   # surfaced via load_tag_options's own outer catch-all, not raised out of it
         assert opts.tag_values == {}
 
@@ -382,7 +382,7 @@ class TestLoadTagOptions:
 
         client.query.side_effect = query
         with patch.object(ts, "get_influxdb3_bridge", return_value=SimpleNamespace(client=client, database="mpg")):
-            opts = ts.load_tag_options(None, "3", "device_data", ["device_identifier"])
+            opts: ts.TagOptions = ts.load_tag_options(None, "3", "device_data", ["device_identifier"])
         assert opts.error == ""                              # not reported as a failure...
         assert opts.tag_values == {"device_identifier": []}  # ...just no suggestions from either window
 
@@ -398,27 +398,27 @@ class TestLoadTagOptions:
 
         client.query.side_effect = query
         with patch.object(ts, "get_influxdb3_bridge", return_value=SimpleNamespace(client=client, database="mpg")):
-            opts = ts.load_tag_options(None, "3", "device_data", ["device_identifier"])
+            opts: ts.TagOptions = ts.load_tag_options(None, "3", "device_data", ["device_identifier"])
         assert "connection refused" in opts.error
 
     def test_failure_is_reported_not_raised(self) -> None:
         client = MagicMock()
         client.query.side_effect = RuntimeError("boom")
         with patch.object(ts, "get_influxdb1_bridge", return_value=SimpleNamespace(client=client, database="mpg")):
-            opts = ts.load_tag_options(None, "1", "device_data", ["device_identifier"])
+            opts: ts.TagOptions = ts.load_tag_options(None, "1", "device_data", ["device_identifier"])
         assert opts.error == "boom"
         assert opts.tag_values == {}
         assert opts.tag_keys == list(ts.STANDARD_TAG_KEYS)      # still offers the standard keys
 
     def test_blank_measurement_does_no_query(self) -> None:
         with patch.object(ts, "get_influxdb1_bridge") as bridge:
-            opts = ts.load_tag_options(None, "1", "  ", ["device_identifier"])
+            opts: ts.TagOptions = ts.load_tag_options(None, "1", "  ", ["device_identifier"])
         bridge.assert_not_called()
         assert opts.tag_values == {} and opts.tag_keys == list(ts.STANDARD_TAG_KEYS)
 
     def test_no_bridge_is_reported(self) -> None:
         with patch.object(ts, "get_influxdb3_bridge", return_value=None):
-            opts = ts.load_tag_options(None, "3", "device_data", ["device_identifier"])
+            opts: ts.TagOptions = ts.load_tag_options(None, "3", "device_data", ["device_identifier"])
         assert "No connected InfluxDB v3 bridge" in opts.error
 
 
@@ -433,8 +433,8 @@ def _shifted_first_point_utc(source_local: str, target_local: str, tz_name: str 
     """Runs an EG4-style import whose first row sits at `source_local`, shifted to `target_local`, and returns that row's stored (UTC) time."""
     tz = ZoneInfo(tz_name)
     df = pd.DataFrame({"Time": pd.date_range(source_local, periods=3, freq="5min"), "v": [1, 2, 3]})
-    source = datetime.fromisoformat(source_local).replace(tzinfo=tz)
-    target = datetime.fromisoformat(target_local).replace(tzinfo=tz)
+    source: datetime = datetime.fromisoformat(source_local).replace(tzinfo=tz)
+    target: datetime = datetime.fromisoformat(target_local).replace(tzinfo=tz)
     points, _ = ts.build_points(
         df,
         measurement="m",
@@ -515,32 +515,32 @@ class TestTimescaleListingWrappers:
 
     def test_tables_for_passes_through(self) -> None:
         with patch.object(ts, "_list_timescale_tables", return_value=[{"table_kind": "narrow", "protocol_name": None, "table_name": "device_metrics_narrow"}]) as mock:
-            result = ts.timescale_tables_for(None)
+            result: list[dict[str, str | None]] = ts.timescale_tables_for(None)
         mock.assert_called_once_with(None)
         assert result == [{"table_kind": "narrow", "protocol_name": None, "table_name": "device_metrics_narrow"}]
 
     def test_devices_for_passes_through(self) -> None:
         with patch.object(ts, "_list_timescale_devices", return_value=[{"device_info_id": 1}]) as mock:
-            result = ts.timescale_devices_for(None, "wide", "eg4_18kpv")
+            result: list[dict[str, str | int | None]] = ts.timescale_devices_for(None, "wide", "eg4_18kpv")
         mock.assert_called_once_with(None, "wide", "eg4_18kpv")
         assert result == [{"device_info_id": 1}]
 
     def test_fields_for_passes_through_with_device_scope(self) -> None:
         with patch.object(ts, "_list_timescale_fields", return_value=[{"name": "soc", "data_type": "REAL"}]) as mock:
-            result = ts.timescale_fields_for(None, "narrow", None, device_info_id=7)
+            result: list[dict[str, str | None]] = ts.timescale_fields_for(None, "narrow", None, device_info_id=7)
         mock.assert_called_once_with(None, "narrow", protocol_name=None, device_info_id=7)
         assert result == [{"name": "soc", "data_type": "REAL"}]
 
     def test_load_field_types_narrow_is_always_empty(self) -> None:
         with patch.object(ts, "timescale_fields_for") as mock:
-            result = ts.load_timescale_field_types(None, "narrow", None)
+            result: dict[str, str] = ts.load_timescale_field_types(None, "narrow", None)
         mock.assert_not_called()
         assert result == {}
 
     def test_load_field_types_wide_maps_name_to_data_type(self) -> None:
-        fields = [{"name": "pv1_voltage", "data_type": "DOUBLE PRECISION"}, {"name": "soc", "data_type": "SMALLINT"}, {"name": "no_type", "data_type": None}]
+        fields: list[dict[str, str] | dict[str, str | None]] = [{"name": "pv1_voltage", "data_type": "DOUBLE PRECISION"}, {"name": "soc", "data_type": "SMALLINT"}, {"name": "no_type", "data_type": None}]
         with patch.object(ts, "timescale_fields_for", return_value=fields):
-            result = ts.load_timescale_field_types(None, "wide", "eg4_18kpv")
+            result: dict[str, str] = ts.load_timescale_field_types(None, "wide", "eg4_18kpv")
         assert result == {"pv1_voltage": "DOUBLE PRECISION", "soc": "SMALLINT"}
 
 
@@ -549,7 +549,7 @@ class TestBuildPointsTimescale:
         return pd.DataFrame(cols)
 
     def test_narrow_target_never_coerces(self) -> None:
-        df = self._df(Time=["2025-06-01 00:00:00"], soc=["not a number"])
+        df: pd.DataFrame = self._df(Time=["2025-06-01 00:00:00"], soc=["not a number"])
         points, result = ts.build_points_timescale(
             df, table_kind="narrow", mapping={"soc": "soc"}, time_column="Time",
             source_is_local=True, local_tz="UTC", time_delta=timedelta(0), wide_field_types={},
@@ -559,38 +559,71 @@ class TestBuildPointsTimescale:
         assert result.type_mismatches == []
 
     def test_wide_target_coerces_against_declared_type(self) -> None:
-        df = self._df(Time=["2025-06-01 00:00:00"], soc=["42"], flag=["true"])
+        df: pd.DataFrame = self._df(Time=["2025-06-01 00:00:00"], soc=["42"], flag=["true"])
         points, result = ts.build_points_timescale(
             df, table_kind="wide", mapping={"soc": "soc", "flag": "flag"}, time_column="Time",
             source_is_local=True, local_tz="UTC", time_delta=timedelta(0),
             wide_field_types={"soc": "SMALLINT", "flag": "BOOLEAN"},
+            existing_wide_columns={"soc", "flag"},
         )
         assert points[0].fields == {"soc": 42.0, "flag": True}
         assert result.type_mismatches == []
 
     def test_wide_type_conflict_is_skipped_and_reported(self) -> None:
-        df = self._df(Time=["2025-06-01 00:00:00"], soc=["not a number"], ok=["5"])
+        df: pd.DataFrame = self._df(Time=["2025-06-01 00:00:00"], soc=["not a number"], ok=["5"])
         points, result = ts.build_points_timescale(
             df, table_kind="wide", mapping={"soc": "soc", "ok": "ok"}, time_column="Time",
             source_is_local=True, local_tz="UTC", time_delta=timedelta(0),
             wide_field_types={"soc": "SMALLINT", "ok": "SMALLINT"},
+            existing_wide_columns={"soc", "ok"},
         )
         assert points[0].fields == {"ok": 5.0}
         assert len(result.type_mismatches) == 1
         assert "soc" in result.type_mismatches[0]
 
     def test_wide_out_of_range_integer_is_a_mismatch(self) -> None:
-        df = self._df(Time=["2025-06-01 00:00:00"], v=["99999"])
+        df: pd.DataFrame = self._df(Time=["2025-06-01 00:00:00"], v=["99999"])
         points, result = ts.build_points_timescale(
             df, table_kind="wide", mapping={"v": "v"}, time_column="Time",
             source_is_local=True, local_tz="UTC", time_delta=timedelta(0), wide_field_types={"v": "SMALLINT"},
+            existing_wide_columns={"v"},
         )
         assert points == []
         assert result.rows_skipped_no_fields == 1
         assert len(result.type_mismatches) == 1
 
+    def test_wide_target_not_an_existing_column_is_rejected(self) -> None:
+        # SECURITY: a mapping target that isn't a real, already-existing wide
+        # column must never reach fields (and therefore never reach the raw
+        # SQL column list _wide_upsert_sql builds) -- see
+        # build_points_timescale's SECURITY note. Regression test for the
+        # fix: previously any client-supplied target string was accepted
+        # here as long as it type-checked against wide_field_types.get(target)
+        # (None for an unknown name, treated as a permissive pass-through).
+        df = self._df(Time=["2025-06-01 00:00:00"], evil=["1); DROP TABLE device_metrics_narrow; --"])
+        points, result = ts.build_points_timescale(
+            df, table_kind="wide", mapping={"evil": "col; DROP TABLE x; --"}, time_column="Time",
+            source_is_local=True, local_tz="UTC", time_delta=timedelta(0),
+            wide_field_types={}, existing_wide_columns={"soc", "pv1_voltage"},
+        )
+        assert points == []
+        assert result.rows_skipped_no_fields == 1
+        assert result.unmapped_columns == {"evil"}
+
+    def test_wide_with_no_existing_wide_columns_argument_rejects_everything(self) -> None:
+        # existing_wide_columns defaults to None -- treated as "nothing is
+        # whitelisted" (reject every wide target) rather than trusting an
+        # unchecked name by default when a caller forgets to pass it.
+        df: pd.DataFrame = self._df(Time=["2025-06-01 00:00:00"], soc=["42"])
+        points, result = ts.build_points_timescale(
+            df, table_kind="wide", mapping={"soc": "soc"}, time_column="Time",
+            source_is_local=True, local_tz="UTC", time_delta=timedelta(0), wide_field_types={"soc": "SMALLINT"},
+        )
+        assert points == []
+        assert result.unmapped_columns == {"soc"}
+
     def test_time_shift_matches_compute_time_delta(self) -> None:
-        df = self._df(Time=["2025-06-01 12:00:00"], v=[1])
+        df: pd.DataFrame = self._df(Time=["2025-06-01 12:00:00"], v=[1])
         source = datetime(2025, 6, 1, 12, 0, tzinfo=ZoneInfo("America/Los_Angeles"))
         target = datetime(2026, 1, 1, 0, 0, tzinfo=ZoneInfo("America/Los_Angeles"))
         points, _ = ts.build_points_timescale(
@@ -600,7 +633,7 @@ class TestBuildPointsTimescale:
         assert points[0].time_iso == "2026-01-01T08:00:00"   # same DST-correct math as InfluxDB's build_points
 
     def test_bad_time_and_no_fields_are_skipped(self) -> None:
-        df = self._df(Time=["not a time", "2025-06-01 00:00:00"], v=[1, None])
+        df: pd.DataFrame = self._df(Time=["not a time", "2025-06-01 00:00:00"], v=[1, None])
         points, result = ts.build_points_timescale(
             df, table_kind="narrow", mapping={"v": "v"}, time_column="Time", source_is_local=True,
             local_tz="UTC", time_delta=timedelta(0), wide_field_types={},
@@ -610,7 +643,7 @@ class TestBuildPointsTimescale:
         assert result.rows_skipped_no_fields == 1
 
     def test_unmapped_column_is_reported_once(self) -> None:
-        df = self._df(Time=["2025-06-01 00:00:00"], v=[1], extra=["x"])
+        df: pd.DataFrame = self._df(Time=["2025-06-01 00:00:00"], v=[1], extra=["x"])
         _points, result = ts.build_points_timescale(
             df, table_kind="narrow", mapping={"v": "v"}, time_column="Time", source_is_local=True,
             local_tz="UTC", time_delta=timedelta(0), wide_field_types={},
@@ -618,7 +651,7 @@ class TestBuildPointsTimescale:
         assert result.unmapped_columns == {"extra"}
 
     def test_ignored_column_mapped_to_empty_string_is_silent(self) -> None:
-        df = self._df(Time=["2025-06-01 00:00:00"], v=[1], tag_col=["x"])
+        df: pd.DataFrame = self._df(Time=["2025-06-01 00:00:00"], v=[1], tag_col=["x"])
         _points, result = ts.build_points_timescale(
             df, table_kind="narrow", mapping={"v": "v", "tag_col": ""}, time_column="Time", source_is_local=True,
             local_tz="UTC", time_delta=timedelta(0), wide_field_types={},
@@ -638,7 +671,7 @@ class TestWritePointsTimescale:
 
     def test_narrow_only_writes_narrow(self) -> None:
         bridge, session = self._bridge()
-        points = [ts.TimescalePointDict(time_iso="2025-06-01T00:00:00", fields={"soc": 50.0, "note": "ok"})]
+        points: list[ts.TimescalePointDict] = [ts.TimescalePointDict(time_iso="2025-06-01T00:00:00", fields={"soc": 50.0, "note": "ok"})]
         with patch.object(ts, "get_timescale_bridge", return_value=bridge):
             written, narrow_rows = ts.write_points_timescale(None, "narrow", "device_metrics_narrow", 7, points)
         assert (written, narrow_rows) == (1, 2)
@@ -647,13 +680,13 @@ class TestWritePointsTimescale:
         sql_text, params = calls[0].args
         assert "device_metrics_narrow" in str(sql_text)
         assert len(params) == 2
-        by_name = {p["metric_name"]: p for p in params}
+        by_name: dict[Any, Any] = {p["metric_name"]: p for p in params}
         assert by_name["soc"] == {"m_time": datetime(2025, 6, 1, tzinfo=timezone.utc), "device_info_id": 7, "metric_name": "soc", "metric_value": 50.0, "metric_ascii": None}
         assert by_name["note"]["metric_value"] == 0.0 and by_name["note"]["metric_ascii"] == "ok"
 
     def test_wide_mirrors_same_fields_into_narrow(self) -> None:
         bridge, session = self._bridge()
-        points = [ts.TimescalePointDict(time_iso="2025-06-01T00:00:00", fields={"pv1_voltage": 300.5})]
+        points: list[ts.TimescalePointDict] = [ts.TimescalePointDict(time_iso="2025-06-01T00:00:00", fields={"pv1_voltage": 300.5})]
         with patch.object(ts, "get_timescale_bridge", return_value=bridge):
             written, narrow_rows = ts.write_points_timescale(None, "wide", "device_metrics_wide__eg4_18kpv", 7, points)
         assert (written, narrow_rows) == (1, 1)
@@ -666,7 +699,7 @@ class TestWritePointsTimescale:
 
     def test_boolean_field_mirrors_as_zero_or_one_in_narrow(self) -> None:
         bridge, session = self._bridge()
-        points = [ts.TimescalePointDict(time_iso="2025-06-01T00:00:00", fields={"is_charging": True})]
+        points: list[ts.TimescalePointDict] = [ts.TimescalePointDict(time_iso="2025-06-01T00:00:00", fields={"is_charging": True})]
         with patch.object(ts, "get_timescale_bridge", return_value=bridge):
             ts.write_points_timescale(None, "wide", "device_metrics_wide__x", 1, points)
         narrow_params = session.execute.call_args_list[1].args[1]
@@ -675,7 +708,7 @@ class TestWritePointsTimescale:
     def test_no_points_is_a_no_op(self) -> None:
         bridge, session = self._bridge()
         with patch.object(ts, "get_timescale_bridge", return_value=bridge):
-            result = ts.write_points_timescale(None, "narrow", "device_metrics_narrow", 1, [])
+            result: tuple[int, int] = ts.write_points_timescale(None, "narrow", "device_metrics_narrow", 1, [])
         assert result == (0, 0)
         session.execute.assert_not_called()
 
@@ -694,10 +727,69 @@ class TestWritePointsTimescale:
         with pytest.raises(ValueError, match="Unknown table_kind"):
             ts.write_points_timescale(None, "sideways", "x", 1, [ts.TimescalePointDict("2025-01-01T00:00:00", {"v": 1.0})])
 
+    def test_wide_write_pauses_and_decompresses_both_tables_in_range(self) -> None:
+        # A wide import touches both the wide table and device_metrics_narrow
+        # -- both should be prepared (paused + decompressed over the batch's
+        # own time range) before the write, and both resumed afterward.
+        bridge, _session = self._bridge()
+        hypertable_mgr = MagicMock()
+        hypertable_mgr.pause_compression_job_for_table.return_value = [42]
+        bridge.hypertable_mgr = hypertable_mgr
+        points: list[ts.TimescalePointDict] = [ts.TimescalePointDict(time_iso="2025-06-01T00:00:00", fields={"pv1_voltage": 300.5})]
+        with patch.object(ts, "get_timescale_bridge", return_value=bridge):
+            ts.write_points_timescale(None, "wide", "device_metrics_wide__eg4_18kpv", 7, points)
+
+        paused_tables: set[Any] = {c.args[1] for c in hypertable_mgr.pause_compression_job_for_table.call_args_list}
+        assert paused_tables == {"device_metrics_wide__eg4_18kpv", "device_metrics_narrow"}
+        decompressed_tables: set[Any] = {c.args[1] for c in hypertable_mgr.decompress_chunks_in_range.call_args_list}
+        assert decompressed_tables == {"device_metrics_wide__eg4_18kpv", "device_metrics_narrow"}
+        # Range passed to decompress matches the (single) point's own timestamp.
+        for call in hypertable_mgr.decompress_chunks_in_range.call_args_list:
+            _session, _table, start, end = call.args
+            assert start == end == datetime(2025, 6, 1, tzinfo=timezone.utc)
+        # Every job paused (one per table here) is resumed with its own job_ids.
+        resumed_job_ids: list[Any] = [c.args[1] for c in hypertable_mgr.resume_compression_job_for_table.call_args_list]
+        assert resumed_job_ids == [[42], [42]]
+
+    def test_narrow_only_write_prepares_only_narrow_table(self) -> None:
+        bridge, _session = self._bridge()
+        hypertable_mgr = MagicMock()
+        hypertable_mgr.pause_compression_job_for_table.return_value = []
+        bridge.hypertable_mgr = hypertable_mgr
+        points: list[ts.TimescalePointDict] = [ts.TimescalePointDict(time_iso="2025-06-01T00:00:00", fields={"soc": 50.0})]
+        with patch.object(ts, "get_timescale_bridge", return_value=bridge):
+            ts.write_points_timescale(None, "narrow", "device_metrics_narrow", 7, points)
+
+        paused_tables: set[Any] = {c.args[1] for c in hypertable_mgr.pause_compression_job_for_table.call_args_list}
+        assert paused_tables == {"device_metrics_narrow"}
+        # No job was paused (empty list), so nothing should be resumed.
+        hypertable_mgr.resume_compression_job_for_table.assert_not_called()
+
+    def test_decompress_failure_is_best_effort_and_does_not_block_the_write(self) -> None:
+        bridge, _session = self._bridge()
+        hypertable_mgr = MagicMock()
+        hypertable_mgr.pause_compression_job_for_table.side_effect = Exception("boom")
+        bridge.hypertable_mgr = hypertable_mgr
+        points: list[ts.TimescalePointDict] = [ts.TimescalePointDict(time_iso="2025-06-01T00:00:00", fields={"soc": 50.0})]
+        with patch.object(ts, "get_timescale_bridge", return_value=bridge):
+            written, narrow_rows = ts.write_points_timescale(None, "narrow", "device_metrics_narrow", 7, points)
+        assert (written, narrow_rows) == (1, 1)   # the write itself still completed
+
+    def test_no_hypertable_mgr_skips_pause_decompress_entirely(self) -> None:
+        # SimpleNamespace has no hypertable_mgr attribute -- same as a bridge
+        # class whose HyperTableManager hasn't been wired up for some reason;
+        # must degrade to the pre-fix behavior (no pause/decompress calls at
+        # all) rather than raising an AttributeError.
+        bridge, _session = self._bridge()
+        points = [ts.TimescalePointDict(time_iso="2025-06-01T00:00:00", fields={"soc": 50.0})]
+        with patch.object(ts, "get_timescale_bridge", return_value=bridge):
+            written, narrow_rows = ts.write_points_timescale(None, "narrow", "device_metrics_narrow", 7, points)
+        assert (written, narrow_rows) == (1, 1)
+
 
 class TestWideUpsertSql:
     def test_upsert_shape(self) -> None:
-        sql = ts._wide_upsert_sql("device_metrics_wide__x", ["a", "b"])  # pyright: ignore[reportPrivateUsage] -- exercising the SQL-shape helper directly
+        sql: str = ts._wide_upsert_sql("device_metrics_wide__x", ["a", "b"])  # pyright: ignore[reportPrivateUsage] -- exercising the SQL-shape helper directly
         assert sql == (
             "INSERT INTO device_metrics_wide__x (m_time, device_info_id, a, b) "
             "VALUES (:m_time, :device_info_id, :a, :b) "
@@ -731,7 +823,7 @@ class TestExportRangeRowsTimescale:
     def test_narrow_pivots_metric_rows_into_wide_shaped_rows(self) -> None:
         t0 = datetime(2025, 6, 1, 0, 0, tzinfo=timezone.utc)
         t1 = datetime(2025, 6, 1, 0, 5, tzinfo=timezone.utc)
-        bridge = self._bridge_with_rows([
+        bridge: SimpleNamespace = self._bridge_with_rows([
             (t0, "soc", 50.0, None), (t0, "note", None, "ok"),
             (t1, "soc", 51.0, None),
         ])
@@ -748,7 +840,7 @@ class TestExportRangeRowsTimescale:
 
     def test_wide_reads_declared_columns_directly(self) -> None:
         t0 = datetime(2025, 6, 1, 0, 0, tzinfo=timezone.utc)
-        bridge = self._bridge_with_rows([(t0, 300.5, 12)])
+        bridge: SimpleNamespace = self._bridge_with_rows([(t0, 300.5, 12)])
         with patch.object(ts, "get_timescale_bridge", return_value=bridge), \
              patch.object(ts, "timescale_fields_for", return_value=[{"name": "pv1_voltage"}, {"name": "soc"}]):
             header, rows = ts.export_range_rows_timescale(
@@ -760,7 +852,7 @@ class TestExportRangeRowsTimescale:
 
     def test_applies_the_same_time_shift_as_influxdb_export(self) -> None:
         t0 = datetime(2025, 6, 1, 23, 50, tzinfo=timezone.utc)
-        bridge = self._bridge_with_rows([(t0, "soc", 50.0, None)])
+        bridge: SimpleNamespace = self._bridge_with_rows([(t0, "soc", 50.0, None)])
         with patch.object(ts, "get_timescale_bridge", return_value=bridge):
             _header, rows = ts.export_range_rows_timescale(
                 None, "narrow", "device_metrics_narrow", None, 1,
@@ -770,7 +862,7 @@ class TestExportRangeRowsTimescale:
         assert rows[0]["time"] == "2026-01-01T08:00:00"
 
     def test_empty_wide_field_list_yields_no_rows(self) -> None:
-        bridge = self._bridge_with_rows([])
+        bridge: SimpleNamespace = self._bridge_with_rows([])
         with patch.object(ts, "get_timescale_bridge", return_value=bridge), patch.object(ts, "timescale_fields_for", return_value=[]):
             header, rows = ts.export_range_rows_timescale(
                 None, "wide", "x", "p", 1, datetime(2025, 6, 1, tzinfo=timezone.utc), datetime(2025, 6, 2, tzinfo=timezone.utc), datetime(2025, 6, 1, tzinfo=timezone.utc),
@@ -824,7 +916,7 @@ class TestQueryV3TimeSlices:
 
         start = datetime(2025, 6, 1, tzinfo=timezone.utc)
         end = datetime(2025, 6, 2, tzinfo=timezone.utc)
-        result = ts._query_v3_time_slices(run, start, end)  # pyright: ignore[reportPrivateUsage]
+        result: list[dict[str, Any]] = ts._query_v3_time_slices(run, start, end)  # pyright: ignore[reportPrivateUsage]
 
         assert calls == [(start, end, True)]   # whole range, end-inclusive -- matches a single ordinary query
         assert result == [{"v": 1}]
@@ -840,9 +932,9 @@ class TestQueryV3TimeSlices:
 
         start = datetime(2025, 6, 1, 0, 0, tzinfo=timezone.utc)
         end = datetime(2025, 6, 1, 2, 0, tzinfo=timezone.utc)
-        result = ts._query_v3_time_slices(run, start, end)  # pyright: ignore[reportPrivateUsage]
+        result: list[dict[str, Any]] = ts._query_v3_time_slices(run, start, end)  # pyright: ignore[reportPrivateUsage]
 
-        midpoint = start + timedelta(hours=1)
+        midpoint: datetime = start + timedelta(hours=1)
         assert calls == [
             (start, end, True),                     # whole range -- rejected
             (start, midpoint, False),                # first half -- half-open, so the shared boundary isn't double-queried
@@ -861,8 +953,8 @@ class TestQueryV3TimeSlices:
             return [{}]
 
         start = datetime(2025, 6, 1, tzinfo=timezone.utc)
-        end = start + timedelta(hours=2)
-        result = ts._query_v3_time_slices(run, start, end)  # pyright: ignore[reportPrivateUsage]
+        end: datetime = start + timedelta(hours=2)
+        result: list[dict[str, Any]] = ts._query_v3_time_slices(run, start, end)  # pyright: ignore[reportPrivateUsage]
 
         assert all(w <= timedelta(minutes=20) for w in accepted_widths)
         assert len(result) == len(accepted_widths) >= 4   # a 2-hour range needed more than one bisection to fit under 20 minutes
@@ -896,9 +988,9 @@ class TestExportRangeRowsV3FileLimit:
         client = MagicMock()
 
         def fake_query(sql: str, database: str = "", language: str = "") -> Any:
-            literals = re.findall(r"'([\d\-T:.]+Z)'", sql)
-            slice_start = datetime.strptime(literals[0], "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=timezone.utc)
-            slice_end = datetime.strptime(literals[1], "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=timezone.utc)
+            literals: list[Any] = re.findall(r"'([\d\-T:.]+Z)'", sql)
+            slice_start: datetime = datetime.strptime(literals[0], "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=timezone.utc)
+            slice_end: datetime = datetime.strptime(literals[1], "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=timezone.utc)
             if (slice_end - slice_start) > limit:
                 raise _file_limit_error()
             return _V3Table([{"time": slice_start + timedelta(minutes=1), "soc": 50.0, "device_identifier": "42"}])

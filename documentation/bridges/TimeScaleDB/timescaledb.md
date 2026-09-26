@@ -51,6 +51,7 @@ The module does **not** scrape data itself. Instead, it acts as a consumer of br
 - Requests upstream reconnects when stale data persists
 - Backlogs data during database outages and replays that data on database recovery
 - Provide Grafana-ready metrics for visualization
+- Lets an administrator correct historical values (Metrics Edit, section 4.5) and export, time-shift and re-import data (Timeshift Data, section 4.7) from the web UI
 
 ### Stale Data Handling
 
@@ -80,8 +81,9 @@ One row per metric per timestamp.
 | --- | --- |
 | m_time | Timestamp |
 | device_info_id | Device identifier ID |
-| metric | Metric name |
-| value | Metric value |
+| metric_name | Metric name |
+| metric_value | Numeric metric value (booleans stored as 1/0) |
+| metric_ascii | Text metric value; empty for numeric metrics |
 
 #### Narrow Table Benefits
 
@@ -133,14 +135,20 @@ One row per timestamp with multiple metric columns.
 
 ### 4.4 Metric Catalog
 
+One row per metric per protocol — the record of every metric a protocol has ever reported, and, for a wide-table protocol, which column it lives in. Metrics Edit's and Wide Table Column Deletion's own column lists are read from here, and this is also the table those two screens' whitelist checks validate a column name against before it's ever used to build SQL.
+
 | Column | Description |
 | --- | --- |
-| id | Metric Unique ID |
-| metric_name | Metric Name as shown in the MPG Registry |
-| clean_column_name | Metric Name sanitized for SQL |
-| data_type | Metric Data Type (default Double Precision) |
-| created_at | Table Add Date |
-| notes | metric name descriptions |
+| catalog_id | Metric unique ID (primary key) |
+| protocol_id | Foreign key to `protocol_registry` — which protocol this metric belongs to |
+| metric_name | Metric name as reported by the protocol/scraper |
+| clean_column_name | `metric_name` sanitized into a valid SQL column name (wide tables only — this is the actual column name on the protocol's wide table) |
+| data_type | Column's declared Postgres type, e.g. `DOUBLE PRECISION`, `SMALLINT`, `BOOLEAN`, `TEXT` (default `DOUBLE PRECISION`) |
+| unit_mod | Optional unit-conversion multiplier applied to the raw value before it's stored |
+| created_at | Row created (or last updated) date |
+| notes | Free-text description of the metric |
+
+`(protocol_id, metric_name)` and `(protocol_id, clean_column_name)` are each unique, so the same metric name can exist under different protocols, and two protocols can independently use the same column name on their own wide tables.
 
 Here is a screen shot of how the schema looks in PGadmin.  The tables reside in the public folder.
 
@@ -152,21 +160,29 @@ Here is a screen shot of how the schema looks in PGadmin.  The tables reside in 
 
 The **Timescale DB → Metrics Edit** admin screen lets an administrator correct or remove specific metric *values* — for one device, over a chosen date/time range — on either the shared narrow table or a wide table, without changing either table's schema. This is the tool to reach for when a sensor fault, a mis-wired input, a device test, or a known outage window put bad or unwanted values into the database and you want them fixed or cleared, as opposed to Wide Table Column Deletion (section 4.2), which permanently drops an entire metric column, table-wide, for every device and timestamp.
 
+> **One table per edit.** Live data is written to the narrow table *and*, when the protocol has one, to its wide table. Metrics Edit changes only the table you select. To correct a value everywhere it was recorded, make the same edit once against the narrow table and once against the wide table.
+
 ![Timescale Metrics Edit](../../../classes/WebServer/static/screenshots/timescale_metrics_edit.png)
 
 #### Using the Metrics Edit Screen
 
 1. Open **Timescale DB → Metrics Edit** from the admin menu.
 2. Pick a **table** on the left — either the shared `device_metrics_narrow` table, or one wide-table protocol.
-3. Pick the **device** whose data you want to edit.
-4. Check the **field(s)** (metric names, or wide-table columns) to target.
-5. Pick a **start** and **end** date/time for the range to affect.
+3. Pick the **device** whose data you want to edit. Only devices that already have at least one row in the selected table are listed, so a device that has only ever written to the narrow table will not appear when a wide table is selected, and vice versa.
+4. Pick the **field** to target from the dropdown — **one field per edit**. For a wide table the list is the protocol's metric columns, shown with their declared data type. For the narrow table it is the distinct metric names already recorded for the chosen device. Only one field is allowed because a single replacement value is applied to whatever is selected, and different metrics can have different types (for example an `INTEGER` and a `BOOLEAN`). To change several metrics, stage one edit per metric.
+5. Pick a **start** and **end** date/time for the range to affect. Both ends are inclusive. The range is interpreted in the same timezone the bridge stamps rows with: the machine's local timezone, or UTC when `use_utc_timestamp = True` (see section 6.5).
 6. Choose an **action**:
-   - **Delete value(s)** — clears the selected field(s) over the range.
-   - **Set value** — overwrites the selected field(s) with a replacement value you enter.
-7. Click **Preview** to see how many rows match and a sample of their current values before changing anything.
-8. Click **Add to Staged Changes**.
-9. Use the existing **Commit All Changes** button in the header to apply every staged Metrics Edit (and any staged Delete Columns changes) at once. Nothing is written to TimescaleDB before this step — staged edits can be reviewed and individually removed from the staged-changes list, or abandoned entirely with **Discard Changes**.
+   - **Delete value(s)** — clears the selected field over the range.
+   - **Set value** — overwrites the selected field with a replacement value you enter.
+7. Click **Preview** to see how many rows match and a sample of their current values (up to the 25 most recent matching rows) before changing anything. Preview is a plain read: it does not lock, pause, or decompress anything. For a wide table the count is the number of rows for that device in the range, whether or not the selected column currently holds a value in each of them.
+8. Click **Add to Staged Changes** and confirm the browser prompt. The value is validated first (see "Value Type Validation"); an invalid value is rejected at this step and nothing is staged.
+9. Use the **Commit All Changes** button in the header to apply every staged Metrics Edit (and any staged Delete Columns changes) at once. Nothing is written to TimescaleDB before this step. Staged edits can be reviewed and individually removed from the Staged Changes list, or abandoned entirely with **Discard Changes**.
+
+#### Staging
+
+Each press of **Add to Staged Changes** stores one complete edit request: table, device, field, time range, action, and replacement value. Several edits can be staged before a commit, even against the same table and device, and they are applied in the order they were staged.
+
+Staged edits are held in memory by the running MPG web server. They are not written to `config.cfg`, to the SQLite staging database, or to TimescaleDB. They survive navigating between admin pages, but are lost if MPG is restarted before you commit.
 
 #### Narrow vs. Wide Behavior
 
@@ -174,29 +190,59 @@ The two table shapes require slightly different semantics for "delete," since a 
 
 | Table | Delete | Set Value |
 | --- | --- | --- |
-| Narrow (`device_metrics_narrow`) | Removes the matching `(m_time, device_info_id, metric_name)` rows outright | Overwrites `metric_value` (numeric) or `metric_ascii` (text) for the matching rows |
-| Wide (`device_metrics_wide__*`) | Sets the selected column(s) to `NULL` for the matching rows — the row itself can't be removed, since it also holds every other metric recorded at that timestamp | Overwrites the selected column(s) in place |
+| Narrow (`device_metrics_narrow`) | Removes the matching `(m_time, device_info_id, metric_name)` rows outright | Numeric metric: sets `metric_value` and clears `metric_ascii`. Text metric: sets `metric_ascii` and sets `metric_value` to `0`. |
+| Wide (`device_metrics_wide__*`) | Sets the selected column to `NULL` for every row of that device in the range — the row itself can't be removed, since it also holds every other metric recorded at that timestamp | Overwrites the selected column in place for every row of that device in the range |
+
+Metrics Edit only ever changes rows that already exist. It never inserts a row and never adds or drops a column.
 
 #### Value Type Validation
 
-A replacement value entered for **Set Value** is checked against the field's type before it is even staged:
+A replacement value entered for **Set Value** is checked against the field's type before it is staged, and checked again at commit time, because a column's type or existence can change in between (for example, a Delete Columns change committed in the meantime):
 
-- **Wide table columns** are checked against their declared `metric_catalog.data_type` (e.g. an `INTEGER` column rejects non-whole numbers and out-of-range values, a `BOOLEAN` column only accepts recognizable spellings like `true`/`false`, a `TEXT` column accepts anything).
-- **Narrow table metrics** have no fixed declared type (every metric shares the same `metric_value`/`metric_ascii` pair), so the screen instead infers numeric vs. text from what's already been recorded for that device/metric, and validates the new value against that inference.
+- **Wide table columns** are checked against their declared `metric_catalog.data_type`. An `INTEGER`, `SMALLINT` or `BIGINT` column rejects non-whole numbers and out-of-range values, a `BOOLEAN` column accepts `true`/`false`, `t`/`f`, `1`/`0`, `yes`/`no` and `on`/`off`, and a `TEXT` column accepts anything.
+- **Narrow table metrics** have no fixed declared type (every metric shares the same `metric_value`/`metric_ascii` pair), so the screen infers numeric vs. text from what is already recorded for that device and metric: if any existing row has `metric_ascii` populated the metric is treated as text, otherwise as numeric. A metric with no existing rows defaults to numeric. A numeric metric only accepts a value that parses as a number.
 
 An invalid value is rejected immediately, with a clear error, rather than only surfacing when Commit All Changes is pressed.
 
 #### What Happens on Commit
 
-Applying a Metrics Edit runs through the same category of safety measures as a wide-table column deletion:
+**Commit All Changes** applies pending work in this order: configuration changes, staged Delete Columns changes, staged Metrics Edit changes, then staged InfluxDB edits. Each staged Metrics Edit is then run on its own, in staging order:
 
-1. Data ingestion is briefly paused so the write path can't race the edit.
-2. Any compression job configured for the affected table is paused, and just the chunks overlapping the edited time range are decompressed (not the whole table, since the edit never writes outside that range).
-3. The delete/update itself runs under the same schema advisory lock used for structural changes, so it can't race a concurrent Delete Columns commit against the same table.
-4. The hourly/daily/weekly/monthly rollup views covering the edited time range are refreshed afterward, so pre-aggregated rollups reflect the correction rather than continuing to serve stale numbers for that period.
-5. The paused compression job is resumed automatically, whether or not the edit succeeded.
+1. The bridge's flush worker is paused. Live readings keep arriving and are queued, and the worker writes them as soon as the edit finishes, so no data is lost.
+2. Any compression job configured for the affected table is paused, and only the chunks overlapping the edited time range are decompressed. Chunks elsewhere are left compressed, since the edit never writes outside the range.
+3. The `UPDATE`/`DELETE` runs in a single transaction under the same schema locks used for structural changes, so it can't race a concurrent Delete Columns commit against the same table.
+4. The four rollup views (hourly, daily, weekly, monthly) for that table's own stack are refreshed over the edited range, so pre-aggregated rollups reflect the correction instead of continuing to serve the old numbers. If the range is narrower than a view's bucket (for example a few minutes against a weekly bucket), the refresh window is widened to whole buckets.
+5. The flush worker and the compression job are resumed, whether or not the edit succeeded. The chunks that were decompressed are compressed again later by the normal compression policy.
 
-No row data outside the selected device, fields, and time range is ever touched.
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Admin
+    participant UI as Metrics Edit screen
+    participant Stage as In-memory staging
+    participant Bridge as timescaledb bridge
+    participant DB as TimescaleDB
+
+    Admin->>UI: Pick table, device, field, range, action
+    UI->>DB: Preview (read-only count + sample)
+    Admin->>UI: Add to Staged Changes
+    UI->>Bridge: Validate value against field type
+    Bridge-->>UI: OK, or error (nothing staged)
+    UI->>Stage: Store edit
+    Admin->>UI: Commit All Changes
+    loop Each staged edit, in order
+        Bridge->>Bridge: Re-validate, pause flush worker
+        Bridge->>DB: Pause compression job, decompress chunks in range
+        Bridge->>DB: UPDATE or DELETE, one transaction, schema lock held
+        Bridge->>DB: Refresh 4 rollup views over the range
+        Bridge->>Bridge: Resume compression job and flush worker
+        Bridge->>Stage: Remove the applied edit
+    end
+```
+
+**If something fails.** A failure while applying an edit stops the remaining edits and the commit reports an error. Edits that already completed are removed from staging, so they are not applied a second time; the edit that failed, and any after it, stay staged so the commit can be retried once the cause is fixed. A common cause is a staged Delete Columns change that removed the column a later staged edit targets: the edit is re-validated at commit and refused. If only the rollup refresh in step 4 fails, the edit itself has already been applied; the failure is written to the log as a warning. Run **Rebuild Rollup Views** (section 4.6) to bring the rollups back in line.
+
+No row data outside the selected device, field, and time range is ever touched.
 
 ### 4.6  Rebuilds:  Compression and Rollups
 
@@ -207,7 +253,8 @@ The **Timescale DB → Rebuild Compression** admin screen decompresses and recom
 You need this after a change that alters a table's physical layout but doesn't retroactively apply to data already compressed:
 
 - Changing `compress_segmentby` / `compress_orderby` in `hypertable_defaults` — new chunks pick up the change automatically, but chunks compressed under the old settings won't until they're rewritten.
-- Running **Wide Table Column Deletion** or **Metrics Edit** against a wide table — the dropped/edited columns are gone from new compressed chunks, but older compressed chunks still carry the old column layout internally until rewritten.
+- Running **Wide Table Column Deletion** — dropping a column requires decompressing every currently-compressed chunk of that wide table first (`ALTER TABLE ... DROP COLUMN` can't run against a compressed one), so the whole table is left decompressed afterward. It stays that size on disk, without the dropped column's old data taking any extra room, until the next scheduled compression pass or a manual **Rebuild Compression** rewrites it under the current (now-smaller) column list.
+- After a **Metrics Edit** (section 4.5) or a **Timeshift Data** import (section 4.7) — both decompress only the chunks that overlap the range they touched, not the whole table, since neither one writes outside that range or changes the column layout. Those chunks are recompressed the same way, by the normal schedule or by running Rebuild Compression sooner for that group.
 
 ![Timescale Rebuild Compression](../../../classes/WebServer/static/screenshots/timescale_rebuild_compression.png)
 
@@ -247,9 +294,9 @@ The **Timescale DB → Rebuild Rollup Views** admin screen manages the four-tier
 
 | Action | What It Does | When To Use It |
 | --- | --- | --- |
-| **Refresh Now** | Pulls the latest raw data into each selected view's *existing* definition (`CALL refresh_continuous_aggregate`) — the same thing the background refresh policy does on its own schedule. Never drops or recreates a view. | Routine catch-up between scheduled refreshes, or after a **Metrics Edit** corrected historical values outside a view's normal incremental refresh window. |
-| **Rebuild Rollups** | Purges and fully re-materializes a selected group's whole rollup stack, but only for groups that actually need it — a missing view, or one whose bucket configuration no longer matches `config.cfg`. A group that already checks out is left untouched. | After changing rollup bucket/backfill settings, or after wide-table columns changed via **Delete Columns**/**Metrics Edit** and the rollups look out of sync. |
-| **Force Rebuild** | Purges and fully re-materializes every selected group's whole stack unconditionally, regardless of whether it looked out of date. | When you suspect drift or corruption the normal check wouldn't catch, or you simply want a guaranteed clean rebuild. |
+| **Refresh Now** | Pulls the latest raw data into each selected view's *existing* definition (`CALL refresh_continuous_aggregate`) — the same thing the background refresh policy does on its own schedule, so it only covers each view's recent window (by default 3 hours, 3 days, 3 weeks and 3 months for hourly, daily, weekly and monthly). Never drops or recreates a view. | Routine catch-up between scheduled refreshes, or after a **Timeshift Data** import (section 4.7) into that recent window. **Metrics Edit** already refreshes the rollups for its own edited range, so it doesn't need this. |
+| **Rebuild Rollups** | Purges and fully re-materializes a selected group's whole rollup stack, but only for groups that actually need it — a missing view, or one whose bucket configuration no longer matches `config.cfg`. A group that already checks out is left untouched. | After changing rollup bucket/backfill settings, or after wide-table columns changed via **Delete Columns** and the rollups look out of sync. |
+| **Force Rebuild** | Purges and fully re-materializes every selected group's whole stack unconditionally, regardless of whether it looked out of date. | When you suspect drift or corruption the normal check wouldn't catch, or you simply want a guaranteed clean rebuild. Also the way to bring the rollups up to date after a **Timeshift Data** import into an older date range (section 4.7). |
 
 ##### Why Whole Stacks, Not Individual Views
 
@@ -258,6 +305,128 @@ The daily rollup is built from the hourly rollup, the weekly rollup from the dai
 ##### Progress and Results
 
 **Rebuild Rollups** and **Force Rebuild** report progress per group, since each one delegates to the same internal setup routine the bridge uses on startup/reconnect, which rebuilds its whole stack as a single step. **Refresh Now** reports progress per individual view, since it already loops over each one independently. In every case, each group or view is attempted on its own — one failure doesn't block the rest of the selection from completing.
+
+### 4.7 Timeshift Data — Exporting, Shifting and Importing Historical Data
+
+The **Timescale DB → Timeshift Data** admin screen (`/pages/timeshift-data?version=timescale`) moves a block of historical data through a CSV file, optionally shifting every timestamp by a fixed amount on the way. It has two uses:
+
+- **Export** a device's date range from a narrow or wide table as a CSV, with the timestamps shifted to a different start time if you want. This is how you copy a known-good day onto another day, or take data out for editing in a spreadsheet.
+- **Import** a CSV back in, again with an optional shift. The CSV can be one this same screen exported (optionally edited in a spreadsheet first), or a spreadsheet downloaded from the EG4 monitoring website. The EG4 option is offered only when at least one `eg4_*` protocol is configured on the gateway.
+
+The same screen also serves InfluxDB v1 and v3; a toggle at the top of the page switches between the destinations that have a connected bridge. This section describes what happens for TimescaleDB. See the [InfluxDB documentation](../InfluxDB/influxdb.md) for the others.
+
+**Timeshift Data does not use the staging and Commit All Changes flow** that Delete Columns and Metrics Edit use. Export downloads a file immediately, Preview is read-only, and **Import writes to the database as soon as you confirm the dialog**.
+
+#### Settings Common to Export and Import
+
+- **Table** — the shared narrow table, or one protocol's wide table. A protocol only appears as a wide table once it has one.
+- **Device** — the device every row in this export or import belongs to. As on the Metrics Edit screen, only devices that already have at least one row in the selected table are listed, so you cannot import into a table for a device that has no rows there yet.
+- **Local Machine Timezone** — preselected to the bridge's configured timezone. It is used to interpret the Source Start, Source End and Target Start fields you type, and to interpret timestamps in an EG4 spreadsheet, which are naive local times.
+- **Metric Match Confidence Threshold** — how closely an EG4 column name must match a database field name before it is pre-filled in the Field Matchup table (default `0.85`). Not used for re-imported CSVs.
+- **Allow float coercion** and **Delete existing points in target range first** are shown but disabled for TimescaleDB. Values written to a wide table are always coerced to the column's declared type, and existing data is never deleted by an import. Use Metrics Edit if you need to clear a range first.
+
+#### How the Time Shift Is Calculated
+
+You enter a **Source Start** and a **Target Start**. The shift is `Target Start − Source Start`, and that one amount is added to every timestamp. Leave the two equal for no shift.
+
+The two times are compared as real instants (both converted to UTC first), so a shift across a daylight-saving change, such as a June source moved onto a January target, lands exactly where you asked rather than an hour off.
+
+#### Export: Date Range to CSV
+
+1. Choose the **Export** source option, then the table and device.
+2. Enter a **Source Start** and **Source End**. Both ends are inclusive.
+3. Enter a **Target Start**, or leave it equal to Source Start for an unshifted copy.
+4. Click **Export to CSV**. Your browser's Save dialog is where the file goes.
+
+What the export does:
+
+- It runs a read-only query for that device over the range. Nothing in the database changes.
+- A **wide** table is exported as it is: one row per timestamp, one column per metric. A **narrow** table stores one row per metric per timestamp, so it is pivoted into the same wide shape: one row per distinct timestamp, one column per metric name seen in the range. Text metrics come from `metric_ascii`, numeric ones from `metric_value`. A narrow export and a wide export therefore produce files of the same shape, and either can be re-imported the same way.
+- The first column is `time`. It holds the *shifted* timestamp, written in **UTC** as an ISO-8601 value without a timezone suffix. Empty database values (`NULL`) become blank cells.
+- The file is named `<table>_<start date>_<end date>_vtimescale.csv`.
+
+#### Import: EG4 Spreadsheet or Exported CSV
+
+1. Choose **Import EG4 spreadsheet** or **Re-import an exported/edited CSV**, then the table and device.
+2. Choose the **file** (`.csv`, `.xls` or `.xlsx`, up to 25 MB).
+3. Enter **Source Start** and **Target Start**. For an EG4 upload, Source Start defaults to the earliest timestamp found in the file.
+4. Click **Upload & Scan Fields**. The file is parsed and held in memory on the MPG web server, and the **Field Matchup** table appears. The uploaded file is not saved to disk, and it is lost if MPG restarts.
+5. Pick the **Time Column**. The page guesses one where it can.
+6. Review the Field Matchup table (below) and adjust any row.
+7. Click **Preview** to see how many rows would be written, anything that would be skipped (missing times, unmapped columns, type conflicts), and the first 10 rows with their shifted timestamps. Nothing is written. Use it to catch a wrong Time Column or an unmapped field before the real import.
+8. Click **Import to TimescaleDB** and confirm the dialog. The rows are written immediately.
+
+**Reading the file.** A workbook with several sheets is merged into one table joined on timestamp. Sheets covering different time ranges are stacked, and sheets with different columns for the same times are placed side by side. Where two sheets disagree about the same column at the same timestamp, the earlier sheet's value is kept and a warning names the sheets and columns. A sheet with no data or no recognizable time column is skipped and reported.
+
+**Interpreting timestamps.** In an EG4 spreadsheet, times are naive *local* times, read in the Local Machine Timezone. In a re-imported CSV, naive times are read as **UTC**, which matches how the export writes them. Each time is converted to UTC and then the shift is added. Rows whose time is missing or unreadable are skipped and counted.
+
+> **Shifting twice.** A CSV that was exported with a Target Start different from its Source Start already contains the shifted timestamps. When you re-import it, leave Source Start equal to Target Start unless you want the data shifted a second time.
+
+**Field Matchup.** Each source column gets one row showing which database field it will be written to:
+
+- For a **re-imported CSV**, column names already are the database field names, so the mapping is one-to-one and is shown for review.
+- For an **EG4 spreadsheet**, column names rarely match, so each is fuzzy-matched against the table's existing fields. A match at or above the confidence threshold is pre-filled. A column below the threshold starts with **Ignore this column** ticked, because an EG4 export carries many columns MPG never records. You can un-tick Ignore and pick a field yourself.
+- The target list is the wide table's existing columns, or, for the narrow table, the metric names already recorded for the selected device. A **+ New field…** entry, to create a new metric name, is offered for the narrow table only. A wide table cannot gain a column here, since that would need an `ALTER TABLE`, which this screen never runs; write a brand-new metric to the narrow table instead.
+- The column you choose as the **Time Column** is used only for the timestamp and is never written as a value. A column literally named `time` or `measurement` starts with Ignore ticked.
+
+**Cleaning values.** Each cell is normalized before it is written: hex text such as `0x1478` becomes an integer, `25%` becomes `25.0`, numeric text becomes an integer or float, and blank cells are dropped, so a blank never overwrites an existing value. For a wide table, each value must then fit its column's declared type (a fractional value into an `INTEGER` column, text into a numeric column, or a number outside an integer type's range does not). A value that does not fit is skipped and reported as a type conflict; it does not fail the import. Narrow-table values are not type-checked, because the narrow table has no per-metric type. Rows left with no values at all are skipped and counted.
+
+#### What the Import Writes
+
+The import connects directly to the TimescaleDB bridge and writes in one database transaction: either every row is written, or none is.
+
+- **Narrow table.** Each value becomes one row in `device_metrics_narrow`, keyed on `(m_time, device_info_id, metric_name)`. Numbers, and booleans as `1`/`0`, go to `metric_value`; text goes to `metric_ascii` with `metric_value` set to `0`.
+- **Wide table.** Each source row is written to the wide table keyed on `(m_time, device_info_id)`, and **the same values are also written to `device_metrics_narrow`**, using the column name as the metric name. The narrow table is the durable long-format record and the wide table is derived from it, so an import into a wide table keeps them consistent. The result message reports how many values were mirrored into the narrow table.
+- **Overwrite, not skip.** Both writes are upserts. If a row already exists at the same timestamp for that device, the imported value replaces it. In a wide table only the columns you mapped and that had a value are changed; other columns at that timestamp keep what they had. If no row exists, one is created. This makes re-running the same import over the same range safe, but it also means an import overlapping live readings at identical timestamps replaces them. Existing rows in the target range that the file does not mention are left alone.
+- **No queue, no backlog.** The import bypasses the live write path: it does not use the flush queue or the stale-data check, and nothing is saved to the persistent backlog. If the bridge is not connected to TimescaleDB, the import fails immediately with an error instead of being retried later.
+- **Compression is handled, but more lightly than Metrics Edit.** A Timeshift import commonly targets an older range, which is often already compressed by the time an admin gets to it. Before writing, the import pauses the compression job (if any) and decompresses just the chunks overlapping the batch's own time range — on both the wide table (for a wide import) and `device_metrics_narrow` — the same range-scoped step Metrics Edit uses, and just as best-effort: a table with nothing to decompress simply no-ops. Unlike Metrics Edit, the import does **not** pause the flush worker or take the schema lock, so live ingestion continues normally while it runs. Decompressed chunks are recompressed later by the normal schedule, or immediately with Rebuild Compression (section 4.6). If the import fails part-way, the transaction rolls back and no rows are kept; the paused job is resumed regardless.
+- **Rollups are not refreshed.** The hourly/daily/weekly/monthly rollup views do not know about imported rows until they are refreshed (see below).
+
+```mermaid
+flowchart TD
+    A["Export: query device rows in Source Start - Source End"] --> B["Add Target Start - Source Start to each timestamp"]
+    B --> C["Pivot narrow rows to one row per timestamp"]
+    C --> D["CSV download: time in UTC, one column per metric"]
+
+    E["Import: upload CSV or EG4 spreadsheet"] --> F["Parse and hold in memory, merge sheets"]
+    F --> G["Field Matchup: map columns to fields"]
+    G --> H["Preview: count and sample, nothing written"]
+    H --> I["Confirm Import"]
+    I --> J["Convert times to UTC, add the shift"]
+    J --> K["Clean values, coerce to column type for wide tables"]
+    K --> L{"Target table?"}
+    L -- "Wide" --> M["Upsert wide row and mirror each value into narrow"]
+    L -- "Narrow" --> N["Upsert narrow rows"]
+    M --> O["One transaction commits"]
+    N --> O
+    O --> P["Rollup views still show old numbers until refreshed"]
+```
+
+#### After an Import: Refresh the Rollups
+
+Live data reaches the rollup views through the scheduled background refresh. That refresh only looks back over each view's own window, which by default is 3 hours for hourly, 3 days for daily, 3 weeks for weekly and 3 months for monthly rollups. **Refresh Now** on the Rebuild Rollup Views screen (section 4.6) covers the same windows.
+
+- If the shifted data landed **inside those windows**, the rollups catch up on their own at the next scheduled refresh, or immediately with **Refresh Now**.
+- If it landed **further back**, neither will pick it up. Use **Force Rebuild** for the affected group (the shared narrow stack, and the wide-table protocol if you imported into one), which re-materializes every rollup tier from the raw data. Because a wide-table import also writes the narrow table, refresh both stacks.
+
+Grafana panels that read the raw tables show imported data straight away. Only panels that read the rollup views need the refresh.
+
+#### Import Results
+
+After a successful import the screen reports the number of rows written (one per source row), the number of values mirrored into the narrow table for a wide-table import, rows skipped for a missing time or for having no usable values, columns left unmapped, and values skipped for a type conflict.
+
+### 4.8 How the Three Ways of Changing Data Compare
+
+| | Live ingestion | Metrics Edit (4.5) | Timeshift Data import (4.7) |
+| --- | --- | --- | --- |
+| **Where data comes from** | Scraper, via the bridge's flush queue | Existing rows in the selected table | An uploaded CSV or EG4 spreadsheet |
+| **Tables written** | Narrow, plus wide when the protocol has one | Only the one table you select | Narrow; a wide-table import also writes the wide table |
+| **Existing rows** | Narrow: a duplicate is skipped. Wide: plain insert | Updated or deleted | Overwritten if the timestamp already exists |
+| **Staged until Commit All Changes** | No | Yes | No — writes on confirm |
+| **Flush worker paused** | No | Yes, for the duration | No |
+| **Compression** | Background policy | Job paused, chunks in range decompressed | Job paused, chunks in range decompressed (same as Metrics Edit, but the flush worker keeps running) |
+| **Rollup views** | Background refresh | Refreshed automatically over the edited range | Not refreshed; refresh or rebuild afterward |
+| **If TimescaleDB is down** | Queued to the persistent backlog (when `enable_persistent_storage` is on) and replayed later | Fails; the edit stays staged | Fails immediately; nothing is kept |
 
 ---
 
@@ -790,3 +959,4 @@ The TimescaleDB module provides:
 - Automatic stale data detection
 - Self-healing reconnect behavior
 - Support for Grafana visualization
+- Admin tools for correcting historical data (Metrics Edit) and for exporting, time-shifting and re-importing it (Timeshift Data), without needing direct database access
