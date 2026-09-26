@@ -1464,6 +1464,7 @@ def build_points_timescale(
     local_tz: str,
     time_delta: timedelta,
     wide_field_types: dict[str, str],  # column_name -> declared Postgres type; {} for a narrow target (see load_timescale_field_types)
+    existing_wide_columns: set[str] | None = None,  # required (non-None) when table_kind == "wide" -- see SECURITY note below
     ) -> tuple[list[TimescalePointDict], TimeshiftImportResult]:
     """
     TimescaleDB counterpart of build_points() -- same row-by-row time-shift
@@ -1472,6 +1473,25 @@ def build_points_timescale(
     declared Postgres type instead of InfluxDB's own field-type bucket, and
     with no tags (the whole point set shares one device_info_id, attached
     by write_points_timescale() rather than per-point here).
+
+    SECURITY: `mapping`'s values become dict keys on the returned
+    TimescalePointDicts, and for table_kind == "wide" those keys are used
+    by write_points_timescale()/_wide_upsert_sql() to build a raw SQL
+    column list -- unlike an InfluxDB field name (just a tag value in a
+    parameterized line-protocol write), a wide-table target name is a SQL
+    identifier. `mapping` itself is client-supplied JSON
+    (routers/timeshift.py's mapping_json), so for table_kind == "wide"
+    every target is checked against `existing_wide_columns` (the real,
+    already-existing column names for this table, from
+    load_timescale_field_types/timescale_fields_for -- themselves sourced
+    from metric_catalog, never from the request) before it's allowed into
+    `fields`; anything else is reported in result.unmapped_columns and
+    dropped, exactly like a column the admin left unmapped. This is the
+    same untrusted-name whitelist discipline delete_fields()/
+    edit_metric_values() apply before building their own column lists.
+    Narrow-table targets become metric_name bind PARAMETER values (see
+    _NARROW_UPSERT_SQL), never identifiers, so they carry no such risk and
+    existing_wide_columns is ignored for table_kind == "narrow".
 
     A wide-table value that fails transports.timescaledb._coerce_value_for_
     data_type (wrong shape for its column, e.g. text into a numeric column,
@@ -1529,6 +1549,14 @@ def build_points_timescale(
                 continue
 
             if table_kind == "wide":
+                # Reject any mapping target that isn't a real, already-existing
+                # column on this wide table -- see this function's SECURITY note.
+                # existing_wide_columns is required (non-None) for table_kind ==
+                # "wide"; treated as empty (reject everything) if a caller ever
+                # omits it, rather than trusting an unchecked name by default.
+                if target not in (existing_wide_columns or set()):
+                    result.unmapped_columns.add(col)
+                    continue
                 try:
                     val = _coerce_value_for_data_type(val, wide_field_types.get(target))
                 except ValueError as exc:
@@ -1617,6 +1645,24 @@ def write_points_timescale(
     shares one more (all points, or none, per the same all-or-nothing
     expectation write_points_v1/write_points_v3 give InfluxDB imports).
 
+    A Timeshift import commonly targets an older date range -- that's the
+    point of shifting data onto or off of a past window -- which is
+    exactly the kind of range TimescaleDB's own compression policy has
+    usually already compressed by the time an admin gets to it. Before the
+    write, this function pauses the compression job (if any) for every
+    table it's about to touch and decompresses just the chunks overlapping
+    the batch's own time range, the same range-scoped pattern
+    BridgeAdminManager.edit_metric_values() uses for Metrics Edit -- rather
+    than relying on however the connected TimescaleDB server happens to
+    handle DML against a still-compressed chunk. This best-effort step
+    never fails the import: a table with no compression configured, or no
+    compressed chunks in range, simply no-ops (see
+    HyperTableManager.pause_compression_job_for_table/
+    decompress_chunks_in_range). The paused job(s) are always resumed in a
+    `finally`, whether or not the write succeeded; a decompressed chunk is
+    recompressed later by the normal compression schedule, or immediately
+    via Rebuild Compression (section 4.6) if you want it done sooner.
+
     Raises:
         RuntimeError: no TimescaleDB bridge is attached to this gateway, or it isn't connected.
         ValueError: table_kind isn't "narrow"/"wide".
@@ -1637,32 +1683,73 @@ def write_points_timescale(
     if not points:
         return 0, 0
 
+    times: list[datetime] = [datetime.fromisoformat(p.time_iso).replace(tzinfo=timezone.utc) for p in points]
+    range_start, range_end = min(times), max(times)
+
+    # Every table this batch will actually write to -- device_metrics_narrow
+    # always, plus the wide table when table_kind == "wide" (table_name IS
+    # "device_metrics_narrow" already for a narrow-only write, so this is a
+    # single-element set in that case).
+    tables_to_prepare: set[str] = {table_name, "device_metrics_narrow"}
+    hypertable_mgr: Any | None = getattr(bridge, "hypertable_mgr", None)
+    paused_job_ids_by_table: dict[str, list[int]] = {}
+    if hypertable_mgr is not None:
+        for t in tables_to_prepare:
+            try:
+                with bridge.SessionFactory() as session:
+                    paused: list[int] = hypertable_mgr.pause_compression_job_for_table(session, t)
+                    session.commit()
+                if paused:
+                    paused_job_ids_by_table[t] = paused
+                with bridge.SessionFactory() as session:
+                    hypertable_mgr.decompress_chunks_in_range(session, t, range_start, range_end)
+                    session.commit()
+            except Exception as e:
+                # Best-effort, same as Metrics Edit's identical step -- a table
+                # with no compression configured, or a transient failure here,
+                # should not block the import; worst case the write below hits
+                # whatever the connected server does with a compressed chunk.
+                _log.warning(f"[Timeshift] Could not prepare compressed chunks for '{t}' in [{range_start}, {range_end}]: {e}")
+
     narrow_rows: list[dict[str, Any]] = []
     rows_written = 0
 
-    with bridge.SessionFactory() as session:
-        with session.begin():
-            for p in points:
-                # p.time_iso is a naive-UTC ISO string (see TimescalePointDict/build_points_timescale,
-                # and InfluxPointDict's identical convention). Explicitly re-attaching UTC here, rather
-                # than binding the naive string/datetime directly, matters because these columns are
-                # TIMESTAMPTZ: a naive value would otherwise be interpreted in the DB session's own
-                # timezone setting (not necessarily UTC), silently shifting every written timestamp.
-                m_time: datetime = datetime.fromisoformat(p.time_iso).replace(tzinfo=timezone.utc)
-                if table_kind == "wide":
-                    sql: str = _wide_upsert_sql(table_name, list(p.fields.keys()))
-                    params: dict[str, Any] = {"m_time": m_time, "device_info_id": device_info_id, **p.fields}
-                    session.execute(_sql_text(sql), params)
-                for name, value in p.fields.items():
-                    metric_value, metric_ascii = _narrow_value_pair(value)
-                    narrow_rows.append({
-                        "m_time": m_time, "device_info_id": device_info_id,
-                        "metric_name": name, "metric_value": metric_value, "metric_ascii": metric_ascii,
-                    })
-                rows_written += 1
+    try:
+        with bridge.SessionFactory() as session:
+            with session.begin():
+                for p, m_time in zip(points, times):
+                    # p.time_iso is a naive-UTC ISO string (see TimescalePointDict/build_points_timescale,
+                    # and InfluxPointDict's identical convention). Explicitly re-attaching UTC here, rather
+                    # than binding the naive string/datetime directly, matters because these columns are
+                    # TIMESTAMPTZ: a naive value would otherwise be interpreted in the DB session's own
+                    # timezone setting (not necessarily UTC), silently shifting every written timestamp.
+                    if table_kind == "wide":
+                        sql: str = _wide_upsert_sql(table_name, list(p.fields.keys()))
+                        params: dict[str, Any] = {"m_time": m_time, "device_info_id": device_info_id, **p.fields}
+                        session.execute(_sql_text(sql), params)
+                    for name, value in p.fields.items():
+                        metric_value, metric_ascii = _narrow_value_pair(value)
+                        narrow_rows.append({
+                            "m_time": m_time, "device_info_id": device_info_id,
+                            "metric_name": name, "metric_value": metric_value, "metric_ascii": metric_ascii,
+                        })
+                    rows_written += 1
 
-            if narrow_rows:
-                session.execute(_sql_text(_NARROW_UPSERT_SQL), narrow_rows)
+                if narrow_rows:
+                    session.execute(_sql_text(_NARROW_UPSERT_SQL), narrow_rows)
+    finally:
+        # hypertable_mgr can't actually be None here when paused_job_ids_by_table
+        # is non-empty (it's only ever populated inside the `if hypertable_mgr is
+        # not None:` block above), but the type checker can't see that across the
+        # try/finally boundary, so this is checked explicitly rather than assumed.
+        if hypertable_mgr is not None:
+            for t, job_ids in paused_job_ids_by_table.items():
+                try:
+                    with bridge.SessionFactory() as session:
+                        hypertable_mgr.resume_compression_job_for_table(session, job_ids)
+                        session.commit()
+                except Exception as e:
+                    _log.warning(f"[Timeshift] Could not resume compression job(s) {job_ids} for '{t}': {e}")
 
     return rows_written, len(narrow_rows)
 

@@ -767,6 +767,38 @@ flowchart TD
     style M fill:#fecaca,stroke:#dc2626
 ```
 
+### Other Ways Data Reaches These Tables
+
+The flowchart above is only the live path, from a scraper's `write_data()` call through the flush queue. Two admin-only paths reach the same tables directly, bypassing the queue entirely, each with its own transaction and its own compression/rollup handling — see [TimescaleDB documentation, section 4.5](../bridges/TimeScaleDB/timescaledb.md#45-metrics-edit--editing-or-deleting-historical-metric-values) (Metrics Edit) and [section 4.7](../bridges/TimeScaleDB/timescaledb.md#47-timeshift-data--exporting-shifting-and-importing-historical-data) (Timeshift Data), and [section 4.8](../bridges/TimeScaleDB/timescaledb.md#48-how-the-three-ways-of-changing-data-compare) for a full comparison of all three.
+
+```mermaid
+flowchart LR
+    subgraph Live["Live ingestion (above)"]
+        direction TB
+        L1["Scraper via flush queue"] --> L2["Narrow + wide insert"]
+    end
+
+    subgraph Edit["Metrics Edit (admin, staged)"]
+        direction TB
+        E1["Admin stages an edit,<br/>Commit All Changes applies it"] --> E2["UPDATE/DELETE on existing<br/>rows, one table, one device,<br/>one time range"]
+    end
+
+    subgraph Shift["Timeshift Data import (admin, immediate)"]
+        direction TB
+        S1["Admin uploads/exports a CSV<br/>or EG4 spreadsheet, confirms Import"] --> S2["Upsert new or replacement<br/>rows, narrow always,<br/>wide+narrow mirror for a wide target"]
+    end
+
+    L2 --> T[("device_metrics_narrow /<br/>device_metrics_wide__*")]
+    E2 --> T
+    S2 --> T
+
+    style L2 fill:#dbeafe,stroke:#2563eb
+    style E2 fill:#fef3c7,stroke:#d97706
+    style S2 fill:#dcfce7,stroke:#16a34a
+```
+
+Only live ingestion queues to the persistent backlog on failure. Metrics Edit and Timeshift Data both fail outright if TimescaleDB is unreachable, and neither is retried automatically.
+
 ---
 
 ## 12. Flowchart — Live Protocol Analysis Workflow
