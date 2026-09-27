@@ -1190,7 +1190,7 @@
       "label": "Pressing the upload button will load the spreadsheet data into memory.  The earliest date in the spreadsheet will populate the Source Start if Source Start is left blank.",
       "shape_type": "dot",
       "label_x_percent": 52,
-      "label_y_percent": 82.2506889637342
+      "label_y_percent": 82.3
     },
     {
       "id": "influxdb_timeshift-metrics",
@@ -1328,6 +1328,7 @@
     "device__prometheus": "device__bridge_prometheus",
     "device__prometheus_out": "device__bridge_prometheus",
     "device__timescaledb": "device__bridge_timescaledb",
+    "influxdb_timeshift_1": "influxdb_timeshift",    
     "pages__about": "about",
     "pages__analyze*": "analysis",
     "pages__create-protocol": "create_protocol",
@@ -1335,7 +1336,7 @@
     "pages__faq": "faq",
     "pages__general_settings": "general_settings",
     "pages__help": "help",
-    "pages__influxdb-metrics-edit__1": "influxdb_metrics_edit",    
+    "pages__influxdb-metrics-edit__1": "influxdb_metrics_edit",
     "pages__influxdb_timeshift_1": "influxdb_timeshift",
     "pages__logging-settings": "logging-settings",
     "pages__messaging-settings": "messages",
@@ -1348,6 +1349,6 @@
     "pages__transport-settings": "transport_settings_trunc",
     "pages__view-log": "view_log",
     "protocol-editor__*": "protocol_edit"
-  }
 
+  }
 }
