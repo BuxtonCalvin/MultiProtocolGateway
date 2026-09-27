@@ -1076,8 +1076,8 @@
       "y_percent": 43.7,
       "label": "Choose whether to edit or delete a value.",
       "shape_type": "dot",
-      "label_x_percent": 44.74155844155843,
-      "label_y_percent": 45.14104070151894
+      "label_x_percent": 44.7,
+      "label_y_percent": 45.1
     },
     {
       "id": "influxdb_metrics_edit-commit",
@@ -1140,8 +1140,8 @@
       "y_percent": 46.2,
       "label": "Choose a confidence level for the metric name mapping function below.",
       "shape_type": "dot",
-      "label_x_percent": 52.79133742417183,
-      "label_y_percent": 34.11650947538408
+      "label_x_percent": 52.8,
+      "label_y_percent": 34.1
     },
     {
       "id": "influxdb_timeshift-coercion",
@@ -1311,7 +1311,7 @@
       "label_y_percent": 69.2
     }
   ],
-  "aliases": {
+  "_aliases": {
     "device__device_help": "device__device_help",
     "device__eg4_ll_s_1": "device__scraper_read_generic",
     "device__eg4_ll_s_2": "device__scraper_read_generic",
@@ -1335,6 +1335,8 @@
     "pages__faq": "faq",
     "pages__general_settings": "general_settings",
     "pages__help": "help",
+    "pages__influxdb-metrics-edit__1": "influxdb_metrics_edit",    
+    "pages__influxdb_timeshift_1": "influxdb_timeshift",
     "pages__logging-settings": "logging-settings",
     "pages__messaging-settings": "messages",
     "pages__timescale-delete-columns": "timescale_delete",
@@ -1347,4 +1349,5 @@
     "pages__view-log": "view_log",
     "protocol-editor__*": "protocol_edit"
   }
+
 }
