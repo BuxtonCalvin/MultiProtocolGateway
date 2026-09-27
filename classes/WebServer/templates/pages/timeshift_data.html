@@ -351,6 +351,31 @@
   const STANDARD_TAGS = JSON.parse(document.getElementById('timeshift-root').dataset.standardTags || '[]');
   const NEW_TAG_VALUE = '__new__';
 
+  // Gives each of the three Timeshift Data destinations its own context-help
+  // screen, the same way Metrics Edit's three destinations already get one
+  // each -- but Metrics Edit gets that for free, from having three distinct
+  // URLs (/pages/timescale-metrics-edit, /pages/influxdb-metrics-edit/1,
+  // /pages/influxdb-metrics-edit/3): base.html's default help resolution
+  // keys off window.location.pathname alone, so a different path is a
+  // different help screen automatically. Timeshift Data is one path for
+  // all three (?version=1|3|timescale on /pages/timeshift-data), and the
+  // query string plays no part in that resolution, so without this all
+  // three would collapse onto one shared, unhelpfully generic screen.
+  // mpgSetContextHelp/mpgResetContextHelp exist precisely for this case --
+  // see base.html's own comment, and protocol_editor_panes.html's identical
+  // use of it for the protocol editor's Holding/Input/Coil/JSON tab strip,
+  // which has the same one-URL-many-screens shape. Guarded the same way,
+  // since this template also renders standalone in template-preview
+  // contexts where base.html's script (and so this function) never loads.
+  if (window.mpgSetContextHelp) {
+    window.mpgSetContextHelp(
+      TimeshiftState.version === 'timescale' ? 'timescale_timeshift'
+      : TimeshiftState.version === '3' ? 'influxdb_timeshift_3'
+      : 'influxdb_timeshift_1'
+    );
+  }
+
+
   // ---- Destination-generic helpers ----
   // "Measurement" (InfluxDB, free text) and "Table" (TimescaleDB, a fixed <select>) are the same
   // concept in different shapes -- these centralize the version branching so the rest of the script

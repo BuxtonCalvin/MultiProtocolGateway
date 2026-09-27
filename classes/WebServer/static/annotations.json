@@ -959,12 +959,12 @@
   "timescale_metrics_edit": [
     {
       "id": "timescale_metrics_edit-table",
-      "x_percent": 26,
-      "y_percent": 19.7,
+      "x_percent": 5.3,
+      "y_percent": 22,
       "label": "Choose the data table that you want to edit first.",
       "shape_type": "dot",
-      "label_x_percent": 3.0430107526881685,
-      "label_y_percent": 40.71849590543849
+      "label_x_percent": 8.7,
+      "label_y_percent": 6.4
     },
     {
       "id": "timescale_metrics_edit-scraper-device",
@@ -972,8 +972,8 @@
       "y_percent": 9.7,
       "label": "Choose the Scraper data you want to edit.",
       "shape_type": "dot",
-      "label_x_percent": 75.9378733572282,
-      "label_y_percent": 1.5504086094899971
+      "label_x_percent": 72.5925925925926,
+      "label_y_percent": 2.376104274718786
     },
     {
       "id": "timescale_metrics_edit-fields",
@@ -981,8 +981,8 @@
       "y_percent": 18.2,
       "label": "Fields you can edit that are related to the table/scraper combination.",
       "shape_type": "dot",
-      "label_x_percent": 77.1910394265233,
-      "label_y_percent": 11.392634738222121
+      "label_x_percent": 73.6068100358423,
+      "label_y_percent": 11.722913004313636
     },
     {
       "id": "timescale_metrics_edit-dates",
@@ -990,28 +990,30 @@
       "y_percent": 27.1,
       "label": "The date range of the data you want to edit.",
       "shape_type": "rect",
-      "label_x_percent": 94.7,
-      "label_y_percent": 23.153191270405152,
+      "label_x_percent": 14.9,
+      "label_y_percent": 23.5,
       "width_percent": 54.6,
       "height_percent": 8.6,
       "stroke_color": "rgb(14,165,233)",
       "fill_color": "rgba(14,165,233,0.18)"
     },
     {
-      "id": "timescale_metrics_edit-rect-1789517301417",
-      "x_percent": 66.4874551971326,
-      "y_percent": 36.991165802249725,
-      "label": "",
+      "id": "timescale_metrics_edit-EditValue",
+      "x_percent": 66.7,
+      "y_percent": 36.2,
+      "label": "Set the value of the metric(s).",
       "shape_type": "rect",
-      "label_x_percent": 94.68339307048983,
-      "label_y_percent": 34.01866140742609,
-      "width_percent": 52.210274790919975,
-      "height_percent": 7.596400120104839
+      "label_x_percent": 41.679450418160094,
+      "label_y_percent": 40.995417399137274,
+      "width_percent": 52.2,
+      "height_percent": 7.6,
+      "stroke_color": "rgb(14,165,233)",
+      "fill_color": "rgba(14,165,233,0.18)"
     },
     {
       "id": "timescale_metrics_edit-stage",
-      "x_percent": 70.7,
-      "y_percent": 49.9,
+      "x_percent": 69.02735961768221,
+      "y_percent": 48.57888693563393,
       "label": "Stage your changes.",
       "shape_type": "dot",
       "label_x_percent": 77.9,
@@ -1019,48 +1021,330 @@
     },
     {
       "id": "timescale_metrics_edit-changes",
-      "x_percent": 67.4,
-      "y_percent": 89.3,
+      "x_percent": 59.4,
+      "y_percent": 89.1,
       "label": "You'll see your changes here.  Press the commit button in the top right of the screen to save these changes.",
       "shape_type": "dot",
-      "label_x_percent": 80.3,
-      "label_y_percent": 86.2
+      "label_x_percent": 73.7,
+      "label_y_percent": 84.2
     }
   ],
-  "_aliases": {
-    "device__inverter_read": "device__scraper_read_generic",
-    "device__inverter_write": "device__scraper_write_generic",
+  "influxdb_metrics_edit": [
+    {
+      "id": "influxdb_metrics_edit-tablename",
+      "x_percent": 8.5,
+      "y_percent": 89.1,
+      "label": "Pick your data table name here.",
+      "shape_type": "dot",
+      "label_x_percent": 3.1,
+      "label_y_percent": 77.1
+    },
+    {
+      "id": "influxdb_metrics_edit-device",
+      "x_percent": 38.8,
+      "y_percent": 20.4,
+      "label": "Pick your scraper device here.",
+      "shape_type": "dot",
+      "label_x_percent": 32.89090909090909,
+      "label_y_percent": 12.761347793770428
+    },
+    {
+      "id": "influxdb_metrics_edit-field",
+      "x_percent": 29.8,
+      "y_percent": 27.7,
+      "label": "Choose the field that you want to edit.",
+      "shape_type": "dot",
+      "label_x_percent": 45.5,
+      "label_y_percent": 16.7
+    },
+    {
+      "id": "influxdb_metrics_edit-dates",
+      "x_percent": 31.7,
+      "y_percent": 35.2,
+      "label": "Choose the start and end dates of the range of data you want to edit.  You can narrow this range repeatedly until you get to the range of bad data that needs correcting. ",
+      "shape_type": "rect",
+      "label_x_percent": 45.13734421198397,
+      "label_y_percent": 26.313795908596198,
+      "width_percent": 24.4,
+      "height_percent": 8.3,
+      "stroke_color": "rgb(14,165,233)",
+      "fill_color": "rgba(14,165,233,0.18)"
+    },
+    {
+      "id": "influxdb_metrics_edit-action",
+      "x_percent": 29.6,
+      "y_percent": 43.7,
+      "label": "Choose whether to edit or delete a value.",
+      "shape_type": "dot",
+      "label_x_percent": 44.74155844155843,
+      "label_y_percent": 45.14104070151894
+    },
+    {
+      "id": "influxdb_metrics_edit-commit",
+      "x_percent": 91.1,
+      "y_percent": 13.8,
+      "label": "After reviewing your staged edits, commit your changes to the database.",
+      "shape_type": "dot",
+      "label_x_percent": 86.1,
+      "label_y_percent": 21.1
+    }
+  ],
+  "influxdb_timeshift": [
+    {
+      "id": "influxdb_timeshift-action",
+      "x_percent": 17.1,
+      "y_percent": 3.9,
+      "label": "Three choice selection.  You can export a time range of data.  If you are running an EG4 protocol, you can import an EG4 website export file.  Or you can re-import a csv of metrics data that you have hand edited.",
+      "shape_type": "rect",
+      "label_x_percent": 54.28171233991828,
+      "label_y_percent": 0.6769397992220334,
+      "width_percent": 34,
+      "height_percent": 7.9,
+      "stroke_color": "rgb(14,165,233)",
+      "fill_color": "rgba(14,165,233,0.18)"
+    },
+    {
+      "id": "influxdb_timeshift-table",
+      "x_percent": 14.9,
+      "y_percent": 12.7,
+      "label": "Choose your InfluxDB table here.",
+      "shape_type": "dot",
+      "label_x_percent": 3.3908330429880635,
+      "label_y_percent": 15.362629876940005
+    },
+    {
+      "id": "influxdb_timeshift-timezone",
+      "x_percent": 38.5,
+      "y_percent": 12.2,
+      "label": "Choose a timezone other than your default machine time zone.  This will shift the exported data to that timezone.",
+      "shape_type": "dot",
+      "label_x_percent": 77.19057666821998,
+      "label_y_percent": 2.5294414701976464
+    },
+    {
+      "id": "influxdb_timeshift-tags",
+      "x_percent": 26.2,
+      "y_percent": 35.1,
+      "label": "Choose your InfluxDB tags, or create new ones.",
+      "shape_type": "rect",
+      "label_x_percent": 53.15698974956936,
+      "label_y_percent": 24.568793756473234,
+      "width_percent": 49.8,
+      "height_percent": 18.7,
+      "stroke_color": "rgb(14,165,233)",
+      "fill_color": "rgba(14,165,233,0.18)"
+    },
+    {
+      "id": "influxdb_timeshift-confidence",
+      "x_percent": 13.8,
+      "y_percent": 46.2,
+      "label": "Choose a confidence level for the metric name mapping function below.",
+      "shape_type": "dot",
+      "label_x_percent": 52.79133742417183,
+      "label_y_percent": 34.11650947538408
+    },
+    {
+      "id": "influxdb_timeshift-coercion",
+      "x_percent": 27.1,
+      "y_percent": 46.3,
+      "label": "Allow MPG to change integers to floats to match the native InfluxDB data type.",
+      "shape_type": "dot",
+      "label_x_percent": 52.4,
+      "label_y_percent": 45.7
+    },
+    {
+      "id": "influxdb_timeshift-delete",
+      "x_percent": 43.8,
+      "y_percent": 46.6,
+      "label": "Currently not function.  Will allow you to delete data prior to overwrites.",
+      "shape_type": "dot",
+      "label_x_percent": 74.74736466531581,
+      "label_y_percent": 44.475948717614244
+    },
+    {
+      "id": "influxdb_timeshift-file",
+      "x_percent": 38.29903749157465,
+      "y_percent": 56.2,
+      "label": "Choose your EG4 import file.",
+      "shape_type": "dot",
+      "label_x_percent": 52.58758826670714,
+      "label_y_percent": 56.863620958547834
+    },
+    {
+      "id": "influxdb_timeshift-dates",
+      "x_percent": 26.3,
+      "y_percent": 63.1,
+      "label": "Choose the Source start date based on the earliest date of the data that you want to shift.  The Target start date is the start of the date that you want to shift to.  ",
+      "shape_type": "rect",
+      "label_x_percent": 52.1,
+      "label_y_percent": 62.2,
+      "width_percent": 50.1,
+      "height_percent": 8.8,
+      "stroke_color": "rgb(14,165,233)",
+      "fill_color": "rgba(14,165,233,0.18)"
+    },
+    {
+      "id": "influxdb_timeshift-upload",
+      "x_percent": 12,
+      "y_percent": 70.6,
+      "label": "Pressing the upload button will load the spreadsheet data into memory.  The earliest date in the spreadsheet will populate the Source Start if Source Start is left blank.",
+      "shape_type": "dot",
+      "label_x_percent": 52,
+      "label_y_percent": 82.2506889637342
+    },
+    {
+      "id": "influxdb_timeshift-metrics",
+      "x_percent": 42,
+      "y_percent": 94.6,
+      "label": "The list of metrics in the InfluxDB database that will be matched to your import data.  Adjust the confidence rate above to either match more metrics (lower) or match more accurately (higher).  Checking Ignore will not attempt to match that metric.  The drop downs of potential matches are comprised of InfluxDB unused field matches.",
+      "shape_type": "dot",
+      "label_x_percent": 77.1,
+      "label_y_percent": 67.3
+    }
+  ],
+  "timescale_timeshift": [
+    {
+      "id": "timescale_timeshift-action",
+      "x_percent": 17.804008463226744,
+      "y_percent": 14.738149742767828,
+      "label": "Three choice selection.  You can export a time range of data.  If you are running an EG4 protocol, you can import an EG4 website export file.  Or you can re-import a csv of metrics data that you have hand edited.",
+      "shape_type": "rect",
+      "label_x_percent": 45.21760337587399,
+      "label_y_percent": 5.012199696329164,
+      "width_percent": 34,
+      "height_percent": 7.9,
+      "stroke_color": "rgb(14,165,233)",
+      "fill_color": "rgba(14,165,233,0.18)"
+    },
+    {
+      "id": "timescale_timeshift-table",
+      "x_percent": 15,
+      "y_percent": 22,
+      "label": "Choose your Timescale table here.",
+      "shape_type": "dot",
+      "label_x_percent": 44.91561069156993,
+      "label_y_percent": 24.799752028940034
+    },
+    {
+      "id": "timescale_timeshift-timezone",
+      "x_percent": 38.41199894209665,
+      "y_percent": 22.10916547910201,
+      "label": "Choose a timezone other than your default machine time zone.  This will shift the exported data to that timezone.",
+      "shape_type": "dot",
+      "label_x_percent": 65.2224327933654,
+      "label_y_percent": 11.045130553800941
+    },
+    {
+      "id": "timescale_timeshift-device",
+      "x_percent": 15.5,
+      "y_percent": 35.5,
+      "label": "Choose a scraper device by its unique ID.",
+      "shape_type": "dot",
+      "label_x_percent": 64.5,
+      "label_y_percent": 26.9
+    },
+    {
+      "id": "timescale_timeshift-confidence",
+      "x_percent": 7.9039291204760485,
+      "y_percent": 41.40024797105997,
+      "label": "Choose a confidence level for the metric name mapping function below.",
+      "shape_type": "dot",
+      "label_x_percent": 43.55122634432086,
+      "label_y_percent": 37.05829297699249
+    },
+    {
+      "id": "timescale_timeshift-coercion",
+      "x_percent": 25.2,
+      "y_percent": 40.4,
+      "label": "Allow MPG to change integers to floats to match the native Timescale data type if there is a conflict.",
+      "shape_type": "dot",
+      "label_x_percent": 61.99211531146433,
+      "label_y_percent": 37.49397233761865
+    },
+    {
+      "id": "timescale_timeshift-delete",
+      "x_percent": 37.46392383095934,
+      "y_percent": 39.94227944372833,
+      "label": "Currently not function.  Will allow you to delete data prior to overwrites.",
+      "shape_type": "dot",
+      "label_x_percent": 80.46743342903308,
+      "label_y_percent": 37.973058871953555
+    },
+    {
+      "id": "timescale_timeshift-file",
+      "x_percent": 15.946768784125634,
+      "y_percent": 47.993972337618644,
+      "label": "Choose your EG4 import file.",
+      "shape_type": "dot",
+      "label_x_percent": 44.13948670798626,
+      "label_y_percent": 48.812424006777455
+    },
+    {
+      "id": "timescale_timeshift-dates",
+      "x_percent": 22.1,
+      "y_percent": 56.1,
+      "label": "Choose the Source start date based on the earliest date of the data that you want to shift.  The Target start date is the start of the date that you want to shift to.  ",
+      "shape_type": "rect",
+      "label_x_percent": 44.5,
+      "label_y_percent": 53.8,
+      "width_percent": 43.1,
+      "height_percent": 5.7,
+      "stroke_color": "rgb(14,165,233)",
+      "fill_color": "rgba(14,165,233,0.18)"
+    },
+    {
+      "id": "timescale_timeshift-upload",
+      "x_percent": 10.6,
+      "y_percent": 64.3,
+      "label": "Pressing the upload button will load the spreadsheet data into memory.  The earliest date in the spreadsheet will populate the Source Start if Source Start is left blank.",
+      "shape_type": "dot",
+      "label_x_percent": 44.3,
+      "label_y_percent": 70.6
+    },
+    {
+      "id": "timescale_timeshift-metrics",
+      "x_percent": 37,
+      "y_percent": 91.3,
+      "label": "The list of metrics in the Timescale database that will be matched to your import data.  Adjust the confidence rate above to either match more metrics (lower) or match more accurately (higher).  Checking Ignore will not attempt to match that metric.  The drop downs of potential matches are comprised of Timescale unused field matches.",
+      "shape_type": "dot",
+      "label_x_percent": 65.5,
+      "label_y_percent": 69.2
+    }
+  ],
+  "aliases": {
+    "device__device_help": "device__device_help",
     "device__eg4_ll_s_1": "device__scraper_read_generic",
     "device__eg4_ll_s_2": "device__scraper_read_generic",
-    "device__mqtt": "device__bridge_mqtt",
-    "device__timescaledb": "device__bridge_timescaledb",
-    "device__json_out": "device__bridge_json",
-    "protocol-editor__*": "protocol_edit",
-    "pages__logging-settings": "logging-settings",
-    "pages__messaging-settings": "messages",
-    "pages__view-log": "view_log",
-    "pages__transport-library": "transport_library",
-    "pages__transport-settings": "transport_settings_trunc",
+    "device__influx3db": "device__bridge_influx3db",
+    "device__influx3db_out": "device__bridge_influx3db",
     "device__influxdb": "device__bridge_influxdb",
-    "pages__create-scraper": "create_scraper",
-    "pages__analyze*": "analysis",
     "device__influxdb3": "device__bridge_influx3db",
-    "pages__create-protocol": "create_protocol",
-    "device__device_help": "device__device_help",
-    "pages__timescale-delete-columns": "timescale_delete",
-    "pages__general_settings": "general_settings",
-    "pages__about": "about",
-    "pages__help": "help",
-    "pages__faq": "faq",
-    "pages__timescale-rebuild-rollups": "timescale_rebuild_rollups",
-    "pages__timescale_compression_group_list": "timescale_rebuild_compression",
-    "pages__timescale-rebuild-compression": "timescale_rebuild_compression",
+    "device__influxdb3_out": "device__bridge_influx3db",
+    "device__influxdb_out": "device__bridge_influxdb",
+    "device__inverter_read": "device__scraper_read_generic",
+    "device__inverter_write": "device__scraper_write_generic",
+    "device__json_out": "device__bridge_json",
+    "device__mqtt": "device__bridge_mqtt",
     "device__prometheus": "device__bridge_prometheus",
     "device__prometheus_out": "device__bridge_prometheus",
-    "device__influx3db": "device__bridge_influx3db",
-    "device__influxdb3_out": "device__bridge_influx3db",
-    "device__influx3db_out": "device__bridge_influx3db",
-    "device__influxdb_out": "device__bridge_influxdb",
-    "pages__timescale-metrics-edit": "timescale_metrics_edit"
+    "device__timescaledb": "device__bridge_timescaledb",
+    "pages__about": "about",
+    "pages__analyze*": "analysis",
+    "pages__create-protocol": "create_protocol",
+    "pages__create-scraper": "create_scraper",
+    "pages__faq": "faq",
+    "pages__general_settings": "general_settings",
+    "pages__help": "help",
+    "pages__logging-settings": "logging-settings",
+    "pages__messaging-settings": "messages",
+    "pages__timescale-delete-columns": "timescale_delete",
+    "pages__timescale-metrics-edit": "timescale_metrics_edit",
+    "pages__timescale-rebuild-compression": "timescale_rebuild_compression",
+    "pages__timescale-rebuild-rollups": "timescale_rebuild_rollups",
+    "pages__timescale_compression_group_list": "timescale_rebuild_compression",
+    "pages__transport-library": "transport_library",
+    "pages__transport-settings": "transport_settings_trunc",
+    "pages__view-log": "view_log",
+    "protocol-editor__*": "protocol_edit"
   }
 }
