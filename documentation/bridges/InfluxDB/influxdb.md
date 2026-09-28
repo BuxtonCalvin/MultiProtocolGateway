@@ -81,6 +81,7 @@ connection_timeout = 10
 | `reconnect_attempts` | `5` | Number of reconnection attempts before giving up |
 | `reconnect_delay` | `5.0` | Delay between reconnection attempts (seconds) |
 | `connection_timeout` | `10` | Connection timeout for InfluxDB client (seconds) |
+| `use_utc_timestamp` | `False` | Use UTC time as the timestamp for saved data.|
 
 ### Connection Monitoring
 
