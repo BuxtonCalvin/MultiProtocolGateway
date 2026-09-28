@@ -1156,7 +1156,7 @@
       "id": "influxdb_timeshift-delete",
       "x_percent": 43.8,
       "y_percent": 46.6,
-      "label": "Currently not function.  Will allow you to delete data prior to overwrites.",
+      "label": "Currently not functioning.  Will allow you to delete data prior to overwrites.",
       "shape_type": "dot",
       "label_x_percent": 74.74736466531581,
       "label_y_percent": 44.475948717614244
@@ -1265,7 +1265,7 @@
       "id": "timescale_timeshift-delete",
       "x_percent": 37.46392383095934,
       "y_percent": 39.94227944372833,
-      "label": "Currently not function.  Will allow you to delete data prior to overwrites.",
+      "label": "Currently not functioning.  Will allow you to delete data prior to overwrites.",
       "shape_type": "dot",
       "label_x_percent": 80.46743342903308,
       "label_y_percent": 37.973058871953555
