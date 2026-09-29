@@ -2,7 +2,7 @@
 
 **Multi Protocol Gateway (MPG)** reads live data from solar inverters, battery management systems (BMS), energy meters, and other Modbus/CAN-speaking hardware. MPG then fans that data out to your choice of bridges: MQTT, InfluxDB, TimescaleDB, Prometheus, and JSON — all managed through a built-in web UI; no config-file editing required. MPG allows you to read data from concurrent hardware devices and protocols, and then push the data to one, or more software bridges. If you have a device that speaks Modbus RTU/TCP, CAN bus, or one of the supported proprietary serial protocols and you want its data in Home Assistant, Grafana, Prometheus, or a time-series database, this app should work for you.
 
-[![Python 3.10](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.10.yml/badge.svg)](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.10.yml) ➔ [![Python 3.14](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.14.yml/badge.svg)](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.14.yml) [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE) [![Ruff](https://img.shields.io/badge/Linter-Ruff-brightgreen?style=flat-square)](https://github.com/charliermarsh/ruff) [![CodeQL Status](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/codeql.yml/badge.svg)](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/codeql.yml)
+[![Python 3.11](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.11.yml/badge.svg)](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.11.yml) ➔ [![Python 3.14](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.14.yml/badge.svg)](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.14.yml) [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE) [![Ruff](https://img.shields.io/badge/Linter-Ruff-brightgreen?style=flat-square)](https://github.com/charliermarsh/ruff) [![CodeQL Status](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/codeql.yml/badge.svg)](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/codeql.yml)
 
 [![Dashboard](classes/WebServer/static/screenshots/dashboard.png)](classes/WebServer/static/screenshots/dashboard.png)
 
@@ -24,7 +24,7 @@ Then open **`http://localhost:1717`** and configure everything from the web UI �
 
 ### Try It With or Without Hardware
 
-**Prerequisites:** Python 3.10+, and (for real hardware) a device connected via USB serial adapter, RS-485 adapter, or network.
+**Prerequisites:** Python 3.11+, and (for real hardware) a device connected via USB serial adapter, RS-485 adapter, or network.
 
 [![Hardware](documentation/assets/waveshare_mpg_eg4.png)](documentation/assets/waveshare_mpg_eg4.png)
 
@@ -73,15 +73,15 @@ The web UI is available at **`http://localhost:1717`** as soon as the gateway st
 
 ## Feature Overview
 
-| Capability                      | Details                                                                                                 |
+| Capability | Details |
 | ------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| **Input protocols** (scrapers)  | Modbus RTU, Modbus TCP, Modbus TLS, Modbus UDP, CAN bus, PACE BMS serial, Pylon serial, EG4 LL-S RS-485 |
-| **Output transports** (bridges) | MQTT, Timescale DB (PostgreSQL hypertable), InfluxDB, InfluxDB3, Prometheus, JSON file                  |
-| **Web UI**                      | Full browser-based configuration and live management on port **1717**                                   |
-| **Protocol library**            | 29 manufacturers with tested register maps; 74 more with device metadata stubbed in                     |
-| **Config management**           | SQLite staging database; changes are previewed and committed — no raw file editing required.            |
-| **Python versions**             | 3.10 – 3.14                                                                                             |
-| **Deployment**                  | Script, systemd service, Docker container, Home Assistant add-on                                        |
+| **Input transports** (scrapers) | Modbus RTU, Modbus TCP, Modbus TLS, Modbus UDP, CAN bus, PACE BMS serial, Pylon serial, EG4 LL-S RS-485 |
+| **Output transports** (bridges) | MQTT, Timescale DB (PostgreSQL hypertable), InfluxDB, InfluxDB3, Prometheus, JSON file |
+| **Web UI** | Full browser-based configuration and live management on port **1717** |
+| **Protocol library** | 29 manufacturers with tested register maps; 74 more with device metadata stubbed in |
+| **Config management** | SQLite staging database; changes are previewed and committed — no raw file editing required. |
+| **Python versions** | 3.11 – 3.14 |
+| **Deployment** | Script, systemd service, Docker container, Home Assistant add-on |
 
 ---
 

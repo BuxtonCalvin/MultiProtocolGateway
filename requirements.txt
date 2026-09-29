@@ -1,28 +1,33 @@
-pymodbus
-paho-mqtt
-pyserial
-python-can
-influxdb
-influxdb3-python
-sqlalchemy-timescaledb
-sqlalchemy
-psycopg2-binary
-alembic               # for database migrations
-tzlocal               # for timezone handling in multiple services
-fastapi               # for building the web server and API
-pydantic              # for data validation and settings management in FastAPI
-uvicorn[standard]     # for running FastAPI applications
-jinja2                # for HTML templating in FastAPI
-python-multipart      # required for form parsing in FastAPI
-markdown              # for rendering Markdown in FastAPI docs
-pygments              # for rendering Markdown in FastAPI docs
-pymdown-extensions    # for rendering Markdown in FastAPI docs
-watchdog              # file watcher
-aiofiles              # static file serving
-Pygments              # for syntax highlighting in FastAPI docs
-python-telegram-bot   # for Telegram messaging support
-prometheus_client     # for prometheus metrics support
-typing_extensions     # for strict typing support in Python versions < 3.11
-pandas                # for data manipulation and analysis
-openpyxl              # for reading/writing Excel files
-xlrd                  # for reading/writing Excel files
+# Minimum versions are set to the latest releases as of 2026-09-28.
+# Floors (>=) force `pip install -r requirements.txt` to upgrade older installs,
+# while still letting pip pick newer releases. Do not use == here.
+pymodbus>=3.15.0              # for Modbus support (used by all modbus transports)
+paho-mqtt>=2.1.0              # for MQTT support (used by mqtt transport)
+pyserial>=3.5                 # for serial port support (used by serial transport)
+python-can>=4.6.1             # for CAN bus support (used by canbus transport)
+influxdb>=5.3.2               # InfluxDB v1 client (used by timeshift_service and influxdb_out)
+influxdb3-python>=0.21.0      # InfluxDB v3 client (used by influxdb3_out and timeshift_service)
+sqlalchemy-timescaledb>=0.4.1 # for TimescaleDB support in SQLAlchemy (used by timescaledb transport)
+sqlalchemy>=2.1.1             # for database interactions (used by timescaledb transport) and alembic migrations
+psycopg2-binary>=2.9.13       # for PostgreSQL database interactions (used by timescaledb transport)
+alembic>=1.20.0               # for database migrations
+tzlocal>=5.4.4                # for timezone handling in multiple services
+fastapi>=0.141.1              # for building the web server and API
+starlette>=1.7.0              # imported directly (State); also a fastapi dependency
+pydantic>=2.13.5              # for data validation and settings management in FastAPI
+uvicorn[standard]>=0.54.0     # for running FastAPI applications
+jinja2>=3.1.6                 # for HTML templating in FastAPI
+python-multipart>=0.0.32      # required for form parsing in FastAPI
+markdown>=3.11                # for rendering Markdown in FastAPI docs
+pygments>=2.21.0              # for syntax highlighting in FastAPI docs
+pymdown-extensions>=12.1      # for rendering Markdown in FastAPI docs
+watchdog>=6.0.0               # file watcher
+aiofiles>=25.1.0              # static file serving
+python-telegram-bot>=22.8     # for Telegram messaging support
+prometheus_client>=0.26.0     # for prometheus metrics support
+typing_extensions>=4.16.0     # for strict typing support in Python versions < 3.11
+pandas>=3.0.6                 # for data manipulation and analysis
+openpyxl>=3.1.5               # for reading/writing Excel files
+xlrd>=2.0.2                   # for reading/writing Excel files
+requests>=2.34.2              # imported directly (influxdb3_out)
+pyarrow>=25.0.1               # imported directly (influxdb3_out)

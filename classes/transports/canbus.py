@@ -82,7 +82,7 @@ class canbus(transport_base):
     ''' CAN ID known to carry the serial number; read from settings, or discovered by sniffing. '''
 
     def __init__(self, settings: TransportSettings, protocolSettings: protocol_settings | None = None) -> None:
-        # Annotations are postponed for Python 3.10+ compatibility, so the
+        # Annotations are postponed for Python 3.11+ compatibility, so the
         # concrete protocol_settings type can be used here without import-time
         # evaluation of the union expression.
         super().__init__(settings)
