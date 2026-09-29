@@ -39,7 +39,7 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, List, Sequence, Tuple
+from typing import TYPE_CHECKING, Any, List, Sequence
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import (
@@ -214,7 +214,7 @@ async def device_page(request: Request, device_name: str):
         )
         protocol_match = None
         if summary is None:
-            protocol_match: Row[Tuple[str, str]] | None = (
+            protocol_match: Row[str, str] | None = (
                 db.query(ProtocolRegister.protocol_group, ProtocolRegister.protocol_name)
                 .filter(ProtocolRegister.protocol_name == device_name)
                 .first()
@@ -596,7 +596,7 @@ async def protocol_editor(
     with session_scope() as db:
         nav: NavData = get_nav_data(db)
 
-        rows: Sequence[Row[Tuple[str, str, int]]] = (
+        rows: Sequence[Row[str, str, int]] = (
             db.execute(
                 select(
                     ProtocolRegister.protocol_name,

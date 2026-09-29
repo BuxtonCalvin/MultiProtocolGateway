@@ -23,7 +23,7 @@ You can find a copy of the GNU Affero General Public License in the documentatio
 If not, see <https://www.gnu.org>.
 ----------------------------------------------------------------------------------------------------------------------
 timescaledb transport bridge module (with rollup continuous aggregates) and persistent disk backlog.
-python > 3.11 is required, 3.14 is recommended for best performance and latest features.
+python 3.11 or higher is required, 3.13 is recommended for best performance and latest features.
 The transport uses the latest SQLAlchemy version for database interactions and supports automatic schema management,
 including dynamic column creation based on the protocol registry, hypertable setup, and continuous
 aggregate rollups for efficient querying of historical data.
@@ -77,7 +77,9 @@ from typing import (
     Protocol,
     Sequence,
     Tuple,
+    TypeAlias,
     Union,
+    Unpack,
     cast,
 )
 
@@ -118,7 +120,6 @@ from sqlalchemy.orm import (
     sessionmaker,
 )
 from sqlalchemy.orm.session import Session
-from typing_extensions import TypeAlias, Unpack
 from tzlocal import get_localzone_name
 
 from classes.protocol_settings import (
@@ -463,7 +464,7 @@ class TimescaleDBConnectionManager:
         try:
             default_engine: Engine = create_engine(default_url, isolation_level="AUTOCOMMIT", pool_pre_ping=True)
             with default_engine.connect() as conn:
-                row: AnyRow | None = conn.execute(
+                row: Row[int] | None = conn.execute(
                     text("SELECT 1 FROM pg_database WHERE datname = :d"),
                     {"d": self.database}
                 ).fetchone()
@@ -1806,7 +1807,7 @@ class timescaledb(transport_base):
         """
         with self.SessionFactory() as session:
             try:
-                rows: Sequence[AnyRow] = session.execute(
+                rows: Sequence[Row[str, str | None, bool]] = session.execute(
                     text("""
                         SELECT protocol_name, wide_table_name,
                             rollup_setup_complete
@@ -1866,7 +1867,7 @@ class timescaledb(transport_base):
         """
         with self.SessionFactory() as session:
             try:
-                rows: Sequence[AnyRow] = session.execute(
+                rows: Sequence[Row[str, str, str]] = session.execute(
                     text("""
                         SELECT mc.metric_name, mc.clean_column_name, mc.data_type
                         FROM metric_catalog mc
@@ -3633,7 +3634,7 @@ class HyperTableManager:
         }]
 
         with self.SessionFactory() as session:
-            protocol_rows: Sequence[AnyRow] = session.execute(
+            protocol_rows: Sequence[Row[str, str | None, str]] = session.execute(
                 text("""
                     SELECT protocol_name, rollup_prefix, wide_table_name
                     FROM protocol_registry
@@ -3848,7 +3849,7 @@ class HyperTableManager:
         re-enable them afterward.
         """
         try:
-            rows: Sequence[AnyRow] = session.execute(
+            rows: Sequence[Row[int]] = session.execute(
                 text("""
                     SELECT job_id FROM timescaledb_information.jobs
                     WHERE hypertable_name = :table_name
@@ -4427,7 +4428,7 @@ class HyperTableManager:
 
         try:
             with self.SessionFactory() as session:
-                protocol_rows: Sequence[AnyRow] = session.execute(
+                protocol_rows: Sequence[Row[str, str]] = session.execute(
                     text("""
                         SELECT protocol_name, wide_table_name
                         FROM protocol_registry
@@ -4634,7 +4635,7 @@ class HyperTableManager:
 
         try:
             with self.SessionFactory() as session:
-                rows: Sequence[AnyRow] = session.execute(
+                rows: Sequence[Row[str, int | None]] = session.execute(
                     text("SELECT transport, metric_count FROM device_info WHERE transport = ANY(:transports)"),
                     {"transports": list(relevant_transports.keys())},
                 ).fetchall()
@@ -6250,7 +6251,7 @@ class RollupManager:
             # schema) and follows the same "rollup_wide__<suffix>" naming
             # _ensure_cagg_views_for_protocol derives from wide_table_name --
             # the two must stay in sync.
-            protocol_rows: Sequence[AnyRow] = session.execute(
+            protocol_rows: Sequence[Row[str, str | None, str]] = session.execute(
                 text("""
                     SELECT protocol_name, rollup_prefix, wide_table_name
                     FROM protocol_registry
@@ -6373,7 +6374,7 @@ class RollupManager:
         rebuild_narrow: bool = protocol_names is None or "shared_narrow" in protocol_names
 
         with self.SessionFactory() as session:
-            protocol_rows: Sequence[AnyRow] = session.execute(
+            protocol_rows: Sequence[Row[str, str]] = session.execute(
                 text("""
                     SELECT protocol_name, wide_table_name
                     FROM protocol_registry
@@ -6523,7 +6524,7 @@ class RollupManager:
         }
 
         with self.SessionFactory() as session:
-            protocol_rows: Sequence[AnyRow] = session.execute(
+            protocol_rows: Sequence[Row[str, str | None]] = session.execute(
                 text("""
                     SELECT protocol_name, rollup_prefix
                     FROM protocol_registry
@@ -6702,7 +6703,7 @@ class RollupManager:
 
         try:
             with self.SessionFactory() as session:
-                protocol_rows: Sequence[AnyRow] = session.execute(
+                protocol_rows: Sequence[Row[str, str | None]] = session.execute(
                     text("""
                         SELECT protocol_name, rollup_prefix
                         FROM protocol_registry
@@ -6904,7 +6905,7 @@ class RollupManager:
         # Then per-protocol wide views
         try:
             with self.SessionFactory() as session:
-                rows: Sequence[AnyRow] = session.execute(
+                rows: Sequence[Row[str]] = session.execute(
                     text("""
                         SELECT rollup_prefix
                         FROM protocol_registry
@@ -6930,7 +6931,7 @@ class RollupManager:
     def _view_exists_conn_helper(self, conn: Connection, view_name: str) -> bool:
         """Session-free variant of _view_exists for use inside autocommit engine.connect() blocks."""
         try:
-            result: AnyRow | None = conn.execute(
+            result: Row[int] | None = conn.execute(
                 text("SELECT 1 FROM timescaledb_information.continuous_aggregates WHERE view_name = :name"),
                 {"name": view_name}
             ).fetchone()
@@ -6959,11 +6960,11 @@ class RollupManager:
         r_settings: dict[str, Any] = self.hypertable_mgr.get_dynamic_settings_helper()
         try:
             # 1. Fetch current aggregates
-            result: Result[Any] = session.execute(text("""
+            result: Result[str, str] = session.execute(text("""
                 SELECT view_schema, view_name
                 FROM timescaledb_information.continuous_aggregates;
             """))
-            views: Sequence[AnyRow] = result.fetchall()
+            views: Sequence[Row[str, str]] = result.fetchall()
 
             if not views:
                 self._log.info("No continuous aggregates found to drop.")
@@ -6973,7 +6974,7 @@ class RollupManager:
             # This prevents internal _partial_view dependencies from blocking the drop.
             priority_map: dict[str, int] = {"monthly": 4, "weekly": 3, "daily": 2, "hourly": 1}
 
-            def get_drop_rank(v_tuple: AnyRow) -> int:
+            def get_drop_rank(v_tuple: Row[str, str]) -> int:
                 name_lower: str = v_tuple[1].lower()
                 for key, val in priority_map.items():
                     if key in name_lower:
@@ -6981,7 +6982,7 @@ class RollupManager:
                 return 0
 
             # Sort descending: 4 (Weekly) drops first, 1 (Hourly) drops last.
-            sorted_views: List[AnyRow] = sorted(views, key=get_drop_rank, reverse=True)
+            sorted_views: List[Row[str, str]] = sorted(views, key=get_drop_rank, reverse=True)
 
             # 3. Iterate and drop each view safely
             for schema, name in sorted_views:
@@ -7487,7 +7488,7 @@ class RollupManager:
         """)
 
         try:
-            ghosts: Sequence[AnyRow] = session.execute(detect_sql).fetchall()
+            ghosts: Sequence[Row[int, str | None, str, int | None]] = session.execute(detect_sql).fetchall()
 
             if not ghosts:
                 self._log.info("All background workers healthy.")
@@ -7771,7 +7772,7 @@ class BridgeAdminManager:
                         metrics) and therefore has no wide table to edit.
         """
         with self.SessionFactory() as session:
-            row: AnyRow | None = session.execute(
+            row: Row[int, str | None] | None = session.execute(
                 text("""
                     SELECT protocol_id, wide_table_name
                     FROM protocol_registry
@@ -7817,7 +7818,7 @@ class BridgeAdminManager:
         per protocol to resolve its table name.
         """
         with self.SessionFactory() as session:
-            rows: Sequence[AnyRow] = session.execute(
+            rows: Sequence[Row[str, str]] = session.execute(
                 text("""
                     SELECT protocol_name, wide_table_name FROM protocol_registry
                     WHERE wide_table_name IS NOT NULL
@@ -7876,7 +7877,7 @@ class BridgeAdminManager:
         protocol_id, _wide_table_name = self._resolve_wide_table(protocol_name)
 
         with self.SessionFactory() as session:
-            rows: Sequence[AnyRow] = session.execute(
+            rows: Sequence[Row[str, str, str, float | None, str | None]] = session.execute(
                 text("""
                     SELECT metric_name, clean_column_name, data_type, unit_mod, notes
                     FROM metric_catalog
@@ -8209,7 +8210,7 @@ class BridgeAdminManager:
         to build a SELECT/UPDATE column list), never trusted directly.
         """
         with self.SessionFactory() as session:
-            rows: Sequence[AnyRow] = session.execute(
+            rows: Sequence[Row[int, str, str]] = session.execute(
                 text("SELECT catalog_id, clean_column_name, data_type FROM metric_catalog WHERE protocol_id = :pid"),
                 {"pid": protocol_id},
             ).fetchall()
@@ -8236,7 +8237,7 @@ class BridgeAdminManager:
         if not metric_names:
             return kinds
         with self.SessionFactory() as session:
-            rows: Sequence[AnyRow] = session.execute(
+            rows: Sequence[Row[str, bool]] = session.execute(
                 text(f"""
                     SELECT metric_name, bool_or(metric_ascii IS NOT NULL) AS is_text
                     FROM {table_name}
@@ -8281,7 +8282,7 @@ class BridgeAdminManager:
         """
         table_name, _protocol_id = self._resolve_metric_edit_table(table_kind, protocol_name)
         with self.SessionFactory() as session:
-            rows: Sequence[AnyRow] = session.execute(
+            rows: Sequence[Row[int, str | None, str | None]] = session.execute(
                 text(f"""
                     SELECT d.device_info_id, d.device_identifier, d.device_name
                     FROM device_info d
@@ -8323,7 +8324,7 @@ class BridgeAdminManager:
         table_name, _protocol_id = self._resolve_metric_edit_table(table_kind, protocol_name)
         with self.SessionFactory() as session:
             if device_info_id is not None:
-                rows: Sequence[AnyRow] = session.execute(
+                rows: Sequence[Row[str]] = session.execute(
                     text(f"""
                         SELECT DISTINCT metric_name FROM {table_name}
                         WHERE device_info_id = :did
@@ -8379,7 +8380,7 @@ class BridgeAdminManager:
                     {"did": device_info_id, "names": field_names, "start": start_time, "end": end_time},
                 ).scalar_one()
 
-                sample_rows: Sequence[AnyRow] = session.execute(
+                sample_rows: Sequence[Row[datetime, str, float | None, str | None]] = session.execute(
                     text(f"""
                         SELECT m_time, metric_name, metric_value, metric_ascii FROM {table_name}
                         WHERE device_info_id = :did
@@ -8417,7 +8418,7 @@ class BridgeAdminManager:
                     {"did": device_info_id, "start": start_time, "end": end_time},
                 ).scalar_one()
 
-                sample_rows = session.execute(
+                wide_sample_rows: Sequence[AnyRow] = session.execute(
                     text(f"""
                         SELECT m_time, {select_cols} FROM {table_name}
                         WHERE device_info_id = :did AND m_time BETWEEN :start AND :end
@@ -8426,7 +8427,7 @@ class BridgeAdminManager:
                     """),  # noqa: S608
                     {"did": device_info_id, "start": start_time, "end": end_time, "lim": sample_limit},
                 ).fetchall()
-                for r in sample_rows:
+                for r in wide_sample_rows:
                     m_time = r[0]
                     for i, col in enumerate(to_read, start=1):
                         sample.append(MetricValueSample(m_time=m_time, field_name=col, value=r[i]))
@@ -8892,7 +8893,7 @@ class BridgeAdminManager:
         tables: list[tuple[str, str]] = [("shared_narrow", "device_metrics_narrow")]
         try:
             with self.SessionFactory() as session:
-                wide_rows: Sequence[AnyRow] = session.execute(
+                wide_rows: Sequence[Row[str, str]] = session.execute(
                     text("""
                         SELECT protocol_name, wide_table_name
                         FROM protocol_registry
