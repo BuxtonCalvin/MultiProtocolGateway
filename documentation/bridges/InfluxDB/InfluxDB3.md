@@ -70,7 +70,7 @@ docker compose restart mpg
    user: root
    environment:
     # This env tells the engine process which token string matches the operational layer. Generate the admin_token per above.
-     - INFLUXDB3_AUTH_TOKEN=apiv3_CiLCKXAAbiCBxSzqvjT09Ev1ZK5DBDFo1I-Z11ALvJm-oh9XqoFQmZ_99im0D4r2xkm6toTX3XzSspaKj1XB4A
+     - INFLUXDB3_AUTH_TOKEN=apiv3_your_generated_token_here
    ports:
      - "8100:8181" # Native v3 API port
    volumes:

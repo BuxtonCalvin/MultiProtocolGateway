@@ -245,7 +245,6 @@
     "max_reconnect_delay": "300.0",
     "max_stale_attempts": "3",
     "measurement": "device_data",
-    "mgmt_api_url": "",
     "org": "",
     "password": "",
     "periodic_reconnect_interval": "14400.0",

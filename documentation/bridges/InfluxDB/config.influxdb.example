@@ -1,42 +1,119 @@
+# Example InfluxDB bridge configuration for MPG.
 #
-[influxdb_output]
-transport = influxdb_out
-host = localhost
-port = 8086
-database = solar
-username = 
-password = 
-measurement = device_data
-include_timestamp = true
-include_device_info = true
-batch_size = 100
-batch_timeout = 10.0
-log_level = INFO
+# - A bridge section is recognized by its "transport" key (not "type").
+# - A scraper feeds a bridge by naming the bridge's exact section name in "bridge =".
+#   Several bridges can be listed, comma separated.
+# - A bridge has no read_interval of its own: one point per device is written each time
+#   the scraper completes a read.
+# - Every setting below except transport/host/database is optional; the values shown are
+#   the defaults.
 
-# Connection monitoring settings (optional)
-reconnect_attempts = 5
-reconnect_delay = 5.0
-connection_timeout = 10
-
-# Exponential backoff settings (optional)
-use_exponential_backoff = true
-max_reconnect_delay = 300.0
-
-# Periodic reconnection settings (optional)
-periodic_reconnect_interval = 14400.0
-
-# Persistent storage for long-term outages (optional)
-enable_persistent_storage = true
-persistent_storage_path = influxdb_backlog
-max_backlog_size = 10000
-max_backlog_age = 86400
-
-# Example bridge configuration
-[modbus_rtu_source]
-type = modbus_rtu
+# ---------------------------------------------------------------------------
+# Source device (scraper) that feeds the bridge
+# ---------------------------------------------------------------------------
+[transport.growatt_inverter]
+transport = modbus_rtu
 port = /dev/ttyUSB0
 baudrate = 9600
 protocol_version = growatt_2020_v1.24
 device_serial_number = 123456789
-bridge = influxdb_output
+device_manufacturer = Growatt
+device_model = SPH3000
+read_interval = 15
+bridge = transport.influxdb
+
+# ---------------------------------------------------------------------------
+# InfluxDB v1 bridge (influxdb_out)
+# ---------------------------------------------------------------------------
+[transport.influxdb]
+transport = influxdb_out
+host = localhost
+port = 8086
+database = solar
+username =
+password =
+measurement = device_data
+
+# Point content
+include_timestamp = true        # keep true when the persistent backlog is enabled
+include_device_info = true      # writes device_* tags; leave on when several devices share a measurement
+force_float = true              # store numeric fields as floats to avoid field type conflicts
+use_utc_timestamp = false       # zone the bridge reports to the admin screens; stored epoch time is unaffected
+
+# Batching: a flush happens only when a new point arrives and either batch_size points
+# are waiting or batch_timeout seconds have passed since the last write.
+batch_size = 100
+batch_timeout = 10.0
+
+# Connection monitoring (routine checks run at most every 300 s while data is flowing).
+# Reconnect waits block the calling thread; keep them short in sequential read mode.
+connection_timeout = 10
+reconnect_attempts = 5
+reconnect_delay = 5.0
+use_exponential_backoff = true
+max_reconnect_delay = 300.0
+periodic_reconnect_interval = 14400.0   # 0 disables
+
+# Persistent backlog for outages. The path is relative to the MPG install directory
+# (/app in Docker; mount a volume there to keep the backlog across container recreation).
+# Each point is stored once, so max_backlog_size is the real capacity.
+enable_persistent_storage = true
+persistent_storage_path = backlogs
+max_backlog_size = 10000
+max_backlog_age = 86400                 # applied when the backlog file is loaded
+
+# Stale data detection: a source returning identical values for stale_data_timeout seconds
+# gets a reconnect request and an alert, at most max_stale_attempts times,
+# retry_delay_mins apart.
+stale_data_timeout = 300
+max_stale_attempts = 3
+retry_delay_mins = 5
+
+# Optional: local path to InfluxDB's data directory, used only for the on-disk size
+# in the Storage Overview panel.
+# data_dir = /var/lib/influxdb/data
+
+log_level = INFO
+
+# ---------------------------------------------------------------------------
+# InfluxDB v3 bridge (influxdb3_out) - use instead of, or alongside, the v1 bridge above.
+# Point a scraper at it with: bridge = transport.influxdb3
+# ---------------------------------------------------------------------------
+# [transport.influxdb3]
+# transport = influxdb3_out
+# host = http://localhost               # include https:// for TLS / InfluxDB Cloud; a bare host gets http://
+# port = 8181                           # optional; overrides a port embedded in host
+# database = solar
+# token = apiv3_your_token_here
+# org =                                 # only needed for some InfluxDB Cloud setups
+# measurement = device_data             # written as a table in v3
+# auto_create_database = true           # false: refuse to connect if the database is missing
 #
+# include_timestamp = true
+# include_device_info = true
+# force_float = true
+# use_utc_timestamp = false
+# batch_size = 100
+# batch_timeout = 10.0
+#
+# connection_timeout = 10               # v3: HTTP side calls only (pprof probe, edition check, delete requests)
+# reconnect_attempts = 5
+# reconnect_delay = 5.0
+# use_exponential_backoff = true
+# max_reconnect_delay = 300.0
+# periodic_reconnect_interval = 14400.0
+#
+# enable_persistent_storage = true
+# persistent_storage_path = backlogs
+# max_backlog_size = 10000
+# max_backlog_age = 86400
+#
+# stale_data_timeout = 300
+# max_stale_attempts = 3
+# retry_delay_mins = 5
+#
+# Optional, Storage Overview panel only:
+# object_store_dir = /var/lib/influxdb3/object_store
+# debug_pprof_url =
+#
+# log_level = INFO
