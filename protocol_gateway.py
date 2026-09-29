@@ -33,12 +33,12 @@ from classes.WebServer.database import session_scope
 from classes.WebServer.main import NoSignalServer, start_webserver
 from classes.WebServer.models import ConfigBackup
 
-# Check if Python version is greater than 3.10
+# Check if Python version is greater than 3.11
 if sys.version_info < (3, 10):
     print("==================================================")
-    print("WARNING: python version 3.10 or higher is required")
+    print("WARNING: python version 3.11 or higher is required")
     print("Current version: " + sys.version)
-    print("Please upgrade your python version to 3.10")
+    print("Please upgrade your python version to 3.11 or higher to run this program.")
     print("==================================================")
     time.sleep(4)
 
