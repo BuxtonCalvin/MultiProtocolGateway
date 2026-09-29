@@ -128,6 +128,7 @@ class influxdb_out(transport_base):
 
     # Persistent storage runtime state
     backlog_file: Optional[Path] = None
+    _closed: bool = False  # set by close(); makes close()/cleanup()/__del__ idempotent
     backlog_points: list[InfluxPoint]
 
     def __init__(self, settings: TransportSettings) -> None:
@@ -264,19 +265,46 @@ class influxdb_out(transport_base):
                 priority=1
             )
 
-    def _add_to_backlog(self, point: InfluxPoint) -> None:
-        """Add a point to the persistent backlog."""
-        if not self.enable_persistent_storage:
+    def _add_points_to_backlog(self, points: list[InfluxPoint]) -> None:
+        """Append points to the persistent backlog and save the file once.
+
+        Trims the oldest points if the backlog exceeds max_backlog_size.
+        _backlog_time is always UTC Unix time regardless of the timezone setting.
+        If persistent storage is disabled the points are discarded with a warning.
+        """
+        if not points:
             return
 
-        point["_backlog_time"] = time.time()
-        self.backlog_points.append(point)
+        if not self.enable_persistent_storage:
+            self._log.warning(f"Persistent storage disabled, {len(points)} point(s) will be lost")
+            return
 
-        if len(self.backlog_points) > self.max_backlog_size:
-            removed: InfluxPoint = self.backlog_points.pop(0)
-            self._log.warning(f"Backlog full, removed oldest point: {removed.get('measurement', 'unknown')}")
+        stamp: float = time.time()
+        for point in points:
+            point["_backlog_time"] = stamp
+        self.backlog_points.extend(points)
+
+        overflow: int = len(self.backlog_points) - self.max_backlog_size
+        if overflow > 0:
+            del self.backlog_points[:overflow]
+            self._log.warning(f"Backlog full, removed {overflow} oldest point(s)")
 
         self._save_backlog()
+
+    def _add_to_backlog(self, point: InfluxPoint) -> None:
+        """Add a single point to the persistent backlog."""
+        self._add_points_to_backlog([point])
+
+    def _drain_batch_to_backlog(self) -> None:
+        """Move (not copy) any pending in-memory batch points into the backlog.
+
+        Used by the offline path so each point lives in exactly one place and
+        chronological order is preserved.
+        """
+        with self._batch_lock:
+            pending: list[InfluxPoint] = self.batch_points
+            self.batch_points = []
+        self._add_points_to_backlog(pending)
 
     def _flush_backlog(self) -> None:
         """Write all backlog points to InfluxDB."""
@@ -318,6 +346,7 @@ class influxdb_out(transport_base):
     def connect(self) -> bool:
         """Initialize the InfluxDB client connection."""
         self._log.info("influxdb_out connect")
+        self._closed = False
 
         try:
             self.client = InfluxDBClient(
@@ -750,24 +779,32 @@ class influxdb_out(transport_base):
 
         return point
 
+    def _row_changed(self, state: StaleRegistryState, row: DataPayload) -> bool:
+        """
+        True if any field in `row` differs from the row the current unchanged period started with.
+        Numeric comparisons use math.isclose to avoid false positives from floating point noise.
+        """
+        for key, val in row.items():
+            prev: int | float | str | None = state["last_row"].get(key)
+            if isinstance(val, (int, float)) and isinstance(prev, (int, float)):
+                if not math.isclose(val, prev, rel_tol=1e-4, abs_tol=1e-6):
+                    return True
+            elif val != prev:
+                return True
+        return False
+
     def _check_is_stale(self, transport_id: str, row: DataPayload, timestamp: datetime) -> bool:
         """
-        Compares the incoming data payload against the last seen payload for this
-        transport. Returns True if data is identical and has been so for longer
-        than stale_data_timeout seconds. Numeric comparisons use math.isclose
-        to avoid false positives from floating point noise.
+        Returns True if the incoming data payload is identical to the payload that started the
+        current unchanged period for this transport, and has been unchanged for longer than
+        stale_data_timeout seconds.
         """
         state: StaleRegistryState | None = self._stale_registry.get(transport_id)
         if not state:
             return False
 
-        for key, val in row.items():
-            prev: int | float | str | None = state["last_row"].get(key)
-            if isinstance(val, (int, float)) and isinstance(prev, (int, float)):
-                if not math.isclose(val, prev, rel_tol=1e-4, abs_tol=1e-6):
-                    return False
-            elif val != prev:
-                return False
+        if self._row_changed(state, row):
+            return False
 
         elapsed: timedelta = timestamp - state["start_ts"]
         return elapsed > timedelta(seconds=self.stale_data_timeout)
@@ -776,9 +813,12 @@ class influxdb_out(transport_base):
     def _commit_transport_state(self, transport_id: str, row: DataPayload, timestamp: datetime, is_stale: bool) -> None:
         """
         Updates the stale registry for this transport after each write_data call.
-        On fresh data resets all counters. On first stale detection triggers
-        _handle_stale_event once per stale period — subsequent calls within the
-        same stale window are no-ops until data changes and resets the state.
+
+        - Changed data resets the unchanged-period timer and all counters.
+        - Unchanged data that has not yet reached stale_data_timeout leaves the timer running
+          (start_ts is only reset when the data actually changes).
+        - Stale data calls _handle_stale_event on every write; that method caps reconnect
+          requests at max_stale_attempts and spaces them at least retry_delay_mins apart.
         """
         if transport_id not in self._stale_registry:
             self._stale_registry[transport_id] = {
@@ -795,17 +835,15 @@ class influxdb_out(transport_base):
             f"elapsed: {timestamp - state['start_ts']}"
         )
 
-        if not is_stale:
-            # Fresh data — reset everything including the throttle timer
+        if self._row_changed(state, row):
+            # Fresh data — restart the unchanged period and clear the throttle
             state.update({
                 "last_row": dict(row), "start_ts": timestamp,
                 "is_stale": False, "stale_event_count": 0,
                 "last_event_ts": None,
             })
-        elif not state["is_stale"]:
-            # First detection of staleness for this period — trigger once only
+        elif is_stale:
             state["is_stale"] = True
-            state["last_event_ts"] = timestamp
             elapsed: timedelta = timestamp - state["start_ts"]
             self._handle_stale_event(transport_id, timestamp, elapsed)
 
@@ -914,24 +952,18 @@ class influxdb_out(transport_base):
 
 
     def _process_and_store_data(self, data: DataPayload, from_transport: transport_base) -> None:
-        """Build a point and place it in the persistent backlog (offline path)."""
+        """Build a point and place it in the persistent backlog (offline path).
+
+        Any points still pending in the write batch are moved into the backlog first,
+        so every point is stored exactly once and in capture order.
+        """
         if not self.enable_persistent_storage:
             self._log.warning("Persistent storage disabled, data will be lost")
             return
 
         point: InfluxPoint = self._create_influxdb_point(data, from_transport)
-        self._add_to_backlog(point)
-
-        should_flush: bool = False
-        with self._batch_lock:
-            self.batch_points.append(point)
-            current_time: float = time.time()
-            if (len(self.batch_points) >= self.batch_size or
-                    (current_time - self.last_batch_time) >= self.batch_timeout):
-                should_flush = True
-
-        if should_flush:
-            self._flush_batch()
+        self._drain_batch_to_backlog()
+        self._add_points_to_backlog([point])
 
     def _process_and_write_data(self, data: DataPayload, from_transport: transport_base) -> None:
         """Build a point and add it to the write batch (online path)."""
@@ -958,8 +990,7 @@ class influxdb_out(transport_base):
 
         if not self._check_connection():
             self._log.warning("Not connected to InfluxDB, storing batch in backlog")
-            for point in points_to_write:
-                self._add_to_backlog(point)
+            self._add_points_to_backlog(points_to_write)
             return
 
         try:
@@ -989,12 +1020,10 @@ class influxdb_out(transport_base):
 
                 except Exception as retry_e:
                     self._log.error(f"Failed to write batch after reconnection: {retry_e}")
-                    for point in points_to_write:
-                        self._add_to_backlog(point)
+                    self._add_points_to_backlog(points_to_write)
                     self.connected = False
             else:
-                for point in points_to_write:
-                    self._add_to_backlog(point)
+                self._add_points_to_backlog(points_to_write)
                 self.connected = False
 
     # ------------------------------------------------------------------
@@ -1005,18 +1034,51 @@ class influxdb_out(transport_base):
         """Initialize bridge — not needed for InfluxDB output."""
         pass
 
+    def _write_pending_on_close(self) -> None:
+        """Shutdown path: write pending batch points if connected, otherwise persist them.
+
+        Unlike _flush_batch this never attempts a reconnect, so shutdown/reload
+        is never delayed by backoff sleeps.
+        """
+        with self._batch_lock:
+            pending: list[InfluxPoint] = self.batch_points
+            self.batch_points = []
+        if not pending:
+            return
+
+        if self.connected and self.client is not None:
+            client: Any = self.client  # influxdb client methods are untyped
+            try:
+                client.write_points(pending)
+                self._log.info(f"Wrote {len(pending)} pending points to InfluxDB during shutdown")
+            except Exception as e:
+                self._log.error(f"Failed to write pending points during shutdown: {e}")
+            else:
+                return
+
+        self._add_points_to_backlog(pending)
+
+    def cleanup(self) -> None:
+        """Called by the gateway on stop/reload: save pending points, close the client, mark disconnected."""
+        self.close()
+        super().cleanup()
+
     def close(self) -> None:
         """
         Gracefully terminate the connection.
-        Flushes pending metric batches and closes persistent network sockets.
+        Writes (or backlogs) pending batch points and closes the client. Safe to call more than once.
         """
-        self._log.info("Closing InfluxDB v3 transport bridge...")
+        if self._closed:
+            return
+        self._closed = True
+
+        self._log.info("Closing InfluxDB v1 transport bridge...")
 
         if getattr(self, "batch_points", None):
             try:
-                self._flush_batch()
+                self._write_pending_on_close()
             except Exception as e:
-                self._log.error(f"Failed to flush batch during explicit close: {e}")
+                self._log.error(f"Failed to save pending points during close: {e}")
 
         client: InfluxDBClient | None = getattr(self, "client", None)
         if client is not None:
@@ -1030,7 +1092,7 @@ class influxdb_out(transport_base):
                 self.client = None
 
         self.connected = False
-        self._log.info("InfluxDB v3 transport bridge closed cleanly.")
+        self._log.info("InfluxDB v1 transport bridge closed cleanly.")
 
 
     def __del__(self) -> None:

@@ -71,7 +71,6 @@
   "measurement": "InfluxDB measurement name used as the table/series identifier for all data points written by this transport.",
   "metric_prefix": "Prefix for Prometheus metric names.",
   "metrics_path": "Path for the Prometheus metrics endpoint.",
-  "mgmt_api_url": "Basic URL to the the Influxdb3 database.  Used to determine the healthcheck of the database.  Default is self.host}/api/v3/databases.",
   "migrate_data": "Migrate existing data to the new TimescaleDB schema on startup if schema changes are detected.",
   "modbus_delay": "Delay in milliseconds inserted between consecutive Modbus requests. Helps prevent bus saturation on slower devices.",
   "modbus_delay_increment": "Increment or decrement the modbus delay based on active performance.  Default is 0.05 seconds",
