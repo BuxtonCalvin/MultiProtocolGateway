@@ -64,6 +64,37 @@ categories:
       labels:
         - "documentation"
         - "docs"
+categories:
+  - title: '🚨 Breaking Changes'
+    when: { labels: [ 'major', 'breaking' ] }
+  - title: '🚀 Features'
+    when: { labels: [ 'minor', 'feature', 'enhancement' ] }
+  - title: '🐛 Bug Fixes'
+    when: { labels: [ 'patch', 'fix', 'bugfix', 'bug' ] }
+  - title: '🧰 Maintenance'
+    when:
+      labels: [ 'chore', 'dependencies', 'ci', 'github-actions', 'docker', 'python' ]
+  - title: '📚 Documentation'
+    when: { labels: [ 'documentation', 'docs' ] }
+  - title: 'Exclude'
+    type: 'pre-exclude'
+    when: { label: 'skip-changelog' }
+  - title: 'Major Resolver'
+    type: 'version-resolver'
+    'semver-increment': 'major'
+    when: { labels: [ 'major', 'breaking' ] }
+  - title: 'Minor Resolver'
+    type: 'version-resolver'
+    'semver-increment': 'minor'
+    when: { labels: [ 'minor', 'feature', 'enhancement' ] }
+  - title: 'Patch Resolver'
+    type: 'version-resolver'
+    'semver-increment': 'patch'
+    when:
+      labels: [ 'patch', 'fix', 'bugfix', 'bug', 'chore', 'dependencies', 'documentation' ]
+  - title: 'Default Patch Resolver'
+    type: 'version-resolver'
+    'semver-increment': 'patch'
 
   - type: "pre-exclude"
     when:
