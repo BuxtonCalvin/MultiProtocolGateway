@@ -158,7 +158,7 @@ def _write_mask_screen_files(db: Session, project_root: Path) -> dict[str, int]:
         # own name — same for a synthetic field's code (there isn't one, so
         # a synthetic selection has no file representation at all; it can
         # only reach the data stream via its own always-forwarded path).
-        registers: list[Row[tuple[DeviceProtocolSelection, ProtocolRegister]]] = (
+        registers: list[Row[DeviceProtocolSelection, ProtocolRegister]] = (
             db.query(DeviceProtocolSelection, ProtocolRegister)
             .join(
                 ProtocolRegister,

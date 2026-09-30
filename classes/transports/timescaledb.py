@@ -23,7 +23,7 @@ You can find a copy of the GNU Affero General Public License in the documentatio
 If not, see <https://www.gnu.org>.
 ----------------------------------------------------------------------------------------------------------------------
 timescaledb transport bridge module (with rollup continuous aggregates) and persistent disk backlog.
-python > 3.11 is required, 3.14 is recommended for best performance and latest features.
+python 3.11 or higher is required, 3.13 is recommended for best performance and latest features.
 The transport uses the latest SQLAlchemy version for database interactions and supports automatic schema management,
 including dynamic column creation based on the protocol registry, hypertable setup, and continuous
 aggregate rollups for efficient querying of historical data.
@@ -77,7 +77,9 @@ from typing import (
     Protocol,
     Sequence,
     Tuple,
+    TypeAlias,
     Union,
+    Unpack,
     cast,
 )
 
@@ -118,7 +120,6 @@ from sqlalchemy.orm import (
     sessionmaker,
 )
 from sqlalchemy.orm.session import Session
-from typing_extensions import TypeAlias, Unpack
 from tzlocal import get_localzone_name
 
 from classes.protocol_settings import (
@@ -463,7 +464,7 @@ class TimescaleDBConnectionManager:
         try:
             default_engine: Engine = create_engine(default_url, isolation_level="AUTOCOMMIT", pool_pre_ping=True)
             with default_engine.connect() as conn:
-                row: AnyRow | None = conn.execute(
+                row: Row[int] | None = conn.execute(
                     text("SELECT 1 FROM pg_database WHERE datname = :d"),
                     {"d": self.database}
                 ).fetchone()
@@ -576,13 +577,16 @@ class timescaledb(transport_base):
     enable_auto_refresh: bool = True  # whether to auto-refresh rollups periodically
     drop_after: str = "1 year"  # default retention policy for raw data in tables and views, can be overridden by settings SectionProxy
 
-    # stale data settings and fields.  Stale data is read per transport batch based on the timestamp of the last row of metrics data received.
-    # If the current time exceeds that timestamp by more than the stale_data_timeout, then the transport will consider the data to be stale
-    # and trigger a cleanup of incomplete batches in the database, as well as an optional upstream reconnect if request_upstream_reconnect
-    # callback is set by the user.
-    stale_data_timeout: int = 300       # seconds before considering data stale for incomplete batch cleanup
-    max_stale_attempts: int = 3         # Number of times to read the data stream to determine if it's stale.
-    retry_delay_mins: int = 5
+    # stale data settings and fields.  Staleness is evaluated per transport (scraper) on each batch that reaches the flush worker.
+    # A batch is stale when every metric value in it is unchanged (within a small numeric tolerance) from the last fresh batch
+    # AND that has been true for longer than stale_data_timeout seconds.  Stale batches are NOT written to the database (neither
+    # the narrow nor the wide table); writing resumes as soon as any value changes.
+    # While a transport remains stale, the transport asks the gateway (via the request_upstream_reconnect callback) to reconnect the
+    # scraper, at most max_stale_attempts times per stale period, waiting at least retry_delay_mins minutes between requests.
+    # A stale alert notification is sent with each request.  Both counters reset as soon as fresh data arrives.
+    stale_data_timeout: int = 300       # SECONDS a reading must be unchanged before it is considered stale (300 = 5 minutes)
+    max_stale_attempts: int = 3         # max upstream reconnect requests per stale period; 0 disables reconnect requests and stale alerts
+    retry_delay_mins: int = 5           # MINUTES to wait between upstream reconnect requests while data remains stale
 
     current_metric_count: int = 0
 
@@ -616,14 +620,16 @@ class timescaledb(transport_base):
             - hypertable_defaults: Dicts for hypertable narrow and wide creation and policies
             - max_backlog_age (int): Max age (seconds) for backlog points (default: 86400) 24 hours
             - max_backlog_size (int): Max backlog points (default: 10000)
-            - max_reconnect_delay (int): Max reconnect delay (default: 300)
+            - max_reconnect_delay (int): Max reconnect delay in seconds (default: 300 = 5 minutes)
+            - max_stale_attempts (int): Max upstream reconnect requests per stale period; 0 disables (default: 3)
             - migrate_data: whether to attempt to migrate existing data when creating hypertables and rollups. Set to False to skip migration and start fresh with new schema.
             - password (str): Database password
             - port (int): Database port (default: 5432)
             - reconnect_attempts (int): Max reconnect attempts (default: 5)  if set to 0, no limit.
-            - reconnect_delay (int): Initial reconnect delay (default: 5)
+            - reconnect_delay (int): Initial reconnect delay in seconds (default: 5)
             - rollup_defaults: dict for rollup settings
-            - stale_data_timeout (int): Seconds before considering data stale for incomplete batch cleanup (default: 300)
+            - retry_delay_mins (int): Minutes between upstream reconnect requests while data is stale (default: 5)
+            - stale_data_timeout (int): Seconds a reading must be unchanged before it is stale and skipped (default: 300 = 5 minutes)
             - use_exponential_backoff (bool): Use exponential backoff (default: True)
             - use_utc_timestamp (bool): Use UTC timezone for all timestamps instead of local machine timezone (default: False)
             - username (str): Database username
@@ -673,6 +679,9 @@ class timescaledb(transport_base):
 
         # stale data settings
         self.stale_data_timeout: int = settings.getint("stale_data_timeout", fallback=self.stale_data_timeout)
+        # negative values make no sense for either; clamp to 0 (0 attempts = reconnect requests/alerts disabled, 0 delay = no throttle)
+        self.max_stale_attempts: int = max(0, settings.getint("max_stale_attempts", fallback=self.max_stale_attempts))
+        self.retry_delay_mins: int = max(0, settings.getint("retry_delay_mins", fallback=self.retry_delay_mins))
         # wait for complete data to write to db.
         self.write_requires_complete_cycle: bool = settings.getboolean("write_requires_complete_cycle", fallback=self.write_requires_complete_cycle)
 
@@ -851,7 +860,7 @@ class timescaledb(transport_base):
             self._set_tsdb_connected(conn_value = False, conn_reason = "Initial TSDB connect was not successful")
         """
             Attribute:
-            request_upstream_reconnect (Callable[[], None] | None):
+            request_upstream_reconnect (Callable[[str], None] | None):  (called with the stale transport's id)
             Optional callback function that, if set by the user,
             will be called to trigger an source data reconnect when stale data is detected or a reconnect is required.
 
@@ -1806,7 +1815,7 @@ class timescaledb(transport_base):
         """
         with self.SessionFactory() as session:
             try:
-                rows: Sequence[AnyRow] = session.execute(
+                rows: Sequence[Row[str, str | None, bool]] = session.execute(
                     text("""
                         SELECT protocol_name, wide_table_name,
                             rollup_setup_complete
@@ -1866,7 +1875,7 @@ class timescaledb(transport_base):
         """
         with self.SessionFactory() as session:
             try:
-                rows: Sequence[AnyRow] = session.execute(
+                rows: Sequence[Row[str, str, str]] = session.execute(
                     text("""
                         SELECT mc.metric_name, mc.clean_column_name, mc.data_type
                         FROM metric_catalog mc
@@ -2270,10 +2279,12 @@ class timescaledb(transport_base):
                                 # to the narrow table, by applying the timestamp and device_info_id to each metric/value pair.
                                 self._flush_batch_narrow(narrow_data, device_info_id, timestamp, session, transport_name)
 
-                                # Only attempt to write to the wide table if the row is valid and the table name is known.
-                                # If the row fails validation, it may indicate a schema mismatch between the incoming data
-                                # and the existing wide table columns — in this case we skip the wide table write to prevent data loss,
-                                # but still write to the narrow table which is schema-flexible and can accept all incoming data.
+                                # The wide row is inserted whenever the wide table name is known -- valid_row only changes the log message.
+                                # If validation reported missing columns (fewer_keys: a column still exists on the wide table but its metric
+                                # is no longer in the scrape), the insert still happens and those columns are stored as NULL.
+                                # The opposite mismatch (extra_keys: a scraped metric with NO wide column, e.g. the column was deleted while
+                                # the metric is still in the variable_mask) never reaches this point: _validate_wide_row raises ValueError
+                                # before this try block, and the outer handler drops the whole batch -- narrow AND wide -- for that cycle.
                                 if wide_table_name is not None:
                                     target_table: Table = Base.metadata.tables[wide_table_name]
                                     stmt: Insert = pg_insert(target_table).values(**wide_data)
@@ -2512,11 +2523,11 @@ class timescaledb(transport_base):
                 "is_stale": False, "stale_event_count": 0,   # ← counter resets here on recovery
                 "last_event_ts": None                        # ← also reset the throttle timer
             })
-        elif is_stale and not state["is_stale"]:
-            # Only trigger the event ONCE per stale period
+        else:
+            # Stale batch.  Mark the stale period, then hand off to _handle_stale_event on EVERY stale batch: it owns the
+            # max_stale_attempts cap and the retry_delay_mins throttle, so calling it repeatedly is what lets retries happen.
+            # last_event_ts must be left alone here (None on the first stale batch) or the throttle would swallow the first request.
             state["is_stale"] = True
-            state["last_event_ts"] = timestamp
-
             elapsed = timestamp - state["start_ts"]
             self._handle_stale_event(transport_id, timestamp, elapsed)
 
@@ -2594,7 +2605,11 @@ class timescaledb(transport_base):
 
     def _handle_stale_event(self, transport_id: str, current_time: datetime, total_stale_elapsed: timedelta) -> None:
         """
-        Triggers a reconnect for a specific transport (max X times) with a gap between attempts.
+        Requests an upstream reconnect for a stale transport, at most max_stale_attempts times per stale period, with at least
+        retry_delay_mins minutes between requests, and sends a stale alert notification with each request.
+
+        Called for every stale batch (see _commit_transport_state); returns without doing anything when the attempt cap has been
+        reached (including max_stale_attempts = 0) or the retry delay has not yet elapsed.  Counters reset when fresh data arrives.
         """
         state = self._stale_registry.get(transport_id)
         if not state:
@@ -3633,7 +3648,7 @@ class HyperTableManager:
         }]
 
         with self.SessionFactory() as session:
-            protocol_rows: Sequence[AnyRow] = session.execute(
+            protocol_rows: Sequence[Row[str, str | None, str]] = session.execute(
                 text("""
                     SELECT protocol_name, rollup_prefix, wide_table_name
                     FROM protocol_registry
@@ -3848,7 +3863,7 @@ class HyperTableManager:
         re-enable them afterward.
         """
         try:
-            rows: Sequence[AnyRow] = session.execute(
+            rows: Sequence[Row[int]] = session.execute(
                 text("""
                     SELECT job_id FROM timescaledb_information.jobs
                     WHERE hypertable_name = :table_name
@@ -4427,7 +4442,7 @@ class HyperTableManager:
 
         try:
             with self.SessionFactory() as session:
-                protocol_rows: Sequence[AnyRow] = session.execute(
+                protocol_rows: Sequence[Row[str, str]] = session.execute(
                     text("""
                         SELECT protocol_name, wide_table_name
                         FROM protocol_registry
@@ -4634,7 +4649,7 @@ class HyperTableManager:
 
         try:
             with self.SessionFactory() as session:
-                rows: Sequence[AnyRow] = session.execute(
+                rows: Sequence[Row[str, int | None]] = session.execute(
                     text("SELECT transport, metric_count FROM device_info WHERE transport = ANY(:transports)"),
                     {"transports": list(relevant_transports.keys())},
                 ).fetchall()
@@ -6250,7 +6265,7 @@ class RollupManager:
             # schema) and follows the same "rollup_wide__<suffix>" naming
             # _ensure_cagg_views_for_protocol derives from wide_table_name --
             # the two must stay in sync.
-            protocol_rows: Sequence[AnyRow] = session.execute(
+            protocol_rows: Sequence[Row[str, str | None, str]] = session.execute(
                 text("""
                     SELECT protocol_name, rollup_prefix, wide_table_name
                     FROM protocol_registry
@@ -6373,7 +6388,7 @@ class RollupManager:
         rebuild_narrow: bool = protocol_names is None or "shared_narrow" in protocol_names
 
         with self.SessionFactory() as session:
-            protocol_rows: Sequence[AnyRow] = session.execute(
+            protocol_rows: Sequence[Row[str, str]] = session.execute(
                 text("""
                     SELECT protocol_name, wide_table_name
                     FROM protocol_registry
@@ -6523,7 +6538,7 @@ class RollupManager:
         }
 
         with self.SessionFactory() as session:
-            protocol_rows: Sequence[AnyRow] = session.execute(
+            protocol_rows: Sequence[Row[str, str | None]] = session.execute(
                 text("""
                     SELECT protocol_name, rollup_prefix
                     FROM protocol_registry
@@ -6702,7 +6717,7 @@ class RollupManager:
 
         try:
             with self.SessionFactory() as session:
-                protocol_rows: Sequence[AnyRow] = session.execute(
+                protocol_rows: Sequence[Row[str, str | None]] = session.execute(
                     text("""
                         SELECT protocol_name, rollup_prefix
                         FROM protocol_registry
@@ -6904,7 +6919,7 @@ class RollupManager:
         # Then per-protocol wide views
         try:
             with self.SessionFactory() as session:
-                rows: Sequence[AnyRow] = session.execute(
+                rows: Sequence[Row[str]] = session.execute(
                     text("""
                         SELECT rollup_prefix
                         FROM protocol_registry
@@ -6930,7 +6945,7 @@ class RollupManager:
     def _view_exists_conn_helper(self, conn: Connection, view_name: str) -> bool:
         """Session-free variant of _view_exists for use inside autocommit engine.connect() blocks."""
         try:
-            result: AnyRow | None = conn.execute(
+            result: Row[int] | None = conn.execute(
                 text("SELECT 1 FROM timescaledb_information.continuous_aggregates WHERE view_name = :name"),
                 {"name": view_name}
             ).fetchone()
@@ -6959,11 +6974,11 @@ class RollupManager:
         r_settings: dict[str, Any] = self.hypertable_mgr.get_dynamic_settings_helper()
         try:
             # 1. Fetch current aggregates
-            result: Result[Any] = session.execute(text("""
+            result: Result[str, str] = session.execute(text("""
                 SELECT view_schema, view_name
                 FROM timescaledb_information.continuous_aggregates;
             """))
-            views: Sequence[AnyRow] = result.fetchall()
+            views: Sequence[Row[str, str]] = result.fetchall()
 
             if not views:
                 self._log.info("No continuous aggregates found to drop.")
@@ -6973,7 +6988,7 @@ class RollupManager:
             # This prevents internal _partial_view dependencies from blocking the drop.
             priority_map: dict[str, int] = {"monthly": 4, "weekly": 3, "daily": 2, "hourly": 1}
 
-            def get_drop_rank(v_tuple: AnyRow) -> int:
+            def get_drop_rank(v_tuple: Row[str, str]) -> int:
                 name_lower: str = v_tuple[1].lower()
                 for key, val in priority_map.items():
                     if key in name_lower:
@@ -6981,7 +6996,7 @@ class RollupManager:
                 return 0
 
             # Sort descending: 4 (Weekly) drops first, 1 (Hourly) drops last.
-            sorted_views: List[AnyRow] = sorted(views, key=get_drop_rank, reverse=True)
+            sorted_views: List[Row[str, str]] = sorted(views, key=get_drop_rank, reverse=True)
 
             # 3. Iterate and drop each view safely
             for schema, name in sorted_views:
@@ -7487,7 +7502,7 @@ class RollupManager:
         """)
 
         try:
-            ghosts: Sequence[AnyRow] = session.execute(detect_sql).fetchall()
+            ghosts: Sequence[Row[int, str | None, str, int | None]] = session.execute(detect_sql).fetchall()
 
             if not ghosts:
                 self._log.info("All background workers healthy.")
@@ -7771,7 +7786,7 @@ class BridgeAdminManager:
                         metrics) and therefore has no wide table to edit.
         """
         with self.SessionFactory() as session:
-            row: AnyRow | None = session.execute(
+            row: Row[int, str | None] | None = session.execute(
                 text("""
                     SELECT protocol_id, wide_table_name
                     FROM protocol_registry
@@ -7817,7 +7832,7 @@ class BridgeAdminManager:
         per protocol to resolve its table name.
         """
         with self.SessionFactory() as session:
-            rows: Sequence[AnyRow] = session.execute(
+            rows: Sequence[Row[str, str]] = session.execute(
                 text("""
                     SELECT protocol_name, wide_table_name FROM protocol_registry
                     WHERE wide_table_name IS NOT NULL
@@ -7876,7 +7891,7 @@ class BridgeAdminManager:
         protocol_id, _wide_table_name = self._resolve_wide_table(protocol_name)
 
         with self.SessionFactory() as session:
-            rows: Sequence[AnyRow] = session.execute(
+            rows: Sequence[Row[str, str, str, float | None, str | None]] = session.execute(
                 text("""
                     SELECT metric_name, clean_column_name, data_type, unit_mod, notes
                     FROM metric_catalog
@@ -8209,7 +8224,7 @@ class BridgeAdminManager:
         to build a SELECT/UPDATE column list), never trusted directly.
         """
         with self.SessionFactory() as session:
-            rows: Sequence[AnyRow] = session.execute(
+            rows: Sequence[Row[int, str, str]] = session.execute(
                 text("SELECT catalog_id, clean_column_name, data_type FROM metric_catalog WHERE protocol_id = :pid"),
                 {"pid": protocol_id},
             ).fetchall()
@@ -8236,7 +8251,7 @@ class BridgeAdminManager:
         if not metric_names:
             return kinds
         with self.SessionFactory() as session:
-            rows: Sequence[AnyRow] = session.execute(
+            rows: Sequence[Row[str, bool]] = session.execute(
                 text(f"""
                     SELECT metric_name, bool_or(metric_ascii IS NOT NULL) AS is_text
                     FROM {table_name}
@@ -8281,7 +8296,7 @@ class BridgeAdminManager:
         """
         table_name, _protocol_id = self._resolve_metric_edit_table(table_kind, protocol_name)
         with self.SessionFactory() as session:
-            rows: Sequence[AnyRow] = session.execute(
+            rows: Sequence[Row[int, str | None, str | None]] = session.execute(
                 text(f"""
                     SELECT d.device_info_id, d.device_identifier, d.device_name
                     FROM device_info d
@@ -8323,7 +8338,7 @@ class BridgeAdminManager:
         table_name, _protocol_id = self._resolve_metric_edit_table(table_kind, protocol_name)
         with self.SessionFactory() as session:
             if device_info_id is not None:
-                rows: Sequence[AnyRow] = session.execute(
+                rows: Sequence[Row[str]] = session.execute(
                     text(f"""
                         SELECT DISTINCT metric_name FROM {table_name}
                         WHERE device_info_id = :did
@@ -8379,7 +8394,7 @@ class BridgeAdminManager:
                     {"did": device_info_id, "names": field_names, "start": start_time, "end": end_time},
                 ).scalar_one()
 
-                sample_rows: Sequence[AnyRow] = session.execute(
+                sample_rows: Sequence[Row[datetime, str, float | None, str | None]] = session.execute(
                     text(f"""
                         SELECT m_time, metric_name, metric_value, metric_ascii FROM {table_name}
                         WHERE device_info_id = :did
@@ -8417,7 +8432,7 @@ class BridgeAdminManager:
                     {"did": device_info_id, "start": start_time, "end": end_time},
                 ).scalar_one()
 
-                sample_rows = session.execute(
+                wide_sample_rows: Sequence[AnyRow] = session.execute(
                     text(f"""
                         SELECT m_time, {select_cols} FROM {table_name}
                         WHERE device_info_id = :did AND m_time BETWEEN :start AND :end
@@ -8426,7 +8441,7 @@ class BridgeAdminManager:
                     """),  # noqa: S608
                     {"did": device_info_id, "start": start_time, "end": end_time, "lim": sample_limit},
                 ).fetchall()
-                for r in sample_rows:
+                for r in wide_sample_rows:
                     m_time = r[0]
                     for i, col in enumerate(to_read, start=1):
                         sample.append(MetricValueSample(m_time=m_time, field_name=col, value=r[i]))
@@ -8892,7 +8907,7 @@ class BridgeAdminManager:
         tables: list[tuple[str, str]] = [("shared_narrow", "device_metrics_narrow")]
         try:
             with self.SessionFactory() as session:
-                wide_rows: Sequence[AnyRow] = session.execute(
+                wide_rows: Sequence[Row[str, str]] = session.execute(
                     text("""
                         SELECT protocol_name, wide_table_name
                         FROM protocol_registry

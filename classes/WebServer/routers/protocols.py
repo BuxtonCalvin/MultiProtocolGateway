@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, List, Tuple
+from typing import TYPE_CHECKING, Any, List
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -321,7 +321,7 @@ async def protocol_table_partial(
     if registry_type == "json":
         # Look up protocol_group so we can find the .json file
         with session_scope() as db:
-            row: Row[Tuple[str]] | None = (
+            row: Row[str] | None = (
                 db.query(ProtocolRegister.protocol_group)
                 .filter(ProtocolRegister.protocol_name == protocol_name)
                 .first()

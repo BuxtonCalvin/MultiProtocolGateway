@@ -444,6 +444,8 @@ erDiagram
         text device_name
         text device_manufacturer
         text device_model
+        text device_location
+        int metric_count
         text transport UK
     }
 
@@ -732,39 +734,45 @@ flowchart TD
 
 ## 11. Flowchart — TimescaleDB Write Routing
 
-The `timescaledb` bridge always writes the schema-flexible narrow table, and additionally upserts a per-protocol wide table when one exists. Failures during an outage fall back to a persistent disk backlog rather than dropping data.
+The `timescaledb` bridge writes the schema-flexible narrow table for every reading and, when the protocol has a wide table, also inserts one row into it, both in a single transaction. A stale reading is not written at all. A scraped metric that has no wide-table column causes the whole reading to be dropped for that cycle. Database failures during an outage fall back to a persistent disk backlog rather than dropping data.
 
 ```mermaid
 flowchart TD
-    A["write_data(metrics, from_transport)"] --> B["Enqueue payload on<br/>_flush_queue<br/>(async — write_data returns immediately)"]
+    A["write_data(metrics, from_transport)"] --> B["Stamp m_time, enqueue payload on<br/>_flush_queue<br/>(async — write_data returns immediately)"]
     B --> C["Flush worker thread<br/>dequeues payload"]
 
-    C --> D{"Is incoming data stale?<br/>(_check_is_stale vs last<br/>known timestamp)"}
-    D -- "Yes" --> D1["Skip DB write<br/>_commit_transport_state(is_stale=True)"]
+    C --> D{"Is incoming data stale?<br/>(_check_is_stale: every value unchanged<br/>for more than stale_data_timeout seconds)"}
+    D -- "Yes" --> D1["Nothing is written<br/>_commit_transport_state(is_stale=True)<br/>→ _handle_stale_event: request upstream reconnect<br/>(max_stale_attempts, retry_delay_mins) and send alert"]
     D -- "No" --> E["_process_raw_metrics()<br/>coerce types, clean column names<br/>→ narrow_data + wide_data"]
 
     E --> F["Resolve wide_table_name<br/>for this protocol<br/>(None if protocol metric_count >=<br/>WIDE_TABLE_COLUMN_LIMIT = 160)"]
+    F --> V{"wide_table_name<br/>is not None?"}
+    V -- "Yes" --> W["_validate_wide_row()<br/>(runs before the transaction)"]
+    V -- "No — too many metrics" --> K["Narrow-only for this protocol<br/>(logged once at schema registration)"]
 
-    F --> G["BEGIN transaction"]
-    G --> H["Always: insert into<br/>DeviceMetricsNarrow<br/>(one row per metric, schema-flexible)"]
+    W -- "scraped metric has no wide column<br/>(still missing after schema resync)" --> X["ValueError:<br/>whole reading dropped (narrow AND wide)<br/>logged as Fatal Flush Worker Crash"]
+    W -- "all columns present, or a column is<br/>missing from the scrape data (warning only)" --> G["BEGIN transaction"]
+    K --> G
+
+    G --> H["Always: insert into<br/>DeviceMetricsNarrow<br/>(one row per metric,<br/>ON CONFLICT DO NOTHING)"]
     H --> I{"wide_table_name<br/>is not None?"}
-    I -- "Yes" --> J["_validate_wide_row()<br/>then pg_insert ON CONFLICT upsert<br/>into DeviceMetricsWide"]
-    I -- "No — too many metrics" --> K["Narrow-only for this protocol<br/>(logged once at schema registration)"]
-
-    J & K & D1 --> L["COMMIT<br/>_commit_transport_state(is_stale=False)"]
+    I -- "Yes" --> J["Plain INSERT into DeviceMetricsWide<br/>(one row per device; NULL for any<br/>column missing from the scrape data)"]
+    I -- "No" --> L
+    J --> L["COMMIT<br/>_commit_transport_state(is_stale=False)"]
 
     G -.->|"SQLAlchemyError / ValueError"| M["ROLLBACK transaction"]
     M --> N{"enable_persistent_storage<br/>AND tsdb currently<br/>disconnected?"}
-    N -- "Yes" --> O["Enqueue payload to<br/>disk-backed BacklogManager<br/>for replay once reconnected"]
+    N -- "Yes" --> O["Enqueue payload to<br/>disk-backed BacklogManager (SQLite)<br/>for replay once reconnected"]
     N -- "No" --> P["Drop this batch,<br/>log error"]
-    M --> Q["_set_tsdb_connected(False)<br/>+ trigger reconnect thread"]
+    M -- "SQLAlchemyError only" --> Q["_set_tsdb_connected(False)<br/>+ trigger reconnect thread"]
 
-    R["RollupManager<br/>(background, out of write path)"] -.->|"auto-refresh every<br/>auto_refresh_interval (default 6h)"| S["hourly → daily → weekly →<br/>monthly continuous aggregates"]
+    R["RollupManager<br/>(background, out of write path)"] -.->|"auto-refresh every<br/>auto_refresh_interval (default 6h)"| S["hourly → daily → weekly stacked;<br/>monthly built from the raw table<br/>(continuous aggregates)"]
 
     style H fill:#dbeafe,stroke:#2563eb
     style J fill:#dcfce7,stroke:#16a34a
     style O fill:#fef3c7,stroke:#d97706
     style M fill:#fecaca,stroke:#dc2626
+    style X fill:#fecaca,stroke:#dc2626
 ```
 
 ### Other Ways Data Reaches These Tables

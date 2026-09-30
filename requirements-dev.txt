@@ -4,3 +4,4 @@ pytest
 hbmqtt
 pyright
 mypy
+pandas-stubs

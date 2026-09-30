@@ -271,7 +271,7 @@ def get_protocols_for_device(db: Session, protocol_version: str, device_name: st
     returns the available registry_types (tabs) for that device,
     including W/M/S selection counts when device_name is provided.
     """
-    rows: Sequence[Row[Tuple[str, str]]] = (
+    rows: Sequence[Row[str, str]] = (
         db.execute(
             select(
                 ProtocolRegister.protocol_name,
@@ -392,7 +392,7 @@ def get_device_metric_summary(
     Pass None to compute registers-only counts, e.g. for a device that
     isn't currently connected.
     """
-    rows: Sequence[Row[Tuple[str, str, int]]] = (
+    rows: Sequence[Row[str, str, int]] = (
         db.execute(
             select(
                 ProtocolRegister.protocol_name,
