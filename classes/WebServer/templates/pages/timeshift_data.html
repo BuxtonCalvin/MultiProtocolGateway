@@ -76,7 +76,7 @@
 #}
 
 {% extends "base.html" %}
-{% block title %}InfluxDB — Timeshift Data — MPG Admin{% endblock %}
+{% block title %}{{ 'TimescaleDB' if version == 'timescale' else 'InfluxDB' }} — Timeshift Data — MPG Admin{% endblock %}
 {% block content %}
 <div class="col-span-12 flex flex-col gap-4" id="timeshift-root" data-version="{{ version }}" data-standard-tags='{{ standard_tag_keys|tojson }}' style="max-width: 900px;">
 
@@ -116,7 +116,7 @@
     <div class="flex flex-wrap gap-4 text-xs">
       <label class="flex items-center gap-1.5">
         <input type="radio" name="source-mode" value="export" checked onchange="onSourceModeChange(this)">
-        Export InfluxDB range to CSV
+        Export {{ 'TimescaleDB' if version == 'timescale' else 'InfluxDB' }} range to CSV
       </label>
       <label class="flex items-center gap-1.5 {% if not eg4_available %}opacity-40{% endif %}">
         <input type="radio" name="source-mode" value="eg4" {% if not eg4_available %}disabled{% endif %}

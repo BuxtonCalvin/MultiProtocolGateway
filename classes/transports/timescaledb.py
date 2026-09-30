@@ -577,13 +577,16 @@ class timescaledb(transport_base):
     enable_auto_refresh: bool = True  # whether to auto-refresh rollups periodically
     drop_after: str = "1 year"  # default retention policy for raw data in tables and views, can be overridden by settings SectionProxy
 
-    # stale data settings and fields.  Stale data is read per transport batch based on the timestamp of the last row of metrics data received.
-    # If the current time exceeds that timestamp by more than the stale_data_timeout, then the transport will consider the data to be stale
-    # and trigger a cleanup of incomplete batches in the database, as well as an optional upstream reconnect if request_upstream_reconnect
-    # callback is set by the user.
-    stale_data_timeout: int = 300       # seconds before considering data stale for incomplete batch cleanup
-    max_stale_attempts: int = 3         # Number of times to read the data stream to determine if it's stale.
-    retry_delay_mins: int = 5
+    # stale data settings and fields.  Staleness is evaluated per transport (scraper) on each batch that reaches the flush worker.
+    # A batch is stale when every metric value in it is unchanged (within a small numeric tolerance) from the last fresh batch
+    # AND that has been true for longer than stale_data_timeout seconds.  Stale batches are NOT written to the database (neither
+    # the narrow nor the wide table); writing resumes as soon as any value changes.
+    # While a transport remains stale, the transport asks the gateway (via the request_upstream_reconnect callback) to reconnect the
+    # scraper, at most max_stale_attempts times per stale period, waiting at least retry_delay_mins minutes between requests.
+    # A stale alert notification is sent with each request.  Both counters reset as soon as fresh data arrives.
+    stale_data_timeout: int = 300       # SECONDS a reading must be unchanged before it is considered stale (300 = 5 minutes)
+    max_stale_attempts: int = 3         # max upstream reconnect requests per stale period; 0 disables reconnect requests and stale alerts
+    retry_delay_mins: int = 5           # MINUTES to wait between upstream reconnect requests while data remains stale
 
     current_metric_count: int = 0
 
@@ -617,14 +620,16 @@ class timescaledb(transport_base):
             - hypertable_defaults: Dicts for hypertable narrow and wide creation and policies
             - max_backlog_age (int): Max age (seconds) for backlog points (default: 86400) 24 hours
             - max_backlog_size (int): Max backlog points (default: 10000)
-            - max_reconnect_delay (int): Max reconnect delay (default: 300)
+            - max_reconnect_delay (int): Max reconnect delay in seconds (default: 300 = 5 minutes)
+            - max_stale_attempts (int): Max upstream reconnect requests per stale period; 0 disables (default: 3)
             - migrate_data: whether to attempt to migrate existing data when creating hypertables and rollups. Set to False to skip migration and start fresh with new schema.
             - password (str): Database password
             - port (int): Database port (default: 5432)
             - reconnect_attempts (int): Max reconnect attempts (default: 5)  if set to 0, no limit.
-            - reconnect_delay (int): Initial reconnect delay (default: 5)
+            - reconnect_delay (int): Initial reconnect delay in seconds (default: 5)
             - rollup_defaults: dict for rollup settings
-            - stale_data_timeout (int): Seconds before considering data stale for incomplete batch cleanup (default: 300)
+            - retry_delay_mins (int): Minutes between upstream reconnect requests while data is stale (default: 5)
+            - stale_data_timeout (int): Seconds a reading must be unchanged before it is stale and skipped (default: 300 = 5 minutes)
             - use_exponential_backoff (bool): Use exponential backoff (default: True)
             - use_utc_timestamp (bool): Use UTC timezone for all timestamps instead of local machine timezone (default: False)
             - username (str): Database username
@@ -674,6 +679,9 @@ class timescaledb(transport_base):
 
         # stale data settings
         self.stale_data_timeout: int = settings.getint("stale_data_timeout", fallback=self.stale_data_timeout)
+        # negative values make no sense for either; clamp to 0 (0 attempts = reconnect requests/alerts disabled, 0 delay = no throttle)
+        self.max_stale_attempts: int = max(0, settings.getint("max_stale_attempts", fallback=self.max_stale_attempts))
+        self.retry_delay_mins: int = max(0, settings.getint("retry_delay_mins", fallback=self.retry_delay_mins))
         # wait for complete data to write to db.
         self.write_requires_complete_cycle: bool = settings.getboolean("write_requires_complete_cycle", fallback=self.write_requires_complete_cycle)
 
@@ -852,7 +860,7 @@ class timescaledb(transport_base):
             self._set_tsdb_connected(conn_value = False, conn_reason = "Initial TSDB connect was not successful")
         """
             Attribute:
-            request_upstream_reconnect (Callable[[], None] | None):
+            request_upstream_reconnect (Callable[[str], None] | None):  (called with the stale transport's id)
             Optional callback function that, if set by the user,
             will be called to trigger an source data reconnect when stale data is detected or a reconnect is required.
 
@@ -2271,10 +2279,12 @@ class timescaledb(transport_base):
                                 # to the narrow table, by applying the timestamp and device_info_id to each metric/value pair.
                                 self._flush_batch_narrow(narrow_data, device_info_id, timestamp, session, transport_name)
 
-                                # Only attempt to write to the wide table if the row is valid and the table name is known.
-                                # If the row fails validation, it may indicate a schema mismatch between the incoming data
-                                # and the existing wide table columns — in this case we skip the wide table write to prevent data loss,
-                                # but still write to the narrow table which is schema-flexible and can accept all incoming data.
+                                # The wide row is inserted whenever the wide table name is known -- valid_row only changes the log message.
+                                # If validation reported missing columns (fewer_keys: a column still exists on the wide table but its metric
+                                # is no longer in the scrape), the insert still happens and those columns are stored as NULL.
+                                # The opposite mismatch (extra_keys: a scraped metric with NO wide column, e.g. the column was deleted while
+                                # the metric is still in the variable_mask) never reaches this point: _validate_wide_row raises ValueError
+                                # before this try block, and the outer handler drops the whole batch -- narrow AND wide -- for that cycle.
                                 if wide_table_name is not None:
                                     target_table: Table = Base.metadata.tables[wide_table_name]
                                     stmt: Insert = pg_insert(target_table).values(**wide_data)
@@ -2513,11 +2523,11 @@ class timescaledb(transport_base):
                 "is_stale": False, "stale_event_count": 0,   # ← counter resets here on recovery
                 "last_event_ts": None                        # ← also reset the throttle timer
             })
-        elif is_stale and not state["is_stale"]:
-            # Only trigger the event ONCE per stale period
+        else:
+            # Stale batch.  Mark the stale period, then hand off to _handle_stale_event on EVERY stale batch: it owns the
+            # max_stale_attempts cap and the retry_delay_mins throttle, so calling it repeatedly is what lets retries happen.
+            # last_event_ts must be left alone here (None on the first stale batch) or the throttle would swallow the first request.
             state["is_stale"] = True
-            state["last_event_ts"] = timestamp
-
             elapsed = timestamp - state["start_ts"]
             self._handle_stale_event(transport_id, timestamp, elapsed)
 
@@ -2595,7 +2605,11 @@ class timescaledb(transport_base):
 
     def _handle_stale_event(self, transport_id: str, current_time: datetime, total_stale_elapsed: timedelta) -> None:
         """
-        Triggers a reconnect for a specific transport (max X times) with a gap between attempts.
+        Requests an upstream reconnect for a stale transport, at most max_stale_attempts times per stale period, with at least
+        retry_delay_mins minutes between requests, and sends a stale alert notification with each request.
+
+        Called for every stale batch (see _commit_transport_state); returns without doing anything when the attempt cap has been
+        reached (including max_stale_attempts = 0) or the retry delay has not yet elapsed.  Counters reset when fresh data arrives.
         """
         state = self._stale_registry.get(transport_id)
         if not state:

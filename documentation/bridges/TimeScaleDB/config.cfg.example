@@ -16,11 +16,11 @@ console = true
 enabled = true
 default_title = MPG Notification
 pushover_enabled = true
-pushover_api_token = azs5ghrj7cugjsdfkjgnke9hfrkkhm5dd
-pushover_user_key = uh6193sgfjogsfjd594juw9qt5x
+pushover_api_token = azs5ghrj7cugjsdfkke9hfrkkhm5dd
+pushover_user_key = uh6193sgfjogsfjdjuw9qt5x
 telegram_enabled = true
-telegram_bot_token = 7056410669:AAHiVtZsfdgsdfJq0ezPIs3s2El0
-telegram_chat_ids = -1005269010370
+telegram_bot_token = 7056410669:AAHiVtZsfdgJq0ezPIs3s2El0
+telegram_chat_ids = -1005210370
 
 [transport.Inverter_read]
 log_level = DEBUG
@@ -81,7 +81,7 @@ host = 10.17.2.42
 port = 8086
 database = openLuup
 username = KevinB
-password = SoleSole12
+password = yourpassword
 measurement = device_data
 include_timestamp = true
 include_device_info = true
@@ -118,7 +118,7 @@ discovery_enabled = true
 discovery_topic = solar
 log_level = DEBUG
 username = KevinB
-password = SoleSole12
+password = yourpassword 
 
 [transport.timescaledb]
 log_level = DEBUG
@@ -127,7 +127,7 @@ host = 10.17.2.42
 port = 5431
 database = solar1
 username = KevinB
-password = SoleSole12
+password = yourpassword
 force_float = true
 enable_persistent_storage = true
 backlog_storage_path = timescaledb_backlog

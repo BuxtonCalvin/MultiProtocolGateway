@@ -4,68 +4,207 @@
 
 ## Overview
 
-The TimescaleDB module is a **transform / sink transport** for the Multi Protocol Gateway.  
-Its primary responsibility is to:
+The TimescaleDB module is a **bridge transport** for the Multi Protocol Gateway (MPG). It does not scrape anything itself. A scraper transport (for example a Modbus TCP connected inverter) reads the device, the gateway filters and forwards each completed reading to every bridge the scraper is linked to, and this module persists it in a **TimescaleDB (PostgreSQL)** database.
 
-- Receive telemetry data from an upstream scraper transport (e.g. Modbus TCP connected inverter)
-- Persist time-series data into a **TimescaleDB (PostgreSQL)** backend
-- Detect **stale data conditions**
-- Trigger **automatic upstream and downstream reconnects** when data stops flowing
-- Enable downstream visualization and analytics via **Grafana**
+The module:
 
-The module does **not** scrape data itself. Instead, it acts as a consumer of bridged data streams and focuses on persistence, monitoring, and reliability.
+- Writes every reading to two hypertables, a **narrow** table (one row per metric) and, for protocols with fewer than 160 metrics, a **wide** table (one row per device per reading)
+- Maintains the metadata tables that describe the devices, protocols and metrics it has seen
+- Skips readings that have stopped changing (**stale data**) and asks the gateway to reconnect the scraper
+- Buffers readings to a disk **backlog** while the database is unreachable and replays them after it comes back
+- Manages compression, retention and hourly / daily / weekly / monthly **rollup views** (continuous aggregates)
+- Provides web UI tools for correcting, exporting, shifting and re-importing historical data, and read-only diagnostic panels
 
 ---
 
 ## Architecture Overview
 
-``` text
+```text
 [ Inverter / Device ]
+          |   Modbus / CAN / serial - the scraper transport reads register groups
+          v
+[ Scraper transport ]
           |
           v
-[ Modbus / TCP Transport ]
+[ Protocol Gateway ]   applies the variable mask / screen, then forwards a completed
+          |            reading to each linked bridge (bridge = transport.<timescaledb section>)
+          v
+[ TimescaleDB bridge:  write_data() ]   resolves the device, stamps m_time, queues the reading
           |
           v
-[ Protocol Gateway ]
+[ In-memory flush queue ] --> [ Flush worker thread ]   stale check, type coercion, validation
+          |                              |
+          |                              +--> [ SQLite backlog ] when the database is down
+          |                                        replayed after the bridge reconnects
+          v   one transaction per reading
+[ device_metrics_narrow + device_metrics_wide__<protocol> hypertables ]
           |
           v
-[ TimescaleDB Transport ]
+[ Continuous aggregates: hourly / daily / weekly / monthly rollup views ]
           |
           v
-[ TimescaleDB (Postgres) ]
-          |
-          v
-[ Grafana ]
+[ Grafana / SQL ]
 ```
 
 ---
 
 ## What the TimescaleDB Module Does
 
-### Core Responsibilities
+### How Data Flows Through MPG
 
-- Converts incoming measurements into normalized rows
-- Writes data into hypertables optimized for time-series workloads
-- Maintains metadata for scraped devices
-- Detects stale data conditions
-- Requests upstream reconnects when stale data persists
-- Backlogs data during database outages and replays that data on database recovery
-- Provide Grafana-ready metrics for visualization
-- Lets an administrator correct historical values (Metrics Edit, section 4.5) and export, time-shift and re-import data (Timeshift Data, section 4.7) from the web UI
+#### 1. Startup
+
+1. The gateway reads `config.cfg` and builds every `[transport.*]` section. A scraper names its bridge with `bridge = transport.<section>`.
+2. The TimescaleDB bridge reads its settings, fixes the timestamp mode (see section 6.5), and sizes its connection pool automatically (see *Connection pool* below).
+3. It connects, creating the target database if it does not exist, and runs `CREATE EXTENSION IF NOT EXISTS timescaledb_toolkit`. It clears out any idle connections that a crashed earlier client left holding locks, creates the shared tables, and starts the flush worker thread.
+4. For each scraper, the gateway calls the bridge's `init_bridge()`. The first time the bridge sees a protocol it registers the protocol in `protocol_registry`, records the protocol's metrics in `metric_catalog`, creates that protocol's wide table and its columns (if it has fewer than 160 metrics), and then sets up the hypertables, compression and retention policies, and the rollup views. It also records the scraper's `read_interval`, which the dynamic chunk sizing uses (see *Hypertables, Compression and Retention*).
+
+> **Prerequisite:** MPG creates the database and `timescaledb_toolkit`, but it does not run `CREATE EXTENSION timescaledb` itself. Use a TimescaleDB server or image (such as the one in section 6) in which the `timescaledb` extension is available to the target database. If table setup fails with a missing-function error, enable the extension in that database yourself.
+
+#### 2. Scrape and filter
+
+Each scraper reads its register groups on its own `read_interval`. The gateway's `read_mode` (`[general]`) only changes how scrapers are scheduled against each other; every mode hands finished data to bridges the same way. The gateway keeps only the metrics enabled by the protocol's variable mask / screen, which is why the mask decides which metrics end up in the database.
+
+#### 3. Hand-off to the bridge
+
+With `write_requires_complete_cycle = true` (the default) the gateway forwards a reading only after the scraper has completed its whole cycle without error, so a partly read cycle is never written as a partly filled row.
+
+For each forwarded reading, `write_data()`:
+
+1. Finds or creates the device's row in `device_info` (unique per scraper transport section name) and caches its ID
+2. Stamps one `m_time` on the whole reading, using the **bridge's clock at the moment of receipt** (local timezone, or UTC if `use_utc_timestamp = true`), not a timestamp from the device
+3. Puts the reading on an in-memory queue and returns immediately, so a slow database never stalls scraping
+
+#### 4. The flush worker
+
+A single background thread takes readings off the queue, one at a time:
+
+1. **Waits** while a rebuild, Delete Columns or Metrics Edit is running. Readings queue up in memory and are written afterwards.
+2. **Checks for stale data** (see *Stale Data Handling*). A stale reading is skipped entirely.
+3. **Coerces types.** Each metric name is mapped to its SQL-safe column name and declared type. Wide-table values are converted to that type; narrow values are kept as raw key/value pairs.
+4. **Validates the wide row** against the wide table's known columns (see *Wide Table Column Deletion* in section 4.2 for the two mismatch cases).
+5. **Writes in a single transaction:** first the narrow rows, then the wide row. Both commit together or neither does.
+
+#### 5. What one reading produces
+
+| Table | Rows written | Details |
+| --- | --- | --- |
+| `device_metrics_narrow` | One per metric | Numbers and booleans go to `metric_value` (booleans as 1/0). A text metric goes to `metric_ascii` with `metric_value` = 0. For an enum metric, `metric_value` keeps the numeric code and its description goes to the same row's `metric_ascii`. Duplicates of the same `(m_time, device_info_id, metric_name)` are ignored. |
+| `device_metrics_wide__<protocol>` | One per device | One column per metric, in the declared type, plus a `<metric>_desc` TEXT column for enum metrics. A plain insert. Columns with no value in the reading are stored as NULL. Protocols with 160 or more metrics have no wide table and are narrow-only. |
+
+#### 6. When the write fails
+
+- **Database error during the write:** the transaction is rolled back. If `enable_persistent_storage` is on and the bridge already considers itself disconnected, the reading is saved to the disk backlog. A database error also marks the bridge disconnected and starts the reconnect thread.
+- **A scraped metric has no wide-table column:** the whole reading is dropped for that cycle, narrow and wide. The log shows *Database schema is still missing columns after resync* (see section 4.2).
 
 ### Stale Data Handling
 
-The module tracks:
+The module treats a scraper's data as **stale** when *every* value in a reading is unchanged (numbers within a small tolerance, everything else exactly equal) from the last reading that did change, and that has been true for longer than `stale_data_timeout` **seconds**.
 
-- Time since last successful write
-- Number of reconnect attempts
-- Retry backoff interval
+When data is stale:
 
-When data becomes stale:
+1. **The reading is not written.** Neither the narrow nor the wide table gets a row, so a frozen scraper leaves a gap in the data rather than a run of identical rows. Writing resumes with the first reading in which any value changes.
+2. **The bridge asks the gateway to reconnect the scraper.** The gateway marks the scraper disconnected and clears its last-read time, so it reconnects on its next cycle. The first request is made as soon as the stale timeout has elapsed. Further requests follow while the data stays stale, up to `max_stale_attempts` requests in total, with at least `retry_delay_mins` **minutes** between them. Because staleness is evaluated as each reading reaches the flush worker, the spacing is rounded up to a whole scrape interval.
+3. **An alert is sent** with each request through the notification channels in `[messages]` (Pushover, Telegram).
+4. **Everything resets** as soon as a reading with a changed value arrives: the attempt counter, the retry timer and the stale flag.
 
-1. A reconnect is requested from the Protocol Gateway
-2. The upstream scraper transport is reset and a reconnection is tried
-3. Scraping resumes automatically if the device is reachable
+| Setting | Default | Unit | Description |
+| --- | --- | --- | --- |
+| `stale_data_timeout` | `300` | seconds | How long every value must stay unchanged before the data is stale. `300` is 5 minutes. |
+| `max_stale_attempts` | `3` | requests | Maximum reconnect requests per stale period. `0` disables reconnect requests and stale alerts; stale readings are still skipped. |
+| `retry_delay_mins` | `5` | minutes | Minimum wait between reconnect requests while the data remains stale. |
+
+> **Note:** a device that genuinely reports identical values for every metric (for example, an idle or switched-off device) is indistinguishable from a frozen one. Its readings will be skipped after the timeout and reconnect requests will be made. Raise `stale_data_timeout`, or set `max_stale_attempts = 0`, if that applies to you.
+
+### Database Connection, Backlog and Reconnect
+
+The bridge keeps working through database outages.
+
+**Backlog.** While the database is unreachable, readings are appended to a SQLite file (`<backlog_storage_path>/<backlog_file_name>.db`, with the path relative to the MPG application directory; in Docker, `/app/backlogs`). After the connection is restored, the backlog is replayed through the normal flush path.
+
+- `max_backlog_size` caps the number of stored points. When it is exceeded, the **oldest** points are evicted first.
+- `max_backlog_age` is applied when the backlog is **loaded from disk at startup**: older points are discarded then. While running, only the size cap is enforced.
+- Readings still in the in-memory queue when MPG shuts down are not written to the backlog.
+
+**Reconnect.** When a write fails with a database error, a background thread retries the connection:
+
+1. It waits `reconnect_delay` **seconds**, then tries to connect.
+2. With `use_exponential_backoff = true`, the delay doubles after each failure, up to `max_reconnect_delay` **seconds**. Otherwise the delay stays fixed.
+3. `reconnect_attempts` limits the tries; `0` means no limit. If all attempts fail, the next failed write starts another reconnect cycle.
+4. On success, the bridge rebuilds its in-memory view of the registered protocols and rollup views, then replays the backlog.
+
+| Setting | Default | Unit | Description |
+| --- | --- | --- | --- |
+| `enable_persistent_storage` | `true` | | Enable the disk backlog. |
+| `backlog_storage_path` | `backlogs` | | Folder for the backlog file. |
+| `backlog_file_name` | `timescaledb_backlog` | | Backlog file name (`.db` is added). The web UI pre-fills `no_connect_timescale_backlog`. |
+| `max_backlog_size` | `10000` | points | Maximum stored points. |
+| `max_backlog_age` | `86400` | seconds | Maximum age of a stored point, applied at load (24 hours). |
+| `reconnect_attempts` | `5` | tries | Maximum tries per reconnect cycle; `0` = unlimited. |
+| `reconnect_delay` | `5` | seconds | Initial wait between tries. |
+| `use_exponential_backoff` | `true` | | Double the wait after each failed try. |
+| `max_reconnect_delay` | `300` | seconds | Upper limit on the wait (5 minutes). |
+
+**Connection pool.** The pool size is calculated automatically as the larger of 2 and *(number of scrapers + 3)*, which leaves room for the flush worker, the rollup refresh thread, schema work and the reconnect thread. It is not a user setting. `pool_size`, `max_overflow` and `pool_recycle` do not appear in the configuration and are ignored if present.
+
+### Hypertables, Compression and Retention
+
+Both raw tables are hypertables partitioned on `m_time`. Compression segments the narrow table by `device_info_id, metric_name` and the wide table by `device_info_id`, both ordered by `m_time DESC`.
+
+**Chunk size and compression timing.** With `enable_dynamic_chunk_sizing = true` (the default), each raw table's chunk interval and compress-after interval are chosen from its live write load. The load is the number of metrics each device contributes multiplied by its writes per day, summed over the devices feeding that table (all of them for the narrow table, just that protocol's devices for a wide table):
+
+| Load (metric-writes/day) | Band | Chunk interval | Compress after |
+| --- | --- | --- | --- |
+| up to 288,000 | Group 1 (light) | 7 days | 14 days |
+| up to 576,000 | Group 2 | 3 days | 7 days |
+| up to 1,152,000 | Group 3 | 1 day | 3 days |
+| up to 2,016,000 | Group 4 | 12 hours | 36 hours |
+| above 2,016,000 | Group 5 (heavy) | 6 hours | 18 hours |
+
+If dynamic sizing is off, or a table has no live data yet, the static defaults apply: **1 day** chunks compressed after **3 days** for the narrow table, and **7 day** chunks compressed after **14 days** for wide tables. The band boundaries and static defaults are set in the code, not in `config.cfg`. The [Compression & Retention Status panel](#49-bridge-diagnostic-panels) shows the band each table currently falls in.
+
+**Retention.** `drop_after` (default `1 year`) is the retention period for the raw tables **and** for every rollup view. Data older than that is dropped automatically, so rollups do not outlive the raw data.
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `enable_compression` | `true` | Compress older chunks. |
+| `enable_dynamic_chunk_sizing` | `true` | Pick chunk and compression intervals from the live write load (table above). |
+| `drop_after` | `1 year` | Retention period for raw data and rollup views. |
+| `migrate_data` | `true` | Migrate existing data when hypertables and rollups are created or rebuilt. Set to `false` to start fresh with the new schema. |
+
+### Rollup Views
+
+With `enable_rollups = true` (the default) the bridge creates continuous aggregates for the narrow table and for each wide table:
+
+- `hourly_rollup_narrow`, `daily_rollup_narrow`, `weekly_rollup_narrow`, `monthly_rollup_narrow`
+- `hourly_rollup_wide__<protocol>`, `daily_rollup_wide__<protocol>`, `weekly_rollup_wide__<protocol>`, `monthly_rollup_wide__<protocol>`
+
+Each view holds, for every metric and device per time bucket, the **minimum**, the **maximum** and a statistical summary (`stats_agg` from `timescaledb_toolkit`) from which averages and similar statistics can be derived. Narrow views also group by `metric_name`. Wide views leave out TEXT and BOOLEAN columns.
+
+The views are layered: hourly is built from the raw table, daily from hourly, and weekly from daily. **Monthly is built directly from the raw table**, because a month is not a whole multiple of a week and TimescaleDB cannot stack it on the weekly view.
+
+Buckets are aligned with `time_bucket(interval, m_time, '<machine timezone>')`, where the timezone is `UTC` when `use_utc_timestamp = true` and the machine's local timezone otherwise. Day, week and month boundaries therefore fall at local midnight in local mode (see section 6.5).
+
+**Keeping views current.** Each view has a TimescaleDB refresh policy. Separately, with `enable_auto_refresh = true` the bridge refreshes all views itself every `auto_refresh_interval` seconds (default `21600`, 6 hours), The **Rebuild Rollup Views** tool (section 4.6) does a manual refresh or rebuild, and section 4.7 explains when to refresh the rollups after a Timeshift import.
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `enable_rollups` | `true` | Create the rollup views. |
+| `enable_auto_refresh` | `true` | Refresh the views periodically from the bridge. |
+| `auto_refresh_interval` | `21600` | Seconds between refreshes (6 hours). |
+
+The bucket sizes and refresh-policy offsets are set in the code, not in `config.cfg`:
+
+| View | Bucket | Refresh-policy start offset |
+| --- | --- | --- |
+| hourly | 1 hour | 3 hours |
+| daily | 1 day | 3 days |
+| weekly | 1 week | 3 weeks |
+| monthly | 1 month | 3 months |
+
+The refresh policy runs once per bucket. Its end offset is one bucket, and its schedule is anchored at `2000-01-01 00:00:00+00`.
+
+**Rollup view chunk sizing.** Each view also gets its own chunk and compress-after intervals. The static defaults are hourly 1 day / 3 days, daily 7 days / 2 weeks, weekly 1 month / 2 months and monthly 4 months / 6 months. With dynamic sizing on, they are scaled down by a factor that depends on the view's modelled rows per day (the number of device-and-metric series times buckets per day): a factor of 1 up to 10,000 rows/day, 0.5 up to 50,000, 0.25 up to 200,000, 0.125 up to 800,000 and 0.0625 above that. Most deployments stay in Group 1, so the static defaults apply.
 
 ---
 
@@ -75,15 +214,19 @@ When data becomes stale:
 
 ### 4.1 Narrow Table
 
-One row per metric per timestamp.
+`device_metrics_narrow` holds one row per metric per timestamp, for every protocol, including those too large for a wide table.
 
 | Column | Description |
 | --- | --- |
-| m_time | Timestamp |
+| m_time | Timestamp of the reading (the bridge's clock when the reading was received) |
 | device_info_id | Device identifier ID |
-| metric_name | Metric name |
-| metric_value | Numeric metric value (booleans stored as 1/0) |
-| metric_ascii | Text metric value; empty for numeric metrics |
+| metric_name | Metric name (SQL-safe form) |
+| metric_value | Numeric metric value. Booleans are stored as 1/0. A text-only metric stores 0. An enum metric stores its numeric code. |
+| metric_ascii | Text value of a text metric, or the description of an enum metric. NULL for plain numeric metrics. |
+
+`(m_time, device_info_id, metric_name)` is unique. A second row for the same combination is ignored rather than raising an error.
+
+**Enum metrics.** A metric with a code-to-description mapping is stored as a single narrow row: the code in `metric_value` and its description in `metric_ascii`. The separate `<metric>_desc` value the scraper produces is folded into that row and gets no row of its own.
 
 #### Narrow Table Benefits
 
@@ -93,16 +236,21 @@ One row per metric per timestamp.
 
 ### 4.2 Wide Table (If Less than 160 metrics chosen via the MPG variable filters)
 
-One row per timestamp with multiple metric columns.
+`device_metrics_wide__<protocol>` holds one row per device per reading, with one column per metric. Each protocol has its own wide table. A protocol with 160 or more metrics has none and is stored in the narrow table only.
 
 | Column | Description |
 | --- | --- |
-| m_time | Timestamp |
+| m_time | Timestamp of the reading |
 | device_info_id | Device identifier ID |
 | inverter_power | Example metric |
 | grid_voltage | Example metric |
 | panel_voltage | Example metric |
 | etc. | etc. |
+
+- Each metric column has the type declared for it in `metric_catalog` (for example `DOUBLE PRECISION`, `SMALLINT`, `BOOLEAN` or `TEXT`).
+- An enum metric has two columns: the numeric code under the metric's name, and a `<metric>_desc` TEXT column holding the description.
+- A reading is written with a plain `INSERT`. A column with no value in that reading is stored as NULL.
+- Columns are created automatically for the metrics in the current variable mask when the gateway loads or reloads.
 
 #### Wide Table Benefits
 
@@ -111,31 +259,50 @@ One row per timestamp with multiple metric columns.
 
 #### Wide Table Column Deletion
 
-- You may add and subtract metrics from the wide table to your liking via the mask and screen settings detailed in the MPG readme.  However, if you subtract a metric from the timescaledb bridge, you should delete the column in the wide table that captures that metric.  
+Which metrics MPG collects is controlled by the scraper's variable mask / screen settings, described in the MPG readme. **Delete Columns** does not stop a metric from being scraped; it only drops the matching column and its stored history from the wide table. The two steps must therefore be done in this order:
+
+1. **Remove the metric from the scrape.** Clear it in the scraper's mask / screen settings and use **Commit All Changes**. The gateway reloads and the metric is no longer read.
+2. **Delete its column.** Open **Timescale DB → Delete Columns**. Columns the current mask / screen no longer produces are highlighted in red and marked as not scraped. Tick them, stage the change and commit.
 
 ![Timescale Delete](../../../classes/WebServer/static/screenshots/timescale_delete.png)
+
+**Red is a hint, not a lock.** The screen lists every column in the wide table, and it lets you tick a column that is still being scraped. Only protected columns (`m_time`, `device_info_id`) and a selection that would leave the table with no metric columns are refused. Take care to delete only red columns. If no scraper is currently connected, nothing is highlighted and every column looks the same.
+
+What happens if the order is wrong:
+
+| Situation | Effect |
+| --- | --- |
+| **Metric removed from the scrape, column not deleted** | Every write to that wide table logs a warning that the column is missing from the scrape data and suggests deleting it. The wide row is still written, with NULL in that column, so no data is lost. The column only wastes space and adds log noise until it is deleted. |
+| **Column deleted while the metric is still scraped** | The wide table has no column for the incoming metric, so the **entire reading is dropped for that cycle, both narrow and wide**, and this repeats every cycle. The log shows *Database schema is still missing columns after resync* followed by *Fatal Flush Worker Crash* (the worker keeps running). Remove the metric from the scrape, or restore it by reloading the gateway with the metric still in the mask (which recreates the column, empty), to stop the loss. |
+
+A column deletion cannot be undone: it drops the column for every device and every timestamp. After the drop, MPG rebuilds that protocol's rollup views, indexes and compression and retention policies. Writes are paused, and queued in memory, while it runs. Delete Columns affects only the wide table. Old rows for the removed metric remain in the narrow table until you delete them with Metrics Edit.
 
 > **Note:** Delete Columns changes a wide table's *shape* — it drops a column outright, for every device and every timestamp. To correct or remove specific *values* (e.g. a bad reading from a sensor fault, or data captured during a known test/outage) for one device over a chosen time range without touching the schema, use **Metrics Edit** instead — see section 4.5 below.
 
 ### 4.3 Device Info Table
 
+One row per scraper transport section. The `transport` value (the `[transport.<name>]` section name in `config.cfg`) is what makes a device unique, so **renaming a scraper section creates a new device**. The other descriptive fields are refreshed from the scraper's settings the first time the bridge writes for that device after it starts.
+
 | Column | Description |
 | --- | --- |
 | device_info_id | Device Identifier ID |
-| device_identifier | Device or Inverter Identifier ** |
-| device_serial_number | Device or Inverter Serial Number ** |
-| device_name | Device of Inverter Informal Name ** |
+| transport | Scraper transport section name. **Unique**; identifies the device. |
+| protocol_id | Foreign key to `protocol_registry` for the scraper's protocol |
+| device_identifier | Device or Inverter Identifier |
+| device_serial_number | Device or Inverter Serial Number |
+| device_name | Device or Inverter Informal Name |
 | device_manufacturer | Device or Inverter Manufacturer |
 | device_model | Device or Inverter Model |
 | device_firmware | Device or Inverter Firmware |
 | device_location | Device or Inverter Location |
-| transport | Device or Inverter Scraper Transport |
-
-** =  Determines uniqueness of the Device.
+| metric_count | Number of metrics in the device's write payload. Used to estimate load for dynamic chunk sizing. |
+| created_at / updated_at | Row created / last refreshed |
 
 ### 4.4 Metric Catalog
 
-One row per metric per protocol — the record of every metric a protocol has ever reported, and, for a wide-table protocol, which column it lives in. Metrics Edit's and Wide Table Column Deletion's own column lists are read from here, and this is also the table those two screens' whitelist checks validate a column name against before it's ever used to build SQL.
+The protocol tables work together: `protocol_registry` has one row per protocol (its name, the name of its wide table or NULL for a narrow-only protocol, its metric count, and whether rollups are enabled and fully set up). `device_info` has one row per scraper. `metric_catalog` below has one row per metric.
+
+`metric_catalog` holds one row per metric per protocol — the record of every metric a protocol has ever reported, and, for a wide-table protocol, which column it lives in. Metrics Edit's and Wide Table Column Deletion's own column lists are read from here, and this is also the table those two screens' whitelist checks validate a column name against before it's ever used to build SQL.
 
 | Column | Description |
 | --- | --- |
@@ -203,6 +370,15 @@ A replacement value entered for **Set Value** is checked against the field's typ
 - **Narrow table metrics** have no fixed declared type (every metric shares the same `metric_value`/`metric_ascii` pair), so the screen infers numeric vs. text from what is already recorded for that device and metric: if any existing row has `metric_ascii` populated the metric is treated as text, otherwise as numeric. A metric with no existing rows defaults to numeric. A numeric metric only accepts a value that parses as a number.
 
 An invalid value is rejected immediately, with a clear error, rather than only surfacing when Commit All Changes is pressed.
+
+#### Enum Metrics
+
+A metric with a code-to-description mapping keeps its numeric code and its description together, and Metrics Edit can only change them one half at a time:
+
+- In the **narrow** table both live in one row (`metric_value` holds the code and `metric_ascii` the description). Because `metric_ascii` is populated, the screen treats the metric as text, so **Set Value** replaces the description with the text you enter and sets `metric_value` to 0. That produces a code and description combination the scraper would never write.
+- In a **wide** table the code column and its `<metric>_desc` column are separate fields, and **Set Value** changes only the one you select, so the pair can be left inconsistent unless you edit both.
+
+To remove bad enum readings, use **Delete value(s)** rather than Set Value.
 
 #### What Happens on Commit
 
@@ -428,6 +604,87 @@ After a successful import the screen reports the number of rows written (one per
 | **Rollup views** | Background refresh | Refreshed automatically over the edited range | Not refreshed; refresh or rebuild afterward |
 | **If TimescaleDB is down** | Queued to the persistent backlog (when `enable_persistent_storage` is on) and replayed later | Fails; the edit stays staged | Fails immediately; nothing is kept |
 
+### 4.9 Bridge Diagnostic Panels
+
+The TimescaleDB bridge's device page shows five read-only panels. Open it from the **Bridges** menu and choose the TimescaleDB bridge. (They are not in the **Timescale DB** menu, which holds the tools that change data: Metrics Edit, Timeshift Data, Delete Columns, Rebuild Rollup Views and Rebuild Compression.) The panels only observe. Nothing on them is clickable, and nothing they do creates, drops or changes anything.
+
+Each panel loads separately, so a slow query in one cannot hold up the others. Until the bridge has connected to the database, a panel shows a "Still connecting to TimescaleDB" message instead of data. The page works with the first TimescaleDB bridge attached to the gateway. If a single table's query fails, only that row shows *Query failed*; the rest of the panel still renders.
+
+#### Bridge Health
+
+| Field | Meaning |
+| --- | --- |
+| **Rollup migration** | *In progress* while a rollup rebuild or Delete Columns is running. The flush worker is paused during this time and readings queue in memory. *Idle* when nothing is running. *Not initialized* before the rollup manager exists. |
+| **Backlog buffer** | Points currently held in the backlog against `max_backlog_size`, for example `120 / 10000 pts`. *(buffering)* appears when the count is above zero, meaning the database has been unreachable and data is waiting to be replayed. |
+| **Auto-refresh Rollups** | `Every N h` (from `auto_refresh_interval`) or *Disabled*. |
+| **Rollup setup** | How many rollup-enabled protocols have finished setting up their rollup views, for example `2 / 2 protocol(s)`. A lower first number means a protocol's rollup setup has not finished, for example after a failed Delete Columns rebuild. The bridge retries it after its next reconnect. |
+
+Connection status is not repeated here. It is shown in the status badge at the top right of the page.
+
+#### Storage Overview
+
+One row for the shared narrow table (`shared_narrow`) followed by one row per wide table.
+
+| Column | Meaning |
+| --- | --- |
+| **Table** | Protocol name, with the table name underneath |
+| **~Rows** | An estimate taken from TimescaleDB's chunk statistics, not an exact count, hence the `~`. It can lag behind for newly created chunks. |
+| **Size** | Total size of the hypertable, including its indexes, across all chunks |
+| **Chunks** | Number of chunks |
+| **Time Range** | Oldest and newest `m_time` in the table |
+
+The panel covers the raw source tables only, not the rollup views. Use the chunk counts and sizes to judge whether the chunk intervals shown in the Compression & Retention panel suit your hardware.
+
+#### Indexes
+
+Lists every index on the narrow table, on every wide table, and on the lookup tables `protocol_registry`, `metric_catalog` and `device_info`. Rollup views are not included.
+
+| Column | Meaning |
+| --- | --- |
+| **Index / Keys** | Index name with its key columns underneath. An index built on an expression shows *expression* instead; hover over the name to see the full definition. |
+| **Table** | The table the index belongs to |
+| **Type** | *Primary*, *Unique* or *Index* |
+| **Size** | Index size. For a hypertable this is summed across all chunks. |
+| **Scans** | How many times the query planner has used the index since the database statistics were last reset. It counts every reader, including Grafana. It is a running total, not a rate. |
+
+A low or zero scan count means only that no query has chosen the index yet. *n/a* means the scan statistics could not be collected for that table; the names, sizes and keys are still correct.
+
+#### Compression & Retention Status
+
+Everything here is configuration or a calculation made when you open the panel. It does not query a policy's live state. The intervals shown are the ones the **next** connect, reconnect or Rebuild pass would apply, so a table whose existing chunks were created earlier may not match them yet.
+
+The summary lists:
+
+- **Compression:** Enabled or Disabled (`enable_compression`)
+- **Raw table sizing:** *Dynamic (load-based)* or *Static (manual)* (`enable_dynamic_chunk_sizing`)
+- **Raw data retention (drop_after):** the retention period for raw data and rollup views
+- **Segment by (narrow) / (wide):** the compression segmenting columns
+
+Below the summary are two tables. **Raw tables** has one row per raw table, and **Rollup views** has one group per protocol with a row per granularity. Both show:
+
+| Column | Meaning |
+| --- | --- |
+| **Load** | For raw tables, writes per day modelled from the metric count and scrape interval. For rollup views, modelled rows per day. A dash means there is no live data yet. |
+| **Band** | *Group 1 (light)* to *Group 5 (heavy)*, or a *Static* label: *Static (manual)* when dynamic sizing is off, *Static (no live data yet)* before any scraper has written, *Static (unparseable baseline)* if a default interval could not be read |
+| **Compress After** | How old a chunk must be before it is compressed |
+| **Chunk Time** | The chunk interval |
+
+The band tables that these values come from are in *Hypertables, Compression and Retention* above. The band settings themselves are set in the code and cannot be changed from the panel.
+
+#### Background Job Status
+
+Lists TimescaleDB's own background jobs for every hypertable and rollup view the bridge manages: compression, retention and continuous-aggregate refresh policies. They are run by TimescaleDB's scheduler, not by MPG.
+
+| Column | Meaning |
+| --- | --- |
+| **Job** | The job's procedure name (for example `policy_compression`) with its job number underneath |
+| **Target** | The table or view the job acts on |
+| **Last Run** | *Success*, the failure status, or *Never run*, with the time of the last successful finish underneath |
+| **Next Run** | When the scheduler will run it next |
+| **Failures** | Total failed runs. Shown in red when above zero. |
+
+A row is tinted red when its last run did not succeed. Repeated failures on a raw table's `policy_compression` job usually mean compression is colliding with live writes; widen that table's compress-after interval. A failing job is fixed with TimescaleDB's own job management, not from this panel. If no jobs are listed, the tables and views have no policies yet.
+
 ---
 
 ## 5. Example SQL Queries
@@ -497,44 +754,43 @@ services:
     image: buxtoncalvin/multiprotocolgateway:latest
     restart: always
     security_opt:
-    - apparmor:unconfined
+      - apparmor:unconfined
     environment:
-    - TZ=America/Los_Angeles
+      - TZ=America/Los_Angeles
     volumes:
-    - /home/multiprotocolgateway4/config:/app/config
-    - /home/multiprotocolgateway4/protocols:/app/protocols
-    - /home/multiprotocolgateway4/backlogs:/app/backlogs
-    - /home/multiprotocolgateway4/logs:/app/logs
-
+      - /home/multiprotocolgateway4/config:/app/config
+      - /home/multiprotocolgateway4/protocols:/app/protocols
+      - /home/multiprotocolgateway4/backlogs:/app/backlogs
+      - /home/multiprotocolgateway4/logs:/app/logs
     ports:
-    - "1717:1717"
+      - "1717:1717"
     expose:
-    - "1717"   
+      - "1717"
     depends_on:
-    - timescaledb
+      - timescaledb
     logging:
-    driver: "json-file"
-    options:
-      max-size: "10m" 
-      max-file: "3
-
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   timescaledb:
     image: timescale/timescaledb-ha:pg18
     environment:
       POSTGRES_PASSWORD: your-password
       POSTGRES_USER: your-user-name
-      POSTGRES_DB: solar (or your database name)
+      # the database name; must match the `database` setting in the MPG config
+      POSTGRES_DB: solar
     ports:
       # we change the access port here to allow for other postgres dbs
       - "5431:5432"
     volumes:
-   # note the ha version of timescaledb uses a different data storage path compared to the standard postgres database
-   # so the volume is mapped in the environment variable to account for any future changes to the path-- which as of 3/3/2026 doesn't work. So direct mapping to timescaledb-ha data folder: /home/postgres/pgdata  
-   #- /home/timescaledb:/var/lib/postgresql/data
-   # current data path in timescale.
-   - /home/timescaledb:/home/postgres/pgdata
-  
+      # note the ha version of timescaledb uses a different data storage path compared to the standard postgres database
+      # so the volume is mapped in the environment variable to account for any future changes to the path-- which as of 3/3/2026 doesn't work. So direct mapping to timescaledb-ha data folder: /home/postgres/pgdata
+      #- /home/timescaledb:/var/lib/postgresql/data
+      # current data path in timescale.
+      - /home/timescaledb:/home/postgres/pgdata
+
   grafana:
     container_name: grafana
     image: grafana/grafana:latest
@@ -550,30 +806,30 @@ services:
       - GF_SECURITY_ALLOW_EMBEDDING=true
       - GF_DATABASE_USER=your-user-name
       - GF_DATABASE_PASSWORD=your-password
-    user: '1000'    
+    user: '1000'
     depends_on:
       - timescaledb
     volumes:
-      - /home/grafana:/var/lib/grafana      
+      - /home/grafana:/var/lib/grafana
 
   postgres_admin:
-    image: dpage/pgadmin4:latest 
+    image: dpage/pgadmin4:latest
     container_name: pgadmin
     restart: always
     security_opt:
-      - apparmor:unconfined     
+      - apparmor:unconfined
     environment:
-    PGADMIN_DEFAULT_EMAIL: Blah@Gmail.Com
-    PGADMIN_DEFAULT_USER: your-user-name
-    PGADMIN_DEFAULT_PASSWORD: your-password
-    PGADMIN_DISABLE_POSTFIX: true
+      PGADMIN_DEFAULT_EMAIL: Blah@Gmail.Com
+      PGADMIN_DEFAULT_USER: your-user-name
+      PGADMIN_DEFAULT_PASSWORD: your-password
+      PGADMIN_DISABLE_POSTFIX: true
     volumes:
       - /home/pgadmin:/var/lib/pgadmin
     ports:
       #  set the port to 8181 to avoid typical port 80 conflicts
-      - "8181:80" 
+      - "8181:80"
     depends_on:
-      - timescaledb     
+      - timescaledb
 
 ```
 
@@ -589,8 +845,10 @@ services:
 - Login: admin / admin   or your username/password
 - Add data source:
 - Type: PostgreSQL
-- Host: timescaledb:5431
-- Database: metrics
+- Host: timescaledb:5432   (inside the compose network the database listens on 5432;
+                            5431 is only the port published on the host, so use
+                            <host-ip>:5431 if Grafana runs outside this compose stack)
+- Database: solar   (the POSTGRES_DB / `database` value)
 - User: your-TSDB user-name
 - Password: your-TSDB-password
 - SSL: disabled
@@ -610,17 +868,29 @@ log_dir = logs
 log_file = gateway.log
 level = INFO
 # weekly | daily | size
-rotation = weekly         
+rotation = weekly
 # Monday rollover
-when = W0                  
+when = W0
 interval = 1
 # keep 4 weeks
-backup_count = 4           
+backup_count = 4
 # 100MB (only if size-based)
-max_bytes = 104857600      
+max_bytes = 104857600
 console = true
 
-# can be any name in the format transport.<name>
+# Notification channels used by the TimescaleDB bridge for connection lost/restored
+# and stale data alerts. Leave a channel disabled if you don't use it.
+[messages]
+enabled = true
+default_title = MPG Notification
+pushover_enabled = true
+pushover_api_token = your_token_here
+pushover_user_key = your_user_key_here
+telegram_enabled = false
+telegram_bot_token = your_bot_token_here
+telegram_chat_ids = your_chat_id_here
+
+# can be any name in the format transport.<n>
 # changing the name will result in a new device being created in the Timescale DB.
 [transport.Inverter]
 log_level = DEBUG
@@ -661,19 +931,20 @@ enable_persistent_storage = true
 backlog_storage_path = backlogs
 backlog_file_name = no_connect_timescale_backlog
 
-# max data points to store in backlog
+# max data points to store in backlog (oldest are evicted first)
 max_backlog_size = 10000
-# seconds-->  equal to 24 hours
-max_backlog_age = 86400 
+# seconds-->  equal to 24 hours (applied when the backlog is loaded at startup)
+max_backlog_age = 86400
 
 # TSDB Connection monitoring settings
+# number of tries per reconnect cycle (0 = unlimited)
 reconnect_attempts = 5
-# minutes
+# seconds
 reconnect_delay = 5
 
-# Exponential backoff settings (reconnect delay increases exponentially on each failure)
+# Exponential backoff settings (reconnect delay doubles on each failure)
 use_exponential_backoff = true
-# minutes --> 5 hours
+# seconds --> 5 minutes
 max_reconnect_delay = 300
 
 ## hypertable and rollup options
@@ -687,16 +958,19 @@ auto_refresh_interval = 21600
 enable_auto_refresh = True
 drop_after = 1 year
 
-# stale data cleanup settings minutes --> 5 hours
+# stale data settings
+# seconds every value must stay unchanged before the data is stale (300 = 5 minutes)
 stale_data_timeout = 300
+# reconnect requests to the scraper per stale period (0 = never request a reconnect)
+max_stale_attempts = 3
+# minutes between those reconnect requests
+retry_delay_mins = 5
 
-# pushover settings / leave blank and disable if you don't use pushover
-enable_pushover = True
-pushover_token = your_token_here
-pushover_user = your_user_key_here
 # tells MPG to wait until all metrics have been read to write data to timescaledb
 write_requires_complete_cycle = True
 ```
+
+Notification settings (Pushover and Telegram) are set once in the `[messages]` section, not in the TimescaleDB section. The connection pool is sized automatically, so there are no pool settings to configure.
 
 ### 6.5 UTC Timestamp Toggle Feature
 
@@ -731,7 +1005,7 @@ use_utc_timestamp = True
 
 - **Default Value**: `False` (uses local machine timezone)
 - **Backward Compatible**: Existing deployments continue to use local timezone unless explicitly configured
-- **Per-Transport**: The setting is configured per TimescaleDB transport instance
+- **Process-wide**: The setting is read from the TimescaleDB bridge's section, but it switches a single global timestamp mode for the whole MPG process
 
 #### How It Works
 
@@ -761,9 +1035,9 @@ The following timestamp columns are affected:
 
 ###### Rollup Calculations
 
-- The rollup system uses `anchor_start_time_utc` (already UTC-based)
-- Time bucket boundaries are calculated correctly with UTC timestamps or local timestamps
-- Hierarchical continuous aggregates (hourly → daily → weekly → monthly) work seamlessly
+- The rollup refresh policies are anchored at `anchor_start_time_utc` (`2000-01-01 00:00:00+00`), a fixed UTC instant
+- Buckets are built with `time_bucket(interval, m_time, '<timezone>')`, where `<timezone>` is `UTC` in UTC mode and the machine's local timezone otherwise. Day, week and month buckets therefore start at UTC midnight in UTC mode and at local midnight in local mode
+- Hourly, daily and weekly views are stacked (each built from the one before it). The monthly view is built directly from the raw table
 
 ###### Stale Data Detection
 
@@ -785,20 +1059,20 @@ The following timestamp columns are affected:
 
 TimescaleDB's `time_bucket()` function works with timezone-aware timestamps. The system:
 
-- Uses `anchor_start_time_utc = "2000-01-01 00:00:00+00"` for all rollups
-- Aligns hourly buckets to UTC midnight boundaries
-- Hierarchically depends on previous aggregates (hourly → daily → weekly → monthly)
+- Passes the bridge's timezone (`UTC` or the local zone) to `time_bucket()`, so bucket boundaries follow that timezone
+- Anchors each view's refresh policy at `anchor_start_time_utc = "2000-01-01 00:00:00+00"`
+- Builds daily from hourly and weekly from daily; monthly is built from the raw table
 
 ##### Example Rollup Bucket Sizes
 
 ```ini
-- Hourly Rollup: 1 hour bucket, starts 3 hours ago
-- Daily Rollup: 1 day bucket, starts 3 days ago
-- Weekly Rollup: 1 week bucket, starts 3 weeks ago
-- Monthly Rollup: 1 month bucket, starts 3 months ago
+- Hourly Rollup: 1 hour bucket, refresh-policy start offset 3 hours
+- Daily Rollup: 1 day bucket, refresh-policy start offset 3 days
+- Weekly Rollup: 1 week bucket, refresh-policy start offset 3 weeks
+- Monthly Rollup: 1 month bucket, refresh-policy start offset 3 months
 ```
 
-Whether using UTC or local timezone, these bucket boundaries remain consistent and aligned.
+The bucket sizes are the same in either mode; only where the boundaries fall changes.
 
 ##### Data Consistency
 
@@ -955,8 +1229,10 @@ The TimescaleDB module provides a production-grade ingestion and monitoring laye
 
 The TimescaleDB module provides:
 
-- Reliable time-series persistence
-- Automatic stale data detection
-- Self-healing reconnect behavior
+- Reliable time-series persistence into narrow and wide hypertables
+- Stale data detection that skips frozen readings and asks the gateway to reconnect the scraper, with configurable limits
+- Self-healing database reconnect with a disk backlog that is replayed on recovery
+- Automatic compression, retention and hourly / daily / weekly / monthly rollup views
+- Read-only diagnostic panels for bridge health, storage, indexes, compression and retention, and background jobs
 - Support for Grafana visualization
 - Admin tools for correcting historical data (Metrics Edit) and for exporting, time-shifting and re-importing it (Timeshift Data), without needing direct database access
