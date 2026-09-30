@@ -26,109 +26,74 @@ autolabeler:
       - "/^refactor(\\(.*\\))?:/i"
       - "/^test(\\(.*\\))?:/i"
 
-# Unified categorization + version-bump rules
-categories:
-  - title: "🚨 Breaking Changes"
-    when:
-      labels:
-        - "major"
-        - "breaking"
-
-  - title: "🚀 Features"
-    when:
-      labels:
-        - "minor"
-        - "feature"
-        - "enhancement"
-
-  - title: "🐛 Bug Fixes"
-    when:
-      labels:
-        - "patch"
-        - "fix"
-        - "bugfix"
-        - "bug"
-
-  - title: "🧰 Maintenance"
-    when:
-      labels:
-        - "chore"
-        - "dependencies"
-        - "ci"
-        - "github-actions"
-        - "docker"
-        - "python"
-
-  - title: "📚 Documentation"
-    when:
-      labels:
-        - "documentation"
-        - "docs"
 categories:
   - title: '🚨 Breaking Changes'
-    when: { labels: [ 'major', 'breaking' ] }
+    when:
+      labels:
+        - 'major'
+        - 'breaking'
   - title: '🚀 Features'
-    when: { labels: [ 'minor', 'feature', 'enhancement' ] }
+    when:
+      labels:
+        - 'minor'
+        - 'feature'
+        - 'enhancement'
   - title: '🐛 Bug Fixes'
-    when: { labels: [ 'patch', 'fix', 'bugfix', 'bug' ] }
+    when:
+      labels:
+        - 'patch'
+        - 'fix'
+        - 'bugfix'
+        - 'bug'
   - title: '🧰 Maintenance'
     when:
-      labels: [ 'chore', 'dependencies', 'ci', 'github-actions', 'docker', 'python' ]
+      labels:
+        - 'chore'
+        - 'dependencies'
+        - 'ci'
+        - 'github-actions'
+        - 'docker'
+        - 'python'
   - title: '📚 Documentation'
-    when: { labels: [ 'documentation', 'docs' ] }
+    when:
+      labels:
+        - 'documentation'
+        - 'docs'
   - title: 'Exclude'
     type: 'pre-exclude'
-    when: { label: 'skip-changelog' }
+    when:
+      labels:
+        - 'skip-changelog'
   - title: 'Major Resolver'
     type: 'version-resolver'
-    'semver-increment': 'major'
-    when: { labels: [ 'major', 'breaking' ] }
+    semver-increment: 'major'
+    when:
+      labels:
+        - 'major'
+        - 'breaking'
   - title: 'Minor Resolver'
     type: 'version-resolver'
-    'semver-increment': 'minor'
-    when: { labels: [ 'minor', 'feature', 'enhancement' ] }
+    semver-increment: 'minor'
+    when:
+      labels:
+        - 'minor'
+        - 'feature'
+        - 'enhancement'
   - title: 'Patch Resolver'
     type: 'version-resolver'
-    'semver-increment': 'patch'
+    semver-increment: 'patch'
     when:
-      labels: [ 'patch', 'fix', 'bugfix', 'bug', 'chore', 'dependencies', 'documentation' ]
+      labels:
+        - 'patch'
+        - 'fix'
+        - 'bugfix'
+        - 'bug'
+        - 'chore'
+        - 'dependencies'
+        - 'documentation'
   - title: 'Default Patch Resolver'
     type: 'version-resolver'
-    'semver-increment': 'patch'
-
-  - type: "pre-exclude"
-    when:
-      label: "skip-changelog"
-
-  - type: "version-resolver"
-    semver-increment: "major"
-    when:
-      labels:
-        - "major"
-        - "breaking"
-
-  - type: "version-resolver"
-    semver-increment: "minor"
-    when:
-      labels:
-        - "minor"
-        - "feature"
-        - "enhancement"
-
-  - type: "version-resolver"
-    semver-increment: "patch"
-    when:
-      labels:
-        - "patch"
-        - "fix"
-        - "bugfix"
-        - "bug"
-        - "chore"
-        - "dependencies"
-        - "documentation"
-
-  - type: "version-resolver"
-    semver-increment: "patch"
+    semver-increment: 'patch'
 
 template: |
   ## Changes
