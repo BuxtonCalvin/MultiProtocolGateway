@@ -19,7 +19,7 @@ jobs:
       pull-requests: write   # to autolabel PRs
     runs-on: ubuntu-latest
     steps:
-      - uses: release-drafter/release-drafter@531da1f5ce0b533e4d9efb127ba269d06bdfc916 # v7.7.0
+      - uses: release-drafter/release-drafter@v6
         with:
           config-name: release-drafter.yml
         env:
