@@ -1,12 +1,11 @@
 name-template: "v$RESOLVED_VERSION"
 tag-template: "v$RESOLVED_VERSION"
 
-# Autolabeler inspects each PR's title so you don't have to manually
-# label every PR. 
+# Autolabeler inspects each PR's title so you don't have to manually label every PR. 
 autolabeler:
   - label: "major"
     title:
-      - "/^breaking(\\(.*\\))?!:/i" # Fixed: Only captures explicit breaking bumps like feat!: or breaking:
+      - "/^breaking(\\(.*\\))?!:/i"
     body:
       - "/BREAKING CHANGE/i"
   - label: "minor"
@@ -26,74 +25,61 @@ autolabeler:
       - "/^refactor(\\(.*\\))?:/i"
       - "/^test(\\(.*\\))?:/i"
 
+# Section configurations for what visibly appears in your release notes changelog
 categories:
   - title: '🚨 Breaking Changes'
-    when:
-      labels:
-        - 'major'
-        - 'breaking'
+    labels:
+      - 'major'
+      - 'breaking'
   - title: '🚀 Features'
-    when:
-      labels:
-        - 'minor'
-        - 'feature'
-        - 'enhancement'
+    labels:
+      - 'minor'
+      - 'feature'
+      - 'enhancement'
   - title: '🐛 Bug Fixes'
-    when:
-      labels:
-        - 'patch'
-        - 'fix'
-        - 'bugfix'
-        - 'bug'
+    labels:
+      - 'patch'
+      - 'fix'
+      - 'bugfix'
+      - 'bug'
   - title: '🧰 Maintenance'
-    when:
-      labels:
-        - 'chore'
-        - 'dependencies'
-        - 'ci'
-        - 'github-actions'
-        - 'docker'
-        - 'python'
+    labels:
+      - 'chore'
+      - 'dependencies'
+      - 'ci'
+      - 'github-actions'
+      - 'docker'
+      - 'python'
   - title: '📚 Documentation'
-    when:
-      labels:
-        - 'documentation'
-        - 'docs'
-  - title: 'Exclude'
-    type: 'pre-exclude'
-    when:
-      labels:
-        - 'skip-changelog'
-  - title: 'Major Resolver'
-    type: 'version-resolver'
-    semver-increment: 'major'
-    when:
-      labels:
-        - 'major'
-        - 'breaking'
-  - title: 'Minor Resolver'
-    type: 'version-resolver'
-    semver-increment: 'minor'
-    when:
-      labels:
-        - 'minor'
-        - 'feature'
-        - 'enhancement'
-  - title: 'Patch Resolver'
-    type: 'version-resolver'
-    semver-increment: 'patch'
-    when:
-      labels:
-        - 'patch'
-        - 'fix'
-        - 'bugfix'
-        - 'bug'
-        - 'chore'
-        - 'dependencies'
-        - 'documentation'
-  - title: 'Default Patch Resolver'
-    type: 'version-resolver'
-    semver-increment: 'patch'
+    labels:
+      - 'documentation'
+      - 'docs'
+
+# Prevents matching PRs from appearing in the release notes changelog text
+exclude-labels:
+  - 'skip-changelog'
+
+# Handles calculations for tracking major, minor, and patch bumps
+version-resolver:
+  major:
+    labels:
+      - 'major'
+      - 'breaking'
+  minor:
+    labels:
+      - 'minor'
+      - 'feature'
+      - 'enhancement'
+  patch:
+    labels:
+      - 'patch'
+      - 'fix'
+      - 'bugfix'
+      - 'bug'
+      - 'chore'
+      - 'dependencies'
+      - 'documentation'
+  default: 'patch'
 
 template: |
   ## Changes
