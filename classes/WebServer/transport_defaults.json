@@ -316,7 +316,11 @@
     "use_exponential_backoff": "true",
     "use_utc_timestamp": "False",
     "username": "",
-    "write_requires_complete_cycle": "true"
+    "write_requires_complete_cycle": "true",
+    "max_overflow": "10",
+    "pool_recycle": "3600",
+    "pool_size": "5",
+    "auto_update_extensions": "True"
   },
   "prometheus_out": {
     "stale_check_interval": "5.0",

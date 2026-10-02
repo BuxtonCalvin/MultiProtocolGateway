@@ -253,7 +253,15 @@ classDiagram
     class serial_pylon
     class serial_frame_transport
     class mqtt
-    class timescaledb
+    class timescaledb {
+        +auto_update_extensions: bool
+        +timescaledb_version: tuple~int, int, int~
+        -_extension_versions: dict
+        +connect_tsdb()
+        -_ensure_database_extensions()
+        -_update_extensions_if_enabled()
+        -_check_extension_versions()
+    }
     class influxdb_out
     class influxdb3_out
     class json_out
@@ -807,6 +815,44 @@ flowchart LR
 
 Only live ingestion queues to the persistent backlog on failure. Metrics Edit and Timeshift Data both fail outright if TimescaleDB is unreachable, and neither is retried automatically.
 
+### TimescaleDB Startup — Extension Version Check & Auto-Update
+
+Runs inside `connect_tsdb()` before any table work. The module targets the current TimescaleDB API only (the columnstore API, introduced in 2.18.0), so an older server is refused rather than worked around. When the Docker image has been upgraded but the database still holds the older extension, MPG warns, or, if `auto_update_extensions` is on, updates it. See [TimescaleDB documentation, Upgrading TimescaleDB](../bridges/TimeScaleDB/timescaledb.md).
+
+```mermaid
+flowchart TD
+    A["connect_tsdb()<br/>pooled AUTOCOMMIT connection, SELECT 1"] --> B["_ensure_database_extensions()<br/>for timescaledb, then timescaledb_toolkit"]
+    B --> C{"Extension installed<br/>in this database?"}
+    C -- "No" --> D["CREATE EXTENSION IF NOT EXISTS"]
+    D -- "fails (not a TimescaleDB image,<br/>or no privilege)" --> D1["Log cause and manual command<br/>connect fails: bridge does not start"]
+    D -- "ok" --> E
+    C -- "Yes" --> E["Record installed version and the<br/>version the server provides<br/>(pg_available_extensions.default_version)"]
+
+    E --> F{"Installed version differs<br/>from the server's version?"}
+    F -- "No" --> K
+    F -- "Yes" --> G{"auto_update_extensions<br/>enabled? (default: off)"}
+    G -- "No" --> K
+    G -- "Yes" --> H["_update_extensions_if_enabled()<br/>raw DBAPI connection, autocommit,<br/>ALTER EXTENSION x UPDATE as the<br/>very first statement<br/>(timescaledb first, then toolkit)"]
+    H -- "fails (user does not own the extension)" --> H1["Log error with the manual command<br/>non-fatal, continue on the older version"]
+    H -- "ok" --> I["Server drops other sessions that had the<br/>old version loaded (Grafana, pgAdmin, ...)<br/>MPG disposes its pool and re-probes"]
+    H1 --> K
+    I --> K
+
+    K["_check_extension_versions()"] --> L{"Still older than the<br/>server provides?"}
+    L -- "Yes" --> L1["Warning: set auto_update_extensions = True<br/>or run ALTER EXTENSION ... UPDATE manually"]
+    L -- "No" --> M
+    L1 --> M{"TimescaleDB older than<br/>2.18.0 (MIN_TIMESCALEDB_VERSION)?"}
+    M -- "Yes" --> N["RuntimeError: too old<br/>tsdb_connected = False<br/>bridge does not start"]
+    M -- "No" --> O["tsdb_connected = True<br/>clean up orphaned locks,<br/>create tables, start flush thread"]
+
+    style H fill:#fef3c7,stroke:#d97706
+    style N fill:#fecaca,stroke:#dc2626
+    style D1 fill:#fecaca,stroke:#dc2626
+    style O fill:#dcfce7,stroke:#16a34a
+```
+
+The update needs a raw driver connection because TimescaleDB refuses `ALTER EXTENSION UPDATE` in any session that has already loaded the extension, and a pooled SQLAlchemy connection always runs setup queries first.
+
 ---
 
 ## 12. Flowchart — Live Protocol Analysis Workflow
@@ -1032,7 +1078,7 @@ flowchart TB
 
     HW -.->|"device passthrough"| MPG
 
-    MPG -->|"writes rows"| TSDB
+    MPG -->|"writes rows<br/>(+ optional ALTER EXTENSION UPDATE at startup)"| TSDB
     MPG -->|"line protocol"| INFLUX1
     MPG -->|"v3 API, apiv3_ token"| INFLUX3
     MPG -->|"publish/subscribe :1883"| MOSQ
@@ -1062,6 +1108,8 @@ flowchart TB
     style TSDB fill:#dcfce7,stroke:#16a34a
     style MOSQ fill:#fef3c7,stroke:#d97706
 ```
+
+Pulling a newer `timescaledb-ha` image upgrades the server software, but each database keeps its older extension version until it is updated. With `auto_update_extensions = true` MPG performs that update at startup (see [TimescaleDB Startup — Extension Version Check & Auto-Update](#timescaledb-startup--extension-version-check--auto-update)); otherwise it logs a warning with the manual command.
 
 ---
 
