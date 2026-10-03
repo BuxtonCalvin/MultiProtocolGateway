@@ -609,8 +609,8 @@ class timescaledb(transport_base):
     migrate_data: bool = True
     # Whether the bridge may run "ALTER EXTENSION <name> UPDATE" itself, at startup, when the server provides a newer
     # timescaledb / timescaledb_toolkit than the one installed in the target database (typical after a Docker image upgrade).
-    # Off by default: the update is one-way, needs a superuser, and drops every other open connection to the database.
-    auto_update_extensions: bool = False
+    # On by default: the update is one-way, needs a superuser, and drops every other open connection to the database.
+    auto_update_extensions: bool = True
     # This module targets the CURRENT TimescaleDB API only (no legacy fallbacks): the columnstore API (enable_columnstore,
     # add_columnstore_policy, ...) arrived in 2.18.0, which is therefore the floor.  An older server is refused at connect
     # time with an upgrade message rather than failing later in some policy call.
@@ -669,7 +669,7 @@ class timescaledb(transport_base):
             - max_backlog_size (int): Max backlog points (default: 10000)
             - max_reconnect_delay (int): Max reconnect delay in seconds (default: 300 = 5 minutes)
             - max_stale_attempts (int): Max upstream reconnect requests per stale period; 0 disables (default: 3)
-            - auto_update_extensions (bool): Run ALTER EXTENSION ... UPDATE at startup when the server provides newer timescaledb/timescaledb_toolkit versions than the database has installed (default: False)
+            - auto_update_extensions (bool): Run ALTER EXTENSION ... UPDATE at startup when the server provides newer timescaledb/timescaledb_toolkit versions than the database has installed (default: True)
             - migrate_data: whether to attempt to migrate existing data when creating hypertables and rollups. Set to False to skip migration and start fresh with new schema.
             - password (str): Database password
             - port (int): Database port (default: 5432)
@@ -9330,7 +9330,7 @@ class BridgeAdminManager:
         return {
             "extension_versions": extension_versions,
             "postgres_version": postgres_version,
-            "auto_update_extensions": bool(getattr(self._bridge, "auto_update_extensions", False)),
+            "auto_update_extensions": bool(getattr(self._bridge, "auto_update_extensions", True)),
             "tsdb_connected": self._bridge.tsdb_connected,
             "reconnecting": reconnecting,
             "migration_in_progress": migration_in_progress,
