@@ -25,6 +25,15 @@
   bridge to exist, not to be connected, so an empty dict here means
   "still connecting" rather than an error).
 
+  The Versions group at the bottom lists the TimescaleDB and Toolkit
+  extension versions this database runs and whether each matches the
+  version the server provides ("Up to date" / "Update available"), plus
+  the PostgreSQL version (informational). Context fields:
+  health.extension_versions (list of name/label/installed/available/
+  up_to_date), health.postgres_version, health.auto_update_extensions.
+  The versions are read live, so they stay correct after a manual
+  ALTER EXTENSION ... UPDATE.
+
   Purely observational — nothing on this panel is clickable. The
   connect/reconnect/rebuild ACTIONS this state describes live on the
   Timescale DB menu pads, not here; this card only reports what's
@@ -80,5 +89,36 @@
     </div>
 
   </dl>
+
+  <div class="border-t border-mpg-700/30 pt-2 mt-3">
+    <div class="surface-muted text-xs uppercase tracking-wide mb-2">Versions</div>
+    {% if not health.extension_versions %}
+    <p class="surface-muted text-xs mb-2">Extension versions unavailable.</p>
+    {% endif %}
+    <dl class="space-y-2 text-sm">
+      {% for ext in health.extension_versions %}
+      <div class="flex items-center justify-between gap-3">
+        <dt class="surface-muted text-xs">{{ ext.label }}</dt>
+        <dd class="surface-title text-xs font-medium text-right">
+          <span class="font-mono">{{ ext.installed }}</span>
+          {% if ext.up_to_date %}
+          <span class="text-success ml-1" title="Matches the version the server provides.">&#10003; Up to date</span>
+          {% else %}
+          <span class="text-dirty ml-1"
+                title="{% if health.auto_update_extensions %}MPG will update it on the next start (auto_update_extensions is on).{% else %}Set auto_update_extensions = true in config.cfg, or run ALTER EXTENSION {{ ext.name }} UPDATE; as the first command of a new psql session.{% endif %}">
+            &uarr; Update available: <span class="font-mono">{{ ext.available }}</span>
+          </span>
+          {% endif %}
+        </dd>
+      </div>
+      {% endfor %}
+      {% if health.postgres_version %}
+      <div class="flex items-center justify-between gap-3">
+        <dt class="surface-muted text-xs">PostgreSQL</dt>
+        <dd class="surface-title text-xs font-mono font-medium">{{ health.postgres_version }}</dd>
+      </div>
+      {% endif %}
+    </dl>
+  </div>
   {% endif %}
 </div>

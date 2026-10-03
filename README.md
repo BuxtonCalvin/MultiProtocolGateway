@@ -28,6 +28,9 @@ Then open **`http://localhost:1717`** and configure everything from the web UI �
 
 [![Hardware](documentation/assets/waveshare_mpg_eg4.png)](documentation/assets/waveshare_mpg_eg4.png)
 
+[![Read Modes for Hardware](documentation/architecture/mermaid-diagrams.md#8-flowchart--read-mode-decision-tree)](documentation/architecture/mermaid-diagrams.md#8-flowchart--read-mode-decision-tree)
+
+
 MPG includes simulators so you can evaluate the full scrape → decode → bridge pipeline before you have a device wired up:
 
 - `tools/modbus_server_sim.py` — a simulated Modbus TCP server MPG can scrape from

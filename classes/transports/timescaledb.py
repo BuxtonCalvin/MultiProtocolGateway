@@ -111,7 +111,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 # from sqlalchemy.engine.interfaces import ReflectedColumn
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.engine.interfaces import ReflectedColumn
-from sqlalchemy.exc import OperationalError, SQLAlchemyError
+from sqlalchemy.exc import DBAPIError, OperationalError, SQLAlchemyError
 from sqlalchemy.orm import (
     DeclarativeBase,
     Mapped,
@@ -134,6 +134,45 @@ from .transport_base import transport_base
 # checkers as a ONE-element row, which breaks tuple-unpacking and indexing.
 # This alias means "a row of any length whose columns are Any".
 AnyRow: TypeAlias = Row[Unpack[Tuple[Any, ...]]]
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# SQL safety helpers shared by HyperTableManager and RollupManager
+# ---------------------------------------------------------------------------------------------------------------------
+
+_INTERVAL_PART: str = (
+    r"\d+(?:\.\d+)?\s*(?:microseconds?|milliseconds?|seconds?|secs?|minutes?|mins?|hours?|days?|weeks?|months?|mons?|years?)"
+)
+_INTERVAL_RE: re.Pattern[str] = re.compile(rf"^{_INTERVAL_PART}(?:\s+{_INTERVAL_PART})*$", re.IGNORECASE)
+_SQL_IDENT: str = r'(?:[A-Za-z_][A-Za-z0-9_$]*|"(?:[^"]|"")+")'
+_RELATION_NAME_RE: re.Pattern[str] = re.compile(rf"^{_SQL_IDENT}(?:\.{_SQL_IDENT})?$")
+
+
+def validated_interval(value: str, what: str = "interval") -> str:
+    """
+    Return ``value`` unchanged if it is a plain PostgreSQL interval such as "1 day", "2 weeks" or "1 day 12 hours".
+
+    Intervals reach the database either as bound parameters or inside DDL that cannot take bind parameters (CREATE
+    MATERIALIZED VIEW); either way an unvalidated string (stray quote, semicolon, a typo) would at best produce a confusing
+    server error and at worst alter the statement.  Raises ValueError naming ``what`` so the log says which setting is bad.
+    """
+    if not isinstance(value, str) or not _INTERVAL_RE.match(value.strip()):  # pyright: ignore[reportUnnecessaryIsInstance]
+        msg: str = f"Invalid {what} {value!r}: expected an interval such as '1 day', '2 weeks' or '3 months'."
+        raise ValueError(msg)
+    return value.strip()
+
+
+def validated_relation_name(name: str) -> str:
+    """
+    Return ``name`` unchanged if it is a (optionally schema-qualified) table/view name, with each part either a plain
+    identifier or already double-quoted.  Used where a name must be written into DDL (ALTER TABLE ...) because DDL takes no
+    bind parameters.  Raises ValueError otherwise.  Functions that accept a regclass are called with a bound
+    ``CAST(:name AS regclass)`` instead, which needs no validation at all.
+    """
+    if not isinstance(name, str) or not _RELATION_NAME_RE.match(name):  # pyright: ignore[reportUnnecessaryIsInstance]
+        msg: str = f"Invalid table/view name {name!r}: expected a (optionally schema-qualified) identifier or double-quoted identifier."
+        raise ValueError(msg)
+    return name
 
 
 class TimezoneEngine:
@@ -568,6 +607,14 @@ class timescaledb(transport_base):
 
     # whether to attempt to migrate existing data when creating hypertables and rollups.  Set to False to skip migration and start fresh with new schema.
     migrate_data: bool = True
+    # Whether the bridge may run "ALTER EXTENSION <name> UPDATE" itself, at startup, when the server provides a newer
+    # timescaledb / timescaledb_toolkit than the one installed in the target database (typical after a Docker image upgrade).
+    # Off by default: the update is one-way, needs a superuser, and drops every other open connection to the database.
+    auto_update_extensions: bool = False
+    # This module targets the CURRENT TimescaleDB API only (no legacy fallbacks): the columnstore API (enable_columnstore,
+    # add_columnstore_policy, ...) arrived in 2.18.0, which is therefore the floor.  An older server is refused at connect
+    # time with an upgrade message rather than failing later in some policy call.
+    MIN_TIMESCALEDB_VERSION: tuple[int, int, int] = (2, 18, 0)
     # whether to enable compression on hypertables at startup.
     #Compression policies are created regardless, but this controls whether existing data is compressed on init.
     enable_compression: bool = True
@@ -622,6 +669,7 @@ class timescaledb(transport_base):
             - max_backlog_size (int): Max backlog points (default: 10000)
             - max_reconnect_delay (int): Max reconnect delay in seconds (default: 300 = 5 minutes)
             - max_stale_attempts (int): Max upstream reconnect requests per stale period; 0 disables (default: 3)
+            - auto_update_extensions (bool): Run ALTER EXTENSION ... UPDATE at startup when the server provides newer timescaledb/timescaledb_toolkit versions than the database has installed (default: False)
             - migrate_data: whether to attempt to migrate existing data when creating hypertables and rollups. Set to False to skip migration and start fresh with new schema.
             - password (str): Database password
             - port (int): Database port (default: 5432)
@@ -684,6 +732,7 @@ class timescaledb(transport_base):
         self.retry_delay_mins: int = max(0, settings.getint("retry_delay_mins", fallback=self.retry_delay_mins))
         # wait for complete data to write to db.
         self.write_requires_complete_cycle: bool = settings.getboolean("write_requires_complete_cycle", fallback=self.write_requires_complete_cycle)
+        self.auto_update_extensions: bool = settings.getboolean("auto_update_extensions", fallback=self.auto_update_extensions)
 
         # UTC timestamp mode setting - set context for this transport instance
         self.use_utc_timestamp: bool = settings.getboolean("use_utc_timestamp", fallback=False)
@@ -780,6 +829,10 @@ class timescaledb(transport_base):
 
         # Engine and SessionFactory come from the manager
         self.engine: Engine = self._connection_manager.engine
+        # Set by _ensure_database_extensions once the server has been probed; (0, 0, 0) until then.
+        self.timescaledb_version: tuple[int, int, int] = (0, 0, 0)
+        # extension name -> (installed version, version the server provides or None); filled in by _ensure_database_extensions.
+        self._extension_versions: dict[str, tuple[str, str | None]] = {}
         self.SessionFactory: sessionmaker[Session] = self._connection_manager.make_session_factory()
 
         # -------------------------
@@ -871,6 +924,165 @@ class timescaledb(transport_base):
         """
         self.request_upstream_reconnect: Callable[[str], None] | None = None
 
+    @staticmethod
+    def parse_extension_version(version: str) -> tuple[int, int, int]:
+        """Parse an extension version such as '2.30.2' or '2.31.0-dev' into (major, minor, patch)."""
+        m = re.match(r"^(\d+)\.(\d+)(?:\.(\d+))?", version.strip())
+        if not m:
+            msg: str= f"Unrecognized extension version {version!r}: expected a string like '2.30.2' or '2.31.0-dev'."
+            raise ValueError(msg)
+        return int(m.group(1)), int(m.group(2)), int(m.group(3) or 0)
+
+    def _ensure_database_extensions(self, conn: Connection) -> None:
+        """
+        Make sure the extensions this module depends on exist in the target database, creating any that are missing, and record
+        the installed and server-provided version of each in ``self._extension_versions``.
+
+        - ``timescaledb`` is mandatory: hypertables, compression, retention and continuous aggregates all depend on it.  A TimescaleDB
+          image normally provides it, but a plain PostgreSQL server (or a database that _create_database_if_missing created on a server
+          whose template database lacks the extension) does not.
+        - ``timescaledb_toolkit`` provides the stats_agg() summaries used by the rollup views.
+
+        An extension that is already installed is left alone, without attempting a CREATE, so a database user without the privilege to
+        create extensions still works against a database that already has them.  A failure to create a missing extension is logged
+        with its cause and re-raised, because the module cannot work without them.
+
+        This method only PROBES.  What to do about the versions it finds -- optionally update, then warn or refuse -- is decided by
+        _update_extensions_if_enabled and _check_extension_versions, called by connect_tsdb in that order.
+
+        Must be called on an AUTOCOMMIT connection; CREATE EXTENSION would otherwise be rolled back when the connection closes.
+
+        Args:
+            conn (Connection): An AUTOCOMMIT connection to the target database.
+        """
+        for ext_name in ("timescaledb", "timescaledb_toolkit"):
+            try:
+                installed_version: str | None = conn.execute(
+                    text("SELECT extversion FROM pg_extension WHERE extname = :ext_name"), {"ext_name": ext_name}
+                ).scalar()
+                if not installed_version:
+                    self._log.info(
+                        f"Extension '{ext_name}' is not installed in database '{self.engine.url.database}'. Creating it."
+                    )
+                    conn.execute(text(f"CREATE EXTENSION IF NOT EXISTS {ext_name}"))
+                    installed_version = conn.execute(
+                        text("SELECT extversion FROM pg_extension WHERE extname = :ext_name"), {"ext_name": ext_name}
+                    ).scalar()
+                else:
+                    self._log.debug(f"Extension '{ext_name}' {installed_version} is already installed.")
+
+                available_version: str | None = conn.execute(
+                    text("SELECT default_version FROM pg_available_extensions WHERE name = :ext_name"), {"ext_name": ext_name}
+                ).scalar()
+                if installed_version:
+                    self._extension_versions[ext_name] = (installed_version, available_version)
+                    if ext_name == "timescaledb":
+                        self.timescaledb_version = self.parse_extension_version(installed_version)
+            except Exception as e:
+                self._log.error(
+                    f"Could not create the '{ext_name}' extension in database '{self.engine.url.database}': {e}. "
+                    f"Check that the PostgreSQL server has TimescaleDB installed (use a TimescaleDB image) and that the database user "
+                    f"may create extensions, or create it once as a superuser with: CREATE EXTENSION IF NOT EXISTS {ext_name};"
+                )
+                raise
+
+    def _outdated_extensions(self) -> list[str]:
+        """Names of probed extensions whose installed version differs from the version the server provides."""
+        return [
+            name
+            for name, (installed, available) in self._extension_versions.items()
+            if available is not None and installed != available
+        ]
+
+    def _update_extensions_if_enabled(self) -> None:
+        """
+        Run ``ALTER EXTENSION <name> UPDATE`` for every outdated extension (timescaledb first, then timescaledb_toolkit) when
+        ``auto_update_extensions`` is on, then re-probe so the version check that follows sees the result.
+
+        WHY A RAW DRIVER CONNECTION: TimescaleDB refuses ALTER EXTENSION UPDATE in any session that has already loaded the
+        extension, and the load happens on the first statement of the session.  A SQLAlchemy connection -- even from a brand-new
+        engine -- always runs setup queries first, so the update fails with "cannot be updated after the old version has already
+        been loaded".  A bare DBAPI connection in autocommit mode sends nothing until the ALTER itself, which is what works.
+
+        SIDE EFFECT: updating makes the server terminate every other session that had the old version loaded (this bridge's own pooled
+        connections, but also Grafana, pgAdmin, ...).  Those clients simply reconnect.  The engine pool is disposed here and
+        pool_pre_ping covers the rest.
+
+        Failures (typically: the database user is not a superuser) are logged with the manual command and are not fatal unless the
+        version floor in _check_extension_versions is then violated.
+        """
+        outdated: list[str] = self._outdated_extensions()
+        if not outdated:
+            return
+        if not self.auto_update_extensions:
+            return  # _check_extension_versions will warn with the manual command
+
+        url = self.engine.url
+        for ext_name in ("timescaledb", "timescaledb_toolkit"):
+            if ext_name not in outdated:
+                continue
+            installed, available = self._extension_versions[ext_name]
+            self._log.warning(
+                f"auto_update_extensions: updating '{ext_name}' {installed} -> {available} in database '{url.database}'. "
+                f"Other open connections to this database will be dropped and must reconnect."
+            )
+            raw: Any = None
+            try:
+                dbapi: Any = self.engine.dialect.dbapi
+                raw = dbapi.connect(
+                    host=url.host, port=url.port, dbname=url.database, user=url.username, password=url.password,
+                    connect_timeout=10,
+                )
+                raw.autocommit = True  # must be set BEFORE any statement: psycopg2 would otherwise send BEGIN first
+                with raw.cursor() as cur:
+                    cur.execute(f"ALTER EXTENSION {ext_name} UPDATE")  # ext_name comes from the fixed tuple above
+                self._log.info(f"auto_update_extensions: '{ext_name}' updated to {available}.")
+            except Exception as e:
+                self._log.error(
+                    f"auto_update_extensions: could not update '{ext_name}': {e}. The database user must own the extension (normally a superuser). "
+                    f"Update it manually, as the FIRST command of a new psql session: ALTER EXTENSION {ext_name} UPDATE;"
+                )
+            finally:
+                if raw is not None:
+                    try:
+                        raw.close()
+                    except Exception:  # noqa: S110
+                        pass
+
+        # The pooled connections were terminated by the server (or hold the old library): start from a clean pool and re-probe.
+        self.engine.dispose()
+        self._extension_versions.clear()
+        with self.engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+            self._ensure_database_extensions(conn)
+
+    def _check_extension_versions(self) -> None:
+        """
+        Warn about extensions still older than the server provides, and refuse a TimescaleDB older than MIN_TIMESCALEDB_VERSION.
+
+        This module uses the current columnstore API only (no legacy fallbacks), so an older server is refused here with an upgrade
+        message instead of failing later inside a policy call.
+
+        Raises:
+            RuntimeError: if the installed TimescaleDB is older than MIN_TIMESCALEDB_VERSION.
+        """
+        for ext_name in self._outdated_extensions():
+            installed, available = self._extension_versions[ext_name]
+            self._log.warning(
+                f"Extension '{ext_name}' is at {installed} in database '{self.engine.url.database}' but the server "
+                f"provides {available}. Set auto_update_extensions = True in config.cfg, or run 'ALTER EXTENSION {ext_name} UPDATE;' "
+                f"as the FIRST command of a new psql session to the database, to pick up the newer version."
+            )
+        if self.timescaledb_version < self.MIN_TIMESCALEDB_VERSION:
+            installed_text: str = ".".join(str(n) for n in self.timescaledb_version)
+            min_text: str = ".".join(str(n) for n in self.MIN_TIMESCALEDB_VERSION)
+            msg: str = (
+                f"TimescaleDB {installed_text} is too old: this module requires {min_text} or newer "
+                f"(columnstore API). Upgrade the server image, then set auto_update_extensions = True in config.cfg or run "
+                f"'ALTER EXTENSION timescaledb UPDATE;' as the first command of a new psql session."
+            )
+            self._log.error(msg)
+            raise RuntimeError(msg)
+
     def connect_tsdb(self) -> None:
         """
         Connect to DB, build device_metrics_wide__* table from metrics data, and ensure schema/hypertable/policies exist.
@@ -880,9 +1092,14 @@ class timescaledb(transport_base):
         # create database if missing.  Connect to standard default "postgres" database first to then check/create target database structure.
             self._log.info(f"Starting Timescaledb {self.__version__} and attempting connection:")
             try:
-                with self.engine.connect() as conn:
+                # AUTOCOMMIT is required: CREATE EXTENSION is transactional, and this connection is closed without a commit,
+                # so on a normal (non-autocommit) connection the extensions would be rolled back and never actually created.
+                with self.engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
                     conn.execute(text("SELECT 1"))
-                    conn.execute(text("CREATE EXTENSION IF NOT EXISTS timescaledb_toolkit"))
+                    self._extension_versions.clear()
+                    self._ensure_database_extensions(conn)
+                self._update_extensions_if_enabled()
+                self._check_extension_versions()
                 self._set_tsdb_connected(conn_value=True, conn_reason="Connection verified")
             except OperationalError as e:
                 self._set_tsdb_connected(conn_value=False, conn_reason="Connection failed")
@@ -2611,7 +2828,7 @@ class timescaledb(transport_base):
         Called for every stale batch (see _commit_transport_state); returns without doing anything when the attempt cap has been
         reached (including max_stale_attempts = 0) or the retry delay has not yet elapsed.  Counters reset when fresh data arrives.
         """
-        state = self._stale_registry.get(transport_id)
+        state: dict[str, Any] | None = self._stale_registry.get(transport_id)
         if not state:
             return
 
@@ -2622,7 +2839,7 @@ class timescaledb(transport_base):
 
         # 2. Throttling: Has enough time passed since this transport's last attempt?
         if state["last_event_ts"] is not None:
-            time_since_last = current_time - state["last_event_ts"]
+            time_since_last: timedelta = current_time - state["last_event_ts"]
             if time_since_last < timedelta(minutes=int(self.retry_delay_mins)):
                 return
 
@@ -3291,7 +3508,6 @@ class HyperTableManager:
             self.transport_read_intervals[transport_name] = (protocol_name, read_interval)
 
 
-
     # === moved: ensure_hypertables (3798-3875) ===
     def ensure_hypertables(self, tables: list[str], chunk_time_interval: str | None = None) -> None:
         """
@@ -3325,45 +3541,48 @@ class HyperTableManager:
             "migrate": getattr(self, "migrate_data", True),
         }
 
+        if chunk_time_interval:
+            chunk_time_interval = validated_interval(chunk_time_interval, "chunk_time_interval")  # before any DB work
+
         try:
             with self.SessionFactory() as session:
                 with session.begin():
                     for table in tables:
+                        # by_range() is the current create_hypertable() interface (the positional time-column form is
+                        # the "old interface").  Table name and interval are bound parameters, never interpolated.
+                        ht_params: dict[str, Any] = {**params, "t": table}
                         if chunk_time_interval:
+                            ht_params["cti"] = chunk_time_interval
                             session.execute(
                                 text(
-                                    f"""
+                                    """
                                     SELECT create_hypertable(
-                                        '{table}',
-                                        :time_col,
-                                        chunk_time_interval => INTERVAL '{chunk_time_interval}',
+                                        CAST(:t AS regclass),
+                                        by_range(:time_col, CAST(:cti AS INTERVAL)),
                                         if_not_exists => :if_exists,
                                         migrate_data => :migrate
                                     )
                                     """
                                 ),
-                                {
-                                    **params,
-                                },
+                                ht_params,
                             )
                             session.execute(
-                                text(f"SELECT set_chunk_time_interval('{table}', INTERVAL '{chunk_time_interval}');")
+                                text("SELECT set_chunk_time_interval(CAST(:t AS regclass), CAST(:cti AS INTERVAL))"),
+                                ht_params,
                             )
                         else:
                             session.execute(
                                 text(
-                                    f"""
+                                    """
                                     SELECT create_hypertable(
-                                        '{table}',
-                                        :time_col,
+                                        CAST(:t AS regclass),
+                                        by_range(:time_col),
                                         if_not_exists => :if_exists,
                                         migrate_data => :migrate
                                     )
                                     """
                                 ),
-                                {
-                                    **params,
-                                },
+                                ht_params,
                             )
                 self._log.debug(f"Hypertable creation ensured for: {', '.join(tables)}")
 
@@ -3493,6 +3712,13 @@ class HyperTableManager:
                 return
 
             try:
+                # Validate FIRST: a bad interval must be rejected before the existing policy is touched.
+                drop_after: str = validated_interval(self.drop_after, "drop_after interval")
+            except ValueError as e:
+                self._log.error(f"apply_retention_policy {table_name}: {e}")
+                return
+
+            try:
                 if self.policy_config_matches_helper(
                     session, table_name, "policy_retention", "drop_after", self.drop_after
                 ):
@@ -3503,8 +3729,11 @@ class HyperTableManager:
                     return
 
                 # Remove and re-add policy to ensure interval updates apply
-                session.execute(text(f"SELECT remove_retention_policy('{table_name}', if_exists => True);"))
-                session.execute(text(f"SELECT add_retention_policy('{table_name}', INTERVAL '{self.drop_after}');"))
+                session.execute(text("SELECT remove_retention_policy(CAST(:t AS regclass), if_exists => true)"), {"t": table_name})
+                session.execute(
+                    text("SELECT add_retention_policy(CAST(:t AS regclass), drop_after => CAST(:d AS INTERVAL))"),
+                    {"t": table_name, "d": drop_after},
+                )
 
                 session.commit()
                 self._log.debug(f"Retention policy updated for {table_name}")
@@ -3520,20 +3749,97 @@ class HyperTableManager:
 
     # 5 Start the rollup thread.  Called from TimescaleDB class upon connection to the database.
 
+    _PLAIN_COLUMN_RE: re.Pattern[str] = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+    _ORDERBY_TERM_RE: re.Pattern[str] = re.compile(
+        r"^([A-Za-z_][A-Za-z0-9_]*)(?:\s+(ASC|DESC))?(?:\s+NULLS\s+(FIRST|LAST))?$", re.IGNORECASE
+    )
+
+    def _validate_columnstore_settings_helper(
+        self, session: Session, table_name: str, orderby: str, segmentby: str
+    ) -> tuple[list[str], list[str]]:
+        """
+        Pre-flight check of columnstore (compression) settings, run BEFORE ``ALTER TABLE ... SET (...)``.
+
+        Verifies, against the table's real columns, that every segmentby / orderby column exists, that orderby terms are valid
+        ("col [ASC|DESC] [NULLS FIRST|LAST]"), that no column is used for both, and that no json/array column is used.  This turns
+        a vague server error (or, worse, settings silently built from a stale column list) into a precise message.
+
+        Returns (segmentby_columns, orderby_columns).  Raises ValueError on the first problem found.  If the table does not exist
+        yet, only the syntax is checked -- the ALTER itself will then report the missing table.
+        """
+        seg_cols: list[str] = [c.strip() for c in segmentby.split(",") if c.strip()]
+        ord_terms: list[str] = [t.strip() for t in orderby.split(",") if t.strip()]
+        ord_cols: list[str] = []
+
+        for col in seg_cols:
+            if not self._PLAIN_COLUMN_RE.match(col):
+                msg: str = f"Invalid segmentby column {col!r} for {table_name}: expected a plain identifier (no quotes, no schema)."
+                raise ValueError(msg)
+        for term in ord_terms:
+            m: re.Match[str] | None = self._ORDERBY_TERM_RE.match(term)
+            if not m:
+                msg: str = f"Invalid orderby term {term!r} for {table_name}: expected 'column [ASC|DESC] [NULLS FIRST|LAST]'"
+                raise ValueError(msg)
+
+            ord_cols.append(m.group(1))
+
+        overlap: set[str] = set(seg_cols) & set(ord_cols)
+        if overlap:
+            msg: str = f"Column(s) {sorted(overlap)} cannot be in both segmentby and orderby for {table_name}"
+            raise ValueError(msg)
+
+        col_types: dict[str, str] = {
+            str(name): str(dtype)
+            for name, dtype in session.execute(
+                text(
+                    """
+                    SELECT a.attname, format_type(a.atttypid, a.atttypmod)
+                    FROM pg_attribute a
+                    WHERE a.attrelid = to_regclass(:t) AND a.attnum > 0 AND NOT a.attisdropped
+                    """
+                ),
+                {"t": table_name},
+            ).tuples()
+        }
+        if not col_types:
+            return seg_cols, ord_cols
+
+        for col in seg_cols + ord_cols:
+            if col not in col_types:
+                msg: str = f"Column {col!r} does not exist on {table_name}"
+                raise ValueError(msg)
+        for col in seg_cols:
+            if col_types[col].startswith("json") or col_types[col].endswith("[]"):
+                msg: str = f"segmentby column {col!r} on {table_name} has unsupported type {col_types[col]}"
+                raise ValueError(msg)
+        for col in ord_cols:
+            if col_types[col] == "json" or col_types[col].endswith("[]"):
+                msg: str = f"orderby column {col!r} on {table_name} has unsupported type {col_types[col]}"
+                raise ValueError(msg)
+        return seg_cols, ord_cols
+
     # === moved: _apply_compression_helper (4029-4048) ===
     def _apply_compression_helper(self, session: Session, table_name: str, segment_by: str) -> None:
         """Apply compression ALTER TABLE settings to one source table."""
         try:
+            # Pre-flight (see _validate_columnstore_settings_helper): fail with a precise message BEFORE touching the table.
+            # validated_relation_name/_validate_columnstore_settings_helper guarantee everything written into the DDL below is a
+            # real column or a plain identifier, so the DDL needs no further escaping.
+            safe_table: str = validated_relation_name(table_name)
+            seg_cols, _ord_cols = self._validate_columnstore_settings_helper(session, table_name, self.compress_orderby, segment_by)
             sql: TextClause = text(
-                f"ALTER TABLE {table_name} SET ("
-                f"timescaledb.compress, "
+                f"ALTER TABLE {safe_table} SET ("
+                f"timescaledb.enable_columnstore = true, "
                 f"timescaledb.compress_orderby = '{self.compress_orderby}', "
-                f"timescaledb.compress_segmentby = '{segment_by}'"
+                f"timescaledb.compress_segmentby = '{', '.join(seg_cols)}'"
                 ");"
             )
             session.execute(sql)
             session.commit()
-            self._log.debug(f"Compression enabled on {table_name}")
+            self._log.debug(f"Columnstore enabled on {table_name}")
+        except ValueError as e:
+            self._log.error(f"Not enabling columnstore on {table_name}: {e}")
+            session.rollback()
         except SQLAlchemyError as e:
             self._log.error(f"Error enabling compression on {table_name}: {e}")
             try:
@@ -3586,6 +3892,13 @@ class HyperTableManager:
                     return
 
             try:
+                # Validate FIRST: a bad interval must be rejected before the existing policy is touched.
+                chunk_interval = validated_interval(chunk_interval, "compress_after interval")
+            except ValueError as e:
+                self._log.error(f"ensure_compression_policy {source}: {e}")
+                return
+
+            try:
                 if self.policy_config_matches_helper(
                     session, source, "policy_compression", "compress_after", chunk_interval
                 ):
@@ -3597,9 +3910,12 @@ class HyperTableManager:
 
                 # Remove and re-add policy to ensure interval updates apply
                 # -- same reasoning as apply_retention_policy.
-                session.execute(text(f"SELECT remove_compression_policy('{source}', if_exists => TRUE);"))
                 session.execute(
-                    text(f"SELECT add_compression_policy('{source}', compress_after => INTERVAL '{chunk_interval}');")
+                    text("CALL remove_columnstore_policy(CAST(:t AS regclass), if_exists => true)"), {"t": source}
+                )
+                session.execute(
+                    text("CALL add_columnstore_policy(CAST(:t AS regclass), after => CAST(:after AS INTERVAL))"),
+                    {"t": source, "after": chunk_interval},
                 )
                 session.commit()
 
@@ -3786,7 +4102,7 @@ class HyperTableManager:
                         FROM target_tables t
                         LEFT JOIN LATERAL (
                             SELECT before_compression_total_bytes
-                            FROM chunk_compression_stats(to_regclass(t.view_name))
+                            FROM chunk_columnstore_stats(to_regclass(t.view_name))
                         ) s ON to_regclass(t.view_name) IS NOT NULL
                         GROUP BY t.view_name
                     )
@@ -3898,6 +4214,36 @@ class HyperTableManager:
             self._log.info(f"resume_compression_job_for_table: resumed job(s) {job_ids}")
 
 
+    def _convert_chunks_to_rowstore_helper(
+        self,
+        session: Session,
+        table_name: str,
+        older_than: datetime | None = None,
+        newer_than: datetime | None = None
+    ) -> int:
+        """
+        Convert every chunk of ``table_name`` (optionally only those wholly inside ``newer_than`` .. ``older_than``) back to the
+        rowstore, skipping chunks that are not in the columnstore.  Returns the number of chunks processed.
+
+        convert_to_rowstore is a PROCEDURE, so unlike the old ``SELECT decompress_chunk(c, true) FROM show_chunks(...)`` it cannot be
+        driven from a single set-returning SELECT: the chunk list is read first, then one CALL is issued per chunk, all inside the
+        caller's transaction/savepoint (so the caller's lock_timeout and rollback behavior are unchanged).
+        """
+        if older_than is None and newer_than is None:
+            rows: Sequence[AnyRow] = session.execute(
+                text("SELECT CAST(c AS text) FROM show_chunks(CAST(:t AS regclass)) AS c"), {"t": table_name}
+            ).scalars().all()
+        else:
+            rows: Sequence[AnyRow] = session.execute(
+                text(
+                    "SELECT CAST(c AS text) FROM show_chunks(CAST(:t AS regclass), older_than => :o, newer_than => :n) AS c"
+                ),
+                {"t": table_name, "o": older_than, "n": newer_than},
+            ).scalars().all()
+        for chunk in rows:
+            session.execute(text("CALL convert_to_rowstore(CAST(:c AS regclass), if_columnstore => true)"), {"c": chunk})
+        return len(rows)
+
     # === moved: decompress_table_chunks_best_effort (5835-5911) ===
     def decompress_table_chunks_best_effort(self, session: Session, table_name: str) -> None:
         """
@@ -3960,13 +4306,7 @@ class HyperTableManager:
         try:
             with session.begin_nested():
                 self.set_lock_timeout(session, r_settings["lock_timeout"])
-                session.execute(
-                    text("""
-                        SELECT decompress_chunk(c, true)
-                        FROM show_chunks(:tname) AS c;
-                    """),
-                    {"tname": table_name}
-                )
+                self._convert_chunks_to_rowstore_helper(session, table_name)
         except Exception as e:
             # the common case -- no compressed chunks yet
             # -- is entirely expected, but logged at warning so an
@@ -4008,13 +4348,7 @@ class HyperTableManager:
         try:
             with session.begin_nested():
                 self.set_lock_timeout(session, r_settings["lock_timeout"])
-                session.execute(
-                    text("""
-                        SELECT decompress_chunk(c, true)
-                        FROM show_chunks(:tname, older_than => :end_time, newer_than => :start_time) AS c;
-                    """),
-                    {"tname": table_name, "end_time": end_time, "start_time": start_time},
-                )
+                self._convert_chunks_to_rowstore_helper(session, table_name, older_than=end_time, newer_than=start_time)
         except Exception as e:
             self._log.warning(
                 f"decompress_chunks_in_range: could not decompress chunks for '{table_name}' "
@@ -4299,8 +4633,14 @@ class HyperTableManager:
                                 session.execute(
                                     text(f"SET LOCAL work_mem = '{r_settings['work_mem']}';")
                                 )
-                                session.execute(text("SELECT decompress_chunk(:c, true)"), {"c": qualified_chunk})
-                                session.execute(text("SELECT compress_chunk(:c, true)"), {"c": qualified_chunk})
+                                session.execute(
+                                    text("CALL convert_to_rowstore(CAST(:c AS regclass), if_columnstore => true)"),
+                                    {"c": qualified_chunk},
+                                )
+                                session.execute(
+                                    text("CALL convert_to_columnstore(CAST(:c AS regclass), if_not_columnstore => true)"),
+                                    {"c": qualified_chunk},
+                                )
 
                         acc["chunks_ok"] += 1
                         table_chunks_ok += 1
@@ -4533,7 +4873,6 @@ class HyperTableManager:
             return self.performance_tiers["tier_medium"]
         else:
             return self.performance_tiers["tier_high"]
-
 
 
     # === moved: _max_wide_column_count_helper (6560-6612) ===
@@ -4943,8 +5282,6 @@ class HyperTableManager:
         if hours >= 24:
             return f"{max(1, round(hours / 24))} days"
         return f"{round(hours)} hours"
-
-
 
 
 class RollupManager:
@@ -5434,8 +5771,16 @@ class RollupManager:
                 base_wide_table_name=base_wide_table_name,
             )
 
+            # CREATE MATERIALIZED VIEW is DDL and cannot take bind parameters, so every value written into it is validated first.
+            validated_relation_name(view_name)
+            validated_relation_name(source)
+            if not re.fullmatch(r"[A-Za-z0-9_+\-/]+", self.machine_timezone):
+                msg: str=f"Invalid machine_timezone {self.machine_timezone!r} — must match [A-Za-z0-9_+-/]+"
+                self._log.error(msg)
+                raise ValueError(msg)  # noqa: TRY301
+
             select_clauses: list[str] = [
-                f"time_bucket(INTERVAL '{bucket_interval}', m_time, '{self.machine_timezone}') AS m_time",
+                f"time_bucket(INTERVAL '{validated_interval(bucket_interval, 'rollup bucket_interval')}', m_time, '{self.machine_timezone}') AS m_time",
                 "device_info_id",
             ]
             group_by_positions: list[str] = ["1", "2"]
@@ -5563,20 +5908,33 @@ class RollupManager:
 
             # 2. View's own chunk sizing — see docstring above for why this
             # is applied unconditionally here rather than only at creation.
-            session.execute(text(f"SELECT set_chunk_time_interval('{view_name}', INTERVAL '{chunk_interval}');"))
+            session.execute(
+                text("SELECT set_chunk_time_interval(CAST(:v AS regclass), CAST(:ci AS INTERVAL))"),
+                {"v": view_name, "ci": validated_interval(chunk_interval, "rollup chunk_interval")},
+            )
 
             # 3. Continuous Aggregate Refresh Policy — remove-then-add so a
             # start_offset/schedule change reaches an already-existing view.
-            session.execute(text(f"SELECT remove_continuous_aggregate_policy('{view_name}', if_exists => true);"))
-            session.execute(text(f"""
-                SELECT add_continuous_aggregate_policy(
-                    '{view_name}',
-                    start_offset      => INTERVAL '{start_offset}',
-                    end_offset        => INTERVAL '{bucket_interval}',
-                    initial_start     => '{self.anchor_start_time_utc}'::timestamptz,
-                    schedule_interval => INTERVAL '{bucket_interval}'
-                );
-            """))
+            session.execute(
+                text("SELECT remove_continuous_aggregate_policy(CAST(:v AS regclass), if_exists => true)"), {"v": view_name}
+            )
+            session.execute(
+                text("""
+                    SELECT add_continuous_aggregate_policy(
+                        CAST(:v AS regclass),
+                        start_offset      => CAST(:so AS INTERVAL),
+                        end_offset        => CAST(:bi AS INTERVAL),
+                        initial_start     => CAST(:ist AS timestamptz),
+                        schedule_interval => CAST(:bi AS INTERVAL)
+                    )
+                """),
+                {
+                    "v": view_name,
+                    "so": validated_interval(start_offset, "rollup start_offset"),
+                    "bi": validated_interval(bucket_interval, "rollup bucket_interval"),
+                    "ist": str(self.anchor_start_time_utc),
+                },
+            )
 
             # 4. Data Retention Policy (specific to the view) — remove-
             # then-add so a drop_after change reaches an already-existing
@@ -5588,13 +5946,11 @@ class RollupManager:
                     f"skipping retention remove/re-add."
                 )
             else:
-                session.execute(text(f"SELECT remove_retention_policy('{view_name}', if_exists => true);"))
-                session.execute(text(f"""
-                    SELECT add_retention_policy(
-                        '{view_name}',
-                        drop_after => INTERVAL '{drop_after}'
-                    );
-                """))
+                session.execute(text("SELECT remove_retention_policy(CAST(:v AS regclass), if_exists => true)"), {"v": view_name})
+                session.execute(
+                    text("SELECT add_retention_policy(CAST(:v AS regclass), drop_after => CAST(:d AS INTERVAL))"),
+                    {"v": view_name, "d": validated_interval(drop_after, "rollup drop_after")},
+                )
 
             # 5. Compression Policy — remove-then-add so a compress_after
             # change reaches an already-existing view, but skipped
@@ -5606,7 +5962,7 @@ class RollupManager:
             if self.hypertable_mgr.enable_compression:
                 # ALTER ... SET is inherently idempotent (not a "create"
                 # call), safe to repeat on every pass.
-                session.execute(text(f"ALTER MATERIALIZED VIEW {view_name} SET (timescaledb.compress = true);"))
+                session.execute(text(f"ALTER MATERIALIZED VIEW {view_name} SET (timescaledb.enable_columnstore = true);"))
 
                 if self.hypertable_mgr.policy_config_matches_helper(
                     session, view_name, "policy_compression", "compress_after", compress_after
@@ -5616,13 +5972,13 @@ class RollupManager:
                         f"skipping compression remove/re-add."
                     )
                 else:
-                    session.execute(text(f"SELECT remove_compression_policy('{view_name}', if_exists => true);"))
-                    session.execute(text(f"""
-                        SELECT add_compression_policy(
-                            '{view_name}',
-                            compress_after => INTERVAL '{compress_after}'
-                        );
-                    """))
+                    session.execute(
+                        text("CALL remove_columnstore_policy(CAST(:v AS regclass), if_exists => true)"), {"v": view_name}
+                    )
+                    session.execute(
+                        text("CALL add_columnstore_policy(CAST(:v AS regclass), after => CAST(:after AS INTERVAL))"),
+                        {"v": view_name, "after": validated_interval(compress_after, "rollup compress_after")},
+                    )
 
             # 6. Performance Index
             safe_view_name: str = view_name.replace('"', '').replace('.', '_')
@@ -5957,7 +6313,7 @@ class RollupManager:
 
                 # Disable compression first when present.
                 try:
-                    session.execute(text(f"ALTER MATERIALIZED VIEW {full_name} SET (timescaledb.compress = false);"))
+                    session.execute(text(f"ALTER MATERIALIZED VIEW {full_name} SET (timescaledb.enable_columnstore = false);"))
                 except Exception:
                     # IMPORTANT: clear failed transaction state before continuing
                     session.rollback()
@@ -5966,8 +6322,10 @@ class RollupManager:
                     # Re-enter a clean transaction for the remaining cleanup
                     self.hypertable_mgr.set_lock_timeout(session, r_settings['lock_timeout'])
 
-                session.execute(text(f"SELECT remove_continuous_aggregate_policy('{full_name}', if_exists => true);"))
-                session.execute(text(f"SELECT remove_retention_policy('{full_name}', if_exists => true);"))
+                session.execute(
+                    text("SELECT remove_continuous_aggregate_policy(CAST(:v AS regclass), if_exists => true)"), {"v": full_name}
+                )
+                session.execute(text("SELECT remove_retention_policy(CAST(:v AS regclass), if_exists => true)"), {"v": full_name})
                 session.execute(text(f"DROP MATERIALIZED VIEW IF EXISTS {full_name} CASCADE;"))
 
                 session.commit()
@@ -7008,14 +7366,16 @@ class RollupManager:
 
                 # 4. Disable Compression (Mandatory for a clean drop of compressed CAGGs)
                 try:
-                    session.execute(text(f"ALTER MATERIALIZED VIEW {full_name} SET (timescaledb.compress = false);"))
+                    session.execute(text(f"ALTER MATERIALIZED VIEW {full_name} SET (timescaledb.enable_columnstore = false);"))
                 except Exception:
                     self._log.info(f"View was already uncompressed: {full_name}")
                     pass # Already uncompressed or doesn't support it
 
                 # 5. Remove policies first
-                session.execute(text(f"SELECT remove_continuous_aggregate_policy('{full_name}', if_exists => true);"))
-                session.execute(text(f"SELECT remove_retention_policy('{full_name}', if_exists => true);"))
+                session.execute(
+                    text("SELECT remove_continuous_aggregate_policy(CAST(:v AS regclass), if_exists => true)"), {"v": full_name}
+                )
+                session.execute(text("SELECT remove_retention_policy(CAST(:v AS regclass), if_exists => true)"), {"v": full_name})
 
                 # 6. Acquire Exclusive Lock & Drop
                 session.execute(text(f"LOCK TABLE {full_name} IN ACCESS EXCLUSIVE MODE;"))
@@ -7070,6 +7430,58 @@ class RollupManager:
             except Exception as e:
                 self._log.error(f"Rollup refresh failed: {e}")
 
+    # Seconds to wait before each retry when TimescaleDB refuses a refresh because another refresh of the same continuous aggregate
+    # is running (4 retries, 30 s in total).  See RollupManager._execute_refresh_with_retry.
+    CONCURRENT_REFRESH_RETRY_DELAYS: tuple[float, ...] = (2.0, 4.0, 8.0, 16.0)
+
+    @staticmethod
+    def _is_concurrent_refresh_error_helper(exc: BaseException) -> bool:
+        """
+        True if ``exc`` is TimescaleDB's "could not refresh continuous aggregate ... due to a concurrent refresh" refusal
+        (SQLSTATE 55P03).  The message is checked as well because 55P03 is also used for ordinary lock timeouts, which must NOT be
+        retried here.
+        """
+        orig: object = getattr(exc, "orig", None)
+        return getattr(orig, "pgcode", None) == "55P03" and "concurrent refresh" in str(exc)
+
+    def _execute_refresh_with_retry(
+        self, conn: Connection, statement: str, params: dict[str, Any], view_name: str
+    ) -> None:
+        """
+        Run a ``CALL refresh_continuous_aggregate(...)`` statement, retrying while TimescaleDB reports a concurrent refresh.
+
+        TimescaleDB allows only one refresh at a time per overlapping window of a continuous aggregate and refuses the second with
+        "could not refresh continuous aggregate ... due to a concurrent refresh".  The usual other party is the view's own
+        policy_refresh_continuous_aggregate job: right after an ``ALTER EXTENSION ... UPDATE`` the job scheduler restarts and runs every
+        due job at once, so the policy job and MPG's initial full refresh collide.  The other refresh normally finishes within seconds,
+        so waiting briefly and trying again is both correct and sufficient.
+
+        Waits use the stop event, so shutdown is not delayed.  Any other error, and a refresh still blocked after the last retry, is
+        raised to the caller unchanged.
+
+        Args:
+            conn: AUTOCOMMIT connection (mandatory for refresh_continuous_aggregate).
+            statement: The CALL statement, with ``:name`` bind parameters.
+            params: Bind parameters for ``statement``.
+            view_name: Name of the view being refreshed (for the log only).
+        """
+        retries: tuple[float | None, ...] = (*self.CONCURRENT_REFRESH_RETRY_DELAYS, None)
+        for attempt, delay in enumerate(retries, start=1):
+            try:
+                conn.execute(text(statement), params)
+            except DBAPIError as e:
+                if delay is None or not self._is_concurrent_refresh_error_helper(e):
+                    raise
+                self._log.info(
+                    f"Refresh of '{view_name}' is blocked by another refresh of the same view (usually its own TimescaleDB "
+                    f"policy job, e.g. just after an extension update). Retrying in {delay:.0f}s "
+                    f"({attempt}/{len(self.CONCURRENT_REFRESH_RETRY_DELAYS)})."
+                )
+                if self._stop_refresh_rollup_event.wait(timeout=delay):
+                    raise
+            else:
+                return
+
     def _refresh_single_rollup_helper(self, view_name: str, start_offset: str, force_full: bool = False) -> None:
         """
         Refreshes a rollup with duration tracking and performance logging.
@@ -7097,16 +7509,17 @@ class RollupManager:
             try:
                 if force_full:
                     # Refresh from the beginning of time to now
-                    conn.execute(text(f"CALL refresh_continuous_aggregate('{view_name}', NULL, now());"))
+                    self._execute_refresh_with_retry(
+                        conn, "CALL refresh_continuous_aggregate(CAST(:v AS regclass), NULL, now())", {"v": view_name}, view_name
+                    )
                 else:
                     # Incremental refresh
-                    conn.execute(text(f"""
-                        CALL refresh_continuous_aggregate(
-                            '{view_name}',
-                            now() - INTERVAL '{start_offset}',
-                            now()
-                        );
-                    """))
+                    self._execute_refresh_with_retry(
+                        conn,
+                        "CALL refresh_continuous_aggregate(CAST(:v AS regclass), now() - CAST(:so AS INTERVAL), now())",
+                        {"v": view_name, "so": validated_interval(start_offset, "rollup start_offset")},
+                        view_name,
+                    )
 
                 end_time: float = time.perf_counter()
                 duration_seconds: float = end_time - start_time
@@ -7221,9 +7634,11 @@ class RollupManager:
         bucket_interval: str = self._bucket_interval_for_view(view_name)
         start_time, end_time = self._widen_window_to_buckets(start_time, end_time, bucket_interval)
         with self.engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
-            conn.execute(
-                text(f"CALL refresh_continuous_aggregate('{view_name}', :start_time, :end_time);"),
-                {"start_time": start_time, "end_time": end_time},
+            self._execute_refresh_with_retry(
+                conn,
+                "CALL refresh_continuous_aggregate(CAST(:v AS regclass), :start_time, :end_time)",
+                {"v": view_name, "start_time": start_time, "end_time": end_time},
+                view_name,
             )
 
     # watchdog refresh management
@@ -7361,9 +7776,8 @@ class RollupManager:
                             self._log.warning(f"Skipping refresh: '{view_name}' not found.")
                             continue
                         self._log.debug(f"Refreshing continuous aggregate: {view_name}")
-                        conn.execute(
-                            text("CALL refresh_continuous_aggregate(:view, NULL, NULL);"),
-                            {"view": view_name}
+                        self._execute_refresh_with_retry(
+                            conn, "CALL refresh_continuous_aggregate(CAST(:view AS regclass), NULL, NULL)", {"view": view_name}, view_name
                         )
 
                 # 5. Dynamic Sleep
@@ -8840,9 +9254,20 @@ class BridgeAdminManager:
         Read-only snapshot of the bridge's live connection and background-
         worker state, for the "Bridge Health" panel. Pulls together state
         that's otherwise scattered across the bridge class, its backlog
-        manager, and RollupManager. The only DB round trip is a single
-        cheap COUNT against protocol_registry (skipped entirely if not
+        manager, and RollupManager. The DB round trips are a single cheap
+        COUNT against protocol_registry and one read of the extension
+        catalogs for the version rows (both skipped entirely if not
         currently connected).
+
+        Version fields: ``extension_versions`` has one entry per installed
+        TimescaleDB extension with ``name``, ``label``, ``installed`` (what this
+        database runs), ``available`` (the version the server provides, i.e.
+        what ``ALTER EXTENSION ... UPDATE`` would move to) and ``up_to_date``
+        (installed == available).  "Up to date" therefore means "matches what
+        the server offers", not "newest release on the internet" -- MPG makes no
+        outside network calls.  ``postgres_version`` is informational only.  The
+        catalogs are read live, so the panel is correct right after a manual
+        ALTER EXTENSION, without restarting MPG.
         """
         reconnecting: bool = bool(getattr(self._bridge, "_reconnect_thread_running", False))
         migration_in_progress: bool | None = (
@@ -8871,7 +9296,41 @@ class BridgeAdminManager:
             except SQLAlchemyError as e:
                 self._log.error(f"get_health_snapshot: protocol_registry tally failed: {e}")
 
+        extension_versions: list[dict[str, Any]] = []
+        postgres_version: str | None = None
+        if self._bridge.tsdb_connected:
+            try:
+                with self.SessionFactory() as session:
+                    ext_rows: Sequence[Row[str, str, str | None]] = session.execute(
+                        text("""
+                            SELECT e.extname, e.extversion, a.default_version
+                            FROM pg_extension e
+                            LEFT JOIN pg_available_extensions a ON a.name = e.extname
+                            WHERE e.extname IN ('timescaledb', 'timescaledb_toolkit')
+                            ORDER BY e.extname = 'timescaledb_toolkit', e.extname
+                        """)
+                    ).fetchall()
+                    # e.g. '18.0 (Debian 18.0-1.pgdg13+1)' -> '18.0'
+                    pg_full: str | None = session.execute(text("SELECT current_setting('server_version')")).scalar()
+                    postgres_version = pg_full.split(" ")[0] if pg_full else None
+                labels: dict[str, str] = {"timescaledb": "TimescaleDB", "timescaledb_toolkit": "TimescaleDB Toolkit"}
+                extension_versions = [
+                    {
+                        "name": ext_name,
+                        "label": labels.get(ext_name, ext_name),
+                        "installed": installed,
+                        "available": available,
+                        "up_to_date": available is None or installed == available,
+                    }
+                    for ext_name, installed, available in ext_rows
+                ]
+            except SQLAlchemyError as e:
+                self._log.error(f"get_health_snapshot: extension version read failed: {e}")
+
         return {
+            "extension_versions": extension_versions,
+            "postgres_version": postgres_version,
+            "auto_update_extensions": bool(getattr(self._bridge, "auto_update_extensions", False)),
             "tsdb_connected": self._bridge.tsdb_connected,
             "reconnecting": reconnecting,
             "migration_in_progress": migration_in_progress,

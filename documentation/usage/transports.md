@@ -364,7 +364,7 @@ Values published to a write topic are forwarded to the linked Modbus scraper and
 
 ### TimescaleDB
 
-Writes register values to a [TimescaleDB](https://www.timescale.com/) hypertable (PostgreSQL extension). This is the highest-fidelity bridge — it creates a narrow hypertable for every metric plus, for protocols with fewer than 160 metrics, a wide-format hypertable per protocol with one column per metric, plus automatic continuous aggregates (hourly, daily, weekly, monthly rollups) for fast historical queries.
+Writes register values to a [TimescaleDB](https://www.timescale.com/) hypertable (PostgreSQL extension). This is the highest-fidelity bridge — it creates a wide-format hypertable per device with one column per register, plus automatic continuous aggregates (hourly, daily, weekly, monthly rollups) for fast historical queries.
 
 ```ini
 [transport.timescaledb]
@@ -383,14 +383,13 @@ password = your_password
 | `database` | `solar` | Database name. Created automatically if it does not exist. |
 | `username` | *(required)* | PostgreSQL user. |
 | `password` | *(required)* | PostgreSQL password. |
+| `pool_size` | `5` | SQLAlchemy connection pool size. |
+| `max_overflow` | `10` | Maximum connections above `pool_size` allowed under load. |
+| `pool_recycle` | `3600` | Seconds before idle connections are recycled. |
 | `force_float` | `true` | Cast all numeric values to float. Prevents type-mismatch errors when a register occasionally returns an integer where a float is expected. |
-| `read_interval` | *(from scraper)* | Not used to time database writes: each completed reading is queued and written as it arrives. The linked scraper's `read_interval` sets the write rate. |
-| `write_requires_complete_cycle` | `true` | When `true`, only flush to the DB after a scraper cycle completes all register blocks without error. Prevents partial rows. |
-| `stale_data_timeout` | `300` | Seconds every value in a reading must stay unchanged before the data is stale. Stale readings are not written. |
-| `max_stale_attempts` | `3` | Maximum reconnect requests to the scraper per stale period. `0` disables reconnect requests and stale alerts. |
-| `retry_delay_mins` | `5` | Minutes between those reconnect requests while the data remains stale. |
-
-The connection pool is sized automatically (the larger of 2 and the number of scrapers plus 3), so there are no pool settings.
+| `read_interval` | *(from scraper)* | Used as the flush interval (seconds between DB writes). Inherited from the linked scraper's `read_interval` if not set. |
+| `write_requires_complete_cycle` | `false` | When `true`, only flush to the DB after a scraper cycle completes all register blocks without error. Prevents partial rows. |
+| `stale_data_timeout` | `300` | Minutes before a stale (non-updating) register value is excluded from writes. |
 
 #### Schema Management
 
@@ -398,10 +397,10 @@ TimescaleDB manages its own schema. On first connection MPG will:
 
 1. Create the target database if it does not exist
 2. Create a `device_info` table tracking all connected scrapers
-3. If the protocol has fewer than 160 metrics, create a `device_metrics_wide__<protocol>` hypertable with one column per metric in the protocol map
+3. If the chosen amount of metrics is less than 200, create a `device_metrics_wide` hypertable with one column per register in the protocol map
 4. Always creates a `device_metrics_narrow` hypertable for arbitrary key-value queries
 5. Configure hypertable compression
-6. Create continuous aggregate views: `hourly_rollup_narrow`, `daily_rollup_narrow`, `weekly_rollup_narrow`, `monthly_rollup_narrow` and, for each wide table, `hourly_rollup_wide__<protocol>` and its daily, weekly and monthly equivalents
+6. Create continuous aggregate views: `hourly_rollup`, `daily_rollup`, `weekly_rollup`, `monthly_rollup`
 
 New registers added to the protocol map are automatically added as new columns on the next connection.
 
@@ -409,13 +408,14 @@ New registers added to the protocol map are automatically added as new columns o
 
 | Setting | Default | Description |
 | --- | --- | --- |
+| `auto_update_extensions` | `false` | At startup, run `ALTER EXTENSION UPDATE` for TimescaleDB and its Toolkit when the server provides newer versions than the database has installed (typical after a Docker image upgrade). Needs a superuser database user; back up first. |
 | `enable_compression` | `true` | Enable TimescaleDB native compression on the hypertable. |
-| `enable_dynamic_chunk_sizing` | `true` | Choose each raw table's chunk interval and compress-after interval from its live write load. |
+| `enable_dynamic_chunk_sizing` | `true` | Enable dynamic compression to calculate exact compression settings. |
 | `enable_rollups` | `true` | Create continuous aggregate rollup views. |
 | `enable_auto_refresh` | `true` | Automatically refresh rollup aggregates on a schedule. |
 | `auto_refresh_interval` | `21600` | Seconds between rollup refreshes (default: 6 hours). |
-| `migrate_data` | `true` | Migrate existing data when hypertables and rollups are created or rebuilt. Set to `false` to start fresh with the new schema. |
-| `drop_after` | `1 year` | Retention period for raw data and every rollup view. Older chunks are dropped automatically. |
+| `migrate_data` | `true` | Rebuild rollup views when rollup settings change. |
+| `drop_after` | `1 year` | Hypertable data retention period. Older chunks are dropped automatically. |
 
 #### Persistent Backlog
 
@@ -424,32 +424,41 @@ If the database is unavailable, MPG buffers data points to disk and replays them
 | Setting | Default | Description |
 | --- | --- | --- |
 | `enable_persistent_storage` | `true` | Enable disk backlog on DB disconnect. |
-| `backlog_storage_path` | `backlogs` | Directory for the backlog file, relative to the MPG application directory. |
-| `backlog_file_name` | `timescaledb_backlog` | Backlog file name; `.db` is added (a SQLite file). The web UI pre-fills `no_connect_timescale_backlog`. |
-| `max_backlog_size` | `10000` | Maximum data points to store in the backlog; the oldest are dropped first. |
-| `max_backlog_age` | `86400` | Maximum backlog age in seconds (default: 24 hours). Older points are discarded when the backlog is loaded at startup. |
+| `backlog_storage_path` | `timescaledb_backlog` | Directory for backlog files, relative to the working directory. |
+| `backlog_file_name` | `no_connect_timescale_backlog` | Backlog filename prefix. |
+| `max_backlog_size` | `10000` | Maximum data points to store in the backlog before dropping oldest. |
+| `max_backlog_age` | `86400` | Maximum backlog age in seconds (default: 24 hours). Older points are discarded on reconnect. |
 
 #### Connection Resilience
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| `reconnect_attempts` | `5` | Maximum tries per reconnect cycle. `0` means unlimited. |
-| `reconnect_delay` | `5` | Seconds between reconnect attempts. |
+| `reconnect_attempts` | `5` | Maximum reconnect attempts before backing off. |
+| `reconnect_delay` | `5` | Minutes between reconnect attempts. |
 | `use_exponential_backoff` | `true` | Increase reconnect delay exponentially on repeated failure. |
-| `max_reconnect_delay` | `300` | Maximum reconnect delay in seconds (default: 5 minutes). |
+| `max_reconnect_delay` | `300` | Maximum reconnect delay in minutes (default: 5 hours). |
 
-#### Pushover and Telegram Notifications
+#### Pushover Notifications
 
-The TimescaleDB bridge sends notifications when it loses or restores its database connection and when a scraper's data goes stale. It uses the channels configured once in the `[messages]` section, not settings in the TimescaleDB section.
+TimescaleDB can send a Pushover push notification when the bridge loses or restores database connectivity.
 
-| Setting (in `[messages]`) | Default | Description |
+| Setting | Default | Description |
 | --- | --- | --- |
-| `pushover_enabled` | `false` | Enable Pushover notifications. |
-| `pushover_api_token` | *(empty)* | Pushover application API token. |
-| `pushover_user_key` | *(empty)* | Pushover user key. |
-| `telegram_enabled` | `false` | Enable Telegram notifications. |
-| `telegram_bot_token` | *(empty)* | Telegram bot token. |
-| `telegram_chat_ids` | *(empty)* | Telegram chat ID(s) to notify. |
+| `enable_pushover` | `false` | Enable Pushover notifications for connection events. |
+| `pushover_token` | *(empty)* | Pushover application API token. |
+| `pushover_user` | *(empty)* | Pushover user key. |
+
+---
+
+#### Telegram Notifications
+
+TimescaleDB can send a Telegram push notification when the bridge loses or restores database connectivity.
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `enable_telegram` | `false` | Enable Telegram notifications for connection events. |
+| `telegram_bot_token` | *(empty)* | Telegram application bot token. |
+| `telegram_chat_ids` | *(empty)* | Telegram chat id key. |
 
 ---
 

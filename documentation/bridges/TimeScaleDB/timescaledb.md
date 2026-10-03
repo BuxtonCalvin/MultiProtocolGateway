@@ -56,10 +56,12 @@ The module:
 
 1. The gateway reads `config.cfg` and builds every `[transport.*]` section. A scraper names its bridge with `bridge = transport.<section>`.
 2. The TimescaleDB bridge reads its settings, fixes the timestamp mode (see section 6.5), and sizes its connection pool automatically (see *Connection pool* below).
-3. It connects, creating the target database if it does not exist, and runs `CREATE EXTENSION IF NOT EXISTS timescaledb_toolkit`. It clears out any idle connections that a crashed earlier client left holding locks, creates the shared tables, and starts the flush worker thread.
+3. It connects, creating the target database if it does not exist, and makes sure the `timescaledb` and `timescaledb_toolkit` extensions exist in it, running `CREATE EXTENSION IF NOT EXISTS` for any that are missing, and checks the installed TimescaleDB version (see the note below). It clears out any idle connections that a crashed earlier client left holding locks, creates the shared tables, and starts the flush worker thread.
 4. For each scraper, the gateway calls the bridge's `init_bridge()`. The first time the bridge sees a protocol it registers the protocol in `protocol_registry`, records the protocol's metrics in `metric_catalog`, creates that protocol's wide table and its columns (if it has fewer than 160 metrics), and then sets up the hypertables, compression and retention policies, and the rollup views. It also records the scraper's `read_interval`, which the dynamic chunk sizing uses (see *Hypertables, Compression and Retention*).
 
-> **Prerequisite:** MPG creates the database and `timescaledb_toolkit`, but it does not run `CREATE EXTENSION timescaledb` itself. Use a TimescaleDB server or image (such as the one in section 6) in which the `timescaledb` extension is available to the target database. If table setup fails with a missing-function error, enable the extension in that database yourself.
+> **Extensions:** the bridge checks `pg_extension` at startup and runs `CREATE EXTENSION IF NOT EXISTS timescaledb;` and `CREATE EXTENSION IF NOT EXISTS timescaledb_toolkit;` for any that are missing, so a TimescaleDB image needs no extra setup. An extension that is already installed is left alone. Creating one requires a database user allowed to create extensions (typically a superuser) and a server with TimescaleDB installed; a plain PostgreSQL server does not have it. If creation fails, the log gives the reason and the bridge does not start. In that case, create the extension once as a superuser in the target database.
+>
+> **Version requirement:** the module uses TimescaleDB's current columnstore API and has no fallbacks for older servers, so it requires **TimescaleDB 2.18.0 or newer**. The bridge records the installed version at startup. If it is older, the log says so (*TimescaleDB x.y.z is too old*) and the bridge does not start; upgrade the server image and run `ALTER EXTENSION timescaledb UPDATE;` (see *Upgrading TimescaleDB* in section 6.1). If the server provides a newer TimescaleDB than the one installed in your database, which is normal after a Docker image upgrade, the log shows a warning, and MPG can update the extension for you if you turn on `auto_update_extensions` (see *Upgrading TimescaleDB* in section 6.1).
 
 #### 2. Scrape and filter
 
@@ -149,7 +151,11 @@ The bridge keeps working through database outages.
 
 ### Hypertables, Compression and Retention
 
-Both raw tables are hypertables partitioned on `m_time`. Compression segments the narrow table by `device_info_id, metric_name` and the wide table by `device_info_id`, both ordered by `m_time DESC`.
+Both raw tables are hypertables partitioned on `m_time` (created with TimescaleDB's current `by_range` interface). Compression segments the narrow table by `device_info_id, metric_name` and the wide table by `device_info_id`, both ordered by `m_time DESC`.
+
+**Compression is TimescaleDB's columnstore.** TimescaleDB now calls compressed storage the *columnstore*. This guide and the admin screens keep the word *compression*, but the module uses the columnstore API throughout: it enables compression on a table with `timescaledb.enable_columnstore`, `timescaledb.compress_segmentby` and `timescaledb.compress_orderby`, schedules it with `add_columnstore_policy`, and converts individual chunks with `convert_to_columnstore` and `convert_to_rowstore`. The background job a columnstore policy creates is still named `policy_compression` by TimescaleDB, which is what the Background Job Status panel shows. Rollup views use the same settings.
+
+**Settings are checked before they are applied.** Before changing a table, the bridge confirms that every segment-by and order-by column exists on the table, that the order-by terms are valid (`column [ASC|DESC] [NULLS FIRST|LAST]`), that no column is in both lists, and that no JSON or array column is used. Intervals (chunk, compress-after, retention, rollup) must also be plain intervals such as `1 day` or `2 weeks`. If anything is invalid, the log shows *Not enabling columnstore on `<table>`: `<reason>`* (or *Invalid ... interval*), the table and its existing policies are left exactly as they were, and the bridge carries on.
 
 **Chunk size and compression timing.** With `enable_dynamic_chunk_sizing = true` (the default), each raw table's chunk interval and compress-after interval are chosen from its live write load. The load is the number of metrics each device contributes multiplied by its writes per day, summed over the devices feeding that table (all of them for the narrow table, just that protocol's devices for a wide table):
 
@@ -171,6 +177,7 @@ If dynamic sizing is off, or a table has no live data yet, the static defaults a
 | `enable_dynamic_chunk_sizing` | `true` | Pick chunk and compression intervals from the live write load (table above). |
 | `drop_after` | `1 year` | Retention period for raw data and rollup views. |
 | `migrate_data` | `true` | Migrate existing data when hypertables and rollups are created or rebuilt. Set to `false` to start fresh with the new schema. |
+| `auto_update_extensions` | `false` | At startup, update the TimescaleDB and Toolkit extensions when the server provides newer versions than the database has installed. See *Upgrading TimescaleDB* in section 6.1. |
 
 ### Rollup Views
 
@@ -444,7 +451,7 @@ You need this after a change that alters a table's physical layout but doesn't r
 
 ##### What Gets Touched
 
-For each selected group, every table in its stack — the raw narrow/wide table, plus its hourly, daily, weekly, and monthly rollup views — is checked for compressed chunks. Only chunks TimescaleDB already reports as compressed are touched; the newest chunk(s), still inside their `compress_after` window and not yet compressed by the background policy, are left alone. Each touched chunk is decompressed and immediately recompressed against the hypertable's current compression settings.
+For each selected group, every table in its stack — the raw narrow/wide table, plus its hourly, daily, weekly, and monthly rollup views — is checked for compressed chunks. Only chunks TimescaleDB already reports as compressed are touched; the newest chunk(s), still inside their `compress_after` window and not yet compressed by the background policy, are left alone. Each touched chunk is converted back to the rowstore (decompressed) and immediately converted to the columnstore again (recompressed) against the hypertable's current compression settings.
 
 ##### Rollup Progress and Results
 
@@ -619,6 +626,15 @@ Each panel loads separately, so a slow query in one cannot hold up the others. U
 | **Auto-refresh Rollups** | `Every N h` (from `auto_refresh_interval`) or *Disabled*. |
 | **Rollup setup** | How many rollup-enabled protocols have finished setting up their rollup views, for example `2 / 2 protocol(s)`. A lower first number means a protocol's rollup setup has not finished, for example after a failed Delete Columns rebuild. The bridge retries it after its next reconnect. |
 
+A **Versions** group at the bottom of the panel shows what the database is running:
+
+| Row | Meaning |
+| --- | --- |
+| **TimescaleDB** and **TimescaleDB Toolkit** | The extension version installed in this database, followed by *Up to date* (green) when it matches the version the server provides, or *Update available: x.y.z* (amber) when the server provides a newer one, which is normal after a Docker image upgrade. Hover over the amber text for the fix: set `auto_update_extensions = true`, or run `ALTER EXTENSION ... UPDATE`. If `auto_update_extensions` is already on, the tooltip says MPG will update it on the next start. |
+| **PostgreSQL** | The server version. Information only, with no up-to-date check. |
+
+*Up to date* means "matches what the server offers". MPG makes no outside network calls, so it cannot tell you whether a newer TimescaleDB has been released. To get one, pull a newer `timescaledb-ha` image (see *Upgrading TimescaleDB* in section 6.1). The versions are read from the database each time the panel loads, so after a manual `ALTER EXTENSION ... UPDATE` the panel is correct on the next refresh without restarting MPG. If the versions cannot be read, the group shows *Extension versions unavailable*.
+
 Connection status is not repeated here. It is shown in the status badge at the top right of the page.
 
 #### Storage Overview
@@ -677,7 +693,7 @@ Lists TimescaleDB's own background jobs for every hypertable and rollup view the
 
 | Column | Meaning |
 | --- | --- |
-| **Job** | The job's procedure name (for example `policy_compression`) with its job number underneath |
+| **Job** | The job's procedure name (for example `policy_compression`, which is the name TimescaleDB gives a columnstore policy's job) with its job number underneath |
 | **Target** | The table or view the job acts on |
 | **Last Run** | *Success*, the failure status, or *Never run*, with the time of the last successful finish underneath |
 | **Next Run** | When the scheduler will run it next |
@@ -741,6 +757,50 @@ ORDER BY m_time ASC, device_info_id ASC
 - **Protocol Gateway:** `buxtoncalvin/multiprotocolgateway:latest` The MPG application/inverter scraper
 - **Grafana:** `grafana/grafana:latest`   The graphing application
 - **PostGres Admin:** `dpage/pgadmin4:latest` The database administration application
+
+#### Requirements
+
+- **TimescaleDB 2.18.0 or newer** (the current release is recommended). Current `timescaledb-ha` images meet this. See the version note under *Startup* in *How Data Flows Through MPG*.
+- **Python 3.11 or newer** for MPG when it is installed directly rather than run in Docker. The Docker image already includes a suitable Python.
+
+#### Upgrading TimescaleDB
+
+Pulling a newer `timescaledb-ha` image updates the server software, but each database keeps the extension version it was created with until the extension is updated. MPG logs a warning at startup when the two differ.
+
+**Let MPG do it (recommended for most users).** Set this in the TimescaleDB section of `config.cfg`, or tick it on the bridge's settings page, and restart MPG:
+
+```ini
+auto_update_extensions = true
+```
+
+At startup MPG then runs `ALTER EXTENSION ... UPDATE` for `timescaledb` and then `timescaledb_toolkit`, and logs each step. It is **off by default** because:
+
+- **It is one-way.** An extension cannot be downgraded. Take a backup first.
+- **It needs a database user that owns the extension, normally a superuser.** The default user in the Docker setup is one. If yours is not, MPG logs the reason together with the manual command, and carries on with the older version.
+- **Other programs connected to the same database are disconnected** at the moment of the update (for example Grafana or pgAdmin). They reconnect on their own, and you may see one failed query.
+
+It is safe to leave switched on: once the versions match, nothing happens at startup.
+
+**Or do it by hand.** Connect to the target database (for example `solar`) with `psql` and run, as the **first command** of a new session:
+
+```sql
+ALTER EXTENSION timescaledb UPDATE;
+ALTER EXTENSION timescaledb_toolkit UPDATE;
+```
+
+Restart MPG afterwards. `ALTER EXTENSION ... UPDATE` must be the first statement in the session; a tool that runs other commands on connect (some pgAdmin setups) can make it fail.
+
+#### Startup log messages
+
+| Log message | Meaning and fix |
+| --- | --- |
+| *TimescaleDB x.y.z is too old: this module requires 2.18.0 or newer* | Upgrade the server image, then set `auto_update_extensions = true` or run `ALTER EXTENSION timescaledb UPDATE;` as above. The bridge does not start until you do. |
+| *Extension 'timescaledb' is at x in database ... but the server provides y* | Warning only. Set `auto_update_extensions = true`, or run the `ALTER EXTENSION ... UPDATE` commands above, to use the newer version. |
+| *auto_update_extensions: updating 'timescaledb' x -> y* | MPG is updating the extension now. Other connections to the database are dropped and reconnect. |
+| *auto_update_extensions: could not update ...* | The database user is not allowed to update the extension. The message includes the reason and the manual command to run as a superuser. MPG continues with the older version. |
+| *Could not create the 'timescaledb' (or 'timescaledb_toolkit') extension* | The server lacks TimescaleDB, or the database user may not create extensions. Use a TimescaleDB image, or create the extension once as a superuser. |
+| *Not enabling columnstore on `<table>`: ...* | A segment-by or order-by setting is invalid for that table. The table is left unchanged; the message names the problem column. |
+| *Invalid `<setting>` interval ...* | A chunk, compress-after, retention or rollup interval is not a plain interval such as `1 day`. The existing policy is left unchanged. |
 
 ### 6.2 Example docker-compose.yml
 
@@ -950,6 +1010,8 @@ max_reconnect_delay = 300
 ## hypertable and rollup options
 # changing rollup settings after data has been written, will result in automatic view deletions and rebuilds
 migrate_data = True
+# Update the TimescaleDB / Toolkit extensions at startup when the server provides newer versions (back up first; needs a superuser user)
+auto_update_extensions = False
 enable_compression = True
 enable_dynamic_chunk_sizing = True
 enable_rollups = True
