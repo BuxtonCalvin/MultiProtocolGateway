@@ -4316,7 +4316,9 @@ class HyperTableManager:
                 f"(continuing -- this step is best-effort): {e}"
             )
 
-    def decompress_chunks_in_range(self, session: Session, table_name: str, start_time: datetime, end_time: datetime) -> None:
+    def decompress_chunks_in_range(
+        self, session: Session, table_name: str, start_time: datetime, end_time: datetime
+    ) -> None:
         """
         Decompresses only the chunks of table_name overlapping
         [start_time, end_time], best-effort -- the range-scoped sibling
@@ -9252,9 +9254,20 @@ class BridgeAdminManager:
         Read-only snapshot of the bridge's live connection and background-
         worker state, for the "Bridge Health" panel. Pulls together state
         that's otherwise scattered across the bridge class, its backlog
-        manager, and RollupManager. The only DB round trip is a single
-        cheap COUNT against protocol_registry (skipped entirely if not
+        manager, and RollupManager. The DB round trips are a single cheap
+        COUNT against protocol_registry and one read of the extension
+        catalogs for the version rows (both skipped entirely if not
         currently connected).
+
+        Version fields: ``extension_versions`` has one entry per installed
+        TimescaleDB extension with ``name``, ``label``, ``installed`` (what this
+        database runs), ``available`` (the version the server provides, i.e.
+        what ``ALTER EXTENSION ... UPDATE`` would move to) and ``up_to_date``
+        (installed == available).  "Up to date" therefore means "matches what
+        the server offers", not "newest release on the internet" -- MPG makes no
+        outside network calls.  ``postgres_version`` is informational only.  The
+        catalogs are read live, so the panel is correct right after a manual
+        ALTER EXTENSION, without restarting MPG.
         """
         reconnecting: bool = bool(getattr(self._bridge, "_reconnect_thread_running", False))
         migration_in_progress: bool | None = (
@@ -9283,7 +9296,41 @@ class BridgeAdminManager:
             except SQLAlchemyError as e:
                 self._log.error(f"get_health_snapshot: protocol_registry tally failed: {e}")
 
+        extension_versions: list[dict[str, Any]] = []
+        postgres_version: str | None = None
+        if self._bridge.tsdb_connected:
+            try:
+                with self.SessionFactory() as session:
+                    ext_rows: Sequence[Row[str, str, str | None]] = session.execute(
+                        text("""
+                            SELECT e.extname, e.extversion, a.default_version
+                            FROM pg_extension e
+                            LEFT JOIN pg_available_extensions a ON a.name = e.extname
+                            WHERE e.extname IN ('timescaledb', 'timescaledb_toolkit')
+                            ORDER BY e.extname = 'timescaledb_toolkit', e.extname
+                        """)
+                    ).fetchall()
+                    # e.g. '18.0 (Debian 18.0-1.pgdg13+1)' -> '18.0'
+                    pg_full: str | None = session.execute(text("SELECT current_setting('server_version')")).scalar()
+                    postgres_version = pg_full.split(" ")[0] if pg_full else None
+                labels: dict[str, str] = {"timescaledb": "TimescaleDB", "timescaledb_toolkit": "TimescaleDB Toolkit"}
+                extension_versions = [
+                    {
+                        "name": ext_name,
+                        "label": labels.get(ext_name, ext_name),
+                        "installed": installed,
+                        "available": available,
+                        "up_to_date": available is None or installed == available,
+                    }
+                    for ext_name, installed, available in ext_rows
+                ]
+            except SQLAlchemyError as e:
+                self._log.error(f"get_health_snapshot: extension version read failed: {e}")
+
         return {
+            "extension_versions": extension_versions,
+            "postgres_version": postgres_version,
+            "auto_update_extensions": bool(getattr(self._bridge, "auto_update_extensions", False)),
             "tsdb_connected": self._bridge.tsdb_connected,
             "reconnecting": reconnecting,
             "migration_in_progress": migration_in_progress,

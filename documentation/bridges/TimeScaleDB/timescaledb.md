@@ -626,6 +626,15 @@ Each panel loads separately, so a slow query in one cannot hold up the others. U
 | **Auto-refresh Rollups** | `Every N h` (from `auto_refresh_interval`) or *Disabled*. |
 | **Rollup setup** | How many rollup-enabled protocols have finished setting up their rollup views, for example `2 / 2 protocol(s)`. A lower first number means a protocol's rollup setup has not finished, for example after a failed Delete Columns rebuild. The bridge retries it after its next reconnect. |
 
+A **Versions** group at the bottom of the panel shows what the database is running:
+
+| Row | Meaning |
+| --- | --- |
+| **TimescaleDB** and **TimescaleDB Toolkit** | The extension version installed in this database, followed by *Up to date* (green) when it matches the version the server provides, or *Update available: x.y.z* (amber) when the server provides a newer one, which is normal after a Docker image upgrade. Hover over the amber text for the fix: set `auto_update_extensions = true`, or run `ALTER EXTENSION ... UPDATE`. If `auto_update_extensions` is already on, the tooltip says MPG will update it on the next start. |
+| **PostgreSQL** | The server version. Information only, with no up-to-date check. |
+
+*Up to date* means "matches what the server offers". MPG makes no outside network calls, so it cannot tell you whether a newer TimescaleDB has been released. To get one, pull a newer `timescaledb-ha` image (see *Upgrading TimescaleDB* in section 6.1). The versions are read from the database each time the panel loads, so after a manual `ALTER EXTENSION ... UPDATE` the panel is correct on the next refresh without restarting MPG. If the versions cannot be read, the group shows *Extension versions unavailable*.
+
 Connection status is not repeated here. It is shown in the status badge at the top right of the page.
 
 #### Storage Overview
