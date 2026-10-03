@@ -408,7 +408,7 @@ New registers added to the protocol map are automatically added as new columns o
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| `auto_update_extensions` | `false` | At startup, run `ALTER EXTENSION UPDATE` for TimescaleDB and its Toolkit when the server provides newer versions than the database has installed (typical after a Docker image upgrade). Needs a superuser database user; back up first. |
+| `auto_update_extensions` | `true` | At startup, run `ALTER EXTENSION UPDATE` for TimescaleDB and its Toolkit when the server provides newer versions than the database has installed (typical after a Docker image upgrade). Needs a superuser database user; back up first. |
 | `enable_compression` | `true` | Enable TimescaleDB native compression on the hypertable. |
 | `enable_dynamic_chunk_sizing` | `true` | Enable dynamic compression to calculate exact compression settings. |
 | `enable_rollups` | `true` | Create continuous aggregate rollup views. |

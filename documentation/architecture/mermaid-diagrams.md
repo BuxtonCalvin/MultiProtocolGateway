@@ -830,7 +830,7 @@ flowchart TD
 
     E --> F{"Installed version differs<br/>from the server's version?"}
     F -- "No" --> K
-    F -- "Yes" --> G{"auto_update_extensions<br/>enabled? (default: off)"}
+    F -- "Yes" --> G{"auto_update_extensions<br/>enabled? (default: on)"}
     G -- "No" --> K
     G -- "Yes" --> H["_update_extensions_if_enabled()<br/>raw DBAPI connection, autocommit,<br/>ALTER EXTENSION x UPDATE as the<br/>very first statement<br/>(timescaledb first, then toolkit)"]
     H -- "fails (user does not own the extension)" --> H1["Log error with the manual command<br/>non-fatal, continue on the older version"]

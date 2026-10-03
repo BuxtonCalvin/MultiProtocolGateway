@@ -177,7 +177,7 @@ If dynamic sizing is off, or a table has no live data yet, the static defaults a
 | `enable_dynamic_chunk_sizing` | `true` | Pick chunk and compression intervals from the live write load (table above). |
 | `drop_after` | `1 year` | Retention period for raw data and rollup views. |
 | `migrate_data` | `true` | Migrate existing data when hypertables and rollups are created or rebuilt. Set to `false` to start fresh with the new schema. |
-| `auto_update_extensions` | `false` | At startup, update the TimescaleDB and Toolkit extensions when the server provides newer versions than the database has installed. See *Upgrading TimescaleDB* in section 6.1. |
+| `auto_update_extensions` | `true` | At startup, update the TimescaleDB and Toolkit extensions when the server provides newer versions than the database has installed. See *Upgrading TimescaleDB* in section 6.1. |
 
 ### Rollup Views
 
@@ -1011,7 +1011,7 @@ max_reconnect_delay = 300
 # changing rollup settings after data has been written, will result in automatic view deletions and rebuilds
 migrate_data = True
 # Update the TimescaleDB / Toolkit extensions at startup when the server provides newer versions (back up first; needs a superuser user)
-auto_update_extensions = False
+auto_update_extensions = True
 enable_compression = True
 enable_dynamic_chunk_sizing = True
 enable_rollups = True
