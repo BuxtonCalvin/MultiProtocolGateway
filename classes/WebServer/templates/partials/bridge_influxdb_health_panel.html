@@ -31,6 +31,14 @@
   Storage Overview panel isn't built for these bridges (no query support
   exists to build it from yet).
 
+  The Versions group lists what the server reports on GET /ping (version and
+  build/edition) and the Python client library MPG uses. Context:
+  health.version_rows (label/version/detail, plus latest/up_to_date on the
+  server row when the bridge sets check_latest_release) and
+  health.latest_release_check_enabled. An InfluxDB server cannot say whether it
+  is current, so an "Up to date" / "Newer release" verdict only appears when the
+  opt-in release check is on.
+
   Purely observational — nothing on this panel is clickable. Connection
   status itself is deliberately not repeated here — it's already shown in
   the device page's own status badge, above this card.
@@ -86,5 +94,36 @@
     </div>
 
   </dl>
+
+  {% if health.version_rows %}
+  <div class="border-t border-mpg-700/30 pt-2 mt-3">
+    <div class="surface-muted text-xs uppercase tracking-wide mb-2">Versions</div>
+    <dl class="space-y-2 text-sm">
+      {% for row in health.version_rows %}
+      <div class="flex items-center justify-between gap-3">
+        <dt class="surface-muted text-xs">{{ row.label }}</dt>
+        <dd class="surface-title text-xs font-medium text-right">
+          {% if row.version %}
+          <span class="font-mono">{{ row.version }}</span>
+          {% if row.detail %}<span class="surface-muted">({{ row.detail }})</span>{% endif %}
+          {% if row.latest is defined %}
+            {% if row.up_to_date %}
+            <span class="text-success ml-1" title="Matches the newest release published on GitHub.">&#10003; Up to date</span>
+            {% else %}
+            <span class="text-dirty ml-1" title="The newest release published on GitHub for this major version.">&uarr; Latest release: <span class="font-mono">{{ row.latest }}</span></span>
+            {% endif %}
+          {% endif %}
+          {% else %}
+          <span class="surface-muted"{% if row.detail %} title="{{ row.detail }}"{% endif %}>Unavailable{% if row.detail %} ({{ row.detail }}){% endif %}</span>
+          {% endif %}
+        </dd>
+      </div>
+      {% endfor %}
+    </dl>
+    {% if not health.latest_release_check_enabled %}
+    <p class="surface-muted text-xs mt-2">Set <span class="font-mono">check_latest_release = true</span> on this bridge to compare the server with the newest release (contacts api.github.com once a day).</p>
+    {% endif %}
+  </div>
+  {% endif %}
   {% endif %}
 </div>

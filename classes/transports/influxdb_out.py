@@ -19,15 +19,17 @@
 # Bridge module for InfluxDB v1 output transport with persistent disk backlog and connection monitoring
 from __future__ import annotations
 
+import importlib.metadata
 import logging
 import math
 import pickle
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Callable, Literal, Optional, cast
+from typing import Any, Literal, Optional, cast
 from zoneinfo import ZoneInfo
 
 #  influx db methods are not recognized by type checker
@@ -42,6 +44,7 @@ from defs.common import TransportSettings, strtobool
 from ..protocol_settings import Data_Type, Registry_Type
 from .transport_base import (
     BridgeHealthSnapshot,
+    BridgeVersionRow,
     DataPayload,
     StaleRegistryState,
     StorageOverview,
@@ -113,6 +116,15 @@ class influxdb_out(transport_base):
     # Periodic reconnection settings
     periodic_reconnect_interval: float = 14400.0  # 4 hours in seconds
 
+    # Opt-in: let the Bridge Health panel compare the server version with the newest
+    # release published on GitHub (one cached request to api.github.com a day).
+    # Off by default -- MPG makes no outside network calls unless asked to.
+    check_latest_release: bool = False
+
+    # (version, build) from GET /ping and when to ask again; see _probe_server_info.
+    _SERVER_INFO_TTL: float = 300.0
+    _SERVER_INFO_FAILURE_TTL: float = 30.0
+
     # Optional local filesystem path to InfluxDB's own data directory (e.g.
     # "/var/lib/influxdb/data"), used only to report on-disk size in the
     # Storage Overview panel. Empty by default — MPG and InfluxDB are very
@@ -146,6 +158,8 @@ class influxdb_out(transport_base):
         self.batch_size = settings.getint("batch_size", fallback=self.batch_size)
         self.batch_timeout = settings.getfloat("batch_timeout", fallback=self.batch_timeout)
         self.force_float = strtobool(settings.get("force_float", fallback=self.force_float))
+        self.check_latest_release = strtobool(settings.get("check_latest_release", fallback=self.check_latest_release))
+        self._server_info_cache: tuple[tuple[str | None, str | None], float] | None = None
 
         # Connection monitoring settings
         self.reconnect_attempts = settings.getint("reconnect_attempts", fallback=self.reconnect_attempts)
@@ -513,6 +527,52 @@ class influxdb_out(transport_base):
             "tracked_transport_count": len(self._stale_registry),
         }
 
+    def _probe_server_info(self) -> tuple[str | None, str | None]:
+        """
+        (version, build) the InfluxDB 1.x server reports on ``GET /ping`` (the
+        ``X-Influxdb-Version`` and ``X-Influxdb-Build`` headers, e.g. ("1.11.7", "OSS")),
+        or (None, None) when not connected or the server cannot be reached.
+
+        Uses the bridge's own client, so TLS, credentials and timeout are exactly what
+        the connection uses.  Never raises.  Cached for a few minutes (a failure for
+        only seconds), so the panel does not cost a request on every page load.
+        """
+        now: float = time.time()
+        cached: tuple[tuple[str | None, str | None], float] | None = self._server_info_cache
+        if cached is not None and cached[1] > now:
+            return cached[0]
+
+        info: tuple[str | None, str | None] = (None, None)
+        client: InfluxDBClient | None = self.client
+        if self.connected and client is not None:
+            try:
+                response: Any = cast(Any, client).request(url="ping", method="GET", expected_response_code=204)
+                version: str = str(response.headers.get("X-Influxdb-Version", "")).strip()
+                build: str = str(response.headers.get("X-Influxdb-Build", "")).strip()
+                info = (version or None, build or None)
+            except Exception as exc:  # noqa: BLE001 - informational probe, must never break the panel
+                self._log.debug(f"influxdb_out: GET /ping for version info failed: {exc}")
+
+        ttl: float = self._SERVER_INFO_TTL if info[0] else self._SERVER_INFO_FAILURE_TTL
+        self._server_info_cache = (info, now + ttl)
+        return info
+
+    def get_version_info(self) -> list[BridgeVersionRow]:
+        """
+        Rows for the "Versions" group of the Bridge Health panel: the InfluxDB server
+        (version and build such as OSS or Enterprise, from GET /ping) and the Python
+        ``influxdb`` client library MPG talks to it with.
+        """
+        version, build = self._probe_server_info()
+        try:
+            client_version: str | None = importlib.metadata.version("influxdb")
+        except importlib.metadata.PackageNotFoundError:
+            client_version = None
+        return [
+            {"label": "InfluxDB server", "version": version, "detail": build},
+            {"label": "Python client (influxdb)", "version": client_version, "detail": None},
+        ]
+
     def get_storage_overview(self) -> StorageOverview:
         """
         Best-effort, read-only storage snapshot for the device page's
@@ -576,52 +636,57 @@ class influxdb_out(transport_base):
 
         # 1. Fetch and Format Retention Policies
         try:
-            rp_result = self.client.query(f'SHOW RETENTION POLICIES ON "{self.database}"')  # type: ignore
+            # Drop the inline ignores by assigning the raw query result to a loosely typed variable
+            rp_result: Any = self.client.query(f'SHOW RETENTION POLICIES ON "{self.database}"')  # type: ignore
+
             result["retention_policies"] = [
                 {
-                    "name": p.get("name"), # type: ignore
-                    "duration": p.get("duration"), # type: ignore
-                    "shardGroupDuration": p.get("shardGroupDuration"), # type: ignore
-                    "default": p.get("default", False) # type: ignore
+                    "name": p.get("name"),
+                    "duration": p.get("duration"),
+                    "shardGroupDuration": p.get("shardGroupDuration"),
+                    "default": p.get("default", False)
                 }
-                for p in rp_result.get_points()  # type: ignore
+                for p in rp_result.get_points()
             ]
         except Exception as e:
             self._log.error(f"get_storage_overview: SHOW RETENTION POLICIES failed: {e}")
             errors.append(f"Retention policy query failed: {e}")
+
 
         # 2. Extract Specific Stats Safely (Bypassing the global parsing issue)
         v1_diag: dict[str, dict[str, object]] = {}
 
         # Safely query Runtime stats separately via SHOW STATS
         try:
-            runtime_res = self.client.query("SHOW STATS FOR 'runtime'")  # type: ignore
-            if runtime_res and hasattr(runtime_res, 'raw') and "series" in runtime_res.raw: # type: ignore
-                for series in runtime_res.raw.get("series", []): # type: ignore
+            runtime_res: Any = self.client.query("SHOW STATS FOR 'runtime'")  # type: ignore
+            if runtime_res and hasattr(runtime_res, 'raw') and "series" in runtime_res.raw:
+                for series in runtime_res.raw.get("series", []):
                     if "columns" in series and "values" in series and series["values"]:
-                        v1_diag["runtime"] = dict(zip(series["columns"], series["values"][0])) # type: ignore
+                        v1_diag["runtime"] = dict(zip(series["columns"], series["values"][0]))
         except Exception as e:
             self._log.warning(f"get_storage_overview: Isolated runtime diagnostics skipped: {e}")
 
         # Query Engine Database metric tags safely
         try:
-            stats_res = self.client.query("SHOW STATS FOR 'database'")  # type: ignore
-            if stats_res and hasattr(stats_res, 'raw') and "series" in stats_res.raw: # type: ignore
-                for series in stats_res.raw.get("series", []): # type: ignore
-                    if series.get("tags", {}).get("database") == self.database: # type: ignore
+            # Do the same here to clean up the tags and database lookups
+            stats_res: Any = self.client.query("SHOW STATS FOR 'database'")  # type: ignore
+            if stats_res and hasattr(stats_res, 'raw') and "series" in stats_res.raw:
+                for series in stats_res.raw.get("series", []):
+                    if series.get("tags", {}).get("database") == self.database:
                         if "columns" in series and "values" in series and series["values"]:
-                            v1_diag["database"] = dict(zip(series["columns"], series["values"][0])) # type: ignore
+                            v1_diag["database"] = dict(zip(series["columns"], series["values"][0]))
         except Exception as e:
             self._log.warning(f"get_storage_overview: Isolated database stats skipped: {e}")
 
+
         # Query WAL Engine properties safely
         try:
-            engine_res = self.client.query("SHOW STATS FOR 'engine'")  # type: ignore
-            if engine_res and hasattr(engine_res, 'raw') and "series" in engine_res.raw: # type: ignore
-                for series in engine_res.raw.get("series", []): # type: ignore
-                    if series.get("tags", {}).get("database") == self.database: # type: ignore
+            engine_res: Any = self.client.query("SHOW STATS FOR 'engine'")  # type: ignore
+            if engine_res and hasattr(engine_res, 'raw') and "series" in engine_res.raw:
+                for series in engine_res.raw.get("series", []):
+                    if series.get("tags", {}).get("database") == self.database:
                         if "columns" in series and "values" in series and series["values"]:
-                            v1_diag["engine"] = dict(zip(series["columns"], series["values"][0])) # type: ignore
+                            v1_diag["engine"] = dict(zip(series["columns"], series["values"][0]))
         except Exception as e:
             self._log.warning(f"get_storage_overview: Isolated engine stats skipped: {e}")
 
@@ -629,8 +694,8 @@ class influxdb_out(transport_base):
 
         # 3. Fetch Measurements & Fast Row Approximation
         try:
-            meas_result = self.client.query(f'SHOW MEASUREMENTS ON "{self.database}"')  # type: ignore
-            measurements: list[str] = [p["name"] for p in meas_result.get_points() if "name" in p]  # type: ignore
+            meas_result: Any = self.client.query(f'SHOW MEASUREMENTS ON "{self.database}"')  # type: ignore
+            measurements: list[str] = [p["name"] for p in meas_result.get_points() if "name" in p]
             result["item_names"] = measurements
 
             if measurements:
@@ -638,11 +703,11 @@ class influxdb_out(transport_base):
                 result["sample_item"] = first
 
                 try:
-                    count_result = self.client.query( # type: ignore
+                    count_result: Any = self.client.query( # type: ignore
                         f'SELECT COUNT(*) FROM "{first}" ORDER BY time DESC LIMIT 1',  # noqa: S608
                         database=self.database
-                    )  # type: ignore
-                    points = list(count_result.get_points())  # type: ignore
+                    )
+                    points: list[dict] = list(count_result.get_points())  # type: ignore
                     if points:
                         field_counts: list[int | float] = [v for k, v in points[0].items() if k != "time" and isinstance(v, (int, float))] # type: ignore
                         result["sample_item_approx_rows"] = int(max(field_counts)) if field_counts else 0
@@ -658,7 +723,7 @@ class influxdb_out(transport_base):
             try:
                 data_path = Path(self.data_dir)
                 if data_path.is_dir():
-                    total_bytes = sum(f.stat().st_size for f in data_path.rglob("*") if f.is_file() and not f.is_symlink())
+                    total_bytes: int = sum([f.stat().st_size for f in data_path.rglob("*") if f.is_file() and not f.is_symlink()])
                     result["data_dir_size_bytes"] = total_bytes
 
                     if total_bytes < 1024**2:
@@ -1106,35 +1171,36 @@ class influxdb_out(transport_base):
                 except Exception:
                     self._log.error(f"Exception in __del__: {e}")
 
+"""
+=============================================================================
+Metrics Edit -- read/edit/delete admin operations for InfluxDB v1, the v1
+counterpart of TimescaleDB's BridgeAdminManager (see classes/transports/
+timescaledb.py). Lives in this module (not the web layer) per the same
+separation the TimescaleDB admin screens use: routers/influxdb.py and
+services/influxdb_service.py only orchestrate HTTP/staging concerns,
+every actual InfluxDB read/write happens here, against a live
+influxdb_out bridge instance.
 
-# =============================================================================
-# Metrics Edit -- read/edit/delete admin operations for InfluxDB v1, the v1
-# counterpart of TimescaleDB's BridgeAdminManager (see classes/transports/
-# timescaledb.py). Lives in this module (not the web layer) per the same
-# separation the TimescaleDB admin screens use: routers/influxdb.py and
-# services/influxdb_service.py only orchestrate HTTP/staging concerns,
-# every actual InfluxDB read/write happens here, against a live
-# influxdb_out bridge instance.
-#
-# InfluxDB v1 has no SQL-style UPDATE or per-field DELETE -- both operations
-# below work within what InfluxQL actually supports:
-#
-#   - "Editing" a value means re-writing a point at the exact same
-#     measurement + tag set + timestamp with just the corrected field.
-#     InfluxDB's TSM storage engine merges writes per-field at that exact
-#     (series, timestamp) key, so a re-write containing only the corrected
-#     field leaves every other field already stored at that timestamp
-#     untouched -- there is no other way to change one stored value.
-#   - InfluxQL's DELETE statement filters by tag values and time only,
-#     never by field, so "delete" here removes the ENTIRE point (every
-#     field) at each matching timestamp for the selected device -- not
-#     just the one field chosen in the UI. See edit_metric_values' own
-#     docstring for how this is surfaced to the admin.
-# =============================================================================
+InfluxDB v1 has no SQL-style UPDATE or per-field DELETE -- both operations
+below work within what InfluxQL actually supports:
 
+  - "Editing" a value means re-writing a point at the exact same
+    measurement + tag set + timestamp with just the corrected field.
+    InfluxDB's TSM storage engine merges writes per-field at that exact
+    (series, timestamp) key, so a re-write containing only the corrected
+    field leaves every other field already stored at that timestamp
+    untouched -- there is no other way to change one stored value.
+  - InfluxQL's DELETE statement filters by tag values and time only,
+    never by field, so "delete" here removes the ENTIRE point (every
+    field) at each matching timestamp for the selected device -- not
+    just the one field chosen in the UI. See edit_metric_values' own
+    docstring for how this is surfaced to the admin.
+=============================================================================
+"""
 # InfluxQL field types, as reported by SHOW FIELD KEYS -- used only by
 # _coerce_v1_field_value to basic-validate a Metrics Edit replacement value
 # before it's written.
+
 _INFLUX_V1_FIELD_TYPES: frozenset[str] = frozenset({"float", "integer", "string", "boolean"})
 
 

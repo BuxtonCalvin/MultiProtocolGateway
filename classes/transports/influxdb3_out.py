@@ -22,6 +22,7 @@
 
 from __future__ import annotations
 
+import importlib.metadata
 import logging
 import math
 import pickle
@@ -49,6 +50,7 @@ from defs.common import TransportSettings, strtobool
 from ..protocol_settings import Data_Type, Registry_Type
 from .transport_base import (
     BridgeHealthSnapshot,
+    BridgeVersionRow,
     ColumnInfo,
     DataPayload,
     HeapProfile,
@@ -134,6 +136,15 @@ class influxdb3_out(transport_base):
     # Periodic reconnection settings
     periodic_reconnect_interval: float = 14400.0  # 4 hours in seconds
 
+    # Opt-in: let the Bridge Health panel compare the server version with the newest
+    # release published on GitHub (one cached request to api.github.com a day).
+    # Off by default -- MPG makes no outside network calls unless asked to.
+    check_latest_release: bool = False
+
+    # (version, edition, reason) from GET /ping and when to ask again; see _probe_server_info.
+    _SERVER_INFO_TTL: float = 300.0
+    _SERVER_INFO_FAILURE_TTL: float = 30.0
+
     # Optional local filesystem path to InfluxDB v3's object store (e.g.
     # "/var/lib/influxdb3/object_store"), used only to report on-disk size
     # in the Storage Overview panel. Empty by default — MPG and InfluxDB
@@ -176,6 +187,8 @@ class influxdb3_out(transport_base):
         self.batch_size = settings.getint("batch_size", fallback=self.batch_size)
         self.batch_timeout = settings.getfloat("batch_timeout", fallback=self.batch_timeout)
         self.force_float = strtobool(settings.get("force_float", fallback=self.force_float))
+        self.check_latest_release = strtobool(settings.get("check_latest_release", fallback=self.check_latest_release))
+        self._server_info_cache: tuple[tuple[str | None, str | None, str | None], float] | None = None
 
         # Connection monitoring settings
         self.reconnect_attempts = settings.getint("reconnect_attempts", fallback=self.reconnect_attempts)
@@ -646,6 +659,70 @@ class influxdb3_out(transport_base):
             "tracked_transport_count": len(self._stale_registry),
         }
 
+    def _probe_server_info(self) -> tuple[str | None, str | None, str | None]:
+        """
+        (version, edition, problem) the InfluxDB 3 server reports on ``GET /ping``:
+        the ``x-influxdb-version`` header (falling back to the JSON body's ``version``)
+        and ``x-influxdb-build`` ("Core" or "Enterprise"), e.g. ("3.9.1", "Core", None).
+        ``problem`` is a short reason when the version could not be read -- notably an
+        authentication failure, because /ping requires a valid token by default.
+
+        Never raises; (None, None, reason) when not connected or unreachable.  Cached for
+        a few minutes (a failure for only seconds) so the panel does not cost a request
+        on every page load.  Uses the bridge's own HTTP session, so TLS settings match.
+        """
+        now: float = time.time()
+        cached = self._server_info_cache
+        if cached is not None and cached[1] > now:
+            return cached[0]
+
+        info: tuple[str | None, str | None, str | None] = (None, None, "not connected")
+        if self.connected:
+            info = (None, None, "no response")
+            try:
+                session: requests.Session = cast(requests.Session, getattr(self, "session", None) or requests)
+                resp: requests.Response = session.get(
+                    f"{self._endpoint_url}/ping",
+                    headers={"Authorization": f"Bearer {self.token}"},
+                    timeout=min(float(self.connection_timeout), 5.0),
+                )
+                version: str = resp.headers.get("x-influxdb-version", "").strip()
+                if not version and resp.ok:
+                    try:
+                        version = str(resp.json().get("version", "")).strip()
+                    except ValueError:
+                        version = ""
+                build: str = resp.headers.get("x-influxdb-build", "").strip()
+                if version:
+                    info = (version, build.capitalize() or None, None)
+                elif resp.status_code in (401, 403):
+                    info = (None, None, "/ping needs a valid token")
+                else:
+                    info = (None, None, f"/ping returned HTTP {resp.status_code}")
+            except Exception as exc:  # noqa: BLE001 - informational probe, must never break the panel
+                self._log.debug(f"influxdb3_out: GET /ping for version info failed: {exc}")
+
+        ttl: float = self._SERVER_INFO_TTL if info[0] else self._SERVER_INFO_FAILURE_TTL
+        self._server_info_cache = (info, now + ttl)
+        return info
+
+    def get_version_info(self) -> list[BridgeVersionRow]:
+        """
+        Rows for the "Versions" group of the Bridge Health panel: the InfluxDB 3 server
+        (version and edition, from GET /ping) and the Python ``influxdb3-python`` client
+        library MPG talks to it with.  When the server version is unavailable the row's
+        ``detail`` says why.
+        """
+        version, edition, problem = self._probe_server_info()
+        try:
+            client_version: str | None = importlib.metadata.version("influxdb3-python")
+        except importlib.metadata.PackageNotFoundError:
+            client_version = None
+        return [
+            {"label": "InfluxDB 3 server", "version": version, "detail": edition if version else problem},
+            {"label": "Python client (influxdb3-python)", "version": client_version, "detail": None},
+        ]
+
     def get_storage_overview(self) -> StorageOverview:
         """
         Best-effort, read-only storage snapshot for the device page's
@@ -858,13 +935,13 @@ class influxdb3_out(transport_base):
                 language="sql",
             ))
 
-            raw_columns = cols_table.to_pylist()
+            raw_columns: Any = cols_table.to_pylist()
             processed_columns: list[ColumnInfo] = []
 
             for row in raw_columns:
-                t_name = row.get("table_name")
-                c_name = row.get("column_name")
-                d_type = row.get("data_type")
+                t_name: str = row.get("table_name")
+                c_name: str = row.get("column_name")
+                d_type: str = row.get("data_type")
 
                 if c_name == "time":
                     iox_type = "timestamp"
@@ -1424,60 +1501,60 @@ class influxdb3_out(transport_base):
                 except Exception:
                     self._log.error(f"Exception in __del__: {e}")
 
+"""
+=============================================================================
+Metrics Edit -- read/edit admin operations for InfluxDB v3, the v3
+counterpart of InfluxDB v1's InfluxV1AdminManager (classes/transports/
+influxdb_out.py) and TimescaleDB's BridgeAdminManager (classes/transports/
+timescaledb.py). Lives in this module (not the web layer) per the same
+separation those two use: routers/influxdb.py and services/
+influxdb_service.py only orchestrate HTTP/staging concerns; every actual
+InfluxDB v3 read/write happens here, against a live influxdb3_out bridge
+instance, via SQL (DataFusion) rather than InfluxQL.
+#
+InfluxDB 3 Core has NO row-level or field-level DELETE at all as of this
+writing. "Delete value(s)" here uses InfluxDB 3 ENTERPRISE's row-delete
+API (POST /api/v3/row_delete_requests, the same request the `influxdb3
+delete rows` CLI command submits) -- an Enterprise-only feature that
+requires the upgraded storage engine (--use-pacha-tree /
+--upgrade-pacha-tree). SUPPORTS_DELETE is True here (this class always
+offers the action; the ENTERPRISE REQUIREMENT is enforced by the server
+itself, not pre-checked client-side) -- routers/influxdb.py shows
+"Delete value(s)" for v3 the same as v1, and any failure (wrong edition,
+missing permission, storage engine not upgraded) surfaces as a clear
+error from _delete_rows_via_enterprise_api rather than being hidden.
 
-# =============================================================================
-# Metrics Edit -- read/edit admin operations for InfluxDB v3, the v3
-# counterpart of InfluxDB v1's InfluxV1AdminManager (classes/transports/
-# influxdb_out.py) and TimescaleDB's BridgeAdminManager (classes/transports/
-# timescaledb.py). Lives in this module (not the web layer) per the same
-# separation those two use: routers/influxdb.py and services/
-# influxdb_service.py only orchestrate HTTP/staging concerns; every actual
-# InfluxDB v3 read/write happens here, against a live influxdb3_out bridge
-# instance, via SQL (DataFusion) rather than InfluxQL.
-#
-# InfluxDB 3 Core has NO row-level or field-level DELETE at all as of this
-# writing. "Delete value(s)" here uses InfluxDB 3 ENTERPRISE's row-delete
-# API (POST /api/v3/row_delete_requests, the same request the `influxdb3
-# delete rows` CLI command submits) -- an Enterprise-only feature that
-# requires the upgraded storage engine (--use-pacha-tree /
-# --upgrade-pacha-tree). SUPPORTS_DELETE is True here (this class always
-# offers the action; the ENTERPRISE REQUIREMENT is enforced by the server
-# itself, not pre-checked client-side) -- routers/influxdb.py shows
-# "Delete value(s)" for v3 the same as v1, and any failure (wrong edition,
-# missing permission, storage engine not upgraded) surfaces as a clear
-# error from _delete_rows_via_enterprise_api rather than being hidden.
-#
-# Three things make this delete meaningfully different from a v1 InfluxQL
-# DELETE, and both are surfaced to the admin (see edit_metric_values'
-# docstring and the UI warning in pages/influxdb_metrics_edit.html):
-#   1. Whole-row only: the row-delete predicate supports tag equality only
-#      (AND-combined, no OR/NOT/IN, no field columns) -- exactly like v1's
-#      InfluxQL DELETE, this removes the ENTIRE row (every field) at each
-#      matching timestamp, never just the one field chosen in the UI.
-#   2. Asynchronous: submitting the request only records it. The
-#      compactor applies it later -- by default, up to 24 hours afterward
-#      (tunable server-side via --pt-row-delete-min-age) -- and the
-#      targeted rows remain queryable in the meantime. This is nothing
-#      like a v1 InfluxQL DELETE or a database DELETE statement, which
-#      take effect (at least locally) as soon as they return.
-#   3. Enterprise + upgraded storage engine only: InfluxDB 3 Core, or an
-#      Enterprise cluster that hasn't run the storage engine upgrade,
-#      rejects the request outright; there is no client-side way to
-#      detect this in advance, so a clear server error is surfaced
-#      instead of pre-flighting it.
-#
-# "Editing" a value (the "set_value" action, unaffected by any of the
-# above) means the same thing it does for v1: SQL SELECT * the matching
-# rows (capturing each row's full original tag set and exact timestamp),
-# then re-write ONE Point per row containing that same tag set, timestamp,
-# and ONLY the corrected field. InfluxDB 3's storage engine merges writes
-# per-column at the same (tag-set, timestamp) primary key, the same
-# last-write-wins-per-field behavior InfluxDB v1's TSM engine has, so
-# every other field already stored at that timestamp is left untouched.
-# This part is synchronous and ordinary SQL/write-API traffic -- it works
-# identically on Core and Enterprise.
-# =============================================================================
+Three things make this delete meaningfully different from a v1 InfluxQL
+DELETE, and both are surfaced to the admin (see edit_metric_values'
+docstring and the UI warning in pages/influxdb_metrics_edit.html):
+1. Whole-row only: the row-delete predicate supports tag equality only
+    (AND-combined, no OR/NOT/IN, no field columns) -- exactly like v1's
+    InfluxQL DELETE, this removes the ENTIRE row (every field) at each
+    matching timestamp, never just the one field chosen in the UI.
+2. Asynchronous: submitting the request only records it. The
+    compactor applies it later -- by default, up to 24 hours afterward
+    (tunable server-side via --pt-row-delete-min-age) -- and the
+    targeted rows remain queryable in the meantime. This is nothing
+    like a v1 InfluxQL DELETE or a database DELETE statement, which
+    take effect (at least locally) as soon as they return.
+3. Enterprise + upgraded storage engine only: InfluxDB 3 Core, or an
+    Enterprise cluster that hasn't run the storage engine upgrade,
+    rejects the request outright; there is no client-side way to
+    detect this in advance, so a clear server error is surfaced
+    instead of pre-flighting it.
 
+"Editing" a value (the "set_value" action, unaffected by any of the
+above) means the same thing it does for v1: SQL SELECT * the matching
+rows (capturing each row's full original tag set and exact timestamp),
+then re-write ONE Point per row containing that same tag set, timestamp,
+and ONLY the corrected field. InfluxDB 3's storage engine merges writes
+per-column at the same (tag-set, timestamp) primary key, the same
+last-write-wins-per-field behavior InfluxDB v1's TSM engine has, so
+every other field already stored at that timestamp is left untouched.
+This part is synchronous and ordinary SQL/write-API traffic -- it works
+identically on Core and Enterprise.
+=============================================================================
+"""
 # The six tags every influxdb3_out point carries (see _build_tags above) --
 # used by list_metric_edit_fields to exclude tag columns from the editable
 # field list (information_schema.columns has no separate "is this a tag"
@@ -1486,6 +1563,7 @@ class influxdb3_out(transport_base):
 # Look-back windows, narrowest first, for the Metrics Edit device picker's
 # time-bounded DISTINCT query (see Influx3AdminManager.list_metric_edit_devices).
 # Hard-coded strings interpolated into SQL -- never user input.
+
 _V3_DEVICE_LOOKBACKS: tuple[str, ...] = ("3 days", "14 days")
 
 _INFLUX3_TAG_NAMES: frozenset[str] = frozenset({
@@ -1985,7 +2063,7 @@ class Influx3AdminManager:
                 break
             if slice_count == 0:
                 continue
-            where = _device_time_where(device_identifier, slice_start, slice_end, end_inclusive)
+            where: str = _device_time_where(device_identifier, slice_start, slice_end, end_inclusive)
             sample_table: pa.Table = self._query(
                 f"SELECT time, {quoted_field} FROM {quoted_table} {where} "  # noqa: S608
                 f"ORDER BY time DESC LIMIT {remaining}"
@@ -2290,7 +2368,7 @@ class Influx3AdminManager:
             raise RuntimeError(msg) from e
 
         if resp.status_code not in (200, 202):
-            msg = (
+            msg: str = (
                 f"InfluxDB 3 row-delete request failed (HTTP {resp.status_code}): {resp.text[:500]} -- "
                 "this requires InfluxDB 3 ENTERPRISE with the storage engine upgrade "
                 "(--use-pacha-tree/--upgrade-pacha-tree) and db:<database>:delete permission; "

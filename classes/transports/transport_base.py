@@ -82,6 +82,21 @@ class BridgeHealthSnapshot(TypedDict):
     tracked_transport_count: int
 
 
+class BridgeVersionRow(TypedDict):
+    """
+    One line of the "Versions" group on a bridge's Bridge Health panel: what a
+    component reports it is running. Shared by influxdb_out and influxdb3_out
+    (see their get_version_info) so one template renders both.
+
+    ``version`` is None when it could not be determined (not connected, the
+    server refused the request, ...); ``detail`` is a short qualifier such as the
+    edition ("OSS", "Core") or None.
+    """
+    label: str
+    version: str | None
+    detail: str | None
+
+
 class RetentionPolicy(TypedDict):
     """One row of get_storage_overview()'s retention_policies list (InfluxDB v1 only)."""
     name: object

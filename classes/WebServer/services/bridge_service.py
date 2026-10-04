@@ -67,6 +67,7 @@ from __future__ import annotations
 
 import itertools
 import logging
+import re
 import sys
 import threading
 import time
@@ -74,6 +75,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Generator, cast
 
+import requests
 from starlette.datastructures import State
 
 from ...protocol_settings import Registry_Type, registry_map_entry
@@ -1260,12 +1262,103 @@ def _format_elapsed(seconds: float) -> str:
     return f"{days}d ago"
 
 
+# ---------------------------------------------------------------------------
+# Newest-release lookup for the InfluxDB bridges' "Versions" rows.
+#
+# An InfluxDB server cannot say whether a newer release exists, so the only way to
+# show "up to date" is to ask GitHub.  That is an outside network call, which MPG
+# otherwise never makes, so it only happens when the bridge sets
+# check_latest_release = true.  One request lists the recent releases; the answer
+# is cached for a day (15 minutes after a failure) and shared by every bridge, so
+# GitHub's unauthenticated rate limit is never a concern.  A failure just means
+# "unknown" -- the panel then shows the installed version without a verdict.
+# ---------------------------------------------------------------------------
+_INFLUXDB_RELEASES_URL: str = "https://api.github.com/repos/influxdata/influxdb/releases?per_page=100"
+_LATEST_RELEASE_TTL: float = 86400.0
+_LATEST_RELEASE_FAILURE_TTL: float = 900.0
+_LATEST_RELEASE_TIMEOUT: float = 3.0
+_VERSION_RE: re.Pattern[str] = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)")
+_latest_release_cache: tuple[dict[int, tuple[int, int, int]], float] | None = None
+_latest_release_lock: threading.Lock = threading.Lock()
+
+
+def parse_version_tuple(text: str | None) -> tuple[int, int, int] | None:
+    """'1.11.7' / 'v3.9.1' / '3.9.1-rc1' -> (major, minor, patch); None if it does not start with three numbers."""
+    m: re.Match[str] | None = _VERSION_RE.match((text or "").strip())
+    return (int(m.group(1)), int(m.group(2)), int(m.group(3))) if m else None
+
+
+def _fetch_latest_influxdb_releases() -> dict[int, tuple[int, int, int]]:
+    """
+    Newest stable release per major version (1, 2, 3) among GitHub's 100 most recent InfluxDB
+    releases.  Maintenance releases of older lines are published after newer ones (3.9.13 after
+    3.11.0), so the maximum is taken, not the first match.  The list is newest-first, so anything
+    outside it is older than everything in it and cannot change the maximum.  Raises on any
+    network or HTTP error.
+    """
+    resp: requests.Response = requests.get(
+        _INFLUXDB_RELEASES_URL,
+        headers={"Accept": "application/vnd.github+json", "User-Agent": "MultiProtocolGateway"},
+        timeout=_LATEST_RELEASE_TIMEOUT,
+    )
+    resp.raise_for_status()
+    latest: dict[int, tuple[int, int, int]] = {}
+    for release in cast(list[dict[str, Any]], resp.json()):
+        if release.get("prerelease") or release.get("draft"):
+            continue
+        version: tuple[int, int, int] | None = parse_version_tuple(str(release.get("tag_name", "")))
+        if version is not None and version > latest.get(version[0], (0, 0, 0)):
+            latest[version[0]] = version
+    return latest
+
+
+def get_latest_influxdb_release(major: int) -> tuple[int, int, int] | None:
+    """Newest stable InfluxDB release of this major version, or None when unknown (offline, rate-limited, none listed)."""
+    global _latest_release_cache
+    with _latest_release_lock:
+        now: float = time.time()
+        if _latest_release_cache is None or _latest_release_cache[1] <= now:
+            try:
+                _latest_release_cache = (_fetch_latest_influxdb_releases(), now + _LATEST_RELEASE_TTL)
+            except Exception as exc:  # noqa: BLE001 - informational lookup, must never break the panel
+                _log.info(f"Could not check for the latest InfluxDB release (shown as unknown): {exc}")
+                _latest_release_cache = ({}, now + _LATEST_RELEASE_FAILURE_TTL)
+        return _latest_release_cache[0].get(major)
+
+
+def _build_influxdb_version_rows(bridge: Any) -> tuple[list[dict[str, Any]], bool]:
+    """
+    The bridge's version rows (see influxdb_out/influxdb3_out.get_version_info), plus, when the bridge
+    has check_latest_release on and its server version is known, ``latest`` and ``up_to_date`` on the
+    server row (the first).  Returns (rows, check_enabled).  Never raises.
+    """
+    check_enabled: bool = bool(getattr(bridge, "check_latest_release", False))
+    try:
+        rows: list[dict[str, Any]] = [dict(r) for r in bridge.get_version_info()]
+    except Exception as exc:  # noqa: BLE001 - informational, must never break the panel
+        _log.warning(f"get_version_info failed for {getattr(bridge, 'transport_name', '?')}: {exc}")
+        return [], check_enabled
+
+    if check_enabled and rows:
+        installed: tuple[int, int, int] | None = parse_version_tuple(rows[0].get("version"))
+        if installed is not None:
+            newest: tuple[int, int, int] | None = get_latest_influxdb_release(installed[0])
+            if newest is not None:
+                rows[0]["latest"] = ".".join(str(n) for n in newest)
+                rows[0]["up_to_date"] = installed >= newest
+    return rows, check_enabled
+
+
 def get_influxdb_health(gateway: "Protocol_Gateway | None", device_section: str) -> dict[str, Any]:
     """
     Read-only connection/backlog/staleness snapshot for the "Bridge
     Health" panel, with a human-readable `last_periodic_reconnect_display`
     added. See influxdb_out.get_health_snapshot (identical on influxdb3_
     out) for the rest of the field list.
+
+    Also adds the "Versions" group: `version_rows` (server and client library, from the
+    bridge's get_version_info) and `latest_release_check_enabled`.  When the bridge opts in
+    with check_latest_release, the server row also carries `latest` and `up_to_date`.
 
     Raises RuntimeError if no InfluxDB bridge with this name is attached
     to the gateway.
@@ -1282,6 +1375,10 @@ def get_influxdb_health(gateway: "Protocol_Gateway | None", device_section: str)
         health["last_periodic_reconnect_display"] = _format_elapsed(time.time() - last_attempt)
     else:
         health["last_periodic_reconnect_display"] = "never"
+
+    version_rows, check_enabled = _build_influxdb_version_rows(bridge)
+    health["version_rows"] = version_rows
+    health["latest_release_check_enabled"] = check_enabled
 
     return health
 
