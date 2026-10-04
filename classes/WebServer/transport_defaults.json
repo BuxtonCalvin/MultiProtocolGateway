@@ -227,7 +227,8 @@
     "use_exponential_backoff": "True",
     "use_utc_timestamp": "False",
     "username": "",
-    "data_dir": ""
+    "data_dir": "",
+    "check_latest_release": "False"
   },
   "influxdb3_out": {
     "auto_create_database": "true",
@@ -259,7 +260,8 @@
     "username": "",
     "debug_pprof_url": "",
     "object_store_dir": "",
-    "port": ""
+    "port": "",
+    "check_latest_release": "False"
   },
   "mqtt": {
     "base_topic": "home/device",

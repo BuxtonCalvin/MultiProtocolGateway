@@ -162,6 +162,9 @@ use_exponential_backoff = true
 max_reconnect_delay = 300.0
 periodic_reconnect_interval = 14400.0
 
+# Bridge Health panel: compare the server with the newest GitHub release (contacts api.github.com once a day)
+check_latest_release = false
+
 # Persistent backlog
 enable_persistent_storage = true
 persistent_storage_path = backlogs
@@ -200,6 +203,7 @@ Options marked **v1** or **v3** apply to only that transport; all others apply t
 | `use_exponential_backoff` | `true` | Double the delay after each failed attempt. |
 | `max_reconnect_delay` | `300.0` | Cap on the backoff delay (seconds). |
 | `periodic_reconnect_interval` | `14400.0` | Seconds between proactive connection checks; `0` disables. |
+| `check_latest_release` | `false` | Let the Bridge Health panel compare the InfluxDB server with the newest release published on GitHub. When on, MPG contacts `api.github.com` once a day; when off, MPG makes no outside network calls. |
 | `enable_persistent_storage` | `true` | Save undeliverable points to a backlog file. |
 | `persistent_storage_path` | `backlogs` | Backlog folder, relative to the MPG install directory. |
 | `max_backlog_size` | `10000` | Maximum points held in the backlog. |
@@ -291,7 +295,7 @@ With the default `force_float = true`, virtually every numeric field is a float.
 
 The bridge's device page in the admin UI shows two read-only panels.
 
-**Bridge Health** shows: points pending in the write batch (`n / batch_size`), points in the backlog (`n / max_backlog_size`, marked *buffering* when non-zero, or *Disabled*), the periodic reconnect interval and when it last ran, and how many source transports are currently flagged stale. Connection status is shown in the page's own status badge.
+**Bridge Health** shows: points pending in the write batch (`n / batch_size`), points in the backlog (`n / max_backlog_size`, marked *buffering* when non-zero, or *Disabled*), the periodic reconnect interval and when it last ran, and how many source transports are currently flagged stale. A **Versions** group below shows the InfluxDB server version and build (v1: OSS or Enterprise; v3: Core or Enterprise), read from the server's `/ping` endpoint, and the Python client library MPG uses (`influxdb` for v1, `influxdb3-python` for v3). On v3, `/ping` requires a valid token, so a wrong token shows *Unavailable (/ping needs a valid token)*. An InfluxDB server cannot report whether a newer release exists, so by default the panel shows versions only. Set `check_latest_release = true` to also compare the server with the newest release of the same major version published on GitHub (one request a day, cached, shared by all bridges); the panel then shows *Up to date* or *Latest release: x.y.z*. If GitHub cannot be reached the verdict is simply left out. Connection status is shown in the page's own status badge.
 
 **Storage Overview** is a best-effort snapshot:
 
