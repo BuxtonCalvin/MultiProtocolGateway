@@ -79,6 +79,7 @@ from ..services.device_service import (
     get_nav_data,
     get_transport_library,
 )
+from ..services.faq_service import FaqCategory, FaqLoadError, load_faq
 from ..services.protocol_service import (
     JSONValue,
     export_protocol_registers,
@@ -262,16 +263,16 @@ async def device_page(request: Request, device_name: str):
         request=request,
         name=template_name,
         context={
-            "nav":          nav,
-            "device":       summary,
-            "settings":     settings,
-            "proto_tabs":   proto_tabs,
-            "has_no_selections": has_no_selections,
-            "metric_summary": metric_summary,
-            "proto_groups": proto_groups,
-            "transport_library": get_transport_library(request.app.state.transports_dir),
+            "nav":                  nav,
+            "device":               summary,
+            "settings":             settings,
+            "proto_tabs":           proto_tabs,
+            "has_no_selections":    has_no_selections,
+            "metric_summary":       metric_summary,
+            "proto_groups":         proto_groups,
+            "transport_library":    get_transport_library(request.app.state.transports_dir),
             "device_partial_template": partial_template_name,
-            "analyze_enabled": analyze_enabled,
+            "analyze_enabled":      analyze_enabled,
         },
     )
 
@@ -412,10 +413,17 @@ async def transport_settings_page(request: Request):
 async def faq_page(request: Request):
     with session_scope() as db:
         nav: NavData = get_nav_data(db)
+    faq_categories: list[FaqCategory] = []
+    faq_error: str | None = None
+    try:
+        faq_categories = load_faq()
+    except FaqLoadError as exc:
+        faq_error = str(exc)
+        _log.error("FAQ content could not be loaded: %s", exc)
     return request.app.state.templates.TemplateResponse(
         request=request,
         name="pages/faq.html",
-        context=base_context(request, nav),
+        context={**base_context(request, nav), "faq_categories": faq_categories, "faq_error": faq_error},
     )
 
 
