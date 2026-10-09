@@ -1,178 +1,178 @@
-register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note
-0,,System Status,,,"{""0"": ""Standby"", ""1"": ""(No Use)"", ""2"": ""Discharge"", ""3"": ""Fault"", ""4"": ""Flash"", ""5"": ""PV charge"", ""6"": ""AC charge"", ""7"": ""Combine charge"", ""8"": ""Combine charge and Bypass"", ""9"": ""PV charge and Bypass"", ""10"": ""AC charge and Bypass"", ""11"": ""Bypass"", ""12"": ""PV charge and Discharge""}",,,,System run state; ? (No Use) 2: Discharge; extra: 12:??? PV??? charge??? and Discharge; extra: 12:??? PV??? charge??? and Discharge; extra: 12:??? PV??? charge??? and Discharge; extra: 12:??? PV??? charge??? and Discharge; extra: 12:??? PV??? charge??? and Discharge; extra: 12:??? PV??? charge??? and Discharge; extra: 12:??? PV??? charge??? and Discharge; extra: 12:??? PV??? charge??? and Discharge; extra: 12:??? PV??? charge??? and Discharge; extra: 12:??? PV??? charge??? and Discharge
-1,PV1 Voltage,Vpv1,0.1V,,,,,,PV1 voltage
-2,PV2 Voltage,Vpv2,0.1V,,,,,,PV2 voltage
-3,PV1 Watts,Ppv1 H,0.1W,,,,,,PV1 charge power (high)
-4,,Ppv1 L,0.1W,,,,,,PV1 charge power (low)
-5,PV2 Watts,Ppv2 H,0.1W,,,,,,PV2 charge power (high)
-6,,Ppv2 L,0.1W,,,,,,PV2 charge power (low)
-7,Buck1 Current,Buck1Curr,0.1A,,,,,,Buck1 current
-8,Buck2 Current,Buck2Curr,0.1A,,,,,,Buck2 current
-9,Output Wattage,OP_Watt H,0.1W,,,,,,Output active power (high)
-10,,OP_Watt L,0.1W,,,,,,Output active power (low)
-11,Output VA,OP_VA H,0.1VA,,,,,,Output apparent power (high)
-12,,OP_VA L,0.1VA,,,,,,Output apparent power (low)
-13,AC Charge Watts,ACChr_Watt H,0.1W,,,,,,AC charge watt (high)
-14,,ACChr_Watt L,0.1W,,,,,,AC charge watt (low)
-15,AC Charge VA,ACChr_VA H,0.1VA,,,,,,AC?? charge (high)
-16,,ACChr_VA L,0.1VA,,,,,,AC?? charge (low)
-17,Battery Voltage,Bat Volt,0.01V,,,,,,Battery volt (M3)
-18,Battery SOC,BatterySOC,1.00%,,0~100,,,,Battery SOC
-19,Bus Voltage,Bus Volt,0.1V,,,,,,Bus Voltage
-20,Grid Voltage,Grid Volt,0.1V,,,,,,AC input Volt
-21,Grid Hz,Line Freq,0.01Hz,,,,,,AC input frequency
-22,Output Voltage,OutputVolt,0.1V,,,,,,AC output Volt
-23,Output Hz,OutputFreq,0.01Hz,,,,,,AC output frequency
-24,Output DCV,Output DCV,0.1V,,,,,,Output DC Volt
-25,,InvTemp,0.1C,,,,,,Inv Temperature
-26,,DcDc Temp,0.1C,,,,,,DC-DC Temperature
-27,Load Percentage,LoadPercent,0.10%,,0~1000,,,,Load Percent
-28,,Bat_s_Volt,0.01V,,,,,,Battery-port volt (DSP)
-29,,Bat_Volt_DSP,0.01V,,,,,,Battery-bus volt (DSP)
-30,,Time total H,0.5S,,,,,,Work time total (high)
-31,,Time total L,0.5S,,,,,,Work time total (low)
-32,Buck1 Temperature,Buck1_NTC,0.1C,,,,,,Buck1 Temperature
-33,Buck2 Temperature,Buck2_NTC,0.1C,,,,,,Buck2 Temperature
-34,Output Current,OP_Curr,0.1A,,,,,,Output Current
-35,Inverter Current,Inv_Curr,0.1A,,,,,,Inv Current
-36,AC Input Watts,AC_InWatt H,0.1W,,,,,,AC input watt (high)
-37,,AC_InWatt L,0.1W,,,,,,AC input watt (low)
-38,AC Input VA,AC_InVA H,0.1VA,,,,,,
-39,,AC_InVA L,0.1VA,,,,,,
-40,,Fault bit,,,&*1,,,,fault bit
-41,,Warning bit,,,&*1,,,,Warning bit
-42,,fault value,,,,,,,fault value
-43,,warning value,,,,,,,warning value
-44,,DTC,,,&*6,,,,Device Type Code
-45,,Check Step,,,"{""1"": ""PV1 charge power check"", ""2"": ""PV2 charge power check"", ""3"": ""AC charge Power check""}",,,,Product check step
-46,,Production Line Mode,,,"{""0"": ""Not at ProductionLine Mode"", ""1"": ""Production LineMode"", ""2"": ""Production Line Clear Fault Mode""}",,,,Production Line Mode; 2:???? Production???? Line Clear Fault Mode
-47,,ConstantPowerOKFlag,,,"{""0"": ""Not OK"", ""1"": ""OK""}",,,,Constant Power OK Flag
-48,PV1 KWH Today,Epv1_today H,,,,,,,PV Energy today
-49,,Epv1_today L,0.1kW h,,,,,,PV Energy today
-50,PV1 KWH Total,Epv1_total H,,,,,,,PV Energy total
-51,,Epv1_total L,0.1kW h,,,,,,PV Energy total
-52,PV2 KWH Today,Epv2_today H,,,,,,,PV Energy today
-53,,Epv2_today L,0.1kW h,,,,,,PV Energy today
-54,PV2 KWH Total,Epv2_total H,,,,,,,PV Energy total
-55,,Epv2_total L,0.1kW h,,,,,,PV Energy total
-56,AC Input KWH Today,Eac_chrToday H,,,,,,,AC charge Energy today
-57,,Eac_chrToday L,0.1kW h,,,,,,AC charge Energy today
-58,AC Input KWH Total,Eac_chrTotal H,,,,,,,AC charge Energy total
-59,,Eac_chrTotal L,0.1kW h,,,,,,AC charge Energy total
-60,Battery Discharge KWH Today,Ebat_dischrToday H,,,,,,,Bat discharge Energy today
-61,,Ebat_dischrToday L,0.1kW h,,,,,,Bat discharge Energy today
-62,Battery Discharge KWH Total,Ebat_dischrTotal H,,,,,,,Bat discharge Energy total
-63,,Ebat_dischrTotal L,0.1kW h,,,,,,Bat discharge Energy total
-64,AC Discharge KWH Today,Eac_dischrToday H,,,,,,,AC discharge Energy today
-65,,Eac_dischrToday L,0.1kW h,,,,,,AC discharge Energy today
-66,AC Discharge KWH Total,Eac_dischrTotal H,,,,,,,AC discharge Energy total
-67,,Eac_dischrTotal L,0.1kW h,,,,,,AC discharge Energy total
-68,AC Charge Current,ACChrCurr,0.1A,,,,,,AC Charge Battery Current
-69,AC Discharge Watts,AC_DisChrWatt H,0.1W,,,,,,AC discharge watt (high)
-70,,AC_DisChrWatt L,0.1W,,,,,,AC discharge watt (low)
-71,AC Discharge VA,AC_DisChrVA H,0.1VA,,,,,,AC? discharge? apparent? power (high)
-72,,AC_DisChrVA L,0.1VA,,,,,,AC? discharge? apparent? power (low)
-73,Battery Discharge Watts,Bat_DisChrWatt H,0.1W,,,,,,Bat discharge watt (high)
-74,,Bat_DisChrWatt L,0.1W,,,,,,Bat discharge watt (low)
-75,Battery Discharge VA,Bat_DisChrVA H,0.1VA,,,,,,Bat discharge apparent power (high)
-76,,Bat_DisChrVA L,0.1VA,,,,,,Bat discharge apparent power (low)
-77,Battery Input Watts,Bat_Watt H,0.1W,INT,(signed int 32) Positive:Battery Discharge Power  Negative:????????? Battery Charge Power,,,,Bat watt (high)
-78,,Bat_Watt L,,INT,,,,,Bat watt (low)
-80,,BatOverCharge,,,"{""0"": ""Battery not over charge"", ""1"": ""Battery over charge""}",,,,Battery Over Charge Flag
-81,,MpptFanSpeed,1.00%,,0~100,,,,Fan speed of MPPT Charger
-82,,InvFanSpeed,1.00%,,0~100,,,,Fan speed of Inverter
-90,,BMS_Status,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,Status from BMS
-91,,BMS_Error,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,Error information from BMS
-92,,BMS_ WarnInfo,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,Warning info from BMS
-93,,BMS_SOC,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,SOC from BMS
-94,,BMS_ BatteryVolt,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,Battery voltage from BMS
-95,,BMS_ BatteryCurr,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,Battery current from BMS
-96,,BMS_ BatteryTemp,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,Battery???? temperature???? from BMS
-97,,BMS_ MaxCurr,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,Max. charge/discharge current from BMS
-98,,BMS_ ConstantVolt,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,CV voltage from BMS
-99,,BMS_ BMSInfo,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,BMS Information from BMS
-100,,BMS_ PackInfo,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,Pack Information from BMS
-101,,BMS_ UsingCap,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,Using Cap from BMS
-102,,BMS_ Cell1_Volt,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,Cell1_Voltage from BMS
-117,,BMS_ Cell16_Volt,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,Cell16_Voltage from BMS
-118,,BMS2_Status,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,Status from BMS2
-119,,BMS2_Error,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,Error information from BMS
-120,,BMS2_ WarnInfo,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,Warning info from BMS2
-121,,BMS2_SOC,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,SOC from BMS2
-122,,BMS2_ BatteryVolt,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,Battery voltage from BMS2
-123,,BMS2_ BatteryCurr,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,Battery current from BMS2
-124,,BMS2_ BatteryTemp,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,Battery???? temperature???? from BMS2
-125,,BMS2_ MaxCurr,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,Max. charge/discharge current from BMS2
-126,,BMS2_ ConstantVolt,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,CV voltage from BMS2
-127,,BMS2_ BMSInfo,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,BMS Information from BMS2
-128,,BMS2_ PackInfo,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,Pack Information from BMS2
-129,,BMS2_ UsingCap,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,Using Cap from BMS2
-130,,BMS2_ Cell1_Volt,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,Cell1_Voltage from BMS2
-145,,BMS2_ Cell16_Volt,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,Cell16_Voltage from BMS2
-180,,Solar1_Status,,,,,,,Solar Charger1 Status
-181,,Solar1_FaultCode,,,,,,,Solar Charger1 FaultCode
-182,,Solar1_WarningCode,,,,,,,Solar Charger1 WarningCode
-183,,Solar1_BatVolt,0.01V,,,,,,Solar Charger1 battery voltage
-184,,Solar1_PV1Volt,0.1V,,,,,,Solar Charger1 PV1 voltage
-185,,Solar1_PV2Volt,0.1V,,,,,,Solar Charger1 PV2 voltage
-186,,Solar1_Buck1Curr,0.1A,,,,,,Solar Charger1 Buck1 current
-187,,Solar1_Buck2Curr,0.1A,,,,,,Solar Charger1 Buck2 current
-188,,Solar1_PV1ChrPower H,0.1W,,,,,,Solar??? Charger1??? PV1??? charge Power High 16 bit
-189,,Solar1_PV1ChrPower H,0.1W,,,,,,Solar??? Charger1??? PV1??? charge Power Low 16 bit
-190,,Solar1_PV2ChrPower H,0.1W,,,,,,Solar??? Charger1??? PV2??? charge Power High 16 bit
-191,,Solar1_PV2ChrPower H,0.1W,,,,,,Solar??? Charger1??? PV2??? charge Power Low 16 bit
-192,,Solar1_HS1Temp,0.1C,,,,,,Solar????????? Charger1???????? Buck1 Temperature
-193,,Solar1_HS2Temp,0.1C,,,,,,Solar????????? Charger1???????? Buck2 Temperature
-194,,Solar1_Epv1_today,0.1k Wh,,,,,,Solar Charger1 PV1 Energy today
-195,,Solar1_Epv2_today L,0.1k Wh,,,,,,Solar Charger1 PV2 Energy today
-196,,Solar1_Epv1_total H,0.1k Wh,,,,,,Solar Charger1 PV1 Energy total High 16 bit
-197,,Solar1_Epv1_total L,0.1k Wh,,,,,,Solar Charger1 PV1 Energy total Low 16 bit
-198,,Solar1_Epv2_total H,0.1k Wh,,,,,,Solar Charger1 PV2 Energy total High 16 bit
-199,,Solar1_Epv2_total L,0.1k Wh,,,,,,Solar Charger1 PV2 Energy total Low 16 bit
-200,,Solar2_Status,,,,,,,Solar Charger2 Status
-201,,Solar2_FaultCode,,,,,,,Solar Charger2 FaultCode
-202,,Solar2_WarningCode,,,,,,,Solar Charger2 WarningCode
-203,,Solar2_BatVolt,0.01V,,,,,,Solar Charger2 battery voltage
-204,,Solar2_PV1Volt,0.1V,,,,,,Solar Charger2 PV1 voltage
-205,,Solar2_PV2Volt,0.1V,,,,,,Solar Charger2 PV2 voltage
-206,,Solar2_Buck1Curr,0.1A,,,,,,Solar Charger2 Buck1 current
-207,,Solar2_Buck2Curr,0.1A,,,,,,Solar Charger2 Buck2 current
-208,,Solar2_PV1ChrPower H,0.1W,,,,,,Solar??? Charger2??? PV1??? charge Power High 16 bit
-209,,Solar2_PV1ChrPower H,0.1W,,,,,,Solar??? Charger2??? PV1??? charge Power Low 16 bit
-210,,Solar2_PV2ChrPower H,0.1W,,,,,,Solar??? Charger2??? PV2??? charge Power High 16 bit
-211,,Solar2_PV2ChrPower H,0.1W,,,,,,Solar??? Charger2??? PV2??? charge Power Low 16 bit
-212,,Solar2_HS1Temp,0.1C,,,,,,Solar????????? Charger2???????? Buck1 Temperature
-213,,Solar2_HS2Temp,0.1C,,,,,,Solar????????? Charger2???????? Buck2 Temperature
-214,,Solar2_Epv1_today,0.1k Wh,,,,,,Solar Charger2 PV1 Energy today
-215,,Solar2_Epv2_today,0.1k Wh,,,,,,Solar Charger2 PV2 Energy today
-216,,Solar2_Epv1_total H,0.1k Wh,,,,,,Solar Charger2 PV1 Energy total High 16 bit
-217,,Solar2_Epv1_total L,0.1k Wh,,,,,,Solar Charger2 PV1 Energy total Low 16 bit
-218,,Solar2_Epv2_total H,0.1k Wh,,,,,,Solar Charger2 PV2 Energy total High 16 bit
-219,,Solar2_Epv2_total L,0.1k Wh,,,,,,Solar Charger2 PV2 Energy total Low 16 bit
-220,,Solar_ConnectOKFlag,,,"{""1"": ""Solar Charger1"", ""2"": ""Solar Charger2"", ""3"": ""Solar Charger1 and 2""}",,,,Slave Solar Connect OK Flag
-221,,Solar_BatVoltConsistFl ag,,,"{""1"": ""Check Solar Charger1battery voltage OK"", ""2"": ""Check Solar Charger2battery voltage OK"", ""3"": ""Check Solar Charger1 and 2 battery voltage OK""}",,,,Check Slave Solar Battery Voltage Consist OK Flag
-222,,Solar_TypeSwState,,,"{""0"": ""Master SolarCharger"", ""1"": ""Slaver SolarCharger""}",,,,Solar Charger Type Switch State
-223,,Solar_ModeSwState,,,"{""0"": ""Parallel Mode"", ""1"": ""Single Mode""}",,,,Solar Charger Mode Switch State
-224,,Solar_AddrSwState,,,2~3,,,,Solar Charger Addr Switch State
-360,,BMS_ GaugeRM,,,"Detail???????? information, refer???? to???? document: Sigineer???? xxSxxP???? ESS Protocol;",,,,Gauge RM from BMS
-361,,BMS_GaugeFCC,,,"Detail???????? information, refer???? to???? document: Sigineer???? xxSxxP???? ESS Protocol;",,,,Gauge FCC from BMS
-362,,BMS_ FW,,,"Detail???????? information, refer???? to???? document: Sigineer???? xxSxxP???? ESS Protocol;",,,,BMS_ FW
-363,,BMS_ DeltaVolt,,,"Detail???????? information, refer???? to???? document: Sigineer???? xxSxxP???? ESS Protocol;",,,,Delta V from BMS
-364,,BMS_ CycleCnt,,,"Detail???????? information, refer???? to???? document: Sigineer???? xxSxxP???? ESS Protocol;",,,,Cycle Count from BMS
-365,,BMS_ SOH,,,"Detail???????? information, refer???? to???? document: Sigineer???? xxSxxP???? ESS Protocol;",,,,SOH from BMS
-366,,BMS_ GaugeICCurr,,,"Detail???????? information, refer???? to???? document: Sigineer???? xxSxxP???? ESS Protocol;",,,,Gauge IC current from BMS
-367,,BMS_ MCUVersion,,,"Detail???????? information, refer???? to???? document: Sigineer???? xxSxxP???? ESS Protocol;",,,,MCU Software version from BMS
-368,,BMS_ GaugeVersion,,,"Detail???????? information, refer???? to???? document: Sigineer???? xxSxxP???? ESS Protocol;",,,,Gauge Version from BMS
-369,,BMS_ wGaugeFRVersion_ L,,,"Detail???????? information, refer???? to???? document: Sigineer???? xxSxxP???? ESS Protocol;",,,,Gauge FR Version L16 from BMS
-370,,BMS_ wGaugeFRVersion_H,,,"Detail???????? information, refer???? to???? document: Sigineer???? xxSxxP???? ESS Protocol;",,,,Gauge FR Version H16 from BMS
-371,,BMS2_ GaugeRM,,,"Detail???????? information, refer???? to???? document: Sigineer???? xxSxxP???? ESS Protocol;",,,,BMS2_ GaugeRM
-372,,BMS2_GaugeFCC,,,"Detail???????? information, refer???? to???? document: Sigineer???? xxSxxP???? ESS Protocol;",,,,Gauge FCC from BMS2
-373,,BMS2_ FW,,,"Detail???????? information, refer???? to???? document: Sigineer???? xxSxxP???? ESS Protocol;",,,,BMS2_ FW
-374,,BMS2_ DeltaVolt,,,"Detail???????? information, refer???? to???? document: Sigineer???? xxSxxP???? ESS Protocol;",,,,Delta V from BMS2
-375,,BMS2_ CycleCnt,,,"Detail???????? information, refer???? to???? document: Sigineer???? xxSxxP???? ESS Protocol;",,,,Cycle Count from BMS2
-376,,BMS2_ SOH,,,"Detail???????? information, refer???? to???? document: Sigineer???? xxSxxP???? ESS Protocol;",,,,SOH from BMS2
-377,,BMS2_ GaugeICCurr,,,"Detail???????? information, refer???? to???? document: Sigineer???? xxSxxP???? ESS Protocol;",,,,Gauge IC current from BMS2
-378,,BMS2_ MCUVersion,,,"Detail???????? information, refer???? to???? document: Sigineer???? xxSxxP???? ESS Protocol;",,,,MCU Software version from BMS2
-379,,BMS2_ GaugeVersion,,,"Detail???????? information, refer???? to???? document: Sigineer???? xxSxxP???? ESS Protocol;",,,,Gauge Version from BMS2
-380,,BMS2_ wGaugeFRVersion_ L,,,"Detail???????? information, refer???? to???? document: Sigineer???? xxSxxP???? ESS Protocol;",,,,Gauge FR Version L16 from BMS2
-381,,BMS2_ wGaugeFRVersion_H,,,"Detail???????? information, refer???? to???? document: Sigineer???? xxSxxP???? ESS Protocol;",,,,Gauge FR Version H16 from BMS2
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note,ha_device_class,ha_state_class,ha_entity_category
+0,,System Status,,,"{""0"": ""Standby"", ""1"": ""(No Use)"", ""2"": ""Discharge"", ""3"": ""Fault"", ""4"": ""Flash"", ""5"": ""PV charge"", ""6"": ""AC charge"", ""7"": ""Combine charge"", ""8"": ""Combine charge and Bypass"", ""9"": ""PV charge and Bypass"", ""10"": ""AC charge and Bypass"", ""11"": ""Bypass"", ""12"": ""PV charge and Discharge""}",,,,System run state; ? (No Use) 2: Discharge; extra: 12:??? PV??? charge??? and Discharge; extra: 12:??? PV??? charge??? and Discharge; extra: 12:??? PV??? charge??? and Discharge; extra: 12:??? PV??? charge??? and Discharge; extra: 12:??? PV??? charge??? and Discharge; extra: 12:??? PV??? charge??? and Discharge; extra: 12:??? PV??? charge??? and Discharge; extra: 12:??? PV??? charge??? and Discharge; extra: 12:??? PV??? charge??? and Discharge; extra: 12:??? PV??? charge??? and Discharge,,,
+1,PV1 Voltage,Vpv1,0.1V,,,,,,PV1 voltage,voltage,measurement,
+2,PV2 Voltage,Vpv2,0.1V,,,,,,PV2 voltage,voltage,measurement,
+3,PV1 Watts,Ppv1 H,0.1W,,,,,,PV1 charge power (high),power,measurement,
+4,,Ppv1 L,0.1W,,,,,,PV1 charge power (low),power,measurement,
+5,PV2 Watts,Ppv2 H,0.1W,,,,,,PV2 charge power (high),power,measurement,
+6,,Ppv2 L,0.1W,,,,,,PV2 charge power (low),power,measurement,
+7,Buck1 Current,Buck1Curr,0.1A,,,,,,Buck1 current,current,measurement,
+8,Buck2 Current,Buck2Curr,0.1A,,,,,,Buck2 current,current,measurement,
+9,Output Wattage,OP_Watt H,0.1W,,,,,,Output active power (high),power,measurement,
+10,,OP_Watt L,0.1W,,,,,,Output active power (low),power,measurement,
+11,Output VA,OP_VA H,0.1VA,,,,,,Output apparent power (high),apparent_power,measurement,
+12,,OP_VA L,0.1VA,,,,,,Output apparent power (low),apparent_power,measurement,
+13,AC Charge Watts,ACChr_Watt H,0.1W,,,,,,AC charge watt (high),power,measurement,
+14,,ACChr_Watt L,0.1W,,,,,,AC charge watt (low),power,measurement,
+15,AC Charge VA,ACChr_VA H,0.1VA,,,,,,AC?? charge (high),apparent_power,measurement,
+16,,ACChr_VA L,0.1VA,,,,,,AC?? charge (low),apparent_power,measurement,
+17,Battery Voltage,Bat Volt,0.01V,,,,,,Battery volt (M3),voltage,measurement,
+18,Battery SOC,BatterySOC,1.00%,,0~100,,,,Battery SOC,battery,measurement,
+19,Bus Voltage,Bus Volt,0.1V,,,,,,Bus Voltage,voltage,measurement,
+20,Grid Voltage,Grid Volt,0.1V,,,,,,AC input Volt,voltage,measurement,
+21,Grid Hz,Line Freq,0.01Hz,,,,,,AC input frequency,frequency,measurement,
+22,Output Voltage,OutputVolt,0.1V,,,,,,AC output Volt,voltage,measurement,
+23,Output Hz,OutputFreq,0.01Hz,,,,,,AC output frequency,frequency,measurement,
+24,Output DCV,Output DCV,0.1V,,,,,,Output DC Volt,voltage,measurement,
+25,,InvTemp,0.1C,,,,,,Inv Temperature,temperature,measurement,
+26,,DcDc Temp,0.1C,,,,,,DC-DC Temperature,temperature,measurement,
+27,Load Percentage,LoadPercent,0.10%,,0~1000,,,,Load Percent,,measurement,
+28,,Bat_s_Volt,0.01V,,,,,,Battery-port volt (DSP),voltage,measurement,
+29,,Bat_Volt_DSP,0.01V,,,,,,Battery-bus volt (DSP),voltage,measurement,
+30,,Time total H,0.5S,,,,,,Work time total (high),,,
+31,,Time total L,0.5S,,,,,,Work time total (low),,,
+32,Buck1 Temperature,Buck1_NTC,0.1C,,,,,,Buck1 Temperature,temperature,measurement,
+33,Buck2 Temperature,Buck2_NTC,0.1C,,,,,,Buck2 Temperature,temperature,measurement,
+34,Output Current,OP_Curr,0.1A,,,,,,Output Current,current,measurement,
+35,Inverter Current,Inv_Curr,0.1A,,,,,,Inv Current,current,measurement,
+36,AC Input Watts,AC_InWatt H,0.1W,,,,,,AC input watt (high),power,measurement,
+37,,AC_InWatt L,0.1W,,,,,,AC input watt (low),power,measurement,
+38,AC Input VA,AC_InVA H,0.1VA,,,,,,,apparent_power,measurement,
+39,,AC_InVA L,0.1VA,,,,,,,apparent_power,measurement,
+40,,Fault bit,,,&*1,,,,fault bit,,,
+41,,Warning bit,,,&*1,,,,Warning bit,,,
+42,,fault value,,,,,,,fault value,,,
+43,,warning value,,,,,,,warning value,,,
+44,,DTC,,,&*6,,,,Device Type Code,,,
+45,,Check Step,,,"{""1"": ""PV1 charge power check"", ""2"": ""PV2 charge power check"", ""3"": ""AC charge Power check""}",,,,Product check step,,,
+46,,Production Line Mode,,,"{""0"": ""Not at ProductionLine Mode"", ""1"": ""Production LineMode"", ""2"": ""Production Line Clear Fault Mode""}",,,,Production Line Mode; 2:???? Production???? Line Clear Fault Mode,,,
+47,,ConstantPowerOKFlag,,,"{""0"": ""Not OK"", ""1"": ""OK""}",,,,Constant Power OK Flag,,,
+48,PV1 KWH Today,Epv1_today H,,,,,,,PV Energy today,,,
+49,,Epv1_today L,0.1kW h,,,,,,PV Energy today,energy,total_increasing,
+50,PV1 KWH Total,Epv1_total H,,,,,,,PV Energy total,,,
+51,,Epv1_total L,0.1kW h,,,,,,PV Energy total,energy,total_increasing,
+52,PV2 KWH Today,Epv2_today H,,,,,,,PV Energy today,,,
+53,,Epv2_today L,0.1kW h,,,,,,PV Energy today,energy,total_increasing,
+54,PV2 KWH Total,Epv2_total H,,,,,,,PV Energy total,,,
+55,,Epv2_total L,0.1kW h,,,,,,PV Energy total,energy,total_increasing,
+56,AC Input KWH Today,Eac_chrToday H,,,,,,,AC charge Energy today,,,
+57,,Eac_chrToday L,0.1kW h,,,,,,AC charge Energy today,energy,total_increasing,
+58,AC Input KWH Total,Eac_chrTotal H,,,,,,,AC charge Energy total,,,
+59,,Eac_chrTotal L,0.1kW h,,,,,,AC charge Energy total,energy,total_increasing,
+60,Battery Discharge KWH Today,Ebat_dischrToday H,,,,,,,Bat discharge Energy today,,,
+61,,Ebat_dischrToday L,0.1kW h,,,,,,Bat discharge Energy today,energy,total_increasing,
+62,Battery Discharge KWH Total,Ebat_dischrTotal H,,,,,,,Bat discharge Energy total,,,
+63,,Ebat_dischrTotal L,0.1kW h,,,,,,Bat discharge Energy total,energy,total_increasing,
+64,AC Discharge KWH Today,Eac_dischrToday H,,,,,,,AC discharge Energy today,,,
+65,,Eac_dischrToday L,0.1kW h,,,,,,AC discharge Energy today,energy,total_increasing,
+66,AC Discharge KWH Total,Eac_dischrTotal H,,,,,,,AC discharge Energy total,,,
+67,,Eac_dischrTotal L,0.1kW h,,,,,,AC discharge Energy total,energy,total_increasing,
+68,AC Charge Current,ACChrCurr,0.1A,,,,,,AC Charge Battery Current,current,measurement,
+69,AC Discharge Watts,AC_DisChrWatt H,0.1W,,,,,,AC discharge watt (high),power,measurement,
+70,,AC_DisChrWatt L,0.1W,,,,,,AC discharge watt (low),power,measurement,
+71,AC Discharge VA,AC_DisChrVA H,0.1VA,,,,,,AC? discharge? apparent? power (high),apparent_power,measurement,
+72,,AC_DisChrVA L,0.1VA,,,,,,AC? discharge? apparent? power (low),apparent_power,measurement,
+73,Battery Discharge Watts,Bat_DisChrWatt H,0.1W,,,,,,Bat discharge watt (high),power,measurement,
+74,,Bat_DisChrWatt L,0.1W,,,,,,Bat discharge watt (low),power,measurement,
+75,Battery Discharge VA,Bat_DisChrVA H,0.1VA,,,,,,Bat discharge apparent power (high),apparent_power,measurement,
+76,,Bat_DisChrVA L,0.1VA,,,,,,Bat discharge apparent power (low),apparent_power,measurement,
+77,Battery Input Watts,Bat_Watt H,0.1W,INT,(signed int 32) Positive:Battery Discharge Power  Negative:????????? Battery Charge Power,,,,Bat watt (high),power,measurement,
+78,,Bat_Watt L,,INT,,,,,Bat watt (low),,,
+80,,BatOverCharge,,,"{""0"": ""Battery not over charge"", ""1"": ""Battery over charge""}",,,,Battery Over Charge Flag,,,
+81,,MpptFanSpeed,1.00%,,0~100,,,,Fan speed of MPPT Charger,,measurement,
+82,,InvFanSpeed,1.00%,,0~100,,,,Fan speed of Inverter,,measurement,
+90,,BMS_Status,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,Status from BMS,,,
+91,,BMS_Error,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,Error information from BMS,,,
+92,,BMS_ WarnInfo,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,Warning info from BMS,,,
+93,,BMS_SOC,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,SOC from BMS,,,
+94,,BMS_ BatteryVolt,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,Battery voltage from BMS,,,
+95,,BMS_ BatteryCurr,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,Battery current from BMS,,,
+96,,BMS_ BatteryTemp,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,Battery???? temperature???? from BMS,,,
+97,,BMS_ MaxCurr,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,Max. charge/discharge current from BMS,,,
+98,,BMS_ ConstantVolt,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,CV voltage from BMS,,,
+99,,BMS_ BMSInfo,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,BMS Information from BMS,,,
+100,,BMS_ PackInfo,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,Pack Information from BMS,,,
+101,,BMS_ UsingCap,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,Using Cap from BMS,,,
+102,,BMS_ Cell1_Volt,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,Cell1_Voltage from BMS,,,
+117,,BMS_ Cell16_Volt,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,Cell16_Voltage from BMS,,,
+118,,BMS2_Status,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,Status from BMS2,,,
+119,,BMS2_Error,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,Error information from BMS,,,
+120,,BMS2_ WarnInfo,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,Warning info from BMS2,,,
+121,,BMS2_SOC,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,SOC from BMS2,,,
+122,,BMS2_ BatteryVolt,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,Battery voltage from BMS2,,,
+123,,BMS2_ BatteryCurr,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,Battery current from BMS2,,,
+124,,BMS2_ BatteryTemp,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,Battery???? temperature???? from BMS2,,,
+125,,BMS2_ MaxCurr,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,Max. charge/discharge current from BMS2,,,
+126,,BMS2_ ConstantVolt,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,CV voltage from BMS2,,,
+127,,BMS2_ BMSInfo,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,BMS Information from BMS2,,,
+128,,BMS2_ PackInfo,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,Pack Information from BMS2,,,
+129,,BMS2_ UsingCap,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,Using Cap from BMS2,,,
+130,,BMS2_ Cell1_Volt,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,Cell1_Voltage from BMS2,,,
+145,,BMS2_ Cell16_Volt,,,"Detail??? information,??? refer??? to document:? Sigineer? xxSxxP? ESS Protocol;",,,,Cell16_Voltage from BMS2,,,
+180,,Solar1_Status,,,,,,,Solar Charger1 Status,,,
+181,,Solar1_FaultCode,,,,,,,Solar Charger1 FaultCode,,,
+182,,Solar1_WarningCode,,,,,,,Solar Charger1 WarningCode,,,
+183,,Solar1_BatVolt,0.01V,,,,,,Solar Charger1 battery voltage,voltage,measurement,
+184,,Solar1_PV1Volt,0.1V,,,,,,Solar Charger1 PV1 voltage,voltage,measurement,
+185,,Solar1_PV2Volt,0.1V,,,,,,Solar Charger1 PV2 voltage,voltage,measurement,
+186,,Solar1_Buck1Curr,0.1A,,,,,,Solar Charger1 Buck1 current,current,measurement,
+187,,Solar1_Buck2Curr,0.1A,,,,,,Solar Charger1 Buck2 current,current,measurement,
+188,,Solar1_PV1ChrPower H,0.1W,,,,,,Solar??? Charger1??? PV1??? charge Power High 16 bit,power,measurement,
+189,,Solar1_PV1ChrPower H,0.1W,,,,,,Solar??? Charger1??? PV1??? charge Power Low 16 bit,power,measurement,
+190,,Solar1_PV2ChrPower H,0.1W,,,,,,Solar??? Charger1??? PV2??? charge Power High 16 bit,power,measurement,
+191,,Solar1_PV2ChrPower H,0.1W,,,,,,Solar??? Charger1??? PV2??? charge Power Low 16 bit,power,measurement,
+192,,Solar1_HS1Temp,0.1C,,,,,,Solar????????? Charger1???????? Buck1 Temperature,temperature,measurement,
+193,,Solar1_HS2Temp,0.1C,,,,,,Solar????????? Charger1???????? Buck2 Temperature,temperature,measurement,
+194,,Solar1_Epv1_today,0.1k Wh,,,,,,Solar Charger1 PV1 Energy today,energy,total_increasing,
+195,,Solar1_Epv2_today L,0.1k Wh,,,,,,Solar Charger1 PV2 Energy today,energy,total_increasing,
+196,,Solar1_Epv1_total H,0.1k Wh,,,,,,Solar Charger1 PV1 Energy total High 16 bit,energy,total_increasing,
+197,,Solar1_Epv1_total L,0.1k Wh,,,,,,Solar Charger1 PV1 Energy total Low 16 bit,energy,total_increasing,
+198,,Solar1_Epv2_total H,0.1k Wh,,,,,,Solar Charger1 PV2 Energy total High 16 bit,energy,total_increasing,
+199,,Solar1_Epv2_total L,0.1k Wh,,,,,,Solar Charger1 PV2 Energy total Low 16 bit,energy,total_increasing,
+200,,Solar2_Status,,,,,,,Solar Charger2 Status,,,
+201,,Solar2_FaultCode,,,,,,,Solar Charger2 FaultCode,,,
+202,,Solar2_WarningCode,,,,,,,Solar Charger2 WarningCode,,,
+203,,Solar2_BatVolt,0.01V,,,,,,Solar Charger2 battery voltage,voltage,measurement,
+204,,Solar2_PV1Volt,0.1V,,,,,,Solar Charger2 PV1 voltage,voltage,measurement,
+205,,Solar2_PV2Volt,0.1V,,,,,,Solar Charger2 PV2 voltage,voltage,measurement,
+206,,Solar2_Buck1Curr,0.1A,,,,,,Solar Charger2 Buck1 current,current,measurement,
+207,,Solar2_Buck2Curr,0.1A,,,,,,Solar Charger2 Buck2 current,current,measurement,
+208,,Solar2_PV1ChrPower H,0.1W,,,,,,Solar??? Charger2??? PV1??? charge Power High 16 bit,power,measurement,
+209,,Solar2_PV1ChrPower H,0.1W,,,,,,Solar??? Charger2??? PV1??? charge Power Low 16 bit,power,measurement,
+210,,Solar2_PV2ChrPower H,0.1W,,,,,,Solar??? Charger2??? PV2??? charge Power High 16 bit,power,measurement,
+211,,Solar2_PV2ChrPower H,0.1W,,,,,,Solar??? Charger2??? PV2??? charge Power Low 16 bit,power,measurement,
+212,,Solar2_HS1Temp,0.1C,,,,,,Solar????????? Charger2???????? Buck1 Temperature,temperature,measurement,
+213,,Solar2_HS2Temp,0.1C,,,,,,Solar????????? Charger2???????? Buck2 Temperature,temperature,measurement,
+214,,Solar2_Epv1_today,0.1k Wh,,,,,,Solar Charger2 PV1 Energy today,energy,total_increasing,
+215,,Solar2_Epv2_today,0.1k Wh,,,,,,Solar Charger2 PV2 Energy today,energy,total_increasing,
+216,,Solar2_Epv1_total H,0.1k Wh,,,,,,Solar Charger2 PV1 Energy total High 16 bit,energy,total_increasing,
+217,,Solar2_Epv1_total L,0.1k Wh,,,,,,Solar Charger2 PV1 Energy total Low 16 bit,energy,total_increasing,
+218,,Solar2_Epv2_total H,0.1k Wh,,,,,,Solar Charger2 PV2 Energy total High 16 bit,energy,total_increasing,
+219,,Solar2_Epv2_total L,0.1k Wh,,,,,,Solar Charger2 PV2 Energy total Low 16 bit,energy,total_increasing,
+220,,Solar_ConnectOKFlag,,,"{""1"": ""Solar Charger1"", ""2"": ""Solar Charger2"", ""3"": ""Solar Charger1 and 2""}",,,,Slave Solar Connect OK Flag,,,
+221,,Solar_BatVoltConsistFl ag,,,"{""1"": ""Check Solar Charger1battery voltage OK"", ""2"": ""Check Solar Charger2battery voltage OK"", ""3"": ""Check Solar Charger1 and 2 battery voltage OK""}",,,,Check Slave Solar Battery Voltage Consist OK Flag,,,
+222,,Solar_TypeSwState,,,"{""0"": ""Master SolarCharger"", ""1"": ""Slaver SolarCharger""}",,,,Solar Charger Type Switch State,,,
+223,,Solar_ModeSwState,,,"{""0"": ""Parallel Mode"", ""1"": ""Single Mode""}",,,,Solar Charger Mode Switch State,,,
+224,,Solar_AddrSwState,,,2~3,,,,Solar Charger Addr Switch State,,,
+360,,BMS_ GaugeRM,,,"Detail???????? information, refer???? to???? document: Sigineer???? xxSxxP???? ESS Protocol;",,,,Gauge RM from BMS,,,
+361,,BMS_GaugeFCC,,,"Detail???????? information, refer???? to???? document: Sigineer???? xxSxxP???? ESS Protocol;",,,,Gauge FCC from BMS,,,
+362,,BMS_ FW,,,"Detail???????? information, refer???? to???? document: Sigineer???? xxSxxP???? ESS Protocol;",,,,BMS_ FW,,,diagnostic
+363,,BMS_ DeltaVolt,,,"Detail???????? information, refer???? to???? document: Sigineer???? xxSxxP???? ESS Protocol;",,,,Delta V from BMS,,,
+364,,BMS_ CycleCnt,,,"Detail???????? information, refer???? to???? document: Sigineer???? xxSxxP???? ESS Protocol;",,,,Cycle Count from BMS,,,
+365,,BMS_ SOH,,,"Detail???????? information, refer???? to???? document: Sigineer???? xxSxxP???? ESS Protocol;",,,,SOH from BMS,,,
+366,,BMS_ GaugeICCurr,,,"Detail???????? information, refer???? to???? document: Sigineer???? xxSxxP???? ESS Protocol;",,,,Gauge IC current from BMS,,,
+367,,BMS_ MCUVersion,,,"Detail???????? information, refer???? to???? document: Sigineer???? xxSxxP???? ESS Protocol;",,,,MCU Software version from BMS,,,
+368,,BMS_ GaugeVersion,,,"Detail???????? information, refer???? to???? document: Sigineer???? xxSxxP???? ESS Protocol;",,,,Gauge Version from BMS,,,
+369,,BMS_ wGaugeFRVersion_ L,,,"Detail???????? information, refer???? to???? document: Sigineer???? xxSxxP???? ESS Protocol;",,,,Gauge FR Version L16 from BMS,,,
+370,,BMS_ wGaugeFRVersion_H,,,"Detail???????? information, refer???? to???? document: Sigineer???? xxSxxP???? ESS Protocol;",,,,Gauge FR Version H16 from BMS,,,
+371,,BMS2_ GaugeRM,,,"Detail???????? information, refer???? to???? document: Sigineer???? xxSxxP???? ESS Protocol;",,,,BMS2_ GaugeRM,,,
+372,,BMS2_GaugeFCC,,,"Detail???????? information, refer???? to???? document: Sigineer???? xxSxxP???? ESS Protocol;",,,,Gauge FCC from BMS2,,,
+373,,BMS2_ FW,,,"Detail???????? information, refer???? to???? document: Sigineer???? xxSxxP???? ESS Protocol;",,,,BMS2_ FW,,,diagnostic
+374,,BMS2_ DeltaVolt,,,"Detail???????? information, refer???? to???? document: Sigineer???? xxSxxP???? ESS Protocol;",,,,Delta V from BMS2,,,
+375,,BMS2_ CycleCnt,,,"Detail???????? information, refer???? to???? document: Sigineer???? xxSxxP???? ESS Protocol;",,,,Cycle Count from BMS2,,,
+376,,BMS2_ SOH,,,"Detail???????? information, refer???? to???? document: Sigineer???? xxSxxP???? ESS Protocol;",,,,SOH from BMS2,,,
+377,,BMS2_ GaugeICCurr,,,"Detail???????? information, refer???? to???? document: Sigineer???? xxSxxP???? ESS Protocol;",,,,Gauge IC current from BMS2,,,
+378,,BMS2_ MCUVersion,,,"Detail???????? information, refer???? to???? document: Sigineer???? xxSxxP???? ESS Protocol;",,,,MCU Software version from BMS2,,,
+379,,BMS2_ GaugeVersion,,,"Detail???????? information, refer???? to???? document: Sigineer???? xxSxxP???? ESS Protocol;",,,,Gauge Version from BMS2,,,
+380,,BMS2_ wGaugeFRVersion_ L,,,"Detail???????? information, refer???? to???? document: Sigineer???? xxSxxP???? ESS Protocol;",,,,Gauge FR Version L16 from BMS2,,,
+381,,BMS2_ wGaugeFRVersion_H,,,"Detail???????? information, refer???? to???? document: Sigineer???? xxSxxP???? ESS Protocol;",,,,Gauge FR Version H16 from BMS2,,,

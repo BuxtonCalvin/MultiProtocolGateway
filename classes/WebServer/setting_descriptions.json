@@ -35,6 +35,8 @@
   "device_serial_number": "Serial number of the device. Used for unique identification and tagging.",
   "disable_duration_hours": "Number of hours to disable a failing transport before attempting reconnection.",
   "discovery_enabled": "Enable MQTT Home Assistant auto-discovery publishing.",
+  "discovery_entity_types": "Home Assistant discovery entity types. \"auto\" publishes native sensor, binary_sensor, number, select and switch entities (controls only for registers enabled for writing on this device); \"sensor\" publishes every register as a read-only sensor, as in earlier releases.",
+  "discovery_expire_after": "Seconds after which Home Assistant marks a sensor unavailable if no new value arrives. 0 disables it. Only useful if every register is published each cycle.",
   "discovery_topic": "MQTT topic prefix for Home Assistant discovery messages.",
   "discrete_register_prefix": "MQTT topic sub-prefix used when publishing discrete register values. Full topic: base_topic/discrete_register_prefix/variable_name.",
   "drop_after": "TimescaleDB retention policy — data older than this interval is automatically dropped.",

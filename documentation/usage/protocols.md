@@ -125,6 +125,9 @@ The CSV files are the core of a protocol — one row per logical register or reg
 | `read interval` | No | Per-register polling override. See [Per-Register Read Intervals](#per-register-read-intervals). |
 | `note` | No | Description shown in the protocol editor and analysis tool. |
 | `read command` | No | For protocols requiring a command byte before reading. Hex prefix `x` or raw UTF-8. |
+| `ha device class` | No | Home Assistant `device_class` for this register (e.g. `battery`, `voltage`). Blank = inferred from the unit; `none` = send no class. See [Home Assistant Columns](#home-assistant-columns). |
+| `ha state class` | No | Home Assistant `state_class`: `measurement`, `total` or `total_increasing`. Blank = inferred from the unit; `none` = send no class. |
+| `ha entity category` | No | `diagnostic` or `config`. Moves the entity out of the default dashboard view in Home Assistant. |
 
 ### Data Types
 
@@ -322,6 +325,37 @@ The `values` column serves two purposes.
 Codes can also be defined in the JSON descriptor as `{documented_name}_codes`, which is useful when the code table is large or shared across registers.
 
 ---
+
+### Home Assistant Columns
+
+Three optional columns refine how a register appears in Home Assistant when the [MQTT bridge](../bridges/MQTT/MQTT_bridge.md#home-assistant-discovery) has `discovery_enabled = true`. All are blank by default, which is the right choice for most registers: the bridge infers sensible values from the `unit` column.
+
+| Column | Values |
+| --- | --- |
+| `ha device class` | Any Home Assistant device class valid for the entity (`battery`, `voltage`, `power`, ...). `none` suppresses the inferred class. |
+| `ha state class` | `measurement`, `total`, `total_increasing`, or `none`. Sensors only. |
+| `ha entity category` | `diagnostic` (sensors and controls) or `config` (controls only). Anything else is ignored. |
+
+Rules worth knowing:
+
+- An explicit value always wins over inference; a blank cell never overrides it. Override files follow the same rule.
+- Home Assistant rejects an entity whose unit is not valid for its device class, so MPG infers a class only for units it is certain about (`V`, `A`, `W`, `kWh`, `Hz`, `°C` and similar, matched ignoring case and spacing). Set the column yourself for anything else, for example `battery` on a `%` state-of-charge register.
+- Text and enum-mapped values never receive a unit or state class.
+- Entries with a `values` range also set the min/max of the Home Assistant number control for that register (scaled by the unit multiplier). Narrow the range to tighten the limits.
+
+#### Editing the columns in the web UI
+
+In the **protocol editor** the three columns appear between **R/W** and **Adjustments** as dropdowns, in the same inline-edit style as the other cells. A change is staged immediately (the row is marked as edited) and written to the CSV when you commit. In a **device view** the same columns are shown as read-only text, and they are hidden for the `json` registry. The **Create Protocol** page offers the same dropdowns for every new row.
+
+- The offered device classes depend on the registry type: input and holding registers offer sensor classes, discrete inputs offer binary-sensor classes, and coils offer binary-sensor classes plus `outlet` / `switch` (a coil is a binary sensor while read-only and a switch once it is enabled for writing; a class that does not fit the entity a coil ends up as is dropped with a warning in the log).
+- `none` means "send no class" and is offered for device class and state class only. Entity category is either blank, `diagnostic` or `config`.
+- A value already in a CSV that the dropdown does not offer (for example a newer Home Assistant class you typed by hand) is shown as `<value> (custom)` and kept as-is; it can be left alone but a *different* unlisted value is rejected.
+- The same rules are enforced by the server, so a direct API call cannot stage a value the dropdown would not offer (HTTP 422 with the reason).
+- CSV and JSON exports from the editor include the three columns.
+
+**Upgrading.** Starting MPG applies database migration `0005_ha_columns` automatically. Existing rows start with the three columns unset and are filled from the CSVs on the next scan, including rows with uncommitted edits (their staged edits are kept), so committing an older edit never blanks a value that is in the file.
+
+To fill the columns for an existing protocol library in one pass, run `python tools/add_ha_columns.py` (a dry run; add `--apply` to write).
 
 ### Per-Register Read Intervals
 

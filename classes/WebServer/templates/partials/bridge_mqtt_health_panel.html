@@ -88,7 +88,7 @@
     <div class="flex items-center justify-between">
       <dt class="surface-muted text-xs">HA discovery</dt>
       <dd class="surface-title text-xs font-medium">
-        {% if health.discovery_enabled %}Enabled{% else %}<span class="surface-muted">Disabled</span>{% endif %}
+        {% if health.discovery_enabled %}Enabled &middot; {{ health.discovery_entity_count }} entit{{ 'y' if health.discovery_entity_count == 1 else 'ies' }} ({{ health.discovery_entity_types }}){% else %}<span class="surface-muted">Disabled</span>{% endif %}
       </dd>
     </div>
 

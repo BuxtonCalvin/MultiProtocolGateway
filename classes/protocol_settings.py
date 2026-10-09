@@ -30,7 +30,7 @@ from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Callable, Literal, Optional, cast
+from typing import Any, Callable, Literal, Optional, cast
 
 from defs.common import TransportSettings, strtoint_safe
 
@@ -328,6 +328,17 @@ class registry_map_entry:
 
     description_source: str = ""
     ''' variable_name of the source metric when this is a synthetic _desc entry '''
+
+    ha_device_class: str = ""
+    ''' optional Home Assistant device_class override ("ha device class" CSV column).
+    Blank = infer from the unit; "none" = suppress; anything else is passed through to HA verbatim. '''
+
+    ha_state_class: str = ""
+    ''' optional Home Assistant state_class override ("ha state class" CSV column).
+    Blank = infer from the unit; "none" = suppress; otherwise measurement / total / total_increasing. '''
+
+    ha_entity_category: str = ""
+    ''' optional Home Assistant entity_category ("ha entity category" CSV column): config or diagnostic '''
 
     def __str__(self) -> str:
         """Return the entry's ``variable_name`` as its string representation."""
@@ -1083,12 +1094,14 @@ class protocol_settings:
         overrides: dict[str, dict[str, dict[str, str]]] = {key: {} for key in keys}
 
         with open(override_path, newline="", encoding="latin-1") as csvfile:
-            reader: csv.DictReader[str] = csv.DictReader(csvfile)
+            # restval="": a row shorter than the header yields "" (not None) for its missing
+            # trailing cells, so a ragged row is treated as blank cells instead of crashing.
+            reader: csv.DictReader[str] = csv.DictReader(csvfile, restval="")
             for row in reader:
                 for key in keys:
                     if key in row:
                         row[key] = row[key].strip().lower().replace(" ", "_")
-                        key_value = row[key]
+                        key_value: str | Any = row[key]
                         if key_value:
                             overrides[key][key_value] = row
         return overrides
@@ -1485,6 +1498,9 @@ class protocol_settings:
                     read_interval=read_interval,
                     write_mode=writeMode,
                     has_enum_mapping=value_is_json,
+                    ha_device_class=(row.get("ha device class") or "").strip().lower(),
+                    ha_state_class=(row.get("ha state class") or "").strip().lower(),
+                    ha_entity_category=(row.get("ha entity category") or "").strip().lower(),
                 )
 
                 # Cross-check register_list token count against data_type word width.
@@ -1517,7 +1533,10 @@ class protocol_settings:
 
             first_row: str = re.sub(r"\s+" + re.escape(delimeter) + "|" + re.escape(delimeter) + r"\s+", delimeter, first_row)
             csvfile_iter: itertools.chain[str] = itertools.chain([first_row], csvfile)
-            reader: csv.DictReader[str] = csv.DictReader(csvfile_iter, delimiter=delimeter)
+            # restval="": missing trailing cells become blank. Without it csv.DictReader fills them with
+            # None and the per-row .strip() below raised AttributeError — for ANY short row, in any
+            # protocol CSV, not just ones with the optional ha_* columns.
+            reader: csv.DictReader[str] = csv.DictReader(csvfile_iter, delimiter=delimeter, restval="")
 
             for row in reader:
                 process_row(row)
@@ -1585,6 +1604,11 @@ class protocol_settings:
                     # Copy adjustments from _h if _l has none
                     if not combined_item.adjustments and next_item.adjustments:
                         combined_item.adjustments = dict(next_item.adjustments)
+
+                    # Same rule for the optional Home Assistant columns.
+                    for ha_attr in ("ha_device_class", "ha_state_class", "ha_entity_category"):
+                        if not getattr(combined_item, ha_attr) and getattr(next_item, ha_attr):
+                            setattr(combined_item, ha_attr, getattr(next_item, ha_attr))
 
                     # self._log.warning(
                     #     f"[DEBUG-MERGE] MERGED: '{combined_item.variable_name}' "

@@ -419,6 +419,13 @@ erDiagram
     ProtocolRegister }o--|| AppState : "dirty flags tracked in"
 ```
 
+**How the database is created.** `database.ensure_schema()` runs once at web server startup:
+
+- **New install (no tables):** the whole schema is built directly from the SQLAlchemy models, and no migration is run. The database is then stamped with the current Alembic revision, which only records which revision the schema is at, so that later releases migrate from that point instead of replaying history.
+- **Existing install:** upgraded to the latest revision with Alembic migrations, as before.
+
+If either step fails, startup aborts rather than run against a missing or out-of-date schema. The two routes always produce the same database: `pytests/test_db_schema.py` and `pytests/test_db_bootstrap.py` compare the model-built schema with the migrated one (columns, nullability, defaults, keys, indexes and constraints), so a model change always needs a matching migration.
+
 ### TimescaleDB Telemetry Schema (created by `timescaledb` bridge)
 
 ```mermaid

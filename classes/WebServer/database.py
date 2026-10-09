@@ -1,4 +1,4 @@
-# Description: database.py — SQLAlchemy engine, session factory, and Alembic upgrade helper.
+# Description: database.py — SQLAlchemy engine, session factory, schema bootstrap (fresh create / Alembic upgrade).
 # File: database.py
 #
 # Copyright 2026 Kevin Burke
@@ -16,13 +16,27 @@
 # limitations under the License.
 
 """
-database.py — SQLAlchemy engine, session factory, and Alembic upgrade helper.
+database.py — SQLAlchemy engine, session factory, and schema bootstrap.
 
 The staging DB is a local SQLite file: config/data-db/mpg_staging.db
 
+Schema bootstrap
+----------------
+``ensure_schema()`` is the single startup entry point:
+
+* A brand-new database (no tables) is built **directly from the SQLAlchemy models**
+  with ``create_all`` — no migration is run — and then stamped with the current
+  Alembic head. The stamp only records "this schema is at revision X"; without it the
+  first migration shipped in a later release would try to replay history onto tables
+  that already exist.
+* An existing database is upgraded with ``run_migrations()`` exactly as before.
+
+``pytests/test_db_schema.py`` asserts the migrations produce exactly what the models
+declare, which is what makes the two paths equivalent.
+
 Usage
 -----
-    from classes.WebServer.database import get_session, run_migrations
+    from classes.WebServer.database import get_session, ensure_schema
 
     # Dependency injection in FastAPI routes:
     @router.get("/")
@@ -30,7 +44,7 @@ Usage
         ...
 
     # On startup:
-    run_migrations(db_path, alembic_ini_path)
+    ensure_schema(db_path, alembic_ini_path)
 """
 
 from __future__ import annotations
@@ -38,10 +52,10 @@ from __future__ import annotations
 import logging
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Generator
+from typing import Generator, Literal
 
 from alembic.config import Config
-from sqlalchemy import create_engine, event, func, select
+from sqlalchemy import create_engine, event, func, inspect, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.engine.interfaces import DBAPIConnection, DBAPICursor
 from sqlalchemy.orm import Session, sessionmaker
@@ -49,6 +63,7 @@ from sqlalchemy.pool import ConnectionPoolEntry
 
 from .models import (
     AppState,
+    Base,
     DeviceProtocolSelection,
     OrphanedFilterName,
     ProtocolRegister,
@@ -174,11 +189,8 @@ def run_migrations(db_path: Path, alembic_ini_path: Path) -> None:
     """
     try:
         from alembic import command as alembic_command
-        from alembic.config import Config as AlembicConfig
 
-        cfg: Config = AlembicConfig(str(alembic_ini_path))
-        cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path.as_posix()}")
-        cfg.set_main_option("script_location", str(alembic_ini_path.parent / "migrations"))
+        cfg: Config = _alembic_config(db_path, alembic_ini_path)
 
         alembic_command.upgrade(cfg, "head")
         _log.info("Alembic migrations applied successfully.")
@@ -186,6 +198,77 @@ def run_migrations(db_path: Path, alembic_ini_path: Path) -> None:
         msg: str = f"Alembic migration failed — aborting server startup: {exc}"
         _log.exception(msg)
         raise
+
+
+def _alembic_config(db_path: Path, alembic_ini_path: Path) -> Config:
+    from alembic.config import Config as AlembicConfig
+
+    cfg: Config = AlembicConfig(str(alembic_ini_path))
+    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path.as_posix()}")
+    cfg.set_main_option("script_location", str(alembic_ini_path.parent / "migrations"))
+    return cfg
+
+
+def database_has_tables(db_path: Path) -> bool:
+    """True if the SQLite file at ``db_path`` exists and contains any user table.
+
+    A missing file or an empty one (which SQLite creates the moment anything
+    connects) is a brand-new database. Uses a throwaway engine so no connection
+    to the file outlives the check.
+    """
+    if not db_path.exists():
+        return False
+    probe: Engine = create_engine(f"sqlite:///{db_path.as_posix()}")
+    try:
+        return bool(inspect(probe).get_table_names())
+    finally:
+        probe.dispose()
+
+
+def create_schema(db_path: Path, alembic_ini_path: Path) -> None:
+    """Build the complete, current schema from the models and stamp it at Alembic head.
+
+    No migration is executed. Only for a database with no tables — ``ensure_schema``
+    decides that; calling this on an existing database would leave its recorded
+    revision wrong.
+    """
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    builder: Engine = create_engine(f"sqlite:///{db_path.as_posix()}")
+    try:
+        Base.metadata.create_all(bind=builder)
+    finally:
+        builder.dispose()
+
+    # Record the revision so later releases migrate from here instead of replaying
+    # history. This writes alembic_version only — it does not run any migration.
+    from alembic import command as alembic_command
+
+    alembic_command.stamp(_alembic_config(db_path, alembic_ini_path), "head")
+
+
+def ensure_schema(db_path: Path, alembic_ini_path: Path) -> Literal["created", "migrated"]:
+    """Make the database schema current. Called once at startup.
+
+    * New database (no tables)  -> ``create_schema``: built from the models, no
+      migrations run. Returns ``"created"``.
+    * Existing database         -> ``run_migrations``: upgraded to head, as before.
+      Returns ``"migrated"``.
+
+    Any failure is re-raised so FastAPI startup aborts: the server must never run
+    against a missing or out-of-date schema.
+    """
+    try:
+        if not database_has_tables(db_path):
+            create_schema(db_path, alembic_ini_path)
+            _log.info("New database: schema created from the models (no migrations run).")
+            return "created"
+    except Exception as exc:
+        msg: str = f"Creating the database schema failed — aborting server startup: {exc}"
+        _log.exception(msg)
+        raise
+
+    run_migrations(db_path, alembic_ini_path)
+    return "migrated"
 
 
 # ---------------------------------------------------------------------------

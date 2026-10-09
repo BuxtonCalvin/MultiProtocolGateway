@@ -9,7 +9,7 @@ The MQTT module is a **bridge transport** for the Multi Protocol Gateway, and un
 - Receives telemetry data from an upstream scraper transport (e.g. a Modbus TCP connected inverter) and **publishes** it to an MQTT broker
 - **Subscribes** to a small, deliberately-gated set of per-variable topics so a value published back to the broker can be written to a Modbus holding or coil register
 - Publishes a retained **availability** topic so downstream consumers (Home Assistant, dashboards, automations) know whether the underlying device is actively reporting
-- Optionally publishes **Home Assistant MQTT Discovery** payloads so every readable metric shows up as a sensor entity with no manual HA configuration
+- Optionally publishes **Home Assistant MQTT Discovery** payloads so every metric shows up in HA as the right kind of entity (sensor, binary sensor, number, select or switch) with units, device classes and availability, with no manual HA configuration
 
 The module does **not** scrape data itself and does **not** decide on its own what's writable — it publishes whatever the gateway hands it, and accepts write commands only for variables that satisfy two independent gates (see [The Two-Gate Write Model](#the-two-gate-write-model) below).
 
@@ -53,7 +53,7 @@ Telemetry flows down the left side every scrape cycle. Write commands flow up th
 - Subscribes to a per-variable write topic for every metric that is both protocol-writable *and* user-write-enabled, and routes incoming messages on those topics back into the gateway's write path
 - Reports write-command processing failures to a dedicated error topic
 - Re-subscribes all write topics automatically after a broker reconnect
-- Optionally publishes Home Assistant MQTT Discovery config payloads for every readable metric
+- Optionally publishes Home Assistant MQTT Discovery config payloads, including controls for registers that have passed both write gates, and re-announces them (plus the last known values) whenever Home Assistant restarts
 
 ### Telemetry Publishing
 
@@ -82,6 +82,8 @@ Two independent signals answer two different questions, keeping them distinct:
 **Bridge connectivity** — `{base_topic}/bridge_status` (`"online"` / `"offline"`) answers *"is this MQTT bridge's connection to the broker currently up?"* It is backed by a real MQTT Last Will and Testament, set once at client construction time (`qos=1, retain=True`), so an ungraceful crash — killed process, power loss, segfault — is reflected automatically by the broker itself with no reliance on this application getting a chance to run any shutdown code. `on_connect` publishes `"online"` to it on every successful connection; `exit_handler` publishes `"offline"` to it on a clean shutdown as an immediate signal (a clean disconnect does not itself trigger the LWT — brokers only fire the Will on an *unexpected* disconnect or keepalive timeout).
 
 **Per-device data freshness** — `{base_topic}/{device_identifier}/availability` (`"online"` / `"offline"`) answers a different question: *"is telemetry for this specific device actually flowing?"* This one is republished on every scrape cycle rather than LWT-backed, for two reasons: a single MQTT client can only have one Last Will (so it structurally can't cover multiple bridged devices individually), and more importantly, a Last Will only fires on *connection* loss — it says nothing about the underlying Modbus device going silent while the MQTT connection itself stays healthy. `exit_handler` marks every device this bridge has actually published telemetry for (tracked automatically) as `"offline"` on clean shutdown.
+
+**In Home Assistant**, discovered entities list *both* topics as availability sources and are only available while both read `online` (`availability_mode: all`). A crashed or killed gateway therefore turns every entity `unavailable` via the LWT, instead of leaving the last value looking current.
 
 ### Reconnect Handling
 
@@ -202,15 +204,75 @@ This is deliberately narrow in scope: it only reports errors this module itself 
 
 ## Home Assistant Discovery
 
-Enabled via `discovery_enabled = true`. When active, `mqtt_discovery()` runs once at the end of `init_bridge` and publishes one MQTT Discovery config payload per readable registry entry (every entry except those with `write_mode = READDISABLED`) to:
+Enabled via `discovery_enabled = true`. When active, `mqtt_discovery()` runs at the end of `init_bridge` and publishes one retained MQTT Discovery config per registry entry (every entry except those with `write_mode = READDISABLED`) to:
 
 ```text
-{discovery_topic}/sensor/HN-{device_serial_number}/{variable_name}/config
+{discovery_topic}/{platform}/HN-{device_serial_number}/{variable_name}/config
 ```
 
-Every entity is published as a read-only **`sensor`** — including variables that also have a write topic. **No `command_topic` is ever included in the discovery payload**, so Home Assistant will not offer a control (switch/number/select) for a writable variable automatically; only the sensor state is discovered. Triggering a write still requires publishing directly to the `/write` topic yourself (e.g. via an HA automation's `mqtt.publish` action, or a manually-defined HA `number`/`switch` entity pointed at that topic).
+### Which Home Assistant entity does a register become?
 
-Entries whose `write_mode` is `WRITEONLY` have no readable value at all, so their `state_topic` is seeded with the literal string `"WRITEONLY"` instead of being left blank.
+With `discovery_entity_types = auto` (the default) each entry is published as the most appropriate platform:
+
+| Register | Home Assistant entity |
+| --- | --- |
+| Read-only numeric value | `sensor`, with unit, `device_class` and `state_class` where they can be inferred safely |
+| Read-only text, enum-mapped or flag value | `sensor` with no unit or state class |
+| Read-only coil or discrete input | `binary_sensor` (`1`/`0`, `True`/`False` and `on`/`off` are all understood) |
+| Writable numeric register that passed both write gates | `number`, with min/max/step from the protocol |
+| Writable enum-mapped register that passed both write gates | `select`, options are the value labels |
+| Writable coil (or single-bit field) that passed both write gates | `switch`, sending `1` / `0` |
+
+Controls are only created for registers that passed **both** gates described in [The Two-Gate Write Model](#the-two-gate-write-model). A register that is merely protocol-writable but not enabled for this device stays a read-only sensor, so discovery never advertises a control that a write would be rejected for. Each control's `command_topic` is exactly the `/write` topic subscribed in `init_bridge`, so everything in [Tracing a Write Command End-to-End](#tracing-a-write-command-end-to-end) applies unchanged.
+
+Because the allowlist is read at startup, **enabling or disabling a register for writing requires a restart** before the matching control appears or disappears, just as for the write topic itself.
+
+Setting `discovery_entity_types = sensor` restores the earlier behaviour: every entry is a read-only sensor and no `command_topic` is published. Switching between the two settings clears the retained configs of the platform no longer used, so Home Assistant does not keep duplicate or orphaned entities.
+
+### Units, device classes and state classes
+
+Units are normalised before publishing (`kWH`, `k Wh` and `kwh` all become `kWh`; `C` and the mis-encoded `Â°C` become `°C`). For a numeric register whose unit is one of the following, MPG also sets the device class and state class, which is what makes the entity usable in the Energy dashboard and long-term statistics:
+
+| Unit | Device class | State class |
+| --- | --- | --- |
+| `V`, `mV` | `voltage` | `measurement` |
+| `A`, `mA` | `current` | `measurement` |
+| `W`, `kW` | `power` | `measurement` |
+| `VA` / `var` | `apparent_power` / `reactive_power` | `measurement` |
+| `Wh`, `kWh`, `MWh` | `energy` | `total_increasing` |
+| `Hz` | `frequency` | `measurement` |
+| `°C` | `temperature` | `measurement` |
+| `ms`, `s`, `min`, `h` | `duration` | none |
+| `%`, `Ah`, `mAh`, `kvar` | none | `measurement` |
+
+This table is deliberately conservative: Home Assistant refuses to create an entity whose unit is not valid for its device class, so a class is never guessed. For anything else, set it yourself in the protocol CSV with the optional `ha device class`, `ha state class` and `ha entity category` columns (for example `battery` on a `%` state-of-charge register). See [Home Assistant Columns](../../usage/protocols.md#home-assistant-columns). Text and enum-mapped values never receive a unit or state class.
+
+### Availability
+
+Every entity lists the per-device `availability` topic and the LWT-backed `bridge_status` topic (see [Availability](#availability)) and is available only while both are `online`.
+
+Set `discovery_expire_after` (seconds) to additionally mark sensors and binary sensors `unavailable` if no value arrives for that long. It is off by default because it assumes every register is published each cycle; registers with a long `read interval` would otherwise flap to `unavailable`.
+
+### When Home Assistant restarts
+
+Discovery configs are retained, so they survive a restart, but telemetry is not retained, so entities would otherwise show `unknown` until each metric is next published. MPG therefore subscribes to `{discovery_topic}/status` (Home Assistant's birth message). When Home Assistant announces `online`, MPG re-publishes discovery for every device, then replays the last known value of every metric. Repeated announcements within a few seconds are ignored. Registers that have never been read, such as ones with a long `read interval`, still show `unknown` until their first read.
+
+### JSON mode
+
+With `json = true` there are no per-metric topics, so entities share the per-device JSON topic and extract their own key with a `value_template` (for example `{{ value_json['soc'] }}`). Discovery works in either mode.
+
+### Entity names and IDs
+
+Entity display names are made readable (`grid_charge_enable` becomes "Grid charge enable"). The `unique_id` (`MPG_<serial>_<variable_name>`), the device identifier and the `HN-` discovery topic segment are **intentionally unchanged**. Home Assistant ties entities, history and dashboards to these values, so changing them would orphan every existing entity. Keep them if you rename or fork the application.
+
+### Upgrading from sensor-only discovery
+
+Existing sensors keep their `unique_id` and history, but Home Assistant creates a *new* entity ID when an entry changes platform:
+
+- A register you have enabled for writing changes from `sensor.<name>` to `number.<name>`, `select.<name>` or `switch.<name>`.
+- A coil or discrete input changes from `sensor.<name>` to `binary_sensor.<name>`.
+
+The old sensor is removed, so automations, dashboards and history that referenced it need updating. To avoid any change, set `discovery_entity_types = sensor`. Entries with `write_mode = WRITEONLY` have no readable value; as a sensor they are seeded with the literal state `"WRITEONLY"` (the previous behaviour). In `auto` mode they become optimistic controls if write-enabled, and are not published at all otherwise.
 
 ---
 
@@ -229,6 +291,11 @@ password = your-password
 error_topic = error
 discovery_enabled = false
 discovery_topic = homeassistant
+# auto = native HA sensor/binary_sensor/number/select/switch entities;
+# sensor = every register is a read-only sensor (previous behaviour)
+discovery_entity_types = auto
+# seconds; mark HA sensors unavailable after this long without a value (0 = off)
+discovery_expire_after = 0
 json = false
 reconnect_delay = 7
 # seconds; doubles each attempt up to a 10 minute cap
@@ -267,6 +334,9 @@ device_serial_number = 4066670074
 Documented here rather than silently left unmentioned:
 
 - **A same-name collision between a holding entry and a coil entry** on the same device — see the note under [Write Topics](#write-topics) above.
+- **Controls show the last value read, not the value just sent.** A command is written to the device and the new value appears on the next scrape of that register, so a number or switch can briefly show its old value after you change it.
+- **Number limits come from the protocol's `values` range**, scaled by the unit multiplier, because Home Assistant's own defaults (1 to 100) would be wrong for almost every register. Narrow the `values` column to tighten them.
+- **Write allowlist changes need a restart** to add or remove the corresponding Home Assistant control, as for the write topic itself.
 - **`error_topic` only covers write-command processing failures.** It cannot report connection-level problems (reconnect exhaustion, publish failures while disconnected) for the structural reason described in [Error Reporting](#error-reporting) above — those remain log-only, backed instead by `bridge_status`'s LWT for the connectivity case specifically.
 
 ---
@@ -282,4 +352,4 @@ The MQTT module provides:
 - Structured error reporting for write-command failures
 - Resilient, backoff-based reconnect handling independent of paho's own logic
 - A deliberately narrow, two-gate write model with topic naming simple enough to construct by hand
-- Optional zero-configuration Home Assistant sensor discovery
+- Optional zero-configuration Home Assistant discovery: typed entities (sensor, binary sensor, number, select, switch), units and device classes, availability tied to both bridge and device, controls limited to registers that passed both write gates, and recovery after a Home Assistant restart

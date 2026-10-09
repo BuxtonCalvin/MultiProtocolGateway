@@ -104,7 +104,7 @@
       "label_y_percent": 64,
       "width_percent": 81.1,
       "height_percent": 66.7,
-      "label": "Protocol metrics table. W = write-back enabled, M = metric included in variable_mask (scraped), S = metric added to variable_screen (excluded from output). Live value, address, variable name, doc name, unit, type, range, adjustments, and notes are shown for each register.",
+      "label": "Protocol metrics table. W = write-back enabled, M = metric included in variable_mask (scraped), S = metric added to variable_screen (excluded from output). Live value, address, variable name, doc name, unit, type, range, Home Assistant class/state/category, adjustments, and notes are shown for each register.",
       "shape_type": "rect",
       "stroke_color": "rgb(14,165,233)",
       "fill_color": "rgba(14,165,233,0.18)"
@@ -137,7 +137,7 @@
       "label_y_percent": 36,
       "width_percent": 78.8,
       "height_percent": 68.4,
-      "label": "Protocol metrics table. W = write-back enabled, M = metric included in variable_mask (scraped), S = metric added to variable_screen (excluded from output). Address, variable name, unit, type, range, adjustments and notes are shown for each register.",
+      "label": "Protocol metrics table. W = write-back enabled, M = metric included in variable_mask (scraped), S = metric added to variable_screen (excluded from output). Address, variable name, unit, type, range, Home Assistant class/state/category, adjustments and notes are shown for each register.",
       "shape_type": "rect",
       "stroke_color": "rgb(14,165,233)",
       "fill_color": "rgba(14,165,233,0.18)"
@@ -339,7 +339,7 @@
       "label_y_percent": 63.6,
       "width_percent": 72.8,
       "height_percent": 76.1,
-      "label": "Protocol register map editor. Each row is a register with editable variable name, documented name, unit, type, range, R/W flag, adjustments, and notes. Changes are staged and committed on demand.",
+      "label": "Protocol register map editor. Each row is a register with editable variable name, documented name, unit, type, range, R/W flag, Home Assistant device class / state class / entity category (dropdowns; blank = inferred from the unit), adjustments, and notes. Changes are staged and committed on demand.",
       "shape_type": "rect"
     }
   ],
@@ -1263,12 +1263,12 @@
     },
     {
       "id": "timescale_timeshift-delete",
-      "x_percent": 37.46392383095934,
-      "y_percent": 39.94227944372833,
+      "x_percent": 37.5,
+      "y_percent": 39.9,
       "label": "Currently not functioning.  Will allow you to delete data prior to overwrites.",
       "shape_type": "dot",
-      "label_x_percent": 80.46743342903308,
-      "label_y_percent": 37.973058871953555
+      "label_x_percent": 80.5,
+      "label_y_percent": 38
     },
     {
       "id": "timescale_timeshift-file",
@@ -1328,7 +1328,8 @@
     "device__prometheus": "device__bridge_prometheus",
     "device__prometheus_out": "device__bridge_prometheus",
     "device__timescaledb": "device__bridge_timescaledb",
-    "influxdb_timeshift_1": "influxdb_timeshift",    
+    "influxdb_timeshift_1": "influxdb_timeshift",
+    "influxdb_timeshift_3": "influxdb_timeshift",
     "pages__about": "about",
     "pages__analyze*": "analysis",
     "pages__create-protocol": "create_protocol",
@@ -1338,6 +1339,7 @@
     "pages__help": "help",
     "pages__influxdb-metrics-edit__1": "influxdb_metrics_edit",
     "pages__influxdb_timeshift_1": "influxdb_timeshift",
+    "pages__influxdb_timeshift_3": "influxdb_timeshift",
     "pages__logging-settings": "logging-settings",
     "pages__messaging-settings": "messages",
     "pages__timescale-delete-columns": "timescale_delete",
@@ -1349,6 +1351,5 @@
     "pages__transport-settings": "transport_settings_trunc",
     "pages__view-log": "view_log",
     "protocol-editor__*": "protocol_edit"
-
   }
 }

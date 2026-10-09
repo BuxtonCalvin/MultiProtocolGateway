@@ -278,7 +278,9 @@
     "port": "1883",
     "reconnect_attempts": "21",
     "reconnect_delay": "7",
-    "username": ""
+    "username": "",
+    "discovery_entity_types": "auto",
+    "discovery_expire_after": "0"
   },
   "json_out": {
     "append_mode": "False",

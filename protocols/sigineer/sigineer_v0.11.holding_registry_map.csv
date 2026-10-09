@@ -1,52 +1,52 @@
-register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note
-0,,On_Off,,,"0x0000:??? Standby??? off, Output enable; 0x0001:??? Standby??? on, Output enable; 0x0100:??? Standby??? off, Output disable; 0x0101:??? Standby??? on, Output disable;",,,,"The Standby On/Off state and the AC output DisEN/EN state; The low byte is the Standby on/off(1/0), the high byte is the AC output disable/enable (1/0).; Initial value: 0"
-1,,OutputConfig,,,"{""0"": ""BAT First"", ""1"": ""PV First"",""2"": ""UTI First""}",,W,,AC output set; extra: 0
-2,,ChargeConfig,,,"{""0"": ""PV first"",""1"": ""PV&UTI"",""2"": ""PV Only""}",,W,,Charge source set; extra: 0
-3,,UtiOutStart,H(hour),,0-23,,W,,Uti Output Start Time; Initial value: 0
-4,,UtiOutEnd,H(hour),,0-23,,W,,Uti Output End Time; Initial value: 0
-5,,UtiChargeStart,H(hour),,0-23,,W,,Uti Charge Start Time; Initial value: 0
-6,,UtiChargeEnd,H(hour),,0-23,,W,,Uti Charge End Time; Initial value: 0
-7,,PVModel,,,"{""0"": ""Independent"", ""1"": ""Parallel""}",,W,,PV Input Mode; extra: 0
-8,,ACInModel,,,"{""0"": ""APL,90-280VAC"", ""1"": ""UPS,170-280VAC""}",,W,,AC Input Mode; Initial value: 0
-15,,LCD language,,,"{""0"" : ""Chinese?"", ""1"" : ""English""}",,W,,LCD language; Initial value: 1; English
-18,,OutputVoltType,,,"{""0"": ""208VAC"", ""1"": ""230VAC"", ""2"": ""240VAC""}",,W,,Output Volt Type; 1
-19,,OutputFreqType,,,"{""0"": ""50Hz"", ""1"": ""60Hz""}",,W,,Output Freq Type; 0
-20,,OverLoadRestart,,,"{""0"": ""Yes"", ""1"": ""No"", ""2"": ""Switch to UTI""}",,W,,Over Load Restart; Initial value: 2: Switch to UTI; extra: 0; extra: Yes(over???? Load 1mins????????????? to restart; extra: ?????? after over Load three times?? to?? stop output)
-21,,OverTempRestart,,,"{""0"": ""Yes"", ""1"": ""No""}",,W,,Over Temperature Restart; extra: 0; extra: Yes(over Temperature to???? restart??; extra: after??????????? over Temperature three? times? to stop output)
-22,,BuzzerEN,,,"{""1"": ""Enable"", ""0"": ""Disable""}",,W,,Buzzer on/off enable; extra: 1
-28,,Module H,,,,,W,,Inverter Module (high); Can be set at standby?? state Only
-29,,Module L,,,P-battery type: 0: Lead_Acid,,W,,Inverter Module (low); Initial value: 2: CustomLead_Acid; U-user type: 0: No vendor; extra: 1: Sigineer; extra: 2: CPS; extra: 3: Haiti; extra: M-power rate: 3: 3KW; extra: 5:5KW; extra: S-Aging; extra: 0: Normal Mode; extra: 1: Aging Mode; extra: Can be set at standby?? state Only
-30,,Com Address,,,1~254,,W,,Communicate?? address; Initial value: 1
-31,,FlashStart,,,0x0001: own 0X0100: control broad,,W,,Update firmware
-32,,Reset User Info,,,0x0001,,W,,Reset User Information
-33,,Reset to factory,,,0x0001,,W,,Reset to factory
-34,,MaxChargeCurr,1A,,10~130,,W,,Max Charge Current; Initial value: 70
-35,,BulkChargeVolt,0.1V,,500~580,,W,,Bulk Charge Volt; Initial value: 564
-36,,FloatChargeVolt,0.1V,,500~560,,W,,Float Charge Volt; Initial value: 540
-37,,BatLowToUtiVolt,0.1V,,444~514,,W,,Bat Low Volt Switch To Uti; Initial value: 464
-38,,FloatChargeCurr,0.1A,,0~80,,W,,Float Charge Current
-39,,Battery Type,,,"{""0"": ""Lead_Acid"", ""1"": ""Lithium"", ""2"": ""CustomLead_Acid""}",,W,,Battery Type; Initial value: 2: CustomLead_Acid; extra: 1; extra: Can be set at standby?? state Only
-40,,Aging Mode,,,"{""0"": ""Normal Mode"", ""1"": ""Aging Mode""}",,W,,Aging Mode; extra: 0; extra: Can be set at standby?? state Only
-43,,DTC,,,&*6,,,,Device Type Code
-45,,Sys Year,,,Year offset is 2000,,W,,System time-year
-46,,Sys Month,,,,,W,,System time- Month
-47,,Sys Day,,,,,W,,System time- Day
-48,,Sys Hour,,,,,W,,System time- Hour
-49,,Sys Min,,,,,W,,System time- Min
-50,,Sys Sec,,,,,W,,System time- Second
-59-66,,Manufacturer Info,ASCII,ASCII,,,,,Manufacturer information (high)
-67,,FW Build No_ 4,ASCII,,,,,,Control FW Build No. 2
-68,,FW Build No_ 3,,,,,,,Control FW Build No. 1
-69,,FW Build No_ 2,,,,,,,COM FW Build No. 2
-70,,FW Build No_ 1,ASCII,,,,,,COM FW Build No. 1
-72,,Sys Weekly,,,0-6,,W,,Sys Weekly
-73,,ModbusVersion,Int(16bit s),,Eg:207 is V2.07,,,,Modbus Version
-76,,Rate Watt H,0.1W,,,,,,Rate active power(high)
-77,,Rate Watt L,0.1W,,,,,,Rate active power(low)
-78,,Rate VA H,0.1VA,,,,,,Rata apparent power (high)
-79,,Rate VA L,0.1VA,,,,,,Rate apparent power (low)
-80,,Factory,,,,,,,The ODM Info code
-162,,BLVersion2,,,,,R,,Boot loader version2
-r12~14,,Fw version2 H,ASCII,ASCII,,,,,Control Firmware version (high)
-r23-27,Serial Number,Serial NO 5,ASCII,ASCII,,,W,,Serial number 5
-r9~11,,Fw version,ASCII,ASCII,,,,,Firmware version (high)
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note,ha_device_class,ha_state_class,ha_entity_category
+0,,On_Off,,,"0x0000:??? Standby??? off, Output enable; 0x0001:??? Standby??? on, Output enable; 0x0100:??? Standby??? off, Output disable; 0x0101:??? Standby??? on, Output disable;",,,,"The Standby On/Off state and the AC output DisEN/EN state; The low byte is the Standby on/off(1/0), the high byte is the AC output disable/enable (1/0).; Initial value: 0",,,
+1,,OutputConfig,,,"{""0"": ""BAT First"", ""1"": ""PV First"",""2"": ""UTI First""}",,W,,AC output set; extra: 0,,,
+2,,ChargeConfig,,,"{""0"": ""PV first"",""1"": ""PV&UTI"",""2"": ""PV Only""}",,W,,Charge source set; extra: 0,,,
+3,,UtiOutStart,H(hour),,0-23,,W,,Uti Output Start Time; Initial value: 0,,,
+4,,UtiOutEnd,H(hour),,0-23,,W,,Uti Output End Time; Initial value: 0,,,
+5,,UtiChargeStart,H(hour),,0-23,,W,,Uti Charge Start Time; Initial value: 0,,,
+6,,UtiChargeEnd,H(hour),,0-23,,W,,Uti Charge End Time; Initial value: 0,,,
+7,,PVModel,,,"{""0"": ""Independent"", ""1"": ""Parallel""}",,W,,PV Input Mode; extra: 0,,,
+8,,ACInModel,,,"{""0"": ""APL,90-280VAC"", ""1"": ""UPS,170-280VAC""}",,W,,AC Input Mode; Initial value: 0,,,
+15,,LCD language,,,"{""0"" : ""Chinese?"", ""1"" : ""English""}",,W,,LCD language; Initial value: 1; English,,,
+18,,OutputVoltType,,,"{""0"": ""208VAC"", ""1"": ""230VAC"", ""2"": ""240VAC""}",,W,,Output Volt Type; 1,,,
+19,,OutputFreqType,,,"{""0"": ""50Hz"", ""1"": ""60Hz""}",,W,,Output Freq Type; 0,,,
+20,,OverLoadRestart,,,"{""0"": ""Yes"", ""1"": ""No"", ""2"": ""Switch to UTI""}",,W,,Over Load Restart; Initial value: 2: Switch to UTI; extra: 0; extra: Yes(over???? Load 1mins????????????? to restart; extra: ?????? after over Load three times?? to?? stop output),,,
+21,,OverTempRestart,,,"{""0"": ""Yes"", ""1"": ""No""}",,W,,Over Temperature Restart; extra: 0; extra: Yes(over Temperature to???? restart??; extra: after??????????? over Temperature three? times? to stop output),,,
+22,,BuzzerEN,,,"{""1"": ""Enable"", ""0"": ""Disable""}",,W,,Buzzer on/off enable; extra: 1,,,
+28,,Module H,,,,,W,,Inverter Module (high); Can be set at standby?? state Only,,,
+29,,Module L,,,P-battery type: 0: Lead_Acid,,W,,Inverter Module (low); Initial value: 2: CustomLead_Acid; U-user type: 0: No vendor; extra: 1: Sigineer; extra: 2: CPS; extra: 3: Haiti; extra: M-power rate: 3: 3KW; extra: 5:5KW; extra: S-Aging; extra: 0: Normal Mode; extra: 1: Aging Mode; extra: Can be set at standby?? state Only,,,
+30,,Com Address,,,1~254,,W,,Communicate?? address; Initial value: 1,,,
+31,,FlashStart,,,0x0001: own 0X0100: control broad,,W,,Update firmware,,,
+32,,Reset User Info,,,0x0001,,W,,Reset User Information,,,
+33,,Reset to factory,,,0x0001,,W,,Reset to factory,,,
+34,,MaxChargeCurr,1A,,10~130,,W,,Max Charge Current; Initial value: 70,current,measurement,
+35,,BulkChargeVolt,0.1V,,500~580,,W,,Bulk Charge Volt; Initial value: 564,voltage,measurement,
+36,,FloatChargeVolt,0.1V,,500~560,,W,,Float Charge Volt; Initial value: 540,voltage,measurement,
+37,,BatLowToUtiVolt,0.1V,,444~514,,W,,Bat Low Volt Switch To Uti; Initial value: 464,voltage,measurement,
+38,,FloatChargeCurr,0.1A,,0~80,,W,,Float Charge Current,current,measurement,
+39,,Battery Type,,,"{""0"": ""Lead_Acid"", ""1"": ""Lithium"", ""2"": ""CustomLead_Acid""}",,W,,Battery Type; Initial value: 2: CustomLead_Acid; extra: 1; extra: Can be set at standby?? state Only,,,
+40,,Aging Mode,,,"{""0"": ""Normal Mode"", ""1"": ""Aging Mode""}",,W,,Aging Mode; extra: 0; extra: Can be set at standby?? state Only,,,
+43,,DTC,,,&*6,,,,Device Type Code,,,
+45,,Sys Year,,,Year offset is 2000,,W,,System time-year,,,
+46,,Sys Month,,,,,W,,System time- Month,,,
+47,,Sys Day,,,,,W,,System time- Day,,,
+48,,Sys Hour,,,,,W,,System time- Hour,,,
+49,,Sys Min,,,,,W,,System time- Min,,,
+50,,Sys Sec,,,,,W,,System time- Second,,,
+59-66,,Manufacturer Info,ASCII,ASCII,,,,,Manufacturer information (high),,,diagnostic
+67,,FW Build No_ 4,ASCII,,,,,,Control FW Build No. 2,,,diagnostic
+68,,FW Build No_ 3,,,,,,,Control FW Build No. 1,,,diagnostic
+69,,FW Build No_ 2,,,,,,,COM FW Build No. 2,,,diagnostic
+70,,FW Build No_ 1,ASCII,,,,,,COM FW Build No. 1,,,diagnostic
+72,,Sys Weekly,,,0-6,,W,,Sys Weekly,,,
+73,,ModbusVersion,Int(16bit s),,Eg:207 is V2.07,,,,Modbus Version,,,
+76,,Rate Watt H,0.1W,,,,,,Rate active power(high),power,measurement,
+77,,Rate Watt L,0.1W,,,,,,Rate active power(low),power,measurement,
+78,,Rate VA H,0.1VA,,,,,,Rata apparent power (high),apparent_power,measurement,
+79,,Rate VA L,0.1VA,,,,,,Rate apparent power (low),apparent_power,measurement,
+80,,Factory,,,,,,,The ODM Info code,,,
+162,,BLVersion2,,,,,R,,Boot loader version2,,,
+r12~14,,Fw version2 H,ASCII,ASCII,,,,,Control Firmware version (high),,,diagnostic
+r23-27,Serial Number,Serial NO 5,ASCII,ASCII,,,W,,Serial number 5,,,
+r9~11,,Fw version,ASCII,ASCII,,,,,Firmware version (high),,,diagnostic

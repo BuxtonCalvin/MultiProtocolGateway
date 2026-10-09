@@ -48,7 +48,7 @@ from fastapi.responses import (
     RedirectResponse,
     StreamingResponse,
 )
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.engine.row import Row
 from sqlalchemy.orm import Session
@@ -57,6 +57,13 @@ from classes.messaging.message_handler import is_active
 from classes.messaging.message_handler import send_message as _send_message
 from classes.WebServer.services.device_service import TransportLibraryRow
 
+from ...ha_metadata import (
+    HA_COLUMN_LABELS,
+    HA_COLUMN_TITLES,
+    HA_COLUMNS,
+    ha_dropdown_options,
+    validate_ha_value,
+)
 from ...transports.modbus_base import modbus_base
 from ...transports.transport_base import transport_base
 from ..config_writer import create_backup
@@ -510,10 +517,7 @@ async def create_protocol_page(request: Request):
     with session_scope() as db:
         nav: NavData = get_nav_data(db)
 
-    protocol_create_data: dict[
-        str,
-        list[dict[str, str | list[str]]] | list[dict[str, str]] | tuple[str, ...]
-    ] = {
+    protocol_create_data: dict[str, object] = {
         "manufacturers": _protocol_create_groups(request.app.state.protocols_dir),
         "protocol_types": [
             {"label": "Coil", "value": "coil"},
@@ -523,6 +527,14 @@ async def create_protocol_page(request: Request):
             {"label": "Other", "value": "other"},
         ],
         "csv_headers": CREATE_PROTOCOL_CSV_HEADERS,
+        # Dropdowns for the Home Assistant columns. Device classes differ by
+        # protocol type, so options are sent per type and the page picks one.
+        "ha_labels": HA_COLUMN_LABELS,
+        "ha_titles": HA_COLUMN_TITLES,
+        "ha_options": {
+            protocol_type: {col: ha_dropdown_options(col, protocol_type) for col in HA_COLUMNS}
+            for protocol_type in PROTOCOL_TYPES
+        },
     }
 
     return request.app.state.templates.TemplateResponse(
@@ -826,6 +838,7 @@ CREATE_PROTOCOL_CSV_HEADERS: tuple[str, ...] = (
     "writable",
     "adjustments",
     "note",
+    *HA_COLUMNS,
 )
 PROTOCOL_TYPES: tuple[str, ...] = ("coil", "discrete", "input", "holding", "other")
 
@@ -883,6 +896,11 @@ class CreateProtocolRowInput(BaseModel):
     writable: str = "R"
     adjustments: str = ""
     note: str = ""
+    # Optional Home Assistant columns — validated against the protocol type in
+    # CreateProtocolRequest, since the permissible device classes depend on it.
+    ha_device_class: str = ""
+    ha_state_class: str = ""
+    ha_entity_category: str = ""
 
 
 class CreateProtocolRequest(BaseModel):
@@ -907,6 +925,21 @@ class CreateProtocolRequest(BaseModel):
         if value not in PROTOCOL_TYPES:
             raise ValueError("Unknown protocol type.")
         return value
+
+    @model_validator(mode="after")
+    def validate_home_assistant_columns(self) -> CreateProtocolRequest:
+        """Normalize and check every row's HA cells (needs the protocol type)."""
+        for number, row in enumerate(self.rows, start=1):
+            for column in HA_COLUMNS:
+                try:
+                    cleaned: str = validate_ha_value(
+                        column, getattr(row, column), registry_type=self.protocol_type
+                    )
+                except ValueError as exc:
+                    msg: str = f"Row {number}: {exc}"
+                    raise ValueError(msg) from exc
+                setattr(row, column, cleaned)
+        return self
 
 
 def _append_section_to_config(config_path: Path, section: str, fields: list[tuple[str, str]]) -> None:
