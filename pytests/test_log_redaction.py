@@ -7,7 +7,10 @@ import logging
 import logging.handlers
 import queue
 from collections.abc import Iterator
+from importlib.machinery import ModuleSpec
+from io import StringIO
 from pathlib import Path
+from typing import LiteralString
 
 import pytest
 
@@ -107,7 +110,7 @@ def test_filter_redacts_the_final_output_including_lazy_args_and_tracebacks(tmp_
     assert lr.install_redaction(logger) == 0  # idempotent
 
     logger.info("request to %s failed", f"https://api.telegram.org/bot{FAKE_TOKEN}/getMe")
-    failure = f"cannot reach https://api.telegram.org/bot{FAKE_TOKEN}/getMe"
+    failure: LiteralString = f"cannot reach https://api.telegram.org/bot{FAKE_TOKEN}/getMe"
     try:
         raise RuntimeError(failure)  # noqa: TRY301
     except RuntimeError:
@@ -152,3 +155,84 @@ def test_malformed_log_calls_do_not_break_logging(tmp_path: Path) -> None:
     lr.install_redaction(logger)
     logger.info("too few args: %s %s", "only-one")  # logging prints its own error to stderr; it must not raise
     handler.close()
+
+
+# --------------------------------------------------------------------------- tracebacks must stay intact
+_BUGGY_MODULE = '''
+def connect(password, token, host):
+    resp = login(host=host, password=password, token=token)
+    return resp
+
+
+def login(host, password, token):
+    {fetch_line}
+'''
+
+_PLAIN_FETCH = 'raise ConnectionError(f"login to {{host}} failed (token={{token}})")'
+# A source line that contains a literal secret AND is the line that fails, so it appears in the traceback.
+_LITERAL_FETCH = 'raise ConnectionError("POST https://api.telegram.org/bot{literal}/getMe failed")'
+
+
+def _run_buggy_module(tmp_path: Path, logger_name: str, with_filter: bool, literal_in_source: bool = False) -> list[str]:
+    """Log a real traceback (source lines included, so the module must be a file) and return the output lines."""
+    import importlib.util
+    import io
+
+    path: Path = tmp_path / f"buggy_{logger_name}.py"
+    fetch_line = (_LITERAL_FETCH if literal_in_source else _PLAIN_FETCH).format(literal=FAKE_TOKEN)
+    path.write_text(_BUGGY_MODULE.format(fetch_line=fetch_line), encoding="utf-8")
+    spec: ModuleSpec | None = importlib.util.spec_from_file_location(f"buggy_{logger_name}", path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    stream = io.StringIO()
+    handler: logging.StreamHandler[StringIO] = logging.StreamHandler(stream)
+    handler.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
+    if with_filter:
+        handler.addFilter(lr.SecretRedactionFilter())
+    logger: logging.Logger = _logger_with_handler(f"redaction.tb.{logger_name}", handler)
+    try:
+        module.connect(password="hunter2hunter2", token="abc123def456ghi", host="h")  # noqa: S106
+    except ConnectionError:
+        logger.exception("send failed")
+    return stream.getvalue().replace(str(path), "<module>").split("\n")
+
+
+def test_traceback_is_kept_intact_and_only_the_secret_text_changes(tmp_path: Path) -> None:
+    plain: list[str] = _run_buggy_module(tmp_path, "plain", with_filter=False)
+    filtered: list[str] = _run_buggy_module(tmp_path, "filtered", with_filter=True)
+
+    assert len(plain) == len(filtered)
+    changed: list[tuple[str, str]] = [(a, b) for a, b in zip(plain, filtered, strict=True) if a != b]
+    # Only the line that carries a secret differs: the exception message.
+    assert changed == [("ConnectionError: login to h failed (token=abc123def456ghi)", "ConnectionError: login to h failed (token=<redacted>)")]
+    # Frames, file/line headers, the exception type and the SOURCE LINES are all still there, verbatim.
+    assert any(line.strip() == "resp = login(host=host, password=password, token=token)" for line in filtered)
+    assert any('File "<module>", line' in line and "in connect" in line for line in filtered)
+    assert filtered[0] == "[ERROR] send failed" and filtered[1] == "Traceback (most recent call last):"
+
+
+def test_a_real_secret_shape_in_a_source_line_is_still_redacted(tmp_path: Path) -> None:
+    filtered: list[str] = _run_buggy_module(tmp_path, "shape", with_filter=True, literal_in_source=True)
+    text: str = "\n".join(filtered)
+    assert FAKE_TOKEN not in text and FAKE_TOKEN.split(":")[1] not in text
+    # the literal token in the code line is hidden, but the line itself is still in the traceback
+    assert 'raise ConnectionError("POST https://api.telegram.org/bot<redacted>/getMe failed")' in text
+
+
+def test_indented_dumps_outside_a_traceback_are_still_redacted() -> None:
+    dump = 'settings:\n    "token": "abc123def456",\n    "host": "10.0.0.1",\n    "password": "hunter22222"'
+    out: str = lr.redact(dump)
+    assert "abc123def456" not in out and "hunter22222" not in out and '"host": "10.0.0.1"' in out
+
+
+def test_frame_code_rule_ends_with_the_frame() -> None:
+    text = (
+        'Traceback (most recent call last):\n  File "/x/y.py", line 3, in f\n    login(password=password)\n'
+        "ValueError: bad password=abc123def456 given"
+    )
+    out: str = lr.redact(text)
+    assert "    login(password=password)" in out  # code line kept
+    assert "ValueError: bad password=<redacted> given" in out  # the message after the frame is not code

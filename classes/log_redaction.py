@@ -25,8 +25,12 @@ at DEBUG, HTTP and database clients can print headers, connection strings and se
 A log is the file people attach to bug reports, so it must not hold credentials.
 
 ``SecretRedactionFilter`` is attached to the *handlers* (not to individual loggers, which would miss
-records from child loggers) so it sees every record that is written, whichever library produced it,
-including exception tracebacks.  It redacts in two complementary ways:
+records from child loggers) so it sees every record that is written, whichever library produced it.
+Exception tracebacks are kept in full -- frames, file names, line numbers, source lines and the exception
+type and message -- and only a credential found inside one is replaced.  Source lines are code, not data,
+so inside a traceback frame only the unmistakable secret shapes are applied (a token, a ``Bearer`` value,
+URL credentials, a registered secret), never the ``password=...`` / ``'token': ...`` patterns, which would
+rewrite the code being shown (``password=password`` is not a leak).  It redacts in two complementary ways:
 
 * **Patterns** for well-known shapes: Telegram bot tokens, ``Bearer``/``Basic`` credentials,
   ``user:password@host`` in URLs, ``password=...`` / ``token=...`` pairs, and ``'password': '...'``
@@ -113,14 +117,43 @@ def clear_secrets() -> None:
         _secrets_re = None
 
 
-def redact(text: str) -> str:
-    """Return ``text`` with credentials replaced by ``<redacted>``."""
-    for pattern, replacement in _PATTERNS:
-        text = pattern.sub(replacement, text)
+# The first four patterns are unmistakable secret shapes and are safe anywhere; the rest key off a NAME
+# (password=, 'token':) and so would also match ordinary code such as ``login(password=password)``.
+_SHAPE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = _PATTERNS[:4]
+_FRAME_RE: re.Pattern[str] = re.compile(r'^\s*File ".*", line \d+')
+_CODE_INDENT: str = "    "
+
+
+def _redact_line(line: str, code: bool = False) -> str:
+    for pattern, replacement in _SHAPE_PATTERNS if code else _PATTERNS:
+        line = pattern.sub(replacement, line)
     known: re.Pattern[str] | None = _secrets_re
     if known is not None:
-        text = known.sub(REDACTED, text)
-    return text
+        line = known.sub(REDACTED, line)
+    return line
+
+
+def redact(text: str) -> str:
+    """
+    Return ``text`` with credentials replaced by ``<redacted>``.
+
+    In multi-line text the source and caret lines that follow a traceback's ``File "...", line N`` header
+    are code, so only the unmistakable secret shapes are applied to them (see the module docstring).
+    """
+    if "\n" not in text:
+        return _redact_line(text)
+    out: list[str] = []
+    in_frame: bool = False
+    for line in text.split("\n"):
+        if _FRAME_RE.match(line):
+            in_frame = True
+            out.append(_redact_line(line))
+        elif in_frame and line.startswith(_CODE_INDENT):
+            out.append(_redact_line(line, code=True))
+        else:
+            in_frame = False
+            out.append(_redact_line(line))
+    return "\n".join(out)
 
 
 class SecretRedactionFilter(logging.Filter):
