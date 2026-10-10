@@ -332,6 +332,8 @@ json = false
 | `error_topic` | `/error` | Topic suffix for error messages. |
 | `discovery_enabled` | `false` | Enable Home Assistant MQTT discovery. Publishes device config payloads so entities appear automatically in HA. |
 | `discovery_topic` | `homeassistant` | Home Assistant discovery prefix. Must match the value configured in your HA MQTT integration. |
+| `discovery_entity_types` | `auto` | `auto` publishes native Home Assistant `sensor`, `binary_sensor`, `number`, `select` and `switch` entities. `sensor` publishes everything as a read-only sensor (behaviour before this option existed). See the [MQTT bridge guide](../bridges/MQTT/MQTT_bridge.md#home-assistant-discovery). |
+| `discovery_expire_after` | `0` | Seconds after which Home Assistant marks a sensor unavailable if no value arrives. `0` = off. |
 | `json` | `false` | When `true`, publish all register values as a single JSON payload per cycle instead of individual topics. |
 | `holding_register_prefix` | *(empty)* | Optional prefix appended to holding register topic names. |
 | `input_register_prefix` | *(empty)* | Optional prefix appended to input register topic names. |

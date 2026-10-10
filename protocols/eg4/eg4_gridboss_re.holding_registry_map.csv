@@ -1,4 +1,4 @@
-register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note
-2~6,,Serial Number,,ASCII,,,,,
-7~9,,Firmware Version,,ASCII,,,,,
-229.b4,,Smart Load 1 Grid On,,1bit,,,,,uncertain of accuracy
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note,ha_device_class,ha_state_class,ha_entity_category
+2~6,,Serial Number,,ASCII,,,,,,,,diagnostic
+7~9,,Firmware Version,,ASCII,,,,,,,,diagnostic
+229.b4,,Smart Load 1 Grid On,,1bit,,,,,uncertain of accuracy,,,

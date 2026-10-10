@@ -442,6 +442,12 @@ def _write_protocol_csvs(db: Session, protocols_dir: Path, force_protocols: set[
                     "note",
                     "writable",
                     "read_interval",
+                    # Optional Home Assistant columns. They MUST be written back:
+                    # this function regenerates the whole file from the DB, so any
+                    # column not listed here is silently dropped from the CSV.
+                    "ha_device_class",
+                    "ha_state_class",
+                    "ha_entity_category",
                 ],
                 quoting=csv.QUOTE_MINIMAL,
             )
@@ -458,6 +464,9 @@ def _write_protocol_csvs(db: Session, protocols_dir: Path, force_protocols: set[
                     "note": row.note or "",
                     "writable": row.write_mode_protocol or "",
                     "read_interval": row.read_interval or "",
+                    "ha_device_class": row.ha_device_class or "",
+                    "ha_state_class": row.ha_state_class or "",
+                    "ha_entity_category": row.ha_entity_category or "",
                 })
 
         written += 1

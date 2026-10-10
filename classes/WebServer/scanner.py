@@ -600,6 +600,10 @@ def _parse_protocol_csv(csv_path: Path, group_name: str) -> list[dict[str, Any]]
                     "note":                 row.get("note", ""),
                     "read_interval":        row.get("read_interval", ""),
                     "write_mode_protocol":  write_mode,
+                    # Optional Home Assistant columns (absent from most CSVs → "").
+                    "ha_device_class":      row.get("ha_device_class", "").lower(),
+                    "ha_state_class":       row.get("ha_state_class", "").lower(),
+                    "ha_entity_category":   row.get("ha_entity_category", "").lower(),
                 }
 
                 # Last definition for a given address wins — resolves CSV duplicates
@@ -674,6 +678,9 @@ def _parse_protocol_csv(csv_path: Path, group_name: str) -> list[dict[str, Any]]
                 low["adjustments"] = high["adjustments"]
             if not low.get("note") and high.get("note"):
                 low["note"] = high["note"]
+            for ha_key in ("ha_device_class", "ha_state_class", "ha_entity_category"):
+                if not low.get(ha_key) and high.get(ha_key):
+                    low[ha_key] = high[ha_key]
 
             # Remove the _h row — it has no independent DB existence
             del result[i + 1]
@@ -717,6 +724,9 @@ def _parse_protocol_json(json_path: Path, group_name: str) -> list[dict[str, Any
             "note": f"JSON config file: {len(data)} keys",
             "read_interval": "",
             "write_mode_protocol": "R",
+            "ha_device_class": "",
+            "ha_state_class": "",
+            "ha_entity_category": "",
         }]
     except Exception as exc:
         _log.error(f"Error parsing protocol JSON {json_path}: {exc}")
@@ -841,6 +851,17 @@ def _upsert_protocol_register(db: Session, reg: dict[str, Any]) -> ProtocolRegis
             existing.note                = reg.get("note", "")
             existing.read_interval       = reg.get("read_interval", "")
             existing.write_mode_protocol = reg["write_mode_protocol"]
+            existing.ha_device_class     = reg.get("ha_device_class", "")
+            existing.ha_state_class      = reg.get("ha_state_class", "")
+            existing.ha_entity_category  = reg.get("ha_entity_category", "")
+        else:
+            # A dirty row keeps its uncommitted edits, but a never-loaded (NULL) HA
+            # cell — i.e. a row that predates migration 0005 — must still pick up
+            # the CSV value. Otherwise committing that row's edit would rewrite the
+            # CSV with a blank where a real Home Assistant value exists.
+            for ha_key in ("ha_device_class", "ha_state_class", "ha_entity_category"):
+                if getattr(existing, ha_key) is None:
+                    setattr(existing, ha_key, reg.get(ha_key, ""))
         # paired_high_address is structural metadata — always keep current from CSV.
         existing.paired_high_address = reg.get("paired_high_address")
         return existing
@@ -863,6 +884,9 @@ def _upsert_protocol_register(db: Session, reg: dict[str, Any]) -> ProtocolRegis
                 note                   = reg.get("note", ""),
                 read_interval          = reg.get("read_interval", ""),
                 write_mode_protocol    = reg["write_mode_protocol"],
+                ha_device_class        = reg.get("ha_device_class", ""),
+                ha_state_class         = reg.get("ha_state_class", ""),
+                ha_entity_category     = reg.get("ha_entity_category", ""),
                 paired_high_address    = reg.get("paired_high_address"),
                 is_dirty                 = False,
             )

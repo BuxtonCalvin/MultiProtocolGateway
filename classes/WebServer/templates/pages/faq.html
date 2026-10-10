@@ -20,50 +20,128 @@
 {% extends "base.html" %}
 {% block title %}FAQ — MPG Admin{% endblock %}
 {% block content %}
+{#
+  The questions and answers live in classes/WebServer/faq.json (answers are Markdown),
+  loaded and validated by services/faq_service.py. Edit that file, not this template.
+  Context: faq_categories (list of FaqCategory), faq_error (str | None).
+#}
 <div class="max-w-3xl mx-auto space-y-6">
   <h1 class="surface-text font-bold text-xl">Frequently Asked Questions</h1>
 
-  {% set faqs = [
-    ("What is MPG?",
-     "Multi Protocol Gateway (MPG) is a data-collection middleware that reads registers from hardware devices (inverters, batteries) over Modbus TCP/RTU and forwards the data to one or more bridge transports such as MQTT or TimescaleDB."),
-    ("What is a Scraper?",
-     "A Scraper is a transport configured with a protocol_version. It actively polls device registers on a schedule and produces metric data. Examples: an EG4 18KPV inverter on Modbus TCP."),
-    ("What is a Bridge?",
-     "A Bridge is a transport without a protocol — it only receives and stores/forwards data. Examples: MQTT, InfluxDB, TimescaleDB (time-series storage)."),
-    ("What does Commit All Changes do?",
-     "It writes all staged UI edits back to config.cfg and updates the protocol mask/screen/override files on disk. A timestamped backup of the previous config.cfg is created first. The gateway does not auto-restart — you must restart it to pick up the changes."),
-    ("What is the dirty state indicator?",
-     "The orange dot (●) next to a setting or the pulsing 'Commit All Changes' button means a staged value differs from what is currently on disk. Nothing is written until you commit."),
-    ("What is an orphaned setting?",
-     "A setting that exists in the database but is no longer referenced by any transport class in the codebase. This typically happens after a transport is renamed or removed. Orphaned settings are never written to config.cfg and should be reviewed and pruned."),
-    ("What are the Write / Mask / Screen checkboxes in the protocol table?",
-     "Write (W): enables write-back of that register from the UI to the hardware — only available if the protocol CSV marks it as writable (via the MQTT bridge transport). Mask (M): includes the metric in the variable_mask file, meaning it will be scraped. Screen (S): adds the metric to the variable_screen file, meaning it will not be scraped."),
-    ("Can I edit the protocol CSV directly?",
-     "Yes — select the protocol from the Protocols menu. You can view and edit the CSV content. Changes are staged in the database and committed on demand. The original CSV is never modified without a backup."),
-    ("How do I add a new protocol?",
-     "Use the 'Create Protocol' wizard in the menu bar. It will guide you through choosing a hardware manufacturer, choosing an existing protocol or creating a new on, and choosing a modbus protocol type. The new protocol is added to the staging database and written to a protocol folder on commit.  The protocol folder organization is based on manufacturer."),
-    ("How do I add a new scraper device?",
-     "Use the 'Create Scraper' wizard in the menu bar. It will guide you through choosing a transport type, entering connection parameters, and linking to a bridge. The new device is added to the staging database and written to config.cfg on commit."),
-    ("What port does the web UI run on?",
-     "Port 1717 by default. Access it at http://<your-gateway-host>:1717/"),
-    ("After a commit, does the UI restart the gateway automatically?",
-     "No. The gateway process must be restarted manually after a commit for configuration changes to take effect. This is intentional — the UI does not interrupt live data collection."),
-    ("Where are config backups stored?",
-     "In MultiProtocolGateway (or App in docker)/config/backups/ as timestamped .cfg files. You can roll back to any backup via the Diff panel."),
-  ] %}
+  {% if faq_error %}
+  <div class="card" role="alert">
+    <p class="surface-text text-sm font-medium">The FAQ content could not be loaded.</p>
+    <p class="mt-1 surface-muted text-sm leading-relaxed">{{ faq_error }}</p>
+  </div>
+  {% else %}
 
-  {% for q, a in faqs %}
-  <details class="card group" open="{{ loop.first }}">
-    <summary class="cursor-pointer font-medium surface-text list-none flex justify-between items-center">
-      {{ q }}
-      <svg class="w-4 h-4 surface-muted transition-transform group-open:rotate-180"
-           fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
-      </svg>
-    </summary>
-    <p class="mt-2 surface-muted text-sm leading-relaxed">{{ a }}</p>
-  </details>
+  <div>
+    <label for="faq-search" class="sr-only">Search the FAQ</label>
+    <input id="faq-search" type="search" autocomplete="off" spellcheck="false"
+           class="theme-input w-full text-sm rounded px-3 py-2 focus:outline-none focus:ring-1 focus:ring-accent"
+           placeholder="Search, or paste a line from your log…">
+    <p id="faq-count" class="mt-1 surface-muted text-xs" aria-live="polite"></p>
+  </div>
+
+  {% for cat in faq_categories %}
+  <section class="space-y-3" data-faq-category>
+    <div>
+      <h2 class="surface-text font-semibold text-base" id="cat-{{ cat.id }}">{{ cat.title }}</h2>
+      {% if cat.intro_html %}
+      <div class="docs-article mt-1 surface-muted text-sm leading-relaxed">{{ cat.intro_html | safe }}</div>
+      {% endif %}
+    </div>
+
+    {% for item in cat.items %}
+    <details class="card group" id="faq-{{ item.id }}" data-faq-item
+             data-search="{{ item.search_text }}"
+             data-log="{{ item.log | join('\n') | lower }}">
+      <summary class="cursor-pointer font-medium surface-text list-none flex justify-between items-center gap-3">
+        <span>{{ item.question }}</span>
+        <svg class="w-4 h-4 shrink-0 surface-muted transition-transform group-open:rotate-180"
+             fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+        </svg>
+      </summary>
+      <div class="docs-article mt-2 surface-muted text-sm leading-relaxed">{{ item.answer_html | safe }}</div>
+      {% if item.log %}
+      <div class="mt-3 text-xs surface-muted">
+        <p class="font-medium">Appears in the log as:</p>
+        <ul class="mt-1 space-y-0.5 list-none">
+          {% for snippet in item.log %}
+          <li><code class="font-mono break-all">{{ snippet }}</code></li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+      <p class="mt-3 text-xs"><a href="#faq-{{ item.id }}" class="surface-muted underline" title="Link to this answer">#</a></p>
+    </details>
+    {% endfor %}
+  </section>
   {% endfor %}
 
+  <p id="faq-empty" class="surface-muted text-sm" hidden>No entries match. Try fewer words, or part of the message.</p>
+  {% endif %}
 </div>
+{% endblock %}
+
+{% block scripts %}
+{% if not faq_error %}
+<script>
+(function () {
+  var input = document.getElementById("faq-search");
+  var count = document.getElementById("faq-count");
+  var empty = document.getElementById("faq-empty");
+  if (!input) { return; }
+  var items = Array.prototype.slice.call(document.querySelectorAll("[data-faq-item]"));
+  var sections = Array.prototype.slice.call(document.querySelectorAll("[data-faq-category]"));
+
+  // Digits are folded to "#" on both sides so a pasted "Reconnect attempt 3" still matches "Reconnect attempt 1".
+  function norm(s) { return s.toLowerCase().replace(/\d+/g, "#"); }
+
+  function matches(item, query) {
+    var q = norm(query);
+    var hay = norm(item.getAttribute("data-search") || "");
+    var words = q.split(/\s+/).filter(Boolean);
+    if (words.length && words.every(function (w) { return hay.indexOf(w) !== -1; })) { return true; }
+    // A whole pasted log line: does it contain one of this entry's known message fragments?
+    var logs = (item.getAttribute("data-log") || "").split("\n");
+    return logs.some(function (snippet) { var n = norm(snippet).trim(); return n.length >= 12 && q.indexOf(n) !== -1; });
+  }
+
+  function apply() {
+    var query = input.value.trim();
+    var shown = 0;
+    items.forEach(function (item) {
+      var hit = query === "" || matches(item, query);
+      item.hidden = !hit;
+      if (hit) { shown += 1; }
+      if (query !== "") { item.open = hit && items.length > 0 && shown <= 5; }
+    });
+    sections.forEach(function (sec) {
+      sec.hidden = !sec.querySelector("[data-faq-item]:not([hidden])");
+    });
+    if (empty) { empty.hidden = !(query !== "" && shown === 0); }
+    count.textContent = query === "" ? "" : shown + (shown === 1 ? " matching entry" : " matching entries");
+  }
+
+  function openFromHash() {
+    var id = decodeURIComponent((window.location.hash || "").replace(/^#/, ""));
+    // Both /pages/faq#faq-interleaved-cycle (what the "#" link on each answer uses) and the shorter
+    // /pages/faq#interleaved-cycle (the entry's id in faq.json) open the entry.
+    var target = id ? (document.getElementById(id) || document.getElementById("faq-" + id)) : null;
+    if (target && target.hasAttribute("data-faq-item")) {
+      input.value = "";
+      apply();
+      target.open = true;
+      target.scrollIntoView();
+    }
+  }
+
+  input.addEventListener("input", apply);
+  window.addEventListener("hashchange", openFromHash);
+  openFromHash();
+})();
+</script>
+{% endif %}
 {% endblock %}

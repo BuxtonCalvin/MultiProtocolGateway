@@ -123,6 +123,49 @@
   const resultBox = document.getElementById('create-protocol-result');
 
   const headers = createData.csv_headers || [];
+  // Home Assistant columns are dropdowns (permissible values depend on the protocol
+  // type, so options are keyed by type); every other column stays a text input.
+  const haLabels = createData.ha_labels || {};
+  const haTitles = createData.ha_titles || {};
+  const haOptions = createData.ha_options || {};
+
+  function haChoices(header) {
+    return ((haOptions[state.protocolType] || {})[header]) || [];
+  }
+
+  function buildHaSelect(header, value) {
+    const select = document.createElement('select');
+    select.dataset.field = header;
+    select.title = haTitles[header] || '';
+    select.className = 'theme-input w-full border rounded px-2 py-1 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-accent';
+    fillHaSelect(select, header, value);
+    return select;
+  }
+
+  // (Re)build a select's options for the current protocol type. Returns false when
+  // the requested value is not permissible for this type and was reset to blank.
+  function fillHaSelect(select, header, value) {
+    const wanted = (value || '').trim().toLowerCase();
+    const choices = haChoices(header);
+    select.innerHTML = '';
+    choices.forEach(([optValue, label]) => {
+      const option = document.createElement('option');
+      option.value = optValue;
+      option.textContent = label;
+      select.appendChild(option);
+    });
+    const allowed = choices.some(([optValue]) => optValue === wanted);
+    select.value = allowed ? wanted : '';
+    return allowed || wanted === '';
+  }
+
+  function refreshHaSelects() {
+    let reset = 0;
+    csvBody.querySelectorAll('select[data-field]').forEach(select => {
+      if (!fillHaSelect(select, select.dataset.field, select.value)) reset += 1;
+    });
+    return reset;
+  }
   const manufacturers = createData.manufacturers || [];
   const manufacturerMap = Object.fromEntries(manufacturers.map(item => [item.manufacturer, item]));
 
@@ -191,7 +234,8 @@
     headers.forEach(header => {
       const th = document.createElement('th');
       th.className = 'px-2 py-2 text-left border-r border-mpg-200 dark:border-mpg-700 last:border-r-0';
-      th.textContent = header;
+      th.textContent = haLabels[header] || header;
+      if (haTitles[header]) th.title = haTitles[header];
       csvHeaderRow.appendChild(th);
     });
     const removeTh = document.createElement('th');
@@ -206,6 +250,11 @@
     headers.forEach(header => {
       const td = document.createElement('td');
       td.className = 'px-2 py-1.5 border-r border-mpg-200/60 dark:border-mpg-700/30';
+      if (haLabels[header]) {
+        td.appendChild(buildHaSelect(header, values[header]));
+        tr.appendChild(td);
+        return;
+      }
       const input = document.createElement('input');
       input.type = 'text';
       input.dataset.field = header;
@@ -291,7 +340,13 @@
     }
     clearMessage();
     state.protocolType = typeSelect.value;
+    // Device classes differ by type (e.g. discrete inputs are binary sensors): refresh
+    // any rows already added, and say so if a previous choice no longer applies.
+    const reset = refreshHaSelects();
     revealEditor();
+    if (reset) {
+      showMessage('error', `${reset} Home Assistant cell(s) were reset to blank because their value does not apply to the "${state.protocolType}" type.`);
+    }
   }
 
   function readRows() {

@@ -37,7 +37,7 @@ from __future__ import annotations
 import logging
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, Protocol
 
 from .protocol_settings import (
@@ -63,6 +63,8 @@ class EG4MetadataTransport(Protocol):
     send_input_register: bool
     device_serial_number: str
     eg4_hardware_kind_cache: str | None
+    device_metadata: "EG4DeviceMetadata | EG4BatteryMetadata | None"
+    eg4_cache: "EG4IdentificationCache"
 
     @property
     def proto(self) -> protocol_settings: ...
@@ -307,6 +309,67 @@ class EG4BatteryMetadata:
         "serial/model/firmware are only readable over this battery's CANbus "
         "interface, not Modbus — not attempted here."
     )
+
+
+# ----------------------------------------------------------------------------
+# Identification cache
+# ----------------------------------------------------------------------------
+# Everything below describes the *device*, not its current state: serial number, model,
+# firmware, device type, GridBOSS flag, parallel-group role, and the battery module serials
+# an inverter reports.  They are read once -- at connect (modbus_base.init_after_connect) --
+# and cached on the transport, instead of being re-read from the hardware on every scrape
+# cycle.  Each re-read was about seven extra Modbus requests (the serial number alone is one
+# request per register); over a slow gateway that was most of a cycle's time and the main cause
+# of "Interleaved cycle still running" warnings.
+#
+# A read can fail (timeout, a misread on a fresh connection), so an INCOMPLETE result is retried
+# from the scrape cycle, backing off 1 min, 2 min, 4 min ... up to an hour.  A complete result is
+# never re-read until the connection is re-established (see refresh_eg4_identification()).
+_IDENTIFY_RETRY_BASE_SECONDS: float = 60.0
+_IDENTIFY_RETRY_MAX_SECONDS: float = 3600.0
+# After a reconnect the identification is refreshed (firmware may have changed while the device
+# restarted), but not more often than this, so a flapping link cannot turn every reconnect into
+# a burst of reads.
+_REFRESH_MIN_INTERVAL_SECONDS: float = 300.0
+
+
+@dataclass
+class EG4IdentificationCache:
+    """Retry/back-off bookkeeping and cached values for one transport's EG4 identification.
+
+    The identity values themselves (serial, model, firmware, ...) live on
+    ``transport.device_metadata``; this holds what has no other home.
+    """
+    identify_attempts: int = 0
+    identify_last_attempt: float = 0.0  # time.monotonic() of the last (re)identification attempt
+    battery_serials: dict[str, str] = field(default_factory=lambda: dict[str, str]())  # variable_name -> decoded serial
+    battery_serials_loaded: bool = False  # a pass finished without a failed read
+    battery_serials_attempts: int = 0
+    battery_serials_last_attempt: float = 0.0
+
+
+def _cache_of(transport: EG4MetadataTransport) -> EG4IdentificationCache:
+    """The transport's cache object, created on first use for any transport that does not define one."""
+    cache: EG4IdentificationCache | None = getattr(transport, "eg4_cache", None)
+    if cache is None:
+        cache = EG4IdentificationCache()
+        transport.eg4_cache = cache
+    return cache
+
+
+def _retry_delay(attempts: int) -> float:
+    """Seconds to wait before attempt number ``attempts + 1``: 60, 120, 240 ... capped at an hour."""
+    if attempts <= 0:
+        return 0.0
+    return min(_IDENTIFY_RETRY_BASE_SECONDS * (2 ** (attempts - 1)), _IDENTIFY_RETRY_MAX_SECONDS)
+
+
+def _identification_complete(metadata: "EG4DeviceMetadata | EG4BatteryMetadata | None") -> bool:
+    """An inverter is identified once its serial number is known; a battery once it has been probed at all
+    (its serial number is CANbus-only, so it can never have one here)."""
+    if isinstance(metadata, EG4DeviceMetadata):
+        return bool(metadata.serial)
+    return metadata is not None
 
 
 def is_eg4_protocol(protocol_name: str | None) -> bool:
@@ -746,6 +809,105 @@ def _find_named_registry(transport: EG4MetadataTransport, variable_name: str) ->
     return None
 
 
+def get_cached_eg4_metadata(transport: EG4MetadataTransport) -> "EG4DeviceMetadata | EG4BatteryMetadata | None":
+    """The device metadata identified at connect, with no Modbus traffic in the normal case.
+
+    Returns ``transport.device_metadata`` as-is when it is complete.  If it is not (the connect-time read
+    failed or came back without a serial number), the identification is retried from here, backing off
+    1 min, 2 min, 4 min ... up to an hour, so a device whose serial number is genuinely unreadable costs
+    about seven reads an hour instead of seven every cycle.  A retry replaces the cached value only if it
+    is better than what is cached.  Never raises.
+    """
+    metadata: EG4DeviceMetadata | EG4BatteryMetadata | None = transport.device_metadata
+    if _identification_complete(metadata):
+        return metadata
+
+    cache: EG4IdentificationCache = _cache_of(transport)
+    now: float = time.monotonic()
+    if cache.identify_attempts and now - cache.identify_last_attempt < _retry_delay(cache.identify_attempts):
+        return metadata
+
+    cache.identify_attempts += 1
+    cache.identify_last_attempt = now
+    try:
+        _, fresh = identify_eg4_device(transport)
+    except Exception:
+        _log.debug(
+            f"get_cached_eg4_metadata: identification retry failed for transport '{transport.transport_name}'",
+            exc_info=True,
+        )
+        return metadata
+    if fresh is not None and (_identification_complete(fresh) or metadata is None):
+        transport.device_metadata = fresh
+        if _identification_complete(fresh):
+            _log.info(f"Transport {transport.transport_name} EG4 identification completed on retry: {fresh}")
+    return transport.device_metadata
+
+
+def refresh_eg4_identification(transport: EG4MetadataTransport) -> None:
+    """Re-identify an EG4 inverter after a RECONNECT, so values that can change while the device is away
+    (firmware after an update, parallel-group role) are picked up.  A battery has nothing here worth
+    refreshing.  Skipped if identification ran less than _REFRESH_MIN_INTERVAL_SECONDS ago.  A result
+    that is worse than what is cached (e.g. the serial read failed this time) is discarded.  Never raises.
+    """
+    protocol_name: str = getattr(transport.proto, "protocol", "") or ""
+    if not is_eg4_protocol(protocol_name) or transport.eg4_hardware_kind_cache == "battery":
+        return
+
+    cache: EG4IdentificationCache = _cache_of(transport)
+    now: float = time.monotonic()
+    if cache.identify_last_attempt and now - cache.identify_last_attempt < _REFRESH_MIN_INTERVAL_SECONDS:
+        return
+    cache.identify_last_attempt = now
+    cache.battery_serials_loaded = False  # re-read the battery module serials on the next cycle too
+    cache.battery_serials_attempts = 0
+
+    previous: EG4DeviceMetadata | EG4BatteryMetadata | None = transport.device_metadata
+    try:
+        _, fresh = identify_eg4_device(transport)
+    except Exception:
+        _log.debug(f"refresh_eg4_identification failed for transport '{transport.transport_name}'", exc_info=True)
+        return
+    if fresh is None:
+        return
+    if _identification_complete(fresh) or not _identification_complete(previous):
+        if previous != fresh:
+            _log.info(f"Transport {transport.transport_name} EG4 identification refreshed after reconnect: {fresh}")
+        transport.device_metadata = fresh
+
+
+def get_cached_battery_serial_fields(transport: EG4MetadataTransport) -> dict[str, str]:
+    """The corrected ``batteryserialnumber_<N>`` values, read from the inverter once and cached.
+
+    These are the battery modules' serial numbers as the inverter reports them; they change only when
+    hardware does.  The first pass reads them (one 8-register block per field); a pass that finishes
+    without a failed read is final until the next reconnect.  If a read failed, the fields that did
+    decode are kept and the rest are retried with the same back-off as get_cached_eg4_metadata().
+    A protocol with no such fields costs nothing.  Never raises.
+    """
+    cache: EG4IdentificationCache = _cache_of(transport)
+    if cache.battery_serials_loaded:
+        return dict(cache.battery_serials)
+
+    now: float = time.monotonic()
+    if cache.battery_serials_attempts and now - cache.battery_serials_last_attempt < _retry_delay(cache.battery_serials_attempts):
+        return dict(cache.battery_serials)
+
+    cache.battery_serials_attempts += 1
+    cache.battery_serials_last_attempt = now
+    try:
+        fields, complete = _read_battery_serial_fields(transport)
+    except Exception:
+        _log.debug(
+            f"get_cached_battery_serial_fields: read failed for transport '{transport.transport_name}'",
+            exc_info=True,
+        )
+        return dict(cache.battery_serials)
+    cache.battery_serials.update(fields)
+    cache.battery_serials_loaded = complete
+    return dict(cache.battery_serials)
+
+
 def compute_eg4_post_process_fields(
     transport: EG4MetadataTransport,
     info: dict[str, int | float | str],
@@ -755,31 +917,32 @@ def compute_eg4_post_process_fields(
 
     Returns ``{}`` immediately (no-op) if this isn't an EG4 protocol.
     Otherwise returns model/firmware_version/hardware_kind/is_gridboss for
-    inverters (from read_eg4_device_metadata(), which does a handful of
-    small register reads every call — see that function's docstring), or
-    just hardware_kind for batteries, plus corrected batteryserialnumber_<N>
-    values wherever the inverter's own input registers declare them (see
-    _read_battery_serial_fields()).
+    inverters, or just hardware_kind for batteries, plus corrected
+    batteryserialnumber_<N> values wherever the inverter's own input
+    registers declare them.
+
+    **No Modbus reads happen here in the normal case.**  All of these values
+    describe the device rather than its current state, so they come from what
+    was identified at connect (``transport.device_metadata``, see
+    get_cached_eg4_metadata()) and from the cached battery serials (see
+    get_cached_battery_serial_fields()).  Only an identification that came
+    back incomplete is retried, with back-off; a reconnect refreshes it (see
+    refresh_eg4_identification()).
 
     ``device_type_code`` (holding register 19) is deliberately never part of
-    the result, even though ``read_eg4_device_metadata()`` reads it and uses
+    the result, even though identification reads it and uses
     it internally to compute model/is_gridboss — that register already
     decodes under its own name through the normal registry_map path on every
     EG4 variant this module has seen, so re-exposing it here would produce a
     duplicate "real" register-19 entry plus a "synthetic" one with the same
     name and value.
 
-    ``info`` (the already-decoded values for this cycle) is otherwise
-    accepted for signature symmetry with the post_process_data(info) hook
-    and so future resolvers can build on already-decoded values without a
-    redundant register read, but isn't read from further than the above —
-    every other field here still needs its own live register read
-    regardless of what's already in ``info``.
+    ``info`` (the already-decoded values for this cycle) is accepted for
+    signature symmetry with the post_process_data(info) hook and is not read.
 
-    Every field is independently best-effort: if one piece fails (e.g. a
-    register read times out), the rest of this cycle's ``info`` is
-    unaffected — this function logs failures but never raises them out to
-    the caller.
+    Every field is independently best-effort: if one piece fails, the rest
+    of this cycle's ``info`` is unaffected — this function logs failures but
+    never raises them out to the caller.
     """
     protocol_name: str = getattr(transport.proto, "protocol", "") or ""
     if not is_eg4_protocol(protocol_name):
@@ -789,10 +952,10 @@ def compute_eg4_post_process_fields(
 
     metadata: EG4DeviceMetadata | EG4BatteryMetadata | None = None
     try:
-        metadata = read_eg4_device_metadata(transport)
+        metadata = get_cached_eg4_metadata(transport)
     except Exception:
         _log.debug(
-            f"compute_eg4_post_process_fields: read_eg4_device_metadata failed for "
+            f"compute_eg4_post_process_fields: get_cached_eg4_metadata failed for "
             f"transport '{transport.transport_name}' — skipping this cycle's metadata fields.",
             exc_info=True,
         )
@@ -818,7 +981,7 @@ def compute_eg4_post_process_fields(
             # docstring), so that entry's own per-cycle decode truncates the
             # 10-character serial to its first 2 characters. This overwrites
             # that truncated value with the correctly-reassembled one from
-            # read_eg4_device_metadata() (which read_eg4_serial_number() feeds
+            # identification (which read_eg4_serial_number() feeds
             # — see _read_inverter_metadata()), the same truncation-correction
             # pattern _read_battery_serial_fields() uses for battery serials.
             derived["serial_number"] = metadata.serial
@@ -828,10 +991,10 @@ def compute_eg4_post_process_fields(
         # see EG4BatteryMetadata's docstring.
 
     try:
-        derived.update(_read_battery_serial_fields(transport))
+        derived.update(get_cached_battery_serial_fields(transport))
     except Exception:
         _log.debug(
-            f"compute_eg4_post_process_fields: _read_battery_serial_fields failed for "
+            f"compute_eg4_post_process_fields: get_cached_battery_serial_fields failed for "
             f"transport '{transport.transport_name}' — skipping corrected battery serials "
             f"this cycle.",
             exc_info=True,
@@ -840,9 +1003,13 @@ def compute_eg4_post_process_fields(
     return derived
 
 
-def _read_battery_serial_fields(transport: EG4MetadataTransport) -> dict[str, str]:
+def _read_battery_serial_fields(transport: EG4MetadataTransport) -> tuple[dict[str, str], bool]:
     """Live-read and correctly decode every batteryserialnumber_<N> field
     declared on this protocol's INPUT registry map.
+
+    Returns ``(fields, complete)``. ``complete`` is False if any read failed or came back
+    missing registers (so the caller should try again later); an entry that was read fine but
+    decoded to nothing (an empty battery slot) does not count as a failure.
 
     protocol_settings' ASCII decoder is single-register-only (see
     read_eg4_serial_number()'s docstring for the full explanation), so the
@@ -854,22 +1021,23 @@ def _read_battery_serial_fields(transport: EG4MetadataTransport) -> dict[str, st
     adding a new key.
     """
     fields: dict[str, str] = {}
+    complete: bool = True
     if not transport.send_input_register:
-        return fields
+        return fields, complete
 
     registry_map: list[registry_map_entry] = []
     try:
         registry_map = transport.proto.get_registry_map(Registry_Type.INPUT)
     except Exception:
         _log.debug("_read_battery_serial_fields: could not read INPUT registry map", exc_info=True)
-        return fields
+        return fields, False
 
     battery_serial_entries: list[registry_map_entry] = [
         entry for entry in registry_map
         if entry.variable_name and _BATTERY_SERIAL_FIELD_REGEX.match(entry.variable_name)
     ]
     if not battery_serial_entries:
-        return fields
+        return fields, complete
 
     for entry in battery_serial_entries:
         start: int = entry.register
@@ -882,6 +1050,7 @@ def _read_battery_serial_fields(transport: EG4MetadataTransport) -> dict[str, st
                 f"'{entry.variable_name}' (registers {start}-{start + 7})",
                 exc_info=True,
             )
+            complete = False
             continue
 
         chars: list[str] = []
@@ -891,6 +1060,7 @@ def _read_battery_serial_fields(transport: EG4MetadataTransport) -> dict[str, st
                 f"_read_battery_serial_fields: registers {missing} missing from the read "
                 f"for '{entry.variable_name}' — leaving this field's value untouched this cycle."
             )
+            complete = False
             continue
 
         for i in range(8):
@@ -904,7 +1074,7 @@ def _read_battery_serial_fields(transport: EG4MetadataTransport) -> dict[str, st
             fields[entry.variable_name] = decoded
             _log.debug(f"_read_battery_serial_fields: '{entry.variable_name}' = '{decoded}'")
 
-    return fields
+    return fields, complete
 
 
 def eg4_synthetic_fields_metadata(transport: EG4MetadataTransport) -> list[tuple[str, str, float, str, str]]:

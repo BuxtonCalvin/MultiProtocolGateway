@@ -1,58 +1,58 @@
-register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note
-3,vebus/Ac/ActiveIn/L1/V,vebus-Input voltage phase 1,10V AC,uint16,0 to 6553.5,,,,
-4,vebus/Ac/ActiveIn/L2/V,vebus-Input voltage phase 2,10V AC,uint16,0 to 6553.5,,,,
-5,vebus/Ac/ActiveIn/L3/V,vebus-Input voltage phase 3,10V AC,uint16,0 to 6553.5,,,,
-6,vebus/Ac/ActiveIn/L1/I,vebus-Input current phase 1,10A AC,int16,-3276.8 to 3276.7,,,,Positive: current flowing from mains to Multi. Negative: current flowing from Multi to mains.
-7,vebus/Ac/ActiveIn/L2/I,vebus-Input current phase 2,10A AC,int16,-3276.8 to 3276.7,,,,Positive: current flowing from mains to Multi. Negative: current flowing from Multi to mains.
-8,vebus/Ac/ActiveIn/L3/I,vebus-Input current phase 3,10A AC,int16,-3276.8 to 3276.7,,,,Positive: current flowing from mains to Multi. Negative: current flowing from Multi to mains.
-9,vebus/Ac/ActiveIn/L1/F,vebus-Input frequency 1,100Hz,int16,-327.68 to 327.67,,,,
-10,vebus/Ac/ActiveIn/L2/F,vebus-Input frequency 2,100Hz,int16,-327.68 to 327.67,,,,
-11,vebus/Ac/ActiveIn/L3/F,vebus-Input frequency 3,100Hz,int16,-327.68 to 327.67,,,,
-12,vebus/Ac/ActiveIn/L1/P,vebus-Input power 1,0.1VA or Watts,int16,-327680 to 327670,,,,Sign meaning equal to Input current
-13,vebus/Ac/ActiveIn/L2/P,vebus-Input power 2,0.1VA or Watts,int16,-327680 to 327670,,,,Sign meaning equal to Input current
-14,vebus/Ac/ActiveIn/L3/P,vebus-Input power 3,0.1VA or Watts,int16,-327680 to 327670,,,,Sign meaning equal to Input current
-15,vebus/Ac/Out/L1/V,vebus-Output voltage phase 1,10V AC,uint16,0 to 6553.5,,,,
-16,vebus/Ac/Out/L2/V,vebus-Output voltage phase 2,10V AC,uint16,0 to 6553.5,,,,
-17,vebus/Ac/Out/L3/V,vebus-Output voltage phase 3,10V AC,uint16,0 to 6553.5,,,,
-18,vebus/Ac/Out/L1/I,vebus-Output current phase 1,10A AC,int16,-3276.8 to 3276.7,,,,Positive: current flowing from Multi to the load. Negative: current flowing from load to the Multi.
-19,vebus/Ac/Out/L2/I,vebus-Output current phase 2,10A AC,int16,-3276.8 to 3276.7,,,,Positive: current flowing from Multi to the load. Negative: current flowing from load to the Multi.
-20,vebus/Ac/Out/L3/I,vebus-Output current phase 3,10A AC,int16,-3276.8 to 3276.7,,,,Positive: current flowing from Multi to the load. Negative: current flowing from load to the Multi.
-21,vebus/Ac/Out/L1/F,vebus-Output frequency,100Hz,int16,-327.68 to 327.67,,,,
-22,vebus/Ac/ActiveIn/CurrentLimit,vebus-Active input current limit,10A,int16,-3276.8 to 3276.7,,W,,"See Venus-OS manual for limitations, for example when VE.Bus BMS or DMC is installed."
-23,vebus/Ac/Out/L1/P,vebus-,,,,,,,
-800,system/Serial,system-Serial (System),1,ascii.6,,,,,System value -> MAC address of CCGX (represented as string)
-806,system/Relay/0/State,system-CCGX Relay 1 state,,uint16,"{""0"":""Open"",""1"":""Closed""}",,W,,
-807,system/Relay/1/State,system-CCGX Relay 2 state,,uint16,"{""0"":""Open"",""1"":""Closed""}",,W,,Relay 1 is available on Venus GX only.
-808,system/Ac/PvOnOutput/L1/Power,system-PV - AC-coupled on output L1,W,uint16,0 to 65536,,,,Summation of all AC-Coupled PV Inverters on the output
-809,system/Ac/PvOnOutput/L2/Power,system-PV - AC-coupled on output L2,W,uint16,0 to 65536,,,,
-810,system/Ac/PvOnOutput/L3/Power,system-PV - AC-coupled on output L3,W,uint16,0 to 65536,,,,
-811,system/Ac/PvOnGrid/L1/Power,system-PV - AC-coupled on input L1,W,uint16,0 to 65536,,,,Summation of all AC-Coupled PV Inverters on the input
-812,system/Ac/PvOnGrid/L2/Power,system-PV - AC-coupled on input L2,W,uint16,0 to 65536,,,,
-813,system/Ac/PvOnGrid/L3/Power,system-PV - AC-coupled on input L3,W,uint16,0 to 65536,,,,
-814,system/Ac/PvOnGenset/L1/Power,system-PV - AC-coupled on generator L1,W,uint16,0 to 65536,,,,Summation of all AC-Coupled PV Inverters on a generator. Bit theoretic; this will never be used.
-815,system/Ac/PvOnGenset/L2/Power,system-PV - AC-coupled on generator L2,W,uint16,0 to 65536,,,,
-816,system/Ac/PvOnGenset/L3/Power,system-PV - AC-coupled on generator L3,W,uint16,0 to 65536,,,,
-817,system/Ac/Consumption/L1/Power,system-AC Consumption L1,W,uint16,0 to 65536,,,,Power supplied by system to loads.
-818,system/Ac/Consumption/L2/Power,system-AC Consumption L2,W,uint16,0 to 65536,,,,
-819,system/Ac/Consumption/L3/Power,system-AC Consumption L3,W,uint16,0 to 65536,,,,
-820,system/Ac/Grid/L1/Power,system-Grid L1,W,int16,-32768 to 32767,,,,Power supplied by Grid to system.
-821,system/Ac/Grid/L2/Power,system-Grid L2,W,int16,-327680 to 327670,,,,
-822,system/Ac/Grid/L3/Power,system-Grid L3,W,int16,-32768 to 32767,,,,
-823,system/Ac/Genset/L1/Power,system-Genset L1,W,int16,-32768 to 32767,,,,Power supplied by Genset tot system.
-824,system/Ac/Genset/L2/Power,system-Genset L2,W,int16,-32768 to 32767,,,,
-825,system/Ac/Genset/L3/Power,system-Genset L3,W,int16,-32768 to 32767,,,,
-826,system/Ac/ActiveIn/Source,system-Active input source,,int16,"{""0"":""Unknown"",""1"":""Grid"",""2"":""Generator"",""3"":""Shore power"",""240"":""Not connected""}",,,,0 indicates that there is an active input; but it is not configured under Settings ? System setup.
-830,systemINTERNAL,system-System time in UTC,1seconds,uint64,0 to 18446744073709551615,,R,,
-840,system/Dc/Battery/Voltage,system-Battery Voltage (System),10V DC,uint16,0 to 6553.5,,,,"Battery Voltage determined from different measurements. In order of preference: BMV-voltage (V), Multi-DC-Voltage (CV), MPPT-DC-Voltage (ScV), Charger voltage"
-841,system/Dc/Battery/Current,system-Battery Current (System),10A DC,int16,-3276.8 to 3276.7,,,,Positive: battery begin charged. Negative: battery being discharged
-842,system/Dc/Battery/Power,system-Battery Power (System),1W,int16,-32768 to 32767,,,,Positive: battery begin charged. Negative: battery being discharged
-843,system/Dc/Battery/Soc,system-Battery State of Charge (System),1%,uint16,0 to 100,,,,"Best battery state of charge, determined from different measurements."
-844,system/Dc/Battery/State,system-Battery state (System),10=idle;1=charging;2=discharging,uint16,0 to 65536,,,,
-845,system/Dc/Battery/ConsumedAmphours,system-Battery Consumed Amp hours (System),-10Ah,uint16,0 to -6553.6,,,,
-846,system/Dc/Battery/TimeToGo,system-Battery Time to Go (System),0.01s,uint16,0 to 6553600,,,,Special value: 0 = charging
-850,system/Dc/Pv/Power,system-PV - DC-coupled power,1W,uint16,0 to 65536,,,,Summation of output power of all connected Solar Chargers
-851,system/Dc/Pv/Current,system-PV - DC-coupled current,10A DC,int16,-3276.8 to 3276.7,,,,Summation of output current of all connected Solar Chargers
-855,system/Dc/Charger/Power,system-Charger power,1W,uint16,0 to 65536,,,,
-860,system/Dc/System/Power,system-DC System Power,1W,int16,-32768 to 32767,,,,Power supplied by Battery to system.
-865,system/Dc/Vebus/Current,system-VE.Bus charge current (System),10A DC,int16,-3276.8 to 3276.7,,,,Current flowing from the Multi to the dc system. Negative: the other way around.
-866,system/Dc/Vebus/Power,system-VE.Bus charge power (System),1W,int16,-32768 to 32767,,,,System value etc. AND: Positive: power flowing from the Multi to the dc system. Negative: the other way around.
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note,ha_device_class,ha_state_class,ha_entity_category
+3,vebus/Ac/ActiveIn/L1/V,vebus-Input voltage phase 1,10V AC,uint16,0 to 6553.5,,,,,,,
+4,vebus/Ac/ActiveIn/L2/V,vebus-Input voltage phase 2,10V AC,uint16,0 to 6553.5,,,,,,,
+5,vebus/Ac/ActiveIn/L3/V,vebus-Input voltage phase 3,10V AC,uint16,0 to 6553.5,,,,,,,
+6,vebus/Ac/ActiveIn/L1/I,vebus-Input current phase 1,10A AC,int16,-3276.8 to 3276.7,,,,Positive: current flowing from mains to Multi. Negative: current flowing from Multi to mains.,,,
+7,vebus/Ac/ActiveIn/L2/I,vebus-Input current phase 2,10A AC,int16,-3276.8 to 3276.7,,,,Positive: current flowing from mains to Multi. Negative: current flowing from Multi to mains.,,,
+8,vebus/Ac/ActiveIn/L3/I,vebus-Input current phase 3,10A AC,int16,-3276.8 to 3276.7,,,,Positive: current flowing from mains to Multi. Negative: current flowing from Multi to mains.,,,
+9,vebus/Ac/ActiveIn/L1/F,vebus-Input frequency 1,100Hz,int16,-327.68 to 327.67,,,,,frequency,measurement,
+10,vebus/Ac/ActiveIn/L2/F,vebus-Input frequency 2,100Hz,int16,-327.68 to 327.67,,,,,frequency,measurement,
+11,vebus/Ac/ActiveIn/L3/F,vebus-Input frequency 3,100Hz,int16,-327.68 to 327.67,,,,,frequency,measurement,
+12,vebus/Ac/ActiveIn/L1/P,vebus-Input power 1,0.1VA or Watts,int16,-327680 to 327670,,,,Sign meaning equal to Input current,,,
+13,vebus/Ac/ActiveIn/L2/P,vebus-Input power 2,0.1VA or Watts,int16,-327680 to 327670,,,,Sign meaning equal to Input current,,,
+14,vebus/Ac/ActiveIn/L3/P,vebus-Input power 3,0.1VA or Watts,int16,-327680 to 327670,,,,Sign meaning equal to Input current,,,
+15,vebus/Ac/Out/L1/V,vebus-Output voltage phase 1,10V AC,uint16,0 to 6553.5,,,,,,,
+16,vebus/Ac/Out/L2/V,vebus-Output voltage phase 2,10V AC,uint16,0 to 6553.5,,,,,,,
+17,vebus/Ac/Out/L3/V,vebus-Output voltage phase 3,10V AC,uint16,0 to 6553.5,,,,,,,
+18,vebus/Ac/Out/L1/I,vebus-Output current phase 1,10A AC,int16,-3276.8 to 3276.7,,,,Positive: current flowing from Multi to the load. Negative: current flowing from load to the Multi.,,,
+19,vebus/Ac/Out/L2/I,vebus-Output current phase 2,10A AC,int16,-3276.8 to 3276.7,,,,Positive: current flowing from Multi to the load. Negative: current flowing from load to the Multi.,,,
+20,vebus/Ac/Out/L3/I,vebus-Output current phase 3,10A AC,int16,-3276.8 to 3276.7,,,,Positive: current flowing from Multi to the load. Negative: current flowing from load to the Multi.,,,
+21,vebus/Ac/Out/L1/F,vebus-Output frequency,100Hz,int16,-327.68 to 327.67,,,,,frequency,measurement,
+22,vebus/Ac/ActiveIn/CurrentLimit,vebus-Active input current limit,10A,int16,-3276.8 to 3276.7,,W,,"See Venus-OS manual for limitations, for example when VE.Bus BMS or DMC is installed.",current,measurement,
+23,vebus/Ac/Out/L1/P,vebus-,,,,,,,,,,
+800,system/Serial,system-Serial (System),1,ascii.6,,,,,System value -> MAC address of CCGX (represented as string),,,
+806,system/Relay/0/State,system-CCGX Relay 1 state,,uint16,"{""0"":""Open"",""1"":""Closed""}",,W,,,,,
+807,system/Relay/1/State,system-CCGX Relay 2 state,,uint16,"{""0"":""Open"",""1"":""Closed""}",,W,,Relay 1 is available on Venus GX only.,,,
+808,system/Ac/PvOnOutput/L1/Power,system-PV - AC-coupled on output L1,W,uint16,0 to 65536,,,,Summation of all AC-Coupled PV Inverters on the output,power,measurement,
+809,system/Ac/PvOnOutput/L2/Power,system-PV - AC-coupled on output L2,W,uint16,0 to 65536,,,,,power,measurement,
+810,system/Ac/PvOnOutput/L3/Power,system-PV - AC-coupled on output L3,W,uint16,0 to 65536,,,,,power,measurement,
+811,system/Ac/PvOnGrid/L1/Power,system-PV - AC-coupled on input L1,W,uint16,0 to 65536,,,,Summation of all AC-Coupled PV Inverters on the input,power,measurement,
+812,system/Ac/PvOnGrid/L2/Power,system-PV - AC-coupled on input L2,W,uint16,0 to 65536,,,,,power,measurement,
+813,system/Ac/PvOnGrid/L3/Power,system-PV - AC-coupled on input L3,W,uint16,0 to 65536,,,,,power,measurement,
+814,system/Ac/PvOnGenset/L1/Power,system-PV - AC-coupled on generator L1,W,uint16,0 to 65536,,,,Summation of all AC-Coupled PV Inverters on a generator. Bit theoretic; this will never be used.,power,measurement,
+815,system/Ac/PvOnGenset/L2/Power,system-PV - AC-coupled on generator L2,W,uint16,0 to 65536,,,,,power,measurement,
+816,system/Ac/PvOnGenset/L3/Power,system-PV - AC-coupled on generator L3,W,uint16,0 to 65536,,,,,power,measurement,
+817,system/Ac/Consumption/L1/Power,system-AC Consumption L1,W,uint16,0 to 65536,,,,Power supplied by system to loads.,power,measurement,
+818,system/Ac/Consumption/L2/Power,system-AC Consumption L2,W,uint16,0 to 65536,,,,,power,measurement,
+819,system/Ac/Consumption/L3/Power,system-AC Consumption L3,W,uint16,0 to 65536,,,,,power,measurement,
+820,system/Ac/Grid/L1/Power,system-Grid L1,W,int16,-32768 to 32767,,,,Power supplied by Grid to system.,power,measurement,
+821,system/Ac/Grid/L2/Power,system-Grid L2,W,int16,-327680 to 327670,,,,,power,measurement,
+822,system/Ac/Grid/L3/Power,system-Grid L3,W,int16,-32768 to 32767,,,,,power,measurement,
+823,system/Ac/Genset/L1/Power,system-Genset L1,W,int16,-32768 to 32767,,,,Power supplied by Genset tot system.,power,measurement,
+824,system/Ac/Genset/L2/Power,system-Genset L2,W,int16,-32768 to 32767,,,,,power,measurement,
+825,system/Ac/Genset/L3/Power,system-Genset L3,W,int16,-32768 to 32767,,,,,power,measurement,
+826,system/Ac/ActiveIn/Source,system-Active input source,,int16,"{""0"":""Unknown"",""1"":""Grid"",""2"":""Generator"",""3"":""Shore power"",""240"":""Not connected""}",,,,0 indicates that there is an active input; but it is not configured under Settings ? System setup.,,,
+830,systemINTERNAL,system-System time in UTC,1seconds,uint64,0 to 18446744073709551615,,R,,,,,
+840,system/Dc/Battery/Voltage,system-Battery Voltage (System),10V DC,uint16,0 to 6553.5,,,,"Battery Voltage determined from different measurements. In order of preference: BMV-voltage (V), Multi-DC-Voltage (CV), MPPT-DC-Voltage (ScV), Charger voltage",,,
+841,system/Dc/Battery/Current,system-Battery Current (System),10A DC,int16,-3276.8 to 3276.7,,,,Positive: battery begin charged. Negative: battery being discharged,,,
+842,system/Dc/Battery/Power,system-Battery Power (System),1W,int16,-32768 to 32767,,,,Positive: battery begin charged. Negative: battery being discharged,power,measurement,
+843,system/Dc/Battery/Soc,system-Battery State of Charge (System),1%,uint16,0 to 100,,,,"Best battery state of charge, determined from different measurements.",,measurement,
+844,system/Dc/Battery/State,system-Battery state (System),10=idle;1=charging;2=discharging,uint16,0 to 65536,,,,,,,
+845,system/Dc/Battery/ConsumedAmphours,system-Battery Consumed Amp hours (System),-10Ah,uint16,0 to -6553.6,,,,,,measurement,
+846,system/Dc/Battery/TimeToGo,system-Battery Time to Go (System),0.01s,uint16,0 to 6553600,,,,Special value: 0 = charging,duration,,
+850,system/Dc/Pv/Power,system-PV - DC-coupled power,1W,uint16,0 to 65536,,,,Summation of output power of all connected Solar Chargers,power,measurement,
+851,system/Dc/Pv/Current,system-PV - DC-coupled current,10A DC,int16,-3276.8 to 3276.7,,,,Summation of output current of all connected Solar Chargers,,,
+855,system/Dc/Charger/Power,system-Charger power,1W,uint16,0 to 65536,,,,,power,measurement,
+860,system/Dc/System/Power,system-DC System Power,1W,int16,-32768 to 32767,,,,Power supplied by Battery to system.,power,measurement,
+865,system/Dc/Vebus/Current,system-VE.Bus charge current (System),10A DC,int16,-3276.8 to 3276.7,,,,Current flowing from the Multi to the dc system. Negative: the other way around.,,,
+866,system/Dc/Vebus/Power,system-VE.Bus charge power (System),1W,int16,-32768 to 32767,,,,System value etc. AND: Positive: power flowing from the Multi to the dc system. Negative: the other way around.,power,measurement,

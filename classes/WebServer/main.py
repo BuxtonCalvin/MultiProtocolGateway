@@ -41,6 +41,7 @@ import logging.handlers
 import queue as _queue
 import socket
 import threading
+from collections.abc import AsyncGenerator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -52,9 +53,9 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.engine import Engine
 
-from classes.WebServer.models import Base, ConfigBackup
+from classes.WebServer.models import ConfigBackup
 
-from .database import ensure_app_state, init_db, run_migrations, session_scope
+from .database import ensure_app_state, ensure_schema, init_db, session_scope
 from .file_watcher import FileWatcher
 from .routers.analysis import router as analysis_router
 from .routers.bridges import collect_prometheus_metrics_ports, mount_prometheus_bridges
@@ -253,8 +254,10 @@ def create_app(
     project_root  — root of MultiProtocolGateway (contains protocols/, classes/)
     """
 
+    # Annotated as AsyncGenerator (not AsyncIterator): typeshed marks the AsyncIterator form of
+    # @asynccontextmanager as deprecated, and leaving it unannotated makes some checkers pick it.
     @asynccontextmanager
-    async def lifespan(app: FastAPI):
+    async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         # ---- Startup ----
         _install_webserver_logging()
         _log.info("MPG WebServer starting up...")
@@ -264,8 +267,9 @@ def create_app(
         engine: Engine = init_db(db_dir / "mpg_staging.db")
 
         def _startup_io() -> Scanner:
-            run_migrations(db_dir / "mpg_staging.db", _ALEMBIC_INI)
-            Base.metadata.create_all(bind=engine)
+            # New database: built straight from the models (no migrations).
+            # Existing database: upgraded with Alembic. See database.ensure_schema.
+            ensure_schema(db_dir / "mpg_staging.db", _ALEMBIC_INI)
             with session_scope() as db:
                 ensure_app_state(db)
             s = Scanner(config_path, project_root)
@@ -306,7 +310,7 @@ def create_app(
             _log.error(msg)
             scanner = Scanner(config_path, project_root)
 
-        _log.info(f"Database {engine.url} initialized and migrations applied.")
+        _log.info(f"Database {engine.url} initialized and schema ready.")
 
         # State management
         app.state.config_dir      = config_dir or config_path.parent

@@ -1,106 +1,106 @@
-register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note
-0,,Current,10mA,SHORT,,,R,,length: 2byte; Positive: charging Negative: discharging
-1,,Voltage of pack,10mV,USHORT,,,R,,length: 2byte
-2,,SOC,%,8BIT,0~100%,,R,,length: 2byte
-3,,SOH,%,8BIT,0~100%,,R,,length: 2byte
-4,,Remain capacity,10mAH,USHORT,,,R,,length: 2byte
-5,,Full capacity,10mAH,USHORT,,,R,,length: 2byte
-6,,Design capacity,10mAH,USHORT,,,R,,length: 2byte
-7,,Battery cycle counts,Cycles,USHORT,,,R,,length: 2byte
-9,,Warning flag,,16BIT_FLAGS,,,R,,length: 2byte; See description-1
-10,,Protection flag,,16BIT_FLAGS,,,R,,length: 2byte; See description-2
-11,,Fault flag,,8BIT_FLAGS,,,R,,length: 2byte; See description-3
-11.b8,,Status Flag,,8BIT_FLAGS,,,R,,
-12,,Balance status,,16BIT_FLAGS,,,R,,length: 2byte
-15,,Cell voltage 1,mV,USHORT,,,R,,length: 32byte; Voltage of 16 cells; extra: 2 byte for each cell
-16,,Cell voltage 2,mV,USHORT,,,R,,
-17,,Cell voltage 3,mV,USHORT,,,R,,
-18,,Cell voltage 4,mV,USHORT,,,R,,
-19,,Cell voltage 5,mV,USHORT,,,R,,
-20,,Cell voltage 6,mV,USHORT,,,R,,
-21,,Cell voltage 7,mV,USHORT,,,R,,
-22,,Cell voltage 8,mV,USHORT,,,R,,
-23,,Cell voltage 9,mV,USHORT,,,R,,
-24,,Cell voltage 10,mV,USHORT,,,R,,
-25,,Cell voltage 11,mV,USHORT,,,R,,
-26,,Cell voltage 12,mV,USHORT,,,R,,
-27,,Cell voltage 13,mV,USHORT,,,R,,
-28,,Cell voltage 14,mV,USHORT,,,R,,
-29,,Cell voltage 15,mV,USHORT,,,R,,
-30,,Cell voltage 16,mV,USHORT,,,R,,
-31,,Cell temperature 1,01.c,4bit,,,R,,length: 8byte; 4 cell temperature; extra: 2 byte for each cell
-31.b4,,Cell temperature 2,01.c,4bit,,,R,,
-31.b8,,Cell temperature 3,01.c,4bit,,,R,,
-31.b12,,Cell temperature 4,01.c,4bit,,,R,,
-32,,Cell temperature 5,01.c,4bit,,,R,,
-32.b4,,Cell temperature 6,01.c,4bit,,,R,,
-32.b8,,Cell temperature 7,01.c,4bit,,,R,,
-32.b12,,Cell temperature 8,01.c,4bit,,,R,,
-33,,Cell temperature 9,01.c,4bit,,,R,,
-33.b4,,Cell temperature 10,01.c,4bit,,,R,,
-33.b8,,Cell temperature 11,01.c,4bit,,,R,,
-33.b12,,Cell temperature 12,01.c,4bit,,,R,,
-34,,Cell temperature 13,01.c,4bit,,,R,,
-34.b4,,Cell temperature 14,01.c,4bit,,,R,,
-34.b8,,Cell temperature 15,01.c,4bit,,,R,,
-34.b12,,Cell temperature 16,01.c,4bit,,,R,,
-35,,MOSFET temperature,0.1c,SHORT,,,R,,length: 2byte; Or invalid
-36,,Environment temperature,0.1c,SHORT,,,R,,length: 2byte; Or invalid
-60,,Pack OV alarm,mV,USHORT,,,RW,,length: 2byte
-61,,Pack OV protection,mV,USHORT,,,RW,,length: 2byte
-62,,Pack OV release protection,mV,USHORT,,,RW,,length: 2byte
-63,,Pack OV protection delay time,0.1S,UINT8,1~255,,RW,,length: 2byte
-64,,Cell OV alarm,mV,USHORT,,,RW,,length: 2byte
-65,,Cell OV protection,mV,USHORT,,,RW,,length: 2byte
-66,,Cell OV release protection,mV,USHORT,,,RW,,length: 2byte
-67,,Cell OV protection delay time,0.1S,UINT8,1~255,,RW,,length: 2byte
-68,,Pack UV alarm,mV,USHORT,,,RW,,length: 2byte
-69,,Pack UV protection,mV,USHORT,,,RW,,length: 2byte
-70,,Pack UV release protection,mV,USHORT,,,RW,,length: 2byte
-71,,Pack UV protection delay time,0.1S,UINT8,1~255,,RW,,length: 2byte
-72,,Cell UV alarm,mV,USHORT,,,RW,,length: 2byte
-73,,Cell UV protection,mV,USHORT,,,RW,,length: 2byte
-74,,Cell UV release protection,mV,USHORT,,,RW,,length: 2byte
-75,,Cell UV protection delay time,0.1S,UINT8,1~255,,RW,,length: 2byte
-76,,Charging OC alarm,A,USHORT,,,RW,,length: 2byte
-77,,Charging OC protection,A,USHORT,,,RW,,length: 2byte
-78,,Charging OC protection delay time,0.1S,UINT8,1~255,,RW,,length: 2byte
-79,,Discharging OC alarm,A,USHORT,,,RW,,length: 2byte
-80,,DischargingOCprotection,A,USHORT,,,RW,,length: 2byte
-81,,DischargingOCprotection delay time,0.1S,UINT8,1~255,,RW,,length: 2byte
-82,,Discharging OC2 protection,A,USHORT,,,RW,,length: 2byte
-83,,Discharging OC2 protection delay time,0.025S,UINT8,1~255,,RW,,length: 2byte
-84,,Charging OT alarm,0.1c,SHORT,,,RW,,length: 2byte
-85,,Charging OT protection,0.1c,SHORT,,,RW,,length: 2byte
-86,,Charging OT release protection,0.1c,SHORT,,,RW,,length: 2byte
-87,,Discharging OT alarm,0.1c,SHORT,,,RW,,length: 2byte
-88,,DischargingOTprotection,0.1c,SHORT,,,RW,,length: 2byte
-89,,Discharging OT release,0.1c,SHORT,,,RW,,length: 2byte
-90,,Charging UT alarm,0.1c,SHORT,,,RW,,length: 2byte
-91,,Charging UT protection,0.1c,SHORT,,,RW,,length: 2byte
-92,,Charging UT release protection,0.1c,SHORT,,,RW,,length: 2byte
-93,,Discharging UT alarm,0.1c,SHORT,,,RW,,length: 2byte
-94,,DischargingUTprotection,0.1c,SHORT,,,RW,,length: 2byte
-95,,Discharging UT release protection,0.1c,SHORT,,,RW,,length: 2byte
-96,,MOSFET OT alarm,0.1c,SHORT,,,RW,,length: 2byte; Or invalid parameters in BMS-4820
-97,,MOSFET OT protection,0.1c,SHORT,,,RW,,length: 2byte
-98,,MOSFET OT release protection,0.1c,SHORT,,,RW,,length: 2byte
-99,,Environment OT alarm,0.1c,SHORT,,,RW,,length: 2byte
-100,,EnvironmentOTprotection,0.1c,SHORT,,,RW,,length: 2byte
-101,,Environment OT release protection,0.1c,SHORT,,,RW,,length: 2byte
-102,,Environment UT alarm,0.1c,SHORT,,,RW,,length: 2byte
-103,,EnvironmentUTprotection,0.1c,SHORT,,,RW,,length: 2byte
-104,,Environment UT release protection,0.1c,SHORT,,,RW,,length: 2byte
-105,,Balance start cell voltage,mV,USHORT,,,RW,,length: 2byte
-106,,Balance start delta voltage,mV,USHORT,,,RW,,length: 2byte
-107,,Pack full charge voltage,mV,USHORT,,,RW,,length: 2byte
-108,,Pack full charge current,mA,USHORT,,,RW,,length: 2byte
-109,,Cell sleep voltage,mV,USHORT,,,RW,,length: 2byte
-110,,Cell sleep delay time,min,USHORT,,,RW,,length: 2byte
-111,,Short circuit protect delay time,25uS,UINT8,1~20,,RW,,length: 2byte; Max 500uS
-112,,SOC alarm threshold,%,UINT8,0~100%,,RW,,length: 2byte
-113,,Charging OC2 protection,A,USHORT,,,RW,,length: 2byte
-114,,Charging OC2 protection delay time,0.025S,UINT8,1~255,,RW,,length: 2byte
-0150-0159,,Version information,ASCII,ASCII,,,R,,length: 20byte
-0160-0169,,Model SN,ASCII,ASCII,,,RW,,length: 20byte; BMS Manufacturer
-0170-0179,Serial Number,PACK SN,ASCII,ASCII,,,RW,,length: 20byte; PACK Manufacturer
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note,ha_device_class,ha_state_class,ha_entity_category
+0,,Current,10mA,SHORT,,,R,,length: 2byte; Positive: charging Negative: discharging,current,measurement,
+1,,Voltage of pack,10mV,USHORT,,,R,,length: 2byte,voltage,measurement,
+2,,SOC,%,8BIT,0~100%,,R,,length: 2byte,battery,measurement,
+3,,SOH,%,8BIT,0~100%,,R,,length: 2byte,,measurement,
+4,,Remain capacity,10mAH,USHORT,,,R,,length: 2byte,,measurement,
+5,,Full capacity,10mAH,USHORT,,,R,,length: 2byte,,measurement,
+6,,Design capacity,10mAH,USHORT,,,R,,length: 2byte,,measurement,
+7,,Battery cycle counts,Cycles,USHORT,,,R,,length: 2byte,,,
+9,,Warning flag,,16BIT_FLAGS,,,R,,length: 2byte; See description-1,,,
+10,,Protection flag,,16BIT_FLAGS,,,R,,length: 2byte; See description-2,,,
+11,,Fault flag,,8BIT_FLAGS,,,R,,length: 2byte; See description-3,,,
+11.b8,,Status Flag,,8BIT_FLAGS,,,R,,,,,
+12,,Balance status,,16BIT_FLAGS,,,R,,length: 2byte,,,
+15,,Cell voltage 1,mV,USHORT,,,R,,length: 32byte; Voltage of 16 cells; extra: 2 byte for each cell,voltage,measurement,
+16,,Cell voltage 2,mV,USHORT,,,R,,,voltage,measurement,
+17,,Cell voltage 3,mV,USHORT,,,R,,,voltage,measurement,
+18,,Cell voltage 4,mV,USHORT,,,R,,,voltage,measurement,
+19,,Cell voltage 5,mV,USHORT,,,R,,,voltage,measurement,
+20,,Cell voltage 6,mV,USHORT,,,R,,,voltage,measurement,
+21,,Cell voltage 7,mV,USHORT,,,R,,,voltage,measurement,
+22,,Cell voltage 8,mV,USHORT,,,R,,,voltage,measurement,
+23,,Cell voltage 9,mV,USHORT,,,R,,,voltage,measurement,
+24,,Cell voltage 10,mV,USHORT,,,R,,,voltage,measurement,
+25,,Cell voltage 11,mV,USHORT,,,R,,,voltage,measurement,
+26,,Cell voltage 12,mV,USHORT,,,R,,,voltage,measurement,
+27,,Cell voltage 13,mV,USHORT,,,R,,,voltage,measurement,
+28,,Cell voltage 14,mV,USHORT,,,R,,,voltage,measurement,
+29,,Cell voltage 15,mV,USHORT,,,R,,,voltage,measurement,
+30,,Cell voltage 16,mV,USHORT,,,R,,,voltage,measurement,
+31,,Cell temperature 1,01.c,4bit,,,R,,length: 8byte; 4 cell temperature; extra: 2 byte for each cell,temperature,measurement,
+31.b4,,Cell temperature 2,01.c,4bit,,,R,,,temperature,measurement,
+31.b8,,Cell temperature 3,01.c,4bit,,,R,,,temperature,measurement,
+31.b12,,Cell temperature 4,01.c,4bit,,,R,,,temperature,measurement,
+32,,Cell temperature 5,01.c,4bit,,,R,,,temperature,measurement,
+32.b4,,Cell temperature 6,01.c,4bit,,,R,,,temperature,measurement,
+32.b8,,Cell temperature 7,01.c,4bit,,,R,,,temperature,measurement,
+32.b12,,Cell temperature 8,01.c,4bit,,,R,,,temperature,measurement,
+33,,Cell temperature 9,01.c,4bit,,,R,,,temperature,measurement,
+33.b4,,Cell temperature 10,01.c,4bit,,,R,,,temperature,measurement,
+33.b8,,Cell temperature 11,01.c,4bit,,,R,,,temperature,measurement,
+33.b12,,Cell temperature 12,01.c,4bit,,,R,,,temperature,measurement,
+34,,Cell temperature 13,01.c,4bit,,,R,,,temperature,measurement,
+34.b4,,Cell temperature 14,01.c,4bit,,,R,,,temperature,measurement,
+34.b8,,Cell temperature 15,01.c,4bit,,,R,,,temperature,measurement,
+34.b12,,Cell temperature 16,01.c,4bit,,,R,,,temperature,measurement,
+35,,MOSFET temperature,0.1c,SHORT,,,R,,length: 2byte; Or invalid,temperature,measurement,
+36,,Environment temperature,0.1c,SHORT,,,R,,length: 2byte; Or invalid,temperature,measurement,
+60,,Pack OV alarm,mV,USHORT,,,RW,,length: 2byte,voltage,measurement,
+61,,Pack OV protection,mV,USHORT,,,RW,,length: 2byte,voltage,measurement,
+62,,Pack OV release protection,mV,USHORT,,,RW,,length: 2byte,voltage,measurement,
+63,,Pack OV protection delay time,0.1S,UINT8,1~255,,RW,,length: 2byte,,,
+64,,Cell OV alarm,mV,USHORT,,,RW,,length: 2byte,voltage,measurement,
+65,,Cell OV protection,mV,USHORT,,,RW,,length: 2byte,voltage,measurement,
+66,,Cell OV release protection,mV,USHORT,,,RW,,length: 2byte,voltage,measurement,
+67,,Cell OV protection delay time,0.1S,UINT8,1~255,,RW,,length: 2byte,,,
+68,,Pack UV alarm,mV,USHORT,,,RW,,length: 2byte,voltage,measurement,
+69,,Pack UV protection,mV,USHORT,,,RW,,length: 2byte,voltage,measurement,
+70,,Pack UV release protection,mV,USHORT,,,RW,,length: 2byte,voltage,measurement,
+71,,Pack UV protection delay time,0.1S,UINT8,1~255,,RW,,length: 2byte,,,
+72,,Cell UV alarm,mV,USHORT,,,RW,,length: 2byte,voltage,measurement,
+73,,Cell UV protection,mV,USHORT,,,RW,,length: 2byte,voltage,measurement,
+74,,Cell UV release protection,mV,USHORT,,,RW,,length: 2byte,voltage,measurement,
+75,,Cell UV protection delay time,0.1S,UINT8,1~255,,RW,,length: 2byte,,,
+76,,Charging OC alarm,A,USHORT,,,RW,,length: 2byte,current,measurement,
+77,,Charging OC protection,A,USHORT,,,RW,,length: 2byte,current,measurement,
+78,,Charging OC protection delay time,0.1S,UINT8,1~255,,RW,,length: 2byte,,,
+79,,Discharging OC alarm,A,USHORT,,,RW,,length: 2byte,current,measurement,
+80,,DischargingOCprotection,A,USHORT,,,RW,,length: 2byte,current,measurement,
+81,,DischargingOCprotection delay time,0.1S,UINT8,1~255,,RW,,length: 2byte,,,
+82,,Discharging OC2 protection,A,USHORT,,,RW,,length: 2byte,current,measurement,
+83,,Discharging OC2 protection delay time,0.025S,UINT8,1~255,,RW,,length: 2byte,,,
+84,,Charging OT alarm,0.1c,SHORT,,,RW,,length: 2byte,temperature,measurement,
+85,,Charging OT protection,0.1c,SHORT,,,RW,,length: 2byte,temperature,measurement,
+86,,Charging OT release protection,0.1c,SHORT,,,RW,,length: 2byte,temperature,measurement,
+87,,Discharging OT alarm,0.1c,SHORT,,,RW,,length: 2byte,temperature,measurement,
+88,,DischargingOTprotection,0.1c,SHORT,,,RW,,length: 2byte,temperature,measurement,
+89,,Discharging OT release,0.1c,SHORT,,,RW,,length: 2byte,temperature,measurement,
+90,,Charging UT alarm,0.1c,SHORT,,,RW,,length: 2byte,temperature,measurement,
+91,,Charging UT protection,0.1c,SHORT,,,RW,,length: 2byte,temperature,measurement,
+92,,Charging UT release protection,0.1c,SHORT,,,RW,,length: 2byte,temperature,measurement,
+93,,Discharging UT alarm,0.1c,SHORT,,,RW,,length: 2byte,temperature,measurement,
+94,,DischargingUTprotection,0.1c,SHORT,,,RW,,length: 2byte,temperature,measurement,
+95,,Discharging UT release protection,0.1c,SHORT,,,RW,,length: 2byte,temperature,measurement,
+96,,MOSFET OT alarm,0.1c,SHORT,,,RW,,length: 2byte; Or invalid parameters in BMS-4820,temperature,measurement,
+97,,MOSFET OT protection,0.1c,SHORT,,,RW,,length: 2byte,temperature,measurement,
+98,,MOSFET OT release protection,0.1c,SHORT,,,RW,,length: 2byte,temperature,measurement,
+99,,Environment OT alarm,0.1c,SHORT,,,RW,,length: 2byte,temperature,measurement,
+100,,EnvironmentOTprotection,0.1c,SHORT,,,RW,,length: 2byte,temperature,measurement,
+101,,Environment OT release protection,0.1c,SHORT,,,RW,,length: 2byte,temperature,measurement,
+102,,Environment UT alarm,0.1c,SHORT,,,RW,,length: 2byte,temperature,measurement,
+103,,EnvironmentUTprotection,0.1c,SHORT,,,RW,,length: 2byte,temperature,measurement,
+104,,Environment UT release protection,0.1c,SHORT,,,RW,,length: 2byte,temperature,measurement,
+105,,Balance start cell voltage,mV,USHORT,,,RW,,length: 2byte,voltage,measurement,
+106,,Balance start delta voltage,mV,USHORT,,,RW,,length: 2byte,voltage,measurement,
+107,,Pack full charge voltage,mV,USHORT,,,RW,,length: 2byte,voltage,measurement,
+108,,Pack full charge current,mA,USHORT,,,RW,,length: 2byte,current,measurement,
+109,,Cell sleep voltage,mV,USHORT,,,RW,,length: 2byte,voltage,measurement,
+110,,Cell sleep delay time,min,USHORT,,,RW,,length: 2byte,duration,,
+111,,Short circuit protect delay time,25uS,UINT8,1~20,,RW,,length: 2byte; Max 500uS,,,
+112,,SOC alarm threshold,%,UINT8,0~100%,,RW,,length: 2byte,,measurement,
+113,,Charging OC2 protection,A,USHORT,,,RW,,length: 2byte,current,measurement,
+114,,Charging OC2 protection delay time,0.025S,UINT8,1~255,,RW,,length: 2byte,,,
+0150-0159,,Version information,ASCII,ASCII,,,R,,length: 20byte,,,diagnostic
+0160-0169,,Model SN,ASCII,ASCII,,,RW,,length: 20byte; BMS Manufacturer,,,
+0170-0179,Serial Number,PACK SN,ASCII,ASCII,,,RW,,length: 20byte; PACK Manufacturer,,,

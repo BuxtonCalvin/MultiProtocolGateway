@@ -140,6 +140,7 @@ The protocol editor provides a full in-browser spreadsheet-style view of the reg
 - View a real-time diff of staged versus on-disk rows before committing
 - Manage orphaned rows (registers present in the DB but no longer in the CSV)
 - Import and export register maps as CSV or JSON
+- Set the optional Home Assistant **class**, **state** and **category** of each register from dropdowns (blank = inferred from the unit)
 
 [![Protocols](classes/WebServer/static/screenshots/protocol_edit.png)](classes/WebServer/static/screenshots/protocol_edit.png)
 
@@ -377,6 +378,8 @@ The short alias `mpg` can be used as the service name if preferred, matching the
 
 MPG publishes data to MQTT using Home Assistant's auto-discovery format. Devices appear automatically under **Settings → Devices & Services → MQTT** once the broker is configured on both sides.
 
+With `discovery_enabled = true`, entities are created with the right Home Assistant type: sensors carry units, device classes and state classes (so they work with the Energy dashboard), coils and discrete inputs become binary sensors, and registers you have enabled for writing appear as number, select or switch controls. Entities go unavailable if MPG stops reporting, and the last known values are replayed when Home Assistant restarts. See the [MQTT bridge guide](documentation/bridges/MQTT/MQTT_bridge.md#home-assistant-discovery) for details, including how to keep the previous sensors-only behaviour (`discovery_entity_types = sensor`).
+
 ### Install Mosquitto on Home Assistant (if not installed via docker)
 
 ``` ini
@@ -393,7 +396,7 @@ For connecting an external MQTT broker to Home Assistant, see [this guide](https
 
 ### Troubleshooting: Unknown Status
 
-If all MQTT values appear as "Unknown" immediately after setup, this is a known Home Assistant discovery timing issue. Restart the MPG service and the values will populate correctly.
+If MQTT values appear as "Unknown" right after setup, wait for the next read cycle: MPG re-announces discovery and replays the last known values whenever Home Assistant reports it is online, so a restart of MPG should no longer be needed. Registers with a long `read interval` stay "Unknown" until they are first read.
 
 ---
 

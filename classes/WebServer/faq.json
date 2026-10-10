@@ -1,0 +1,384 @@
+{
+  "_comment": "FAQ content for the admin UI (pages/faq.html). Answers are Markdown. 'log' lists literal log text the entry explains (shown on the page and searchable); 'tags' are extra search words. Ids must be unique and are used for deep links, e.g. /pages/faq#interleaved-cycle. Never paste real tokens, passwords or serial numbers here.",
+  "version": 1,
+  "categories": [
+    {
+      "id": "general",
+      "title": "Using the admin UI",
+      "items": [
+        {
+          "id": "what-is-mpg",
+          "q": "What is MPG?",
+          "a": "Multi Protocol Gateway (MPG) is a data-collection middleware that reads registers from hardware devices (inverters, batteries) over Modbus TCP/RTU and forwards the data to one or more bridge transports such as MQTT or TimescaleDB."
+        },
+        {
+          "id": "what-is-a-scraper",
+          "q": "What is a Scraper?",
+          "a": "A Scraper is a transport configured with a protocol_version. It actively polls device registers on a schedule and produces metric data. Examples: an EG4 18KPV inverter on Modbus TCP."
+        },
+        {
+          "id": "what-is-a-bridge",
+          "q": "What is a Bridge?",
+          "a": "A Bridge is a transport without a protocol — it only receives and stores/forwards data. Examples: MQTT, InfluxDB, TimescaleDB (time-series storage)."
+        },
+        {
+          "id": "what-does-commit-all-changes-do",
+          "q": "What does Commit All Changes do?",
+          "a": "It writes all staged UI edits back to config.cfg and updates the protocol mask/screen/override files on disk. A timestamped backup of the previous config.cfg is created first. The gateway does not auto-restart — you must restart it to pick up the changes."
+        },
+        {
+          "id": "what-is-the-dirty-state-indicator",
+          "q": "What is the dirty state indicator?",
+          "a": "The orange dot (●) next to a setting or the pulsing 'Commit All Changes' button means a staged value differs from what is currently on disk. Nothing is written until you commit."
+        },
+        {
+          "id": "what-is-an-orphaned-setting",
+          "q": "What is an orphaned setting?",
+          "a": "A setting that exists in the database but is no longer referenced by any transport class in the codebase. This typically happens after a transport is renamed or removed. Orphaned settings are never written to config.cfg and should be reviewed and pruned."
+        },
+        {
+          "id": "what-are-the-write-mask-screen-checkboxes-in-the",
+          "q": "What are the Write / Mask / Screen checkboxes in the protocol table?",
+          "a": "Write (W): enables write-back of that register from the UI to the hardware — only available if the protocol CSV marks it as writable (via the MQTT bridge transport). Mask (M): includes the metric in the variable_mask file, meaning it will be scraped. Screen (S): adds the metric to the variable_screen file, meaning it will not be scraped."
+        },
+        {
+          "id": "can-i-edit-the-protocol-csv-directly",
+          "q": "Can I edit the protocol CSV directly?",
+          "a": "Yes — select the protocol from the Protocols menu. You can view and edit the CSV content. Changes are staged in the database and committed on demand. The original CSV is never modified without a backup."
+        },
+        {
+          "id": "how-do-i-add-a-new-protocol",
+          "q": "How do I add a new protocol?",
+          "a": "Use the 'Create Protocol' wizard in the menu bar. It will guide you through choosing a hardware manufacturer, choosing an existing protocol or creating a new on, and choosing a modbus protocol type. The new protocol is added to the staging database and written to a protocol folder on commit.  The protocol folder organization is based on manufacturer."
+        },
+        {
+          "id": "how-do-i-add-a-new-scraper-device",
+          "q": "How do I add a new scraper device?",
+          "a": "Use the 'Create Scraper' wizard in the menu bar. It will guide you through choosing a transport type, entering connection parameters, and linking to a bridge. The new device is added to the staging database and written to config.cfg on commit."
+        },
+        {
+          "id": "what-port-does-the-web-ui-run-on",
+          "q": "What port does the web UI run on?",
+          "a": "Port 1717 by default. Access it at `http://<your-gateway-host>:1717/`"
+        },
+        {
+          "id": "after-a-commit-does-the-ui-restart-the-gateway-a",
+          "q": "After a commit, does the UI restart the gateway automatically?",
+          "a": "No. The gateway process must be restarted manually after a commit for configuration changes to take effect. This is intentional — the UI does not interrupt live data collection."
+        },
+        {
+          "id": "where-are-config-backups-stored",
+          "q": "Where are config backups stored?",
+          "a": "In MultiProtocolGateway (or App in docker)/config/backups/ as timestamped .cfg files. You can roll back to any backup via the Diff panel."
+        }
+      ]
+    },
+    {
+      "id": "log",
+      "title": "Understanding your log",
+      "intro": "Messages that look alarming, or that need context to make sense of. Paste a line from your log into the search box to find its entry.",
+      "items": [
+        {
+          "id": "log-too-big",
+          "q": "Why is my log so large, and what are the 'pymodbus … Processing: 0x…' lines?",
+          "a": "Those lines are **DEBUG** output. At DEBUG level every Modbus request and reply, every HTTP call to Pushover/Telegram, and every metric written is logged. In one two-day sample, DEBUG lines made up about 87% of 818,000 lines.\n\nSet the log level to **INFO** (or WARNING) on the [Logging Settings](/pages/logging-settings) page, or per bridge in its settings panel, once things are working. INFO still shows connections, reconnects, writes and every warning on this page.",
+          "log": [
+            "pymodbus.logging: Processing: 0x",
+            "decoded PDU function_code(3 sub -1)",
+            "Register range check HOLDING"
+          ],
+          "tags": [
+            "debug",
+            "size",
+            "level"
+          ]
+        },
+        {
+          "id": "share-log-safely",
+          "q": "Is it safe to share my log?",
+          "a": "**Mostly, but look through it first.** MPG now passes every log line through a redaction filter before it is written:\n\n- Telegram bot tokens, `Bearer`/`Basic` credentials, `user:password@` in URLs, `password=` / `token=` pairs and `'password': '…'` entries are replaced by `<redacted>`. So is every password, token, secret, API key and user key value found in `config.cfg`, wherever it turns up.\n- The per-request lines of the `httpx` library, which printed the full Telegram URL including the bot token, are no longer logged. MPG's own *sent / failed* messages remain.\n\nTwo limits:\n\n- **Logs written by older versions are not rewritten.** They can contain the Telegram bot token in `httpx: HTTP Request: POST https://api.telegram.org/bot<token>/…` lines (logged even at INFO) and in `telegram.Bot` DEBUG lines. If such a log has been shared, regenerate the token with Telegram's *BotFather*.\n- Redaction only knows about credentials. Device and broker IP addresses, chat IDs and serial numbers are not secrets to MPG and stay in the log, so check before posting one publicly.",
+          "log": [
+            "httpx: HTTP Request: POST https://api.telegram.org/bot",
+            "Set Bot API URL: https://api.telegram.org/bot"
+          ],
+          "tags": [
+            "security",
+            "token",
+            "privacy"
+          ]
+        },
+        {
+          "id": "redacted-in-log",
+          "q": "What does '<redacted>' in my log mean?",
+          "a": "MPG replaced a **secret** with `<redacted>` at the moment the line was written, so it never reaches the log file. It only changes what is written: the real value is still used for the connection, and nothing is lost from a message you need, because the rest of the line stays intact (for example `https://api.telegram.org/bot<redacted>/sendMessage`).\n\n**Tracebacks are never removed or shortened.** Every frame, file name, line number, source line and the exception type stay exactly as Python produced them; only a secret that happens to appear inside the exception message (or in a literal in a source line) is replaced.\n\nSecrets are recognised by their shape (Telegram tokens, `Bearer` headers, `password=…` and so on) and by value: every password, token, secret, API key and user key in `config.cfg` is registered at startup and hidden wherever it appears. If you add a new credential to `config.cfg`, restart MPG so it is registered.\n\nIf a line you are troubleshooting has an unexpected `<redacted>`, the match was probably on a setting whose name contains `token`, `password` or `secret`; the surrounding text and the log level still tell you what happened.",
+          "log": [
+            "<redacted>",
+            "bot<redacted>"
+          ],
+          "tags": [
+            "security",
+            "privacy",
+            "token"
+          ]
+        },
+        {
+          "id": "interleaved-cycle",
+          "q": "'Interleaved cycle still running … skipping this tick' appears every 30 seconds. Is something wrong?",
+          "a": "Usually **no, but your data is being collected half as often as the setting says.**\n\nA scraper starts a read cycle every `read_interval` seconds (15 s in the sample log). If the previous cycle has not finished when the next tick arrives, MPG skips that tick instead of starting a second, overlapping read on the same device. The warning is logged each time that happens.\n\nIn the sample, each cycle took between 15 and 30 seconds, so every second tick was skipped. Data was written every 30 s instead of 15 s, with no gaps and no data loss. The time is spent mostly waiting on the device: each Modbus request took 1–3 seconds through the gateway in front of this inverter, and the version that produced that log re-read the inverter's identity (about seven small requests) on every cycle. Current versions read it once at connect (see *Why does the log show 'Reconstructing EG4 serial number …'*), which removes most of that time; the remaining cycle time is the real data reads.\n\nWhat you can do:\n- **Set `read_interval` to what the device can really deliver** (30 s here). The data cadence stays the same and the warnings stop.\n- If you use TimescaleDB, the hint in the message is also worth knowing: `write_requires_complete_cycle` holds back writes until a whole cycle succeeds, so a slow cycle delays rows. Turning it off lets partial cycles through.\n- If cycles take *much* longer than usual, or you see *cycle timed out*, the device or its network link is struggling; see the next entry.",
+          "log": [
+            "Interleaved cycle still running for [",
+            "skipping this tick to avoid overlapping reads"
+          ],
+          "tags": [
+            "scheduling",
+            "read_interval",
+            "slow"
+          ]
+        },
+        {
+          "id": "cycle-timed-out",
+          "q": "What does \"Transport '…' cycle timed out - evicting\" mean?",
+          "a": "A read cycle did not finish within its time limit, so MPG **gave up on it and started over**.\n\nThe limit is an estimate based on the Modbus timeout, the retry count and how many register blocks the protocol reads. In the sample log, one inverter read simply went silent after a normal reply: nothing was logged for almost five minutes, then the warning appeared and the next cycle ran normally. In the sample, the battery reads and database writes paused as well for those five minutes, leaving a **gap in the data**.\n\nIt points to the device or the link, not to MPG: a Wi-Fi dongle or RS-485 gateway that stopped answering, a loose cable, or a device that was busy or restarting. Check whether it recurs at the same time of day. If it does, look at what else uses that gateway (a vendor app or cloud sync polling the same device is a common cause). Lowering the Modbus timeout or `max_retries_per_block` shortens the worst-case gap, at the cost of giving up sooner on a slow reply.",
+          "log": [
+            "cycle timed out - evicting."
+          ],
+          "tags": [
+            "timeout",
+            "gap",
+            "modbus"
+          ]
+        },
+        {
+          "id": "eg4-serial-every-cycle",
+          "q": "Why does the log show 'Reconstructing EG4 serial number …' and reads of registers 2–6, 19–20, 0–2 and 7–11?",
+          "a": "That is MPG **identifying an EG4 inverter**: it reassembles the serial number from holding registers 2–6 (one request per register), then reads the device type (register 19), the model (0–1), the firmware version (7–10) and the parallel-group role. The reads ignore your variable mask and screen files (the log says *fixed address, bypassing mask/screen*), so they happen even if you have excluded the whole HOLDING register type from scraping.\n\nThe results are **cached and reused for every cycle**: `serial_number`, `model`, `firmware_version`, `hardware_kind`, `is_gridboss` and the battery module serials all come from memory, so a running system makes no identification reads. You will see the lines again:\n\n- **at every start of MPG**, and after the connection to the inverter was lost and re-established (the firmware may have been updated meanwhile). A reconnect refreshes the values at most once every five minutes, so a flapping link cannot cause bursts of reads;\n- **if the first attempt failed** (a timeout or a misread). MPG then retries from the scrape cycle after 1, 2, 4 … minutes, up to once an hour, until the serial number is read, and the line *EG4 identification completed on retry* tells you it worked.\n\n**Older versions re-read all of this on every cycle**: about seven extra Modbus requests that, on a slow gateway, made up most of the cycle time and were the main cause of *Interleaved cycle still running*. If you still see these lines every cycle, you are running one of those versions.\n\nBatteries do not take part: an EG4 battery's serial number is only available over CANbus, so MPG reads nothing for it (see the entry on blank serial numbers).",
+          "log": [
+            "Reconstructing EG4 serial number from HOLDING registers",
+            "Read EG4 SN from HOLDING:",
+            "EG4 identification completed on retry",
+            "EG4 identification refreshed after reconnect"
+          ],
+          "tags": [
+            "eg4",
+            "serial",
+            "performance"
+          ]
+        },
+        {
+          "id": "variable-mask-no-holding",
+          "q": "'variable_mask has N entries but none match any HOLDING register … excluding the ENTIRE HOLDING registry type'",
+          "a": "MPG checks each register type against your **variable mask** (the list of metrics you chose to scrape). A mask works as a whitelist: only the metrics in it are scraped. If it contains entries but *none* belong to the HOLDING registers, nothing would be kept from that type, so MPG skips the whole HOLDING type instead of reading it only to discard everything (*0 metrics will be scraped from it*).\n\nThe wording of the warning assumes a mistake (a mask that refers to names a protocol update removed). But if you deliberately picked only **input registers**, which is normal for an inverter whose live data is all in the INPUT bank, then it is working as intended and the warning is just a reminder. Nothing is lost: the metrics you chose are still scraped.\n\nIt is a real problem only if you *expected* holding-register metrics (battery thresholds, settings) in your data. In that case open the protocol table, tick **Mask (M)** for the holding registers you want, and commit. The names in the mask file must match the protocol CSV's variable names exactly.",
+          "log": [
+            "variable_mask has",
+            "none match any HOLDING register",
+            "excluding the ENTIRE HOLDING registry type"
+          ],
+          "tags": [
+            "mask",
+            "holding",
+            "protocol"
+          ]
+        },
+        {
+          "id": "writable-allowlist",
+          "q": "'… protocol-writable but excluded from MQTT write topics because they're missing from the writable CSV allowlist'",
+          "a": "A write-enabled MQTT transport only creates a **write topic** for a register if it is both marked writable in the protocol *and* listed in that transport's writable allowlist file (for example `inverter_write.writable.csv` in the config folder). This keeps a typo or a stray message from changing an inverter setting you never meant to expose.\n\nThe warning names the variables that are writable in the protocol but not in the allowlist, such as `accharge_bat_current`. No topic was subscribed for them, so they cannot be written over MQTT. Nothing is broken.\n\nTo allow one, add its row to the allowlist using the protocol's **documented name** (the exact column the message mentions), then restart. If you did not want it writable, ignore the warning.",
+          "log": [
+            "are protocol-writable but excluded from MQTT write topics",
+            "writable CSV allowlist"
+          ],
+          "tags": [
+            "mqtt",
+            "write",
+            "allowlist"
+          ]
+        },
+        {
+          "id": "blank-serial-battery",
+          "q": "Why is the serial number blank for my EG4 battery ('serial numbers: ,')?",
+          "a": "An EG4 battery's serial number is **only readable over its CANbus interface, not over Modbus**, so MPG deliberately does not try. The log says so: *serial number requires a CANbus connection and isn't readable over Modbus*.\n\nThat is why the battery has an empty `device_identifier` and serial tag, and why InfluxDB messages such as `Wrote 2 points to InfluxDB (serial numbers: ,)` show empty entries: the list has one slot per point written, and the battery's slot is empty. Inverter points show their serial. The line `Transport … serial number:` with nothing after it is the same fact.\n\nIf you need to tell batteries apart, use the **device name** (for example \"Battery 2\"), which is always set.",
+          "log": [
+            "serial number requires a CANbus connection and isn't readable over Modbus",
+            "Wrote 2 points to InfluxDB (serial numbers: ,)"
+          ],
+          "tags": [
+            "eg4",
+            "battery",
+            "serial",
+            "influxdb"
+          ]
+        },
+        {
+          "id": "unsolicited-bytes",
+          "q": "'discarded N unsolicited byte(s) received before any request was sent'",
+          "a": "Some Modbus-TCP gateways send a short **banner** the moment you connect, before any request. It isn't part of the Modbus protocol and would corrupt the first reply if left in the buffer, so MPG reads and discards it. The log says as much: it is filtered automatically and does not indicate a problem.\n\nYou may also see a DEBUG line saying a *priming-byte drain read failed (non-fatal): timed out*. That just means this gateway sent no banner this time.",
+          "log": [
+            "discarded 6 unsolicited byte(s)",
+            "priming-byte drain read failed (non-fatal)"
+          ],
+          "tags": [
+            "modbus",
+            "startup",
+            "benign"
+          ]
+        },
+        {
+          "id": "bms-cache-defaults",
+          "q": "'Holding register cache will load on first successful scrape cycle. Balancing inference will use built-in defaults'",
+          "a": "For EG4 batteries MPG works out whether a pack is **balancing** from the BMS thresholds stored in its holding registers (balance voltage, balance voltage difference, cell over-voltage release). It cannot read them at the moment it connects, so it loads them during the first successful scrape cycle and, until then, uses built-in defaults (3.4 V, 0.04 V, 3.45 V).\n\nThe next log line, *EG4 BMS threshold registers loaded …*, shows what was read. These reads ignore the variable mask on purpose, so excluding the thresholds from your mask does not change the result.",
+          "log": [
+            "Holding register cache will load on first successful scrape cycle",
+            "EG4 BMS threshold registers loaded"
+          ],
+          "tags": [
+            "eg4",
+            "battery",
+            "balancing",
+            "startup"
+          ]
+        },
+        {
+          "id": "mqtt-reconnect",
+          "q": "'[DISCONNECTED] transport.mqtt connection lost' followed by 'Reconnect attempt N — waiting Ns'",
+          "a": "The MQTT broker dropped the connection. MPG starts a background reconnect: it waits a few seconds, tries again, and **waits longer after each failure**, so a broker that is down does not get hammered. A failure such as `[Errno 111] Connection refused` means the host answered but nothing was listening on the broker port, which is typical while a broker or its container is restarting. `❌ [COMMUNICATION LOST] --- Host` is the same event reported for the host.\n\nWhen it comes back, MPG logs *Connected with result code Success* and *Re-subscribed to N write topic(s)*, so MQTT write commands work again.\n\n**Messages published while the broker is away are not queued.** An `MQTT Publish failed: No connection to broker` line means that one update was dropped, and the next scrape publishes fresh values. This differs from InfluxDB and TimescaleDB, which keep a backlog. A drop followed by an immediate reconnect (as happened twice within two seconds in the sample) is a broker restart.",
+          "log": [
+            "[DISCONNECTED] transport.mqtt connection lost.",
+            "Reconnect attempt",
+            "MQTT Publish failed: No connection to broker.",
+            "COMMUNICATION LOST"
+          ],
+          "tags": [
+            "mqtt",
+            "reconnect",
+            "outage"
+          ]
+        },
+        {
+          "id": "influxdb-startup-reset",
+          "q": "'Failed to connect to InfluxDB … Connection reset by peer', then 'Reconnection attempt 1/5 … exponential backoff'",
+          "a": "InfluxDB was not ready to accept connections yet. This is common when MPG, InfluxDB and the broker are all restarted together (a host reboot or `docker compose up`): MPG's side starts quicker. MPG keeps going without InfluxDB.\n\nIt retries up to five times with a growing wait (5, 10, 20, 40 seconds). The sample log connected on attempt 5, a minute after start. While InfluxDB was away, points are held in the **backlog** and then written in one go: *Flushed backlog after successful reconnection*. Nothing is lost as long as the backlog limits (`max_backlog_size`, `max_backlog_age`) are not exceeded.\n\n*Loaded N points from backlog* at startup reports points saved by a previous run. *Loaded 0 points* means there was nothing waiting.\n\n*Periodic reconnection check (every 14400 seconds)* is a separate routine that probes the connection every four hours. It also runs once straight after a failed start-up connection, which is why it appears minutes after a restart.",
+          "log": [
+            "Failed to connect to InfluxDB",
+            "Reconnection attempt 1/5",
+            "Waiting 5.0 seconds before next attempt (exponential backoff)",
+            "Flushed backlog after successful reconnection",
+            "Periodic reconnection check",
+            "Loaded 0 points from backlog"
+          ],
+          "tags": [
+            "influxdb",
+            "backlog",
+            "startup",
+            "reconnect"
+          ]
+        },
+        {
+          "id": "notification-send-failed",
+          "q": "'Pushover send failed … NameResolutionError' and 'Telegram send failed: Timed out'",
+          "a": "MPG tried to send you a notification but the machine could not reach the notification service, here because **DNS was not working** (`Failed to resolve 'api.pushover.net' [Errno -3] Try again`) or the connection timed out. In the sample this happened a few minutes after a host restart, before the network and DNS were fully up.\n\nThe cost is that **the alert about an outage can itself be lost** when the outage is a network problem: the *connection lost* message could not get out. These failures are only logged, and the failed alert is not re-sent later. Once DNS works again, new alerts are delivered normally (the log shows `Message dispatched via pushover` / `telegram`).\n\nIf this recurs on every restart, check that the container's DNS (the Docker or host resolver) is available at startup.",
+          "log": [
+            "Pushover send failed",
+            "NameResolutionError",
+            "Telegram send failed: Timed out",
+            "Telegram send failed: httpx.ConnectError"
+          ],
+          "tags": [
+            "notifications",
+            "dns",
+            "telegram",
+            "pushover"
+          ]
+        },
+        {
+          "id": "timescale-connection-lost",
+          "q": "TimescaleDB: 'Narrow flush failed … Connection refused' and a long Python traceback",
+          "a": "The TimescaleDB server stopped accepting connections (the container was stopped, restarted or being upgraded, or the host was rebooting). MPG logs the failure, marks the bridge **disconnected** and starts a reconnect thread (*Reconnect attempt 1 — waiting 5s before connect*).\n\nThe traceback is the full chain of Python errors behind that one failure; the useful lines are the last one (`connection to server at … port … failed: Connection refused`) and the hint *Is the server running on that host and accepting TCP/IP connections?* The exceptions listed before it, such as `InvalidatePoolError`, are SQLAlchemy's internal handling of the dead connection; the last one is the cause.\n\nWhile the database is unreachable, rows are kept in the persistent backlog and are written when the connection returns, so you should see a short pause rather than a permanent gap. A repeating message means the server is still down; check it with `docker ps` and the database container's log.",
+          "log": [
+            "Narrow flush failed",
+            "metrics data write failed",
+            "[DISCONNECTED] transport.timescaledb connection lost.",
+            "InvalidatePoolError",
+            "Auto-reconnect: connection lost, attempting to reconnect..."
+          ],
+          "tags": [
+            "timescaledb",
+            "outage",
+            "traceback"
+          ]
+        },
+        {
+          "id": "timescale-schema-mismatch",
+          "q": "'TimescaleDB Wide-table schema mismatch; missing N keys in scrape data' / 'Not a complete valid row for the wide table'",
+          "a": "The wide table has a column for every metric of a protocol, and in one cycle some of those metrics were not in the data. In the sample the missing five were the battery's **calculated fields** (`cell_voltage_max_v`, `cell_voltage_min_v`, `cell_voltage_diff_v`, `balancing_state`, `balancing_state_text`). They are worked out from the cell voltages, and that cycle returned 138 metrics instead of 143, which happens when a Modbus read inside the cycle fails or times out.\n\nMPG still wrote the row (*but wrote metrics anyway*): the narrow table received every value it had, and the wide row received those values with the missing columns left empty. Nothing is rejected, so an occasional occurrence can be ignored.\n\nIf it appears **every cycle**, a column no longer matches what the protocol produces. Either something is excluded by the mask/screen files, or the column is left over from an earlier configuration. Use *Delete Columns* on the TimescaleDB bridge page to remove it, or re-include the metric.",
+          "log": [
+            "TimescaleDB Wide-table schema mismatch; missing",
+            "Not a complete valid row for the wide table"
+          ],
+          "tags": [
+            "timescaledb",
+            "wide",
+            "schema"
+          ]
+        },
+        {
+          "id": "timescale-startup-chatter",
+          "q": "What is all the TimescaleDB activity at startup (hypertables, 'Static (no live data yet)', 'FULL refresh', 'Pausing flush thread')?",
+          "a": "Every start, MPG makes sure the database matches the configuration, and each step logs a line. All of it is normal:\n\n- **Wide table created/verified, Ensured N metric columns, Schema resync**: checks that each protocol has its table and columns.\n- **Hypertable check/creation, Setting up compression policy**: confirms the raw tables are time-partitioned and that compression and retention policies are in place. Policies that already match are left alone (*already compress_after=…, skipping*).\n- **Rollup config matches … No rebuild required**: the hourly/daily/weekly/monthly rollup views already exist with the right settings. A rebuild only happens if that setting changed.\n- **Pausing flush thread for migration … Resuming flush thread**: writes are held for a moment while the rollups are checked.\n- **Narrow/Wide raw table sizing: Static (no live data yet) → chunk=1 day …**: before any data has arrived, MPG uses standard chunk and compression sizes. After the first real data it logs **Dynamic sizing retune … Group N → chunk=12 hours, compress_after=36 hours** and adjusts to your actual data volume.\n- **Starting / COMPLETED FULL refresh for …_rollup_…**: each rollup view is refreshed once so it is current. Typically about a tenth of a second each; a large hourly view can take several seconds.",
+          "log": [
+            "Static (no live data yet)",
+            "Dynamic sizing retune",
+            "Starting FULL refresh for",
+            "Rollup config matches",
+            "Pausing flush thread for migration..."
+          ],
+          "tags": [
+            "timescaledb",
+            "startup",
+            "rollups"
+          ]
+        },
+        {
+          "id": "reload-disabled",
+          "q": "'reload(manual): Dynamic configuration reload is disabled … config.cfg was updated but the running gateway was not'",
+          "a": "You committed changes in the web UI, which wrote `config.cfg`, but the running gateway only picks up a changed file if **Dynamic configuration reload** (`enable_dynamic_configuration`) is turned on in *General Settings*. With it off, the new settings take effect only after you **restart** MPG, so live data collection is never interrupted unexpectedly.\n\nThe message appears once per commit; four commits in a few minutes give four lines. Nothing is wrong. Restart when you are done editing, or enable dynamic reload if you prefer changes to apply immediately.",
+          "log": [
+            "reload(manual): Dynamic configuration reload is disabled"
+          ],
+          "tags": [
+            "config",
+            "commit",
+            "restart"
+          ]
+        },
+        {
+          "id": "cfg-differs-from-backup",
+          "q": "'config.cfg differs from last backup — treating cfg as ground truth for this scan'",
+          "a": "At startup the web UI scans `config.cfg` and compares it with the last backup it made. If they differ, for example because you edited the file by hand, or the gateway committed a change since, MPG treats the **file on disk as correct** and resets the UI's staged values to match it. The side effect is that **uncommitted edits made in the UI before the restart are discarded**.\n\nIt is informational. You will see it after any restart that follows a commit, because each commit backs up the *previous* file, so the current one always differs from the newest backup. The following *Scanner complete: N settings, N orphaned, N registers* line summarizes what was found.",
+          "log": [
+            "config.cfg differs from last backup",
+            "Scanner complete:"
+          ],
+          "tags": [
+            "config",
+            "startup",
+            "scanner"
+          ]
+        },
+        {
+          "id": "multiple-startups",
+          "q": "Why does my log show the whole startup sequence more than once?",
+          "a": "The log file is **appended to across restarts**, so each time the process starts (a container restart, a host reboot, or you restarting after a config commit) another full startup block follows: *Transport scheduling mode*, *Connecting to …*, *WebServer ready*.\n\nTwo starts within a few minutes can happen after a host or Docker restart, when dependencies (broker, database, DNS) are not ready in the order MPG needs. If MPG restarts when you did not ask for it, look at the lines just before the first *Loading…* for the cause: a *connection lost* from the broker or database, or an *Unhandled error*, points to what was happening.",
+          "log": [
+            "Transport scheduling mode: interleaved",
+            "Loading...",
+            "MPG WebServer ready on"
+          ],
+          "tags": [
+            "restart",
+            "startup"
+          ]
+        }
+      ]
+    }
+  ]
+}

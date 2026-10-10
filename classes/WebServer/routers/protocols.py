@@ -32,6 +32,12 @@ from sqlalchemy.orm import Session
 
 from classes.WebServer.models import DeviceProtocolSelection, ProtocolRegister
 
+from ...ha_metadata import (
+    HA_COLUMN_LABELS,
+    HA_COLUMN_TITLES,
+    HA_COLUMNS,
+    ha_dropdown_options,
+)
 from ...transports.transport_base import transport_base
 from ..database import get_session, session_scope
 from ..services.protocol_service import (
@@ -288,7 +294,14 @@ def update_register_field(register_id: int, payload: FieldUpdateRequest, db: Ses
     # register's bool/int/str/float column depending on what the caller asked
     # to read back). id/field/is_dirty are known (int/str/bool) but a dict's
     # value type is one union across all keys, so they inherit Any too.
-    result: ProtocolRegister | None = update_protocol_register_field(db, register_id, payload.field, payload.value)
+    try:
+        result: ProtocolRegister | None = update_protocol_register_field(
+            db, register_id, payload.field, payload.value
+        )
+    except ValueError as exc:
+        # Not a "not found": the row and field exist, the value is not permissible
+        # (e.g. an unknown Home Assistant state class sent by a hand-built request).
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if result is None:
         raise HTTPException(status_code=404, detail="Protocol register or field not found")
     db.commit()
@@ -409,6 +422,12 @@ async def protocol_table_partial(
             "protocol_name": protocol_name,
             "registry_type": registry_type,
             "device_name": device_name,
+            # Home Assistant column dropdowns (permissible values per column for
+            # this registry type; the template appends any row's stored custom value).
+            "ha_columns": HA_COLUMNS,
+            "ha_labels": HA_COLUMN_LABELS,
+            "ha_titles": HA_COLUMN_TITLES,
+            "ha_options": {col: ha_dropdown_options(col, registry_type) for col in HA_COLUMNS},
             **data,
         },
     )

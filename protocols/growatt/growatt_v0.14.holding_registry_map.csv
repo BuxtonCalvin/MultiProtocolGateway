@@ -1,92 +1,92 @@
-register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note
-0,,On_Off low,,1bit,"standby on, standby off",,,,
-0.b8,,On_Off high,,1bit,0x0000: Output enable 0x0100: Output disable,,,,"The Standby On/Off state and the AC output DisEN/EN state; The low byte is the Standby on/off(1/0), the high byte is the AC output disable/enable (1/0).; extra: 0"
-1,,OutputConfig,,,"{""0"": ""BAT First"", ""1"": ""PV First"", ""2"": ""UTI First"", ""3"": ""PV&UTI First""}",10x,W,,AC output set; initial value: 2: UTI First; 3: PV&UTI First; extra: 0
-2,,ChargeConfig,,,"{""0"": ""PV first"", ""1"": ""PV&UTI"", ""2"": ""PV Only""}",10x,W,,Charge source set; initial value: 2: PV Only; extra: 0
-3,,UtiOutStart,,,0-23,10x,W,,Uti Output Start Time; initial value: H(hour); 0
-4,,UtiOutEnd,,,0-23,10x,W,,Uti Output End Time; initial value: H(hour); 0
-5,,UtiChargeStart,,,0-23,10x,W,,Uti Charge Start Time; initial value: H(hour); 0
-6,,UtiChargeEnd,,,0-23,10x,W,,Uti Charge End Time; initial value: H(hour); 0
-7,PV Input Mode,PVModel,,,"{""0"": ""Independent"", ""1"": ""Parallel""}",10x,W,,PV Input Mode; extra: 0
-8,AC Input Mode,ACInModel,,,"{""0"": ""APL,90-280VAC"", ""1"": ""UPS,170-280VAC"", ""2"": ""GEN""}",10x,W,,AC Input Mode; 0
-15,,LCD language,1,,{{lcd_language_codes}},10x,W,,LCD language; initial value: English
-16,,GridV_Adj,,,,10x,,,
-17,,InvV_Adj,,,,10x,,,
-18,,OutputVoltType,,,"{""0"": ""208VAC"", ""1"": ""230VAC"", ""2"": ""240VAC"", ""3"": ""220VAC"", ""4"": ""100VAC"", ""5"": ""110VAC"", ""6"": ""120VAC""}",10x,W,,Output Volt Type; initial value: 1
-19,,OutputFreqType,,,"{""0"": ""50Hz"", ""1"": ""60Hz""}",10x,W,,Output Freq Type; initial value: 0
-20,,OverLoadRestart,,,"{""0"": ""Yes"", ""1"": ""No"", ""2"": ""Swith to UTI""}",10x,W,,Over Load Restart; initial value: 0; Yes(over 1mins restart; extra: Load to after over Load three times to stop output)
-21,,OverTempRestart,,,"{""0"": ""Yes"", ""1"": ""No""}",10x,W,,Over Temperature Restart; initial value: 0; Yes(over  Temperature to restart; extra: after over Temperature  three times to stop output)
-22,,BuzzerEN,,,"{""1"": ""Enable"", ""0"": ""Disable""}",10x,W,,Buzzer on/off enable; 1
-23-27,Serial Number,Serial No,,ASCII,[A-Z0-9],100x,WD,,Serial number 5
-28,,Moudle H,,,,10x,W,,Inverter Moudle (high); initial value: Can be set at standy state Only
-29,,Moudle L,,,P-battery type: 0: Lead_Acid 1: Lithium 2: CustomLead_Acid U-user type:,10x,W,,Inverter Moudle (low); initial value: Can be set at
-30,,Com Address,,,1~254,10x,W,,Communicate address; 1
-31,,FlashStart,,,0x0001: own 0X0100: control broad,10x,WD,,Update firmware
-32,,Reset User Info,,,0x0001,100x,WD,,Reset User Information
-33,,Reset to factory,,,0x0001,100x,WD,,Reset to factory
-34,,MaxChargeCurr,1A,,0~180,10x,W,,Max Charge Current; 70
-35,,BulkChargeVolt,0.1V,,500~640,10x,W,,Bulk Charge Volt; 564
-36,,FloatChargeVolt,0.1V,,500~560,10x,W,,Float Charge Volt; 540
-37,,BatLowToUtiVolt,0.1V Or 1%,,200~640 (non Lithium) or 5~100 (Lithium),10x,W,,Bat Low Volt Switch To Uti; 460 Or 50%
-38,,ACChargeCurr,1A,,0~100,10x,W,,AC Charge Current; 30
-39,,Battery Type,,,"{""0"": ""AGM"", ""1"": ""FLD"", ""2"": ""USE"", ""3"": ""Lithium"", ""4"": ""USE2""}",10x,W,,Battery Type; 1; extra: Can be set at standy Only
-40,,Aging Mode,,,"{""0"": ""Normal Mode"", ""1"": ""Aging Mode""}",10x,W,,Aging Mode; extra: 0; extra: Can be set at standy state Only
-41,,Etl check enable,,1bit,"{""1"": ""Enable"", ""0"": ""Disable""}",10x,W,,extra: 0:Disable; extra: 1:Enable
-41.b1,,Pv ISO Check enable,,1bit,"{""1"": ""Enable"", ""0"": ""Disable""}",10x,W,,
-42,,Safety Type,1,,"{""1"": ""standard"", ""2"": ""ETL"", ""3"": ""AS4777"", ""4"": ""CQC"", ""5"": ""VDE4105""}",10x,W,,
-43,,DTC,,,,100x,&*6,,Device Type Code
-45,System Year,Sys Year,,,Year offset is 2000,10x,W,,System time-year
-46,System Month,Sys Month,,,,10x,W,,System time- Month
-47,System Day,Sys Day,,,,10x,W,,System time- Day
-48,System Hour,Sys Hour,,,,10x,W,,System time- Hour
-49,System Minute,Sys Min,,,,10x,W,,System time- Min
-50,System Second,Sys Sec,,,,10x,W,,System time- Second
-52,,uwAcVoltHighL,,,,10x,,,
-53,,uwAcVoltLowL,,,,10x,,,
-54,,uwAcFreqHighL,,,,10x,,,
-55,,uwAcFreqLowL,,,,10x,,,
-59-66,,Manufacturer Info,,ASCII,ASCII,100x,,,Manufacturer information (high)
-67,,FW Build No_ 4,,,,100x,,,Control FW Build No. 2
-68,,FW Build No_ 3,,,,100x,,,Control FW Build No. 1
-69,,FW Build No_ 2,,,,100x,,,COM FW Build No. 2
-70,,FW Build No_ 1,,,,100x,,,COM FW Build No. 1
-72,,Sys Weekly,,,0-6,10x,W,,Sys Weekly
-73,,ModbusVersion,0.01,,Eg:207 is V2.07 Int(16bit s),10x,,,Modbus Version
-75,,SCC_ComMode,,,,10x,,,SCC Communication; initial value: For; BMS
-76,,Rate Watt H,0.1W,,,10x,,,Rate active power(high)
-77,,Rate Watt L,0.1W,,,10x,,,Rate active power(low)
-78,,Rate VA H,0.1VA,,,10x,,,Rata apparent power (high)
-79,,Rate VA L,0.1VA,,,10x,,,Rate apparent power (low)
-80,,ComboardVer,,,,10x,,,Communicaiton board Version; initial value: For boad; bms
-81,,uwBatPieceNum,,,,10x,,,
-82,,wBatLowCutOff,0.1V Or 1%,,200~640 (non Lithium) or 5~100 (Lithium),100x,,,Bat voltage low cutoff; initial value: 460 Or 50%
-84,,NomGridVolt,,,,10x,,,
-85,,NomGridFreq,,,,10x,,,
-86,,NomBatVolt,,,,10x,,,
-87,,NomPvCurr,,,,10x,,,
-88,,NomAcChgCurr,,,,10x,,,
-89,,NomOpVolt,,,,10x,,,
-90,,NomOpFreq,,,,10x,,,
-91,,NomOpPow,,,,10x,,,
-95,,uwAC2BatVolt,0.1V Or 1%,,200~640 (non Lithium) or 5~100 (Lithium),10x,,,AC switch to Battery; initial value: 460 Or 50%
-96,,BypEnable,,,,10x,,,
-97,,PowSavingEn,,,,10x,,,
-98,,SpowBalEn,,,,10x,,,
-99,,ClrEnergyToday,,,,10x,,,
-100,,clrEnergyAll,,,,10x,,,
-101,,BurnInTestEn,,,,10x,,,
-102,,ManualStartEn,,,,10x,,,
-103,,SciLossChkEn,,,,10x,,,
-104,,BlightEn,,,,10x,,,
-105,,ParaMaxChgCurr,,,,10x,,,Parallel Maximum current
-106,,LiProtocolType,,,for,10x,,,Protocol battery; initial value: 1~99; extra: 1
-107,,AudioAlarmEn,,,,10x,,,
-108,,uwEqEn,,,,10x,,,
-109,,uwEqChgVolt,,,,10x,,,
-110,,uwEqTime,,,,10x,,,
-111,,uwEqTimeOut,,,,10x,,,
-112,,uwEqInterval,,,,10x,,,
-113,,uwMaxDisChgCu rr,,,,10x,,,
-162,,BLVersion2,R,,,100x,,,Boot loader version2; extra: M3 bootloader version
-r12~14,,Fw version2,,ASCII,,100x,,,Control Firmware version (high); initial value: ASCII
-r9~11,,Fw version,,ASCII,,100x,,,Firmware version (high); initial value: ASCII
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note,ha_device_class,ha_state_class,ha_entity_category
+0,,On_Off low,,1bit,"standby on, standby off",,,,,,,
+0.b8,,On_Off high,,1bit,0x0000: Output enable 0x0100: Output disable,,,,"The Standby On/Off state and the AC output DisEN/EN state; The low byte is the Standby on/off(1/0), the high byte is the AC output disable/enable (1/0).; extra: 0",,,
+1,,OutputConfig,,,"{""0"": ""BAT First"", ""1"": ""PV First"", ""2"": ""UTI First"", ""3"": ""PV&UTI First""}",10x,W,,AC output set; initial value: 2: UTI First; 3: PV&UTI First; extra: 0,,,
+2,,ChargeConfig,,,"{""0"": ""PV first"", ""1"": ""PV&UTI"", ""2"": ""PV Only""}",10x,W,,Charge source set; initial value: 2: PV Only; extra: 0,,,
+3,,UtiOutStart,,,0-23,10x,W,,Uti Output Start Time; initial value: H(hour); 0,,,
+4,,UtiOutEnd,,,0-23,10x,W,,Uti Output End Time; initial value: H(hour); 0,,,
+5,,UtiChargeStart,,,0-23,10x,W,,Uti Charge Start Time; initial value: H(hour); 0,,,
+6,,UtiChargeEnd,,,0-23,10x,W,,Uti Charge End Time; initial value: H(hour); 0,,,
+7,PV Input Mode,PVModel,,,"{""0"": ""Independent"", ""1"": ""Parallel""}",10x,W,,PV Input Mode; extra: 0,,,
+8,AC Input Mode,ACInModel,,,"{""0"": ""APL,90-280VAC"", ""1"": ""UPS,170-280VAC"", ""2"": ""GEN""}",10x,W,,AC Input Mode; 0,,,
+15,,LCD language,1,,{{lcd_language_codes}},10x,W,,LCD language; initial value: English,,,
+16,,GridV_Adj,,,,10x,,,,,,
+17,,InvV_Adj,,,,10x,,,,,,
+18,,OutputVoltType,,,"{""0"": ""208VAC"", ""1"": ""230VAC"", ""2"": ""240VAC"", ""3"": ""220VAC"", ""4"": ""100VAC"", ""5"": ""110VAC"", ""6"": ""120VAC""}",10x,W,,Output Volt Type; initial value: 1,,,
+19,,OutputFreqType,,,"{""0"": ""50Hz"", ""1"": ""60Hz""}",10x,W,,Output Freq Type; initial value: 0,,,
+20,,OverLoadRestart,,,"{""0"": ""Yes"", ""1"": ""No"", ""2"": ""Swith to UTI""}",10x,W,,Over Load Restart; initial value: 0; Yes(over 1mins restart; extra: Load to after over Load three times to stop output),,,
+21,,OverTempRestart,,,"{""0"": ""Yes"", ""1"": ""No""}",10x,W,,Over Temperature Restart; initial value: 0; Yes(over  Temperature to restart; extra: after over Temperature  three times to stop output),,,
+22,,BuzzerEN,,,"{""1"": ""Enable"", ""0"": ""Disable""}",10x,W,,Buzzer on/off enable; 1,,,
+23-27,Serial Number,Serial No,,ASCII,[A-Z0-9],100x,WD,,Serial number 5,,,diagnostic
+28,,Moudle H,,,,10x,W,,Inverter Moudle (high); initial value: Can be set at standy state Only,,,
+29,,Moudle L,,,P-battery type: 0: Lead_Acid 1: Lithium 2: CustomLead_Acid U-user type:,10x,W,,Inverter Moudle (low); initial value: Can be set at,,,
+30,,Com Address,,,1~254,10x,W,,Communicate address; 1,,,
+31,,FlashStart,,,0x0001: own 0X0100: control broad,10x,WD,,Update firmware,,,
+32,,Reset User Info,,,0x0001,100x,WD,,Reset User Information,,,
+33,,Reset to factory,,,0x0001,100x,WD,,Reset to factory,,,
+34,,MaxChargeCurr,1A,,0~180,10x,W,,Max Charge Current; 70,current,measurement,
+35,,BulkChargeVolt,0.1V,,500~640,10x,W,,Bulk Charge Volt; 564,voltage,measurement,
+36,,FloatChargeVolt,0.1V,,500~560,10x,W,,Float Charge Volt; 540,voltage,measurement,
+37,,BatLowToUtiVolt,0.1V Or 1%,,200~640 (non Lithium) or 5~100 (Lithium),10x,W,,Bat Low Volt Switch To Uti; 460 Or 50%,,,
+38,,ACChargeCurr,1A,,0~100,10x,W,,AC Charge Current; 30,current,measurement,
+39,,Battery Type,,,"{""0"": ""AGM"", ""1"": ""FLD"", ""2"": ""USE"", ""3"": ""Lithium"", ""4"": ""USE2""}",10x,W,,Battery Type; 1; extra: Can be set at standy Only,,,
+40,,Aging Mode,,,"{""0"": ""Normal Mode"", ""1"": ""Aging Mode""}",10x,W,,Aging Mode; extra: 0; extra: Can be set at standy state Only,,,
+41,,Etl check enable,,1bit,"{""1"": ""Enable"", ""0"": ""Disable""}",10x,W,,extra: 0:Disable; extra: 1:Enable,,,
+41.b1,,Pv ISO Check enable,,1bit,"{""1"": ""Enable"", ""0"": ""Disable""}",10x,W,,,,,
+42,,Safety Type,1,,"{""1"": ""standard"", ""2"": ""ETL"", ""3"": ""AS4777"", ""4"": ""CQC"", ""5"": ""VDE4105""}",10x,W,,,,,
+43,,DTC,,,,100x,&*6,,Device Type Code,,,
+45,System Year,Sys Year,,,Year offset is 2000,10x,W,,System time-year,,,
+46,System Month,Sys Month,,,,10x,W,,System time- Month,,,
+47,System Day,Sys Day,,,,10x,W,,System time- Day,,,
+48,System Hour,Sys Hour,,,,10x,W,,System time- Hour,,,
+49,System Minute,Sys Min,,,,10x,W,,System time- Min,,,
+50,System Second,Sys Sec,,,,10x,W,,System time- Second,,,
+52,,uwAcVoltHighL,,,,10x,,,,,,
+53,,uwAcVoltLowL,,,,10x,,,,,,
+54,,uwAcFreqHighL,,,,10x,,,,,,
+55,,uwAcFreqLowL,,,,10x,,,,,,
+59-66,,Manufacturer Info,,ASCII,ASCII,100x,,,Manufacturer information (high),,,diagnostic
+67,,FW Build No_ 4,,,,100x,,,Control FW Build No. 2,,,diagnostic
+68,,FW Build No_ 3,,,,100x,,,Control FW Build No. 1,,,diagnostic
+69,,FW Build No_ 2,,,,100x,,,COM FW Build No. 2,,,diagnostic
+70,,FW Build No_ 1,,,,100x,,,COM FW Build No. 1,,,diagnostic
+72,,Sys Weekly,,,0-6,10x,W,,Sys Weekly,,,
+73,,ModbusVersion,0.01,,Eg:207 is V2.07 Int(16bit s),10x,,,Modbus Version,,,
+75,,SCC_ComMode,,,,10x,,,SCC Communication; initial value: For; BMS,,,
+76,,Rate Watt H,0.1W,,,10x,,,Rate active power(high),power,measurement,
+77,,Rate Watt L,0.1W,,,10x,,,Rate active power(low),power,measurement,
+78,,Rate VA H,0.1VA,,,10x,,,Rata apparent power (high),apparent_power,measurement,
+79,,Rate VA L,0.1VA,,,10x,,,Rate apparent power (low),apparent_power,measurement,
+80,,ComboardVer,,,,10x,,,Communicaiton board Version; initial value: For boad; bms,,,
+81,,uwBatPieceNum,,,,10x,,,,,,
+82,,wBatLowCutOff,0.1V Or 1%,,200~640 (non Lithium) or 5~100 (Lithium),100x,,,Bat voltage low cutoff; initial value: 460 Or 50%,,,
+84,,NomGridVolt,,,,10x,,,,,,
+85,,NomGridFreq,,,,10x,,,,,,
+86,,NomBatVolt,,,,10x,,,,,,
+87,,NomPvCurr,,,,10x,,,,,,
+88,,NomAcChgCurr,,,,10x,,,,,,
+89,,NomOpVolt,,,,10x,,,,,,
+90,,NomOpFreq,,,,10x,,,,,,
+91,,NomOpPow,,,,10x,,,,,,
+95,,uwAC2BatVolt,0.1V Or 1%,,200~640 (non Lithium) or 5~100 (Lithium),10x,,,AC switch to Battery; initial value: 460 Or 50%,,,
+96,,BypEnable,,,,10x,,,,,,
+97,,PowSavingEn,,,,10x,,,,,,
+98,,SpowBalEn,,,,10x,,,,,,
+99,,ClrEnergyToday,,,,10x,,,,,,
+100,,clrEnergyAll,,,,10x,,,,,,
+101,,BurnInTestEn,,,,10x,,,,,,
+102,,ManualStartEn,,,,10x,,,,,,
+103,,SciLossChkEn,,,,10x,,,,,,
+104,,BlightEn,,,,10x,,,,,,
+105,,ParaMaxChgCurr,,,,10x,,,Parallel Maximum current,,,
+106,,LiProtocolType,,,for,10x,,,Protocol battery; initial value: 1~99; extra: 1,,,
+107,,AudioAlarmEn,,,,10x,,,,,,
+108,,uwEqEn,,,,10x,,,,,,
+109,,uwEqChgVolt,,,,10x,,,,,,
+110,,uwEqTime,,,,10x,,,,,,
+111,,uwEqTimeOut,,,,10x,,,,,,
+112,,uwEqInterval,,,,10x,,,,,,
+113,,uwMaxDisChgCu rr,,,,10x,,,,,,
+162,,BLVersion2,R,,,100x,,,Boot loader version2; extra: M3 bootloader version,,,
+r12~14,,Fw version2,,ASCII,,100x,,,Control Firmware version (high); initial value: ASCII,,,diagnostic
+r9~11,,Fw version,,ASCII,,100x,,,Firmware version (high); initial value: ASCII,,,diagnostic

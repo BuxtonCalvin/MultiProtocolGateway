@@ -21,10 +21,47 @@
   protocol_table.html
   HTMX partial — renders protocol register rows.
 -->
+{#
+  Optional Home Assistant columns (ha device class / ha state class / ha entity
+  category). Shown for every registry type except 'json', and only when the route
+  supplied the dropdown context (ha_columns / ha_options / ha_labels / ha_titles).
+  ha_cells() emits the three <td>s: dropdowns in the protocol editor, plain text
+  in a device view. A stored value the dropdown does not offer (a hand-edited CSV)
+  is appended as "<value> (custom)" so the control never shows a different value
+  from the one actually stored.
+#}
+{% set show_ha = (registry_type != 'json') and (ha_columns is defined) %}
+{% set ha_count = (ha_columns | length) if show_ha else 0 %}
+{% macro ha_cells(row) %}
+{% for col in ha_columns %}
+{% set current = (row | attr(col)) or '' %}
+{% set options = ha_options[col] %}
+<td class="px-2 py-1.5 text-mpg-500 dark:text-mpg-100" title="{{ ha_titles[col] }}" role="cell">
+  {% if device_name %}
+  {% if current %}{{ current }}{% else %}<span class="text-mpg-700">{{ '—' if col == 'ha_entity_category' else 'auto' }}</span>{% endif %}
+  {% else %}
+  <select class="w-full bg-mpg-200 border border-mpg-400 rounded px-1 py-0.5 surface-title dark:bg-mpg-700/75 dark:border-mpg-500 dark:text-mpg-50"
+          aria-label="{{ ha_labels[col] }} for {{ row.variable_name }}"
+          data-ha-column="{{ col }}"
+          hx-patch="/api/protocols/{{ row.id }}/field"
+          hx-on:htmx:config-request="event.detail.parameters = {field: '{{ col }}', value: this.value}"
+          hx-swap="none"
+          hx-trigger="change">
+    {% for value, label in options %}
+    <option value="{{ value }}"{% if value == current %} selected{% endif %}>{{ label }}</option>
+    {% endfor %}
+    {% if current and current not in (options | map(attribute=0) | list) %}
+    <option value="{{ current }}" selected>{{ current }} (custom)</option>
+    {% endif %}
+  </select>
+  {% endif %}
+</td>
+{% endfor %}
+{% endmacro %}
 <div>
   <div class="overflow-x-auto">
     <table id="protocol-register-table"
-           class="w-full min-w-[112rem] text-xs border-collapse"
+           class="w-full {{ 'min-w-[136rem]' if show_ha else 'min-w-[112rem]' }} text-xs border-collapse"
            role="table"
            aria-label="{{ protocol_name }} {{ registry_type }} registers"
            data-device="{{ device_name or '' }}">
@@ -48,6 +85,11 @@
           <th class="px-2 py-2 text-left w-20 cursor-pointer select-none" scope="col" data-sort-key="type">Type</th>
           <th class="px-2 py-2 text-left w-32 cursor-pointer select-none" scope="col" data-sort-key="range">Range</th>
           <th class="px-2 py-2 text-left w-16 cursor-pointer select-none" scope="col" data-sort-key="protocol_write">R/W</th>
+          {% if show_ha %}
+          {% for col in ha_columns %}
+          <th class="px-2 py-2 text-left {{ 'w-36' if col == 'ha_device_class' else ('w-32' if col == 'ha_state_class' else 'w-28') }} cursor-pointer select-none" scope="col" data-sort-key="{{ col }}" title="{{ ha_titles[col] }}">{{ ha_labels[col] }}</th>
+          {% endfor %}
+          {% endif %}
           <th class="px-2 py-2 text-left w-56 cursor-pointer select-none" scope="col" data-sort-key="adjustments">Adjustments</th>
           <th class="px-2 py-2 text-left min-w-md cursor-pointer select-none" scope="col" data-sort-key="note">Notes</th>
         </tr>
@@ -67,6 +109,7 @@
             data-sort-type="{{ (row.data_type or '') | lower }}"
             data-sort-range="{{ (row.values_range or '') | lower }}"
             data-sort-adjustments="{{ (row.adjustments or '') | lower }}"
+            {% if show_ha %}{% for col in ha_columns %}data-sort-{{ col }}="{{ ((row | attr(col)) or '') | lower }}" {% endfor %}{% endif %}
             data-sort-note="{{ (row.note or '') | lower }}"
             data-sort-protocol_write="{{ row.write_mode_protocol }}"
             data-mask="{{ 1 if row.mask_enabled else 0 }}"
@@ -239,6 +282,8 @@
             {% endif %}
           </td>
 
+          {% if show_ha %}{{ ha_cells(row) }}{% endif %}
+
           {# Adjustments — most important for 32-bit pairs (Register_Endian JSON lives here) #}
           <td class="px-2 py-1.5 text-mpg-500 dark:text-mpg-100 font-mono text-xs"
               title="{{ row.adjustments | string if row.adjustments else '' }}" role="cell">
@@ -307,6 +352,7 @@
           <td class="px-2 py-1 text-mpg-700">bits 0–15</td>
           {# R/W — inherited #}
           <td class="px-2 py-1 text-center text-mpg-700">R</td>
+          {% if show_ha %}<td class="px-2 py-1 text-mpg-700 italic text-center" colspan="{{ ha_count }}">↑ set on parent row</td>{% endif %}
           {# Adjustments — pointer to parent #}
           <td class="px-2 py-1 text-mpg-700 italic" colspan="2"
               title="Edit adjustments on the parent {{ row.variable_name }} row">
@@ -349,6 +395,7 @@
           <td class="px-2 py-1 text-mpg-700">bits 16–31</td>
           {# R/W — inherited #}
           <td class="px-2 py-1 text-center text-mpg-700">R</td>
+          {% if show_ha %}<td class="px-2 py-1 text-mpg-700 italic text-center" colspan="{{ ha_count }}">↑ set on parent row</td>{% endif %}
           {# Adjustments — pointer to parent #}
           <td class="px-2 py-1 text-mpg-700 italic" colspan="2"
               title="Edit adjustments on the parent {{ row.variable_name }} row">
@@ -372,6 +419,7 @@
             data-sort-type="{{ (row.data_type or '') | lower }}"
             data-sort-range="{{ (row.values_range or '') | lower }}"
             data-sort-adjustments="{{ (row.adjustments or '') | lower }}"
+            {% if show_ha %}{% for col in ha_columns %}data-sort-{{ col }}="{{ ((row | attr(col)) or '') | lower }}" {% endfor %}{% endif %}
             data-sort-note="{{ (row.note or '') | lower }}"
             data-sort-protocol_write="{{ row.write_mode_protocol }}"
             data-mask="{{ 1 if row.mask_enabled else 0 }}"
@@ -588,6 +636,8 @@
             {% endif %}
           </td>
 
+          {% if show_ha %}{{ ha_cells(row) }}{% endif %}
+
           <td class="px-2 py-1.5 text-mpg-500 dark:text-mpg-100 font-mono text-xs"
               title="{{ row.adjustments | string if row.adjustments else '' }}" role="cell">
             {% if device_name %}
@@ -623,7 +673,7 @@
 
         {% if not rows %}
         <tr>
-          <td colspan="{{ 11 if device_name else (9 if registry_type != 'json' else 8) }}" class="px-4 py-6 text-center text-mpg-300 text-sm">
+          <td colspan="{{ (11 if device_name else (9 if registry_type != 'json' else 8)) + ha_count }}" class="px-4 py-6 text-center text-mpg-300 text-sm">
             No registers found for {{ protocol_name }} / {{ registry_type }}.
           </td>
         </tr>

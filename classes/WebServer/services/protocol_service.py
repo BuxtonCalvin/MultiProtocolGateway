@@ -31,6 +31,7 @@ from sqlalchemy import func, select
 from sqlalchemy.engine.row import Row
 from sqlalchemy.orm import Query, Session
 
+from ...ha_metadata import HA_COLUMNS, validate_ha_value
 from ...protocol_settings import Registry_Type, registry_map_entry
 from ...transports.transport_base import transport_base
 from ..database import refresh_app_state
@@ -95,6 +96,12 @@ class DeviceRegisterView:
     # is shared protocol-definition state, the same scope as the row's other
     # editable fields.
     pending_delete: bool = False
+    # Optional Home Assistant attributes — see ProtocolRegister.ha_device_class
+    # and classes/ha_metadata.py. Blank means "inferred from the unit" (the
+    # MQTT bridge decides at publish time), never "missing".
+    ha_device_class: str = ""
+    ha_state_class: str = ""
+    ha_entity_category: str = ""
 
     @property
     def is_paired(self) -> bool:
@@ -243,6 +250,9 @@ def get_protocol_registers(
                     is_json_desc=_safe_flag(row, "is_json_desc"),
                     source_variable_name=_safe_str(row, "source_variable_name"),
                     pending_delete=_safe_flag(row, "pending_delete"),
+                    ha_device_class=_safe_str(row, "ha_device_class") or "",
+                    ha_state_class=_safe_str(row, "ha_state_class") or "",
+                    ha_entity_category=_safe_str(row, "ha_entity_category") or "",
                 )
             )
         except Exception as exc:
@@ -805,6 +815,14 @@ def toggle_register_pending_delete(db: Session, register_id: int, value: bool) -
 
 
 def update_protocol_register_field(db: Session, register_id: int, field: str, value: str) -> ProtocolRegister | None:
+    """Stage an edit to one protocol register field.
+
+    Returns None if the field is not editable or the row does not exist.
+    Raises ValueError (with a user-presentable message) if the value is not
+    permissible for a Home Assistant column — the dropdowns only offer valid
+    values, but this is also reachable by a direct API call, and an invalid
+    value written to the CSV would later make Home Assistant reject the entity.
+    """
     allowed_fields: set[str] = {
         "variable_name",
         "documented_name",
@@ -815,6 +833,7 @@ def update_protocol_register_field(db: Session, register_id: int, field: str, va
         "note",
         "read_interval",
         "write_mode_protocol",
+        *HA_COLUMNS,
     }
     if field not in allowed_fields:
         return None
@@ -822,6 +841,11 @@ def update_protocol_register_field(db: Session, register_id: int, field: str, va
     row: ProtocolRegister | None = db.get(ProtocolRegister, register_id)
     if row is None:
         return None
+
+    if field in HA_COLUMNS:
+        value = validate_ha_value(
+            field, value, registry_type=row.registry_type, current=getattr(row, field)
+        )
 
     setattr(row, field, value)
     row.is_dirty = True
@@ -1142,6 +1166,9 @@ def export_protocol_registers(
             "adjustments":        row.adjustments or "",
             "note":               row.note or "",
             "read_interval":      row.read_interval or "",
+            "ha_device_class":    row.ha_device_class or "",
+            "ha_state_class":     row.ha_state_class or "",
+            "ha_entity_category": row.ha_entity_category or "",
             "is_paired_register": bool(paired_high),
         }
 

@@ -33,12 +33,12 @@ from classes.WebServer.database import session_scope
 from classes.WebServer.main import NoSignalServer, start_webserver
 from classes.WebServer.models import ConfigBackup
 
-# Check if Python version is greater than 3.11
-if sys.version_info < (3, 10):
+# Check if Python version is 3.11 or higher
+if sys.version_info < (3, 11):
     print("==================================================")
     print("WARNING: python version 3.11 or higher is required")
     print("Current version: " + sys.version)
-    print("Please upgrade your python version to 3.11 or higher to run this program.")
+    print("Please upgrade your python version to 3.11")
     print("==================================================")
     time.sleep(4)
 
@@ -53,6 +53,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, ParamSpec, TextIO, TypeVar, cast
 
+from classes.log_redaction import install_redaction, register_config_secrets
 from classes.messaging.message_handler import MessageHandler
 from classes.protocol_settings import (
     protocol_settings,
@@ -534,6 +535,14 @@ class Protocol_Gateway:
             console: logging.StreamHandler[TextIO] = logging.StreamHandler()
             console.setFormatter(formatter)
             root.addHandler(console)
+
+        # Keep credentials out of the log. Attached to the handlers (not the loggers) so it also covers
+        # third-party libraries and queued WebServer records; see log_redaction.py. httpx logs every
+        # request URL at INFO, and a Telegram URL contains the bot token, so its per-request lines
+        # are not wanted in the log at all (MPG logs its own send/failure messages).
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+        install_redaction(root)
+        register_config_secrets(cfg)
 
         cls._logging_initialized = True
         cls._log_path = log_path

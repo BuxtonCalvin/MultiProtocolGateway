@@ -43,6 +43,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.orm import (
     DeclarativeBase,
@@ -92,12 +93,12 @@ class Setting(Base):
     value_disk: Mapped[str | None] = mapped_column(Text, nullable=True)
     value_staged: Mapped[str | None] = mapped_column(Text, nullable=True)
     default_value: Mapped[str | None] = mapped_column(Text, nullable=True)
-    transport_type: Mapped[str] = mapped_column(String(32), default="general")
+    transport_type: Mapped[str] = mapped_column(String(32), default="general", server_default="general")
     # "scraper" | "bridge" | "general" | "logging"
 
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    is_dirty: Mapped[bool] = mapped_column(Boolean, default=False)
-    is_orphan: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("1"))
+    is_dirty: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    is_orphan: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), nullable=False
@@ -162,8 +163,17 @@ class ProtocolRegister(Base):
     adjustments: Mapped[str | None] = mapped_column(Text, nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     read_interval: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # Optional Home Assistant attributes — the CSVs' "ha device class" / "ha state
+    # class" / "ha entity category" columns (permissible values and validation:
+    # classes/ha_metadata.py). NULL = never loaded from the CSV (every row that
+    # existed before migration 0005); "" = loaded and genuinely blank. The
+    # scanner fills NULLs even on dirty rows, so config_writer never rewrites a
+    # CSV with blank cells over real values.
+    ha_device_class: Mapped[str | None] = mapped_column(String(64), nullable=True, default="")
+    ha_state_class: Mapped[str | None] = mapped_column(String(64), nullable=True, default="")
+    ha_entity_category: Mapped[str | None] = mapped_column(String(64), nullable=True, default="")
     # Write mode from protocol (immutable from CSV — never changed by user)
-    write_mode_protocol: Mapped[str] = mapped_column(String(8), default="R")
+    write_mode_protocol: Mapped[str] = mapped_column(String(8), default="R", server_default="R")
     # "R" | "RW" | "RD" | "WO"
 
     # 32 bit register joins
@@ -172,7 +182,7 @@ class ProtocolRegister(Base):
     # Set directly (not via mark_dirty()) by update_protocol_register_field()
     # whenever a metadata field above is edited in the protocol editor —
     # triggers a CSV rewrite for this protocol on the next commit.
-    is_dirty: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_dirty: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
 
     # True for rows materialized on-demand for a synthetic metric (see
     # services.protocol_service.build_synthetic_rows) or a JSON
@@ -186,8 +196,8 @@ class ProtocolRegister(Base):
     # collide with the one _add_code_description_entries generates fresh
     # from its source row at every load). register_address for these rows
     # is never a real CSV address — see _virtual_register_address().
-    is_synthetic: Mapped[bool] = mapped_column(Boolean, default=False)
-    is_json_desc: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_synthetic: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    is_json_desc: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     # Staged for deletion by the protocol editor's DELETE checkbox column.
     # Deliberately not folded into is_dirty (used for in-place field edits
     # that get *rewritten* into the CSV) — a deletion isn't a value to
@@ -199,7 +209,7 @@ class ProtocolRegister(Base):
     # that reference it, since that table has no FK/cascade of its own,
     # only a loose (protocol_name, registry_type, register_address) match
     # (see DeviceProtocolSelection) — from the DB.
-    pending_delete: Mapped[bool] = mapped_column(Boolean, default=False)
+    pending_delete: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     # Only meaningful when is_json_desc is True — the variable_name of the
     # real CSV register this "<name>_desc" entry decodes (registry_map_entry
     # .description_source in the live transport, see build_json_desc_rows).
@@ -248,15 +258,15 @@ class DeviceProtocolSelection(Base):
     registry_type: Mapped[str] = mapped_column(String(16), nullable=False)
     register_address: Mapped[str] = mapped_column(String(32), nullable=False)
 
-    user_write_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
-    mask_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
-    screen_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    user_write_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    mask_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    screen_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
 
-    user_write_enabled_disk: Mapped[bool] = mapped_column(Boolean, default=False)
-    mask_enabled_disk: Mapped[bool] = mapped_column(Boolean, default=False)
-    screen_enabled_disk: Mapped[bool] = mapped_column(Boolean, default=False)
+    user_write_enabled_disk: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    mask_enabled_disk: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    screen_enabled_disk: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
 
-    is_dirty: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_dirty: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     # 32 bit register joins
     paired_high_address: Mapped[str | None] = mapped_column(String, nullable=True, default=None)
 
@@ -305,7 +315,7 @@ class ConfigBackup(Base):
     )
     filepath: Mapped[str] = mapped_column(Text, nullable=False)
     file_size_bytes: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    trigger: Mapped[str] = mapped_column(String(32), default="manual")
+    trigger: Mapped[str] = mapped_column(String(32), default="manual", server_default="manual")
     # "manual" | "auto" | "file_watch"
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -381,10 +391,10 @@ class AppState(Base):
     last_scan_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_commit_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
-    has_dirty_settings: Mapped[bool] = mapped_column(Boolean, default=False)
-    has_dirty_protocols: Mapped[bool] = mapped_column(Boolean, default=False)
-    has_orphans: Mapped[bool] = mapped_column(Boolean, default=False)
-    has_orphaned_filters: Mapped[bool] = mapped_column(Boolean, default=False)
+    has_dirty_settings: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    has_dirty_protocols: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    has_orphans: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
+    has_orphaned_filters: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
     # True when any mask/screen filter-file line matches no current
     # register — see OrphanedFilterName. Deliberately separate from
     # has_orphans: a Setting orphan is a stale config.cfg key (safe to
@@ -392,12 +402,12 @@ class AppState(Base):
     # suppressing live data (see OrphanedFilterName docstring) — these
     # need different urgency in the UI, so they shouldn't share one flag.
 
-    dirty_settings_count: Mapped[int] = mapped_column(Integer, default=0)
-    dirty_protocols_count: Mapped[int] = mapped_column(Integer, default=0)
-    orphan_count: Mapped[int] = mapped_column(Integer, default=0)
-    orphaned_filter_count: Mapped[int] = mapped_column(Integer, default=0)
+    dirty_settings_count: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
+    dirty_protocols_count: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
+    orphan_count: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
+    orphaned_filter_count: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
 
-    scanner_status: Mapped[str] = mapped_column(String(32), default="idle")
+    scanner_status: Mapped[str] = mapped_column(String(32), default="idle", server_default="idle")
     # "idle" | "running" | "error"
     scanner_last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -421,7 +431,7 @@ class SettingDescription(Base):
     transports: Mapped[str] = mapped_column(Text, nullable=True)   # comma-separated list
     description: Mapped[str] = mapped_column(Text, nullable=True)
     description_disk: Mapped[str] = mapped_column(Text, nullable=True)  # for dirty tracking
-    is_dirty: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_dirty: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("0"))
 
     def mark_dirty(self) -> None:
         self.is_dirty = (self.description or "") != (self.description_disk or "")

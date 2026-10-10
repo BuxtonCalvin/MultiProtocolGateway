@@ -1,2 +1,2 @@
-register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note
-15,,debug,10mA,USHORT,,,R,,length: 2byte; Positive: charging Negative: discharging
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note,ha_device_class,ha_state_class,ha_entity_category
+15,,debug,10mA,USHORT,,,R,,length: 2byte; Positive: charging Negative: discharging,current,measurement,

@@ -331,6 +331,8 @@ class modbus_base(transport_base):
         self._needs_reconnection : bool = False
 
         self.device_metadata: eg4_metadata.EG4DeviceMetadata | eg4_metadata.EG4BatteryMetadata | None = None
+        self.eg4_cache: eg4_metadata.EG4IdentificationCache = eg4_metadata.EG4IdentificationCache()
+        ''' Retry/back-off state and cached battery serials for the device identification; see eg4_metadata.EG4IdentificationCache. '''
         ''' Populated at connect for EG4 protocols by eg4_metadata.read_eg4_device_metadata(); None otherwise. '''
         self.eg4_hardware_kind_cache: str | None = None
         ''' Cached result of eg4_metadata.detect_eg4_hardware_kind(): "inverter", "battery", or "unknown". '''
@@ -1221,6 +1223,11 @@ class modbus_base(transport_base):
                     f"already attempted this session (serial="
                     f"{self.device_serial_number or '<none>'}) — skipping."
                 )
+                # EG4 values are cached rather than re-read every cycle (see eg4_metadata), so a RECONNECT
+                # is where anything that changed while the device was away (firmware, parallel role) is
+                # picked up. Rate-limited and failure-tolerant inside; never raises.
+                if eg4_metadata.is_eg4_protocol(getattr(self._protocol, "protocol", "") or ""):
+                    eg4_metadata.refresh_eg4_identification(self)
             else:
                 self.identification_attempted = True
                 protocol_name: str = getattr(self._protocol, "protocol", "") or ""

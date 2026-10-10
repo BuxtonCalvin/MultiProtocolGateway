@@ -266,6 +266,10 @@ STANDARD_REGISTRY_HEADER: list[str] = [
     "writable",
     "adjustments",
     "note",
+    # Optional Home Assistant columns; blank = inferred from the unit by the MQTT bridge.
+    "ha_device_class",
+    "ha_state_class",
+    "ha_entity_category",
 ]
 
 
