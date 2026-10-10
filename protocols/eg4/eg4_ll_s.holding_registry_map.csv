@@ -63,7 +63,7 @@ register,variable_name,documented_name,unit,data_type,values,adjustments,note,wr
 28.b1,error_temperature_error,Error Temperature_Error,,1bit,"{""0"":""Clear"",""1"":""Temperature_Error""}",,"Reg 28 bit 1. Fault: a temperature sensor error has been detected (e.g. open/short thermistor, reading out of physical range). 1=Temperature_Error active, 0=clear. Affects thermal protection reliability.",R,,,,
 28.b2,error_current_flow_error,Error Current_Flow_Error,,1bit,"{""0"":""Clear"",""1"":""Current_Flow_Error""}",,"Reg 28 bit 2. Fault: a current measurement error has been detected (e.g. shunt/hall-sensor fault, reading implausible). 1=Current_Flow_Error active, 0=clear. May disable charge/discharge current protection.",R,,,,
 28.b4,error_cell_unbalance,Error Cell_Unbalance,,1bit,"{""0"":""Clear"",""1"":""Cell_Unbalance""}",,"Reg 28 bit 4. Fault: cell voltages within the pack are significantly unbalanced beyond the allowable delta. 1=Cell_Unbalance active, 0=clear. BMS may activate passive balancing or restrict charging to top-balance cells.",R,,,,
-29_30,cycle_count,cycle_count,,UINT,,,Cycle count. Big Endian ABCD. Technically not low_high but high_low.  Except battery expects high to be read first.,W,,,,
+29_30,cycle_count,cycle_count,,UINT,,,Cycle count. Big Endian ABCD. Technically not low_high but high_low.  Except battery expects high to be read first.,W,,,total_increasing,
 3,cell_02_voltage,cell_02_voltage,0.001V,USHORT,0-65535,,Cell 2 voltage.,R,,voltage,measurement,
 30,register_30,Register 30,,ushort,0-65535,,Unknown,R,,,,
 31_32,full_capacity,full_capacity,0.00000027778aH,UINT,,,Full capacity. Big Endian ABCD. Displayed in Amp Hours. Technically not low_high but high_low.  Except battery expects high to be read first.,W,,,measurement,
