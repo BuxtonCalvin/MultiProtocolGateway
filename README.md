@@ -2,7 +2,7 @@
 
 **Multi Protocol Gateway (MPG)** reads live data from solar inverters, battery management systems (BMS), energy meters, and other Modbus/CAN-speaking hardware. MPG then fans that data out to your choice of bridges: MQTT, InfluxDB, TimescaleDB, Prometheus, and JSON — all managed through a built-in web UI; no config-file editing required. MPG allows you to read data from concurrent hardware devices and protocols, and then push the data to one, or more software bridges. If you have a device that speaks Modbus RTU/TCP, CAN bus, or one of the supported proprietary serial protocols and you want its data in Home Assistant, Grafana, Prometheus, or a time-series database, this app should work for you.
 
-[![Python 3.11](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.11.yml/badge.svg)](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.11.yml) ➔ [![Python 3.14](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.14.yml/badge.svg)](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.14.yml) [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE) [![Ruff](https://img.shields.io/badge/Linter-Ruff-brightgreen?style=flat-square)](https://github.com/charliermarsh/ruff) [![CodeQL Status](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/codeql.yml/badge.svg)](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/codeql.yml)
+[![Python 3.11](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.11.yml/badge.svg)](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.11.yml) ➔ [![Python 3.14](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.14.yml/badge.svg)](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.14.yml) [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE) [![Ruff](https://img.shields.io/badge/Linter-Ruff-brightgreen?style=flat-square)](https://github.com/charliermarsh/ruff) [![CodeQL Status](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/codeql.yml/badge.svg)](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/codeql.yml) [![Docker Pulls](https://img.shields.io/docker/pulls/buxtoncalvin/multiprotocolgateway?style=flat-square&logo=docker)](https://hub.docker.com/r/buxtoncalvin/multiprotocolgateway) [![Docker Image Size](https://img.shields.io/docker/image-size/buxtoncalvin/multiprotocolgateway?style=flat-square&logo=docker&color=blue)](https://hub.docker.com/r/buxtoncalvin/multiprotocolgateway)
 
 [![Dashboard](classes/WebServer/static/screenshots/dashboard.png)](classes/WebServer/static/screenshots/dashboard.png)
 
@@ -29,7 +29,6 @@ Then open **`http://localhost:1717`** and configure everything from the web UI �
 [![Hardware](documentation/assets/waveshare_mpg_eg4.png)](documentation/assets/waveshare_mpg_eg4.png)
 
 [![Read Modes for Hardware](documentation/architecture/mermaid-diagrams.md#8-flowchart--read-mode-decision-tree)](documentation/architecture/mermaid-diagrams.md#8-flowchart--read-mode-decision-tree)
-
 
 MPG includes simulators so you can evaluate the full scrape → decode → bridge pipeline before you have a device wired up:
 
@@ -378,7 +377,7 @@ The short alias `mpg` can be used as the service name if preferred, matching the
 
 MPG publishes data to MQTT using Home Assistant's auto-discovery format. Devices appear automatically under **Settings → Devices & Services → MQTT** once the broker is configured on both sides.
 
-With `discovery_enabled = true`, entities are created with the right Home Assistant type: sensors carry units, device classes and state classes (so they work with the Energy dashboard), coils and discrete inputs become binary sensors, and registers you have enabled for writing appear as number, select or switch controls. Entities go unavailable if MPG stops reporting, and the last known values are replayed when Home Assistant restarts. See the [MQTT bridge guide](documentation/bridges/MQTT/MQTT_bridge.md#home-assistant-discovery) for details, including how to keep the previous sensors-only behaviour (`discovery_entity_types = sensor`).
+With `discovery_enabled = true`, entities are created with the right Home Assistant type: sensors carry units, device classes and state classes (so they work with the Energy dashboard), coils and discrete inputs become binary sensors, and registers you have enabled for writing appear as number, select or switch controls. Entities go unavailable if MPG stops reporting, and the last known values are replayed when Home Assistant restarts. See the [MQTT bridge guide](documentation/bridges/MQTT/MQTT_bridge.md#home-assistant-discovery) for details, including how to keep the previous sensors-only behavior (`discovery_entity_types = sensor`).
 
 ### Install Mosquitto on Home Assistant (if not installed via docker)
 
