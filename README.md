@@ -430,18 +430,21 @@ Each supported device has a protocol directory under `protocols/` containing:
 
 The CSV files use `,` as delimiter (OpenOffice/LibreOffice compatible) and support the following columns — this column set is standardized across every protocol map in the repo, hand-built or generated:
 
-| Column            | Description                                           |
-| ----------------- | ----------------------------------------------------- |
-| `register`        | Modbus register number                                |
-| `variable_name`   | Friendly name used in MQTT topics and DB columns      |
-| `documented_name` | Original name from the device manual                  |
-| `data_type`       | e.g. `int16`, `uint16`, `float32`, `bit`              |
-| `unit`            | e.g. `V`, `A`, `W`, `°C`, 1 , .01 , 10 etc.           |
-| `values`          | Valid range or enumeration                            |
-| `read_interval`   | Override the global poll interval for this register   |
-| `writable`        | `R` (read-only) or `RW` (writable)                    |
-| `adjustments`     | JSON encoded code to enable special register handling |
-| `note`            | Free-form note shown in the web UI                    |
+| Column               | Description                                           |
+| -------------------- | ----------------------------------------------------- |
+| `register`           | Modbus register number                                |
+| `variable_name`      | Friendly name used in MQTT topics and DB columns      |
+| `documented_name`    | Original name from the device manual                  |
+| `unit`               | e.g. `V`, `A`, `W`, `°C`, 1 , .01 , 10 etc.           |
+| `data_type`          | e.g. `int16`, `uint16`, `float32`, `bit`              |
+| `values`             | Valid range or enumeration                            |
+| `read_interval`      | Override the global poll interval for this register   |
+| `writable`           | `R` (read-only) or `RW` (writable)                    |
+| `adjustments`        | JSON encoded code to enable special register handling |
+| `note`               | Free-form note shown in the web UI                    |
+| `ha_device_class`    | Home Assistant Device class                           |
+| `ha_state_class`     | Home Assistant State class                            |
+| `ha_entity_category` | Home Assistant Entity Category                        |
 
 Variable names have been normalized for readability. To use original documented names, clear the `variable_name` column in the CSV or edit via the Protocol Editor in the web UI.
 
