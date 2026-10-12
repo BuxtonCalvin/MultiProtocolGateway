@@ -119,7 +119,8 @@ _log: logging.Logger = logging.getLogger(__name__)
 
 @router.delete("/api/bridges/{bridge_name}")
 def delete_bridge_route(
-    bridge_name: str, db: Session = Depends(get_session)
+    bridge_name: str,
+    db: Session = Depends(get_session)
 ) -> JSONResponse:
     """
     Deletes a bridge's [transport.<bridge_name>] section from the config,
@@ -184,7 +185,7 @@ def delete_bridge_route(
 # ---------------------------------------------------------------------------
 
 @router.get("/pages/timescale/health", response_class=HTMLResponse, response_model=None)
-async def timescale_health_partial(request: Request):
+async def timescale_health_partial(request: Request) -> Any:
     """
     Bridge Health panel for the TimescaleDB bridge's device page — connection
     state, backlog buffering, and rollup setup completion. Read-only; lazy-
@@ -210,7 +211,7 @@ async def timescale_health_partial(request: Request):
 
 
 @router.get("/pages/timescale/storage", response_class=HTMLResponse, response_model=None)
-async def timescale_storage_partial(request: Request):
+async def timescale_storage_partial(request: Request)-> Any:
     """
     Storage Overview panel for the TimescaleDB bridge's device page — row
     count, size, chunk count, and time range per source table. Read-only;
@@ -236,7 +237,7 @@ async def timescale_storage_partial(request: Request):
 
 
 @router.get("/pages/timescale/indexes", response_class=HTMLResponse, response_model=None)
-async def timescale_indexes_partial(request: Request):
+async def timescale_indexes_partial(request: Request)-> Any:
     """
     Indexes panel for the TimescaleDB bridge's device page — every index
     on the shared narrow table and each wide table, with size and scan
@@ -263,7 +264,7 @@ async def timescale_indexes_partial(request: Request):
 
 
 @router.get("/pages/timescale/compression-retention", response_class=HTMLResponse, response_model=None)
-async def timescale_compression_retention_partial(request: Request):
+async def timescale_compression_retention_partial(request: Request)-> Any:
     """
     Compression & Retention Status panel for the TimescaleDB bridge's
     device page — the configured compression schedule and raw-data
@@ -289,7 +290,7 @@ async def timescale_compression_retention_partial(request: Request):
 
 
 @router.get("/pages/timescale/jobs", response_class=HTMLResponse, response_model=None)
-async def timescale_jobs_partial(request: Request):
+async def timescale_jobs_partial(request: Request)-> Any:
     """
     Background Job Status panel for the TimescaleDB bridge's device page —
     TimescaleDB's own compression/retention/refresh scheduler jobs for
@@ -322,7 +323,7 @@ async def timescale_jobs_partial(request: Request):
 # ---------------------------------------------------------------------------
 
 @router.get("/pages/influxdb/{device_name}/health", response_class=HTMLResponse, response_model=None)
-async def influxdb_health_partial(device_name: str, request: Request):
+async def influxdb_health_partial(device_name: str, request: Request)-> Any:
     """
     Bridge Health panel for an InfluxDB v1 (influxdb_out) or v3
     (influxdb3_out) device page — connection/backlog/staleness state.
@@ -351,7 +352,7 @@ async def influxdb_health_partial(device_name: str, request: Request):
 
 
 @router.get("/pages/influxdb/{device_name}/storage", response_class=HTMLResponse, response_model=None)
-async def influxdb_storage_partial(device_name: str, request: Request):
+async def influxdb_storage_partial(device_name: str, request: Request)-> Any:
     """
     Storage Overview panel for an InfluxDB v1 (influxdb_out) or v3
     (influxdb3_out) device page — discovered measurements/tables, a
@@ -384,7 +385,7 @@ async def influxdb_storage_partial(device_name: str, request: Request):
 # ---------------------------------------------------------------------------
 
 @router.get("/pages/mqtt/{device_name}/health", response_class=HTMLResponse, response_model=None)
-async def mqtt_health_partial(device_name: str, request: Request):
+async def mqtt_health_partial(device_name: str, request: Request)-> Any:
     """
     Bridge Health panel for an MQTT device page — connection/reconnect/
     write-topic state. Read-only; lazy-loaded like the other bridge panels.
@@ -417,7 +418,7 @@ async def mqtt_health_partial(device_name: str, request: Request):
 # ---------------------------------------------------------------------------
 
 @router.get("/pages/prometheus/{device_name}/health", response_class=HTMLResponse, response_model=None)
-async def prometheus_health_partial(device_name: str, request: Request):
+async def prometheus_health_partial(device_name: str, request: Request)-> Any:
     """
     Bridge Health panel for a Prometheus device page — in-memory metrics
     registry summary (metrics registered, mount path, machine counts by
@@ -447,7 +448,7 @@ async def prometheus_health_partial(device_name: str, request: Request):
 
 
 @router.get("/pages/prometheus/{device_name}/targets", response_class=HTMLResponse, response_model=None)
-async def prometheus_targets_partial(device_name: str, request: Request):
+async def prometheus_targets_partial(device_name: str, request: Request)-> Any:
     """
     Target Health panel for a Prometheus device page — one row per
     upstream machine this bridge has ever been wired to or received data
