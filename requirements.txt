@@ -30,4 +30,4 @@ pandas>=3.0.6                 # for data manipulation and analysis
 openpyxl>=3.1.5               # for reading/writing Excel files
 xlrd>=2.0.2                   # for reading/writing Excel files
 requests>=2.34.2              # imported directly (influxdb3_out)
-pyarrow>=25.0.1               # imported directly (influxdb3_out)
+pyarrow>=26.0.0               # imported directly (influxdb3_out)
