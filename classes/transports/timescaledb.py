@@ -60,6 +60,7 @@ import math
 import queue
 import re
 import sqlite3
+import sys
 import threading
 import time
 import warnings
@@ -134,6 +135,26 @@ from .transport_base import transport_base
 # checkers as a ONE-element row, which breaks tuple-unpacking and indexing.
 # This alias means "a row of any length whose columns are Any".
 AnyRow: TypeAlias = Row[Unpack[Tuple[Any, ...]]]
+
+if sys.version_info >= (3, 12):
+    from typing import TypedDict
+else:
+    # pydantic (reached via FastAPI response models elsewhere in the app)
+    # rejects typing.TypedDict on < 3.12; match transport_base.py.
+    from typing_extensions import TypedDict
+
+if sys.version_info >= (3, 11):
+    from typing import NotRequired
+else:
+    from typing_extensions import NotRequired
+
+
+# Result shapes for the web UI's admin/diagnostic panels (consumed by
+# classes/WebServer/services/bridge_service.py) are declared directly above the
+# class that builds them: HyperTableManager, RollupManager and
+# BridgeAdminManager. Values read out of a SQL result row are Any as far as the
+# type checker is concerned (SQLAlchemy Row access), so for those fields the
+# declared type is the column's observed type, not something pyright verifies.
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -519,6 +540,41 @@ class TimescaleDBConnectionManager:
             raise
 
 
+class RollupPolicy(TypedDict):
+    """The hypertable / rollup options the bridge builds from its config
+    section in timescaledb.__init__ and shares, by reference, with
+    HyperTableManager and RollupManager (so a change made here, such as the
+    connection flag, is seen by both immediately). `tsdb_connected` is kept up
+    to date by timescaledb's connection-state handling. `retune_timeout_seconds`
+    is never set by the bridge; it is read with a 300 second default, so a
+    caller can override it by adding the key."""
+    current_metric_count: int
+    tsdb_connected: bool
+    machine_timezone: str
+    drop_after: str
+    migrate_data: bool
+    enable_compression: bool
+    enable_dynamic_chunk_sizing: bool
+    auto_refresh_interval: int
+    enable_auto_refresh: bool
+    enable_rollups: bool
+    retune_timeout_seconds: NotRequired[float]
+
+
+class StaleTransportState(TypedDict):
+    """What timescaledb._stale_registry keeps for each source transport, for
+    stale-data detection: the last row that differed, when that data was first
+    seen unchanged, whether the transport is currently stale, when it was last
+    heard from (used to drop transports unseen for 7 days), and the reconnect-
+    request counter and timestamp that throttle _handle_stale_event."""
+    last_row: dict[str, int | float | str]
+    start_ts: datetime
+    is_stale: bool
+    last_seen: datetime
+    stale_event_count: int
+    last_event_ts: datetime | None
+
+
 # TimescaleDB transport bridge class
 class timescaledb(transport_base):
 
@@ -757,7 +813,7 @@ class timescaledb(transport_base):
         # hypertable / rollup options that are user defined.  These are sent to the rollup manager class
         # which will handle the hypertable and rollup creation and maintenance based on these settings.
 
-        self.rollup_policy: dict[str,Any] = {
+        self.rollup_policy: RollupPolicy = {
             # Hypertable Settings
             "current_metric_count": self.current_metric_count,
             "tsdb_connected": self.tsdb_connected,
@@ -779,7 +835,7 @@ class timescaledb(transport_base):
         super().__init__(settings)
 
         # registry map for the last batch of data received, used for stale data detection.
-        self._stale_registry: dict[str, dict[str, Any]] = {}
+        self._stale_registry: dict[str, StaleTransportState] = {}
         self._last_cleanup_time: float = time.time()
 
         self._verified_devices: set[str] = set()
@@ -840,7 +896,7 @@ class timescaledb(transport_base):
         # -------------------------
 
         # Initialize async flush queue and worker thread.  Start it here so it's ready at full init.
-        self._flush_queue: queue.Queue[dict[str, Any] | None] = queue.Queue(maxsize=0)
+        self._flush_queue: queue.Queue[FlushPayload | None] = queue.Queue(maxsize=0)
         self._flush_thread = threading.Thread(target=self._flush_worker, daemon=True, name="FlushWorker")
         self._flush_lock: Lock = threading.Lock()
         self._flush_event: threading.Event = getattr(self, "_flush_event", threading.Event())
@@ -1275,6 +1331,30 @@ class timescaledb(transport_base):
             self._stop_reconnect_event.clear()
             threading.Thread(target=self._attempt_reconnect, daemon=True, name= "TSDB ReconnectThread").start()
             self._log.info("Reconnect thread started.")
+
+    def _recover_if_flagged_disconnected(self) -> None:
+        """
+        Called by the flush worker right after a data write has committed.
+
+        tsdb_connected only goes True from the initial connect and from a successful reconnect
+        attempt, never from a successful write. If the database comes back in the gap between one
+        reconnect thread giving up (reconnect_attempts exhausted) and the next write, that write
+        succeeds but nothing would flip the flag back: the persisted backlog would never be
+        replayed, protocol rediscovery and rollup view repopulation would be skipped, and every
+        tsdb_connected-gated job (rollup refresh, column creation, policy setup) would stay
+        disabled until a restart or an unrelated SQL error.
+
+        A committed write is proof the database is reachable, so hand off to the normal reconnect
+        worker, which verifies with SELECT 1, sets the flag, and runs the same recovery (rediscover
+        protocols, repopulate rollup views, replay the backlog) as any other reconnect. A no-op when
+        already connected, or when a reconnect thread is already running, so it is cheap to call
+        after every write and does not repeat while a reconnect is in progress.
+        """
+        with self._reconnect_lock:
+            if self.tsdb_connected or self._reconnect_thread_running:
+                return
+        self._log.info("A data write succeeded while TimescaleDB is flagged disconnected -- starting reconnect verification.")
+        self._trigger_reconnect()
 
     def _stop_thread_reconnect(self) -> None:
         """
@@ -2194,7 +2274,7 @@ class timescaledb(transport_base):
         Creates RollupManager on first call, adds new protocol views on
         subsequent calls as more protocols register via init_bridge.
         """
-        if not self.rollup_policy.get("enable_rollups", True):
+        if not self.rollup_policy["enable_rollups"]:
             return
 
         if self.rollup_mgr is None:
@@ -2234,7 +2314,7 @@ class timescaledb(transport_base):
                 wide_table_name=self._protocol_wide_table_map[protocol]
             )
 
-            if self.rollup_policy.get("enable_auto_refresh", True):
+            if self.rollup_policy["enable_auto_refresh"]:
                 self.rollup_mgr.start_auto_refresh()
 
             # Replay backlog now that schema is confirmed ready.
@@ -2385,7 +2465,7 @@ class timescaledb(transport_base):
         # Look up the wide table for this transport's protocol
         wide_table_name: str | None = self._protocol_wide_table_map.get(protocol)
 
-        payload: dict[str, Any] = {
+        payload: FlushPayload = {
             "device_info_id": device_id,
             "metrics": data.copy(),
             "m_time": _now_tz(),
@@ -2418,148 +2498,168 @@ class timescaledb(transport_base):
                     self._cleanup_stale_registry()
                     self._last_cleanup_time = time.time()
 
+                self._flush_event.wait(timeout=0)
+                #************** Drain the queue with a 1s timeout to stay responsive************
+                data_in: FlushPayload | None = self._flush_queue.get(block=True)
+
+                # Every item taken off the queue is marked done exactly once, by the finally below, whether
+                # _flush_one finishes it, asks the worker to stop, or raises. (Calling task_done() from several
+                # places inside the processing, plus once more from an exception handler, is what used to count an
+                # item twice: the second call raised ValueError and ended this thread.)
+                stop: bool = False
                 try:
-                    self._flush_event.wait(timeout=0)
-                    #************** Drain the queue with a 1s timeout to stay responsive************
-                    data_in: dict[str, Any] | None = self._flush_queue.get(block=True)
-
-                    if data_in is None:
-                        self._log.info("No data in flush queue. Exiting flush worker.")
-                        self._flush_queue.task_done()
-                        break # Exit the loop cleanly and immediately
-
-                    # Now that we have data, wait here if a migration is running
-                    while self.migration_in_progress.is_set():
-                        if self._stop_event.is_set():
-                            break
-                        time.sleep(0.25)
-
-                    # 2. Extract the metadata from data_in
-                    device_info_id: int = data_in["device_info_id"]
-                    timestamp: datetime = data_in["m_time"]
-                    # Backlog replay deserializes datetime as ISO string — convert back.
-                    if isinstance(timestamp, str):
-                        timestamp = datetime.fromisoformat(timestamp)
-                    metrics_only: dict[str, Any] = data_in["metrics"]
-                    transport_name: str = data_in["transport_name"]
-                    protocol: str = data_in["protocol"]
-                    wide_table_name: str | None = data_in["wide_table_name"]
-
-                    # Check for stale data before attempting to process/write to the database. This is based on the timestamp from the transport
-                    # and the previous saved timestamp.
-
-                    is_stale: bool = self._check_is_stale(transport_name, metrics_only, timestamp)
-
-                    if is_stale:
-                        self._commit_transport_state(transport_name, metrics_only, timestamp, is_stale=True)
-                        self._log.debug("Stale data detected, skipping DB write.")
-                        self._flush_queue.task_done()
-                        continue
-
-                    # pre-process data to coerce floating point, integer as values (from metric_catalog definitions) for safe insertion to the wide table.
-                    # Also applies SQL-safe column renaming. Only process metric values for the wide table path.
-                    # The narrow table stores raw key/values as default double precision and is not subject to the same schema
-                    # constraints, so we can skip processing for narrow table entries with only metric names safe SQL cleaned for
-                    # consistency.
-
-                    wide_data, narrow_data = self._process_raw_metrics(metrics_only, protocol)
-
-                    if not wide_data and not narrow_data:
-                        self._log.debug("No data detected, skipping DB write.")
-                        self._flush_queue.task_done()
-                        continue
-                    else:
-                        # Add device_info_id and timestamp to wide_data for wide table insertion.  This is needed because the narrow table
-                        # applies timestamp and device_info_id to individual rows, whereas the wide table has one row per
-                        # timestamp/device with multiple metric columns.
-
-                        valid_row: bool = False
-                        msg: str | None = None
-                        if wide_data and wide_table_name is not None:
-                            valid_row, msg = self._validate_wide_row(wide_data, wide_table_name)
-                            wide_data: dict[str, Any] = wide_data | {
-                                "device_info_id": device_info_id,
-                                "m_time": timestamp,
-                            }
-
-                    if self._stop_event.is_set():
-                        break
-
-                    while self.migration_in_progress.is_set():
-                        if self._stop_event.is_set():
-                            break
-                        time.sleep(0.5)
-                    try:
-                        with self.schema_lock:
-                            with session.begin():
-                                # Further process the narrow data with the timestamp and device_info_id for insertion
-                                # to the narrow table, by applying the timestamp and device_info_id to each metric/value pair.
-                                self._flush_batch_narrow(narrow_data, device_info_id, timestamp, session, transport_name)
-
-                                # The wide row is inserted whenever the wide table name is known -- valid_row only changes the log message.
-                                # If validation reported missing columns (fewer_keys: a column still exists on the wide table but its metric
-                                # is no longer in the scrape), the insert still happens and those columns are stored as NULL.
-                                # The opposite mismatch (extra_keys: a scraped metric with NO wide column, e.g. the column was deleted while
-                                # the metric is still in the variable_mask) never reaches this point: _validate_wide_row raises ValueError
-                                # before this try block, and the outer handler drops the whole batch -- narrow AND wide -- for that cycle.
-                                if wide_table_name is not None:
-                                    target_table: Table = Base.metadata.tables[wide_table_name]
-                                    stmt: Insert = pg_insert(target_table).values(**wide_data)
-                                    session.execute(stmt)
-                                    if valid_row:
-                                        self._log.info(f"data write complete from [{transport_name}] to timescaledb wide table for {len(metrics_only)} metrics.")
-                                    else:
-                                        self._log.info(f"Not a complete valid row for the wide table because {msg}, but wrote metrics anyway.")
-
-                            self._commit_transport_state(transport_name, metrics_only, timestamp, is_stale=False)
-
-                    except (SQLAlchemyError, ValueError) as e1:
-                        session.rollback()
-                        self._log.error(f"metrics data write failed.{e1}")
-
-                        # Only backlog if setting enabled and DB is down
-                        with self._reconnect_lock:
-                            tsdb_connected: bool = self.tsdb_connected
-
-                        if self.enable_persistent_storage and not tsdb_connected:
-                            # Check if we can get the lock
-                            acquired: bool = self._backlog_lock.acquire(blocking=False)
-                            try:
-                                if acquired:
-                                    payload: dict[str, Any] = {
-                                        "metrics": metrics_only,
-                                        "device_info_id": device_info_id,
-                                        "m_time": timestamp,
-                                        "transport_name": transport_name,
-                                        "protocol": protocol,
-                                        "wide_table_name": wide_table_name,
-                                    }
-                                    self.backlog.enqueue(payload)
-
-                            finally:
-                                if acquired:
-                                    self._backlog_lock.release()
-
-                        # Handle recovery
-                        if isinstance(e1, SQLAlchemyError):
-                            self._set_tsdb_connected(conn_value = False, conn_reason = "Connection failure")
-                            msg = ("Connection failure detected during flush worker write. Data has been "
-                            "enqueued to backlog and will be retried when connection is restored.")
-                            self._trigger_reconnect()
-
-                    finally:
-
-                        self._flush_queue.task_done()
-
-                        # Clear flush event if queue is empty
-                        if self._flush_queue.empty():
-                            self._flush_event.clear()
+                    stop = self._flush_one(data_in, session)
                 except Exception as e:
                     self._log.critical(f" Fatal Flush Worker Crash: {e}")
+                finally:
                     self._flush_queue.task_done()
+                if stop:
+                    break
 
         finally:
             session.close()
+
+    def _flush_one(self, data_in: FlushPayload | None, session: Session) -> bool:
+        """
+        Process one item taken off the flush queue: check it for staleness, write it to the narrow (and wide) table,
+        or route it to the backlog if the write fails. Returns True when the worker should stop (the shutdown
+        sentinel, or a stop request), False to carry on with the next item.
+
+        Never calls task_done(): _flush_worker does that exactly once per item, whatever happens here. An exception
+        that is not handled below propagates to it, which logs it and carries on with the next item.
+        """
+        if data_in is None:
+            self._log.info("No data in flush queue. Exiting flush worker.")
+            return True  # exit the loop cleanly and immediately
+
+        # Now that we have data, wait here if a migration is running
+        while self.migration_in_progress.is_set():
+            if self._stop_event.is_set():
+                break
+            time.sleep(0.25)
+
+        # 2. Extract the metadata from data_in
+        device_info_id: int = data_in["device_info_id"]
+        timestamp: datetime = data_in["m_time"]
+        metrics_only: dict[str, int | float | str] = data_in["metrics"]
+        transport_name: str = data_in["transport_name"]
+        protocol: str = data_in["protocol"]
+        wide_table_name: str | None = data_in["wide_table_name"]
+
+        # Check for stale data before attempting to process/write to the database. This is based on the timestamp from the transport
+        # and the previous saved timestamp.
+
+        is_stale: bool = self._check_is_stale(transport_name, metrics_only, timestamp)
+
+        if is_stale:
+            self._commit_transport_state(transport_name, metrics_only, timestamp, is_stale=True)
+            self._log.debug("Stale data detected, skipping DB write.")
+            return False
+
+        # pre-process data to coerce floating point, integer as values (from metric_catalog definitions) for safe insertion to the wide table.
+        # Also applies SQL-safe column renaming. Only process metric values for the wide table path.
+        # The narrow table stores raw key/values as default double precision and is not subject to the same schema
+        # constraints, so we can skip processing for narrow table entries with only metric names safe SQL cleaned for
+        # consistency.
+
+        wide_data, narrow_data = self._process_raw_metrics(metrics_only, protocol)
+
+        if not wide_data and not narrow_data:
+            self._log.debug("No data detected, skipping DB write.")
+            return False
+
+        # Add device_info_id and timestamp to wide_data for wide table insertion.  This is needed because the narrow table
+        # applies timestamp and device_info_id to individual rows, whereas the wide table has one row per
+        # timestamp/device with multiple metric columns.
+
+        valid_row: bool = False
+        msg: str | None = None
+        if wide_data and wide_table_name is not None:
+            valid_row, msg = self._validate_wide_row(wide_data, wide_table_name)
+            wide_data: dict[str, Any] = wide_data | {
+                "device_info_id": device_info_id,
+                "m_time": timestamp,
+            }
+
+        if self._stop_event.is_set():
+            return True
+
+        while self.migration_in_progress.is_set():
+            if self._stop_event.is_set():
+                break
+            time.sleep(0.5)
+        try:
+            with self.schema_lock:
+                with session.begin():
+                    # Further process the narrow data with the timestamp and device_info_id for insertion
+                    # to the narrow table, by applying the timestamp and device_info_id to each metric/value pair.
+                    self._flush_batch_narrow(narrow_data, device_info_id, timestamp, session, transport_name)
+
+                    # The wide row is inserted whenever the wide table name is known -- valid_row only changes the log message.
+                    # If validation reported missing columns (fewer_keys: a column still exists on the wide table but its metric
+                    # is no longer in the scrape), the insert still happens and those columns are stored as NULL.
+                    # The opposite mismatch (extra_keys: a scraped metric with NO wide column, e.g. the column was deleted while
+                    # the metric is still in the variable_mask) never reaches this point: _validate_wide_row raises ValueError
+                    # before this try block, and the outer handler drops the whole batch -- narrow AND wide -- for that cycle.
+                    if wide_table_name is not None:
+                        target_table: Table = Base.metadata.tables[wide_table_name]
+                        stmt: Insert = pg_insert(target_table).values(**wide_data)
+                        session.execute(stmt)
+                        if valid_row:
+                            self._log.info(f"data write complete from [{transport_name}] to timescaledb wide table for {len(metrics_only)} metrics.")
+                        else:
+                            self._log.info(f"Not a complete valid row for the wide table because {msg}, but wrote metrics anyway.")
+
+                self._commit_transport_state(transport_name, metrics_only, timestamp, is_stale=False)
+
+        except (SQLAlchemyError, ValueError) as e1:
+            session.rollback()
+            self._log.error(f"metrics data write failed.{e1}")
+
+            # Only backlog if setting enabled and DB is down
+            with self._reconnect_lock:
+                tsdb_connected: bool = self.tsdb_connected
+
+            if self.enable_persistent_storage and not tsdb_connected:
+                # Check if we can get the lock
+                acquired: bool = self._backlog_lock.acquire(blocking=False)
+                try:
+                    if acquired:
+                        payload: FlushPayload = {
+                            "metrics": metrics_only,
+                            "device_info_id": device_info_id,
+                            "m_time": timestamp,
+                            "transport_name": transport_name,
+                            "protocol": protocol,
+                            "wide_table_name": wide_table_name,
+                        }
+                        self.backlog.enqueue(payload)
+
+                finally:
+                    if acquired:
+                        self._backlog_lock.release()
+
+            # Handle recovery
+            if isinstance(e1, SQLAlchemyError):
+                self._set_tsdb_connected(conn_value = False, conn_reason = "Connection failure")
+                msg = ("Connection failure detected during flush worker write. Data has been "
+                "enqueued to backlog and will be retried when connection is restored.")
+                self._trigger_reconnect()
+        else:
+            # The write committed. Runs here, not inside the try, so a problem in the recovery
+            # hand-off can never be mistaken for a failed write, and is caught on its own so it
+            # can never take down the flush worker (the outer handler would call task_done() a
+            # second time for this item).
+            try:
+                self._recover_if_flagged_disconnected()
+            except Exception as recover_error:
+                self._log.error(f"Post-write reconnect check failed: {recover_error}")
+        finally:
+            # Clear flush event if queue is empty
+            if self._flush_queue.empty():
+                self._flush_event.clear()
+
+        return False
 
     def _process_raw_metrics(self, datacopy: dict[str, Any], protocol: str) -> tuple[dict[str, Any], dict[str, Any]]:
         try:
@@ -2675,7 +2775,7 @@ class timescaledb(transport_base):
             raise  # Re-raise to be caught by outer handler for potential backlog queuing
 
 
-    def _check_is_stale(self, transport_id: str, row: dict[str, Any], timestamp: datetime) -> bool:
+    def _check_is_stale(self, transport_id: str, row: dict[str, int | float | str], timestamp: datetime) -> bool:
         """_summary_   Stale Data Detection and Handling
             The following methods implement a mechanism to detect when incoming data from a transport has become stale
             (i.e., unchanged for a certain period) and to handle such situations by triggering reconnects and notifications.
@@ -2689,8 +2789,8 @@ class timescaledb(transport_base):
             bool: Returns True if the data is considered stale (unchanged for longer than the defined timeout),
                 otherwise False.
         """
-        state: dict[str, Any] | None = self._stale_registry.get(transport_id)
-        if not state or state["last_row"] is None:
+        state: StaleTransportState | None = self._stale_registry.get(transport_id)
+        if not state:
             return False
 
         # Comparison Logic (Numeric + Strict)
@@ -2706,7 +2806,7 @@ class timescaledb(transport_base):
         elapsed = timestamp - state["start_ts"]
         return elapsed > timedelta(seconds=int(self.stale_data_timeout))
 
-    def _commit_transport_state(self, transport_id: str, row: dict[str, Any], timestamp: datetime, is_stale: bool) -> None:
+    def _commit_transport_state(self, transport_id: str, row: dict[str, int | float | str], timestamp: datetime, is_stale: bool) -> None:
         """_summary_ The method _commit_transport_state is responsible for tracking the state of each transport's
             data freshness. It maintains a registry (_stale_registry) that records the last received data, the timestamp of when that
             data was received, and whether the data is currently considered stale. When new data arrives, this method
@@ -2725,7 +2825,7 @@ class timescaledb(transport_base):
                 "last_seen": timestamp, "stale_event_count": 0, "last_event_ts": None
             }
 
-        state: dict[str, Any] = self._stale_registry[transport_id]
+        state: StaleTransportState = self._stale_registry[transport_id]
         state["last_seen"] = timestamp
         self._log.debug(
             f"Committing state for transport: {transport_id} | "
@@ -2828,7 +2928,7 @@ class timescaledb(transport_base):
         Called for every stale batch (see _commit_transport_state); returns without doing anything when the attempt cap has been
         reached (including max_stale_attempts = 0) or the retry delay has not yet elapsed.  Counters reset when fresh data arrives.
         """
-        state: dict[str, Any] | None = self._stale_registry.get(transport_id)
+        state: StaleTransportState | None = self._stale_registry.get(transport_id)
         if not state:
             return
 
@@ -2928,6 +3028,79 @@ class SendMessageProtocol(Protocol):
         **kwargs: Any,
     ) -> None:
         ...
+# ---------------------------------------------------------------------------------------------------------------------
+# Flush queue payload
+#
+# One data point as it travels timescaledb.write_data -> _flush_queue -> _flush_worker, and through BacklogManager
+# when the database is unreachable. BacklogManager is the only place the payload leaves the process (it journals each
+# point to SQLite as JSON), so it is also the only place its types can be lost, and the only place they are restored.
+# ---------------------------------------------------------------------------------------------------------------------
+
+class FlushPayload(TypedDict):
+    """One data point in the flush queue. `m_time` is always a datetime here. The on-disk backlog stores it as text
+    (json.dumps(..., default=str) turns it into str(datetime)), and BacklogManager.load_from_disk restores the
+    datetime when it reads a point back, so nothing downstream of that boundary ever sees a string. `metrics` is the
+    transport's readings for one poll cycle; its value types are the transport contract (write_data's signature),
+    not something checked at runtime, since the live path does not check them either."""
+    device_info_id: int
+    metrics: dict[str, int | float | str]
+    m_time: datetime
+    transport_name: str
+    protocol: str
+    wide_table_name: str | None  # None means a narrow-only protocol
+
+
+class _MalformedFlushPayload(ValueError):
+    """A backlog row whose JSON is not a valid FlushPayload. A ValueError, so load_from_disk's existing
+    per-row handler treats it like any other corrupted row."""
+
+
+def _malformed(reason: str) -> _MalformedFlushPayload:
+    return _MalformedFlushPayload(f"backlog payload {reason}")
+
+
+def _flush_payload_from_json(payload_str: str, m_time: datetime) -> FlushPayload:
+    """
+    Rebuild a FlushPayload from the JSON text BacklogManager journalled, with `m_time` supplied by the caller
+    (the row's m_time column, already parsed back into a datetime, so the same value that decided the point's age
+    is the one written to the database).
+
+    The JSON comes back from disk as an unknown shape, so this checks that it is an object holding every field
+    write_data puts there, with the right primitive types, and raises _MalformedFlushPayload (a ValueError) if not,
+    which load_from_disk reports as a corrupted row and drops. (json.JSONDecodeError is a ValueError too, so
+    malformed JSON is the same case.)
+    """
+    parsed: object = json.loads(payload_str)
+    if not isinstance(parsed, dict):
+        raise _malformed("is not a JSON object")
+    fields: dict[str, object] = cast("dict[str, object]", parsed)
+    for key in ("device_info_id", "metrics", "transport_name", "protocol", "wide_table_name"):
+        if key not in fields:
+            missing: str = f"has no '{key}'"
+            raise _malformed(missing)
+    device_info_id: object = fields["device_info_id"]
+    metrics: object = fields["metrics"]
+    transport_name: object = fields["transport_name"]
+    protocol: object = fields["protocol"]
+    wide_table_name: object = fields["wide_table_name"]
+    if not isinstance(device_info_id, int) or isinstance(device_info_id, bool):
+        raise _malformed("'device_info_id' is not an integer")
+    if not isinstance(metrics, dict):
+        raise _malformed("'metrics' is not an object")
+    if not isinstance(transport_name, str) or not isinstance(protocol, str):
+        raise _malformed("'transport_name' or 'protocol' is not a string")
+    if wide_table_name is not None and not isinstance(wide_table_name, str):
+        raise _malformed("'wide_table_name' is neither a string nor null")
+    return {
+        "device_info_id": device_info_id,
+        "metrics": cast("dict[str, int | float | str]", metrics),
+        "m_time": m_time,
+        "transport_name": transport_name,
+        "protocol": protocol,
+        "wide_table_name": wide_table_name,
+    }
+
+
 class BacklogManager:
     """
     Manages persistent backlog storage and replay for TimescaleDB writes.
@@ -2971,7 +3144,7 @@ class BacklogManager:
         max_backlog_age: int,
         max_backlog_size: int,
         send_message: SendMessageProtocol,
-        flush_queue: queue.Queue[dict[str, Any] | None],
+        flush_queue: queue.Queue[FlushPayload | None],
         flush_event: threading.Event,
         backlog_lock: threading.RLock,
         log: logging.Logger
@@ -2981,12 +3154,12 @@ class BacklogManager:
         self.max_backlog_age: int = max_backlog_age
         self.max_backlog_size: int = max_backlog_size
         self.send_message: SendMessageProtocol = send_message
-        self._flush_queue: queue.Queue[dict[str, Any] | None] = flush_queue
+        self._flush_queue: queue.Queue[FlushPayload | None] = flush_queue
         self._flush_event: threading.Event = flush_event
         self._backlog_lock: threading.RLock = backlog_lock
         self._log: logging.Logger = log
 
-        self.backlog_points: list[dict[str, Any]] = []
+        self.backlog_points: list[FlushPayload] = []
         self._backlog_rowids: list[int] = []    # parallel to backlog_points: rowid[i] belongs to backlog_points[i]
 
     # -------------------------
@@ -3017,7 +3190,7 @@ class BacklogManager:
             return
 
         cutoff: datetime = _now_tz() - timedelta(seconds=int(self.max_backlog_age))
-        loaded_points: list[dict[str, Any]] = []
+        loaded_points: list[FlushPayload] = []
         loaded_rowids: list[int] = []
         expired_ids: list[int] = []
 
@@ -3035,8 +3208,9 @@ class BacklogManager:
                             if m_time < cutoff:
                                 expired_ids.append(row_id)
                                 continue
-                            point: dict[str, Any] = json.loads(payload_str)
-                            loaded_points.append(point)
+                            # The payload's own m_time came back from JSON as text; the datetime parsed from the
+                            # m_time column above (the one the age check used) replaces it.
+                            loaded_points.append(_flush_payload_from_json(payload_str, m_time))
                             loaded_rowids.append(row_id)
                         except (json.JSONDecodeError, ValueError) as e:
                             self._log.info("Skipping corrupted backlog row %s: %s", row_id, e)
@@ -3068,7 +3242,7 @@ class BacklogManager:
                 priority=1
             )
 
-    def enqueue(self, point: dict[str, Any]) -> None:
+    def enqueue(self, point: FlushPayload) -> None:
         """
         Add a point to the backlog. SQLite is always written before memory is updated so that
         a crash mid-call leaves SQLite as the authoritative record.
@@ -3080,7 +3254,7 @@ class BacklogManager:
             example point dict:
             {
                 "device_info_id": 3,                          # int — FK into device_info table
-                "m_time": datetime(2026, 6, 2, 14, 23, 11,    # datetime (or ISO string after SQLite round-trip)
+                "m_time": datetime(2026, 6, 2, 14, 23, 11,    # datetime (restored from text if reloaded from disk)
                                 tzinfo=tzlocal()),
                 "transport_name": "eg4_18kpv_inverter_1",     # str — identifies the source inverter
                 "protocol":       "eg4_18kpv",                # str — used to route to the right wide table
@@ -3097,9 +3271,6 @@ class BacklogManager:
                 }
 }
         """
-        if isinstance(point, list):
-            raise TypeError("enqueue() does not accept lists, only single dict or None.")
-
         with self._backlog_lock:
             if len(self.backlog_points) >= self.max_backlog_size:
                 self._log.warning(f"Max backlog size ({self.max_backlog_size}) reached. Dropping oldest point.")
@@ -3145,14 +3316,14 @@ class BacklogManager:
     # Disk helpers
     # -------------------------
 
-    def _append_to_disk(self, point: dict[str, Any]) -> int:
+    def _append_to_disk(self, point: FlushPayload) -> int:
         """
         Insert a single point into SQLite. Returns the new rowid.
         Raises on failure — caller must not update memory if this raises.
         """
         if not self.backlog_file_path:
             return -1
-        m_time_str: str = str(point.get("m_time", _now_tz().isoformat()))
+        m_time_str: str = str(point["m_time"])
         payload_str: str = json.dumps(point, default=str)
 
         try:
@@ -3222,6 +3393,154 @@ class BacklogManager:
                 priority=1
             )
             raise
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# HyperTableManager result shapes
+#
+# What HyperTableManager.get_dynamic_raw_table_overview() and list_compression_groups() return,
+# the events rebuild_compression() streams, and the two internal shapes those paths are
+# built from (PerformanceTier, CompressionGroupTables).
+# ----------------------------------------------------------------------------------------------------------------------
+
+class DynamicRawTableRow(TypedDict):
+    """HyperTableManager.get_dynamic_raw_table_overview() row."""
+    table_name: str
+    protocol_name: str
+    load_score: float
+    band_name: str
+    chunk_time_interval: str
+    compress_after_interval: str
+
+
+class CompressionTableInfo(TypedDict):
+    """One table (raw hypertable or rollup view) inside a CompressionGroupInfo."""
+    table_name: str
+    granularity: str
+    total_chunks: int
+    compressed_chunks: int
+    size_bytes: int
+    raw_size_bytes: int
+
+
+class CompressionGroupInfo(TypedDict):
+    """HyperTableManager.list_compression_groups() row."""
+    protocol_name: str
+    wide_table_name: str
+    tables: list[CompressionTableInfo]
+    total_chunks: int
+    compressed_chunks: int
+    size_bytes: int
+    raw_size_bytes: int
+
+class PerformanceTier(TypedDict):
+    """One entry of HyperTableManager.performance_tiers: session settings
+    sized to how much refresh-window pressure there is (see
+    get_dynamic_settings_helper for how a tier is chosen). work_mem and
+    lock_timeout are what callers apply to a session; count and
+    flush_batch_size are declared with each tier but nothing currently
+    reads them."""
+    count: int
+    work_mem: str
+    lock_timeout: str
+    flush_batch_size: int
+
+
+class CompressionGroupTables(TypedDict):
+    """One compression group as resolved by HyperTableManager.
+    _compression_group_tables(): a protocol's raw table plus its rollup
+    views (or "shared_narrow" and the shared narrow stack). `tables` is in
+    granularity order (raw, hourly, daily, weekly, monthly); `selected` says
+    whether the caller asked for this group, since an unselected group is
+    still listed so it always has a result row."""
+    protocol_name: str
+    wide_table_name: str
+    selected: bool
+    tables: list[str]
+
+
+class CompressionRebuildChunk(TypedDict):
+    """One chunk's decompress -> recompress outcome in a rebuild_compression() group."""
+    table_name: str
+    chunk_name: str
+    ok: bool
+    error: str | None
+
+
+class _CompressionRebuildPendingTable(TypedDict):
+    """A table's result inside rebuild_compression() before the post-rebuild
+    sizes are measured; becomes a CompressionRebuildTable."""
+    table_name: str
+    ok: bool
+    chunks_ok: int
+    chunks_failed: int
+    size_before_bytes: int
+
+
+class CompressionRebuildTable(TypedDict):
+    """One table in a rebuild_compression() group result. Sizes are the
+    table's total on-disk size (hypertable_size()) before and after."""
+    table_name: str
+    ok: bool
+    chunks_ok: int
+    chunks_failed: int
+    size_before_bytes: int
+    size_after_bytes: int
+
+
+class CompressionRebuildGroup(TypedDict):
+    """One protocol group in rebuild_compression()'s final result. A group
+    that wasn't selected has skipped=True, zero counts and no tables/chunks."""
+    protocol_name: str
+    skipped: bool
+    ok: bool
+    chunks_attempted: int
+    chunks_ok: int
+    chunks_failed: int
+    size_before_bytes: int
+    size_after_bytes: int
+    tables: list[CompressionRebuildTable]
+    chunks: list[CompressionRebuildChunk]
+
+
+class CompressionRebuildResult(TypedDict):
+    groups: list[CompressionRebuildGroup]
+
+
+class CompressionRebuildProgress(TypedDict):
+    """Streamed after every chunk (success or failure). bytes_processed is
+    weighted by table size, not chunk count."""
+    type: Literal["progress"]
+    protocol_name: str
+    table_name: str
+    bytes_processed: int
+    bytes_total: int
+
+
+class CompressionRebuildDone(TypedDict):
+    """The single terminal event of rebuild_compression()."""
+    type: Literal["done"]
+    result: CompressionRebuildResult
+
+
+CompressionRebuildEvent: TypeAlias = CompressionRebuildProgress | CompressionRebuildDone
+
+
+class _CompressionPlanItem(TypedDict):
+    """One compressed table to rebuild, planned up front by rebuild_compression()."""
+    protocol_name: str
+    table_name: str
+    chunk_names: list[str]
+
+
+class _CompressionGroupAccumulator(TypedDict):
+    """Running totals for one protocol group inside rebuild_compression()."""
+    chunk_results: list[CompressionRebuildChunk]
+    table_results: list[_CompressionRebuildPendingTable]
+    chunks_ok: int
+    chunks_failed: int
+
+
 class HyperTableManager:
     """
     Owns TimescaleDB hypertable-level mechanics: creating hypertables,
@@ -3273,12 +3592,12 @@ class HyperTableManager:
 
     def __init__(
         self,
-        rollup_policy: dict[str, Any],
+        rollup_policy: RollupPolicy,
         my_session_factory: sessionmaker[Session],
         log: logging.Logger,
         ) -> None:
 
-        self.rollup_policy: dict[str, Any] = rollup_policy
+        self.rollup_policy: RollupPolicy = rollup_policy
         self.SessionFactory: sessionmaker[Session] = my_session_factory
         self._log: logging.Logger = log
 
@@ -3296,7 +3615,7 @@ class HyperTableManager:
         # and RollupManager's refresh/rebuild paths (via
         # self.rollup_mgr / hypertable_mgr cross-calls) -- see
         # get_dynamic_settings_helper.
-        self.performance_tiers: dict[str, dict[str, Any]] = {
+        self.performance_tiers: dict[str, PerformanceTier] = {
         "tier_low":    {"count": 50,  "work_mem": "32MB",  "lock_timeout": "10s", "flush_batch_size": 10},
         "tier_medium": {"count": 100, "work_mem": "64MB",  "lock_timeout": "15s", "flush_batch_size": 20},
         "tier_high":   {"count": 160, "work_mem": "128MB", "lock_timeout": "30s", "flush_batch_size": 40},
@@ -3388,8 +3707,8 @@ class HyperTableManager:
 
         self.if_not_exists = True
 
-        self.enable_compression = bool(self.rollup_policy.get("enable_compression", True))
-        self.drop_after: str = self.rollup_policy.get("drop_after", "1 year")
+        self.enable_compression = bool(self.rollup_policy["enable_compression"])
+        self.drop_after: str = self.rollup_policy["drop_after"]
 
         # When True (default), raw-table chunk_time_interval and compress_
         # after are computed dynamically from live scrape load (see
@@ -3399,7 +3718,7 @@ class HyperTableManager:
         # data to classify a table (e.g. right after a fresh connect,
         # before any scraper has written through this bridge), or when
         # this is disabled.
-        self.enable_dynamic_chunk_sizing = bool(self.rollup_policy.get("enable_dynamic_chunk_sizing", True))
+        self.enable_dynamic_chunk_sizing = bool(self.rollup_policy["enable_dynamic_chunk_sizing"])
 
         # Compression settings
         self.compress_segmentby_narrow: str = self.hypertable_defaults["compress_segmentby_narrow"]
@@ -3473,11 +3792,7 @@ class HyperTableManager:
             forced through the rollup_mgr back-reference (which isn't set
             yet during this class's own construction window).
         """
-        val: Any = self.rollup_policy.get("tsdb_connected", False)
-        if val is True or val == "True":
-            return val is True
-        else:
-            return False
+        return self.rollup_policy["tsdb_connected"]
 
     # === moved: record_transport_interval (3644-3671) ===
     def record_transport_interval(self, transport_name: str, protocol_name: str, read_interval: float) -> None:
@@ -3929,7 +4244,7 @@ class HyperTableManager:
 
 
     # === moved: _compression_group_tables (5559-5624) ===
-    def _compression_group_tables(self, protocol_names: set[str] | None = None) -> list[dict[str, Any]]:
+    def _compression_group_tables(self, protocol_names: set[str] | None = None) -> list[CompressionGroupTables]:
         """
         Resolves each compression group's member tables -- the group's raw
         hypertable plus its hourly/daily/weekly/monthly rollup views (all
@@ -3950,7 +4265,7 @@ class HyperTableManager:
         include it in the returned list, so a group always has a result
         row even when it's skipped.
         """
-        groups: list[dict[str, Any]] = [{
+        groups: list[CompressionGroupTables] = [{
             "protocol_name": "shared_narrow",
             "wide_table_name": "device_metrics_narrow",
             "selected": protocol_names is None or "shared_narrow" in protocol_names,
@@ -3997,7 +4312,7 @@ class HyperTableManager:
 
 
     # === moved: list_compression_groups (5625-5792) ===
-    def list_compression_groups(self) -> list[dict[str, Any]]:
+    def list_compression_groups(self) -> list[CompressionGroupInfo]:
         """
         Read-only compression inventory for the Rebuild Compression screen
         -- one row per group (shared narrow stack, plus each wide-table
@@ -4057,7 +4372,7 @@ class HyperTableManager:
         loads once per page view and once after a rebuild -- so the public
         catalog views are the safer choice here.)
         """
-        groups: list[dict[str, Any]] = self._compression_group_tables(protocol_names=None)
+        groups: list[CompressionGroupTables] = self._compression_group_tables(protocol_names=None)
 
         granularity_by_table: dict[str, str] = {}
         all_table_names: list[str] = []
@@ -4128,9 +4443,9 @@ class HyperTableManager:
             for row in stat_rows
         }
 
-        rows_out: list[dict[str, Any]] = []
+        rows_out: list[CompressionGroupInfo] = []
         for group in groups:
-            table_rows: list[dict[str, Any]] = []
+            table_rows: list[CompressionTableInfo] = []
             total_chunks = 0
             compressed_chunks = 0
             size_bytes = 0
@@ -4302,7 +4617,7 @@ class HyperTableManager:
         like everything else here does; it was inconsistent for this
         decompress to be the one exception.
         """
-        r_settings: dict[str, Any] = self.get_dynamic_settings_helper()
+        r_settings: PerformanceTier = self.get_dynamic_settings_helper()
         try:
             with session.begin_nested():
                 self.set_lock_timeout(session, r_settings["lock_timeout"])
@@ -4344,7 +4659,7 @@ class HyperTableManager:
         Best-effort: a table with no compressed chunks in range (or not a
         hypertable) simply no-ops rather than failing the caller's edit.
         """
-        r_settings: dict[str, Any] = self.get_dynamic_settings_helper()
+        r_settings: PerformanceTier = self.get_dynamic_settings_helper()
         try:
             with session.begin_nested():
                 self.set_lock_timeout(session, r_settings["lock_timeout"])
@@ -4403,7 +4718,7 @@ class HyperTableManager:
 
 
     # === moved: rebuild_compression (5956-6291) ===
-    def rebuild_compression(self, protocol_names: set[str] | None = None) -> Generator[dict[str, Any], None, None]:
+    def rebuild_compression(self, protocol_names: set[str] | None = None) -> Generator[CompressionRebuildEvent, None, None]:
         """
         Full decompress -> recompress pass across every already-compressed
         chunk of the selected group(s)' raw table and all four rollup
@@ -4538,8 +4853,8 @@ class HyperTableManager:
         no DB hit) and applied per chunk transaction below, rather than
         per table, since it doesn't change over the course of one run.
         """
-        r_settings: dict[str, Any] = self.get_dynamic_settings_helper()
-        all_groups: list[dict[str, Any]] = self._compression_group_tables(protocol_names=protocol_names)
+        r_settings: PerformanceTier = self.get_dynamic_settings_helper()
+        all_groups: list[CompressionGroupTables] = self._compression_group_tables(protocol_names=protocol_names)
 
         selected_table_names: list[str] = [
             table_name for group in all_groups if group["selected"] for table_name in group["tables"]
@@ -4550,7 +4865,7 @@ class HyperTableManager:
         # its total byte weight, before touching anything. This is what
         # lets the very first progress event already know a real,
         # correct bytes_total instead of discovering it incrementally.
-        plan: list[dict[str, Any]] = []  # [{protocol_name, table_name, chunk_names}, ...]
+        plan: list[_CompressionPlanItem] = []
 
         for group in all_groups:
             if not group["selected"]:
@@ -4593,7 +4908,7 @@ class HyperTableManager:
         # seeded for every group up front so a selected group that ends
         # up with nothing to do (every table had zero compressed chunks)
         # still reports cleanly rather than being absent.
-        group_acc: dict[str, dict[str, Any]] = {
+        group_acc: dict[str, _CompressionGroupAccumulator] = {
             group["protocol_name"]: {"chunk_results": [], "table_results": [], "chunks_ok": 0, "chunks_failed": 0}
             for group in all_groups
             if group["selected"]
@@ -4605,7 +4920,7 @@ class HyperTableManager:
             protocol_name: str = item["protocol_name"]
             table_name: str = item["table_name"]
             chunk_names: list[str] = item["chunk_names"]
-            acc: dict[str, Any] = group_acc[protocol_name]
+            acc: _CompressionGroupAccumulator = group_acc[protocol_name]
 
             table_weight: int = old_total_sizes.get(table_name, 0)
             per_chunk_weight: float = (table_weight / len(chunk_names)) if chunk_names else 0.0
@@ -4697,7 +5012,7 @@ class HyperTableManager:
         # same reasoning as old_total_sizes above.
         new_total_sizes: dict[str, int] = self._get_hypertable_total_sizes(touched_table_names)
 
-        group_results: list[dict[str, Any]] = []
+        group_results: list[CompressionRebuildGroup] = []
         for group in all_groups:
             protocol_name = group["protocol_name"]
             if not group["selected"]:
@@ -4718,9 +5033,10 @@ class HyperTableManager:
             acc = group_acc[protocol_name]
             group_before = 0
             group_after = 0
+            table_results: list[CompressionRebuildTable] = []
             for table_entry in acc["table_results"]:
                 after: int = new_total_sizes.get(table_entry["table_name"], 0)
-                table_entry["size_after_bytes"] = after
+                table_results.append({**table_entry, "size_after_bytes": after})
                 group_before += table_entry["size_before_bytes"]
                 group_after += after
 
@@ -4731,7 +5047,7 @@ class HyperTableManager:
                 "chunks_attempted": acc["chunks_ok"] + acc["chunks_failed"],
                 "chunks_ok": acc["chunks_ok"],
                 "chunks_failed": acc["chunks_failed"],
-                "tables": acc["table_results"],
+                "tables": table_results,
                 "chunks": acc["chunk_results"],
                 "size_before_bytes": group_before,
                 "size_after_bytes": group_after,
@@ -4747,7 +5063,7 @@ class HyperTableManager:
 
 
     # === moved: get_dynamic_raw_table_overview (6292-6355) ===
-    def get_dynamic_raw_table_overview(self) -> list[dict[str, Any]]:
+    def get_dynamic_raw_table_overview(self) -> list[DynamicRawTableRow]:
         """
         Read-only, per-raw-table snapshot of the values get_dynamic_raw_
         table_settings_helper would currently resolve — the shared narrow
@@ -4764,7 +5080,7 @@ class HyperTableManager:
         settings_helper from setup_narrow_rollup/add_wide_rollup (which
         this reuses read-only).
         """
-        rows: list[dict[str, Any]] = []
+        rows: list[DynamicRawTableRow] = []
 
         narrow_chunk, narrow_compress, narrow_band = self.get_dynamic_raw_table_settings_helper(
             target_protocol_name=None,
@@ -4838,7 +5154,7 @@ class HyperTableManager:
 
 
     # === moved: get_dynamic_settings_helper (6523-6559) ===
-    def get_dynamic_settings_helper(self) -> dict[str, Any]:
+    def get_dynamic_settings_helper(self) -> PerformanceTier:
         """
         Returns performance tier settings based on the actual workload drivers
         in a multi-protocol environment.
@@ -5284,6 +5600,103 @@ class HyperTableManager:
         return f"{round(hours)} hours"
 
 
+# ----------------------------------------------------------------------------------------------------------------------
+# RollupManager result shapes
+#
+# What RollupManager.list_rollup_views() and get_dynamic_view_overview() return, and the
+# events rebuild_all_rollups() and refresh_selected_rollups() stream.
+# ----------------------------------------------------------------------------------------------------------------------
+
+class RollupViewRow(TypedDict):
+    """RollupManager.list_rollup_views() row."""
+    protocol_name: str
+    wide_table_name: str
+    view_name: str
+    granularity: str
+    bucket_interval: str
+    status: str
+
+
+class DynamicViewRow(TypedDict):
+    """RollupManager.get_dynamic_view_overview() row."""
+    view_name: str
+    protocol_name: str
+    granularity: str
+    load_score: float
+    band_name: str
+    chunk_time_interval: str
+    compress_after_interval: str
+
+
+class RollupRebuildProgress(TypedDict):
+    """Streamed by rebuild_all_rollups() after each group finishes. `group`
+    is "shared_narrow" or a protocol name."""
+    type: Literal["progress"]
+    group: str
+    groups_processed: int
+    groups_total: int
+
+
+class RollupRebuildNarrowResult(TypedDict):
+    ok: bool
+    error: str | None
+    skipped: bool
+    changed: bool
+
+
+class RollupRebuildProtocolResult(TypedDict):
+    protocol_name: str
+    ok: bool
+    error: str | None
+    skipped: bool
+    changed: bool
+
+
+class RollupRebuildResult(TypedDict):
+    narrow: RollupRebuildNarrowResult
+    protocols: list[RollupRebuildProtocolResult]
+    force: bool
+
+
+class RollupRebuildDone(TypedDict):
+    """The single terminal event of rebuild_all_rollups()."""
+    type: Literal["done"]
+    result: RollupRebuildResult
+
+
+RollupRebuildEvent: TypeAlias = RollupRebuildProgress | RollupRebuildDone
+
+
+class RollupRefreshProgress(TypedDict):
+    """Streamed by refresh_selected_rollups() after each view."""
+    type: Literal["progress"]
+    view_name: str
+    protocol_name: str
+    views_processed: int
+    views_total: int
+
+
+class RollupRefreshViewResult(TypedDict):
+    view_name: str
+    protocol_name: str
+    ok: bool
+    error: str | None
+
+
+class RollupRefreshResult(TypedDict):
+    views: list[RollupRefreshViewResult]
+    force_full: bool
+
+
+class RollupRefreshDone(TypedDict):
+    """The single terminal event of refresh_selected_rollups()."""
+    type: Literal["done"]
+    result: RollupRefreshResult
+
+
+RollupRefreshEvent: TypeAlias = RollupRefreshProgress | RollupRefreshDone
+
+
 class RollupManager:
     """ summary logic
         The RollupManger class creates the structures that enable TimescaleDB rollup views.
@@ -5322,27 +5735,27 @@ class RollupManager:
 
     def __init__(
         self,
-        rollup_policy: dict[str, Any],
+        rollup_policy: RollupPolicy,
         my_session_factory: sessionmaker[Session],
         my_engine: Engine,
         migration_in_progress: threading.Event,
         log: logging.Logger,
         send_message:  SendMessageProtocol,
         backlog_lock: threading.RLock,
-        flush_queue: queue.Queue[dict[str, Any] | None],
+        flush_queue: queue.Queue[FlushPayload | None],
         backlog: BacklogManager,
         reconnect_lock: threading.RLock,
         hypertable_mgr: "HyperTableManager",
         ) -> None:
 
-        self.rollup_policy: dict[str, Any] = rollup_policy
+        self.rollup_policy: RollupPolicy = rollup_policy
         self.SessionFactory: sessionmaker[Session] = my_session_factory
         self.engine: Engine = my_engine
         self.migration_in_progress: threading.Event = migration_in_progress
         self._log: logging.Logger = log
         self.send_message:  SendMessageProtocol = send_message
         self._backlog_lock: threading.RLock = backlog_lock
-        self._flush_queue: queue.Queue[dict[str, Any] | None]  = flush_queue
+        self._flush_queue: queue.Queue[FlushPayload | None]  = flush_queue
         self.backlog: 'BacklogManager'  = backlog
         self._reconnect_lock: threading.RLock = reconnect_lock
 
@@ -5382,12 +5795,12 @@ class RollupManager:
         }
 
         # Rollup /Hypertable Settings extracted from rollup_policy  (user can override defaults via rollup_policy)
-        self.current_metric_count: int = self.rollup_policy.get("current_metric_count", 0)
-        self.machine_timezone: str = self.rollup_policy.get("machine_timezone", "UTC")
-        self.auto_refresh_interval: int = self.rollup_policy.get("auto_refresh_interval",21600)
-        self.enable_auto_refresh:bool = self.rollup_policy.get("enable_auto_refresh", True)
-        self.enable_rollups = bool(self.rollup_policy.get("enable_rollups", True))
-        self.migrate_data = bool(self.rollup_policy.get("migrate_data",True))
+        self.current_metric_count: int = self.rollup_policy["current_metric_count"]
+        self.machine_timezone: str = self.rollup_policy["machine_timezone"]
+        self.auto_refresh_interval: int = self.rollup_policy["auto_refresh_interval"]
+        self.enable_auto_refresh:bool = self.rollup_policy["enable_auto_refresh"]
+        self.enable_rollups = bool(self.rollup_policy["enable_rollups"])
+        self.migrate_data = bool(self.rollup_policy["migrate_data"])
 
         # Rollup-view (CAGG) granularity settings -- each of the four
         # hierarchical views' own chunk_time_interval / compress_after.
@@ -5439,14 +5852,7 @@ class RollupManager:
             This allows the RollupManager to react immediately to changes in TSDB connection status,
             which is critical for coordinating rollup refreshes and backlog replays.
         """
-        val: Any = self.rollup_policy.get("tsdb_connected", False)
-        # If val is the boolean False, the expression 'val is True or val == "True"' will return False.
-        # basically tries to capture string "True" as well as boolean True if somehow the config was passed as a string.
-        if val is True or val == "True":
-
-            return val is True
-        else:
-            return False
+        return self.rollup_policy["tsdb_connected"]
 
     def setup_narrow_rollup(self) -> None:
         """
@@ -5751,7 +6157,7 @@ class RollupManager:
         one generic SELECT using typed metric descriptors and then applies the
         standard view policies.
         """
-        r_settings: dict[str, Any] = self.hypertable_mgr.get_dynamic_settings_helper()
+        r_settings: PerformanceTier = self.hypertable_mgr.get_dynamic_settings_helper()
 
         if not session:
             self._log.error("Cannot create rollup — not connected.")
@@ -6289,7 +6695,7 @@ class RollupManager:
         transaction is rolled back before continuing so the session does not remain
         in the aborted state.
         """
-        r_settings: dict[str, Any] = self.hypertable_mgr.get_dynamic_settings_helper()
+        r_settings: PerformanceTier = self.hypertable_mgr.get_dynamic_settings_helper()
 
         ordered_view_names: list[str] = sorted(
             view_names,
@@ -6574,7 +6980,7 @@ class RollupManager:
     #  to the automatic one that already runs on connect/reconnect.
     # -------------------------
 
-    def list_rollup_views(self) -> list[dict[str, Any]]:
+    def list_rollup_views(self) -> list[RollupViewRow]:
         """
         Read-only inventory of every rollup view this bridge manages or
         should manage: the shared narrow stack (hourly/daily/weekly/monthly
@@ -6597,7 +7003,7 @@ class RollupManager:
             ("monthly", self.monthly_rollup_bucket),
         ]
 
-        rows_out: list[dict[str, Any]] = []
+        rows_out: list[RollupViewRow] = []
 
         with self.SessionFactory() as session:
             # Shared narrow stack -- fixed view names, not tied to a protocol.
@@ -6654,7 +7060,7 @@ class RollupManager:
 
     def rebuild_all_rollups(
         self, protocol_names: set[str] | None = None, force: bool = False
-    ) -> Generator[dict[str, Any], None, None]:
+    ) -> Generator[RollupRebuildEvent, None, None]:
         """
         Runs a rebuild pass across the rollup stacks this bridge manages, for
         the admin's "Rebuild Rollups" / "Force Rebuild" buttons.
@@ -6731,7 +7137,7 @@ class RollupManager:
         # Snapshot status before doing anything, so the result can report
         # whether a selected group actually needed work -- independent of
         # `force`, which forces the purge+recreate regardless of status.
-        pre_views: list[dict[str, Any]] = self.list_rollup_views()
+        pre_views: list[RollupViewRow] = self.list_rollup_views()
         narrow_pre_ok: bool = all(
             v["status"] == "OK" for v in pre_views if v["protocol_name"] == "shared_narrow"
         )
@@ -6785,7 +7191,7 @@ class RollupManager:
         else:
             self._log.debug("rebuild_all_rollups: shared narrow stack not selected -- skipping.")
 
-        protocol_results: list[dict[str, Any]] = []
+        protocol_results: list[RollupRebuildProtocolResult] = []
         for protocol_name, wide_table_name in protocol_rows:
             selected: bool = protocol_names is None or protocol_name in protocol_names
             if not selected:
@@ -6822,7 +7228,7 @@ class RollupManager:
             force, rebuild_narrow, narrow_ok, narrow_changed, ok_count, attempted_count,
         )
 
-        result: dict[str, Any] = {
+        result: RollupRebuildResult = {
             "narrow": {
                 "ok": narrow_ok, "error": narrow_error,
                 "skipped": not rebuild_narrow, "changed": narrow_changed,
@@ -6834,7 +7240,7 @@ class RollupManager:
 
     def refresh_selected_rollups(
         self, protocol_names: set[str] | None = None, force_full: bool = False
-    ) -> Generator[dict[str, Any], None, None]:
+    ) -> Generator[RollupRefreshEvent, None, None]:
         """
         Refreshes the selected rollup groups' *existing* views in place --
         pulls the latest raw data into them via CALL refresh_continuous_
@@ -6929,7 +7335,7 @@ class RollupManager:
         views_total: int = len(candidates)
         views_processed: int = 0
 
-        view_results: list[dict[str, Any]] = []
+        view_results: list[RollupRefreshViewResult] = []
         for view_name, group, start_offset in candidates:
             try:
                 with self.SessionFactory() as session:
@@ -7031,7 +7437,7 @@ class RollupManager:
         (None,       0.0625, "Group 5 (heavy)"),
     ]
 
-    def get_dynamic_view_overview(self) -> list[dict[str, Any]]:
+    def get_dynamic_view_overview(self) -> list[DynamicViewRow]:
         """
         Read-only, per-VIEW snapshot of the values get_dynamic_view_
         settings_helper would currently resolve — narrow's four rollup
@@ -7052,7 +7458,7 @@ class RollupManager:
         read-only).
         """
         granularities: list[str] = ["hourly", "daily", "weekly", "monthly"]
-        rows: list[dict[str, Any]] = []
+        rows: list[DynamicViewRow] = []
 
         narrow_cardinality: int = self._compute_view_cardinality_helper(None)
         for gran in granularities:
@@ -7329,7 +7735,7 @@ class RollupManager:
             5) Drop the view with CASCADE to clean up dependencies,
             6) Commit after each drop to release locks and allow the next drop to proceed.
         """
-        r_settings: dict[str, Any] = self.hypertable_mgr.get_dynamic_settings_helper()
+        r_settings: PerformanceTier = self.hypertable_mgr.get_dynamic_settings_helper()
         try:
             # 1. Fetch current aggregates
             result: Result[str, str] = session.execute(text("""
@@ -7494,7 +7900,7 @@ class RollupManager:
             force_full: If True, performs a full refresh from the beginning of time to now. If
             False, performs an incremental refresh based on the start_offset.
         """
-        r_settings: dict[str, Any] = self.hypertable_mgr.get_dynamic_settings_helper()
+        r_settings: PerformanceTier = self.hypertable_mgr.get_dynamic_settings_helper()
 
         stop_signal: List[bool] = self._start_refresh_watchdog_helper(view_name)
 
@@ -7765,7 +8171,7 @@ class RollupManager:
                 with self.engine.connect() as conn:
                     conn: Connection = conn.execution_options(isolation_level="AUTOCOMMIT")
                     # Apply dynamic session settings from performance tiers
-                    tier: dict[str, Any] = self.hypertable_mgr.get_dynamic_settings_helper()
+                    tier: PerformanceTier = self.hypertable_mgr.get_dynamic_settings_helper()
                     conn.execute(text(f"SET work_mem = '{tier['work_mem']}';"))
                     conn.execute(text(f"SET lock_timeout = '{tier['lock_timeout']}';"))
 
@@ -8122,6 +8528,113 @@ def _coerce_value_for_data_type(value: Any, data_type: str | None) -> float | st
             raise ValueError(msg)
 
     return parsed
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# BridgeAdminManager result shapes
+#
+# What BridgeAdminManager's diagnostic-panel methods return: get_health_snapshot,
+# get_storage_overview, get_index_overview, get_compression_retention_summary and
+# get_background_jobs. CompressionRetentionConfig embeds HyperTableManager's
+# DynamicRawTableRow.
+# ----------------------------------------------------------------------------------------------------------------------
+
+class ExtensionVersionRow(TypedDict):
+    """One installed TimescaleDB extension in TimescaleHealthSnapshot."""
+    name: str
+    label: str
+    installed: str
+    available: str | None
+    up_to_date: bool
+
+
+class TimescaleHealthSnapshot(TypedDict):
+    """BridgeAdminManager.get_health_snapshot()."""
+    extension_versions: list[ExtensionVersionRow]
+    postgres_version: str | None
+    auto_update_extensions: bool
+    tsdb_connected: bool
+    reconnecting: bool
+    migration_in_progress: bool | None
+    backlog_count: int
+    max_backlog_size: int
+    max_backlog_age: int
+    enable_auto_refresh: bool | None
+    auto_refresh_interval: int | None
+    protocols_rollup_complete: int
+    protocols_rollup_total: int
+
+
+class StorageOverviewRow(TypedDict):
+    """One BridgeAdminManager.get_storage_overview() row. When a table's
+    query fails the counts and timestamps are None and `error` is set."""
+    protocol_name: str
+    table_name: str
+    approx_rows: int | None
+    size_bytes: int | None
+    chunk_count: int | None
+    oldest: datetime | None
+    newest: datetime | None
+    error: str | None
+
+
+class IndexOverviewRow(TypedDict):
+    """One BridgeAdminManager.get_index_overview() row. When a table's query
+    fails the index fields are None, key_columns is [], and `error` is set.
+    `protocol_name` is "shared_narrow" for the narrow table, the protocol's
+    name for its wide table, and None for the plain lookup tables."""
+    protocol_name: str | None
+    table_name: str
+    is_hypertable: bool
+    index_name: str | None
+    size_bytes: int | None
+    idx_scan: int | None
+    idx_tup_read: int | None
+    idx_tup_fetch: int | None
+    is_unique: bool | None
+    is_primary: bool | None
+    key_columns: list[str]
+    indexdef: str | None
+    error: str | None
+
+
+class CompressionScheduleRow(TypedDict):
+    """One rollup granularity's compress-after interval."""
+    granularity: str
+    compress_after: str
+
+
+class CompressionRetentionConfig(TypedDict):
+    """BridgeAdminManager.get_compression_retention_summary()."""
+    enable_compression: bool
+    enable_dynamic_chunk_sizing: bool
+    retention_interval: str
+    segment_by_narrow: str
+    segment_by_wide: str
+    compress_orderby: str
+    raw_narrow_compress_after_interval: str
+    raw_wide_compress_after_interval: str
+    raw_narrow_chunk_time_interval: str
+    raw_wide_chunk_time_interval: str
+    schedule: list[CompressionScheduleRow]
+    dynamic_raw_tables: list[DynamicRawTableRow]
+
+
+class BackgroundJobInfo(TypedDict):
+    """One BridgeAdminManager.get_background_jobs() row. `protocol_name` is
+    the protocol whose table or rollup view the job targets ("shared_narrow"
+    for the narrow table and its views), or None if the target matches no
+    registered protocol."""
+    protocol_name: str | None
+    job_id: int
+    proc_name: str
+    hypertable_name: str
+    schedule_interval: str | None
+    last_run_status: str | None
+    last_successful_finish: datetime | None
+    next_start: datetime | None
+    total_runs: int | None
+    total_failures: int | None
 
 
 class BridgeAdminManager:
@@ -9249,7 +9762,7 @@ class BridgeAdminManager:
     # or RollupManager's internal shapes.
     # -------------------------
 
-    def get_health_snapshot(self) -> dict[str, Any]:
+    def get_health_snapshot(self) -> TimescaleHealthSnapshot:
         """
         Read-only snapshot of the bridge's live connection and background-
         worker state, for the "Bridge Health" panel. Pulls together state
@@ -9296,7 +9809,7 @@ class BridgeAdminManager:
             except SQLAlchemyError as e:
                 self._log.error(f"get_health_snapshot: protocol_registry tally failed: {e}")
 
-        extension_versions: list[dict[str, Any]] = []
+        extension_versions: list[ExtensionVersionRow] = []
         postgres_version: str | None = None
         if self._bridge.tsdb_connected:
             try:
@@ -9343,7 +9856,7 @@ class BridgeAdminManager:
             "protocols_rollup_total": protocols_rollup_total,
         }
 
-    def get_storage_overview(self) -> list[dict[str, Any]]:
+    def get_storage_overview(self) -> list[StorageOverviewRow]:
         """
         Read-only per-source-table storage snapshot for the "Storage
         Overview" panel: the shared narrow table plus every wide table
@@ -9380,7 +9893,7 @@ class BridgeAdminManager:
 
         tables.extend((protocol_name, wide_table_name) for protocol_name, wide_table_name in wide_rows)
 
-        results: list[dict[str, Any]] = []
+        results: list[StorageOverviewRow] = []
         for protocol_name, table_name in tables:
             try:
                 with self.SessionFactory() as session:
@@ -9440,7 +9953,7 @@ class BridgeAdminManager:
         ) AS key_columns
     """
 
-    def get_index_overview(self) -> list[dict[str, Any]]:
+    def get_index_overview(self) -> list[IndexOverviewRow]:
         """
         Read-only per-index snapshot for the "Indexes" panel: every index
         on the shared narrow table, every wide table (the same source-
@@ -9499,23 +10012,25 @@ class BridgeAdminManager:
         if not self._bridge.tsdb_connected:
             return []
 
-        tables: list[tuple[str, bool]] = [("device_metrics_narrow", True)]
+        # (table_name, is_hypertable, protocol_name) -- protocol_name is None
+        # for the plain lookup tables, which belong to no protocol.
+        tables: list[tuple[str, bool, str | None]] = [("device_metrics_narrow", True, "shared_narrow")]
         try:
             with self.SessionFactory() as session:
-                wide_table_names: Sequence[str] = session.execute(
+                wide_rows: Sequence[Row[str, str]] = session.execute(
                     text("""
-                        SELECT wide_table_name
+                        SELECT protocol_name, wide_table_name
                         FROM protocol_registry
                         WHERE wide_table_name IS NOT NULL
                         ORDER BY protocol_name
                     """)
-                ).scalars().all()
+                ).fetchall()
         except SQLAlchemyError as e:
             self._log.error(f"get_index_overview: protocol_registry query failed: {e}")
-            wide_table_names = []
+            wide_rows = []
 
-        tables.extend((name, True) for name in wide_table_names)
-        tables.extend((name, False) for name in self._LOOKUP_TABLE_NAMES)
+        tables.extend((wide_table_name, True, protocol_name) for protocol_name, wide_table_name in wide_rows)
+        tables.extend((name, False, None) for name in self._LOOKUP_TABLE_NAMES)
 
         hypertable_metadata_sql: TextClause = text(f"""
             SELECT
@@ -9584,8 +10099,8 @@ class BridgeAdminManager:
             ORDER BY pi.indexname
         """)  # noqa: S608
 
-        results: list[dict[str, Any]] = []
-        for table_name, is_hypertable in tables:
+        results: list[IndexOverviewRow] = []
+        for table_name, is_hypertable, protocol_name in tables:
             if not is_hypertable:
                 try:
                     with self.SessionFactory() as session:
@@ -9594,6 +10109,7 @@ class BridgeAdminManager:
                         ).fetchall()
                     for r in rows:
                         results.append({
+                            "protocol_name": protocol_name,
                             "table_name": table_name,
                             "is_hypertable": False,
                             "index_name": r.index_name,
@@ -9610,7 +10126,7 @@ class BridgeAdminManager:
                 except SQLAlchemyError as e:
                     self._log.error(f"get_index_overview: query failed for '{table_name}': {e}")
                     results.append({
-                        "table_name": table_name, "is_hypertable": False,
+                        "protocol_name": protocol_name, "table_name": table_name, "is_hypertable": False,
                         "index_name": None, "size_bytes": None, "idx_scan": None,
                         "idx_tup_read": None, "idx_tup_fetch": None,
                         "is_unique": None, "is_primary": None, "key_columns": [],
@@ -9626,7 +10142,7 @@ class BridgeAdminManager:
             except SQLAlchemyError as e:
                 self._log.error(f"get_index_overview: metadata query failed for '{table_name}': {e}")
                 results.append({
-                    "table_name": table_name, "is_hypertable": True,
+                    "protocol_name": protocol_name, "table_name": table_name, "is_hypertable": True,
                     "index_name": None, "size_bytes": None, "idx_scan": None,
                     "idx_tup_read": None, "idx_tup_fetch": None,
                     "is_unique": None, "is_primary": None, "key_columns": [],
@@ -9654,6 +10170,7 @@ class BridgeAdminManager:
                 key_columns: list[str] = list(r.key_columns) if r.key_columns else []
                 scan_row: AnyRow | None = scan_stats_by_key.get(tuple(key_columns))
                 results.append({
+                    "protocol_name": protocol_name,
                     "table_name": table_name,
                     "is_hypertable": True,
                     "index_name": r.index_name,
@@ -9684,14 +10201,14 @@ class BridgeAdminManager:
     # historical accident of where each was originally written.
     # -------------------------
 
-    def get_compression_retention_summary(self) -> dict[str, Any]:
+    def get_compression_retention_summary(self) -> CompressionRetentionConfig | None:
         """
         Read-only summary of this bridge's compression and retention
         configuration, for the "Compression & Retention Status" panel.
         Every value here is a plain attribute read (set from rollup_policy
         / hypertable_defaults in HyperTableManager/RollupManager __init__)
         -- no DB round trip, since this is config, not live state. Returns
-        {} if the bridge isn't connected yet (hypertable_mgr/rollup_mgr
+        None if the bridge isn't connected yet (hypertable_mgr/rollup_mgr
         don't exist until then) -- callers treat that the same as "still
         connecting", matching the other panels' `not summary` template check.
 
@@ -9724,7 +10241,7 @@ class BridgeAdminManager:
         htm: "HyperTableManager | None" = self._bridge.hypertable_mgr
         rm: "RollupManager | None" = self._bridge.rollup_mgr
         if htm is None or rm is None:
-            return {}
+            return None
 
         return {
             "enable_compression": htm.enable_compression,
@@ -9761,7 +10278,7 @@ class BridgeAdminManager:
             "dynamic_raw_tables": htm.get_dynamic_raw_table_overview(),
         }
 
-    def get_background_jobs(self) -> list[dict[str, Any]]:
+    def get_background_jobs(self) -> list[BackgroundJobInfo]:
         """
         Read-only snapshot of TimescaleDB's own background scheduler jobs
         (compression, retention, and continuous-aggregate refresh
@@ -9779,15 +10296,34 @@ class BridgeAdminManager:
 
         try:
             with self.SessionFactory() as session:
-                wide_table_names: Sequence[str] = session.execute(
-                    text("SELECT wide_table_name FROM protocol_registry WHERE wide_table_name IS NOT NULL")
-                ).scalars().all()
+                registry_rows: Sequence[Row[str, str | None, str | None]] = session.execute(
+                    text("SELECT protocol_name, wide_table_name, rollup_prefix FROM protocol_registry")
+                ).fetchall()
         except SQLAlchemyError as e:
             self._log.error(f"get_background_jobs: protocol_registry query failed: {e}")
-            wide_table_names = []
+            registry_rows = []
+
+        # Which protocol each job target belongs to. Wide tables come straight
+        # from the registry; a rollup view is named f"{granularity}_{rollup_prefix}"
+        # (granularities are single words), so stripping the granularity leaves
+        # the registry's rollup_prefix, or "rollup_narrow" for the shared views.
+        protocol_by_target: dict[str, str] = {"device_metrics_narrow": "shared_narrow"}
+        protocol_by_rollup_prefix: dict[str, str] = {"rollup_narrow": "shared_narrow"}
+        wide_table_names: list[str] = []
+        for protocol_name, wide_table_name, rollup_prefix in registry_rows:
+            if wide_table_name is not None:
+                wide_table_names.append(wide_table_name)
+                protocol_by_target[wide_table_name] = protocol_name
+            if rollup_prefix is not None:
+                protocol_by_rollup_prefix[rollup_prefix] = protocol_name
+        for view_name in rm.known_rollup_views:
+            _granularity, _, rollup_prefix_part = view_name.partition("_")
+            view_protocol: str | None = protocol_by_rollup_prefix.get(rollup_prefix_part)
+            if view_protocol is not None:
+                protocol_by_target[view_name] = view_protocol
 
         target_names: list[str] = (
-            ["device_metrics_narrow"] + list(wide_table_names) + list(rm.known_rollup_views.keys())
+            ["device_metrics_narrow"] + wide_table_names + list(rm.known_rollup_views.keys())
         )
         if not target_names:
             return []
@@ -9813,6 +10349,7 @@ class BridgeAdminManager:
 
         return [
             {
+                "protocol_name": protocol_by_target.get(r.hypertable_name),
                 "job_id": r.job_id,
                 "proc_name": r.proc_name,
                 "hypertable_name": r.hypertable_name,

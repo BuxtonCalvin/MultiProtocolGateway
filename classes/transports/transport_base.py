@@ -39,6 +39,11 @@ if sys.version_info >= (3, 12):
 else:
     from typing_extensions import TypedDict
 
+if sys.version_info >= (3, 11):
+    from typing import NotRequired
+else:
+    from typing_extensions import NotRequired
+
 if TYPE_CHECKING:
     from datetime import datetime
 
@@ -95,6 +100,10 @@ class BridgeVersionRow(TypedDict):
     label: str
     version: str | None
     detail: str | None
+    # Set by the web UI's bridge service (never by the transport) on the
+    # server row only, when the bridge has check_latest_release on.
+    latest: NotRequired[str]
+    up_to_date: NotRequired[bool]
 
 
 class RetentionPolicy(TypedDict):
@@ -111,6 +120,10 @@ class TableStat(TypedDict):
     row_count: int
     file_size_bytes: int
     memory_bytes: int
+    # Display fields added by the web UI's bridge service, never by the transport.
+    file_size_display: NotRequired[str]
+    memory_display: NotRequired[str]
+    column_count: NotRequired[int]
 
 
 class ColumnInfo(TypedDict):
@@ -128,6 +141,7 @@ class HeapProfile(TypedDict):
     size_bytes: int | None
     elapsed_ms: int | None
     error: str | None
+    size_display: NotRequired[str | None]  # added by the web UI's bridge service
 
 
 # Shared payload shape passed to every bridge's write_data(); a flat
@@ -176,6 +190,7 @@ class StorageOverview(TypedDict, total=False):
     heap_profile: HeapProfile | None
     v1_diagnostics: dict[str, dict[str, object]]
     error: str | None
+    columns_by_table: dict[str, list[ColumnInfo]]  # added by the web UI's bridge service
 
 class TransportWriteMode(Enum):
     READ = 0x00

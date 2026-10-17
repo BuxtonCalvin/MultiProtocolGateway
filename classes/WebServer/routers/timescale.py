@@ -48,7 +48,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Iterator
+from typing import TYPE_CHECKING, Iterator
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Request
@@ -59,6 +59,9 @@ from ...transports.timescaledb import get_machine_timezone
 from ...transports.transport_base import transport_base
 from ..database import session_scope
 from ..services.bridge_service import (
+    CompressionGroupRow,
+    MetricPreview,
+    RollupViewGroup,
     get_staged_columns,
     get_staged_metric_edits,
     get_timescale_bridge,
@@ -107,16 +110,10 @@ router = APIRouter(tags=["timescale"])
 # accurate (and simplest) annotation for them.
 EventStream = Iterator[str]
 
-# A number of endpoints below keep dict[str, Any]/list[dict[str, Any]]
-# return-shaped locals rather than a tightened union. In every one of
-# those cases the dict is a near-verbatim pass-through of a
-# services/bridge_service.py introspection call (list_wide_table_fields,
-# list_rollup_view_groups, list_compression_groups, ...) — a service
-# module, out of this pass's "router modules" scope, and one that's
-# reading genuinely heterogeneous data out of Postgres/TimescaleDB system
-# catalogs (table names, byte sizes, timestamps, per-column type info)
-# with no fixed shape this router file can assert without guessing at
-# internals it doesn't own (see the identical note in bridges.py).
+# Panel and inventory payload shapes (RollupViewGroup, CompressionGroupRow,
+# MetricPreview, ...) are TypedDicts defined in services/bridge_service.py
+# alongside the functions that build them; the locals below carry them
+# through to the template context.
 
 
 def _require_bridge(request: Request) -> transport_base:
@@ -187,7 +184,7 @@ async def timescale_fields_partial(protocol_name: str, request: Request):
 
     staged: set[str] = get_staged_columns(request.app.state, protocol_name)
     try:
-        fields: list[dict[str, Any]] = list_wide_table_fields(gateway, protocol_name, staged_columns=staged)
+        fields: list[dict[str, str | bool]] = list_wide_table_fields(gateway, protocol_name, staged_columns=staged)
         wide_table_name: str = resolve_wide_table_name(gateway, protocol_name)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
@@ -275,7 +272,7 @@ def _parse_local_datetime(value: str) -> datetime:
 
 
 @router.get("/pages/timescale-metrics-edit", response_class=HTMLResponse, response_model=None)
-async def timescale_metrics_edit_page(request: Request)-> Any:
+async def timescale_metrics_edit_page(request: Request) -> HTMLResponse:
     """
     "Metrics Edit" screen — lists every selectable table (the shared
     narrow table first, then every wide-table protocol). Selecting one
@@ -314,14 +311,14 @@ async def timescale_metrics_edit_page(request: Request)-> Any:
 @router.get("/pages/timescale/metrics-edit/devices", response_class=HTMLResponse, response_model=None)
 async def timescale_metrics_edit_devices_partial(
     request: Request, table_kind: str, protocol_name: str | None = None
-    ) -> Any:
+    ) -> HTMLResponse:
     """Device picker (<option> list) for one Metrics Edit table selection."""
     gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
     if not is_timescale_available(gateway):
         raise HTTPException(status_code=404, detail="No TimescaleDB bridge is attached to this gateway.")
 
     try:
-        devices: list[dict[str, Any]] = list_metric_edit_devices(gateway, table_kind, protocol_name)
+        devices: list[dict[str, str | int | None]] = list_metric_edit_devices(gateway, table_kind, protocol_name)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except Exception as exc:
@@ -340,7 +337,7 @@ async def timescale_metrics_edit_fields_partial(
     table_kind: str,
     protocol_name: str | None = None,
     device_info_id: int | None = None,
-    ) -> Any:
+    ) -> HTMLResponse:
     """Field checklist for one Metrics Edit table + device selection."""
     gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
     if not is_timescale_available(gateway):
@@ -393,7 +390,7 @@ def timescale_metrics_edit_preview(payload: MetricEditPreviewRequest, request: R
         raise HTTPException(status_code=400, detail="End time must not be before start time.")
 
     try:
-        preview: dict[str, Any] = preview_metric_edit(
+        preview: MetricPreview = preview_metric_edit(
             gateway,
             payload.table_kind,
             payload.protocol_name,
@@ -557,7 +554,7 @@ async def timescale_rollups_partial(request: Request):
         )
 
     try:
-        groups: list[dict[str, Any]] = list_rollup_view_groups(gateway)
+        groups: list[RollupViewGroup] = list_rollup_view_groups(gateway)
     except RuntimeError:
         # Bridge attached but not connected to TimescaleDB yet (rollup_mgr
         # not initialized) — render an empty inventory rather than a hard
@@ -748,7 +745,7 @@ async def timescale_compression_partial(request: Request):
         )
 
     try:
-        groups: list[dict[str, Any]] = list_compression_groups(gateway)
+        groups: list[CompressionGroupRow] = list_compression_groups(gateway)
     except RuntimeError:
         # Bridge attached but not connected to TimescaleDB yet — render an
         # empty inventory rather than a hard error, same reasoning as

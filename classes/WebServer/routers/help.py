@@ -23,17 +23,18 @@ import html
 import json
 import re
 from pathlib import Path
-from typing import Any, Callable
+from typing import Callable, cast
 from urllib.parse import quote, unquote
 
 import markdown as markdown_lib
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field
+from typing_extensions import NotRequired, TypedDict
 
 from ..database import session_scope
 from ..services.device_service import NavData, get_nav_data
-from ..services.protocol_service import get_protocol_groups
+from ..services.protocol_service import ProtocolGroup, get_protocol_groups
 
 router = APIRouter(tags=["help"])
 
@@ -58,7 +59,37 @@ class Annotation(BaseModel):
     fill_color: str | None = Field(default=None)
 
 
-def _base_context(request: Request) -> dict[str, Any]:
+class HelpContext(TypedDict):
+    """Template context shared by every help page (merged into each
+    TemplateResponse's own context)."""
+    nav: NavData
+    proto_groups: list[ProtocolGroup]
+
+
+class DocEntry(TypedDict):
+    """One file in the documentation sidebar tree (_doc_tree())."""
+    title: str
+    name: str
+    path: str
+    folder: str
+    url: str
+    is_pdf: bool
+
+
+class SelectedDoc(TypedDict):
+    """The document open in the viewer (help_doc()). Exactly one of
+    `html` (markdown) or `text` (non-image, non-markdown) is set; an image
+    sets neither."""
+    path: str
+    title: str
+    is_markdown: bool
+    is_image: bool
+    raw_url: str
+    html: NotRequired[str]
+    text: NotRequired[str]
+
+
+def _base_context(request: Request) -> HelpContext:
     with session_scope() as db:
         nav: NavData = get_nav_data(db)
     return {
@@ -80,7 +111,7 @@ def _load_annotations() -> dict[str, list[Annotation]]:
     if not ANNOTATIONS_PATH.exists():
         return {}
     try:
-        raw: dict[str, Any] = json.loads(ANNOTATIONS_PATH.read_text(encoding="utf-8"))
+        raw: dict[str, object] = json.loads(ANNOTATIONS_PATH.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise HTTPException(status_code=500, detail=f"Invalid annotations.json: {exc}") from exc
     if not raw:
@@ -110,12 +141,13 @@ def _load_aliases() -> dict[str, str]:
     if not ANNOTATIONS_PATH.exists():
         return {}
     try:
-        raw: dict[str, Any] = json.loads(ANNOTATIONS_PATH.read_text(encoding="utf-8"))
+        raw: dict[str, object] = json.loads(ANNOTATIONS_PATH.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
         return {}
-    aliases: dict[str, str] = raw.get("_aliases", {})
-    if aliases:
-        return {str(k): str(v) for k, v in aliases.items()}
+    aliases: object = raw.get("_aliases", {})
+    if isinstance(aliases, dict) and aliases:
+        # JSON object: keys are strings by construction, values are whatever the file holds.
+        return {str(k): str(v) for k, v in cast("dict[object, object]", aliases).items()}
     return {}
 
 
@@ -145,14 +177,14 @@ def _resolve_image_id(image_id: str) -> str:
     return image_id
 
 
-def _doc_tree() -> list[dict[str, Any]]:
+def _doc_tree() -> list[DocEntry]:
     if not DOCUMENTATION_DIR.exists():
         return []
     allowed: set[str] = {
         ".md", ".pdf", ".png", ".jpg", ".jpeg", ".gif", ".txt", ".example",
         ".conf", ".yml", ".yaml", ".json",
     }
-    docs: list[dict[str, Any]] = []
+    docs: list[DocEntry] = []
     for path in sorted(DOCUMENTATION_DIR.rglob("*")):
         path_parts: tuple[str, ...] = path.relative_to(DOCUMENTATION_DIR).parts
         if not path.is_file() or any(part.startswith(".") for part in path_parts[:-1]):
@@ -503,7 +535,7 @@ async def help_screen(request: Request, image_id: str):
 
 
 @router.get("/pages/help/files/{doc_path:path}")
-async def help_file(doc_path: str):
+async def help_file(doc_path: str) -> FileResponse:
     doc_path = unquote(doc_path)
     doc_file: Path = _safe_child(DOCUMENTATION_DIR, doc_path)
     if not doc_file.exists() or not doc_file.is_file():
@@ -512,13 +544,13 @@ async def help_file(doc_path: str):
 
 
 @router.get("/pages/help/docs/{doc_path:path}", response_class=HTMLResponse, response_model=None)
-async def help_doc(request: Request, doc_path: str):
+async def help_doc(request: Request, doc_path: str) -> HTMLResponse:
     doc_path = unquote(doc_path)
     doc_file: Path = _safe_child(DOCUMENTATION_DIR, doc_path)
     if not doc_file.exists() or not doc_file.is_file():
         raise HTTPException(status_code=404, detail="Document not found")
 
-    selected_doc: dict[str, Any] = {
+    selected_doc: SelectedDoc = {
         "path": doc_path,
         "title": doc_file.stem.replace("_", " ").replace("-", " ").title(),
         "is_markdown": doc_file.suffix.lower() == ".md",

@@ -21,8 +21,9 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, List
+from typing import TYPE_CHECKING, List, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -40,8 +41,18 @@ from ...ha_metadata import (
 )
 from ...transports.transport_base import transport_base
 from ..database import get_session, session_scope
+
+if sys.version_info >= (3, 12):
+    from typing import TypedDict
+else:
+    # pydantic (via FastAPI response models) rejects typing.TypedDict on < 3.12
+    from typing_extensions import TypedDict
+
 from ..services.protocol_service import (
+    DeviceMetricSummary,
     DeviceRegisterView,
+    ProtocolTab,
+    RegistersPage,
     build_json_desc_rows,
     build_synthetic_rows,
     get_device_metric_summary,
@@ -82,12 +93,7 @@ def list_registers(
     page_size: int = 50,
     device_name: str | None = None,
     db: Session = Depends(get_session),
-) -> dict[str, Any]:
-    # dict[str, Any] kept: this passes straight through
-    # get_protocol_registers()'s own return shape, which is
-    # protocol_service.py's to define (a service module, not this router —
-    # out of this pass's scope, same reasoning as commit_staged_deletions()
-    # in commit.py).
+) -> RegistersPage:
     return get_protocol_registers(db, protocol_name, registry_type, page, page_size, device_name)
 
 
@@ -96,7 +102,7 @@ def device_protocol_tabs(
     protocol_version: str,
     device_name: str | None = None,
     db: Session = Depends(get_session),
-) -> list[dict[str, Any]]:
+) -> list[ProtocolTab]:
     """
     Returns every protocol tab for a device, each with its W/M/S counts
     already computed by get_protocols_for_device(). This is the single
@@ -105,8 +111,6 @@ def device_protocol_tabs(
     endpoint after a toggle to refresh the tab strip — so the two can
     never disagree.
     """
-    # dict[str, Any] kept: same reasoning as list_registers() above —
-    # get_protocols_for_device()'s return shape belongs to protocol_service.py.
     return get_protocols_for_device(db, protocol_version, device_name=device_name)
 
 
@@ -116,16 +120,13 @@ def device_metric_summary(
     device_name: str,
     request: Request,
     db: Session = Depends(get_session),
-) -> dict[str, Any]:
+) -> DeviceMetricSummary:
     """
     Returns the Available / Selected / Register-map-total counts shown next
     to the protocol tab strip (see get_device_metric_summary()). The client
     re-fetches this after every mask/screen toggle to keep the badges in
     sync — same source of truth used for the initial page render.
     """
-    # Return type kept dict[str, Any]: get_device_metric_summary()'s shape
-    # belongs to protocol_service.py, same reasoning as above. gateway/
-    # transport below are locally-owned and now precisely typed.
     gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
     transport: transport_base | None = gateway.get_transport(f"transport.{device_name}") if gateway is not None else None
     return get_device_metric_summary(db, protocol_version, device_name, transport=transport)
@@ -139,6 +140,13 @@ class ToggleRequest(BaseModel):
 class FieldUpdateRequest(BaseModel):
     field: str
     value: str
+
+
+class RegisterFieldUpdateResult(TypedDict):
+    id: int
+    field: str
+    value: str | None
+    is_dirty: bool
 
 
 class ProtocolRegisterResponse(BaseModel):
@@ -287,13 +295,11 @@ def toggle_delete_register(register_id: int, payload: DeleteToggleRequest, db: S
 
 
 @router.patch("/{register_id}/field")
-def update_register_field(register_id: int, payload: FieldUpdateRequest, db: Session = Depends(get_session))-> dict[str, Any]:
-    # dict[str, Any] kept: "value" below is getattr(result, payload.field) —
-    # payload.field names an arbitrary ProtocolRegister column at runtime,
-    # so its value type genuinely can't be known statically (could be a
-    # register's bool/int/str/float column depending on what the caller asked
-    # to read back). id/field/is_dirty are known (int/str/bool) but a dict's
-    # value type is one union across all keys, so they inherit Any too.
+def update_register_field(register_id: int, payload: FieldUpdateRequest, db: Session = Depends(get_session)) -> RegisterFieldUpdateResult:
+    # update_protocol_register_field() only accepts a fixed set of text
+    # columns (variable_name, unit, the HA columns, ...) and writes the
+    # request's str value into one, so reading it back via getattr is always
+    # a nullable string.
     try:
         result: ProtocolRegister | None = update_protocol_register_field(
             db, register_id, payload.field, payload.value
@@ -308,7 +314,7 @@ def update_register_field(register_id: int, payload: FieldUpdateRequest, db: Ses
     return {
         "id": result.id,
         "field": payload.field,
-        "value": getattr(result, payload.field),
+        "value": cast("str | None", getattr(result, payload.field)),
         "is_dirty": result.is_dirty,
     }
 
@@ -365,8 +371,7 @@ async def protocol_table_partial(
         )
 
     with session_scope() as db:
-        # dict[str, Any] kept: same out-of-scope reasoning as list_registers().
-        data: dict[str, Any] = get_protocol_registers(
+        data: RegistersPage = get_protocol_registers(
             db, protocol_name, registry_type, page, page_size=5000, device_name=device_name
         )
 

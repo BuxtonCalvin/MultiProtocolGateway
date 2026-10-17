@@ -44,6 +44,16 @@
   definition instead. A row with `error` set means that one table's
   index query failed; the rest of the snapshot still renders.
 
+  protocol_name — added to each row: "shared_narrow", the protocol's name for
+  its wide table, or None for the plain lookup tables (which belong to no
+  protocol and are never flagged).
+
+  linked_protocols — protocols (plus "shared_narrow") that at least one
+  scraper is configured to write to this bridge, from services/bridge_service.
+  get_timescale_linked_protocols(); None if that lookup failed. Rows for a
+  table whose protocol isn't in it are shown in the warning colour: the
+  table exists on the server but is fed by no scraper.
+
   Purely observational — nothing here is clickable.
 -->
 
@@ -66,10 +76,13 @@
       </thead>
       <tbody>
         {% for idx in indexes %}
-        <tr class="mini-table-row transition-colors" role="row">
+        {% set idx_unlinked = linked_protocols is not none and idx.protocol_name is not none and idx.protocol_name not in linked_protocols %}
+        <tr class="mini-table-row transition-colors{% if idx_unlinked %} bg-amber-50 dark:bg-warning/10{% endif %}" role="row"
+            {%- if idx_unlinked %} title="No scraper is configured to write {{ idx.protocol_name }} to this bridge"{% endif %}>
           {% if idx.error %}
           <td class="px-2 py-1.5 font-mono mini-table-value whitespace-nowrap mini-table-col-divider" role="cell">
             {{ idx.table_name }}
+            {% if idx_unlinked %}<span class="text-amber-800 dark:text-warning text-[10px] block">no scraper linked</span>{% endif %}
           </td>
           <td colspan="4" class="px-2 py-1.5 text-danger text-xs" role="cell">Query failed: {{ idx.error }}</td>
           {% else %}
@@ -82,6 +95,7 @@
           </td>
           <td class="px-2 py-1.5 font-mono mini-table-value whitespace-nowrap mini-table-col-divider" role="cell">
             {{ idx.table_name }}
+            {% if idx_unlinked %}<span class="text-amber-800 dark:text-warning text-[10px] block">no scraper linked</span>{% endif %}
           </td>
           <td class="px-2 py-1.5 whitespace-nowrap mini-table-col-divider text-[11px]" role="cell">
             {% if idx.is_primary %}

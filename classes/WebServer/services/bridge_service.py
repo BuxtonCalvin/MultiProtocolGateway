@@ -73,13 +73,22 @@ import threading
 import time
 import uuid
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Generator, cast
+from typing import TYPE_CHECKING, Generator, Literal, cast
 
 import requests
 from starlette.datastructures import State
 
 from ...protocol_settings import Registry_Type, registry_map_entry
-from ...transports.transport_base import transport_base
+from ...transports.transport_base import (
+    BridgeHealthSnapshot,
+    BridgeVersionRow,
+    ColumnInfo,
+    HeapProfile,
+    StorageOverview,
+    TableStat,
+    transport_base,
+)
+from .device_service import get_nav_data
 from .protocol_service import SyntheticFieldMetadata
 
 if sys.version_info >= (3, 12):
@@ -88,6 +97,272 @@ else:
     from typing_extensions import TypedDict
 
 _log: logging.Logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Panel / inventory result shapes
+#
+# The raw shapes are declared next to the code that builds them
+# (transports/timescaledb.py, prometheus_out.py, transport_base.py, mqtt.py)
+# and used here directly. The types below are the ones this module derives:
+# a transport row plus display-only `*_display` fields, or a grouping /
+# merge of transport rows.
+#
+# timescaledb and prometheus_out are optional transports that this module
+# must never hard-import (see get_timescale_bridge), so their types are only
+# imported under TYPE_CHECKING and a derived type that adds fields to one is
+# declared in full instead of subclassing it. Every construction site below
+# builds the derived dict from the transport row with `{**row, ...}`, so
+# pyright rejects a derived type that drifts from the transport's.
+# ---------------------------------------------------------------------------
+
+# -- TimescaleDB: Storage Overview ----------------------------------------
+
+class TimescaleStorageRow(TypedDict):
+    """timescaledb.StorageOverviewRow plus display fields."""
+    protocol_name: str
+    table_name: str
+    approx_rows: int | None
+    size_bytes: int | None
+    chunk_count: int | None
+    oldest: datetime | None
+    newest: datetime | None
+    error: str | None
+    size_display: str
+    oldest_display: str
+    newest_display: str
+
+
+# -- TimescaleDB: Indexes -------------------------------------------------
+
+class TimescaleIndexRow(TypedDict):
+    """timescaledb.IndexOverviewRow plus display fields."""
+    protocol_name: str | None
+    table_name: str
+    is_hypertable: bool
+    index_name: str | None
+    size_bytes: int | None
+    idx_scan: int | None
+    idx_tup_read: int | None
+    idx_tup_fetch: int | None
+    is_unique: bool | None
+    is_primary: bool | None
+    key_columns: list[str]
+    indexdef: str | None
+    error: str | None
+    size_display: str
+
+
+# -- TimescaleDB: Compression & Retention --------------------------------
+
+class DynamicViewGroup(TypedDict):
+    """RollupManager.get_dynamic_view_overview() rows grouped by protocol."""
+    protocol_name: str
+    views: list[DynamicViewRow]
+
+
+class CompressionRetentionSummary(TypedDict):
+    """timescaledb.CompressionRetentionConfig plus the `dynamic_view_groups`
+    list merged in by this module."""
+    enable_compression: bool
+    enable_dynamic_chunk_sizing: bool
+    retention_interval: str
+    segment_by_narrow: str
+    segment_by_wide: str
+    compress_orderby: str
+    raw_narrow_compress_after_interval: str
+    raw_wide_compress_after_interval: str
+    raw_narrow_chunk_time_interval: str
+    raw_wide_chunk_time_interval: str
+    schedule: list[CompressionScheduleRow]
+    dynamic_raw_tables: list[DynamicRawTableRow]
+    dynamic_view_groups: list[DynamicViewGroup]
+
+
+# -- TimescaleDB: Background Jobs ----------------------------------------
+
+class BackgroundJobRow(TypedDict):
+    """timescaledb.BackgroundJobInfo plus display fields."""
+    protocol_name: str | None
+    job_id: int
+    proc_name: str
+    hypertable_name: str
+    schedule_interval: str | None
+    last_run_status: str | None
+    last_successful_finish: datetime | None
+    next_start: datetime | None
+    total_runs: int | None
+    total_failures: int | None
+    last_successful_finish_display: str
+    next_start_display: str
+
+
+# -- TimescaleDB: Metrics Edit preview -------------------------------------
+
+class MetricPreviewSample(TypedDict):
+    """One matched row in preview_metric_edit()'s sample (m_time is ISO-8601)."""
+    m_time: str
+    field_name: str
+    value: float | str | None
+
+
+class MetricPreview(TypedDict):
+    row_count: int
+    sample: list[MetricPreviewSample]
+
+
+# -- TimescaleDB: Rebuild screens ----------------------------------------
+
+class RollupViewGroup(TypedDict):
+    """RollupManager.list_rollup_views() rows grouped by source table."""
+    protocol_name: str
+    wide_table_name: str
+    views: list[RollupViewRow]
+
+
+class CompressionTableRow(TypedDict):
+    """timescaledb.CompressionTableInfo plus display fields."""
+    table_name: str
+    granularity: str
+    total_chunks: int
+    compressed_chunks: int
+    size_bytes: int
+    raw_size_bytes: int
+    size_display: str
+    raw_size_display: str
+
+
+class CompressionGroupRow(TypedDict):
+    """timescaledb.CompressionGroupInfo plus display fields (here and on each table)."""
+    protocol_name: str
+    wide_table_name: str
+    tables: list[CompressionTableRow]
+    total_chunks: int
+    compressed_chunks: int
+    size_bytes: int
+    raw_size_bytes: int
+    size_display: str
+    raw_size_display: str
+
+
+# -- TimescaleDB: Rebuild Compression stream -----------------------------
+
+class SizeChangeDisplay(TypedDict):
+    """Display fields for one before/after size pair."""
+    size_before_display: str
+    size_after_display: str
+    percent_reduced: float | None  # None when there is no size_before to compare against
+
+
+class CompressionRebuildTableResult(TypedDict):
+    """timescaledb.CompressionRebuildTable plus display fields."""
+    table_name: str
+    ok: bool
+    chunks_ok: int
+    chunks_failed: int
+    size_before_bytes: int
+    size_after_bytes: int
+    size_before_display: str
+    size_after_display: str
+    percent_reduced: float | None
+
+
+class CompressionRebuildGroupResult(TypedDict):
+    """timescaledb.CompressionRebuildGroup plus display fields (here and on each table)."""
+    protocol_name: str
+    skipped: bool
+    ok: bool
+    chunks_attempted: int
+    chunks_ok: int
+    chunks_failed: int
+    size_before_bytes: int
+    size_after_bytes: int
+    tables: list[CompressionRebuildTableResult]
+    chunks: list[CompressionRebuildChunk]
+    size_before_display: str
+    size_after_display: str
+    percent_reduced: float | None
+
+
+class CompressionRebuildResult(TypedDict):
+    groups: list[CompressionRebuildGroupResult]
+
+
+class CompressionRebuildDoneEvent(TypedDict):
+    """The terminal event of rebuild_compression(): the transport's "done"
+    event with this module's display fields added to each group and table."""
+    type: Literal["done"]
+    result: CompressionRebuildResult
+
+
+# -- Commit results (routers/commit.py's "Commit All Changes") --------------
+
+class ColumnDeletionCommitResult(TypedDict):
+    """commit_staged_deletions(): one successfully-deleted protocol."""
+    protocol_name: str
+    wide_table_name: str
+    deleted: list[str]
+    not_found: list[str]
+    remaining_fields: list[str]
+    rollups_rebuilt: bool
+
+
+class MetricEditCommitResult(TypedDict):
+    """commit_staged_metric_edits(): one successfully-applied edit."""
+    edit_id: str
+    table_kind: str
+    protocol_name: str | None
+    table_name: str
+    device_info_id: int
+    field_names: list[str]
+    action: str
+    rows_affected: int
+    rollups_refreshed: bool
+
+
+# -- InfluxDB v1/v3 --------------------------------------------------------
+# get_influxdb_storage() returns transport_base.StorageOverview directly:
+# the display keys this module fills in (data_dir_size_display,
+# columns_by_table, and the *_display / column_count fields on table_stats
+# and heap_profile) are declared there as optional keys.
+
+class InfluxDBHealthPanel(BridgeHealthSnapshot):
+    """get_influxdb_health(): the bridge's BridgeHealthSnapshot plus the
+    display/version fields added by this module."""
+    last_periodic_reconnect_display: str
+    version_rows: list[BridgeVersionRow]
+    latest_release_check_enabled: bool
+
+
+# -- Prometheus ------------------------------------------------------------
+
+class PrometheusHealth(TypedDict):
+    """prometheus_out.PrometheusBridgeSummary plus `uptime_display`."""
+    metrics_registered: int
+    total_machines: int
+    connected_count: int
+    stale_count: int
+    never_reported_count: int
+    metrics_path: str
+    metrics_port: int
+    uptime_seconds: float
+    uptime_display: str
+
+
+class PrometheusTargetRow(TypedDict):
+    """prometheus_out.PrometheusTargetHealth plus the scrape-age fields."""
+    machine_id: str
+    device_name: str
+    protocol_name: str
+    connected: bool
+    interval: float
+    scrape_failures_total: int
+    last_scrape_timestamp: float | None
+    last_metric_count: int
+    last_skipped_count: int
+    total_writes: int
+    seconds_since_last_scrape: float | None
+    last_scrape_display: str
 
 
 # ---------------------------------------------------------------------------
@@ -142,57 +417,58 @@ if TYPE_CHECKING:
 
     from protocol_gateway import Protocol_Gateway
 
+    from ...transports.influxdb3_out import influxdb3_out
+    from ...transports.influxdb_out import influxdb_out
+    from ...transports.mqtt import MqttHealthSnapshot, mqtt
+    from ...transports.prometheus_out import (
+        PrometheusBridgeSummary,
+        PrometheusTargetHealth,
+        prometheus_out,
+    )
     from ...transports.timescaledb import (
+        BackgroundJobInfo,
         BridgeAdminManager,
+        CompressionGroupInfo,
+        CompressionRebuildChunk,
+        CompressionRebuildGroup,
+        CompressionRebuildProgress,
+        CompressionRetentionConfig,
+        CompressionScheduleRow,
+        DynamicRawTableRow,
+        DynamicViewRow,
+        IndexOverviewRow,
         MetricEditDevice,
         MetricEditField,
         MetricEditPreview,
         MetricEditResult,
         MetricEditTable,
+        RollupRebuildEvent,
+        RollupRefreshEvent,
+        RollupViewRow,
+        StorageOverviewRow,
+        TimescaleHealthSnapshot,
         WideTableField,
         WideTableFieldDeletionResult,
         timescaledb,
     )
     from ..models import Setting
 
-# A great many functions below deliberately keep `Any` for values that
-# originate from calling a method on an mqtt/influxdb/prometheus bridge
-# object found via duck-typing (type(t).__name__ == "mqtt"/etc. — see
-# get_influxdb_bridge/get_mqtt_bridge/get_prometheus_bridge) rather than
-# isinstance against an imported class. That's this module's own
-# documented design choice (see the module docstring above): every
-# bridge transport module is optional/pluggable, and this file must not
-# fail to import just because one of them isn't installed in a given
-# deployment. Once a value comes from one of those bridges, there is no
-# type available to assert against without hard-importing that specific
-# transport class — which is exactly what the duck-typing exists to
-# avoid. Those Any usages are intentional and are not re-justified
-# individually at each occurrence below; only genuinely fixable Any usage
-# (gateway/app_state parameters, the locally-defined staging-dict shape,
-# locally-built dict literals with a fully known shape) is narrowed.
-#
-# get_timescale_bridge() below is the one exception to that pattern: it
-# returns a real `timescaledb | None`, not `Any | None`. Runtime
-# behavior is identical to the other three bridge getters — the walk of
-# __transports is still duck-typed on type(t).__name__, no hard import
-# of transports.timescaledb happens at module load — but timescaledb is
-# additionally imported under TYPE_CHECKING (same idiom already used for
-# BridgeAdminManager/WideTableField above), so a type checker can follow
-# the cast() at the one point the duck-typing check proves it's safe,
-# and every TimescaleDB call site below gets full static checking on
-# bridge.rollup_mgr / bridge.hypertable_mgr / bridge.get_health_snapshot()
-# etc. instead of falling through Any. Not extended to the mqtt/influxdb/
-# prometheus getters here — out of scope for this file's TimescaleDB
-# section; the same idiom would apply if those ever need it.
+# Every bridge getter below (get_timescale_bridge, get_influxdb_bridge,
+# get_mqtt_bridge, get_prometheus_bridge) returns the real transport class,
+# not Any. The walk of __transports is still duck-typed on type(t).__name__
+# (this module's documented design choice: every bridge transport is
+# optional/pluggable, and this file must not fail to import because one of
+# them isn't installed), so no transport class is imported at runtime. The
+# classes are imported under TYPE_CHECKING above instead, and each getter
+# does one cast() at the single point its class-name check has just proven
+# the type. Every call on a bridge below is then checked statically against
+# the transport's own declared return types, e.g. get_health_snapshot().
 
-# Declared Any up front, before either branch assigns to it: this is what
-# makes _field_manager() calling it not get flagged as "Object of type
-# 'None' cannot be called". Without this, the type checker infers
-# `type[BridgeAdminManager] | None` from the two conditional
-# assignments below and won't treat it as callable — even though the
-# `bridge is None` check in _field_manager() already guarantees this is
-# never actually None by the time it's called.
-_BridgeAdminManagerImpl: Any
+# Declared up front, before either branch assigns to it. It really is
+# `type[BridgeAdminManager] | None` -- None exactly when the timescaledb
+# module can't be imported -- and _field_manager() checks for that before
+# calling it.
+_BridgeAdminManagerImpl: "type[BridgeAdminManager] | None"
 
 try:
     from ...transports.timescaledb import (
@@ -316,6 +592,8 @@ def _field_manager(gateway: "Protocol_Gateway | None") -> "BridgeAdminManager":
     bridge = get_timescale_bridge(gateway)
     if bridge is None:
         raise RuntimeError("No TimescaleDB bridge is attached to this gateway.")
+    if _BridgeAdminManagerImpl is None:
+        raise RuntimeError("The TimescaleDB transport is not importable in this deployment.")
     return _BridgeAdminManagerImpl(bridge)
 
 
@@ -446,7 +724,7 @@ def preview_metric_edit(
     field_names: list[str],
     start_time: datetime,
     end_time: datetime,
-    ) -> dict[str, Any]:
+    ) -> MetricPreview:
     """
     Returns {row_count, sample: [{m_time, field_name, value}, ...]} for the
     Metrics Edit "Preview" step — a read-only look at what a matching
@@ -479,7 +757,7 @@ def preview_metric_edit(
 # riding the app's "Commit All Changes" flow.
 # ---------------------------------------------------------------------------
 
-def list_rollup_views(gateway: "Protocol_Gateway | None") -> list[dict[str, Any]]:
+def list_rollup_views(gateway: "Protocol_Gateway | None") -> list[RollupViewRow]:
     """
     Returns the rollup-view inventory (shared narrow stack + every wide
     protocol's hourly/daily/weekly/monthly stack) for the Rebuild Rollup
@@ -496,7 +774,7 @@ def list_rollup_views(gateway: "Protocol_Gateway | None") -> list[dict[str, Any]
     return bridge.rollup_mgr.list_rollup_views()
 
 
-def list_rollup_view_groups(gateway: "Protocol_Gateway | None") -> list[dict[str, Any]]:
+def list_rollup_view_groups(gateway: "Protocol_Gateway | None") -> list[RollupViewGroup]:
     """
     Same inventory as list_rollup_views(), grouped into one entry per
     source table -- the shared narrow stack, plus one entry per wide-table
@@ -515,10 +793,10 @@ def list_rollup_view_groups(gateway: "Protocol_Gateway | None") -> list[dict[str
     preserves list_rollup_views()'s ordering (shared narrow stack first,
     then wide protocols alphabetically) instead.
     """
-    flat: list[dict[str, Any]] = list_rollup_views(gateway)
-    groups: list[dict[str, Any]] = []
+    flat: list[RollupViewRow] = list_rollup_views(gateway)
+    groups: list[RollupViewGroup] = []
     for protocol_name, rows_iter in itertools.groupby(flat, key=lambda r: r["protocol_name"]):
-        rows: list[dict[str, Any]] = list(rows_iter)
+        rows: list[RollupViewRow] = list(rows_iter)
         groups.append({
             "protocol_name": protocol_name,
             "wide_table_name": rows[0]["wide_table_name"],
@@ -531,7 +809,7 @@ def rebuild_all_rollups(
     gateway: "Protocol_Gateway | None",
     protocol_names: set[str] | None = None,
     force: bool = False
-    ) -> Generator[dict[str, Any], None, None]:
+    ) -> Generator[RollupRebuildEvent, None, None]:
     """
     Triggers an immediate rebuild pass across the selected rollup stack(s)
     on the live bridge. Called from the "Rebuild Rollups" / "Force Rebuild"
@@ -576,7 +854,7 @@ def refresh_selected_rollups(
     gateway: "Protocol_Gateway | None",
     protocol_names: set[str] | None = None,
     force_full: bool = False
-    ) -> Generator[dict[str, Any], None, None]:
+    ) -> Generator[RollupRefreshEvent, None, None]:
     """
     Pulls the latest raw data into the selected rollup groups' existing
     views, without dropping or recreating anything. Called from the
@@ -619,7 +897,7 @@ def refresh_selected_rollups(
 # actually takes effect on historical data instead of only new chunks.
 # ---------------------------------------------------------------------------
 
-def list_compression_groups(gateway: "Protocol_Gateway | None") -> list[dict[str, Any]]:
+def list_compression_groups(gateway: "Protocol_Gateway | None") -> list[CompressionGroupRow]:
     """
     Read-only compression inventory (one row per group, each carrying a
     `tables` breakdown of that group's raw table + all four rollup views'
@@ -636,38 +914,71 @@ def list_compression_groups(gateway: "Protocol_Gateway | None") -> list[dict[str
         raise RuntimeError("No TimescaleDB bridge is attached to this gateway.")
     if bridge.hypertable_mgr is None:
         raise RuntimeError("Hypertable manager is not initialized yet — the bridge is not connected to TimescaleDB.")
-    rows: list[dict[str, Any]] = bridge.hypertable_mgr.list_compression_groups()
-    for row in rows:
-        row["size_display"] = _format_bytes(row.get("size_bytes"))
-        row["raw_size_display"] = _format_bytes(row.get("raw_size_bytes"))
-        for table_row in row.get("tables", []):
-            table_row["size_display"] = _format_bytes(table_row.get("size_bytes"))
-            table_row["raw_size_display"] = _format_bytes(table_row.get("raw_size_bytes"))
-    return rows
+    raw_groups: list[CompressionGroupInfo] = bridge.hypertable_mgr.list_compression_groups()
+    return [
+        {
+            "protocol_name": group["protocol_name"],
+            "wide_table_name": group["wide_table_name"],
+            "tables": [
+                {
+                    **table,
+                    "size_display": _format_bytes(table["size_bytes"]),
+                    "raw_size_display": _format_bytes(table["raw_size_bytes"]),
+                }
+                for table in group["tables"]
+            ],
+            "total_chunks": group["total_chunks"],
+            "compressed_chunks": group["compressed_chunks"],
+            "size_bytes": group["size_bytes"],
+            "raw_size_bytes": group["raw_size_bytes"],
+            "size_display": _format_bytes(group["size_bytes"]),
+            "raw_size_display": _format_bytes(group["raw_size_bytes"]),
+        }
+        for group in raw_groups
+    ]
 
 
-def _annotate_compression_change(entry: dict[str, Any]) -> None:
+def _size_change_display(size_before_bytes: int, size_after_bytes: int) -> SizeChangeDisplay:
     """
-    Adds human-readable display fields to one before/after-size entry --
-    either a group result or one of its `tables` rows from
-    RollupManager.rebuild_compression -- in place: `size_before_display`,
-    `size_after_display`, and `percent_reduced` (float, None when there's
-    no size_before to compute a ratio against, e.g. a skipped group or an
-    untouched table). Mirrors the size_display convention used elsewhere
-    in this module (e.g. list_compression_groups) -- this is where display
+    Human-readable before/after sizes and percent reduced for one rebuild_compression
+    group or table. `percent_reduced` is None when there's no size_before to compute a
+    ratio against (e.g. a skipped group). Mirrors the size_display convention used
+    elsewhere in this module (e.g. list_compression_groups) -- this is where display
     formatting belongs, not the transport layer or the frontend.
     """
-    size_before: int = entry.get("size_before_bytes") or 0
-    size_after: int = entry.get("size_after_bytes") or 0
-    entry["size_before_display"] = _format_bytes(size_before)
-    entry["size_after_display"] = _format_bytes(size_after)
-    entry["percent_reduced"] = round((1 - (size_after / size_before)) * 100, 1) if size_before else None
+    return {
+        "size_before_display": _format_bytes(size_before_bytes),
+        "size_after_display": _format_bytes(size_after_bytes),
+        "percent_reduced": (
+            round((1 - (size_after_bytes / size_before_bytes)) * 100, 1) if size_before_bytes else None
+        ),
+    }
+
+
+def _annotate_compression_group(group: CompressionRebuildGroup) -> CompressionRebuildGroupResult:
+    """One rebuild_compression group (and each of its tables) with the display fields added."""
+    return {
+        "protocol_name": group["protocol_name"],
+        "skipped": group["skipped"],
+        "ok": group["ok"],
+        "chunks_attempted": group["chunks_attempted"],
+        "chunks_ok": group["chunks_ok"],
+        "chunks_failed": group["chunks_failed"],
+        "size_before_bytes": group["size_before_bytes"],
+        "size_after_bytes": group["size_after_bytes"],
+        "tables": [
+            {**table, **_size_change_display(table["size_before_bytes"], table["size_after_bytes"])}
+            for table in group["tables"]
+        ],
+        "chunks": group["chunks"],
+        **_size_change_display(group["size_before_bytes"], group["size_after_bytes"]),
+    }
 
 
 def rebuild_compression(
     gateway: "Protocol_Gateway | None",
     protocol_names: set[str] | None = None
-    ) -> Generator[dict[str, Any], None, None]:
+    ) -> Generator[CompressionRebuildProgress | CompressionRebuildDoneEvent, None, None]:
     """
     Triggers an immediate decompress -> recompress pass across every
     already-compressed chunk of the selected group(s)' raw table and all
@@ -706,13 +1017,13 @@ def rebuild_compression(
         raise RuntimeError("Hypertable manager is not initialized yet — the bridge is not connected to TimescaleDB.")
 
     for event in bridge.hypertable_mgr.rebuild_compression(protocol_names=protocol_names):
-        if event.get("type") == "done":
-            result: dict[str, Any] = event.get("result", {})
-            for group in result.get("groups", []):
-                _annotate_compression_change(group)
-                for table_row in group.get("tables", []):
-                    _annotate_compression_change(table_row)
-        yield event
+        if event["type"] == "done":
+            yield {
+                "type": "done",
+                "result": {"groups": [_annotate_compression_group(group) for group in event["result"]["groups"]]},
+            }
+        else:
+            yield event
 
 
 # ---------------------------------------------------------------------------
@@ -722,7 +1033,7 @@ def rebuild_compression(
 # /storage, /compression-retention, /jobs). Purely observational: none of
 # these mutate anything, unlike the rollup functions above.
 # ---------------------------------------------------------------------------
-def _format_dt(value: Any) -> str:
+def _format_dt(value: datetime | None) -> str:
     """
     Human-readable timestamp for template display, e.g. '2026-07-24 09:15
     UTC'. Formatted here rather than in the template since this app has no
@@ -733,10 +1044,11 @@ def _format_dt(value: Any) -> str:
     try:
         return value.strftime("%Y-%m-%d %H:%M %Z").strip()
     except AttributeError:
+        # Not a datetime after all (SQL row values are unchecked) -- show it as-is.
         return str(value)
 
 
-def get_timescale_health(gateway: "Protocol_Gateway | None") -> dict[str, Any]:
+def get_timescale_health(gateway: "Protocol_Gateway | None") -> TimescaleHealthSnapshot:
     """
     Read-only connection/background-worker snapshot for the "Bridge
     Health" panel. See BridgeAdminManager.get_health_snapshot for the
@@ -753,7 +1065,7 @@ def get_timescale_health(gateway: "Protocol_Gateway | None") -> dict[str, Any]:
     return _field_manager(gateway).get_health_snapshot()
 
 
-def get_storage_overview(gateway: "Protocol_Gateway | None") -> list[dict[str, Any]]:
+def get_storage_overview(gateway: "Protocol_Gateway | None") -> list[TimescaleStorageRow]:
     """
     Read-only per-source-table storage snapshot for the "Storage Overview"
     panel, with a human-readable `size_display` added to each row. See
@@ -766,15 +1078,20 @@ def get_storage_overview(gateway: "Protocol_Gateway | None") -> list[dict[str, A
     bridge: "timescaledb | None" = get_timescale_bridge(gateway)
     if bridge is None:
         raise RuntimeError("No TimescaleDB bridge is attached to this gateway.")
-    rows: list[dict[str, Any]] = _field_manager(gateway).get_storage_overview()
-    for row in rows:
-        row["size_display"] = _format_bytes(row.get("size_bytes"))
-        row["oldest_display"] = _format_dt(row.get("oldest"))
-        row["newest_display"] = _format_dt(row.get("newest"))
+    raw_rows: list[StorageOverviewRow] = _field_manager(gateway).get_storage_overview()
+    rows: list[TimescaleStorageRow] = [
+        {
+            **row,
+            "size_display": _format_bytes(row["size_bytes"]),
+            "oldest_display": _format_dt(row["oldest"]),
+            "newest_display": _format_dt(row["newest"]),
+        }
+        for row in raw_rows
+    ]
     return rows
 
 
-def get_index_overview(gateway: "Protocol_Gateway | None") -> list[dict[str, Any]]:
+def get_index_overview(gateway: "Protocol_Gateway | None") -> list[TimescaleIndexRow]:
     """
     Read-only per-index snapshot for the "Indexes" panel, with a human-
     readable `size_display` added to each row. See BridgeAdminManager.
@@ -787,13 +1104,15 @@ def get_index_overview(gateway: "Protocol_Gateway | None") -> list[dict[str, Any
     bridge: "timescaledb | None" = get_timescale_bridge(gateway)
     if bridge is None:
         raise RuntimeError("No TimescaleDB bridge is attached to this gateway.")
-    rows: list[dict[str, Any]] = _field_manager(gateway).get_index_overview()
-    for row in rows:
-        row["size_display"] = _format_bytes(row.get("size_bytes"))
+    raw_rows: list[IndexOverviewRow] = _field_manager(gateway).get_index_overview()
+    rows: list[TimescaleIndexRow] = [
+        {**row, "size_display": _format_bytes(row["size_bytes"])}
+        for row in raw_rows
+    ]
     return rows
 
 
-def get_compression_retention_summary(gateway: "Protocol_Gateway | None") -> dict[str, Any]:
+def get_compression_retention_summary(gateway: "Protocol_Gateway | None") -> CompressionRetentionSummary:
     """
     Read-only compression/retention configuration summary for the
     "Compression & Retention Status" panel, with `dynamic_raw_tables` and
@@ -817,7 +1136,10 @@ def get_compression_retention_summary(gateway: "Protocol_Gateway | None") -> dic
         raise RuntimeError("No TimescaleDB bridge is attached to this gateway.")
     if bridge.rollup_mgr is None or bridge.hypertable_mgr is None:
         raise RuntimeError("Hypertable/rollup managers are not initialized yet — the bridge is not connected to TimescaleDB.")
-    summary: dict[str, Any] = _field_manager(gateway).get_compression_retention_summary()
+    config: CompressionRetentionConfig | None = _field_manager(gateway).get_compression_retention_summary()
+    if config is None:
+        # Only possible if the bridge dropped its managers between the check above and this call.
+        raise RuntimeError("Hypertable/rollup managers are not initialized yet — the bridge is not connected to TimescaleDB.")
 
     # Grouped by protocol for display (4 granularity rows per table) --
     # itertools.groupby only merges already-consecutive equal keys, not a
@@ -825,16 +1147,43 @@ def get_compression_retention_summary(gateway: "Protocol_Gateway | None") -> dic
     # view_groups: it preserves get_dynamic_view_overview()'s narrow-first
     # ordering instead of alphabetizing "shared_narrow" in among protocol
     # names.
-    flat_views: list[dict[str, Any]] = bridge.rollup_mgr.get_dynamic_view_overview()
-    view_groups: list[dict[str, Any]] = []
+    flat_views: list[DynamicViewRow] = bridge.rollup_mgr.get_dynamic_view_overview()
+    view_groups: list[DynamicViewGroup] = []
     for protocol_name, rows_iter in itertools.groupby(flat_views, key=lambda r: r["protocol_name"]):
         view_groups.append({"protocol_name": protocol_name, "views": list(rows_iter)})
-    summary["dynamic_view_groups"] = view_groups
 
-    return summary
+    return {**config, "dynamic_view_groups": view_groups}
 
 
-def get_background_jobs(gateway: "Protocol_Gateway | None") -> list[dict[str, Any]]:
+def get_timescale_linked_protocols(gateway: "Protocol_Gateway | None", db: "Session") -> list[str]:
+    """
+    Protocol names the TimescaleDB bridge is *fed* from: every scraper whose
+    `bridge =` setting names this bridge contributes its protocol_version,
+    and "shared_narrow" is included whenever at least one scraper does (every
+    protocol also writes to the one shared narrow table).
+
+    The compression panel lists every table that exists on the server, which
+    includes protocols no scraper currently writes to (a leftover from an
+    earlier configuration, or a scraper re-pointed at a different bridge).
+    This is how it tells the two apart. Follows the settings database, same
+    as the Bridges nav dropdown, so it reflects staged edits too. Returns []
+    when there is no TimescaleDB bridge or no scraper links to it.
+    """
+    bridge: "timescaledb | None" = get_timescale_bridge(gateway)
+    if bridge is None:
+        return []
+    bridge_name: str = bridge.transport_name.removeprefix("transport.")
+    linked_protocols: set[str] = {
+        scraper.protocol_version
+        for scraper in get_nav_data(db).scrapers
+        if bridge_name in scraper.linked_bridges and scraper.protocol_version
+    }
+    if not linked_protocols:
+        return []
+    return ["shared_narrow", *sorted(linked_protocols)]
+
+
+def get_background_jobs(gateway: "Protocol_Gateway | None") -> list[BackgroundJobRow]:
     """
     Read-only snapshot of TimescaleDB's background scheduler jobs for
     every hypertable/view this bridge manages, for the "Background Job
@@ -849,11 +1198,15 @@ def get_background_jobs(gateway: "Protocol_Gateway | None") -> list[dict[str, An
         raise RuntimeError("No TimescaleDB bridge is attached to this gateway.")
     if bridge.rollup_mgr is None:
         raise RuntimeError("Rollup manager is not initialized yet — the bridge is not connected to TimescaleDB.")
-    jobs: list[dict[str, Any]] = _field_manager(gateway).get_background_jobs()
-    for job in jobs:
-        job["last_successful_finish_display"] = _format_dt(job.get("last_successful_finish"))
-        job["next_start_display"] = _format_dt(job.get("next_start"))
-    return jobs
+    raw_jobs: list[BackgroundJobInfo] = _field_manager(gateway).get_background_jobs()
+    return [
+        {
+            **job,
+            "last_successful_finish_display": _format_dt(job["last_successful_finish"]),
+            "next_start_display": _format_dt(job["next_start"]),
+        }
+        for job in raw_jobs
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -964,7 +1317,7 @@ def clear_staged_deletions(app_state: State) -> None:
 # Commit — actually performs the drops via BridgeAdminManager
 # ---------------------------------------------------------------------------
 
-def commit_staged_deletions(gateway: "Protocol_Gateway | None", app_state: State) -> list[dict[str, Any]]:
+def commit_staged_deletions(gateway: "Protocol_Gateway | None", app_state: State) -> list[ColumnDeletionCommitResult]:
     """
     Executes every staged deletion against the live TimescaleDB bridge, one
     protocol at a time. Called from routers/commit.py's do_commit() as part
@@ -989,7 +1342,7 @@ def commit_staged_deletions(gateway: "Protocol_Gateway | None", app_state: State
 
     mgr: BridgeAdminManager = _field_manager(gateway)
     staged: dict[str, StagedEntry] = get_all_staged(app_state)
-    results: list[dict[str, Any]] = []
+    results: list[ColumnDeletionCommitResult] = []
 
     with _lock(app_state):
         store: dict[str, StagedEntry] = _store(app_state)
@@ -1144,7 +1497,7 @@ def clear_staged_metric_edits(app_state: State) -> None:
         _metric_edit_store(app_state).clear()
 
 
-def commit_staged_metric_edits(gateway: "Protocol_Gateway | None", app_state: State) -> list[dict[str, Any]]:
+def commit_staged_metric_edits(gateway: "Protocol_Gateway | None", app_state: State) -> list[MetricEditCommitResult]:
     """
     Executes every staged Metrics Edit entry against the live TimescaleDB
     bridge, in the order they were staged. Called from routers/commit.py's
@@ -1171,7 +1524,7 @@ def commit_staged_metric_edits(gateway: "Protocol_Gateway | None", app_state: St
 
     mgr: BridgeAdminManager = _field_manager(gateway)
     staged: list[StagedMetricEdit] = get_staged_metric_edits(app_state)
-    results: list[dict[str, Any]] = []
+    results: list[MetricEditCommitResult] = []
 
     with _metric_edit_lock(app_state):
         store: dict[str, StagedMetricEdit] = _metric_edit_store(app_state)
@@ -1219,7 +1572,7 @@ def commit_staged_metric_edits(gateway: "Protocol_Gateway | None", app_state: St
 # INFLUXDB (v1 / v3)
 # ============================================================================
 
-def get_influxdb_bridge(gateway: "Protocol_Gateway | None", device_section: str) -> transport_base | None:
+def get_influxdb_bridge(gateway: "Protocol_Gateway | None", device_section: str) -> "influxdb_out | influxdb3_out | None":
     """
     Finds the live influxdb_out / influxdb3_out bridge transport whose
     transport_name matches device_section (e.g. "transport.influxdb_out"),
@@ -1236,7 +1589,7 @@ def get_influxdb_bridge(gateway: "Protocol_Gateway | None", device_section: str)
     transports: list[transport_base] = getattr(gateway, "_Protocol_Gateway__transports", [])
     for t in transports:
         if type(t).__name__ in ("influxdb_out", "influxdb3_out") and getattr(t, "transport_name", None) == device_section:
-            return t
+            return cast("influxdb_out | influxdb3_out", t)
     return None
 
 
@@ -1278,6 +1631,14 @@ _LATEST_RELEASE_TTL: float = 86400.0
 _LATEST_RELEASE_FAILURE_TTL: float = 900.0
 _LATEST_RELEASE_TIMEOUT: float = 3.0
 _VERSION_RE: re.Pattern[str] = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)")
+class GitHubRelease(TypedDict, total=False):
+    """The fields of GitHub's list-releases response this module reads. External
+    JSON, so every key is optional and read with .get()."""
+    tag_name: str
+    prerelease: bool
+    draft: bool
+
+
 _latest_release_cache: tuple[dict[int, tuple[int, int, int]], float] | None = None
 _latest_release_lock: threading.Lock = threading.Lock()
 
@@ -1303,7 +1664,7 @@ def _fetch_latest_influxdb_releases() -> dict[int, tuple[int, int, int]]:
     )
     resp.raise_for_status()
     latest: dict[int, tuple[int, int, int]] = {}
-    for release in cast(list[dict[str, Any]], resp.json()):
+    for release in cast(list[GitHubRelease], resp.json()):
         if release.get("prerelease") or release.get("draft"):
             continue
         version: tuple[int, int, int] | None = parse_version_tuple(str(release.get("tag_name", "")))
@@ -1326,21 +1687,21 @@ def get_latest_influxdb_release(major: int) -> tuple[int, int, int] | None:
         return _latest_release_cache[0].get(major)
 
 
-def _build_influxdb_version_rows(bridge: Any) -> tuple[list[dict[str, Any]], bool]:
+def _build_influxdb_version_rows(bridge: influxdb_out | influxdb3_out) -> tuple[list[BridgeVersionRow], bool]:
     """
     The bridge's version rows (see influxdb_out/influxdb3_out.get_version_info), plus, when the bridge
     has check_latest_release on and its server version is known, ``latest`` and ``up_to_date`` on the
     server row (the first).  Returns (rows, check_enabled).  Never raises.
     """
-    check_enabled: bool = bool(getattr(bridge, "check_latest_release", False))
+    check_enabled: bool = bridge.check_latest_release
     try:
-        rows: list[dict[str, Any]] = [dict(r) for r in bridge.get_version_info()]
+        rows: list[BridgeVersionRow] = [{**r} for r in bridge.get_version_info()]
     except Exception as exc:  # noqa: BLE001 - informational, must never break the panel
-        _log.warning(f"get_version_info failed for {getattr(bridge, 'transport_name', '?')}: {exc}")
+        _log.warning(f"get_version_info failed for {bridge.transport_name}: {exc}")
         return [], check_enabled
 
     if check_enabled and rows:
-        installed: tuple[int, int, int] | None = parse_version_tuple(rows[0].get("version"))
+        installed: tuple[int, int, int] | None = parse_version_tuple(rows[0]["version"])
         if installed is not None:
             newest: tuple[int, int, int] | None = get_latest_influxdb_release(installed[0])
             if newest is not None:
@@ -1349,7 +1710,7 @@ def _build_influxdb_version_rows(bridge: Any) -> tuple[list[dict[str, Any]], boo
     return rows, check_enabled
 
 
-def get_influxdb_health(gateway: "Protocol_Gateway | None", device_section: str) -> dict[str, Any]:
+def get_influxdb_health(gateway: "Protocol_Gateway | None", device_section: str) -> InfluxDBHealthPanel:
     """
     Read-only connection/backlog/staleness snapshot for the "Bridge
     Health" panel, with a human-readable `last_periodic_reconnect_display`
@@ -1363,26 +1724,24 @@ def get_influxdb_health(gateway: "Protocol_Gateway | None", device_section: str)
     Raises RuntimeError if no InfluxDB bridge with this name is attached
     to the gateway.
     """
-    bridge: Any | None = get_influxdb_bridge(gateway, device_section)
+    bridge: influxdb_out | influxdb3_out | None = get_influxdb_bridge(gateway, device_section)
     if bridge is None:
         msg: str = f"No InfluxDB bridge named '{device_section}' is attached to this gateway."
         raise RuntimeError(msg)
 
-    health: dict[str, Any] = bridge.get_health_snapshot()
+    snapshot: BridgeHealthSnapshot = bridge.get_health_snapshot()
 
-    last_attempt: float = health.get("last_periodic_reconnect_attempt") or 0.0
-    if last_attempt > 0:
-        health["last_periodic_reconnect_display"] = _format_elapsed(time.time() - last_attempt)
-    else:
-        health["last_periodic_reconnect_display"] = "never"
-
+    last_attempt: float = snapshot["last_periodic_reconnect_attempt"] or 0.0
     version_rows, check_enabled = _build_influxdb_version_rows(bridge)
-    health["version_rows"] = version_rows
-    health["latest_release_check_enabled"] = check_enabled
 
-    return health
+    return {
+        **snapshot,
+        "last_periodic_reconnect_display": _format_elapsed(time.time() - last_attempt) if last_attempt > 0 else "never",
+        "version_rows": version_rows,
+        "latest_release_check_enabled": check_enabled,
+    }
 
-def get_influxdb_storage(gateway: "Protocol_Gateway | None", device_section: str) -> dict[str, Any]:
+def get_influxdb_storage(gateway: "Protocol_Gateway | None", device_section: str) -> StorageOverview:
     """
     Best-effort, read-only storage snapshot for the "Storage Overview"
     panel. See influxdb_out.get_storage_overview / influxdb3_out.
@@ -1405,12 +1764,12 @@ def get_influxdb_storage(gateway: "Protocol_Gateway | None", device_section: str
     Raises RuntimeError if no InfluxDB bridge with this name is attached
     to the gateway.
     """
-    bridge: Any | None = get_influxdb_bridge(gateway, device_section)
+    bridge: influxdb_out | influxdb3_out | None = get_influxdb_bridge(gateway, device_section)
     if bridge is None:
         msg: str = f"No InfluxDB bridge named '{device_section}' is attached to this gateway."
         raise RuntimeError(msg)
 
-    storage: dict[str, Any] = bridge.get_storage_overview()
+    storage: StorageOverview = bridge.get_storage_overview()
 
     data_dir_size_bytes: int | None = storage.get("data_dir_size_bytes")
     storage["data_dir_size_display"] = (
@@ -1419,25 +1778,25 @@ def get_influxdb_storage(gateway: "Protocol_Gateway | None", device_section: str
 
     # Group the flat schema-map rows by table, and fold a column count
     # onto each table_stats row so the panel can show it in one place.
-    columns: list[dict[str, Any]] = storage.get("columns") or list[dict[str, Any]]()
-    columns_by_table: dict[str, list[dict[str, Any]]] = {}
+    columns: list[ColumnInfo] = storage.get("columns") or []
+    columns_by_table: dict[str, list[ColumnInfo]] = {}
     for col in columns:
         table_name: str | None = col.get("table_name")
         if not table_name:
             continue
-        columns_by_table.setdefault(table_name, list[dict[str, Any]]()).append(col)
+        columns_by_table.setdefault(table_name, []).append(col)
     storage["columns_by_table"] = columns_by_table
 
-    table_stats: list[dict[str, Any]] = storage.get("table_stats") or list[dict[str, Any]]()
+    table_stats: list[TableStat] = storage.get("table_stats") or []
     for row in table_stats:
         row["file_size_display"] = _format_bytes(row.get("file_size_bytes"))
         row["memory_display"] = _format_bytes(row.get("memory_bytes"))
         row_table_name: str | None = row.get("table_name")
         row["column_count"] = (
-            len(columns_by_table.get(row_table_name, list[dict[str, Any]]())) if row_table_name else 0
+            len(columns_by_table.get(row_table_name, [])) if row_table_name else 0
         )
 
-    heap_profile: dict[str, Any] | None = storage.get("heap_profile")
+    heap_profile: HeapProfile | None = storage.get("heap_profile")
     if heap_profile is not None:
         heap_size_bytes: int | None = heap_profile.get("size_bytes")
         heap_profile["size_display"] = _format_bytes(heap_size_bytes) if heap_size_bytes is not None else None
@@ -1449,7 +1808,7 @@ def get_influxdb_storage(gateway: "Protocol_Gateway | None", device_section: str
 # MQTT
 # ============================================================================
 
-def get_mqtt_bridge(gateway: "Protocol_Gateway | None", device_section: str) -> transport_base | None:
+def get_mqtt_bridge(gateway: "Protocol_Gateway | None", device_section: str) -> "mqtt | None":
     """
     Finds the live mqtt bridge transport whose transport_name matches
     device_section (e.g. "transport.mqtt"), if any.
@@ -1465,7 +1824,7 @@ def get_mqtt_bridge(gateway: "Protocol_Gateway | None", device_section: str) -> 
     transports: list[transport_base] = getattr(gateway, "_Protocol_Gateway__transports", [])
     for t in transports:
         if type(t).__name__ == "mqtt" and getattr(t, "transport_name", None) == device_section:
-            return t
+            return cast("mqtt", t)
     return None
 
 
@@ -1474,7 +1833,7 @@ def is_mqtt_bridge(gateway: "Protocol_Gateway | None", device_section: str) -> b
     return get_mqtt_bridge(gateway, device_section) is not None
 
 
-def get_mqtt_health(gateway: "Protocol_Gateway | None", device_section: str) -> dict[str, Any]:
+def get_mqtt_health(gateway: "Protocol_Gateway | None", device_section: str) -> MqttHealthSnapshot:
     """
     Read-only connection/reconnect/write-topic snapshot for the "Bridge
     Health" panel. See mqtt.get_health_snapshot for the field list.
@@ -1482,7 +1841,7 @@ def get_mqtt_health(gateway: "Protocol_Gateway | None", device_section: str) -> 
     Raises RuntimeError if no MQTT bridge with this name is attached to
     the gateway.
     """
-    bridge: Any | None = get_mqtt_bridge(gateway, device_section)
+    bridge: mqtt | None = get_mqtt_bridge(gateway, device_section)
     if bridge is None:
         msg: str = f"No MQTT bridge named '{device_section}' is attached to this gateway."
         raise RuntimeError(msg)
@@ -1493,7 +1852,7 @@ def get_mqtt_health(gateway: "Protocol_Gateway | None", device_section: str) -> 
 # PROMETHEUS
 # ============================================================================
 
-def get_prometheus_bridge(gateway: "Protocol_Gateway | None", device_section: str) -> transport_base | None:
+def get_prometheus_bridge(gateway: "Protocol_Gateway | None", device_section: str) -> "prometheus_out | None":
     """
     Finds the live prometheus_out bridge transport whose transport_name
     matches device_section (e.g. "transport.prometheus_out"), if any.
@@ -1509,7 +1868,7 @@ def get_prometheus_bridge(gateway: "Protocol_Gateway | None", device_section: st
     transports: list[transport_base] = getattr(gateway, "_Protocol_Gateway__transports", [])
     for t in transports:
         if type(t).__name__ == "prometheus_out" and getattr(t, "transport_name", None) == device_section:
-            return t
+            return cast("prometheus_out", t)
     return None
 
 
@@ -1540,7 +1899,7 @@ def _format_duration(seconds: float | None) -> str:
     return f"{total_seconds}s"
 
 
-def get_prometheus_health(gateway: "Protocol_Gateway | None", device_section: str) -> dict[str, Any]:
+def get_prometheus_health(gateway: "Protocol_Gateway | None", device_section: str) -> PrometheusHealth:
     """
     Read-only in-memory-registry summary for the "Bridge Health" panel —
     metrics registered, mount path, and machine counts by connectivity
@@ -1550,16 +1909,15 @@ def get_prometheus_health(gateway: "Protocol_Gateway | None", device_section: st
     Raises RuntimeError if no Prometheus bridge with this name is attached
     to the gateway.
     """
-    bridge: Any | None = get_prometheus_bridge(gateway, device_section)
+    bridge: prometheus_out | None = get_prometheus_bridge(gateway, device_section)
     if bridge is None:
         msg: str = f"No Prometheus bridge named '{device_section}' is attached to this gateway."
         raise RuntimeError(msg)
-    summary: dict[str, Any] = bridge.get_bridge_summary()
-    summary["uptime_display"] = _format_duration(summary.get("uptime_seconds"))
-    return summary
+    summary: PrometheusBridgeSummary = bridge.get_bridge_summary()
+    return {**summary, "uptime_display": _format_duration(summary["uptime_seconds"])}
 
 
-def get_prometheus_targets(gateway: "Protocol_Gateway | None", device_section: str) -> list[dict[str, Any]]:
+def get_prometheus_targets(gateway: "Protocol_Gateway | None", device_section: str) -> list[PrometheusTargetRow]:
     """
     Read-only per-machine scrape-target snapshot for the "Target Health"
     panel — one row per machine this bridge has ever been wired to or
@@ -1572,22 +1930,21 @@ def get_prometheus_targets(gateway: "Protocol_Gateway | None", device_section: s
     Raises RuntimeError if no Prometheus bridge with this name is attached
     to the gateway.
     """
-    bridge: Any | None = get_prometheus_bridge(gateway, device_section)
+    bridge: prometheus_out | None = get_prometheus_bridge(gateway, device_section)
     if bridge is None:
         msg: str = f"No Prometheus bridge named '{device_section}' is attached to this gateway."
         raise RuntimeError(msg)
 
-    rows: list[dict[str, Any]] = bridge.get_target_health()
+    raw_rows: list[PrometheusTargetHealth] = bridge.get_target_health()
     now: float = time.time()
-    for row in rows:
-        last_ts: float | None = row.get("last_scrape_timestamp")
+    rows: list[PrometheusTargetRow] = []
+    for row in raw_rows:
+        last_ts: float | None = row["last_scrape_timestamp"]
         if last_ts:
             elapsed: float = now - last_ts
-            row["seconds_since_last_scrape"] = elapsed
-            row["last_scrape_display"] = _format_elapsed(elapsed)
+            rows.append({**row, "seconds_since_last_scrape": elapsed, "last_scrape_display": _format_elapsed(elapsed)})
         else:
-            row["seconds_since_last_scrape"] = None
-            row["last_scrape_display"] = "never"
+            rows.append({**row, "seconds_since_last_scrape": None, "last_scrape_display": "never"})
     return rows
 
 

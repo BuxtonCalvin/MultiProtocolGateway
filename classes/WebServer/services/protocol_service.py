@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Literal, Sequence, Tuple
@@ -37,6 +38,12 @@ from ...transports.transport_base import transport_base
 from ..database import refresh_app_state
 from ..models import DeviceProtocolSelection, ProtocolRegister
 
+if sys.version_info >= (3, 12):
+    from typing import TypedDict
+else:
+    # pydantic (via FastAPI response models) rejects typing.TypedDict on < 3.12
+    from typing_extensions import TypedDict
+
 _log: logging.Logger = logging.getLogger(__name__)
 
 # One entry of transport.synthetic_fields_metadata — either
@@ -48,6 +55,48 @@ SyntheticFieldMetadata = (
     tuple[str, str | None, float, str | None]
     | tuple[str, str | None, float, str | None, str]
 )
+
+
+class ProtocolGroup(TypedDict):
+    """get_protocol_groups(): one protocols_dir sub-folder and its protocol files."""
+    group: str
+    protocols: list[str]
+
+
+class RegistersPage(TypedDict):
+    """get_protocol_registers(): one page of register rows plus paging info."""
+    protocol_name: str
+    registry_type: str
+    total: int
+    page: int
+    page_size: int
+    pages: int
+    rows: list[DeviceRegisterView]
+
+
+class ProtocolTab(TypedDict):
+    """get_protocols_for_device(): one registry-type tab and its W/M/S counts."""
+    protocol_name: str
+    registry_type: str
+    write_count: int
+    mask_count: int
+    screen_count: int
+
+
+class RegistryTypeCounts(TypedDict):
+    total: int
+    chosen: int
+
+
+class DeviceMetricSummary(TypedDict):
+    """get_device_metric_summary(): see that function's docstring for what
+    each count means."""
+    total_available: int
+    chosen_count: int
+    register_map_chosen: int
+    over_limit: bool
+    wide_table_limit: int
+    by_registry_type: dict[str, RegistryTypeCounts]
 
 
 @dataclass
@@ -184,7 +233,7 @@ def get_protocol_registers(
     page: int = 1,
     page_size: int = 50,
     device_name: str | None = None,
-) -> dict[str, str | int | list[DeviceRegisterView]]:
+) -> RegistersPage:
     """
     Returns a paginated list of ProtocolRegister rows for a given
     protocol_name and registry_type (input | holding | coil | discrete | json).
@@ -275,7 +324,7 @@ def get_protocol_registers(
     }
 
 
-def get_protocols_for_device(db: Session, protocol_version: str, device_name: str | None = None) -> List[dict[str, str | int]]:
+def get_protocols_for_device(db: Session, protocol_version: str, device_name: str | None = None) -> List[ProtocolTab]:
     """
     Given a protocol_version string (e.g. "eg4_18kpv"),
     returns the available registry_types (tabs) for that device,
@@ -294,7 +343,7 @@ def get_protocols_for_device(db: Session, protocol_version: str, device_name: st
         .all()
     )
 
-    tabs: List[dict[str, str | int]] = []
+    tabs: List[ProtocolTab] = []
     protocol_name: str
     registry_type: str
     for r in rows:
@@ -347,7 +396,7 @@ def get_device_metric_summary(
     protocol_version: str,
     device_name: str,
     transport: transport_base | None = None,
-) -> dict[str, int | bool | dict[str, dict[str, int]]]:
+) -> DeviceMetricSummary:
     """
     Device-wide metric-selection summary across every non-JSON registry-type
     tab (register map) for a protocol_version. Used to render the
@@ -507,7 +556,7 @@ def get_device_metric_summary(
     # needed one before that fix.
     register_map_json_desc_total: int = json_desc_total
 
-    by_registry_type: dict[str, dict[str, int]] = {}
+    by_registry_type: dict[str, RegistryTypeCounts] = {}
     for registry_type, tab_total, mask_count, screen_count in tab_data:
         if mask_count:
             tab_chosen: int = mask_count
@@ -1185,12 +1234,12 @@ def export_protocol_registers(
     return result
 
 
-def get_protocol_groups(protocols_dir: Path) -> list[dict[str, str | list[str]]]:
+def get_protocol_groups(protocols_dir: Path) -> list[ProtocolGroup]:
     """
     Scan protocols_dir and return the cascading menu structure:
     [ { group: "eg4", protocols: ["eg4_18kpv_holding", "eg4_18kpv_input", ...] } ]
     """
-    groups: list[dict[str, str | list[str]]] = []
+    groups: list[ProtocolGroup] = []
     if not protocols_dir.exists():
         return groups
 

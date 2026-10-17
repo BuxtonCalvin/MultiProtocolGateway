@@ -148,6 +148,10 @@ if TYPE_CHECKING:
     # Deferred at runtime -- same circular-import avoidance as routers/influxdb.py.
     from protocol_gateway import Protocol_Gateway
 
+    from ...transports.influxdb3_out import influxdb3_out
+    from ...transports.influxdb_out import influxdb_out
+    from ...transports.timescaledb import timescaledb
+
 _log: logging.Logger = logging.getLogger(__name__)
 
 router: APIRouter = APIRouter(tags=["timeshift"])
@@ -155,22 +159,17 @@ router: APIRouter = APIRouter(tags=["timeshift"])
 MAX_UPLOAD_BYTES: int = 25 * 1024 * 1024  # 25 MB -- generous for a single date-range spreadsheet/CSV export
 
 
-def _require_bridge(request: Request, version: str) -> Any:
+def _require_bridge(request: Request, version: str) -> influxdb_out | influxdb3_out | timescaledb:
     """
     Resolves the live influxdb_out (v1), influxdb3_out (v3), or timescaledb
-    bridge for `version`, or raises 404. See routers/influxdb.py's
-    identical helper for why this returns `Any` rather than a Union of the
-    transport classes: every caller here only ever touches a small common
-    surface (`.client`/`.database` for InfluxDB, `.SessionFactory` for
-    TimescaleDB), none of it declared through a common typed base in
-    classes/transports/ -- typing this as a Union would just push the same
-    `Any`-shaped member access one level down into every call site instead
-    of centralizing it here.
+    bridge for `version`, or raises 404. Return type is the union of the
+    transport classes the three getters (get_influxdb1_bridge,
+    get_influxdb3_bridge, get_timescale_bridge) already return.
     """
     if version not in ("1", "3", "timescale"):
         raise HTTPException(status_code=404, detail=f"Unknown destination '{version}'.")
     gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
-    bridge: Any | None
+    bridge: influxdb_out | influxdb3_out | timescaledb | None
     if version == "timescale":
         bridge = get_timescale_bridge(gateway)
         label: str = "TimescaleDB"
@@ -525,9 +524,9 @@ class TimeshiftRunRequest(BaseModel):
     device_info_id: int | None = None   # required when version="timescale"
 
 
-def _run_common(payload: TimeshiftRunRequest, request: Request) -> tuple[Any, TimeshiftUpload, dict[str, str], dict[str, str], dict[str, str]]:
+def _run_common(payload: TimeshiftRunRequest, request: Request) -> tuple[influxdb_out | influxdb3_out | timescaledb, TimeshiftUpload, dict[str, str], dict[str, str], dict[str, str]]:
     """Shared setup for Preview and Import: resolves the bridge, the stored upload, and the tags/mapping/field-type dicts every build_points() call needs. InfluxDB only -- see _run_common_timescale for the TimescaleDB counterpart. Returns (bridge, upload, tags, mapping, influx_field_types)."""
-    bridge: Any = _require_bridge(request, payload.version)
+    bridge: influxdb_out | influxdb3_out | timescaledb = _require_bridge(request, payload.version)
     upload: TimeshiftUpload = _require_upload(payload, request)
 
     tags: dict[str, str] = _parse_tags_json(payload.tags_json)
