@@ -544,8 +544,8 @@ def _active_metric_names_for_protocol(gateway: "Protocol_Gateway | None", protoc
     Returns the metric/variable names the live transport for
     protocol_name is currently configured to produce, via its
     variable_mask/variable_screen-filtered registry_map, plus any
-    transport-declared synthetic fields (see
-    transport_base.synthetic_fields_metadata). This is the same source
+    transport-declared synthetic fields the user has chosen via (M)ask (see
+    transport_base.selected_synthetic_fields_metadata). This is the same source
     timescaledb._extract_metric_names reads at schema-registration time.
 
     This is the "expected" side of the comparison
@@ -577,7 +577,10 @@ def _active_metric_names_for_protocol(gateway: "Protocol_Gateway | None", protoc
             if variable_name:
                 names.add(variable_name)
 
-    metadata: list[SyntheticFieldMetadata] = getattr(transport, "synthetic_fields_metadata", [])
+    # Synthetic fields are opt-in: only those chosen via (M)ask are forwarded,
+    # so an unchosen one's column is NOT expected in scrape data and must be
+    # flagged stale (matching timescaledb._validate_wide_row's warning).
+    metadata: list[SyntheticFieldMetadata] = getattr(transport, "selected_synthetic_fields_metadata", [])
     for synthetic in metadata:
         # synthetic is a (variable_name, data_type, unit_mod, note[, registry_type])
         # tuple — see protocol_service.SyntheticFieldMetadata / transport_base.

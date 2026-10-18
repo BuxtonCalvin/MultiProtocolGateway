@@ -422,10 +422,13 @@ def get_device_metric_summary(
         selection, an empty tab contributes nothing rather than being
         assumed fully forwarded. Tabs that do have their own selections
         always apply their own whitelist/blacklist rule independently of
-        what any other tab is doing. Synthetic fields have no toggle and
-        are always forwarded, so they're added in once at the end
-        regardless of any tab's selection state, the same as in
-        total_available.
+        what any other tab is doing. Synthetic fields (e.g. EG4 model /
+        firmware_version) are opt-in: they count as chosen only when the
+        device has actively selected them with (M)ask — they are never
+        forwarded to a bridge otherwise, and merely being displayed (the
+        green cached/static values) does not select them. JSON "<name>_desc"
+        companions are chosen exactly when their source code register is.
+        Both still count toward total_available whether chosen or not.
 
       - register_map_chosen: chosen_count restricted to registry_type in
         {"holding", "input"} — the register maps that feed the TimescaleDB
@@ -451,6 +454,15 @@ def get_device_metric_summary(
     Pass None to compute registers-only counts, e.g. for a device that
     isn't currently connected.
     """
+    # Virtual rows (synthetic fields and JSON "<name>_desc" companions) are
+    # materialized into ProtocolRegister/DeviceProtocolSelection rows the
+    # first time a device selects one (see
+    # materialize_and_toggle_virtual_metric), but they are counted from the
+    # live transport's own declarations below, not from these tables — so
+    # they are excluded from every database count here. Otherwise a
+    # materialized row would be counted twice (once as a tab row, once as a
+    # synthetic/desc), and a stray virtual selection would be mistaken for a
+    # real mask/screen selection.
     rows: Sequence[Row[str, str, int]] = (
         db.execute(
             select(
@@ -458,7 +470,11 @@ def get_device_metric_summary(
                 ProtocolRegister.registry_type,
                 func.count(ProtocolRegister.id),
             )
-            .where(ProtocolRegister.protocol_name.like(f"{protocol_version}%"))
+            .where(
+                ProtocolRegister.protocol_name.like(f"{protocol_version}%"),
+                ProtocolRegister.is_synthetic == False,  # noqa: E712
+                ProtocolRegister.is_json_desc == False,  # noqa: E712
+            )
             .group_by(ProtocolRegister.protocol_name, ProtocolRegister.registry_type)
         )
         .all()
@@ -471,29 +487,79 @@ def get_device_metric_summary(
         registry_type for _, registry_type, _ in rows if registry_type != "json"
     }
 
-    # Gather each register-map tab's own mask/screen counts first. Whether
+    # Gather each register-map tab's own mask/screen selections first. Whether
     # an *empty* tab (no mask or screen selections of its own) counts as
     # "everything forwarded" or "nothing forwarded" depends on whether any
     # OTHER tab in the protocol has selections — so that has to be known
     # before any tab's contribution can be decided.
     tab_data: List[Tuple[str, int, int, int]] = []  # (registry_type, tab_total, mask_count, screen_count)
+    masked_real_by_type: dict[str, set[str]] = {}
+    screened_real_by_type: dict[str, set[str]] = {}
     for protocol_name, registry_type, tab_total in rows:
         if registry_type == "json":
             continue
 
-        sels: List[DeviceProtocolSelection] = (
-            db.query(DeviceProtocolSelection)
-            .filter(
-                DeviceProtocolSelection.device_name == device_name,
-                DeviceProtocolSelection.protocol_name == protocol_name,
-                DeviceProtocolSelection.registry_type == registry_type,
+        sel_rows: list[tuple[DeviceProtocolSelection, str]] = [
+            (sel, variable_name)
+            for sel, variable_name in (
+                db.query(DeviceProtocolSelection, ProtocolRegister.variable_name)
+                .join(
+                    ProtocolRegister,
+                    (DeviceProtocolSelection.protocol_name == ProtocolRegister.protocol_name)
+                    & (DeviceProtocolSelection.registry_type == ProtocolRegister.registry_type)
+                    & (DeviceProtocolSelection.register_address == ProtocolRegister.register_address),
+                )
+                .filter(
+                    DeviceProtocolSelection.device_name == device_name,
+                    DeviceProtocolSelection.protocol_name == protocol_name,
+                    DeviceProtocolSelection.registry_type == registry_type,
+                    ProtocolRegister.is_synthetic == False,  # noqa: E712
+                    ProtocolRegister.is_json_desc == False,  # noqa: E712
+                )
+                .all()
             )
-            .all()
-        )
-        mask_count: int = sum(1 for s in sels if s.mask_enabled)
-        screen_count: int = sum(1 for s in sels if s.screen_enabled)
+        ]
+        mask_count: int = sum(1 for sel, _ in sel_rows if sel.mask_enabled)
+        screen_count: int = sum(1 for sel, _ in sel_rows if sel.screen_enabled)
         tab_data.append((registry_type, tab_total, mask_count, screen_count))
         total_available += tab_total
+
+        # Per-register names, needed to decide whether a JSON "<name>_desc"
+        # companion is chosen: it follows its source CODE register.
+        masked_real_by_type.setdefault(registry_type, set()).update(
+            name for sel, name in sel_rows if sel.mask_enabled
+        )
+        screened_real_by_type.setdefault(registry_type, set()).update(
+            name for sel, name in sel_rows if sel.screen_enabled
+        )
+
+    # Synthetic fields the device has actively chosen with (M)ask. Synthetic
+    # fields are opt-in: unlike a real register (where "nothing selected"
+    # means "forward it"), an unselected synthetic field is never forwarded —
+    # so it neither counts as chosen here nor is it sent to a bridge (see
+    # Protocol_Gateway._filter_for_member). Only (M)ask matters: (S)creen on
+    # a synthetic field is a no-op because unchosen ones are already
+    # withheld, and config_writer never writes a synthetic name to a screen
+    # file. Mirrors config_writer's mask-file rule: a name masked on one tab
+    # but explicitly un-masked on another is absent from the file.
+    synthetic_sel_rows = (
+        db.query(DeviceProtocolSelection.mask_enabled, ProtocolRegister.variable_name)
+        .join(
+            ProtocolRegister,
+            (DeviceProtocolSelection.protocol_name == ProtocolRegister.protocol_name)
+            & (DeviceProtocolSelection.registry_type == ProtocolRegister.registry_type)
+            & (DeviceProtocolSelection.register_address == ProtocolRegister.register_address),
+        )
+        .filter(
+            DeviceProtocolSelection.device_name == device_name,
+            DeviceProtocolSelection.protocol_name.like(f"{protocol_version}%"),
+            ProtocolRegister.is_synthetic == True,  # noqa: E712
+        )
+        .all()
+    )
+    synthetic_masked: set[str] = {name for mask_enabled, name in synthetic_sel_rows if mask_enabled}
+    synthetic_unmasked: set[str] = {name for mask_enabled, name in synthetic_sel_rows if not mask_enabled}
+    chosen_synthetic_names: set[str] = synthetic_masked - synthetic_unmasked
 
     # True as soon as ANY register-map tab has a mask or screen selection.
     # When that's the case, a tab with no selections of its own contributes
@@ -501,17 +567,21 @@ def get_device_metric_summary(
     # forwarded. Only when nothing is selected anywhere does the "no
     # selections = everything forwarded" fallback apply, matching the
     # "No chosen metrics: all metrics will write to bridges" notice.
-    any_selections: bool = any(mask_count or screen_count for _, _, mask_count, screen_count in tab_data)
+    # A chosen synthetic field counts as a selection: it is written to the
+    # mask file, which switches the device into whitelist mode.
+    any_selections: bool = bool(chosen_synthetic_names) or any(
+        mask_count or screen_count for _, _, mask_count, screen_count in tab_data
+    )
 
-    # Synthetic fields have no per-register toggle — they're always
-    # forwarded — and build_synthetic_rows() attaches each one to every tab
-    # it applies to (a tab-specific field to just that tab, an
-    # registry-agnostic field to every tab). Track which tabs each distinct
-    # field actually appears on, so total_available/chosen_count can count
-    # it once overall while by_registry_type can still reflect it on every
-    # tab it's visible on. Skip a field tagged to a registry_type this
-    # protocol doesn't actually expose as a tab (matches the filtering
-    # build_synthetic_rows() itself applies when rendering a specific tab).
+    # Synthetic fields have no per-register toggle of their own — build_
+    # synthetic_rows() attaches each one to every tab it applies to (a
+    # tab-specific field to just that tab, a registry-agnostic field to every
+    # tab). Track which tabs each distinct field actually appears on, so
+    # total_available/chosen_count can count it once overall while
+    # by_registry_type can still reflect it on every tab it's visible on.
+    # Skip a field tagged to a registry_type this protocol doesn't actually
+    # expose as a tab (matches the filtering build_synthetic_rows() itself
+    # applies when rendering a specific tab).
     synthetic_names_by_type: dict[str, set[str]] = {rt: set() for rt in existing_registry_types}
     all_synthetic_names: set[str] = set()
     if transport is not None:
@@ -529,32 +599,46 @@ def get_device_metric_summary(
             else:
                 synthetic_names_by_type[field_registry_type].add(name)
     synthetic_total: int = len(all_synthetic_names)
+    chosen_synthetic_total: int = len(all_synthetic_names & chosen_synthetic_names)
     register_map_synthetic_names: set[str] = set()
     for rt in existing_registry_types:
         register_map_synthetic_names |= synthetic_names_by_type[rt]
-    register_map_synthetic_total: int = len(register_map_synthetic_names)
+    register_map_chosen_synthetic_total: int = len(register_map_synthetic_names & chosen_synthetic_names)
 
-    # JSON code-description entries ("<name>_desc") behave exactly like
-    # synthetic fields for counting purposes: no per-register toggle (no
-    # ProtocolRegister/DeviceProtocolSelection row exists for them), always
-    # forwarded, so they're added in once here rather than through the
-    # mask/screen tab_chosen logic below. build_json_desc_rows() reads
+    def _real_register_chosen(registry_type: str, variable_name: str) -> bool:
+        """Same per-tab rule tab_chosen uses below, for one named register."""
+        tab_masked: set[str] = masked_real_by_type.get(registry_type, set())
+        tab_screened: set[str] = screened_real_by_type.get(registry_type, set())
+        if tab_masked:
+            return variable_name in tab_masked
+        if tab_screened:
+            return variable_name not in tab_screened
+        return not any_selections
+
+    # JSON code-description entries ("<name>_desc") have no toggle of their
+    # own that reaches a mask/screen file: they follow their source CODE
+    # register (selecting either selects both — see
+    # materialize_and_toggle_virtual_metric — and the gateway forwards a
+    # "<name>_desc" key whenever "<name>" is in the mask). So a description
+    # is chosen exactly when its code register is chosen on that tab, and is
+    # counted as available regardless. build_json_desc_rows() reads
     # transport.registry_map directly and already tags each row with the
     # registry-type bucket it came from via row.registry_type.
     json_desc_names_by_type: dict[str, set[str]] = {rt: set() for rt in existing_registry_types}
+    json_desc_chosen_by_type: dict[str, set[str]] = {rt: set() for rt in existing_registry_types}
     all_json_desc_names: set[str] = set()
+    chosen_json_desc_names: set[str] = set()
     if transport is not None:
         for row in build_json_desc_rows(transport):
             if row.registry_type not in existing_registry_types:
                 continue
             all_json_desc_names.add(row.variable_name)
             json_desc_names_by_type[row.registry_type].add(row.variable_name)
+            if row.source_variable_name and _real_register_chosen(row.registry_type, row.source_variable_name):
+                chosen_json_desc_names.add(row.variable_name)
+                json_desc_chosen_by_type[row.registry_type].add(row.variable_name)
     json_desc_total: int = len(all_json_desc_names)
-    # Every tab reaching by_registry_type below is already register-map
-    # eligible (see register_map_chosen note above), so no further
-    # restriction is needed here the way register_map_synthetic_names
-    # needed one before that fix.
-    register_map_json_desc_total: int = json_desc_total
+    chosen_json_desc_total: int = len(chosen_json_desc_names)
 
     by_registry_type: dict[str, RegistryTypeCounts] = {}
     for registry_type, tab_total, mask_count, screen_count in tab_data:
@@ -573,15 +657,17 @@ def get_device_metric_summary(
         register_map_chosen += tab_chosen
 
         tab_synthetic: int = len(synthetic_names_by_type.get(registry_type, set()))
+        tab_synthetic_chosen: int = len(synthetic_names_by_type.get(registry_type, set()) & chosen_synthetic_names)
         tab_json_desc: int = len(json_desc_names_by_type.get(registry_type, set()))
+        tab_json_desc_chosen: int = len(json_desc_chosen_by_type.get(registry_type, set()))
         by_registry_type[registry_type] = {
             "total":  tab_total + tab_synthetic + tab_json_desc,
-            "chosen": tab_chosen + tab_synthetic + tab_json_desc,
+            "chosen": tab_chosen + tab_synthetic_chosen + tab_json_desc_chosen,
         }
 
     total_available += synthetic_total + json_desc_total
-    chosen_count += synthetic_total + json_desc_total
-    register_map_chosen += register_map_synthetic_total + register_map_json_desc_total
+    chosen_count += chosen_synthetic_total + chosen_json_desc_total
+    register_map_chosen += register_map_chosen_synthetic_total + chosen_json_desc_total
 
     return {
         "total_available":     total_available,

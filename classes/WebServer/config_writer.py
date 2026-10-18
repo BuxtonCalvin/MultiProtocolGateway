@@ -146,18 +146,30 @@ def _write_mask_screen_files(db: Session, project_root: Path) -> dict[str, int]:
         if not protocol_version:
             continue
 
-        # Find all registers for this protocol. Synthetic and JSON
-        # code-description rows are excluded here — "Synthetic and JSON
-        # metric descriptions should not be written to a mask or screen
-        # file." Their selection still reaches these files correctly: the
-        # mask/screen cascade in protocol_service.toggle_register_field /
+        # Find all registers for this protocol. JSON code-description rows
+        # are excluded here — "JSON metric descriptions should not be written
+        # to a mask or screen file." Their selection still reaches these files
+        # correctly: the mask/screen cascade in
+        # protocol_service.toggle_register_field /
         # materialize_and_toggle_virtual_metric keeps a description's
         # DeviceProtocolSelection in lockstep with its underlying CODE
         # register's (a real, non-excluded CSV row), so selecting a
         # description writes its code's name here, never the description's
-        # own name — same for a synthetic field's code (there isn't one, so
-        # a synthetic selection has no file representation at all; it can
-        # only reach the data stream via its own always-forwarded path).
+        # own name.
+        #
+        # Synthetic fields (EG4 model / firmware_version / hardware_kind /
+        # is_gridboss, ...) are different: they have no code register to
+        # carry their selection, and they are opt-in — the gateway forwards
+        # one to a bridge only when its name is in the MASK file
+        # (Protocol_Gateway._filter_for_member). So a synthetic row the user
+        # has actively mask-selected IS written to the mask file below. A
+        # synthetic row is never written to the SCREEN file: the screen
+        # loader (protocol_settings.load__registry) treats a registry type
+        # with none of its own entries in the screen list as fully screened,
+        # so a screen file naming only a synthetic field would silently
+        # switch off every real metric. Screening a synthetic field would
+        # also be a no-op anyway, since unchosen synthetics are already
+        # withheld.
         registers: list[Row[DeviceProtocolSelection, ProtocolRegister]] = (
             db.query(DeviceProtocolSelection, ProtocolRegister)
             .join(
@@ -169,7 +181,6 @@ def _write_mask_screen_files(db: Session, project_root: Path) -> dict[str, int]:
             .filter(
                 DeviceProtocolSelection.device_name == transport_name,
                 DeviceProtocolSelection.protocol_name.like(f"{protocol_version}%"),
-                ProtocolRegister.is_synthetic == False,  # noqa: E712
                 ProtocolRegister.is_json_desc == False,  # noqa: E712
             )
             .all()
@@ -194,12 +205,21 @@ def _write_mask_screen_files(db: Session, project_root: Path) -> dict[str, int]:
         mask_path: Path = config_dir / f"variable_mask_{transport_name}.txt"
         mask_path.write_text("\n".join(mask_lines) + "\n", encoding="utf-8")
         written["mask"] += 1
-        _log.info(f"Wrote mask file: {mask_path} ({len(mask_lines)} entries)")
+        synthetic_mask_lines: list[str] = sorted(
+            {protocol_row.variable_name for _sel, protocol_row in registers if protocol_row.is_synthetic}
+            & set(mask_lines)
+        )
+        _log.info(
+            f"Wrote mask file: {mask_path} ({len(mask_lines)} entries, "
+            f"{len(synthetic_mask_lines)} synthetic: {synthetic_mask_lines})"
+        )
 
         # Screen file: variables where screen_enabled=True (same dedup logic)
         screened_names: set[str] = set()
         unscreened_names: set[str] = set()
         for selection_row, protocol_row in registers:
+            if protocol_row.is_synthetic:
+                continue  # never screened — see the note above the query
             if selection_row.screen_enabled:
                 screened_names.add(protocol_row.variable_name)
             else:
