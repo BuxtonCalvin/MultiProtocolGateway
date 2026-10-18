@@ -224,3 +224,45 @@ def test_mask_file_gets_chosen_synthetic_and_screen_file_never_does(
     screen = (tmp_path / "config" / f"variable_screen_{DEVICE}.txt").read_text().split()
     assert mask == ["i0", "model"]
     assert screen == ["i1"]
+
+
+# ------------------------------------------------- bridge schema / stale columns
+
+
+def _stub_transport(mask: list[str] | None) -> Any:
+    return SimpleNamespace(
+        protocolSettings=None if mask is None else SimpleNamespace(variable_mask=mask),
+        synthetic_fields_metadata=SYNTHETIC_FIELDS,
+        registry_map={"input": [SimpleNamespace(variable_name="i0")]},
+    )
+
+
+def _selected(stub: Any) -> list[Any]:
+    from classes.transports.transport_base import transport_base
+    return transport_base.selected_synthetic_fields_metadata.fget(stub)  # type: ignore[attr-defined]
+
+
+def test_selected_synthetic_metadata_follows_the_mask() -> None:
+    assert [f[0] for f in _selected(_stub_transport(["i0", "Model"]))] == ["model"]
+    assert _selected(_stub_transport(["i0"])) == []
+    assert _selected(_stub_transport([])) == []
+    assert _selected(_stub_transport(None)) == []
+
+
+def test_unchosen_synthetic_columns_are_not_expected_so_they_flag_stale(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from classes.WebServer.services import bridge_service
+
+    class _T(SimpleNamespace):
+        selected_synthetic_fields_metadata = property(lambda self: _selected(self))
+
+    def expected(mask: list[str]) -> set[str] | None:
+        t = _T(**vars(_stub_transport(mask)))
+        monkeypatch.setattr(bridge_service, "_get_live_transport", lambda *_a, **_k: t) # type: ignore
+        return bridge_service._active_metric_names_for_protocol(None, PROTOCOL) # type: ignore
+
+    # No synthetic chosen: model/firmware_version/... are NOT expected => their columns flag stale.
+    assert expected(["i0"]) == {"i0"}
+    # Chosen one is expected again => not flagged.
+    assert expected(["i0", "model"]) == {"i0", "model"}

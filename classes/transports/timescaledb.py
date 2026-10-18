@@ -2378,13 +2378,15 @@ class timescaledb(transport_base):
         if not already_registered:
             self._log.info(f"Registering protocol '{protocol}' from transport '{from_transport.transport_name}'")
             try:
+                # Synthetic fields are opt-in: only those chosen via (M)ask are
+                # forwarded, so only those get a wide-table column.
                 synthetic: list[tuple[str, str, Any, Any]] = getattr(
-                    from_transport, 'synthetic_fields_metadata', []
+                    from_transport, 'selected_synthetic_fields_metadata', []
                 )
                 if synthetic:
                     self._log.info(
-                        f"Transport '{from_transport.transport_name}' declares "
-                        f"{len(synthetic)} synthetic field(s) for schema registration: "
+                        f"Transport '{from_transport.transport_name}' has "
+                        f"{len(synthetic)} chosen synthetic field(s) for schema registration: "
                         f"{[s[0] for s in synthetic]}"
                     )
                 self._register_protocol_schema(
@@ -2430,13 +2432,15 @@ class timescaledb(transport_base):
         self._log.info(f"Registering protocol '{protocol}' from transport '{from_transport.transport_name}'")
 
         try:
+            # Synthetic fields are opt-in: only those chosen via (M)ask are
+            # forwarded, so only those get a wide-table column.
             synthetic: list[tuple[str, str, Any, Any]] = getattr(
-                from_transport, 'synthetic_fields_metadata', []
+                from_transport, 'selected_synthetic_fields_metadata', []
             )
             if synthetic:
                 self._log.info(
-                    f"Transport '{from_transport.transport_name}' declares "
-                    f"{len(synthetic)} synthetic field(s) for schema registration: "
+                    f"Transport '{from_transport.transport_name}' has "
+                    f"{len(synthetic)} chosen synthetic field(s) for schema registration: "
                     f"{[s[0] for s in synthetic]}"
                 )
             self._register_protocol_schema(

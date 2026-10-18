@@ -793,9 +793,28 @@ class transport_base:
         should override that property only.
 
         ``_filter_for_member`` in ``protocol_gateway`` uses this frozenset to
-        bypass the variable mask for fields that have no protocol CSV row.
+        recognize fields that have no protocol CSV row. Synthetic fields are
+        opt-in: they are forwarded only when named in the variable mask (see
+        ``selected_synthetic_fields_metadata``).
         """
         return frozenset(name for name, *_ in self.synthetic_fields_metadata)
+
+    @property
+    def selected_synthetic_fields_metadata(self) -> list[tuple[str, str, float, str, str]]:
+        """Scheduling path: All — setup/admin only (TimescaleDB schema registration, Delete Columns stale check).
+
+        The subset of ``synthetic_fields_metadata`` the user has actively
+        chosen with (M)ask, i.e. whose name is in this transport's
+        ``variable_mask``. Synthetic fields are opt-in, and only the chosen
+        ones are ever forwarded to a bridge (``_filter_for_member``), so only
+        these should get a bridge schema column or be treated as "expected"
+        in scrape data. Empty when no mask file exists.
+        """
+        ps: Optional["protocol_settings"] = self.protocolSettings
+        mask: set[str] = {m.lower() for m in (ps.variable_mask if ps is not None else None) or []}
+        if not mask:
+            return []
+        return [f for f in self.synthetic_fields_metadata if f[0].lower() in mask]
 
     def post_process_data(self, info: dict[str, int | float | str]) -> dict[str, int | float | str]:
         """Scheduling path: All (Sequential, Concurrent, Interleaved).
