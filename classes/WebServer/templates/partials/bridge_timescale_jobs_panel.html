@@ -18,7 +18,7 @@
 
   partials/bridge_timescale_jobs_panel.html
   Swapped into #bridge-jobs-container on the TimescaleDB device page.
-  Context: jobs — [{job_id, proc_name, hypertable_name, schedule_interval,
+  Context: jobs — [{protocol_name, job_id, proc_name, hypertable_name, schedule_interval,
   last_run_status, last_successful_finish, last_successful_finish_display,
   next_start, next_start_display, total_runs, total_failures}, ...] from
   services/bridge_service.get_background_jobs().
@@ -28,6 +28,15 @@
   view this bridge manages — not something MPG runs itself. Purely
   observational: a failing job here is fixed via TimescaleDB's own job
   management, not from this card.
+
+  protocol_name is the protocol the job's table or rollup view belongs to
+  ("shared_narrow" for the narrow table and its views), or None. linked_
+  protocols — protocols (plus "shared_narrow") that at least one scraper is
+  configured to write to this bridge, from services/bridge_service.
+  get_timescale_linked_protocols(); None if that lookup failed. A job whose
+  protocol isn't in it targets a table that exists on the server but is fed
+  by no scraper, and is shown in the warning color. A failing job keeps
+  its red tint instead: the failure matters more than the missing link.
 -->
 
 <div class="card">
@@ -49,15 +58,19 @@
       </thead>
       <tbody>
         {% for j in jobs %}
+        {% set j_failing = j.last_run_status and j.last_run_status != 'Success' %}
+        {% set j_unlinked = linked_protocols is not none and j.protocol_name is not none and j.protocol_name not in linked_protocols %}
         <tr class="mini-table-row
-                   {% if j.last_run_status and j.last_run_status != 'Success' %}bg-danger/5{% endif %}
-                   transition-colors" role="row">
+                   {% if j_failing %}bg-danger/5{% elif j_unlinked %}bg-amber-50 dark:bg-warning/10{% endif %}
+                   transition-colors" role="row"
+            {%- if j_unlinked %} title="No scraper is configured to write {{ j.protocol_name }} to this bridge"{% endif %}>
           <td class="px-2 py-1.5 font-mono mini-table-value whitespace-nowrap mini-table-col-divider" role="cell">
             {{ j.proc_name }}
             <span class="mini-table-subtext text-[10px] block">#{{ j.job_id }}</span>
           </td>
           <td class="px-2 py-1.5 font-mono mini-table-value whitespace-nowrap mini-table-col-divider" role="cell">
             {{ j.hypertable_name }}
+            {% if j_unlinked %}<span class="text-amber-800 dark:text-warning text-[10px] block">no scraper linked</span>{% endif %}
           </td>
           <td class="px-2 py-1.5 whitespace-nowrap mini-table-col-divider text-[11px]" role="cell">
             {% if j.last_run_status == 'Success' %}

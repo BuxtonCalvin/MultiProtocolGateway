@@ -42,7 +42,7 @@ import logging
 import threading
 import uuid
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Literal
 
 try:
     from typing import TypedDict
@@ -54,6 +54,31 @@ from starlette.datastructures import State
 from ...transports.transport_base import transport_base
 
 _log: logging.Logger = logging.getLogger(__name__)
+
+
+class InfluxPreviewSample(TypedDict):
+    """One matched (time, value) pair in preview_metric_edit()'s sample."""
+    time_iso: str
+    value: float | int | str | bool | None
+
+
+class InfluxEditCommitResult(TypedDict):
+    """commit_staged_metric_edits(): one successfully-applied edit.
+    `pending` is True only for a v3 "delete" (accepted, applied async)."""
+    edit_id: str
+    version: InfluxVersion
+    measurement: str
+    device_identifier: str
+    field_name: str | None
+    action: str
+    points_affected: int
+    pending: bool
+
+
+class InfluxMetricPreview(TypedDict):
+    """preview_metric_edit()'s result, identical for InfluxDB v1 and v3."""
+    row_count: int
+    sample: list[InfluxPreviewSample]
 
 # See bridge_service.py's own top-of-TimescaleDB-section comment for why
 # these TYPE_CHECKING imports exist alongside a *different*-named runtime
@@ -81,11 +106,11 @@ if TYPE_CHECKING:
 
 InfluxVersion = Literal["1", "3"]
 
-# Declared Any up front, before either branch assigns to it -- see
-# bridge_service.py's _BridgeAdminManagerImpl for why this matters (a type
-# checker would otherwise infer `type[...] | None` from the two conditional
-# assignments and refuse to treat the name as callable).
-_InfluxV1AdminManagerImpl: Any
+# Declared up front, before either branch assigns to it -- see
+# bridge_service.py's _BridgeAdminManagerImpl. Each is really
+# `type[...] | None` (None exactly when that transport can't be imported),
+# and the _v1/_v3_admin_manager() helpers below check for that before calling.
+_InfluxV1AdminManagerImpl: "type[InfluxV1AdminManager] | None"
 try:
     from ...transports.influxdb_out import (
         InfluxV1AdminManager as _InfluxV1AdminManagerImpl,
@@ -96,7 +121,7 @@ except ImportError:
     _InfluxV1AdminManagerImpl = None
     InfluxV1_Available = False
 
-_Influx3AdminManagerImpl: Any
+_Influx3AdminManagerImpl: "type[Influx3AdminManager] | None"
 try:
     from ...transports.influxdb3_out import (
         Influx3AdminManager as _Influx3AdminManagerImpl,
@@ -161,6 +186,8 @@ def _v1_admin_manager(gateway: "Protocol_Gateway | None") -> "InfluxV1AdminManag
     bridge = get_influxdb1_bridge(gateway)
     if bridge is None:
         raise RuntimeError("No InfluxDB v1 bridge is attached to this gateway.")
+    if _InfluxV1AdminManagerImpl is None:
+        raise RuntimeError("The InfluxDB v1 transport is not importable in this deployment.")
     return _InfluxV1AdminManagerImpl(bridge)
 
 
@@ -168,6 +195,8 @@ def _v3_admin_manager(gateway: "Protocol_Gateway | None") -> "Influx3AdminManage
     bridge = get_influxdb3_bridge(gateway)
     if bridge is None:
         raise RuntimeError("No InfluxDB v3 bridge is attached to this gateway.")
+    if _Influx3AdminManagerImpl is None:
+        raise RuntimeError("The InfluxDB v3 transport is not importable in this deployment.")
     return _Influx3AdminManagerImpl(bridge)
 
 
@@ -195,7 +224,7 @@ def supports_delete(version: str) -> bool:
     resolved: InfluxVersion = _validate_version(version)
     if resolved == "1":
         return True
-    return bool(getattr(_Influx3AdminManagerImpl, "SUPPORTS_DELETE", False))
+    return _Influx3AdminManagerImpl is not None and _Influx3AdminManagerImpl.SUPPORTS_DELETE
 
 
 def delete_unavailable_reason(gateway: "Protocol_Gateway | None", version: str) -> str | None:
@@ -277,7 +306,7 @@ def preview_metric_edit(
     field_name: str,
     start_time: datetime,
     end_time: datetime,
-    ) -> dict[str, Any]:
+    ) -> InfluxMetricPreview:
     """
     Returns {row_count, sample: [{time_iso, value}, ...]} for the Metrics
     Edit "Preview" step, for either InfluxDB version -- a read-only look at
@@ -453,7 +482,7 @@ def clear_staged_metric_edits(app_state: State) -> None:
         _influx_edit_store(app_state).clear()
 
 
-def commit_staged_metric_edits(gateway: "Protocol_Gateway | None", app_state: State) -> list[dict[str, Any]]:
+def commit_staged_metric_edits(gateway: "Protocol_Gateway | None", app_state: State) -> list[InfluxEditCommitResult]:
     """
     Executes every staged InfluxDB Metrics Edit entry (v1 and v3 together,
     in the order they were staged) against their respective live bridges.
@@ -479,7 +508,7 @@ def commit_staged_metric_edits(gateway: "Protocol_Gateway | None", app_state: St
         return []
 
     staged: list[StagedInfluxEdit] = get_staged_metric_edits(app_state)
-    results: list[dict[str, Any]] = []
+    results: list[InfluxEditCommitResult] = []
 
     with _influx_edit_lock(app_state):
         store: dict[str, StagedInfluxEdit] = _influx_edit_store(app_state)

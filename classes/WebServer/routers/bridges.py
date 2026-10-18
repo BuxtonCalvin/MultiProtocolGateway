@@ -72,7 +72,7 @@ TemplateResponse convention used throughout this module:
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -80,7 +80,14 @@ from sqlalchemy.orm import Session
 
 from ..database import get_session, refresh_app_state
 from ..services.bridge_service import (
+    BackgroundJobRow,
     BridgeDeletionResult,
+    CompressionRetentionSummary,
+    InfluxDBHealthPanel,
+    PrometheusHealth,
+    PrometheusTargetRow,
+    TimescaleIndexRow,
+    TimescaleStorageRow,
     delete_bridge,
     get_background_jobs,
     get_compression_retention_summary,
@@ -92,6 +99,7 @@ from ..services.bridge_service import (
     get_prometheus_targets,
     get_storage_overview,
     get_timescale_health,
+    get_timescale_linked_protocols,
     is_timescale_available,
 )
 
@@ -108,6 +116,10 @@ if TYPE_CHECKING:
     from fastapi import FastAPI
 
     from protocol_gateway import Protocol_Gateway
+
+    from ...transports.mqtt import MqttHealthSnapshot
+    from ...transports.timescaledb import TimescaleHealthSnapshot
+    from ...transports.transport_base import StorageOverview
 
 router = APIRouter(tags=["bridges"])
 _log: logging.Logger = logging.getLogger(__name__)
@@ -167,17 +179,11 @@ def delete_bridge_route(
     return JSONResponse(content=dict(result))
 
 
-# A number of endpoints below keep dict[str, Any]/list[dict[str, Any]]
-# return-shaped locals rather than a tightened union. In every one of
-# those cases the dict is a near-verbatim pass-through of a
-# services/bridge_service.py introspection call (get_timescale_health,
-# get_storage_overview, get_background_jobs, get_index_overview,
-# get_compression_retention_summary, get_influxdb_health,
-# get_influxdb_storage, get_mqtt_health, get_prometheus_health,
-# get_prometheus_targets) — a service module, out of this pass's "router
-# modules" scope, reading genuinely heterogeneous live-bridge data with
-# no fixed shape this file can assert without guessing at internals it
-# doesn't own (see the identical note in timescale.py).
+# Panel payload shapes (TimescaleHealth, InfluxDBStoragePanel, etc.) are
+# TypedDicts defined in services/bridge_service.py, next to the functions
+# that build them. The transports still annotate their snapshot methods as
+# plain dicts, so bridge_service cast()s at that boundary; the locals below
+# just carry the resulting types through to the template context.
 
 
 # ---------------------------------------------------------------------------
@@ -185,7 +191,7 @@ def delete_bridge_route(
 # ---------------------------------------------------------------------------
 
 @router.get("/pages/timescale/health", response_class=HTMLResponse, response_model=None)
-async def timescale_health_partial(request: Request) -> Any:
+async def timescale_health_partial(request: Request) -> HTMLResponse:
     """
     Bridge Health panel for the TimescaleDB bridge's device page — connection
     state, backlog buffering, and rollup setup completion. Read-only; lazy-
@@ -197,25 +203,42 @@ async def timescale_health_partial(request: Request) -> Any:
         raise HTTPException(status_code=404, detail="No TimescaleDB bridge is attached to this gateway.")
 
     try:
-        health: dict[str, Any] = get_timescale_health(gateway)
+        health: TimescaleHealthSnapshot | None = get_timescale_health(gateway)
     except RuntimeError:
-        health = {}
+        health = None
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
     return request.app.state.templates.TemplateResponse(
         request=request,
         name="partials/bridge_timescale_health_panel.html",
-        context={"health": health},
+        context={"health": health or {}},
     )
 
 
+def _timescale_linked_protocols(gateway: "Protocol_Gateway | None", db: Session) -> list[str] | None:
+    """
+    The protocols (plus "shared_narrow") at least one scraper is configured to
+    write to the TimescaleDB bridge, for the panels that list every table on
+    the server (Storage, Indexes, Compression & Retention) and flag the ones
+    nothing feeds. None, not [], if the lookup fails: the templates flag
+    nothing then, instead of flagging every table as unlinked.
+    """
+    try:
+        return get_timescale_linked_protocols(gateway, db)
+    except Exception:
+        _log.exception("Could not determine which protocols are linked to the TimescaleDB bridge")
+        return None
+
+
 @router.get("/pages/timescale/storage", response_class=HTMLResponse, response_model=None)
-async def timescale_storage_partial(request: Request)-> Any:
+async def timescale_storage_partial(request: Request, db: Session = Depends(get_session)) -> HTMLResponse:
     """
     Storage Overview panel for the TimescaleDB bridge's device page — row
     count, size, chunk count, and time range per source table. Read-only;
-    lazy-loaded since this queries every source table individually.
+    lazy-loaded since this queries every source table individually. Tables
+    no scraper is configured to write to this bridge are flagged in the
+    warning colour (`linked_protocols`).
     """
     gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
     if not is_timescale_available(gateway):
@@ -223,7 +246,7 @@ async def timescale_storage_partial(request: Request)-> Any:
         raise HTTPException(status_code=404, detail="No TimescaleDB bridge is attached to this gateway.")
 
     try:
-        tables: list[dict[str, Any]] = get_storage_overview(gateway)
+        tables: list[TimescaleStorageRow] = get_storage_overview(gateway)
     except RuntimeError:
         tables = []
     except Exception as exc:
@@ -232,17 +255,20 @@ async def timescale_storage_partial(request: Request)-> Any:
     return request.app.state.templates.TemplateResponse(
         request=request,
         name="partials/bridge_timescale_storage_panel.html",
-        context={"tables": tables},
+        context={"tables": tables, "linked_protocols": _timescale_linked_protocols(gateway, db)},
     )
 
 
 @router.get("/pages/timescale/indexes", response_class=HTMLResponse, response_model=None)
-async def timescale_indexes_partial(request: Request)-> Any:
+async def timescale_indexes_partial(request: Request, db: Session = Depends(get_session)) -> HTMLResponse:
     """
     Indexes panel for the TimescaleDB bridge's device page — every index
     on the shared narrow table and each wide table, with size and scan
     counts. Read-only; lazy-loaded since this queries every source table
-    individually, same as the Storage Overview panel.
+    individually, same as the Storage Overview panel. Indexes on tables no
+    scraper is configured to write to this bridge are flagged in the
+    warning colour (`linked_protocols`); the plain lookup tables belong to
+    no protocol and are never flagged.
     """
     gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
     if not is_timescale_available(gateway):
@@ -250,7 +276,7 @@ async def timescale_indexes_partial(request: Request)-> Any:
         raise HTTPException(status_code=404, detail="No TimescaleDB bridge is attached to this gateway.")
 
     try:
-        indexes: list[dict[str, Any]] = get_index_overview(gateway)
+        indexes: list[TimescaleIndexRow] = get_index_overview(gateway)
     except RuntimeError:
         indexes = []
     except Exception as exc:
@@ -259,16 +285,21 @@ async def timescale_indexes_partial(request: Request)-> Any:
     return request.app.state.templates.TemplateResponse(
         request=request,
         name="partials/bridge_timescale_indexes_panel.html",
-        context={"indexes": indexes},
+        context={"indexes": indexes, "linked_protocols": _timescale_linked_protocols(gateway, db)},
     )
 
 
 @router.get("/pages/timescale/compression-retention", response_class=HTMLResponse, response_model=None)
-async def timescale_compression_retention_partial(request: Request)-> Any:
+async def timescale_compression_retention_partial(request: Request, db: Session = Depends(get_session)) -> HTMLResponse:
     """
     Compression & Retention Status panel for the TimescaleDB bridge's
     device page — the configured compression schedule and raw-data
     retention interval. Read-only; this is config, not a live query.
+
+    Every table that exists on the server is listed. The template flags in
+    the warning colour the ones no scraper is configured to write to this
+    bridge (`linked_protocols`), so a leftover table from an earlier
+    configuration is visible but distinguishable from one being fed.
     """
     gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
     if not is_timescale_available(gateway):
@@ -276,7 +307,7 @@ async def timescale_compression_retention_partial(request: Request)-> Any:
         raise HTTPException(status_code=404, detail="No TimescaleDB bridge is attached to this gateway.")
 
     try:
-        summary: dict[str, Any] | None = get_compression_retention_summary(gateway)
+        summary: CompressionRetentionSummary | None = get_compression_retention_summary(gateway)
     except RuntimeError:
         summary = None
     except Exception as exc:
@@ -285,16 +316,18 @@ async def timescale_compression_retention_partial(request: Request)-> Any:
     return request.app.state.templates.TemplateResponse(
         request=request,
         name="partials/bridge_timescale_compression_panel.html",
-        context={"summary": summary},
+        context={"summary": summary, "linked_protocols": _timescale_linked_protocols(gateway, db)},
     )
 
 
 @router.get("/pages/timescale/jobs", response_class=HTMLResponse, response_model=None)
-async def timescale_jobs_partial(request: Request)-> Any:
+async def timescale_jobs_partial(request: Request, db: Session = Depends(get_session)) -> HTMLResponse:
     """
     Background Job Status panel for the TimescaleDB bridge's device page —
     TimescaleDB's own compression/retention/refresh scheduler jobs for
-    every hypertable and rollup view this bridge manages. Read-only.
+    every hypertable and rollup view this bridge manages. Read-only. Jobs
+    on a table or view no scraper is configured to write to this bridge are
+    flagged in the warning colour (`linked_protocols`).
     """
     gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
     if not is_timescale_available(gateway):
@@ -302,7 +335,7 @@ async def timescale_jobs_partial(request: Request)-> Any:
         raise HTTPException(status_code=404, detail="No TimescaleDB bridge is attached to this gateway.")
 
     try:
-        jobs: list[dict[str, Any]] = get_background_jobs(gateway)
+        jobs: list[BackgroundJobRow] = get_background_jobs(gateway)
     except RuntimeError:
         jobs = []
     except Exception as exc:
@@ -311,7 +344,7 @@ async def timescale_jobs_partial(request: Request)-> Any:
     return request.app.state.templates.TemplateResponse(
         request=request,
         name="partials/bridge_timescale_jobs_panel.html",
-        context={"jobs": jobs},
+        context={"jobs": jobs, "linked_protocols": _timescale_linked_protocols(gateway, db)},
     )
 
 
@@ -323,7 +356,7 @@ async def timescale_jobs_partial(request: Request)-> Any:
 # ---------------------------------------------------------------------------
 
 @router.get("/pages/influxdb/{device_name}/health", response_class=HTMLResponse, response_model=None)
-async def influxdb_health_partial(device_name: str, request: Request)-> Any:
+async def influxdb_health_partial(device_name: str, request: Request) -> HTMLResponse:
     """
     Bridge Health panel for an InfluxDB v1 (influxdb_out) or v3
     (influxdb3_out) device page — connection/backlog/staleness state.
@@ -338,7 +371,7 @@ async def influxdb_health_partial(device_name: str, request: Request)-> Any:
     device_section: str = f"transport.{device_name}"
 
     try:
-        health: dict[str, Any] = get_influxdb_health(gateway, device_section)
+        health: InfluxDBHealthPanel = get_influxdb_health(gateway, device_section)
     except RuntimeError:
         raise HTTPException(status_code=404, detail=f"No InfluxDB bridge named '{device_name}' is attached to this gateway.")
     except Exception as exc:
@@ -352,7 +385,7 @@ async def influxdb_health_partial(device_name: str, request: Request)-> Any:
 
 
 @router.get("/pages/influxdb/{device_name}/storage", response_class=HTMLResponse, response_model=None)
-async def influxdb_storage_partial(device_name: str, request: Request)-> Any:
+async def influxdb_storage_partial(device_name: str, request: Request) -> HTMLResponse:
     """
     Storage Overview panel for an InfluxDB v1 (influxdb_out) or v3
     (influxdb3_out) device page — discovered measurements/tables, a
@@ -365,7 +398,7 @@ async def influxdb_storage_partial(device_name: str, request: Request)-> Any:
     device_section: str = f"transport.{device_name}"
 
     try:
-        storage: dict[str, Any] = get_influxdb_storage(gateway, device_section)
+        storage: StorageOverview = get_influxdb_storage(gateway, device_section)
     except RuntimeError:
         raise HTTPException(status_code=404, detail=f"No InfluxDB bridge named '{device_name}' is attached to this gateway.")
     except Exception as exc:
@@ -385,7 +418,7 @@ async def influxdb_storage_partial(device_name: str, request: Request)-> Any:
 # ---------------------------------------------------------------------------
 
 @router.get("/pages/mqtt/{device_name}/health", response_class=HTMLResponse, response_model=None)
-async def mqtt_health_partial(device_name: str, request: Request)-> Any:
+async def mqtt_health_partial(device_name: str, request: Request) -> HTMLResponse:
     """
     Bridge Health panel for an MQTT device page — connection/reconnect/
     write-topic state. Read-only; lazy-loaded like the other bridge panels.
@@ -398,7 +431,7 @@ async def mqtt_health_partial(device_name: str, request: Request)-> Any:
     device_section: str = f"transport.{device_name}"
 
     try:
-        health: dict[str, Any] = get_mqtt_health(gateway, device_section)
+        health: MqttHealthSnapshot = get_mqtt_health(gateway, device_section)
     except RuntimeError:
         raise HTTPException(status_code=404, detail=f"No MQTT bridge named '{device_name}' is attached to this gateway.")
     except Exception as exc:
@@ -418,7 +451,7 @@ async def mqtt_health_partial(device_name: str, request: Request)-> Any:
 # ---------------------------------------------------------------------------
 
 @router.get("/pages/prometheus/{device_name}/health", response_class=HTMLResponse, response_model=None)
-async def prometheus_health_partial(device_name: str, request: Request)-> Any:
+async def prometheus_health_partial(device_name: str, request: Request) -> HTMLResponse:
     """
     Bridge Health panel for a Prometheus device page — in-memory metrics
     registry summary (metrics registered, mount path, machine counts by
@@ -434,7 +467,7 @@ async def prometheus_health_partial(device_name: str, request: Request)-> Any:
     device_section: str = f"transport.{device_name}"
 
     try:
-        health: dict[str, Any] = get_prometheus_health(gateway, device_section)
+        health: PrometheusHealth = get_prometheus_health(gateway, device_section)
     except RuntimeError:
         raise HTTPException(status_code=404, detail=f"No Prometheus bridge named '{device_name}' is attached to this gateway.")
     except Exception as exc:
@@ -448,7 +481,7 @@ async def prometheus_health_partial(device_name: str, request: Request)-> Any:
 
 
 @router.get("/pages/prometheus/{device_name}/targets", response_class=HTMLResponse, response_model=None)
-async def prometheus_targets_partial(device_name: str, request: Request)-> Any:
+async def prometheus_targets_partial(device_name: str, request: Request) -> HTMLResponse:
     """
     Target Health panel for a Prometheus device page — one row per
     upstream machine this bridge has ever been wired to or received data
@@ -460,7 +493,7 @@ async def prometheus_targets_partial(device_name: str, request: Request)-> Any:
     device_section: str = f"transport.{device_name}"
 
     try:
-        targets: list[dict[str, Any]] = get_prometheus_targets(gateway, device_section)
+        targets: list[PrometheusTargetRow] = get_prometheus_targets(gateway, device_section)
     except RuntimeError:
         raise HTTPException(status_code=404, detail=f"No Prometheus bridge named '{device_name}' is attached to this gateway.")
     except Exception as exc:

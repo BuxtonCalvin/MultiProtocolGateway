@@ -39,7 +39,7 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, List, Sequence
+from typing import TYPE_CHECKING, List, Sequence
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import (
@@ -52,6 +52,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.engine.row import Row
 from sqlalchemy.orm import Session
+from typing_extensions import TypedDict
 
 from classes.messaging.message_handler import is_active
 from classes.messaging.message_handler import send_message as _send_message
@@ -88,7 +89,10 @@ from ..services.device_service import (
 )
 from ..services.faq_service import FaqCategory, FaqLoadError, load_faq
 from ..services.protocol_service import (
+    DeviceMetricSummary,
     JSONValue,
+    ProtocolGroup,
+    ProtocolTab,
     export_protocol_registers,
     get_device_metric_summary,
     get_protocol_groups,
@@ -108,14 +112,14 @@ router = APIRouter(tags=["pages"])
 _log: logging.Logger = logging.getLogger(__name__)
 
 
-def base_context(request: Request, nav: NavData) -> dict[str, NavData | list[dict[str, str | list[str]]]]:
+def base_context(request: Request, nav: NavData) -> dict[str, NavData | list[ProtocolGroup]]:
     return {
         "nav": nav,
         "proto_groups": get_protocol_groups(request.app.state.protocols_dir),
     }
 
 
-def _analysis_protocol_options(protocol_groups: list[dict[str, str | list[str]]]) -> list[dict[str, str]]:
+def _analysis_protocol_options(protocol_groups: list[ProtocolGroup]) -> list[dict[str, str]]:
     options: list[dict[str, str]] = []
     for group in protocol_groups:
         group_name = str(group.get("group", ""))
@@ -145,7 +149,7 @@ async def dashboard(request: Request):
         nav: NavData = get_nav_data(db)
         state: AppState = get_app_state(db)
 
-    proto_groups: List[dict[str, str | list[str]]] = get_protocol_groups(request.app.state.protocols_dir)
+    proto_groups: List[ProtocolGroup] = get_protocol_groups(request.app.state.protocols_dir)
 
     return request.app.state.templates.TemplateResponse(
         request=request,
@@ -204,7 +208,7 @@ async def device_page(request: Request, device_name: str):
             ] if bridge_keys else all_settings
         else:
             settings = all_settings
-        proto_tabs: List[dict[str, str | int]]   = (
+        proto_tabs: List[ProtocolTab] = (
             get_protocols_for_device(db, summary.protocol_version, device_name=device_name)
             if summary and summary.protocol_version
             else []
@@ -215,7 +219,7 @@ async def device_page(request: Request, device_name: str):
             t.get("mask_count", 0) or t.get("screen_count", 0) or t.get("write_count", 0)
             for t in proto_tabs
         ) if proto_tabs else False
-        metric_summary: dict[str, int | bool | dict[str, dict[str, int]]] | None = (
+        metric_summary: DeviceMetricSummary | None = (
             get_device_metric_summary(db, summary.protocol_version, device_name, transport=live_transport)
             if summary and summary.protocol_version and summary.transport_type == "scraper"
             else None
@@ -236,7 +240,7 @@ async def device_page(request: Request, device_name: str):
             )
         return HTMLResponse("<p>Device not found.</p>", status_code=404)
 
-    proto_groups: List[dict[str, str | list[str]]] = get_protocol_groups(request.app.state.protocols_dir)
+    proto_groups: List[ProtocolGroup] = get_protocol_groups(request.app.state.protocols_dir)
 
     partial_template_name: str = (
         "partials/scraper_panes.html"
@@ -446,10 +450,10 @@ async def about_page(request: Request):
 
 
 @router.get("/pages/create-scraper", response_class=HTMLResponse, response_model=None)
-async def create_scraper_page(request: Request) -> Any:
+async def create_scraper_page(request: Request) -> HTMLResponse:
     with session_scope() as db:
         nav: NavData = get_nav_data(db)
-    proto_groups: List[dict[str, str | list[str]]] = get_protocol_groups(
+    proto_groups: List[ProtocolGroup] = get_protocol_groups(
         request.app.state.protocols_dir
     )
     transport_library: dict[str, TransportLibraryEntry] = scan_transport_library(request.app.state.transports_dir)
@@ -489,8 +493,16 @@ async def create_scraper_page(request: Request) -> Any:
     )
 
 
-def _protocol_create_groups(protocols_dir: Path) -> list[dict[str, str | list[str]]]:
-    groups: list[dict[str, str | list[str]]] = []
+class ManufacturerGroup(TypedDict):
+    """One protocols_dir sub-folder for the Create Protocol page. Same
+    layout as protocol_service.ProtocolGroup but keyed `manufacturer`, which
+    is what create_protocol.html reads."""
+    manufacturer: str
+    protocols: list[str]
+
+
+def _protocol_create_groups(protocols_dir: Path) -> list[ManufacturerGroup]:
+    groups: list[ManufacturerGroup] = []
     if not protocols_dir.exists():
         return groups
 
@@ -576,7 +588,7 @@ async def analyze_device_page(request: Request, device_name: str):
             detail="Analyze is only available for Modbus-based scrapers",
         )
 
-    proto_groups: list[dict[str, str | list[str]]] = get_protocol_groups(request.app.state.protocols_dir)
+    proto_groups: list[ProtocolGroup] = get_protocol_groups(request.app.state.protocols_dir)
     protocol_options: List[dict[str, str]] = _analysis_protocol_options(proto_groups)
     current_protocol: str = device.protocol_version or ""
 
@@ -656,11 +668,11 @@ async def protocol_editor(
     if candidate.exists():
         csv_path = str(candidate)
 
-    proto_groups: List[dict[str, str | list[str]]] = get_protocol_groups(protocols_dir)
+    proto_groups: List[ProtocolGroup] = get_protocol_groups(protocols_dir)
 
     context: dict[
         str,
-        NavData | list[dict[str, str | list[str]]] | str | list[dict[str, str | int]] | dict[str, JSONValue] | None
+        NavData | list[ProtocolGroup] | str | list[dict[str, str | int]] | dict[str, JSONValue] | None
     ] = {
         "nav":            nav,
         "proto_groups":   proto_groups,

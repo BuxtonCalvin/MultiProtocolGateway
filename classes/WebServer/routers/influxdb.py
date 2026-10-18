@@ -33,7 +33,7 @@ from __future__ import annotations
 import html
 import logging
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Request
@@ -43,6 +43,7 @@ from pydantic import BaseModel
 from ..database import session_scope
 from ..services.device_service import NavData, get_nav_data
 from ..services.influxdb_service import (
+    InfluxMetricPreview,
     delete_unavailable_reason,
     get_influxdb1_bridge,
     get_influxdb3_bridge,
@@ -65,6 +66,9 @@ if TYPE_CHECKING:
     # timescale.py/pages.py).
     from protocol_gateway import Protocol_Gateway
 
+    from ...transports.influxdb3_out import influxdb3_out
+    from ...transports.influxdb_out import influxdb_out
+
 _log: logging.Logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["influxdb"])
@@ -85,7 +89,7 @@ def _machine_timezone(request: Request, version: str) -> str:
     matters in practice).
     """
     gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
-    bridge: Any | None = get_influxdb1_bridge(gateway) if version == "1" else get_influxdb3_bridge(gateway)
+    bridge: influxdb_out | influxdb3_out | None = get_influxdb1_bridge(gateway) if version == "1" else get_influxdb3_bridge(gateway)
     return getattr(bridge, "machine_timezone", "UTC") if bridge is not None else "UTC"
 
 
@@ -102,7 +106,7 @@ def _parse_local_datetime(value: str, tz_name: str) -> datetime:
     return naive.replace(tzinfo=ZoneInfo(tz_name))
 
 
-def _require_bridge(request: Request, version: str) -> Any:
+def _require_bridge(request: Request, version: str) -> influxdb_out | influxdb3_out:
     """
     Resolves the live influxdb_out (v1) or influxdb3_out (v3) bridge for
     `version`, or raises 404.
@@ -116,7 +120,7 @@ def _require_bridge(request: Request, version: str) -> Any:
     if version not in ("1", "3"):
         raise HTTPException(status_code=404, detail=f"Unknown InfluxDB version '{version}'.")
     gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
-    bridge: Any | None = get_influxdb1_bridge(gateway) if version == "1" else get_influxdb3_bridge(gateway)
+    bridge: influxdb_out | influxdb3_out | None = get_influxdb1_bridge(gateway) if version == "1" else get_influxdb3_bridge(gateway)
     if bridge is None:
         _log.warning(f"No InfluxDB v{version} bridge is attached to this gateway.")
         raise HTTPException(status_code=404, detail=f"No InfluxDB v{version} bridge is attached to this gateway.")
@@ -273,7 +277,7 @@ def influxdb_metrics_edit_preview(payload: InfluxMetricEditPreviewRequest, reque
         raise HTTPException(status_code=400, detail="End time must not be before start time.")
 
     try:
-        preview: dict[str, Any] = preview_metric_edit(
+        preview: InfluxMetricPreview = preview_metric_edit(
             gateway, version, payload.measurement, payload.device_identifier, payload.field_name, start_dt, end_dt,
         )
     except ValueError as exc:

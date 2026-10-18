@@ -88,10 +88,13 @@
       </thead>
       <tbody>
         {% for t in summary.dynamic_raw_tables %}
-        <tr class="mini-table-row transition-colors" role="row">
+        {% set t_unlinked = linked_protocols is not none and t.protocol_name not in linked_protocols %}
+        <tr class="mini-table-row transition-colors{% if t_unlinked %} bg-amber-50 dark:bg-warning/10{% endif %}" role="row"
+            {%- if t_unlinked %} title="No scraper is configured to write {{ t.protocol_name }} to this bridge"{% endif %}>
           <td class="px-2 py-1 font-mono mini-table-value whitespace-nowrap mini-table-col-divider" role="cell">
             {{ t.protocol_name }}
             <span class="mini-table-subtext text-[10px] block">{{ t.table_name }}</span>
+            {% if t_unlinked %}<span class="text-amber-800 dark:text-warning text-[10px] block">no scraper linked</span>{% endif %}
           </td>
           <td class="px-2 py-1 text-right font-mono mini-table-value whitespace-nowrap mini-table-col-divider" role="cell">
             {% if t.load_score %}~{{ "{:,.0f}".format(t.load_score) }}{% else %}<span class="surface-muted">—</span>{% endif %}
@@ -118,9 +121,11 @@
     often the raw data was scraped.
   </p>
   {% for g in summary.dynamic_view_groups %}
-  <div class="mb-3 rounded border border-mpg-700 overflow-hidden">
-    <div class="px-2 py-1.5 bg-mpg-800 text-mpg-50 text-xs font-mono font-semibold">
-      {{ g.protocol_name }}
+  {% set g_unlinked = linked_protocols is not none and g.protocol_name not in linked_protocols %}
+  <div class="mb-3 rounded border overflow-hidden {{ 'border-amber-400 dark:border-warning/40' if g_unlinked else 'border-mpg-700' }}"
+       {%- if g_unlinked %} title="No scraper is configured to write {{ g.protocol_name }} to this bridge"{% endif %}>
+    <div class="px-2 py-1.5 bg-mpg-800 text-xs font-mono font-semibold {{ 'text-warning' if g_unlinked else 'text-mpg-50' }}">
+      {{ g.protocol_name }}{% if g_unlinked %} — no scraper linked{% endif %}
     </div>
     <div class="overflow-x-auto">
       <table class="w-auto text-xs border-collapse" role="table" aria-label="Dynamic view sizing for {{ g.protocol_name }}">

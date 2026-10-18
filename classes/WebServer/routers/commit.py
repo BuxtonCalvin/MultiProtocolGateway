@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, List
+from typing import TYPE_CHECKING, List
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
@@ -40,10 +40,15 @@ from ..models import (
 )
 from ..services.backup_service import list_backups, rollback_to
 from ..services.bridge_service import (
+    ColumnDeletionCommitResult,
+    MetricEditCommitResult,
     clear_staged_deletions,
     clear_staged_metric_edits,
     commit_staged_deletions,
     commit_staged_metric_edits,
+)
+from ..services.influxdb_service import (
+    InfluxEditCommitResult,
 )
 from ..services.influxdb_service import (
     clear_staged_metric_edits as clear_staged_influx_edits,
@@ -66,9 +71,6 @@ if TYPE_CHECKING:
 _log: logging.Logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/commit", tags=["commit"])
 
-# commit_staged_deletions() (bridge_service.py) is declared to return
-# list[dict[str, Any]] — that Any is outside this file's scope (it's a
-# service module, not a router), so it isn't tightened here.
 BackupSummary = dict[str, int | str | None]
 DiffResponse = dict[str, dict[str, int] | list[dict[str, str | bool | None]]]
 CommitResponse = dict[str, str | int | list[str] | dict[str, bool | str] | None]
@@ -155,7 +157,7 @@ def do_commit(request: Request, db: Session = Depends(get_session))-> CommitResp
         # typed dict[str, int | str] to match commit_all()'s return type,
         # and timescale_protocols_updated is a list[str], which doesn't fit
         # that value type.
-        timescale_results: list[dict[str, Any]] = commit_staged_deletions(
+        timescale_results: list[ColumnDeletionCommitResult] = commit_staged_deletions(
             getattr(state, "gateway", None), state
         )
         timescale_summary: dict[str, int | list[str]] = {}
@@ -169,7 +171,7 @@ def do_commit(request: Request, db: Session = Depends(get_session))-> CommitResp
         # Changes" press covers both admin screens at once. A failure here
         # raises the same as any other step (see commit_staged_metric_edits'
         # own docstring for its partial-progress/retry semantics).
-        metric_edit_results: list[dict[str, Any]] = commit_staged_metric_edits(
+        metric_edit_results: list[MetricEditCommitResult] = commit_staged_metric_edits(
             getattr(state, "gateway", None), state
         )
         if metric_edit_results:
@@ -185,7 +187,7 @@ def do_commit(request: Request, db: Session = Depends(get_session))-> CommitResp
         # once. A failure here raises the same as any other step (see
         # commit_staged_influx_edits' own docstring for its
         # partial-progress/retry semantics).
-        influx_edit_results: list[dict[str, Any]] = commit_staged_influx_edits(
+        influx_edit_results: list[InfluxEditCommitResult] = commit_staged_influx_edits(
             getattr(state, "gateway", None), state
         )
         influx_summary: dict[str, int] = {}

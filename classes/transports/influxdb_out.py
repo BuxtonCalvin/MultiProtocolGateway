@@ -376,7 +376,7 @@ class influxdb_out(transport_base):
             # Create database if it doesn't exist
             databases: list[dict[str, str]] = self.client.get_list_database() # type: ignore[reportUnknownMemberType]
             if not any(db["name"] == self.database for db in databases):
-                self._log.info(f"Creating database: {self.database}")
+                self._log.info(f"Creating InfluxDB database: {self.database}")
                 self.client.create_database(self.database) # type: ignore[reportUnknownMemberType]
 
         except ImportError:
@@ -409,7 +409,7 @@ class influxdb_out(transport_base):
                 current_time - self.last_periodic_reconnect_attempt >= self.periodic_reconnect_interval):
 
             self.last_periodic_reconnect_attempt = current_time
-            self._log.info(f"Periodic reconnection check (every {self.periodic_reconnect_interval} seconds)")
+            self._log.info(f"Periodic InfluxDB reconnection check (every {self.periodic_reconnect_interval} seconds)")
 
             # Check if active connection exists; if not, immediately attempt reconnect
             if not (self.connected and self.client):
@@ -418,7 +418,7 @@ class influxdb_out(transport_base):
             try:
                 self.client.ping()
             except Exception as e:
-                self._log.warning(f"Periodic connection check failed: {e}")
+                self._log.warning(f"Periodic InfluxDB connection check failed: {e}")
                 return self._attempt_reconnect()
 
         # Throttle routine checks to avoid excessive pings
@@ -433,7 +433,7 @@ class influxdb_out(transport_base):
         try:
             self.client.ping()
         except Exception as e:
-            self._log.warning(f"Connection check failed: {e}")
+            self._log.warning(f"InfluxDB Connection check failed: {e}")
             return self._attempt_reconnect()
         else:
             return True
@@ -445,7 +445,7 @@ class influxdb_out(transport_base):
 
         for attempt in range(self.reconnect_attempts):
             try:
-                self._log.info(f"Reconnection attempt {attempt + 1}/{self.reconnect_attempts}")
+                self._log.info(f"InfluxDB Reconnection attempt {attempt + 1}/{self.reconnect_attempts}")
 
                 if self.client:
                     try:
@@ -467,7 +467,7 @@ class influxdb_out(transport_base):
                 self.client.ping()
 
             except Exception as e:
-                self._log.warning(f"Reconnection attempt {attempt + 1} failed: {e}")
+                self._log.warning(f"InfluxDB Reconnection attempt {attempt + 1} failed: {e}")
                 if attempt < self.reconnect_attempts - 1:
                     if self.use_exponential_backoff:
                         delay: float = min(self.reconnect_delay * (2 ** attempt), self.max_reconnect_delay)
@@ -484,11 +484,11 @@ class influxdb_out(transport_base):
 
                 if self.enable_persistent_storage:
                     self._flush_backlog()
-                    self._log.info("Flushed backlog after successful reconnection")
+                    self._log.info("Flushed InfluxDB backlog after successful reconnection")
 
                 return True
 
-        self._log.error(f"Failed to reconnect after {self.reconnect_attempts} attempts")
+        self._log.error(f"Failed to reconnect to InfluxDB after {self.reconnect_attempts} attempts")
         self.connected = False
         return False
 

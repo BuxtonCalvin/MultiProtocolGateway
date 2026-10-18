@@ -29,6 +29,13 @@
   COUNT(*) — labeled "~" for that reason. A row with `error` set means
   that one table's query failed; the rest of the snapshot still renders.
 
+  linked_protocols — protocols (plus "shared_narrow") that at least one
+  scraper is configured to write to this bridge, from services/bridge_service.
+  get_timescale_linked_protocols(); None if that lookup failed. A table whose
+  protocol isn't in it still exists on the server but is fed by no scraper,
+  and is shown in the warning colour. See the same flag in the Indexes and
+  Compression & Retention panels.
+
   Purely observational — nothing here is clickable.
 
 -->
@@ -51,10 +58,13 @@
       </thead>
       <tbody>
         {% for t in tables %}
-        <tr class="mini-table-row transition-colors" role="row">
+        {% set t_unlinked = linked_protocols is not none and t.protocol_name not in linked_protocols %}
+        <tr class="mini-table-row transition-colors{% if t_unlinked %} bg-amber-50 dark:bg-warning/10{% endif %}" role="row"
+            {%- if t_unlinked %} title="No scraper is configured to write {{ t.protocol_name }} to this bridge"{% endif %}>
           <td class="px-2 py-1.5 font-mono mini-table-value whitespace-nowrap mini-table-col-divider" role="cell">
             {{ t.protocol_name }}
             <span class="mini-table-subtext text-[10px] block">{{ t.table_name }}</span>
+            {% if t_unlinked %}<span class="text-amber-800 dark:text-warning text-[10px] block">no scraper linked</span>{% endif %}
           </td>
           {% if t.error %}
           <td colspan="4" class="px-2 py-1.5 text-danger text-xs" role="cell">Query failed: {{ t.error }}</td>

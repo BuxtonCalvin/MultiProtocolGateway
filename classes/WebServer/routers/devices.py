@@ -21,13 +21,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sys
 import threading
 import types
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, List
+from typing import TYPE_CHECKING, List
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -67,6 +69,8 @@ from ..services.influxdb_service import (
     staged_metric_edit_count as staged_influx_edit_count,
 )
 from ..services.protocol_service import (
+    DeviceMetricSummary,
+    ProtocolTab,
     get_device_metric_summary,
     get_protocols_for_device,
 )
@@ -79,6 +83,32 @@ if TYPE_CHECKING:
     from protocol_gateway import Protocol_Gateway
 
 _log: logging.Logger = logging.getLogger(__name__)
+if sys.version_info >= (3, 12):
+    from typing import TypedDict
+else:
+    # pydantic (via FastAPI response models) rejects typing.TypedDict on < 3.12
+    from typing_extensions import TypedDict
+
+
+class DiagAppState(TypedDict):
+    has_dirty_settings: bool
+    has_dirty_protocols: bool
+    dirty_settings_count: int
+    scanner_status: str
+
+
+class DiagnosticsResult(TypedDict, total=False):
+    """/api/devices/diag. Each check sets its own keys; a failing check sets
+    an error string (db_error, or an "error: ..." string) instead."""
+    db_ok: bool
+    settings_row_count: int | None
+    db_error: str
+    dirty_settings: int | str | None
+    app_state: DiagAppState | str
+    route_resolution_ok: bool
+    note: str
+
+
 router = APIRouter(prefix="/api/devices", tags=["devices"])
 
 
@@ -129,19 +159,16 @@ def diag_patch_test(payload: SettingUpdate, request: Request, db: Session = Depe
 
 
 @router.get("/diag")
-def diagnostics(db: Session = Depends(get_session)) -> dict[str, Any]:
+def diagnostics(db: Session = Depends(get_session)) -> DiagnosticsResult:
     """
     Self-test endpoint. Visit /api/devices/diag in your browser to verify
     routing, DB connectivity, and app state. Safe — read-only.
 
-    Genuinely Any here rather than a tightened union: this is a free-form
-    debug grab-bag by design (each try/except branch stuffs in whatever
-    succeeded — a row count, an error string, a nested state dict — and
-    that shape is meant to grow as new debug checks get added ad hoc).
-    A precise type would just be relisted every time a check is added,
-    with no caller ever consuming this beyond eyeballing it in a browser.
+    Each check below fills in its own keys, and a failed check fills in an
+    error string instead, so every key is optional (total=False). A new
+    debug check means a new key on DiagnosticsResult.
     """
-    result: dict[str, Any] = {}
+    result: DiagnosticsResult = {}
 
     # DB connectivity
     try:
@@ -162,12 +189,13 @@ def diagnostics(db: Session = Depends(get_session)) -> dict[str, Any]:
     # App state row
     try:
         state: AppState = get_app_state(db)
-        result["app_state"] = {
+        app_state_info: DiagAppState = {
             "has_dirty_settings": state.has_dirty_settings,
             "has_dirty_protocols": state.has_dirty_protocols,
             "dirty_settings_count": state.dirty_settings_count,
             "scanner_status": state.scanner_status,
         }
+        result["app_state"] = app_state_info
     except Exception as exc:
         result["app_state"] = f"error: {exc}"
 
@@ -489,11 +517,7 @@ def refresh_protocol_tabs(
         refresh_app_state(db)
         db.commit()
 
-    proto_tabs: List[dict[str, Any]] = get_protocols_for_device(db, payload.new_protocol, device_name=device_name)
-    # proto_tabs / metric_summary below keep Any: both come from
-    # protocol_service.py (a service module, not this router — its own
-    # return types are out of this pass's scope; see the equivalent note
-    # for commit_staged_deletions() in commit.py).
+    proto_tabs: List[ProtocolTab] = get_protocols_for_device(db, payload.new_protocol, device_name=device_name)
     summary: DeviceSummary | None = get_device_summary(db, device_name)
 
     # Rebuild summary with updated protocol_version so the heading shows correctly
@@ -507,13 +531,13 @@ def refresh_protocol_tabs(
 
     gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
     live_transport: transport_base | None = gateway.get_transport(f"transport.{device_name}") if gateway is not None else None
-    metric_summary: dict[str, Any] | None = (
+    metric_summary: DeviceMetricSummary | None = (
         get_device_metric_summary(db, payload.new_protocol, device_name, transport=live_transport)
         if payload.new_protocol else None
     )
 
-    templates: Any = request.app.state.templates
-    html: Any  = templates.get_template("partials/protocol_section.html").render({
+    templates: Jinja2Templates = request.app.state.templates
+    html: str = templates.get_template("partials/protocol_section.html").render({
         "device": summary,
         "proto_tabs": proto_tabs,
         "has_no_selections": has_no_selections,
@@ -604,7 +628,7 @@ def update_setting(device_name: str, setting_id: int, payload: SettingUpdate, re
 
 
 @router.get("/orphan-modal", response_class=HTMLResponse, response_model=None)
-async def orphan_modal(request: Request) -> Any:
+async def orphan_modal(request: Request) -> HTMLResponse:
     """HTMX partial — orphan review modal content."""
     with session_scope() as db:
         orphans: List[Setting] = get_orphaned_settings(db)
@@ -632,14 +656,12 @@ def _failed_register_keys(transport: transport_base | None) -> dict[str, str]:
         return {}
 
 
-def _clean_last_known_data(raw: dict[str, Any]) -> dict[str, str]:
+def _clean_last_known_data(raw: dict[str, int | float | str]) -> dict[str, str]:
     """Stringify a transport's last_known_data for JSON response.
 
-    ``raw``'s values genuinely span whatever a register or synthetic/computed
-    metric produced for a given cycle — int, float, str, bool, ASCII decodes,
-    etc. (see protocol_settings.py's process_registry_map()) — there's no
-    single value type that's actually accurate here, hence Any rather than a
-    tightened union.
+    ``raw`` is transport_base.last_known_data, declared as
+    dict[str, int | float | str]. Floats are rounded to 4 places; everything
+    else goes through str().
 
     Includes "*_desc" entries — these are real registry_map rows in their
     own right (protocol_settings.py's _add_code_description_entries()
@@ -679,9 +701,7 @@ async def device_last_values(request: Request, device_name: str) -> JSONResponse
     if transport is None:
         return JSONResponse({"values": {}, "status": "not_found"})
 
-    # last_known_data's value type is genuinely heterogeneous — see
-    # _clean_last_known_data()'s docstring.
-    raw: dict[str, Any] = getattr(transport, "last_known_data", {})
+    raw: dict[str, int | float | str] = transport.last_known_data
     clean: dict[str, str] = _clean_last_known_data(raw)
 
     return JSONResponse({"values": clean, "status": "ok", "failed_keys": _failed_register_keys(transport)})
@@ -720,7 +740,7 @@ async def device_last_values_wait(request: Request, device_name: str) -> JSONRes
     if not fired:
         return JSONResponse({"values": {}, "status": "timeout"})
 
-    raw: dict[str, Any] = getattr(transport, "last_known_data", {})
+    raw: dict[str, int | float | str] = transport.last_known_data
     clean: dict[str, str] = _clean_last_known_data(raw)
 
     return JSONResponse({"values": clean, "status": "ok", "failed_keys": _failed_register_keys(transport)})

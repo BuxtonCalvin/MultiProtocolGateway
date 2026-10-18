@@ -84,6 +84,7 @@ from __future__ import annotations
 import logging
 import math
 import re
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -105,7 +106,42 @@ if TYPE_CHECKING:
     # runtime.
     from fastapi import FastAPI
 
+if sys.version_info >= (3, 12):
+    from typing import TypedDict
+else:
+    # pydantic (reached via FastAPI response models elsewhere in the app)
+    # rejects typing.TypedDict on < 3.12; match transport_base.py.
+    from typing_extensions import TypedDict
+
 _log: logging.Logger = logging.getLogger(__name__)
+
+
+class PrometheusTargetHealth(TypedDict):
+    """One row of prometheus_out.get_target_health(). The web UI adds its own
+    display fields (seconds since last scrape, formatted time) on top."""
+    machine_id: str
+    device_name: str
+    protocol_name: str
+    connected: bool
+    interval: float
+    scrape_failures_total: int
+    last_scrape_timestamp: float | None
+    last_metric_count: int
+    last_skipped_count: int
+    total_writes: int
+
+
+class PrometheusBridgeSummary(TypedDict):
+    """prometheus_out.get_bridge_summary(). The web UI adds `uptime_display`."""
+    metrics_registered: int
+    total_machines: int
+    connected_count: int
+    stale_count: int
+    never_reported_count: int
+    metrics_path: str
+    metrics_port: int
+    uptime_seconds: float
+
 
 # ---------------------------------------------------------------------------
 # Module-level constants
@@ -853,7 +889,7 @@ class prometheus_out(transport_base):
                             f"(expected every {state.interval:.0f}s) -- flagged stale."
                         )
 
-    def get_target_health(self) -> list[dict[str, Any]]:
+    def get_target_health(self) -> list[PrometheusTargetHealth]:
         """
         Scheduling path: N/A -- read-only snapshot for the diagnostics
         dashboard (routers/pages.py Prometheus target-health partial).
@@ -873,7 +909,7 @@ class prometheus_out(transport_base):
         staleness against.
         """
         now: float = time.time()
-        rows: list[dict[str, Any]] = []
+        rows: list[PrometheusTargetHealth] = []
         with self._state_lock:
             for state in sorted(self._machine_state.values(), key=lambda s: s.machine_id):
                 has_reported: bool = state.last_scrape_timestamp > 0
@@ -897,7 +933,7 @@ class prometheus_out(transport_base):
                 })
         return rows
 
-    def get_bridge_summary(self) -> dict[str, Any]:
+    def get_bridge_summary(self) -> PrometheusBridgeSummary:
         """
         Scheduling path: N/A -- read-only snapshot for the diagnostics
         dashboard's summary card.
@@ -907,7 +943,7 @@ class prometheus_out(transport_base):
            stale_count, never_reported_count, metrics_path, metrics_port,
            uptime_seconds}
         """
-        targets: list[dict[str, Any]] = self.get_target_health()
+        targets: list[PrometheusTargetHealth] = self.get_target_health()
         connected_count: int = sum(1 for t in targets if t["connected"])
         never_reported_count: int = sum(1 for t in targets if t["last_scrape_timestamp"] is None)
         stale_count: int = len(targets) - connected_count - never_reported_count

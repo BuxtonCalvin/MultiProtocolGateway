@@ -260,12 +260,18 @@
                  hidden group-hover:block group-focus-within:block
                  max-h-[70vh] overflow-y-auto overscroll-contain"
           role="menu" aria-label="Bridges submenu">
+        {#- A bridge defined in config.cfg is always listed, but is shown in the
+            warning color when no scraper names it in its `bridge =` setting
+            (bridge.linked_scrapers is built in device_service.get_nav_data),
+            i.e. nothing is writing to it. -#}
         {% for bridge in nav.bridges %}
+        {% set bridge_in_use = bridge.linked_scrapers | length > 0 %}
         <li role="none">
           <a href="/device/{{ bridge.name }}" role="menuitem"
-             class="dropdown-item block px-4 py-2 text-mpg-200 hover:bg-mpg-600 hover:text-white">
+             {% if not bridge_in_use %}title="Not in use: no scraper is configured to write to this bridge"{% endif %}
+             class="dropdown-item block px-4 py-2 hover:bg-mpg-600 {{ 'text-mpg-200 hover:text-white' if bridge_in_use else 'text-warning' }}">
             {{ bridge.name }}
-            <span class="text-xs text-mpg-400 ml-1">({{ bridge.transport_class }})</span>
+            <span class="text-xs ml-1 {{ 'text-mpg-400' if bridge_in_use else 'text-warning' }}">({{ bridge.transport_class }})</span>
           </a>
         </li>
         {% endfor %}
