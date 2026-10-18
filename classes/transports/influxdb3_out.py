@@ -584,14 +584,14 @@ class influxdb3_out(transport_base):
 
         for attempt in range(self.reconnect_attempts):
             try:
-                self._log.info(f"Reconnection attempt {attempt + 1}/{self.reconnect_attempts}")
+                self._log.info(f"InfluxDB v3 Reconnection attempt {attempt + 1}/{self.reconnect_attempts}")
 
                 if self.client:
                     try:
                         self.client.close()
                     except Exception as e:
                         self._log.warning(
-                            f"Failed to close existing InfluxDB3 client during reconnect attempt: {e} "
+                            f"Failed to close existing InfluxDB v3 client during reconnect attempt: {e} "
                             f"{attempt + 1}/{self.reconnect_attempts}"
                         )
 
@@ -600,7 +600,7 @@ class influxdb3_out(transport_base):
                 self._health_check()
 
             except Exception as e:
-                self._log.warning(f"Reconnection attempt {attempt + 1} failed: {e}")
+                self._log.warning(f"InfluxDB v3 Reconnection attempt {attempt + 1} failed: {e}")
                 if attempt < self.reconnect_attempts - 1:
                     if self.use_exponential_backoff:
                         delay: float = min(self.reconnect_delay * (2 ** attempt), self.max_reconnect_delay)
@@ -613,7 +613,7 @@ class influxdb3_out(transport_base):
                 # This block runs only if client creation and healthcheck succeed without throwing exceptions
                 self.connected = True
                 self.last_periodic_reconnect_attempt = time.time()
-                self._log.info("Successfully reconnected to InfluxDB")
+                self._log.info("Successfully reconnected to InfluxDB v3")
 
                 if self.enable_persistent_storage:
                     self._flush_backlog()
