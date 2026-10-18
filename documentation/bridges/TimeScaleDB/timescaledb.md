@@ -821,7 +821,7 @@ services:
       - /home/multiprotocolgateway4/config:/app/config
       - /home/multiprotocolgateway4/protocols:/app/protocols
       - /home/multiprotocolgateway4/backlogs:/app/backlogs
-      - /home/multiprotocolgateway4/logs:/app/logs
+      - /home/multiprotocolgateway4/logs:/logs
     ports:
       - "1717:1717"
     expose:
