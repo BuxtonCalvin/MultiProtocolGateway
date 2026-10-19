@@ -99,8 +99,8 @@ from ..services.bridge_service import (
     get_prometheus_targets,
     get_storage_overview,
     get_timescale_health,
-    get_timescale_linked_protocols,
     is_timescale_available,
+    timescale_linked_protocols_or_none,
 )
 
 if TYPE_CHECKING:
@@ -216,21 +216,6 @@ async def timescale_health_partial(request: Request) -> HTMLResponse:
     )
 
 
-def _timescale_linked_protocols(gateway: "Protocol_Gateway | None", db: Session) -> list[str] | None:
-    """
-    The protocols (plus "shared_narrow") at least one scraper is configured to
-    write to the TimescaleDB bridge, for the panels that list every table on
-    the server (Storage, Indexes, Compression & Retention) and flag the ones
-    nothing feeds. None, not [], if the lookup fails: the templates flag
-    nothing then, instead of flagging every table as unlinked.
-    """
-    try:
-        return get_timescale_linked_protocols(gateway, db)
-    except Exception:
-        _log.exception("Could not determine which protocols are linked to the TimescaleDB bridge")
-        return None
-
-
 @router.get("/pages/timescale/storage", response_class=HTMLResponse, response_model=None)
 async def timescale_storage_partial(request: Request, db: Session = Depends(get_session)) -> HTMLResponse:
     """
@@ -255,7 +240,7 @@ async def timescale_storage_partial(request: Request, db: Session = Depends(get_
     return request.app.state.templates.TemplateResponse(
         request=request,
         name="partials/bridge_timescale_storage_panel.html",
-        context={"tables": tables, "linked_protocols": _timescale_linked_protocols(gateway, db)},
+        context={"tables": tables, "linked_protocols": timescale_linked_protocols_or_none(gateway, db)},
     )
 
 
@@ -285,7 +270,7 @@ async def timescale_indexes_partial(request: Request, db: Session = Depends(get_
     return request.app.state.templates.TemplateResponse(
         request=request,
         name="partials/bridge_timescale_indexes_panel.html",
-        context={"indexes": indexes, "linked_protocols": _timescale_linked_protocols(gateway, db)},
+        context={"indexes": indexes, "linked_protocols": timescale_linked_protocols_or_none(gateway, db)},
     )
 
 
@@ -316,7 +301,7 @@ async def timescale_compression_retention_partial(request: Request, db: Session 
     return request.app.state.templates.TemplateResponse(
         request=request,
         name="partials/bridge_timescale_compression_panel.html",
-        context={"summary": summary, "linked_protocols": _timescale_linked_protocols(gateway, db)},
+        context={"summary": summary, "linked_protocols": timescale_linked_protocols_or_none(gateway, db)},
     )
 
 
@@ -344,7 +329,7 @@ async def timescale_jobs_partial(request: Request, db: Session = Depends(get_ses
     return request.app.state.templates.TemplateResponse(
         request=request,
         name="partials/bridge_timescale_jobs_panel.html",
-        context={"jobs": jobs, "linked_protocols": _timescale_linked_protocols(gateway, db)},
+        context={"jobs": jobs, "linked_protocols": timescale_linked_protocols_or_none(gateway, db)},
     )
 
 

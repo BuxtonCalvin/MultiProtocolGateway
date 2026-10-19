@@ -17,6 +17,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# pyright: reportPrivateUsage=false
+
 """Regression tests for the "Holding Selected: 4 with nothing chosen" bug."""
 
 from __future__ import annotations
@@ -26,11 +28,11 @@ from types import SimpleNamespace
 from typing import Any, Iterator
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from classes.protocol_settings import Registry_Type
-from classes.WebServer.config_writer import _write_mask_screen_files  # type: ignore
+from classes.WebServer.config_writer import _write_mask_screen_files
 from classes.WebServer.models import (
     Base,
     DeviceProtocolSelection,
@@ -52,7 +54,7 @@ SYNTHETIC_FIELDS: list[tuple[Any, ...]] = [
 
 @pytest.fixture()
 def db() -> Iterator[Session]:
-    engine = create_engine("sqlite://")
+    engine: Engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
     session: Session = sessionmaker(bind=engine)()
     yield session
@@ -78,7 +80,7 @@ def _select(db: Session, row: ProtocolRegister, **flags: bool) -> None:
 
 
 def _add_synthetic(db: Session, name: str, **flags: bool) -> None:
-    row = _add_register(db, "holding", f"~synthetic:{name}", name, is_synthetic=True)
+    row: ProtocolRegister = _add_register(db, "holding", f"~synthetic:{name}", name, is_synthetic=True)
     _select(db, row, **flags)
 
 
@@ -86,7 +88,7 @@ def _seed(db: Session, mask_inputs: int = 0) -> list[ProtocolRegister]:
     """3 real holding rows + 5 real input rows (the first `mask_inputs` input rows mask-selected)."""
     for i in range(3):
         _add_register(db, "holding", str(i), f"h{i}")
-    inputs = [_add_register(db, "input", str(i), f"i{i}") for i in range(5)]
+    inputs: list[ProtocolRegister] = [_add_register(db, "input", str(i), f"i{i}") for i in range(5)]
     for r in inputs[:mask_inputs]:
         _select(db, r, mask_enabled=True)
     db.commit()
@@ -96,7 +98,7 @@ def _seed(db: Session, mask_inputs: int = 0) -> list[ProtocolRegister]:
 def _transport(descs: list[tuple[str, str, str]] | None = None) -> Any:
     registry_map: dict[Any, list[Any]] = {}
     if descs:
-        entries = [
+        entries: list[SimpleNamespace] = [
             SimpleNamespace(variable_name=name, documented_name=name, unit="", data_type="ASCII",
                             note=None, read_interval=None, description_source=src)
             for name, src, _rt in descs
@@ -158,7 +160,7 @@ def test_screen_on_synthetic_is_inert_for_counts(db: Session) -> None:
 
 
 def test_json_desc_counts_only_when_its_code_register_is_chosen(db: Session) -> None:
-    inputs = _seed(db, mask_inputs=0)
+    inputs: list[ProtocolRegister] = _seed(db, mask_inputs=0)
     _select(db, inputs[0], mask_enabled=True)  # i0 chosen via mask; i1 is not
     db.commit()
     t = _transport(descs=[("i0_desc", "i0", "input"), ("i1_desc", "i1", "input")])
@@ -209,7 +211,7 @@ def test_no_mask_no_registry_withholds_synthetic_but_forwards_the_rest() -> None
 def test_mask_file_gets_chosen_synthetic_and_screen_file_never_does(
     db: Session, tmp_path: Path
 ) -> None:
-    inputs = _seed(db)
+    inputs: list[ProtocolRegister] = _seed(db)
     db.add(Setting(section=f"transport.{DEVICE}", key="protocol_version", value_disk=PROTOCOL, value_staged=PROTOCOL))
     _select(db, inputs[0], mask_enabled=True)
     _select(db, inputs[1], screen_enabled=True)
@@ -220,8 +222,8 @@ def test_mask_file_gets_chosen_synthetic_and_screen_file_never_does(
 
     _write_mask_screen_files(db, tmp_path)
 
-    mask = (tmp_path / "config" / f"variable_mask_{DEVICE}.txt").read_text().split()
-    screen = (tmp_path / "config" / f"variable_screen_{DEVICE}.txt").read_text().split()
+    mask: list[str] = (tmp_path / "config" / f"variable_mask_{DEVICE}.txt").read_text().split()
+    screen: list[str] = (tmp_path / "config" / f"variable_screen_{DEVICE}.txt").read_text().split()
     assert mask == ["i0", "model"]
     assert screen == ["i1"]
 
@@ -255,12 +257,18 @@ def test_unchosen_synthetic_columns_are_not_expected_so_they_flag_stale(
     from classes.WebServer.services import bridge_service
 
     class _T(SimpleNamespace):
-        selected_synthetic_fields_metadata = property(lambda self: _selected(self))
+        @property
+        def selected_synthetic_fields_metadata(self) -> list[Any]:
+            return _selected(self)
 
     def expected(mask: list[str]) -> set[str] | None:
         t = _T(**vars(_stub_transport(mask)))
-        monkeypatch.setattr(bridge_service, "_get_live_transport", lambda *_a, **_k: t) # type: ignore
-        return bridge_service._active_metric_names_for_protocol(None, PROTOCOL) # type: ignore
+
+        def _fake_live_transport(*_args: object, **_kwargs: object) -> _T:
+            return t
+
+        monkeypatch.setattr(bridge_service, "_get_live_transport", _fake_live_transport)
+        return bridge_service._active_metric_names_for_protocol(None, PROTOCOL)
 
     # No synthetic chosen: model/firmware_version/... are NOT expected => their columns flag stale.
     assert expected(["i0"]) == {"i0"}

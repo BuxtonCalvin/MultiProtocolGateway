@@ -143,7 +143,8 @@
 <script>
   function setAllRollupGroups(checked) {
     document.querySelectorAll('.rollup-group-checkbox').forEach(function (cb) {
-      cb.checked = checked;
+      // A group no scraper writes to this bridge is disabled and never selectable, including by "Select all".
+      if (!cb.disabled) { cb.checked = checked; }
     });
   }
 
@@ -158,13 +159,13 @@
   }
 
   function getCheckedRollupGroups() {
-    const checked = document.querySelectorAll('.rollup-group-checkbox:checked');
+    const checked = document.querySelectorAll('.rollup-group-checkbox:checked:not(:disabled)');
     return Array.from(checked).map(function (cb) { return cb.dataset.protocolName; });
   }
 
   function refreshRollupViewsContainer() {
-    // Checkboxes default back to "all checked" on reload — see the
-    // partial's `checked` attribute.
+    // Checkboxes default back to "all checked" on reload (except groups no scraper
+    // writes to this bridge, which are disabled) — see the partial's `checked` attribute.
     htmx.ajax('GET', '/pages/timescale/rollups', {
       target: '#rollup-views-container',
       swap: 'innerHTML scroll:false',

@@ -48,7 +48,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime
-from typing import TYPE_CHECKING, Iterator
+from typing import TYPE_CHECKING, Iterable, Iterator
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Request
@@ -61,6 +61,7 @@ from ..database import session_scope
 from ..services.bridge_service import (
     CompressionGroupRow,
     MetricPreview,
+    NotBridgedError,
     RollupViewGroup,
     get_staged_columns,
     get_staged_metric_edits,
@@ -77,10 +78,12 @@ from ..services.bridge_service import (
     rebuild_all_rollups,
     rebuild_compression,
     refresh_selected_rollups,
+    require_timescale_protocols_linked,
     resolve_wide_table_name,
     stage_field_deletion,
     stage_metric_edit,
     staged_deletion_count,
+    timescale_linked_protocols_or_none,
     unstage_metric_edit,
 )
 from ..services.device_service import NavData, get_nav_data
@@ -133,6 +136,23 @@ def _require_bridge(request: Request) -> transport_base:
     return bridge
 
 
+def _require_protocols_linked(request: Request, protocol_names: Iterable[str | None]) -> None:
+    """
+    409 if any of `protocol_names` (None = the shared narrow table) is not written to this bridge by any scraper.
+
+    The screens below don't offer such a table as selectable (it exists on the server, e.g. left over from an earlier
+    configuration, but nothing is feeding it), so this only fires for a request that didn't come from a current page:
+    a stale tab, or one made by hand. Lookup problems are not held against the admin; see
+    timescale_linked_protocols_or_none().
+    """
+    gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
+    try:
+        with session_scope() as db:
+            require_timescale_protocols_linked(gateway, db, protocol_names)
+    except NotBridgedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 # ---------------------------------------------------------------------------
 # Delete Columns — page shell + inventory partials for the "Timescale DB ->
 # Delete Columns" admin screen.
@@ -154,6 +174,7 @@ async def timescale_delete_columns_page(request: Request):
 
     with session_scope() as db:
         nav: NavData = get_nav_data(db)
+        linked_protocols: list[str] | None = timescale_linked_protocols_or_none(gateway, db)
 
     try:
         wide_tables: list[dict[str, str]] = list_wide_tables(gateway)
@@ -163,7 +184,7 @@ async def timescale_delete_columns_page(request: Request):
     return request.app.state.templates.TemplateResponse(
         request=request,
         name="pages/timescale_delete_columns.html",
-        context={**base_context(request, nav), "wide_tables": wide_tables},
+        context={**base_context(request, nav), "wide_tables": wide_tables, "linked_protocols": linked_protocols},
     )
 
 
@@ -222,6 +243,8 @@ def stage_field(
     services/bridge_service.commit_staged_deletions).
     """
     _require_bridge(request)
+    if payload.checked:  # un-staging something already staged is always allowed
+        _require_protocols_linked(request, [protocol_name])
     stage_field_deletion(
         request.app.state,
         protocol_name=protocol_name,
@@ -291,6 +314,7 @@ async def timescale_metrics_edit_page(request: Request) -> HTMLResponse:
 
     with session_scope() as db:
         nav: NavData = get_nav_data(db)
+        linked_protocols: list[str] | None = timescale_linked_protocols_or_none(gateway, db)
 
     try:
         tables: list[dict[str, str | None]] = list_metric_edit_tables(gateway)
@@ -303,6 +327,7 @@ async def timescale_metrics_edit_page(request: Request) -> HTMLResponse:
         context={
             **base_context(request, nav),
             "tables": tables,
+            "linked_protocols": linked_protocols,
             "staged_edits": get_staged_metric_edits(request.app.state),
         },
     )
@@ -439,6 +464,7 @@ def timescale_metrics_edit_stage(payload: MetricEditStageRequest, request: Reque
     Returns the refreshed staged-changes list partial, for an HTMX swap.
     """
     _require_bridge(request)
+    _require_protocols_linked(request, [payload.protocol_name if payload.table_kind == "wide" else None])
     gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
 
     if not payload.field_names:
@@ -564,10 +590,12 @@ async def timescale_rollups_partial(request: Request):
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
+    with session_scope() as db:
+        linked_protocols: list[str] | None = timescale_linked_protocols_or_none(gateway, db)
     return request.app.state.templates.TemplateResponse(
         request=request,
         name="partials/timescale_rollup_view_list.html",
-        context={"groups": groups},
+        context={"groups": groups, "linked_protocols": linked_protocols},
     )
 
 
@@ -613,6 +641,7 @@ def rebuild_rollups(payload: RebuildRollupsRequest, request: Request) -> Streami
     _require_bridge(request)
     if not payload.protocol_names:
         raise HTTPException(status_code=400, detail="Select at least one rollup group to rebuild.")
+    _require_protocols_linked(request, payload.protocol_names)
 
     protocol_names: set[str] = set(payload.protocol_names)
     force: bool = payload.force
@@ -666,6 +695,7 @@ def refresh_rollups(payload: RefreshRollupsRequest, request: Request) -> Streami
     _require_bridge(request)
     if not payload.protocol_names:
         raise HTTPException(status_code=400, detail="Select at least one rollup group to refresh.")
+    _require_protocols_linked(request, payload.protocol_names)
 
     protocol_names: set[str] = set(payload.protocol_names)
     force_full: bool = payload.force_full
@@ -754,10 +784,12 @@ async def timescale_compression_partial(request: Request):
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
+    with session_scope() as db:
+        linked_protocols: list[str] | None = timescale_linked_protocols_or_none(gateway, db)
     return request.app.state.templates.TemplateResponse(
         request=request,
         name="partials/timescale_compression_group_list.html",
-        context={"groups": groups},
+        context={"groups": groups, "linked_protocols": linked_protocols},
     )
 
 
@@ -814,6 +846,7 @@ def rebuild_compression_endpoint(payload: RebuildCompressionRequest, request: Re
     _require_bridge(request)
     if not payload.protocol_names:
         raise HTTPException(status_code=400, detail="Select at least one group to rebuild.")
+    _require_protocols_linked(request, payload.protocol_names)
 
     protocol_names: set[str] = set(payload.protocol_names)
     gateway: "Protocol_Gateway | None" = request.app.state.gateway

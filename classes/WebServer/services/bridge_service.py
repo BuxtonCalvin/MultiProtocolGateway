@@ -72,8 +72,9 @@ import sys
 import threading
 import time
 import uuid
+from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Generator, Literal, cast
+from typing import TYPE_CHECKING, Generator, Iterable, Literal, cast
 
 import requests
 from starlette.datastructures import State
@@ -1184,6 +1185,95 @@ def get_timescale_linked_protocols(gateway: "Protocol_Gateway | None", db: "Sess
     if not linked_protocols:
         return []
     return ["shared_narrow", *sorted(linked_protocols)]
+
+
+class NotBridgedError(ValueError):
+    """An operation was aimed at something that exists on the server but that no scraper currently writes through
+    this bridge. The Admin UI does not offer those as selectable (see the *_linked helpers below); this is what a
+    mutating endpoint raises if a request for one arrives anyway (a stale page, a hand-made request)."""
+
+
+def timescale_linked_protocols_or_none(gateway: "Protocol_Gateway | None", db: "Session") -> list[str] | None:
+    """
+    get_timescale_linked_protocols() for the screens that decide what to offer as selectable (and for the
+    mutating endpoints behind them): None, not [], if the lookup itself fails. Callers treat None as "unknown, so
+    restrict nothing", so a problem reading the settings database can never lock the admin out of their own tables,
+    while [] (no scraper writes to this bridge) correctly restricts everything.
+    """
+    try:
+        return get_timescale_linked_protocols(gateway, db)
+    except Exception:
+        _log.exception("Could not determine which protocols are linked to the TimescaleDB bridge")
+        return None
+
+
+def is_protocol_linked(linked_protocols: list[str] | None, protocol_name: str | None) -> bool:
+    """True if `protocol_name` ("shared_narrow", or None for the shared narrow table) is written to this bridge by a
+    scraper, or if that is unknown (linked_protocols is None)."""
+    return linked_protocols is None or (protocol_name or "shared_narrow") in linked_protocols
+
+
+def require_timescale_protocols_linked(
+    gateway: "Protocol_Gateway | None", db: "Session", protocol_names: Iterable[str | None]
+) -> None:
+    """Raise NotBridgedError if any of `protocol_names` (None = the shared narrow table) is not written to the
+    TimescaleDB bridge by any scraper. Does nothing when that can't be determined."""
+    linked: list[str] | None = timescale_linked_protocols_or_none(gateway, db)
+    unlinked: list[str] = sorted({(p or "shared_narrow") for p in protocol_names if not is_protocol_linked(linked, p)})
+    if unlinked:
+        names: str = ", ".join(unlinked)
+        msg: str = f"No scraper is configured to write {names} to this TimescaleDB bridge, so it can't be selected here."
+        raise NotBridgedError(msg)
+
+
+# -- InfluxDB: what the bridge is actually being fed -----------------------
+
+@dataclass(frozen=True)
+class InfluxBridgeFeed:
+    """What one InfluxDB bridge is currently fed by the running gateway: the measurement it writes to, and the
+    device_identifier tag of every scraper whose `bridge =` setting names it. Anything on the server outside this
+    (another measurement, or a device whose scraper no longer links to this bridge) is not bridged."""
+    measurement: str
+    device_identifiers: frozenset[str]
+    has_scrapers: bool
+
+
+def get_influxdb_feed(gateway: "Protocol_Gateway | None", bridge: "influxdb_out | influxdb3_out") -> InfluxBridgeFeed | None:
+    """
+    The InfluxBridgeFeed for `bridge`, read from the live transports (so a serial number a scraper only learns from
+    its device is the value that actually gets written as the tag), or None if there is no gateway to ask.
+    """
+    if gateway is None:
+        return None
+    transports: list[transport_base] = getattr(gateway, "_Protocol_Gateway__transports", [])
+    feeders: list[transport_base] = [t for t in transports if bridge.transport_name in t.bridges]
+    return InfluxBridgeFeed(
+        measurement=bridge.measurement,
+        device_identifiers=frozenset(t.device_identifier for t in feeders if t.device_identifier),
+        has_scrapers=bool(feeders),
+    )
+
+
+def influx_measurement_selectable(feed: InfluxBridgeFeed | None, measurement: str) -> bool:
+    """True if `measurement` is the one a scraper writes through this bridge (or if that is unknown)."""
+    return feed is None or (feed.has_scrapers and measurement == feed.measurement)
+
+
+def influx_device_selectable(feed: InfluxBridgeFeed | None, measurement: str, device_identifier: str) -> bool:
+    """True if a scraper linked to this bridge writes `device_identifier` into `measurement` (or if that is unknown)."""
+    return feed is None or (
+        influx_measurement_selectable(feed, measurement) and device_identifier.strip().lower() in feed.device_identifiers
+    )
+
+
+def require_influx_device_fed(feed: InfluxBridgeFeed | None, measurement: str, device_identifier: str) -> None:
+    """Raise NotBridgedError if no scraper writes `device_identifier` into `measurement` through this bridge."""
+    if not influx_device_selectable(feed, measurement, device_identifier):
+        msg: str = (
+            f"No scraper is configured to write device '{device_identifier}' to measurement '{measurement}' "
+            "through this InfluxDB bridge, so it can't be selected here."
+        )
+        raise NotBridgedError(msg)
 
 
 def get_background_jobs(gateway: "Protocol_Gateway | None") -> list[BackgroundJobRow]:

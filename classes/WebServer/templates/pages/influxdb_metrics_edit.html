@@ -107,8 +107,23 @@
     </p>
 
     <ul class="space-y-1" role="list" aria-label="Metrics Edit measurements">
+      {#- A measurement that exists on the server but that no scraper writes through this bridge (the bridge writes one
+          measurement; unselectable_measurements comes from routers/influxdb.py) is shown, but disabled: no hx-get, no
+          onclick. #}
       {% for m in measurements %}
+      {% set m_unfed = m in unselectable_measurements %}
       <li>
+        {% if m_unfed %}
+        <button type="button" disabled aria-disabled="true"
+                class="influx-metrics-edit-measurement-btn w-full text-left px-3 py-2 rounded text-xs
+                       font-mono text-warning border border-transparent cursor-not-allowed"
+                data-measurement="{{ m }}"
+                aria-label="{{ m }} can't be selected: no scraper is configured to write it through this bridge"
+                title="Not selectable: no scraper is configured to write this measurement through this bridge">
+          <div>{{ m }}</div>
+          <div class="text-[10px]">no scraper linked</div>
+        </button>
+        {% else %}
         <button type="button"
                 class="influx-metrics-edit-measurement-btn w-full text-left px-3 py-2 rounded text-xs
                        font-mono text-mpg-200 hover:bg-mpg-600 hover:text-white
@@ -122,6 +137,7 @@
                 onclick="selectInfluxMeasurement(this)">
           {{ m }}
         </button>
+        {% endif %}
       </li>
       {% endfor %}
       {% if not measurements %}
