@@ -1,6 +1,7 @@
-# Description: Synthetic fields (EG4 model/firmware_version/...) are opt-in:
-#   not counted as "Selected", not forwarded to bridges, and only written to
-#   the mask file, unless the user actively chose them with (M)ask.
+# Description: Synthetic fields (EG4 model/firmware_version/...) follow the
+#   same mask/screen rule as every other metric: with a mask they are counted
+#   and forwarded only if M-selected; otherwise they are counted and forwarded
+#   unless S-screened.
 # File: test_synthetic_opt_in.py
 #
 # Copyright 2026 Kevin Burke
@@ -31,7 +32,11 @@ import pytest
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from classes.protocol_settings import Registry_Type
+from classes.protocol_settings import (
+    SYNTHETIC_FILTER_PREFIX,
+    Registry_Type,
+    protocol_settings,
+)
 from classes.WebServer.config_writer import _write_mask_screen_files
 from classes.WebServer.models import (
     Base,
@@ -62,7 +67,7 @@ def db() -> Iterator[Session]:
 
 
 def _add_register(db: Session, registry_type: str, address: str, name: str, **kw: Any) -> ProtocolRegister:
-    row = ProtocolRegister(
+    row: ProtocolRegister = ProtocolRegister(
         protocol_group="eg4", protocol_name=PROTOCOL, registry_type=registry_type,
         register_address=address, variable_name=name, documented_name=name, **kw,
     )
@@ -125,11 +130,32 @@ def test_unselected_synthetic_fields_do_not_count_as_selected(db: Session) -> No
     assert s["by_registry_type"]["holding"]["total"] == 3 + 4
 
 
-def test_no_selections_anywhere_does_not_count_synthetic(db: Session) -> None:
+def test_no_selections_anywhere_counts_synthetic_like_every_other_metric(db: Session) -> None:
     _seed(db)
     s: Any = get_device_metric_summary(db, PROTOCOL, DEVICE, transport=_transport())
-    assert s["chosen_count"] == 8  # real registers only (all forwarded), no synthetic
-    assert s["by_registry_type"]["holding"]["chosen"] == 3
+    assert s["chosen_count"] == 8 + 4  # everything is forwarded, synthetic included
+    assert s["by_registry_type"]["holding"]["chosen"] == 3 + 4
+
+
+def test_screen_mode_counts_unscreened_synthetic_as_selected(db: Session) -> None:
+    """The LL-S report: screening real metrics must not drop the synthetic ones."""
+    _seed(db)
+    rows: list[ProtocolRegister] = db.query(ProtocolRegister).filter_by(registry_type="holding").all()
+    _select(db, rows[0], screen_enabled=True)
+    db.commit()
+    s: Any = get_device_metric_summary(db, PROTOCOL, DEVICE, transport=_transport())
+    # holding: 3 - 1 screened = 2 real + 4 synthetic; input tab has no entries of its own -> 0
+    assert s["by_registry_type"]["holding"]["chosen"] == 2 + 4
+    assert s["chosen_count"] == 2 + 4
+
+
+def test_screened_synthetic_is_not_counted(db: Session) -> None:
+    _seed(db)
+    _add_synthetic(db, "model", screen_enabled=True)
+    s: Any = get_device_metric_summary(db, PROTOCOL, DEVICE, transport=_transport())
+    assert s["by_registry_type"]["holding"]["chosen"] == 3 + 3
+    assert s["chosen_count"] == 8 + 3
+    assert s["total_available"] == 8 + 4
 
 
 def test_mask_selected_synthetic_counts_once_without_double_counting(db: Session) -> None:
@@ -152,18 +178,11 @@ def test_only_a_synthetic_selection_switches_to_whitelist_mode(db: Session) -> N
     assert s["by_registry_type"]["input"]["chosen"] == 0
 
 
-def test_screen_on_synthetic_is_inert_for_counts(db: Session) -> None:
-    _seed(db)
-    _add_synthetic(db, "model", screen_enabled=True)
-    s: Any = get_device_metric_summary(db, PROTOCOL, DEVICE, transport=_transport())
-    assert s["chosen_count"] == 8  # still "no selections": nothing was written anywhere
-
-
 def test_json_desc_counts_only_when_its_code_register_is_chosen(db: Session) -> None:
     inputs: list[ProtocolRegister] = _seed(db, mask_inputs=0)
     _select(db, inputs[0], mask_enabled=True)  # i0 chosen via mask; i1 is not
     db.commit()
-    t = _transport(descs=[("i0_desc", "i0", "input"), ("i1_desc", "i1", "input")])
+    t: Any = _transport(descs=[("i0_desc", "i0", "input"), ("i1_desc", "i1", "input")])
     s: Any = get_device_metric_summary(db, PROTOCOL, DEVICE, transport=t)
     assert s["by_registry_type"]["input"]["chosen"] == 1 + 1  # i0 + i0_desc, not i1_desc
     assert s["chosen_count"] == 2
@@ -173,12 +192,23 @@ def test_json_desc_counts_only_when_its_code_register_is_chosen(db: Session) -> 
 # ---------------------------------------------------------------- forwarding
 
 
-def _member(mask: list[str], registry_names: list[str]) -> Any:
+def _member(mask: list[str], registry_names: list[str], screen: set[str] | None = None) -> Any:
+    ps: ProtocolSettingsStub = ProtocolSettingsStub(mask, screen or set())
     return SimpleNamespace(
-        protocolSettings=SimpleNamespace(variable_mask=mask),
+        protocolSettings=ps,
         synthetic_field_names=frozenset(f[0] for f in SYNTHETIC_FIELDS),
         registry_map={"input": [SimpleNamespace(variable_name=n) for n in registry_names]},
     )
+
+
+class ProtocolSettingsStub:
+    """Just the bits of protocol_settings the filter touches, using the real rule."""
+
+    def __init__(self, mask: list[str], screen: set[str]) -> None:
+        self.variable_mask = mask
+        self.synthetic_screen = screen
+
+    synthetic_forwarded = protocol_settings.synthetic_forwarded
 
 
 DATA: dict[str, Any] = {"i0": 1, "i1": 2, "model": "18kPV", "firmware_version": "FAAB-2727",
@@ -197,18 +227,34 @@ def test_mask_naming_a_synthetic_forwards_only_that_one() -> None:
     assert _filter(_member(["i0", "model"], ["i0"]), DATA) == {"i0": 1, "model": "18kPV"}
 
 
-def test_no_mask_registry_fallback_withholds_synthetic() -> None:
-    assert _filter(_member([], ["i0", "i1"]), DATA) == {"i0": 1, "i1": 2}
+def test_screen_mode_forwards_unscreened_synthetic() -> None:
+    """No mask: synthetic fields flow like every other metric not in the screen file."""
+    assert _filter(_member([], ["i0", "i1"]), DATA) == DATA
 
 
-def test_no_mask_no_registry_withholds_synthetic_but_forwards_the_rest() -> None:
-    assert _filter(_member([], []), DATA) == {"i0": 1, "i1": 2}
+def test_screen_mode_withholds_a_screened_synthetic() -> None:
+    out: dict[str, Any] = _filter(_member([], ["i0", "i1"], screen={"model"}), DATA)
+    assert "model" not in out
+    assert {"firmware_version", "hardware_kind", "is_gridboss", "i0", "i1"} <= out.keys()
+
+
+def test_no_mask_no_registry_still_honours_synthetic_screen() -> None:
+    out: dict[str, Any] = _filter(_member([], [], screen={"model"}), DATA)
+    assert "model" not in out and "firmware_version" in out
+
+
+def test_screened_synthetic_follows_the_helper_on_the_transport() -> None:
+    from classes.transports.transport_base import transport_base
+    ps: ProtocolSettingsStub = ProtocolSettingsStub([], {"model"})
+    stub: SimpleNamespace = SimpleNamespace(protocolSettings=ps, synthetic_fields_metadata=SYNTHETIC_FIELDS)
+    got: list[str] = [f[0] for f in transport_base.selected_synthetic_fields_metadata.fget(stub)]  # type: ignore[attr-defined]
+    assert got == ["firmware_version", "hardware_kind", "is_gridboss"]
 
 
 # ---------------------------------------------------------------- files
 
 
-def test_mask_file_gets_chosen_synthetic_and_screen_file_never_does(
+def test_mask_gets_plain_synthetic_names_and_screen_gets_prefixed_ones(
     db: Session, tmp_path: Path
 ) -> None:
     inputs: list[ProtocolRegister] = _seed(db)
@@ -216,7 +262,7 @@ def test_mask_file_gets_chosen_synthetic_and_screen_file_never_does(
     _select(db, inputs[0], mask_enabled=True)
     _select(db, inputs[1], screen_enabled=True)
     _add_synthetic(db, "model", mask_enabled=True)
-    _add_synthetic(db, "hardware_kind", screen_enabled=True)   # inert
+    _add_synthetic(db, "hardware_kind", screen_enabled=True)
     _add_synthetic(db, "is_gridboss")                          # materialized, then unchecked
     db.commit()
 
@@ -225,15 +271,28 @@ def test_mask_file_gets_chosen_synthetic_and_screen_file_never_does(
     mask: list[str] = (tmp_path / "config" / f"variable_mask_{DEVICE}.txt").read_text().split()
     screen: list[str] = (tmp_path / "config" / f"variable_screen_{DEVICE}.txt").read_text().split()
     assert mask == ["i0", "model"]
-    assert screen == ["i1"]
+    assert screen == ["i1", f"{SYNTHETIC_FILTER_PREFIX}hardware_kind"]
+
+
+def test_screen_file_with_only_synthetic_entries_does_not_exclude_real_registers(tmp_path: Path) -> None:
+    """The loader must not mistake "synthetic:<name>" for a real name (would clear every registry type)."""
+    (tmp_path / "variable_screen_dev.txt").write_text("synthetic:model\n")
+    ps: protocol_settings = protocol_settings.__new__(protocol_settings)
+    ps.protocol = PROTOCOL
+    ps._log = SimpleNamespace(debug=lambda *a, **k: None, error=lambda *a, **k: None)  # type: ignore[attr-defined]
+    ps.find_protocol_file = lambda name, _d: str(tmp_path / name)  # type: ignore[method-assign]
+    raw: list[str] = ps._load_filter_file("variable_screen_dev.txt")
+    assert raw == ["synthetic:model"]
+    # Same split protocol_settings.__init__ performs:
+    assert [e for e in raw if not e.startswith(SYNTHETIC_FILTER_PREFIX)] == []
 
 
 # ------------------------------------------------- bridge schema / stale columns
 
 
-def _stub_transport(mask: list[str] | None) -> Any:
+def _stub_transport(mask: list[str] | None, screen: set[str] | None = None) -> Any:
     return SimpleNamespace(
-        protocolSettings=None if mask is None else SimpleNamespace(variable_mask=mask),
+        protocolSettings=None if mask is None else ProtocolSettingsStub(mask, screen or set()),
         synthetic_fields_metadata=SYNTHETIC_FIELDS,
         registry_map={"input": [SimpleNamespace(variable_name="i0")]},
     )
@@ -244,11 +303,13 @@ def _selected(stub: Any) -> list[Any]:
     return transport_base.selected_synthetic_fields_metadata.fget(stub)  # type: ignore[attr-defined]
 
 
-def test_selected_synthetic_metadata_follows_the_mask() -> None:
-    assert [f[0] for f in _selected(_stub_transport(["i0", "Model"]))] == ["model"]
-    assert _selected(_stub_transport(["i0"])) == []
-    assert _selected(_stub_transport([])) == []
-    assert _selected(_stub_transport(None)) == []
+def test_selected_synthetic_metadata_follows_the_mask_or_screen() -> None:
+    assert [f[0] for f in _selected(_stub_transport(["i0", "model"]))] == ["model"]   # mask: only M-selected
+    assert _selected(_stub_transport(["i0"])) == []                                   # mask without synthetic
+    assert len(_selected(_stub_transport([]))) == 4                                   # nothing selected: all
+    assert len(_selected(_stub_transport(None))) == 4                                 # no settings: all
+    assert [f[0] for f in _selected(_stub_transport([], {"model"}))] == [
+        "firmware_version", "hardware_kind", "is_gridboss"]                           # screen: all but S-screened
 
 
 def test_unchosen_synthetic_columns_are_not_expected_so_they_flag_stale(
@@ -262,7 +323,7 @@ def test_unchosen_synthetic_columns_are_not_expected_so_they_flag_stale(
             return _selected(self)
 
     def expected(mask: list[str]) -> set[str] | None:
-        t = _T(**vars(_stub_transport(mask)))
+        t: _T = _T(**vars(_stub_transport(mask)))
 
         def _fake_live_transport(*_args: object, **_kwargs: object) -> _T:
             return t
@@ -270,7 +331,89 @@ def test_unchosen_synthetic_columns_are_not_expected_so_they_flag_stale(
         monkeypatch.setattr(bridge_service, "_get_live_transport", _fake_live_transport)
         return bridge_service._active_metric_names_for_protocol(None, PROTOCOL)
 
-    # No synthetic chosen: model/firmware_version/... are NOT expected => their columns flag stale.
+    # Mask present without synthetic: their columns are NOT expected => flag stale.
     assert expected(["i0"]) == {"i0"}
-    # Chosen one is expected again => not flagged.
+    # Mask naming one: that one is expected again => not flagged.
     assert expected(["i0", "model"]) == {"i0", "model"}
+    # No mask (screen mode / nothing selected): every synthetic field is still forwarded => expected.
+    assert expected([]) == {"i0", "model", "firmware_version", "hardware_kind", "is_gridboss"}
+
+
+# ------------------------------------------------- mask always wins over screen
+
+
+def test_mask_in_use_reflects_any_mask_selection(db: Session) -> None:
+    from classes.WebServer.services.protocol_service import device_mask_in_use
+    inputs: list[ProtocolRegister] = _seed(db)
+    assert device_mask_in_use(db, DEVICE) is False
+    _select(db, inputs[0], screen_enabled=True)
+    assert device_mask_in_use(db, DEVICE) is False
+    _add_synthetic(db, "model", mask_enabled=True)   # a synthetic M counts as a mask too
+    assert device_mask_in_use(db, DEVICE) is True
+    assert device_mask_in_use(db, "OtherDevice") is False
+
+
+def test_summary_ignores_screens_while_a_mask_exists(db: Session) -> None:
+    """Holding has S:1, Input has M:2: the mask wins, so Holding contributes nothing."""
+    _seed(db, mask_inputs=2)
+    holding: ProtocolRegister | None = db.query(ProtocolRegister).filter_by(registry_type="holding").first()
+    assert holding is not None
+    _select(db, holding, screen_enabled=True)
+    db.commit()
+    s: Any = get_device_metric_summary(db, PROTOCOL, DEVICE, transport=_transport())
+    assert s["mask_in_use"] is True
+    assert s["by_registry_type"]["holding"]["chosen"] == 0   # not 3 - 1 + 4
+    assert s["by_registry_type"]["input"]["chosen"] == 2
+    assert s["chosen_count"] == 2
+
+
+def test_summary_reports_no_mask_in_use_for_screen_only(db: Session) -> None:
+    _seed(db)
+    holding: ProtocolRegister | None = db.query(ProtocolRegister).filter_by(registry_type="holding").first()
+    assert holding is not None
+    _select(db, holding, screen_enabled=True)
+    db.commit()
+    s: Any = get_device_metric_summary(db, PROTOCOL, DEVICE, transport=_transport())
+    assert s["mask_in_use"] is False
+    assert s["by_registry_type"]["holding"]["chosen"] == 2 + 4
+
+
+def test_screen_toggle_is_refused_while_a_mask_exists_but_unticking_is_allowed(db: Session) -> None:
+    from classes.WebServer.services.protocol_service import toggle_register_field
+    inputs: list[ProtocolRegister] = _seed(db, mask_inputs=1)
+    other: ProtocolRegister = inputs[3]
+    assert toggle_register_field(db, other.id, "screen_enabled", True, DEVICE) is None  # noqa: FBT003
+    # Mask toggles themselves are never blocked, and S may be cleared.
+    assert toggle_register_field(db, other.id, "mask_enabled", True, DEVICE) is not None  # noqa: FBT003
+    assert toggle_register_field(db, other.id, "screen_enabled", False, DEVICE) is not None  # noqa: FBT003
+    # Once the masks are gone, screening works again.
+    for r in inputs:
+        toggle_register_field(db, r.id, "mask_enabled", False, DEVICE)  # noqa: FBT003
+    assert toggle_register_field(db, other.id, "screen_enabled", True, DEVICE) is not None  # noqa: FBT003
+
+
+def _ll_s_holding(mask: list[str], screen: list[str]) -> list[str]:
+    """Run the real loader over the real EG4 LL-S holding map with the given filters."""
+    ps: protocol_settings = protocol_settings("eg4_ll_s")
+    first: str
+    second: str
+    first, second = (e.variable_name for e in ps.get_registry_map(Registry_Type.HOLDING)[:2])
+    ps.variable_mask = [n.replace("{0}", first).replace("{1}", second) for n in mask]
+    ps.variable_screen = [n.replace("{0}", first).replace("{1}", second) for n in screen]
+    path: str | None = ps.find_protocol_file("eg4_ll_s.holding_registry_map.csv", "")
+    assert path
+    return [e.variable_name for e in ps.load__registry(path, Registry_Type.HOLDING)]
+
+
+def test_loader_mask_wins_when_a_metric_is_both_masked_and_screened() -> None:
+    assert _ll_s_holding(mask=["{0}"], screen=["{0}"]) == [protocol_settings("eg4_ll_s").get_registry_map(Registry_Type.HOLDING)[0].variable_name]
+
+
+def test_loader_ignores_screen_entirely_when_a_mask_exists() -> None:
+    kept: list[str] = _ll_s_holding(mask=["{0}"], screen=["{1}"])
+    assert len(kept) == 1
+
+
+def test_loader_screen_only_drops_just_the_screened_metric() -> None:
+    full: int = len(protocol_settings("eg4_ll_s").get_registry_map(Registry_Type.HOLDING))
+    assert len(_ll_s_holding(mask=[], screen=["{0}"])) == full - 1

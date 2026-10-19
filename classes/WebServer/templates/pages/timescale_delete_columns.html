@@ -49,6 +49,13 @@
       <span class="text-mpg-200 font-medium">Commit All Changes</span>
       in the header to apply.
     </p>
+    <p class="text-warning text-xs mb-3" role="note">
+      ⏳ Removing columns makes TimescaleDB drop and rebuild this table's
+      rollups and recompress its data. Applying the change can take
+      <span class="font-medium">several minutes</span> on a large table —
+      the header will show a progress timer. Please don't close or refresh
+      the page while it runs.
+    </p>
 
     <ul class="space-y-1" role="list" aria-label="TimescaleDB wide tables">
       {#- The first selectable table auto-loads its columns (hx-trigger="load"). A table that exists on the server but

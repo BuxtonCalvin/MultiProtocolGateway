@@ -444,6 +444,9 @@
           warn.classList.toggle('hidden', !summary.over_limit);
         }
 
+        // Mask always wins over screen: keep the S checkboxes' lock in sync.
+        if (window.mpgSetMaskInUse) window.mpgSetMaskInUse(summary.mask_in_use);
+
         const byType = summary.by_registry_type || {};
         document.querySelectorAll('#protocol-section .tab-btn[data-registry]').forEach(b => {
           const stats = byType[b.dataset.registry];

@@ -55,6 +55,7 @@ from ..services.protocol_service import (
     RegistersPage,
     build_json_desc_rows,
     build_synthetic_rows,
+    device_mask_in_use,
     get_device_metric_summary,
     get_protocol_json,
     get_protocol_registers,
@@ -175,7 +176,9 @@ def toggle_register(
         raise HTTPException(
             status_code=403,
             detail="Toggle not allowed — no device_name given, protocol "
-                   "write_mode is read-only, or register not found."
+                   "write_mode is read-only, register not found, or a (S)creen "
+                   "selection was refused because a metric is mask-selected "
+                   "(mask always wins over screen)."
         )
 
     # toggle_register_field's own cascade only covers the code -> desc
@@ -257,7 +260,9 @@ def create_and_toggle_virtual_register(
         raise HTTPException(
             status_code=403,
             detail="Toggle not allowed — no device_name given, invalid kind/field, "
-                   "or protocol write_mode is read-only."
+                   "protocol write_mode is read-only, or a (S)creen selection was "
+                   "refused because a metric is mask-selected (mask always wins "
+                   "over screen)."
         )
     db.commit()
     return {
@@ -412,6 +417,11 @@ async def protocol_table_partial(
                 if json_desc:
                     data["rows"] = list(data.get("rows", [])) + json_desc
 
+    mask_in_use: bool = False
+    if device_name:
+        with session_scope() as db:
+            mask_in_use = device_mask_in_use(db, device_name)
+
     # Initial table order: synthetic metrics first, then JSON
     # code-description metrics, then anything with a W/M/S checkbox
     # selected, then everything else — alphabetical by variable_name within
@@ -433,6 +443,9 @@ async def protocol_table_partial(
             "ha_labels": HA_COLUMN_LABELS,
             "ha_titles": HA_COLUMN_TITLES,
             "ha_options": {col: ha_dropdown_options(col, registry_type) for col in HA_COLUMNS},
+            # Device-wide: any M-selected metric (on any tab) disables every
+            # (S)creen checkbox — mask always wins over screen.
+            "mask_in_use": mask_in_use,
             **data,
         },
     )

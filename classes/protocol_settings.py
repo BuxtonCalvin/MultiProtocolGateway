@@ -795,6 +795,10 @@ class DataAdjustments:
             return int(result)
         return result
 
+# Prefix marking a synthetic field's entry in a variable_screen_*.txt file.
+SYNTHETIC_FILTER_PREFIX: str = "synthetic:"
+
+
 class protocol_settings:
     """Load and expose a protocol's register map, code tables, and settings from JSON and CSV files.
 
@@ -886,7 +890,17 @@ class protocol_settings:
         self.screen_file_name = screen_file
 
         self.variable_mask = self._load_filter_file(mask_file)
-        self.variable_screen = self._load_filter_file(screen_file)
+        raw_screen: list[str] = self._load_filter_file(screen_file)
+        # Synthetic fields (model, firmware_version, ...) that the user screened
+        # are written to the screen file as "synthetic:<name>". They are split
+        # out here so they never reach variable_screen: that list drives the
+        # per-registry-type rule in load__registry ("screening is in use, so a
+        # type with none of its own entries is fully screened"), and a name
+        # that matches no register must not be able to trip it.
+        self.synthetic_screen: set[str] = {
+            e[len(SYNTHETIC_FILTER_PREFIX):] for e in raw_screen if e.startswith(SYNTHETIC_FILTER_PREFIX)
+        }
+        self.variable_screen = [e for e in raw_screen if not e.startswith(SYNTHETIC_FILTER_PREFIX)]
 
         self.load__json()
 
@@ -926,6 +940,21 @@ class protocol_settings:
         ``_adjustments`` attribute.
         """
         return self._adjustments.get_entry_byteorder(entry)
+
+    def synthetic_forwarded(self, name: str) -> bool:
+        """Return True when the synthetic field ``name`` should be forwarded to bridges.
+
+        Synthetic fields (EG4 ``model`` / ``firmware_version``, LL-S derived
+        cell metrics, ...) follow the same rule as every other metric:
+
+        * a mask file exists -> forwarded only if named in it (M selected);
+        * otherwise -> forwarded unless the user screened it (S selected),
+          which includes the "nothing selected anywhere" default.
+        """
+        lowered: str = name.lower()
+        if self.variable_mask:
+            return lowered in self.variable_mask
+        return lowered not in self.synthetic_screen
 
     def _load_filter_file(self, filename: str) -> list[str]:
         """Load a line-delimited filter file and return a list of cleaned, lowercased metric names.
@@ -1674,7 +1703,14 @@ class protocol_settings:
             # an allowlist with zero of its own type's entries already
             # deletes everything in that type via the loop above, which is
             # the correct behavior for a whitelist with nothing listed.
-            if self.variable_screen:
+            #
+            # Mask always wins over screen: when a mask exists the screen is
+            # not applied at all (a metric that is both mask- and
+            # screen-selected is still forwarded), so only the mask-checked
+            # metrics are sent. The UI disables the S checkboxes while any
+            # metric is mask-selected, so this only matters for stale or
+            # hand-edited files.
+            if self.variable_screen and not self.variable_mask:
                 type_has_own_screen_entries: bool = any(
                     item.documented_name.strip().lower() in self.variable_screen
                     or item.variable_name.strip().lower() in self.variable_screen

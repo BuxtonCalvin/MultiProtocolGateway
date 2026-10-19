@@ -37,6 +37,8 @@ from pathlib import Path
 from sqlalchemy.engine.row import Row
 from sqlalchemy.orm import Session
 
+from classes.protocol_settings import SYNTHETIC_FILTER_PREFIX
+
 from .database import refresh_app_state
 from .models import (
     AppState,
@@ -158,18 +160,15 @@ def _write_mask_screen_files(db: Session, project_root: Path) -> dict[str, int]:
         # own name.
         #
         # Synthetic fields (EG4 model / firmware_version / hardware_kind /
-        # is_gridboss, ...) are different: they have no code register to
-        # carry their selection, and they are opt-in — the gateway forwards
-        # one to a bridge only when its name is in the MASK file
-        # (Protocol_Gateway._filter_for_member). So a synthetic row the user
-        # has actively mask-selected IS written to the mask file below. A
-        # synthetic row is never written to the SCREEN file: the screen
-        # loader (protocol_settings.load__registry) treats a registry type
-        # with none of its own entries in the screen list as fully screened,
-        # so a screen file naming only a synthetic field would silently
-        # switch off every real metric. Screening a synthetic field would
-        # also be a no-op anyway, since unchosen synthetics are already
-        # withheld.
+        # is_gridboss, LL-S derived cell metrics, ...) have no code register to
+        # carry their selection, so their own rows are written. They follow the
+        # same rule as every other metric: when a mask exists a synthetic field
+        # is forwarded only if M-selected (plain name in the MASK file); when
+        # there is no mask it is forwarded unless S-selected ("synthetic:<name>"
+        # in the SCREEN file). The prefix keeps a screened synthetic name from
+        # being mistaken for a real register by the screen loader
+        # (protocol_settings.load__registry), which would otherwise exclude
+        # every registry type that has no entry of its own.
         registers: list[Row[DeviceProtocolSelection, ProtocolRegister]] = (
             db.query(DeviceProtocolSelection, ProtocolRegister)
             .join(
@@ -214,21 +213,29 @@ def _write_mask_screen_files(db: Session, project_root: Path) -> dict[str, int]:
             f"{len(synthetic_mask_lines)} synthetic: {synthetic_mask_lines})"
         )
 
-        # Screen file: variables where screen_enabled=True (same dedup logic)
+        # Screen file: variables where screen_enabled=True (same dedup logic).
+        # A screened synthetic field is written as "synthetic:<name>" so the
+        # loader can tell it apart from a real register name (see
+        # protocol_settings.SYNTHETIC_FILTER_PREFIX).
         screened_names: set[str] = set()
         unscreened_names: set[str] = set()
         for selection_row, protocol_row in registers:
-            if protocol_row.is_synthetic:
-                continue  # never screened — see the note above the query
+            entry: str = (
+                f"{SYNTHETIC_FILTER_PREFIX}{protocol_row.variable_name}"
+                if protocol_row.is_synthetic else protocol_row.variable_name
+            )
             if selection_row.screen_enabled:
-                screened_names.add(protocol_row.variable_name)
+                screened_names.add(entry)
             else:
-                unscreened_names.add(protocol_row.variable_name)
+                unscreened_names.add(entry)
         screen_lines: list[str] = sorted(screened_names - unscreened_names)
         screen_path: Path = config_dir / f"variable_screen_{transport_name}.txt"
         screen_path.write_text("\n".join(screen_lines) + "\n", encoding="utf-8")
         written["screen"] += 1
-        _log.info(f"Wrote screen file: {screen_path} ({len(screen_lines)} entries)")
+        _log.info(
+            f"Wrote screen file: {screen_path} ({len(screen_lines)} entries, "
+            f"{sum(1 for x in screen_lines if x.startswith(SYNTHETIC_FILTER_PREFIX))} synthetic)"
+        )
 
     return written
 

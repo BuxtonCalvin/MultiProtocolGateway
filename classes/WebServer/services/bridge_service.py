@@ -1441,6 +1441,11 @@ def commit_staged_deletions(gateway: "Protocol_Gateway | None", app_state: State
         store: dict[str, StagedEntry] = _store(app_state)
         for protocol_name, entry in staged.items():
             column_names: list[str] = sorted(entry["columns"].keys())
+            _log.info(
+                "commit_staged_deletions: removing %d column(s) from protocol '%s' — TimescaleDB will drop and "
+                "rebuild this protocol's rollups and recompress its data; this can take several minutes.",
+                len(column_names), protocol_name,
+            )
             try:
                 result: WideTableFieldDeletionResult = mgr.delete_fields(protocol_name, column_names)
             except Exception:
