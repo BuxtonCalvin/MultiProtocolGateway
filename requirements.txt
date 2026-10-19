@@ -1,7 +1,7 @@
 # Minimum versions are set to the latest releases as of 2026-09-28.
 # Floors (>=) force `pip install -r requirements.txt` to upgrade older installs,
 # while still letting pip pick newer releases. Do not use == here.
-pymodbus>=3.15.0              # for Modbus support (used by all modbus transports)
+pymodbus>=3.16.1              # for Modbus support (used by all modbus transports)
 paho-mqtt>=2.1.0              # for MQTT support (used by mqtt transport)
 pyserial>=3.5                 # for serial port support (used by serial transport)
 python-can>=4.6.1             # for CAN bus support (used by canbus transport)
@@ -12,9 +12,9 @@ sqlalchemy>=2.1.4             # for database interactions (used by timescaledb t
 psycopg2-binary>=2.9.13       # for PostgreSQL database interactions (used by timescaledb transport)
 alembic>=1.20.0               # for database migrations
 tzlocal>=5.4.4                # for timezone handling in multiple services
-fastapi>=0.143.0              # for building the web server and API
-starlette>=1.7.0              # imported directly (State); also a fastapi dependency
-pydantic>=2.14.0              # for data validation and settings management in FastAPI
+fastapi>=0.143.2              # for building the web server and API
+starlette>=1.8.0              # imported directly (State); also a fastapi dependency
+pydantic>=2.14.1              # for data validation and settings management in FastAPI
 uvicorn[standard]>=0.54.0     # for running FastAPI applications
 jinja2>=3.1.6                 # for HTML templating in FastAPI
 python-multipart>=0.0.32      # required for form parsing in FastAPI
