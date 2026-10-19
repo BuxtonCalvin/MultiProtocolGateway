@@ -91,7 +91,26 @@
 
     <ul class="space-y-1" role="list" aria-label="Metrics Edit tables">
       {% for t in tables %}
+      {#- A table that exists on the server but that no scraper writes to this bridge (linked_protocols comes from
+          services/bridge_service.timescale_linked_protocols_or_none(); None = unknown, restrict nothing) is shown,
+          but disabled: no hx-get, no onclick. routers/timescale.py refuses a request for it as well. #}
+      {% set t_unlinked = linked_protocols is not none and (t.protocol_name or 'shared_narrow') not in linked_protocols %}
       <li>
+        {% if t_unlinked %}
+        <button type="button" disabled aria-disabled="true"
+                class="metrics-edit-table-btn w-full text-left px-3 py-2 rounded text-xs
+                       text-warning border border-transparent cursor-not-allowed"
+                data-table-name="{{ t.table_name }}"
+                aria-label="{{ t.table_name }} can't be selected: no scraper is configured to write it to this bridge"
+                title="Not selectable: no scraper is configured to write {{ t.protocol_name or 'the shared narrow table' }} to this bridge">
+          <div class="font-mono">{{ t.protocol_name or 'device_metrics_narrow' }}</div>
+          <div class="text-[10px] truncate">
+            {{ t.table_name }}
+            {% if t.table_kind == 'narrow' %}<span class="italic">(shared)</span>{% endif %}
+          </div>
+          <div class="text-[10px]">no scraper linked</div>
+        </button>
+        {% else %}
         <button type="button"
                 class="metrics-edit-table-btn w-full text-left px-3 py-2 rounded text-xs
                        text-mpg-200 hover:bg-mpg-600 hover:text-white
@@ -111,6 +130,7 @@
             {% if t.table_kind == 'narrow' %}<span class="italic">(shared)</span>{% endif %}
           </div>
         </button>
+        {% endif %}
       </li>
       {% endfor %}
       {% if not tables %}

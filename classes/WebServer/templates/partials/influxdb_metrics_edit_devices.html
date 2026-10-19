@@ -31,7 +31,10 @@
   data-has-name attribute below).
 
   Context: version, measurement, devices — [{device_identifier,
-  device_name}, ...] in device_identifier order.
+  device_name}, ...] in device_identifier order; unselectable_devices —
+  the device_identifiers no scraper linked to this bridge writes into this
+  measurement (routers/influxdb.py). They are listed (they exist on the
+  server) but disabled.
 
   Selecting a device loads its field picker via HTMX (see
   onInfluxDeviceChange() in pages/influxdb_metrics_edit.html) and clears
@@ -48,11 +51,14 @@
         onchange="onInfluxDeviceChange(this)">
   <option value="" disabled selected>Select a device…</option>
   {% for d in devices %}
+  {% set d_unfed = d.device_identifier in unselectable_devices %}
   <option value="{{ d.device_identifier }}"
           data-label="{{ d.device_identifier or d.device_name or 'device' }}"
-          data-has-name="{{ '1' if d.device_name and d.device_name != d.device_identifier else '0' }}">
+          data-has-name="{{ '1' if d.device_name and d.device_name != d.device_identifier else '0' }}"
+          {%- if d_unfed %} disabled title="Not selectable: no scraper is configured to write this device through this bridge"{% endif %}>
     {{ d.device_identifier }}
     {% if d.device_name and d.device_name != d.device_identifier %} — {{ d.device_name }}{% endif %}
+    {% if d_unfed %} — no scraper linked{% endif %}
   </option>
   {% endfor %}
 </select>

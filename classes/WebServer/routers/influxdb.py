@@ -41,6 +41,14 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from ..database import session_scope
+from ..services.bridge_service import (
+    InfluxBridgeFeed,
+    NotBridgedError,
+    get_influxdb_feed,
+    influx_device_selectable,
+    influx_measurement_selectable,
+    require_influx_device_fed,
+)
 from ..services.device_service import NavData, get_nav_data
 from ..services.influxdb_service import (
     InfluxMetricPreview,
@@ -145,7 +153,7 @@ def influxdb_metrics_edit_page(request: Request, version: str):
     pre-populated here too, so navigating away and back doesn't lose
     anything already staged.
     """
-    _require_bridge(request, version)
+    bridge: influxdb_out | influxdb3_out = _require_bridge(request, version)
     gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
 
     with session_scope() as db:
@@ -159,6 +167,9 @@ def influxdb_metrics_edit_page(request: Request, version: str):
     # supports_delete: this InfluxDB version has a delete action at all.
     # delete_unavailable_reason: set when the connected server cannot perform it
     # (InfluxDB 3 Core) -- the page then shows "Delete value(s)" disabled with this text.
+    # Measurements the bridge's scrapers don't write to are listed (they exist on the server) but not selectable.
+    feed: InfluxBridgeFeed | None = get_influxdb_feed(gateway, bridge)
+    unselectable_measurements: list[str] = [m for m in measurements if not influx_measurement_selectable(feed, m)]
     delete_offered: bool = supports_delete(version)
     delete_block_reason: str | None = delete_unavailable_reason(gateway, version)
 
@@ -169,6 +180,7 @@ def influxdb_metrics_edit_page(request: Request, version: str):
             **base_context(request, nav),
             "version": version,
             "measurements": measurements,
+            "unselectable_measurements": unselectable_measurements,
             "supports_delete": delete_offered,
             "delete_unavailable_reason": delete_block_reason,
             "delete_enabled": delete_offered and delete_block_reason is None,
@@ -186,7 +198,7 @@ def influxdb_metrics_edit_devices_partial(request: Request, version: str, measur
     a plain `def` route in its threadpool. An `async def` route calling them would
     stall the whole event loop (every other request on the UI) until the query returned.
     """
-    _require_bridge(request, version)
+    bridge: influxdb_out | influxdb3_out = _require_bridge(request, version)
     gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
 
     try:
@@ -197,10 +209,17 @@ def influxdb_metrics_edit_devices_partial(request: Request, version: str, measur
         _log.exception("Metrics Edit device list failed (InfluxDB %s, measurement %s)", version, measurement)
         raise HTTPException(status_code=500, detail=str(exc))
 
+    # Devices no linked scraper writes into this measurement are listed (they exist on the server) but not selectable.
+    feed: InfluxBridgeFeed | None = get_influxdb_feed(gateway, bridge)
+    unselectable_devices: list[str] = [
+        identifier
+        for d in devices
+        if (identifier := d.get("device_identifier") or "") and not influx_device_selectable(feed, measurement, identifier)
+    ]
     return request.app.state.templates.TemplateResponse(
         request=request,
         name="partials/influxdb_metrics_edit_devices.html",
-        context={"version": version, "measurement": measurement, "devices": devices},
+        context={"version": version, "measurement": measurement, "devices": devices, "unselectable_devices": unselectable_devices},
     )
 
 
@@ -316,9 +335,14 @@ def influxdb_metrics_edit_stage(payload: InfluxMetricEditStageRequest, request: 
 
     Returns the refreshed staged-changes list partial, for an HTMX swap.
     """
-    _require_bridge(request, version)
+    bridge: influxdb_out | influxdb3_out = _require_bridge(request, version)
     gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
-
+    # The pickers don't offer a device no scraper writes through this bridge; this catches a request that names
+    # one anyway (a stale page, or one made by hand).
+    try:
+        require_influx_device_fed(get_influxdb_feed(gateway, bridge), payload.measurement, payload.device_identifier)
+    except NotBridgedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if payload.action not in ("delete", "set_value"):
         raise HTTPException(status_code=400, detail=f"Unknown action '{payload.action}'.")
     if payload.action == "delete":

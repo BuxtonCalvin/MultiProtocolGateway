@@ -60,18 +60,24 @@
     <span class="mini-table-meta text-xs font-mono">{{ groups|length }} group(s)</span>
   </div>
 
+  {#- A group whose protocol exists on the server but that no scraper writes to this bridge (linked_protocols; None =
+      unknown, restrict nothing) is shown, but its checkbox is disabled and never checked, so it can't be rebuilt from
+      here. routers/timescale.py refuses a request that names it as well. #}
   {% for g in groups %}
-  <div class="mb-3 rounded border border-mpg-700 overflow-hidden"
+  {% set g_unlinked = linked_protocols is not none and g.protocol_name not in linked_protocols %}
+  <div class="mb-3 rounded border overflow-hidden {{ 'border-amber-400 dark:border-warning/40' if g_unlinked else 'border-mpg-700' }}"
        data-rollup-group="{{ g.protocol_name }}">
 
-    <label class="flex items-center gap-2 px-3 py-2 bg-mpg-800 cursor-pointer select-none">
+    <label class="flex items-center gap-2 px-3 py-2 bg-mpg-800 select-none {{ 'cursor-not-allowed' if g_unlinked else 'cursor-pointer' }}"
+           {%- if g_unlinked %} title="Not selectable: no scraper is configured to write {{ g.protocol_name }} to this bridge"{% endif %}>
       <input type="checkbox"
-             class="rollup-group-checkbox accent-accent w-3.5 h-3.5 cursor-pointer shrink-0"
+             class="rollup-group-checkbox accent-accent w-3.5 h-3.5 shrink-0 {{ 'cursor-not-allowed' if g_unlinked else 'cursor-pointer' }}"
              data-protocol-name="{{ g.protocol_name }}"
-             checked
-             aria-label="Include {{ g.protocol_name }} in the next rebuild">
-      <span class="text-mpg-50 text-xs font-semibold font-mono">{{ g.protocol_name }}</span>
+             {% if g_unlinked %}disabled{% else %}checked{% endif %}
+             aria-label="{% if g_unlinked %}{{ g.protocol_name }} can't be selected: no scraper is configured to write it to this bridge{% else %}Include {{ g.protocol_name }} in the next rebuild{% endif %}">
+      <span class="{{ 'text-warning' if g_unlinked else 'text-mpg-50' }} text-xs font-semibold font-mono">{{ g.protocol_name }}</span>
       <span class="text-mpg-300 text-xs font-mono truncate">{{ g.wide_table_name }}</span>
+      {% if g_unlinked %}<span class="text-warning text-xs">no scraper linked</span>{% endif %}
     </label>
 
     <table class="w-auto text-xs border-collapse" role="table"

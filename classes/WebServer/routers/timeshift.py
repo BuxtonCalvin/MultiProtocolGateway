@@ -95,9 +95,12 @@ from pydantic import BaseModel
 
 from ..database import session_scope
 from ..services.bridge_service import (
+    NotBridgedError,
     get_timescale_bridge,
     is_timescale_available,
+    require_timescale_protocols_linked,
     resolve_wide_table_name,
+    timescale_linked_protocols_or_none,
 )
 from ..services.device_service import NavData, get_nav_data
 from ..services.influxdb_service import (
@@ -264,6 +267,7 @@ async def timeshift_data_page(request: Request, version: str = "1") -> HTMLRespo
 
     with session_scope() as db:
         nav: NavData = get_nav_data(db)
+        linked_protocols: list[str] | None = timescale_linked_protocols_or_none(gateway, db)
 
     v1_ok: bool = get_influxdb1_bridge(gateway) is not None
     v3_ok: bool = get_influxdb3_bridge(gateway) is not None
@@ -301,6 +305,7 @@ async def timeshift_data_page(request: Request, version: str = "1") -> HTMLRespo
             "timescale_available": timescale_ok,
             "measurements": measurements,
             "timescale_tables": timescale_tables,
+            "linked_protocols": linked_protocols,
             "eg4_available": is_eg4_protocol_in_use(nav),
             "default_confidence_threshold": DEFAULT_CONFIDENCE_THRESHOLD,
             "machine_timezone": machine_timezone,
@@ -619,6 +624,15 @@ def _run_common_timescale(
     mapping: dict[str, str] = _parse_mapping_json(payload.mapping_json)
     gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
     resolved_table_name: str = _resolve_timescale_table_name(gateway, payload.table_kind, payload.protocol_name)
+    # The Table <select> doesn't offer a table no scraper writes to this bridge; this catches a request that
+    # names one anyway (a stale page, or one made by hand).
+    try:
+        with session_scope() as db:
+            require_timescale_protocols_linked(
+                gateway, db, [payload.protocol_name if payload.table_kind == "wide" else None]
+            )
+    except NotBridgedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     wide_field_types: dict[str, str] = load_timescale_field_types(gateway, payload.table_kind, payload.protocol_name)
     existing_wide_columns: set[str] = set()
     if payload.table_kind == "wide":

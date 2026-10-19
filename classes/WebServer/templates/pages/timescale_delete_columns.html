@@ -51,8 +51,25 @@
     </p>
 
     <ul class="space-y-1" role="list" aria-label="TimescaleDB wide tables">
+      {#- The first selectable table auto-loads its columns (hx-trigger="load"). A table that exists on the server but
+          that no scraper writes to this bridge (linked_protocols; None = unknown, restrict nothing) is shown but
+          disabled, and is never the auto-loaded one. routers/timescale.py refuses a request for it as well. #}
+      {% set ns = namespace(first_done=false) %}
       {% for t in wide_tables %}
+      {% set t_unlinked = linked_protocols is not none and t.protocol_name not in linked_protocols %}
       <li>
+        {% if t_unlinked %}
+        <button type="button" disabled aria-disabled="true"
+                class="wide-table-btn w-full text-left px-3 py-2 rounded text-xs
+                       text-warning border border-transparent cursor-not-allowed"
+                data-protocol="{{ t.protocol_name }}"
+                aria-label="{{ t.protocol_name }} can't be selected: no scraper is configured to write it to this bridge"
+                title="Not selectable: no scraper is configured to write {{ t.protocol_name }} to this bridge">
+          <div class="font-mono">{{ t.protocol_name }}</div>
+          <div class="text-[10px] truncate">{{ t.wide_table_name }}</div>
+          <div class="text-[10px]">no scraper linked</div>
+        </button>
+        {% else %}
         <button type="button"
                 class="wide-table-btn w-full text-left px-3 py-2 rounded text-xs
                        text-mpg-200 hover:bg-mpg-600 hover:text-white
@@ -63,10 +80,11 @@
                 hx-target="#timescale-fields-container"
                 hx-swap="innerHTML scroll:false"
                 hx-headers='{"Cache-Control": "no-cache"}'
-                {% if loop.first %}hx-trigger="load, click"{% else %}hx-trigger="click"{% endif %}>
+                {% if not ns.first_done %}hx-trigger="load, click"{% set ns.first_done = true %}{% else %}hx-trigger="click"{% endif %}>
           <div class="font-mono">{{ t.protocol_name }}</div>
           <div class="text-mpg-500 text-[10px] truncate">{{ t.wide_table_name }}</div>
         </button>
+        {% endif %}
       </li>
       {% endfor %}
       {% if not wide_tables %}
@@ -101,8 +119,8 @@
       };
       btn.addEventListener('click', btn._wtHandler);
     });
-    // Highlight the first entry — it auto-loads via hx-trigger="load".
-    const first = document.querySelector('.wide-table-btn');
+    // Highlight the first selectable entry — it auto-loads via hx-trigger="load".
+    const first = document.querySelector('.wide-table-btn:not([disabled])');
     if (first) first.classList.add('bg-mpg-600', 'text-white');
   })();
 </script>

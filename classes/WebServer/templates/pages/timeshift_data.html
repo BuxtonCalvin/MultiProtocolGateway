@@ -143,9 +143,13 @@
         <select id="ts-table"
                 class="theme-input w-full text-xs rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-accent"
                 onchange="onTableChange()">
+          {#- A table that exists on the server but that no scraper writes to this bridge (linked_protocols; None =
+              unknown, restrict nothing) is listed but disabled. routers/timeshift.py refuses a request for it as well. #}
           {% for t in timescale_tables %}
-          <option value="{{ t.table_name }}" data-table-kind="{{ t.table_kind }}" data-protocol-name="{{ t.protocol_name or '' }}">
-            {{ (t.protocol_name ~ ' (wide table)') if t.table_kind == 'wide' else 'Shared Narrow Table' }}
+          {% set t_unlinked = linked_protocols is not none and (t.protocol_name or 'shared_narrow') not in linked_protocols %}
+          <option value="{{ t.table_name }}" data-table-kind="{{ t.table_kind }}" data-protocol-name="{{ t.protocol_name or '' }}"
+                  {%- if t_unlinked %} disabled title="Not selectable: no scraper is configured to write this table to this bridge"{% endif %}>
+            {{ (t.protocol_name ~ ' (wide table)') if t.table_kind == 'wide' else 'Shared Narrow Table' }}{% if t_unlinked %} — no scraper linked{% endif %}
           </option>
           {% endfor %}
         </select>
