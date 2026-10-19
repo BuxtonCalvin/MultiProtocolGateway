@@ -793,8 +793,8 @@ class transport_base:
         should override that property only.
 
         ``_filter_for_member`` in ``protocol_gateway`` uses this frozenset to
-        recognize fields that have no protocol CSV row. Synthetic fields are
-        opt-in: they are forwarded only when named in the variable mask (see
+        recognize fields that have no protocol CSV row. Whether one is actually
+        forwarded follows the normal mask/screen rule (see
         ``selected_synthetic_fields_metadata``).
         """
         return frozenset(name for name, *_ in self.synthetic_fields_metadata)
@@ -803,18 +803,17 @@ class transport_base:
     def selected_synthetic_fields_metadata(self) -> list[tuple[str, str, float, str, str]]:
         """Scheduling path: All — setup/admin only (TimescaleDB schema registration, Delete Columns stale check).
 
-        The subset of ``synthetic_fields_metadata`` the user has actively
-        chosen with (M)ask, i.e. whose name is in this transport's
-        ``variable_mask``. Synthetic fields are opt-in, and only the chosen
-        ones are ever forwarded to a bridge (``_filter_for_member``), so only
-        these should get a bridge schema column or be treated as "expected"
-        in scrape data. Empty when no mask file exists.
+        The subset of ``synthetic_fields_metadata`` that is actually forwarded
+        to bridges. Synthetic fields follow the same rule as every other
+        metric (``protocol_settings.synthetic_forwarded``): with a mask file,
+        only those named in it; otherwise all of them except any the user
+        screened. Only these should get a bridge schema column or be treated
+        as "expected" in scrape data.
         """
         ps: Optional["protocol_settings"] = self.protocolSettings
-        mask: set[str] = {m.lower() for m in (ps.variable_mask if ps is not None else None) or []}
-        if not mask:
-            return []
-        return [f for f in self.synthetic_fields_metadata if f[0].lower() in mask]
+        if ps is None:
+            return list(self.synthetic_fields_metadata)
+        return [f for f in self.synthetic_fields_metadata if ps.synthetic_forwarded(f[0])]
 
     def post_process_data(self, info: dict[str, int | float | str]) -> dict[str, int | float | str]:
         """Scheduling path: All (Sequential, Concurrent, Interleaved).

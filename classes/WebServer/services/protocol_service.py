@@ -97,6 +97,10 @@ class DeviceMetricSummary(TypedDict):
     over_limit: bool
     wide_table_limit: int
     by_registry_type: dict[str, RegistryTypeCounts]
+    # True when any metric (real or synthetic) is M-selected for the device.
+    # The mask file is device-wide and always wins over the screen file, so
+    # the UI disables every (S)creen checkbox while this is True.
+    mask_in_use: bool
 
 
 @dataclass
@@ -391,6 +395,23 @@ WIDE_TABLE_COLUMN_LIMIT: int = 160
 # is already "json" excluded (see below), so nothing further to filter.
 
 
+def device_mask_in_use(db: Session, device_name: str, protocol_version: str | None = None) -> bool:
+    """Return True when any metric is M-selected for ``device_name``.
+
+    The device's mask file is device-wide and always wins over its screen
+    file (mask present -> only the mask-checked metrics are forwarded and the
+    screen is ignored), so while this is True every (S)creen checkbox is
+    disabled and new S selections are refused.
+    """
+    query = db.query(DeviceProtocolSelection.id).filter(
+        DeviceProtocolSelection.device_name == device_name,
+        DeviceProtocolSelection.mask_enabled == True,  # noqa: E712
+    )
+    if protocol_version:
+        query = query.filter(DeviceProtocolSelection.protocol_name.like(f"{protocol_version}%"))
+    return query.first() is not None
+
+
 def get_device_metric_summary(
     db: Session,
     protocol_version: str,
@@ -423,10 +444,10 @@ def get_device_metric_summary(
         assumed fully forwarded. Tabs that do have their own selections
         always apply their own whitelist/blacklist rule independently of
         what any other tab is doing. Synthetic fields (e.g. EG4 model /
-        firmware_version) are opt-in: they count as chosen only when the
-        device has actively selected them with (M)ask — they are never
-        forwarded to a bridge otherwise, and merely being displayed (the
-        green cached/static values) does not select them. JSON "<name>_desc"
+        firmware_version) follow the same rule as every other metric: when a
+        mask exists they count as chosen only if M-selected; otherwise they
+        count unless S-screened. Merely being displayed (the green
+        cached/static values) does not select them. JSON "<name>_desc"
         companions are chosen exactly when their source code register is.
         Both still count toward total_available whether chosen or not.
 
@@ -533,17 +554,23 @@ def get_device_metric_summary(
             name for sel, name in sel_rows if sel.screen_enabled
         )
 
-    # Synthetic fields the device has actively chosen with (M)ask. Synthetic
-    # fields are opt-in: unlike a real register (where "nothing selected"
-    # means "forward it"), an unselected synthetic field is never forwarded —
-    # so it neither counts as chosen here nor is it sent to a bridge (see
-    # Protocol_Gateway._filter_for_member). Only (M)ask matters: (S)creen on
-    # a synthetic field is a no-op because unchosen ones are already
-    # withheld, and config_writer never writes a synthetic name to a screen
-    # file. Mirrors config_writer's mask-file rule: a name masked on one tab
-    # but explicitly un-masked on another is absent from the file.
+    # Synthetic-field selections. Synthetic fields follow the same rule as
+    # every other metric (see protocol_settings.synthetic_forwarded and
+    # Protocol_Gateway._filter_for_member):
+    #   * a mask exists (any real M selection, or a synthetic M selection,
+    #     since both are written to the mask file) -> a synthetic field is
+    #     chosen only if M-selected;
+    #   * otherwise -> chosen unless S-selected, which includes the
+    #     "nothing selected anywhere" default.
+    # Mirrors config_writer's file rules: a name masked on one tab but
+    # explicitly un-masked on another is absent from the mask file, and the
+    # same for screened/un-screened.
     synthetic_sel_rows = (
-        db.query(DeviceProtocolSelection.mask_enabled, ProtocolRegister.variable_name)
+        db.query(
+            DeviceProtocolSelection.mask_enabled,
+            DeviceProtocolSelection.screen_enabled,
+            ProtocolRegister.variable_name,
+        )
         .join(
             ProtocolRegister,
             (DeviceProtocolSelection.protocol_name == ProtocolRegister.protocol_name)
@@ -557,9 +584,9 @@ def get_device_metric_summary(
         )
         .all()
     )
-    synthetic_masked: set[str] = {name for mask_enabled, name in synthetic_sel_rows if mask_enabled}
-    synthetic_unmasked: set[str] = {name for mask_enabled, name in synthetic_sel_rows if not mask_enabled}
-    chosen_synthetic_names: set[str] = synthetic_masked - synthetic_unmasked
+    synthetic_masked: set[str] = {n for m, _s, n in synthetic_sel_rows if m} - {n for m, _s, n in synthetic_sel_rows if not m}
+    synthetic_screened: set[str] = {n for _m, sc, n in synthetic_sel_rows if sc} - {n for _m, sc, n in synthetic_sel_rows if not sc}
+    chosen_synthetic_names: set[str] = synthetic_masked  # M-selected (name kept for any_selections below)
 
     # True as soon as ANY register-map tab has a mask or screen selection.
     # When that's the case, a tab with no selections of its own contributes
@@ -567,10 +594,16 @@ def get_device_metric_summary(
     # forwarded. Only when nothing is selected anywhere does the "no
     # selections = everything forwarded" fallback apply, matching the
     # "No chosen metrics: all metrics will write to bridges" notice.
-    # A chosen synthetic field counts as a selection: it is written to the
-    # mask file, which switches the device into whitelist mode.
-    any_selections: bool = bool(chosen_synthetic_names) or any(
-        mask_count or screen_count for _, _, mask_count, screen_count in tab_data
+    # A chosen (M) synthetic field counts as a selection: it is written to the
+    # mask file, which switches the device into whitelist mode. A screened
+    # (S) synthetic field does not: it is written under a "synthetic:" prefix
+    # that the loader ignores for the per-registry-type screen rule, so it
+    # never changes what real registers are scraped.
+    mask_in_use: bool = bool(chosen_synthetic_names) or any(
+        mask_count for _, _, mask_count, _ in tab_data
+    )
+    any_selections: bool = mask_in_use or any(
+        screen_count for _, _, _, screen_count in tab_data
     )
 
     # Synthetic fields have no per-register toggle of their own — build_
@@ -599,11 +632,14 @@ def get_device_metric_summary(
             else:
                 synthetic_names_by_type[field_registry_type].add(name)
     synthetic_total: int = len(all_synthetic_names)
-    chosen_synthetic_total: int = len(all_synthetic_names & chosen_synthetic_names)
+    chosen_synthetic_set: set[str] = (
+        all_synthetic_names & synthetic_masked if mask_in_use else all_synthetic_names - synthetic_screened
+    )
+    chosen_synthetic_total: int = len(chosen_synthetic_set)
     register_map_synthetic_names: set[str] = set()
     for rt in existing_registry_types:
         register_map_synthetic_names |= synthetic_names_by_type[rt]
-    register_map_chosen_synthetic_total: int = len(register_map_synthetic_names & chosen_synthetic_names)
+    register_map_chosen_synthetic_total: int = len(register_map_synthetic_names & chosen_synthetic_set)
 
     def _real_register_chosen(registry_type: str, variable_name: str) -> bool:
         """Same per-tab rule tab_chosen uses below, for one named register."""
@@ -611,7 +647,7 @@ def get_device_metric_summary(
         tab_screened: set[str] = screened_real_by_type.get(registry_type, set())
         if tab_masked:
             return variable_name in tab_masked
-        if tab_screened:
+        if tab_screened and not mask_in_use:
             return variable_name not in tab_screened
         return not any_selections
 
@@ -644,7 +680,7 @@ def get_device_metric_summary(
     for registry_type, tab_total, mask_count, screen_count in tab_data:
         if mask_count:
             tab_chosen: int = mask_count
-        elif screen_count:
+        elif screen_count and not mask_in_use:
             tab_chosen = tab_total - screen_count
         elif not any_selections:
             tab_chosen = tab_total
@@ -657,7 +693,7 @@ def get_device_metric_summary(
         register_map_chosen += tab_chosen
 
         tab_synthetic: int = len(synthetic_names_by_type.get(registry_type, set()))
-        tab_synthetic_chosen: int = len(synthetic_names_by_type.get(registry_type, set()) & chosen_synthetic_names)
+        tab_synthetic_chosen: int = len(synthetic_names_by_type.get(registry_type, set()) & chosen_synthetic_set)
         tab_json_desc: int = len(json_desc_names_by_type.get(registry_type, set()))
         tab_json_desc_chosen: int = len(json_desc_chosen_by_type.get(registry_type, set()))
         by_registry_type[registry_type] = {
@@ -676,6 +712,7 @@ def get_device_metric_summary(
         "over_limit":          register_map_chosen > WIDE_TABLE_COLUMN_LIMIT,
         "wide_table_limit":    WIDE_TABLE_COLUMN_LIMIT,
         "by_registry_type":    by_registry_type,
+        "mask_in_use":         mask_in_use,
     }
 
 
@@ -733,12 +770,13 @@ def materialize_and_toggle_virtual_metric(
     row for a CSV-backed protocol, so no materialization needed there) —
     per the mask/screen semantics: selecting a description always selects
     its code too, and vice versa (see toggle_register_field's own cascade
-    for the code -> desc direction when the desc already exists). Neither
-    the description's own name nor a synthetic field's name is ever written
-    to a mask/screen file (see config_writer._write_mask_screen_files) — the
-    code register is what actually gets written and read back at scrape
-    time, and the code<->desc link is what carries a description's
-    selection into the mask/screen file via its paired code.
+    for the code -> desc direction when the desc already exists). A
+    description's own name is never written to a mask/screen file (see
+    config_writer._write_mask_screen_files) — the code register is what
+    actually gets written and read back at scrape time, and the code<->desc
+    link is what carries a description's selection into the mask/screen file
+    via its paired code. A synthetic field IS written under its own name:
+    plain in the mask file, "synthetic:<name>" in the screen file.
 
     Once this row exists, subsequent toggles for this device/metric go
     through the normal PATCH /api/protocols/{register_id}/toggle endpoint
@@ -751,6 +789,11 @@ def materialize_and_toggle_virtual_metric(
         return None
     allowed_fields: set[str] = {"user_write_enabled", "mask_enabled", "screen_enabled"}
     if field not in allowed_fields or not device_name:
+        return None
+
+    # Mask always wins: refuse a new (S)creen selection while any metric is
+    # mask-selected (see device_mask_in_use).
+    if field == "screen_enabled" and value and device_mask_in_use(db, device_name):
         return None
 
     register_address: str = _virtual_register_address(kind, variable_name)
@@ -897,6 +940,11 @@ def toggle_register_field(
 
     row: ProtocolRegister | None = db.get(ProtocolRegister, register_id)
     if row is None:
+        return None
+
+    # Mask always wins: with any metric mask-selected the screen is ignored,
+    # so a new (S)creen selection is refused (un-ticking one is always fine).
+    if field == "screen_enabled" and value and device_mask_in_use(db, device_name):
         return None
 
     target: DeviceProtocolSelection | None = _toggle_selection_for_row(db, row, field, value, device_name)

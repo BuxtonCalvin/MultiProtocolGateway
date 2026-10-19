@@ -235,6 +235,11 @@ def app_state(request: Request, db: Session = Depends(get_session)) -> dict[str,
         # services/bridge_service.py), not in the staging DB, since
         # they're live Postgres work rather than config.cfg settings.
         "has_dirty_timescale": has_staged_deletions(request.app.state) or has_staged_metric_edits(request.app.state),
+        # Wide-table column deletions specifically: applying them drops and
+        # rebuilds the continuous-aggregate rollups (and recompresses data),
+        # which can take minutes, so the header's commit progress banner
+        # (base.html) uses this to warn the user up front.
+        "has_staged_column_deletions": has_staged_deletions(request.app.state),
         # InfluxDB (v1/v3) Metrics Edit value edits/deletes -- a separate
         # staging store from TimescaleDB's (see services/influxdb_service.py),
         # kept as its own field rather than folded into has_dirty_timescale

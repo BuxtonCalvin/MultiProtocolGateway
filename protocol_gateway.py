@@ -1053,10 +1053,11 @@ class Protocol_Gateway:
             # without being "requested" is expected for them, not a config
             # problem. Report them on their own line below instead.
             synthetic_names: set[str] = {n.lower() for n in member.synthetic_field_names}
-            synthetic_chosen: set[str] = mask & synthetic_names
-            synthetic_withheld: set[str] = {
-                k.lower() for k in full_data if k.lower() in synthetic_names
-            } - mask
+            computed_synthetic: set[str] = {k.lower() for k in full_data if k.lower() in synthetic_names}
+            synthetic_chosen: set[str] = (
+                {n for n in computed_synthetic if ps.synthetic_forwarded(n)} if ps is not None else computed_synthetic
+            )
+            synthetic_withheld: set[str] = computed_synthetic - synthetic_chosen
 
             never_requested: set[str] = mask - requested - synthetic_names
             requested_not_decoded: set[str] = requested - full_data.keys()
@@ -1077,10 +1078,10 @@ class Protocol_Gateway:
             )
             if synthetic_names:
                 self.__log.debug(
-                    f"  member='{member.transport_name}': synthetic fields are opt-in "
-                    f"(forwarded only when chosen via (M)ask) — "
-                    f"chosen/forwarded ({len(synthetic_chosen)}): {sorted(synthetic_chosen)}; "
-                    f"computed this cycle but NOT chosen, so withheld from bridges "
+                    f"  member='{member.transport_name}': synthetic fields follow the mask/screen rule "
+                    f"(mask present -> only M-selected; otherwise all except S-screened) — "
+                    f"forwarded ({len(synthetic_chosen)}): {sorted(synthetic_chosen)}; "
+                    f"computed this cycle but withheld from bridges "
                     f"({len(synthetic_withheld)}): {sorted(synthetic_withheld)}"
                 )
             if never_requested:
@@ -1123,8 +1124,7 @@ class Protocol_Gateway:
           descriptions were forwarded even though they don't appear in the mask.
         * **Path 2** (registry-map fallback) — logs a brief count summary only.
         * **Path 3** (no mask) — logs that everything was forwarded as-is
-          (apart from synthetic fields, which are opt-in via the mask and so
-          are withheld whenever no mask file exists).
+          (apart from any synthetic field the user screened).
 
         Synthetic fields (``member.synthetic_field_names``) are reported
         separately on path 1: chosen-and-forwarded, chosen-but-not-computed,
@@ -1144,8 +1144,8 @@ class Protocol_Gateway:
             # expansion is required — a genuine miss is a genuine miss.
             unmatched: set[str] = mask - data_keys_lower
 
-            # Synthetic fields are opt-in: forwarded only when named in the
-            # mask. Split them out so a chosen-but-missing one reads as
+            # With a mask present, synthetic fields are forwarded only when
+            # named in it (same as every other metric). Split them out so a chosen-but-missing one reads as
             # "synthetic metrics disabled / not computed this cycle" rather
             # than as a typo in the mask file, and so computed-but-unchosen
             # ones are visible as deliberately withheld.
@@ -1192,7 +1192,7 @@ class Protocol_Gateway:
                 )
             if synthetic_withheld:
                 self.__log.debug(
-                    f"Synthetic fields computed but NOT chosen (no (M)ask selection), "
+                    f"Synthetic fields computed but NOT in the mask (no (M)ask selection), "
                     f"withheld from bridges for '{member.transport_name}': "
                     f"{sorted(synthetic_withheld)}"
                 )
@@ -1247,15 +1247,15 @@ class Protocol_Gateway:
         ----------------
         Keys listed in ``member.synthetic_field_names`` are fields injected by
         ``post_process_data`` (e.g. EG4 ``model`` / ``firmware_version`` /
-        ``hardware_kind`` / ``is_gridboss``).  They have no protocol CSV row
-        to mask, but they ARE opt-in: they are forwarded only when the user
-        has actively chosen them with the (M)ask checkbox, which
-        ``config_writer`` records by writing the field's name into the
-        member's variable_mask file.  That makes path 1 the only path on
-        which a synthetic field can be forwarded (``k.lower() in mask``);
-        on paths 2 and 3 there is no mask file, so nothing has been chosen
-        and synthetic keys are withheld.  Their values still appear in the
-        webUI (from the cached/live read) — they just are not sent to bridges.
+        ``hardware_kind`` / ``is_gridboss``, LL-S derived cell metrics).  They
+        have no protocol CSV row, but they follow the same rule as every other
+        metric (``protocol_settings.synthetic_forwarded``): with a mask file
+        (path 1) a synthetic field is forwarded only if named in it — i.e. the
+        user M-selected it; with no mask file (paths 2 and 3) it is forwarded
+        unless the user screened it (S-selected; recorded as
+        ``synthetic:<name>`` in the screen file).  Their values still appear in
+        the webUI either way — screening/not masking only stops them being
+        sent to bridges.
 
         A synthetic key that shares its name with a real registry-map entry
         (e.g. a corrected ``batteryserialnumber_<N>``) is a real metric as
@@ -1263,6 +1263,9 @@ class Protocol_Gateway:
         """
         ps: protocol_settings | None = getattr(member, 'protocolSettings', None)
         synthetic: frozenset[str] = frozenset(n.lower() for n in member.synthetic_field_names)
+
+        def _synthetic_ok(key: str) -> bool:
+            return ps is None or ps.synthetic_forwarded(key)
 
         # Path 1 — explicit variable mask. A synthetic field passes only by
         # being named in the mask file, exactly like any other metric.
@@ -1274,8 +1277,8 @@ class Protocol_Gateway:
                 or (k.lower().endswith('_desc') and k.lower()[:-5] in mask)
             }
 
-        # Path 2 — fall back to the registry map variable names. Synthetic
-        # fields are NOT added: with no mask file none can have been chosen.
+        # Path 2 — fall back to the registry map variable names (already
+        # screen-filtered). Synthetic fields are added unless screened.
         member_keys: set[str] = set()
         for entries in member.registry_map.values():
             for entry in entries:
@@ -1283,11 +1286,14 @@ class Protocol_Gateway:
                     member_keys.add(entry.variable_name)
 
         if not member_keys:
-            # Path 3 — no mask at all, forward everything except unchosen
+            # Path 3 — no mask at all, forward everything except screened
             # synthetic fields.
-            return {k: v for k, v in full_data.items() if k.lower() not in synthetic}
+            return {k: v for k, v in full_data.items() if k.lower() not in synthetic or _synthetic_ok(k)}
 
-        return {k: v for k, v in full_data.items() if k in member_keys}
+        return {
+            k: v for k, v in full_data.items()
+            if k in member_keys or (k.lower() in synthetic and _synthetic_ok(k))
+        }
 
     def _submit_concurrent_group_read(self, group: ScrapeGroup, now: float) -> None:
         """

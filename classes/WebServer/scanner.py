@@ -924,6 +924,10 @@ def _load_filter_names(path: Path) -> set[str]:
             name: str = line.strip().lower().replace(" ", "_")
             if not name:
                 continue
+            # A screened synthetic field is written as "synthetic:<name>"
+            # (see protocol_settings.SYNTHETIC_FILTER_PREFIX); strip it so the
+            # name matches the synthetic row's variable_name.
+            name = name.removeprefix("synthetic:")
             # Normalize half-register names to their stem so they match the
             # merged ProtocolRegister.variable_name (e.g. "echg_all_l" → "echg_all")
             if name.endswith("_l") or name.endswith("_h"):

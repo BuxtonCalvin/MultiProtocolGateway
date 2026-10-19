@@ -561,6 +561,16 @@
      aria-live="polite"
      class="hidden px-4 py-2 text-sm border-b"></div>
 
+<!-- COMMIT PROGRESS BANNER — shown while a "Commit All Changes" request that
+     includes slow TimescaleDB work (column deletions drop + rebuild rollups
+     and recompress data) is in flight, with a live timer so the page doesn't
+     look frozen. Driven entirely by the commit request's own start/finish
+     (see the htmx:beforeRequest / htmx:afterRequest handlers below). -->
+<div id="commit-progress-banner"
+     role="status"
+     aria-live="polite"
+     class="hidden px-4 py-2 text-sm border-b bg-accent/10 border-accent/40 text-accent"></div>
+
 <!-- ===== ORPHAN BANNER ===== -->
 {% if app_state and app_state.has_orphans %}
 <div role="alert"
@@ -684,14 +694,88 @@
     localStorage.setItem('mpg-theme', html.classList.contains('dark') ? 'dark' : 'light');
   }
 
+  // Commit-in-flight tracking (see the commit progress banner above).
+  let _lastAppState = null;
+  let _commitInFlight = false;
+  let _commitStartedAt = 0;
+  let _commitTimer = null;
+  let _commitSlowMode = false;
+  const _COMMIT_DURATION_KEY = 'mpg-ts-commit-secs';
+
+  function _fmtClock(totalSeconds) {
+    const s = Math.max(0, Math.round(totalSeconds));
+    return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+  }
+
+  function _renderCommitBanner() {
+    const banner = document.getElementById('commit-progress-banner');
+    if (!banner) return;
+    const elapsed = (Date.now() - _commitStartedAt) / 1000;
+    const last = Number(localStorage.getItem(_COMMIT_DURATION_KEY)) || 0;
+    let status;
+    if (last > 0 && elapsed < last) {
+      status = 'Estimated time remaining ' + _fmtClock(last - elapsed) +
+               ' (based on the last time this ran) · elapsed ' + _fmtClock(elapsed);
+    } else if (last > 0) {
+      status = 'Taking longer than last time (' + _fmtClock(last) + ') — still working · elapsed ' + _fmtClock(elapsed);
+    } else {
+      status = 'Elapsed ' + _fmtClock(elapsed);
+    }
+    banner.innerHTML =
+      '<div class="flex items-center gap-2"><span aria-hidden="true">⏳</span>' +
+      '<span><span class="font-semibold">Applying TimescaleDB changes — this can take several minutes.</span> ' +
+      'Removing columns makes TimescaleDB drop and rebuild the rollups and recompress data. ' +
+      'The page has not frozen; please don\'t close or refresh it.</span></div>' +
+      '<div class="mt-1 flex items-center gap-3"><span class="font-mono tabular-nums">' + status + '</span>' +
+      '<div class="flex-1 h-1.5 rounded bg-accent/20 overflow-hidden" aria-hidden="true">' +
+      '<div class="h-full w-1/3 bg-accent rounded animate-pulse"></div></div></div>';
+  }
+
+  function _startCommitProgress() {
+    _commitInFlight = true;
+    _commitStartedAt = Date.now();
+    const btn = document.getElementById('commit-btn');
+    if (btn) {
+      btn.dataset.dirty = 'false';          // stop the "dirty" pulse while it runs
+      btn.disabled = true;
+      btn.dataset.label = btn.textContent;
+      btn.textContent = 'Committing…';
+    }
+    const st = _lastAppState || {};
+    _commitSlowMode = !!(st.has_staged_column_deletions || st.has_dirty_timescale);
+    if (_commitSlowMode) {
+      const banner = document.getElementById('commit-progress-banner');
+      if (banner) banner.classList.remove('hidden');
+      _renderCommitBanner();
+      _commitTimer = setInterval(_renderCommitBanner, 1000);
+    }
+  }
+
+  function _stopCommitProgress(success) {
+    if (_commitTimer) { clearInterval(_commitTimer); _commitTimer = null; }
+    if (_commitSlowMode && success) {
+      // Remember how long it took so the next run can show a countdown.
+      localStorage.setItem(_COMMIT_DURATION_KEY, String(Math.round((Date.now() - _commitStartedAt) / 1000)));
+    }
+    _commitSlowMode = false;
+    _commitInFlight = false;
+    const banner = document.getElementById('commit-progress-banner');
+    if (banner) { banner.classList.add('hidden'); banner.innerHTML = ''; }
+    const btn = document.getElementById('commit-btn');
+    if (btn && btn.dataset.label) { btn.textContent = btn.dataset.label; delete btn.dataset.label; }
+    refreshState();
+  }
+
   // Poll /api/devices/state every 10s to keep the dirty/commit button in sync
   function refreshState() {
     fetch('/api/devices/state')
       .then(r => r.json())
       .then(data => {
+        _lastAppState = data;
         const btn = document.getElementById('commit-btn');
         const discardBtn = document.getElementById('discard-btn');
         if (!btn) return;
+        if (_commitInFlight) return;  // keep the button in its "Committing…" state until the request ends
         const dirty = data.has_dirty_settings || data.has_dirty_protocols || data.has_dirty_timescale || data.has_dirty_influxdb;
         btn.dataset.dirty = dirty ? 'true' : 'false';
         btn.disabled = !dirty;
@@ -760,8 +844,14 @@
     }
   });
 
+  document.body.addEventListener('htmx:beforeRequest', function(evt) {
+    const path = evt.detail?.requestConfig?.path || evt.detail?.pathInfo?.requestPath || '';
+    if (path === '/api/commit') _startCommitProgress();
+  });
+
   document.body.addEventListener('htmx:afterRequest', function(evt) {
     const path = evt.detail?.requestConfig?.path || evt.detail?.pathInfo?.requestPath || evt.detail?.xhr?.responseURL || '';
+    if (path === '/api/commit') _stopCommitProgress(evt.detail.successful === true);
     if (path.includes('/api/protocols/') || path.includes('/api/devices/') || path.includes('/api/timescale/')) {
       refreshState();
     }

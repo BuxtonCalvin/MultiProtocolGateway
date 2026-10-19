@@ -959,12 +959,37 @@
             }
           }
         }
+        // A mask toggle (or a restored S checkbox) can change whether the
+        // screen column is locked.
+        applyScreenLock();
         // Do NOT call sortRows here — re-sorting on every toggle moves DOM nodes
         // and causes the browser to jump the scroll position.  Row order is
         // refreshed only on initial load, column-header clicks, and after a
         // full commit (which replaces #protocol-table-container entirely).
       });
     }
+
+    // Mask always wins over screen: while ANY metric is mask-selected (on this
+    // tab, or — via the device-wide flag below — on any other tab) only the
+    // mask-checked metrics are forwarded and the screen is ignored, so every
+    // (S)creen checkbox is disabled. maskElsewhere is the server's device-wide
+    // answer at render time, refreshed after each toggle by the tab/summary
+    // updater in scraper_panes.html through window.mpgSetMaskInUse().
+    let maskInUse = "{{ 'true' if mask_in_use else 'false' }}" === "true";
+    const SCREEN_LOCK_TITLE = 'Disabled while any metric is mask-selected — mask always wins over screen';
+    function applyScreenLock() {
+      const locked = maskInUse || !!table.querySelector('.mask-toggle:checked');
+      table.querySelectorAll('.screen-toggle').forEach(inp => {
+        inp.disabled = locked;
+        inp.classList.toggle('opacity-40', locked);
+        inp.classList.toggle('cursor-not-allowed', locked);
+        if (locked) inp.title = SCREEN_LOCK_TITLE; else inp.removeAttribute('title');
+      });
+    }
+    window.mpgSetMaskInUse = function (flag) {
+      maskInUse = !!flag;
+      applyScreenLock();
+    };
 
     // Update the dirty-row highlight when HTMX returns the toggle response.
     // This keeps visual feedback (row color, dirty star) in sync without a
@@ -985,6 +1010,7 @@
     });
 
     tbody.querySelectorAll('.write-toggle, .mask-toggle, .screen-toggle').forEach(attachToggleListener);
+    applyScreenLock();
 
     sortRows('default', 'asc');
   })();
