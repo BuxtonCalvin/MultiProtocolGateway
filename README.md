@@ -41,9 +41,31 @@ Follow the decision tree below to evaluate your communication infrastructure (wh
 
 ```mermaid
 flowchart TD
-    A[Read Mode Request] --> B{Is Hardware Connected?}
-    B -- Yes --> C[Execute Read]
-    B -- No --> D[Run Simulator]
+    START{{"Choosing read_mode<br/>for your transports"}}
+    Q1{"Do any scrapers share a<br/>physical RS-485 / serial bus?"}
+    Q2{"Are all devices on independent<br/>TCP/IP connections<br/>(separate IPs or ports)?"}
+    Q3{"On the shared bus, are some<br/>devices much slower to<br/>respond than others?"}
+
+    SEQ["sequential<br/>(default)<br/>Poll transports one-by-one<br/>with sequential_delay between<br/>each. Simplest, safest for<br/>any shared bus."]
+    CONC["concurrent<br/>Fully parallel ThreadPoolExecutor.<br/>Correct only when nothing is<br/>physically shared — separate<br/>IPs/serial ports."]
+    INTER["interleaved<br/>Round-robin one register block<br/>at a time per transport, parallel<br/>threads for I/O but a shared<br/>bus_lock serializes actual bus<br/>access. Prevents a slow device<br/>from starving fast ones."]
+
+    START --> Q1
+    Q1 -- "Yes (shared RS-485 / serial)" --> Q3
+    Q1 -- "No" --> Q2
+
+    Q2 -- "Yes" --> CONC
+    Q2 -- "No / unsure" --> SEQ
+
+    Q3 -- "Yes — mixed fast/slow devices" --> INTER
+    Q3 -- "No — similar response times" --> SEQ
+
+    note1["TCP-to-RTU gateways (e.g. Waveshare)<br/>still count as a shared bus: differing<br/>slave_id on the same gateway IP maps<br/>to separate RTU polls on one RS-485<br/>line, so they cannot be read concurrently."]
+    Q1 -.-> note1
+
+    style SEQ fill:#dbeafe,stroke:#2563eb
+    style CONC fill:#dcfce7,stroke:#16a34a
+    style INTER fill:#fef3c7,stroke:#d97706
 ```
 
 MPG includes simulators so you can evaluate the full scrape → decode → bridge pipeline before you have a device wired up:
