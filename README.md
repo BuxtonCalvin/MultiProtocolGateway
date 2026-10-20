@@ -34,10 +34,11 @@ Before finalizing your initial config.txt device configurations, you must select
 
 [![Read Mode](classes/WebServer/static/screenshots/general_settings.png)](classes/WebServer/static/screenshots/general_settings.png)
 
-Follow the decision tree below to evaluate your communication infrastructure (whether using direct serial lines, multi-drop RS-485 networks, or dedicated Ethernet/IP topologies). It will guide you to your optimal read_mode setting:
-• interleaved: Ideal if you have a mix of fast-responding (inverters on their own connection) and notoriously slow or high-latency hardware (multiple batteries on a single serial bus).
-• sequential: The default fallback for shared serial networks or TCP-to-RTU bridges (like Waveshare units) where multiple slave IDs share a single downstream RS-485 line and must be polled one at a time.
-• concurrent: The fastest option, reserved exclusively for setups where every single device communicates over completely independent, dedicated TCP/IP connections (unique IPs or separate ports) and can be polled simultaneously.
+Follow the decision tree below to evaluate your communication infrastructure (whether using direct serial lines, multi-drop RS-485 networks, or dedicated Ethernet/IP topologies). It will guide you to your optimal `read_mode` setting:
+
+- **`interleaved`**: Ideal if you have a mix of fast-responding (inverters on their own connection) and notoriously slow or high-latency hardware (multiple batteries on a single serial bus).
+- **`sequential`**: The default fallback for shared serial networks or TCP-to-RTU bridges (like Waveshare units) where multiple slave IDs share a single downstream RS-485 line and must be polled one at a time.
+- **`concurrent`**: The fastest option, reserved exclusively for setups where every single device communicates over completely independent, dedicated TCP/IP connections (unique IPs or separate ports) and can be polled simultaneously.
 
 <details>
 <summary>🔍 Click to expand Read Mode Decision Tree Diagram</summary>
