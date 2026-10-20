@@ -35,38 +35,45 @@ Before finalizing your initial config.txt device configurations, you must select
 [![Read Mode](classes/WebServer/static/screenshots/general_settings.png)](classes/WebServer/static/screenshots/general_settings.png)
 
 Follow the decision tree below to evaluate your communication infrastructure (whether using direct serial lines, multi-drop RS-485 networks, or dedicated Ethernet/IP topologies). It will guide you to your optimal read_mode setting:
-• interleaved: Ideal if you share a single physical serial line but have a mix of fast-responding and notoriously slow or high-latency hardware.
+• interleaved: Ideal if you have a mix of fast-responding (inverters on their own connection) and notoriously slow or high-latency hardware (multiple batteries on a single serial bus).
 • sequential: The default fallback for shared serial networks or TCP-to-RTU bridges (like Waveshare units) where multiple slave IDs share a single downstream RS-485 line and must be polled one at a time.
 • concurrent: The fastest option, reserved exclusively for setups where every single device communicates over completely independent, dedicated TCP/IP connections (unique IPs or separate ports) and can be polled simultaneously.
+
+<details>
+<summary>🔍 Click to expand Read Mode Decision Tree Diagram</summary>
 
 ```mermaid
 flowchart TD
     START{{"Choosing read_mode<br/>for your transports"}}
-    Q1{"Do any scrapers share a<br/>physical RS-485 / serial bus?"}
-    Q2{"Are all devices on independent<br/>TCP/IP connections<br/>(separate IPs or ports)?"}
+    
+    Q1{"Do scrapers share a physical bus?<br/><i>(Includes multiple Slave IDs sharing<br/>one TCP-to-RTU Gateway IP)</i>"}
+    
+    Q2{"Are all devices on separate<br/>TCP/IP connections?<br/><i>(Unique IPs or unique ports)</i>"}
+    
     Q3{"On the shared bus, are some<br/>devices much slower to<br/>respond than others?"}
 
-    SEQ["sequential<br/>(default)<br/>Poll transports one-by-one<br/>with sequential_delay between<br/>each. Simplest, safest for<br/>any shared bus."]
-    CONC["concurrent<br/>Fully parallel ThreadPoolExecutor.<br/>Correct only when nothing is<br/>physically shared — separate<br/>IPs/serial ports."]
-    INTER["interleaved<br/>Round-robin one register block<br/>at a time per transport, parallel<br/>threads for I/O but a shared<br/>bus_lock serializes actual bus<br/>access. Prevents a slow device<br/>from starving fast ones."]
+    SEQ["⚙️ sequential (default)<br/><br/>Poll transports one-by-one<br/>with sequential_delay between<br/>each. Simplest, safest for<br/>any shared bus/gateway setup."]
+    
+    CONC["⚡ concurrent<br/><br/>Fully parallel ThreadPoolExecutor.<br/>Correct only when nothing is<br/>physically shared — separate<br/>IPs/serial ports."]
+    
+    INTER["🔀 interleaved<br/><br/>Round-robin one register block<br/>at a time per transport. Parallel<br/>threads for I/O but a shared<br/>bus_lock serializes actual bus<br/>access. Prevents a slow device<br/>from starving fast ones."]
 
     START --> Q1
-    Q1 -- "Yes (shared RS-485 / serial)" --> Q3
+    Q1 -- "Yes" --> Q3
     Q1 -- "No" --> Q2
 
     Q2 -- "Yes" --> CONC
     Q2 -- "No / unsure" --> SEQ
 
-    Q3 -- "Yes — mixed fast/slow devices" --> INTER
-    Q3 -- "No — similar response times" --> SEQ
+    Q3 -- "Yes — mixed fast/slow hardware" --> INTER
+    Q3 -- "No — uniform response times" --> SEQ
 
-    note1["TCP-to-RTU gateways (e.g. Waveshare)<br/>still count as a shared bus: differing<br/>slave_id on the same gateway IP maps<br/>to separate RTU polls on one RS-485<br/>line, so they cannot be read concurrently."]
-    Q1 -.-> note1
-
-    style SEQ fill:#dbeafe,stroke:#2563eb
-    style CONC fill:#dcfce7,stroke:#16a34a
-    style INTER fill:#fef3c7,stroke:#d97706
+    style SEQ fill:#dbeafe,stroke:#2563eb,stroke-width:2px
+    style CONC fill:#dcfce7,stroke:#16a34a,stroke-width:2px
+    style INTER fill:#fef3c7,stroke:#d97706,stroke-width:2px
 ```
+
+</details>
 
 MPG includes simulators so you can evaluate the full scrape → decode → bridge pipeline before you have a device wired up:
 
