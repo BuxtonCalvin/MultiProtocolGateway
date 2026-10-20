@@ -28,7 +28,23 @@ Then open **`http://localhost:1717`** and configure everything from the web UI �
 
 [![Hardware](documentation/assets/waveshare_mpg_eg4.png)](documentation/assets/waveshare_mpg_eg4.png)
 
-[![Read Modes for Hardware](documentation/architecture/mermaid-diagrams.md#8-flowchart--read-mode-decision-tree)](documentation/architecture/mermaid-diagrams.md#8-flowchart--read-mode-decision-tree)
+### Determining Your Optimal Read Mode for the Hardware Connection
+
+Before finalizing your initial config.txt device configurations, you must select an efficient strategy for your scrapers. How your devices connect to the Multi Protocol Gateway physically dictates how data must be scheduled to prevent serial bus collisions, timeouts, or data corruption.  The read style accessed through the *General Settings* page:
+
+[![Read Mode](classes/WebServer/static/screenshots/general_settings.png)](classes/WebServer/static/screenshots/general_settings.png)
+
+Follow the decision tree below to evaluate your communication infrastructure (whether using direct serial lines, multi-drop RS-485 networks, or dedicated Ethernet/IP topologies). It will guide you to your optimal read_mode setting:
+• interleaved: Ideal if you share a single physical serial line but have a mix of fast-responding and notoriously slow or high-latency hardware.
+• sequential: The default fallback for shared serial networks or TCP-to-RTU bridges (like Waveshare units) where multiple slave IDs share a single downstream RS-485 line and must be polled one at a time.
+• concurrent: The fastest option, reserved exclusively for setups where every single device communicates over completely independent, dedicated TCP/IP connections (unique IPs or separate ports) and can be polled simultaneously.
+
+```mermaid
+flowchart TD
+    A[Read Mode Request] --> B{Is Hardware Connected?}
+    B -- Yes --> C[Execute Read]
+    B -- No --> D[Run Simulator]
+```
 
 MPG includes simulators so you can evaluate the full scrape → decode → bridge pipeline before you have a device wired up:
 
