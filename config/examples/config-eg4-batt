@@ -30,7 +30,7 @@ telegram_chat_ids = -1002111140370
 
 [eg4_battery_1]
 log_level = DEBUG
-transport = eg4_II_s_rs485
+transport = modbus_eg4_ll_s_rtu
 protocol_version = eg4_ll_s
 write = false
 port = /dev/ttyUSB0
@@ -41,7 +41,7 @@ bridge = timescaledb
 
 [eg4_battery_2]
 log_level = DEBUG
-transport = eg4_II_s_rs485
+transport = modbus_eg4_ll_s_rtu
 protocol_version = eg4_ll_s
 write = false
 port = /dev/ttyUSB0
