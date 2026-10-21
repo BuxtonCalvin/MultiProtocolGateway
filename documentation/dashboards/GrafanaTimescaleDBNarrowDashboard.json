@@ -232,7 +232,7 @@
                 }
               }
             },
-            "version": "13.2.0"
+            "version": "13.2.4"
           }
         }
       },
@@ -640,7 +640,7 @@
                 "xTickLabelSpacing": 0
               }
             },
-            "version": "13.2.0"
+            "version": "13.2.4"
           }
         }
       },
@@ -788,7 +788,814 @@
                 }
               }
             },
-            "version": "13.2.0"
+            "version": "13.2.4"
+          }
+        }
+      },
+      "panel-12": {
+        "kind": "Panel",
+        "spec": {
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "datasource": {
+                        "name": "cf1a987bupo1sc"
+                      },
+                      "group": "grafana-postgresql-datasource",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "editorMode": "code",
+                        "format": "time_series",
+                        "rawQuery": true,
+                        "rawSql": "SELECT\n  $__timeGroup(m_time, $__interval) AS time,\n  last(metric_value, m_time) AS \"SOC %\"\nFROM device_metrics_narrow\nWHERE $__timeFilter(m_time)\n    AND device_info_id = $device_info_id\n    AND metric_name = 'soc'\nGROUP BY 1\nORDER BY 1",
+                        "sql": {
+                          "columns": [],
+                          "groupBy": [],
+                          "limit": 50
+                        }
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "A"
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "datasource": {
+                        "name": "cf1a987bupo1sc"
+                      },
+                      "group": "grafana-postgresql-datasource",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "editorMode": "code",
+                        "format": "time_series",
+                        "rawQuery": true,
+                        "rawSql": "SELECT\n  $__timeGroup(m_time, $__interval) AS time,\n  last(metric_value, m_time) AS \"Voltage (V)\"\nFROM device_metrics_narrow\nWHERE $__timeFilter(m_time)\n    AND device_info_id = $device_info_id\n    AND metric_name = 'vbat'\nGROUP BY 1\nORDER BY 1",
+                        "sql": {
+                          "columns": [],
+                          "groupBy": [],
+                          "limit": 50
+                        }
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "B"
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "datasource": {
+                        "name": "cf1a987bupo1sc"
+                      },
+                      "group": "grafana-postgresql-datasource",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "editorMode": "code",
+                        "format": "time_series",
+                        "rawQuery": true,
+                        "rawSql": "SELECT\n  $__timeGroup(m_time, $__interval) AS time,\n  last(metric_value, m_time) AS \"Charge (W)\"\nFROM device_metrics_narrow\nWHERE $__timeFilter(m_time)\n    AND device_info_id = $device_info_id\n    AND metric_name = 'pcharge'\nGROUP BY 1\nORDER BY 1",
+                        "sql": {
+                          "columns": [],
+                          "groupBy": [],
+                          "limit": 50
+                        }
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "C"
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "datasource": {
+                        "name": "cf1a987bupo1sc"
+                      },
+                      "group": "grafana-postgresql-datasource",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "editorMode": "code",
+                        "format": "time_series",
+                        "rawQuery": true,
+                        "rawSql": "SELECT\n  $__timeGroup(m_time, $__interval) AS time,\n  last(metric_value, m_time) AS \"Discharge (W)\"\nFROM device_metrics_narrow\nWHERE $__timeFilter(m_time)\n    AND device_info_id = $device_info_id\n    AND metric_name = 'pdischarge'\nGROUP BY 1\nORDER BY 1",
+                        "sql": {
+                          "columns": [],
+                          "groupBy": [],
+                          "limit": 50
+                        }
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "D"
+                  }
+                }
+              ],
+              "queryOptions": {
+                "timeFrom": "3d"
+              },
+              "transformations": []
+            }
+          },
+          "description": "",
+          "id": 12,
+          "links": [],
+          "title": "Batteries 3 Day",
+          "vizConfig": {
+            "group": "timeseries",
+            "kind": "VizConfig",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "color": {
+                    "mode": "palette-classic"
+                  },
+                  "custom": {
+                    "axisBorderShow": false,
+                    "axisCenteredZero": false,
+                    "axisColorMode": "text",
+                    "axisLabel": "",
+                    "axisPlacement": "auto",
+                    "barAlignment": 0,
+                    "barWidthFactor": 0.6,
+                    "drawStyle": "line",
+                    "fillOpacity": 0,
+                    "gradientMode": "none",
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "insertNulls": false,
+                    "lineInterpolation": "linear",
+                    "lineWidth": 1,
+                    "pointSize": 5,
+                    "scaleDistribution": {
+                      "type": "linear"
+                    },
+                    "showPoints": "auto",
+                    "showValues": false,
+                    "spanNulls": false,
+                    "stacking": {
+                      "group": "A",
+                      "mode": "none"
+                    },
+                    "thresholdsStyle": {
+                      "mode": "off"
+                    }
+                  },
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "color": "green",
+                        "value": 0
+                      }
+                    ]
+                  },
+                  "unit": "watt"
+                },
+                "overrides": [
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "SOC %"
+                    },
+                    "properties": [
+                      {
+                        "id": "unit",
+                        "value": "percent"
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "Voltage (V)"
+                    },
+                    "properties": [
+                      {
+                        "id": "unit",
+                        "value": "volt"
+                      }
+                    ]
+                  }
+                ]
+              },
+              "options": {
+                "annotations": {
+                  "clustering": -1,
+                  "multiLane": false
+                },
+                "legend": {
+                  "calcs": [
+                    "lastNotNull"
+                  ],
+                  "displayMode": "list",
+                  "enableFacetedFilter": false,
+                  "overflow": "ellipsis",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "single",
+                  "sort": "none"
+                }
+              }
+            },
+            "version": "13.2.4"
+          }
+        }
+      },
+      "panel-13": {
+        "kind": "Panel",
+        "spec": {
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "datasource": {
+                        "name": "cf1a987bupo1sc"
+                      },
+                      "group": "grafana-postgresql-datasource",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "alias": "PV Power",
+                        "dataset": "solar1",
+                        "editorMode": "code",
+                        "format": "table",
+                        "groupBy": [
+                          {
+                            "params": [
+                              "$__interval"
+                            ],
+                            "type": "time"
+                          },
+                          {
+                            "params": [
+                              "null"
+                            ],
+                            "type": "fill"
+                          }
+                        ],
+                        "measurement": "device_data",
+                        "orderByTime": "ASC",
+                        "policy": "default",
+                        "query": "SELECT mean(\"ppv1\") FROM \"device_data\" WHERE $timeFilter GROUP BY time($__interval) fill(null)",
+                        "rawQuery": true,
+                        "rawSql": "SELECT\r\n  $__timeGroup(m_time, $__interval) AS time,\r\n  last(metric_value, m_time) AS \"PV Power\"\r\nFROM device_metrics_narrow\r\nWHERE $__timeFilter(m_time)\r\n    AND device_info_id = $device_info_id\r\n    AND metric_name = 'ppv1'\r\nGROUP BY 1\r\nORDER BY 1",
+                        "resultFormat": "time_series",
+                        "select": [
+                          [
+                            {
+                              "params": [
+                                "ppv1"
+                              ],
+                              "type": "field"
+                            },
+                            {
+                              "params": [],
+                              "type": "mean"
+                            }
+                          ]
+                        ],
+                        "sql": {
+                          "columns": [
+                            {
+                              "parameters": [],
+                              "type": "function"
+                            }
+                          ],
+                          "groupBy": [
+                            {
+                              "property": {
+                                "type": "string"
+                              },
+                              "type": "groupBy"
+                            }
+                          ],
+                          "limit": 50
+                        },
+                        "tags": []
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "A"
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "datasource": {
+                        "name": "cf1a987bupo1sc"
+                      },
+                      "group": "grafana-postgresql-datasource",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "alias": "Export to Grid",
+                        "dataset": "solar1",
+                        "editorMode": "code",
+                        "format": "table",
+                        "groupBy": [
+                          {
+                            "params": [
+                              "$__interval"
+                            ],
+                            "type": "time"
+                          },
+                          {
+                            "params": [
+                              "null"
+                            ],
+                            "type": "fill"
+                          }
+                        ],
+                        "measurement": "device_data",
+                        "orderByTime": "ASC",
+                        "policy": "default",
+                        "rawQuery": true,
+                        "rawSql": "SELECT\r\n  $__timeGroup(m_time, $__interval) AS time,\r\n  last(metric_value, m_time) AS \"Export to Grid\"\r\nFROM device_metrics_narrow\r\nWHERE $__timeFilter(m_time)\r\n    AND device_info_id = $device_info_id\r\n    AND metric_name = 'ptogrid'\r\nGROUP BY 1\r\nORDER BY 1",
+                        "resultFormat": "time_series",
+                        "select": [
+                          [
+                            {
+                              "params": [
+                                "ptogrid"
+                              ],
+                              "type": "field"
+                            },
+                            {
+                              "params": [],
+                              "type": "mean"
+                            }
+                          ]
+                        ],
+                        "sql": {
+                          "columns": [
+                            {
+                              "parameters": [],
+                              "type": "function"
+                            }
+                          ],
+                          "groupBy": [
+                            {
+                              "property": {
+                                "type": "string"
+                              },
+                              "type": "groupBy"
+                            }
+                          ],
+                          "limit": 50
+                        },
+                        "tags": []
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "B"
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "datasource": {
+                        "name": "cf1a987bupo1sc"
+                      },
+                      "group": "grafana-postgresql-datasource",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "alias": "Import from Grid",
+                        "dataset": "solar1",
+                        "editorMode": "code",
+                        "format": "table",
+                        "groupBy": [
+                          {
+                            "params": [
+                              "$__interval"
+                            ],
+                            "type": "time"
+                          },
+                          {
+                            "params": [
+                              "null"
+                            ],
+                            "type": "fill"
+                          }
+                        ],
+                        "measurement": "device_data",
+                        "orderByTime": "ASC",
+                        "policy": "default",
+                        "rawQuery": true,
+                        "rawSql": "SELECT\r\n  $__timeGroup(m_time, $__interval) AS time,\r\n  last(metric_value, m_time) AS \"Import from Grid\"\r\nFROM device_metrics_narrow\r\nWHERE $__timeFilter(m_time)\r\n    AND device_info_id = $device_info_id\r\n    AND metric_name = 'ptouser'\r\nGROUP BY 1\r\nORDER BY 1",
+                        "resultFormat": "time_series",
+                        "select": [
+                          [
+                            {
+                              "params": [
+                                "ptouser"
+                              ],
+                              "type": "field"
+                            },
+                            {
+                              "params": [],
+                              "type": "mean"
+                            }
+                          ]
+                        ],
+                        "sql": {
+                          "columns": [
+                            {
+                              "parameters": [],
+                              "type": "function"
+                            }
+                          ],
+                          "groupBy": [
+                            {
+                              "property": {
+                                "type": "string"
+                              },
+                              "type": "groupBy"
+                            }
+                          ],
+                          "limit": 50
+                        },
+                        "tags": []
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "F"
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "datasource": {
+                        "name": "cf1a987bupo1sc"
+                      },
+                      "group": "grafana-postgresql-datasource",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "alias": "Power to Battery",
+                        "dataset": "solar1",
+                        "editorMode": "code",
+                        "format": "table",
+                        "groupBy": [
+                          {
+                            "params": [
+                              "$__interval"
+                            ],
+                            "type": "time"
+                          },
+                          {
+                            "params": [
+                              "null"
+                            ],
+                            "type": "fill"
+                          }
+                        ],
+                        "measurement": "device_data",
+                        "orderByTime": "ASC",
+                        "policy": "default",
+                        "rawQuery": true,
+                        "rawSql": "SELECT\r\n  $__timeGroup(m_time, $__interval) AS time,\r\n  last(metric_value, m_time) AS \"Power to Battery\"\r\nFROM device_metrics_narrow\r\nWHERE $__timeFilter(m_time)\r\n    AND device_info_id = $device_info_id\r\n    AND metric_name = 'pcharge'\r\nGROUP BY 1\r\nORDER BY 1",
+                        "resultFormat": "time_series",
+                        "select": [
+                          [
+                            {
+                              "params": [
+                                "pcharge"
+                              ],
+                              "type": "field"
+                            },
+                            {
+                              "params": [],
+                              "type": "mean"
+                            }
+                          ]
+                        ],
+                        "sql": {
+                          "columns": [
+                            {
+                              "parameters": [],
+                              "type": "function"
+                            }
+                          ],
+                          "groupBy": [
+                            {
+                              "property": {
+                                "type": "string"
+                              },
+                              "type": "groupBy"
+                            }
+                          ],
+                          "limit": 50
+                        },
+                        "tags": []
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "C"
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "datasource": {
+                        "name": "cf1a987bupo1sc"
+                      },
+                      "group": "grafana-postgresql-datasource",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "alias": "SOC",
+                        "dataset": "solar1",
+                        "editorMode": "code",
+                        "format": "table",
+                        "groupBy": [
+                          {
+                            "params": [
+                              "$__interval"
+                            ],
+                            "type": "time"
+                          },
+                          {
+                            "params": [
+                              "null"
+                            ],
+                            "type": "fill"
+                          }
+                        ],
+                        "measurement": "device_data",
+                        "orderByTime": "ASC",
+                        "policy": "default",
+                        "rawQuery": true,
+                        "rawSql": "SELECT\r\n  $__timeGroup(m_time, $__interval) AS time,\r\n  last(metric_value, m_time) AS \"SOC\"\r\nFROM device_metrics_narrow\r\nWHERE $__timeFilter(m_time)\r\n    AND device_info_id = $device_info_id\r\n    AND metric_name = 'soc'\r\nGROUP BY 1\r\nORDER BY 1",
+                        "resultFormat": "time_series",
+                        "select": [
+                          [
+                            {
+                              "params": [
+                                "soc"
+                              ],
+                              "type": "field"
+                            },
+                            {
+                              "params": [],
+                              "type": "mean"
+                            }
+                          ]
+                        ],
+                        "sql": {
+                          "columns": [
+                            {
+                              "parameters": [],
+                              "type": "function"
+                            }
+                          ],
+                          "groupBy": [
+                            {
+                              "property": {
+                                "type": "string"
+                              },
+                              "type": "groupBy"
+                            }
+                          ],
+                          "limit": 50
+                        },
+                        "tags": []
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "D"
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "datasource": {
+                        "name": "cf1a987bupo1sc"
+                      },
+                      "group": "grafana-postgresql-datasource",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "alias": "Consumption",
+                        "dataset": "solar1",
+                        "editorMode": "code",
+                        "format": "table",
+                        "groupBy": [
+                          {
+                            "params": [
+                              "$__interval"
+                            ],
+                            "type": "time"
+                          },
+                          {
+                            "params": [
+                              "null"
+                            ],
+                            "type": "fill"
+                          }
+                        ],
+                        "measurement": "device_data",
+                        "orderByTime": "ASC",
+                        "policy": "default",
+                        "rawQuery": true,
+                        "rawSql": "SELECT\r\n  $__timeGroup(m_time, $__interval) AS time,\r\n  last(metric_value, m_time) AS \"Consumption\"\r\nFROM device_metrics_narrow\r\nWHERE $__timeFilter(m_time)\r\n    AND device_info_id = $device_info_id\r\n    AND metric_name = 'pload'\r\nGROUP BY 1\r\nORDER BY 1",
+                        "resultFormat": "time_series",
+                        "select": [
+                          [
+                            {
+                              "params": [
+                                "pload"
+                              ],
+                              "type": "field"
+                            },
+                            {
+                              "params": [],
+                              "type": "mean"
+                            }
+                          ]
+                        ],
+                        "sql": {
+                          "columns": [
+                            {
+                              "parameters": [],
+                              "type": "function"
+                            }
+                          ],
+                          "groupBy": [
+                            {
+                              "property": {
+                                "type": "string"
+                              },
+                              "type": "groupBy"
+                            }
+                          ],
+                          "limit": 50
+                        },
+                        "tags": []
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "E"
+                  }
+                }
+              ],
+              "queryOptions": {
+                "timeFrom": "3d"
+              },
+              "transformations": []
+            }
+          },
+          "description": "",
+          "id": 13,
+          "links": [],
+          "title": "PV Power",
+          "vizConfig": {
+            "group": "timeseries",
+            "kind": "VizConfig",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "color": {
+                    "mode": "palette-classic"
+                  },
+                  "custom": {
+                    "axisBorderShow": false,
+                    "axisCenteredZero": false,
+                    "axisColorMode": "text",
+                    "axisLabel": "",
+                    "axisPlacement": "auto",
+                    "barAlignment": 0,
+                    "barWidthFactor": 0.6,
+                    "drawStyle": "line",
+                    "fillOpacity": 0,
+                    "gradientMode": "none",
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "insertNulls": false,
+                    "lineInterpolation": "linear",
+                    "lineWidth": 1,
+                    "pointSize": 5,
+                    "scaleDistribution": {
+                      "type": "linear"
+                    },
+                    "showPoints": "auto",
+                    "showValues": false,
+                    "spanNulls": false,
+                    "stacking": {
+                      "group": "A",
+                      "mode": "none"
+                    },
+                    "thresholdsStyle": {
+                      "mode": "off"
+                    }
+                  },
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "color": "green",
+                        "value": 0
+                      },
+                      {
+                        "color": "red",
+                        "value": 80
+                      }
+                    ]
+                  },
+                  "unit": "watt"
+                },
+                "overrides": [
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "SOC"
+                    },
+                    "properties": [
+                      {
+                        "id": "unit",
+                        "value": "percent"
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "Power to Battery"
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.transform",
+                        "value": "negative-Y"
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "PV Power"
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.lineWidth",
+                        "value": 3
+                      }
+                    ]
+                  }
+                ]
+              },
+              "options": {
+                "annotations": {
+                  "clustering": -1,
+                  "multiLane": false
+                },
+                "legend": {
+                  "calcs": [],
+                  "displayMode": "list",
+                  "enableFacetedFilter": false,
+                  "overflow": "ellipsis",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "single",
+                  "sort": "none"
+                }
+              }
+            },
+            "version": "13.2.4"
           }
         }
       },
@@ -1039,7 +1846,7 @@
                 }
               }
             },
-            "version": "13.2.0"
+            "version": "13.2.4"
           }
         }
       },
@@ -1228,7 +2035,7 @@
                 }
               }
             },
-            "version": "13.2.0"
+            "version": "13.2.4"
           }
         }
       },
@@ -1389,7 +2196,7 @@
                 }
               }
             },
-            "version": "13.2.0"
+            "version": "13.2.4"
           }
         }
       },
@@ -1603,7 +2410,7 @@
                 }
               }
             },
-            "version": "13.2.0"
+            "version": "13.2.4"
           }
         }
       },
@@ -1791,7 +2598,7 @@
                 }
               }
             },
-            "version": "13.2.0"
+            "version": "13.2.4"
           }
         }
       },
@@ -2072,7 +2879,7 @@
                 }
               }
             },
-            "version": "13.2.0"
+            "version": "13.2.4"
           }
         }
       },
@@ -2703,7 +3510,7 @@
                 "textMode": "auto"
               }
             },
-            "version": "13.2.0"
+            "version": "13.2.4"
           }
         }
       },
@@ -3035,7 +3842,7 @@
                 "xTickLabelSpacing": 0
               }
             },
-            "version": "13.2.0"
+            "version": "13.2.4"
           }
         }
       }
@@ -3062,12 +3869,38 @@
             "spec": {
               "element": {
                 "kind": "ElementReference",
+                "name": "panel-13"
+              },
+              "height": 9,
+              "width": 24,
+              "x": 0,
+              "y": 5
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": {
+                "kind": "ElementReference",
+                "name": "panel-12"
+              },
+              "height": 9,
+              "width": 24,
+              "x": 0,
+              "y": 14
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": {
+                "kind": "ElementReference",
                 "name": "panel-9"
               },
               "height": 8,
               "width": 24,
               "x": 0,
-              "y": 5
+              "y": 23
             }
           },
           {
@@ -3080,7 +3913,7 @@
               "height": 8,
               "width": 24,
               "x": 0,
-              "y": 13
+              "y": 31
             }
           },
           {
@@ -3093,7 +3926,7 @@
               "height": 8,
               "width": 12,
               "x": 0,
-              "y": 21
+              "y": 39
             }
           },
           {
@@ -3106,7 +3939,7 @@
               "height": 8,
               "width": 12,
               "x": 12,
-              "y": 21
+              "y": 39
             }
           },
           {
@@ -3119,7 +3952,7 @@
               "height": 8,
               "width": 12,
               "x": 0,
-              "y": 29
+              "y": 47
             }
           },
           {
@@ -3132,7 +3965,7 @@
               "height": 8,
               "width": 12,
               "x": 12,
-              "y": 29
+              "y": 47
             }
           },
           {
@@ -3145,7 +3978,7 @@
               "height": 8,
               "width": 12,
               "x": 0,
-              "y": 37
+              "y": 55
             }
           },
           {
@@ -3158,7 +3991,7 @@
               "height": 8,
               "width": 12,
               "x": 12,
-              "y": 37
+              "y": 55
             }
           },
           {
@@ -3171,7 +4004,7 @@
               "height": 8,
               "width": 12,
               "x": 0,
-              "y": 45
+              "y": 63
             }
           },
           {
@@ -3184,7 +4017,7 @@
               "height": 8,
               "width": 12,
               "x": 12,
-              "y": 45
+              "y": 63
             }
           }
         ]
@@ -3209,7 +4042,7 @@
         "1d"
       ],
       "fiscalYearStartMonth": 0,
-      "from": "2026-07-18T14:45:00.000Z",
+      "from": "2026-09-15T15:07:00.000Z",
       "hideTimepicker": false,
       "timezone": "browser",
       "to": "now"
@@ -3221,8 +4054,8 @@
         "spec": {
           "allowCustomValue": true,
           "current": {
-            "text": "2026-08-26",
-            "value": "1787702400"
+            "text": "2026-10-20",
+            "value": "1792454400"
           },
           "definition": "SELECT \n  TO_CHAR(CURRENT_TIMESTAMP AT TIME ZONE '$__timezone', 'YYYY-MM-DD') AS \"__text\",\n  EXTRACT(epoch FROM date_trunc('day', CURRENT_TIMESTAMP AT TIME ZONE '$__timezone'))::int AS \"__value\";",
           "hide": "dontHide",
@@ -3273,8 +4106,8 @@
         "spec": {
           "allowCustomValue": true,
           "current": {
-            "text": "2026-09-15",
-            "value": "1789508700"
+            "text": "2026-11-16",
+            "value": "1794846655"
           },
           "hide": "dontHide",
           "includeAll": false,
