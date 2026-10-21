@@ -1472,7 +1472,7 @@
           "description": "",
           "id": 13,
           "links": [],
-          "title": "Batteries",
+          "title": "Batteries 3 Days",
           "vizConfig": {
             "group": "timeseries",
             "kind": "VizConfig",
