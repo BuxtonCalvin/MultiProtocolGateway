@@ -1,4 +1,4 @@
-# Minimum versions are set to the latest releases as of 2026-09-28.
+# Minimum versions are set to the latest releases as of 2026-10-20.
 # Floors (>=) force `pip install -r requirements.txt` to upgrade older installs,
 # while still letting pip pick newer releases. Do not use == here.
 pymodbus>=3.16.1              # for Modbus support (used by all modbus transports)
@@ -31,3 +31,13 @@ openpyxl>=3.1.5               # for reading/writing Excel files
 xlrd>=2.0.2                   # for reading/writing Excel files
 requests>=2.34.2              # imported directly (influxdb3_out)
 pyarrow>=26.0.0               # imported directly (influxdb3_out)
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Front-end libraries vendored in the repo (NOT installed by pip -- listed here so every third-party dependency is in
+# one place). Served from classes/WebServer/static/ so the Admin UI has no CDN / internet dependency at runtime.
+#   htmx 1.9.12                 static/js/htmx.min.js, htmx-sse.js, json-enc.js    (BSD-2-Clause)
+#   flatpickr 4.6.13            static/js/flatpickr.min.js, static/css/flatpickr.min.css   (MIT)
+#                               date/time range pickers on Timescale DB -> Metrics Edit; licence: static/js/flatpickr.LICENSE.md
+#                               to upgrade: `npm pack flatpickr@<version>` and copy dist/flatpickr.min.js and
+#                               dist/flatpickr.min.css over the two files; re-skinning lives at the end of static/css/mpg.css
+# ---------------------------------------------------------------------------------------------------------------------

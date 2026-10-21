@@ -35,7 +35,15 @@
     <span class="surface-muted">matching row(s){% if preview.row_count > preview.sample|length %} — showing the most recent {{ preview.sample|length }}{% endif %}.</span>
   </p>
 
+  {% if preview.narrow_row_count is not none %}
+  <p class="text-xs mb-2">
+    <span class="font-semibold surface-title">{{ preview.narrow_row_count }}</span>
+    <span class="surface-muted">matching row(s) in the shared narrow table will also be changed.</span>
+  </p>
+  {% endif %}
+
   {% if preview.sample %}
+  <p class="surface-subtle text-[10px] mb-1">Click a row to set Start and End to that sample's time.</p>
   <table class="w-auto text-xs border-collapse">
     <thead>
       <tr class="mini-table-header uppercase tracking-wide">
@@ -46,8 +54,16 @@
     </thead>
     <tbody>
       {% for s in preview.sample %}
-      <tr class="border-t border-mpg-700/50">
-        <td class="px-2 py-1.5 mini-table-value font-mono whitespace-nowrap">{{ s.m_time }}</td>
+      {#- Clicking a row copies its timestamp (whole seconds) into Start AND End -- see setMetricsEditRangeFromRow() in
+          pages/timescale_metrics_edit.html. The End bound covers the whole second, so this selects exactly this sample
+          (and any other row stamped within the same second). m_time_display is already in the app's machine timezone. #}
+      <tr class="border-t border-mpg-700/50 cursor-pointer hover:bg-mpg-700/20"
+          data-ts="{{ s.m_time_display[:20] }}"
+          title="Click to set Start and End to {{ s.m_time_display[:20] }}"
+          tabindex="0" role="button"
+          onclick="setMetricsEditRangeFromRow(this)"
+          onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setMetricsEditRangeFromRow(this); }">
+        <td class="px-2 py-1.5 mini-table-value font-mono whitespace-nowrap">{{ s.m_time_display }}</td>
         <td class="px-2 py-1.5 mini-table-value font-mono whitespace-nowrap">{{ s.field_name }}</td>
         <td class="px-2 py-1.5 mini-table-value font-mono whitespace-nowrap">{{ s.value if s.value is not none else '—' }}</td>
       </tr>

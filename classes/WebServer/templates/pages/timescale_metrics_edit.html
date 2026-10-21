@@ -71,6 +71,11 @@
 
 {% extends "base.html" %}
 {% block title %}Timescale DB — Metrics Edit — MPG Admin{% endblock %}
+{% block head %}
+{#- Flatpickr (MIT), vendored under /static like htmx so the admin UI keeps working with no internet access. #}
+<link rel="stylesheet" href="/static/css/flatpickr.min.css">
+<script src="/static/js/flatpickr.min.js"></script>
+{% endblock %}
 {% block content %}
 <div class="col-span-12 flex gap-4" style="height: calc(100vh - 56px); overflow: hidden;">
 
@@ -170,20 +175,22 @@
           <label for="metrics-edit-start-time" class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">
             Start
           </label>
-          <input type="datetime-local"
+          <input type="text"
                  id="metrics-edit-start-time"
-                 step="1"
-                 class="theme-input w-full text-xs rounded px-2 py-1.5
+                 placeholder="YYYY-MM-DD  HH:MM:SS"
+                 autocomplete="off" spellcheck="false"
+                 class="theme-input w-full text-xs font-mono rounded px-2 py-1.5
                         focus:outline-none focus:ring-1 focus:ring-accent">
         </div>
         <div>
           <label for="metrics-edit-end-time" class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">
             End
           </label>
-          <input type="datetime-local"
+          <input type="text"
                  id="metrics-edit-end-time"
-                 step="1"
-                 class="theme-input w-full text-xs rounded px-2 py-1.5
+                 placeholder="YYYY-MM-DD  HH:MM:SS"
+                 autocomplete="off" spellcheck="false"
+                 class="theme-input w-full text-xs font-mono rounded px-2 py-1.5
                         focus:outline-none focus:ring-1 focus:ring-accent">
         </div>
       </div>
@@ -219,6 +226,22 @@
         INTEGER column, true/false for BOOLEAN) — an invalid value is rejected immediately.
       </p>
 
+      <!-- Narrow companion: only meaningful for a wide table (shown by selectMetricsEditTable()).
+           The writer stores every sample in BOTH the wide and the narrow table, so a wide-only edit
+           leaves the narrow copy (and the narrow rollups) with the old value. -->
+      <div id="metrics-edit-narrow-wrap" class="hidden">
+        <label class="flex items-start gap-2 text-xs surface-title cursor-pointer">
+          <input type="checkbox" id="metrics-edit-also-narrow" checked class="mt-0.5">
+          <span>
+            Also apply to the shared narrow table
+            <span class="surface-subtle block text-[10px]">
+              Every sample is stored in both the wide and narrow tables. Leave this on so the narrow copy and
+              its rollups match; untick it to change the wide table only.
+            </span>
+          </span>
+        </label>
+      </div>
+
       <!-- Buttons -->
       <div class="flex items-center gap-2">
         <button type="button" class="btn-tertiary text-xs" onclick="runMetricsEditPreview()">
@@ -252,6 +275,67 @@
     tableKind: null, protocolName: null, tableName: null, deviceInfoId: null, deviceLabel: null,
   };
 
+  // ── Date/time range pickers ────────────────────────────────────────────
+  // Display/entry format: "2026-10-17  20:05:55" (two spaces between date and time, whole seconds, 24h).
+  // Typing is first-class (allowInput) -- the pickers are only a convenience. parseDate is custom so a typed
+  // value with ONE space (or several) between date and time is accepted too; Flatpickr's built-in parser
+  // would insist on exactly the two characters in the format string.
+  const METRICS_EDIT_TS_FORMAT = 'Y-m-d  H:i:S';
+  const METRICS_EDIT_TS_RE = /^(\d{4})-(\d{1,2})-(\d{1,2})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$/;
+
+  function parseMetricsEditTimestamp(str) {
+    const m = METRICS_EDIT_TS_RE.exec((str || '').trim());
+    if (!m) { return undefined; }
+    const d = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], m[6] ? +m[6] : 0);
+    // Reject roll-overs such as month 13 or Feb 30.
+    return (d.getFullYear() === +m[1] && d.getMonth() === +m[2] - 1 && d.getDate() === +m[3]) ? d : undefined;
+  }
+
+  // Normalizes the field to the canonical format and returns "YYYY-MM-DD HH:MM:SS" (single space) or null.
+  function readMetricsEditTimestamp(id) {
+    const el = document.getElementById(id);
+    const d = parseMetricsEditTimestamp(el.value);
+    if (!d) { return null; }
+    if (el._flatpickr) { el._flatpickr.setDate(d, false); }
+    const p = function (n) { return String(n).padStart(2, '0'); };
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' +
+           p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+  }
+
+  function initMetricsEditPickers() {
+    if (typeof flatpickr !== 'function') { return; }  // asset failed to load: plain typing still works
+    [['metrics-edit-start-time', 0, 0, 0], ['metrics-edit-end-time', 23, 59, 59]].forEach(function (cfg) {
+      flatpickr('#' + cfg[0], {
+        enableTime: true, enableSeconds: true, time_24hr: true,
+        dateFormat: METRICS_EDIT_TS_FORMAT,
+        allowInput: true, disableMobile: true,
+        parseDate: parseMetricsEditTimestamp,
+        // Picking just a day (no time) means the whole day: 00:00:00 for Start, 23:59:59 for End.
+        defaultHour: cfg[1], defaultMinute: cfg[2], defaultSeconds: cfg[3],
+        onClose: function (_sel, _str, fp) {
+          const d = parseMetricsEditTimestamp(fp.input.value);
+          if (d) { fp.setDate(d, false); }
+        },
+      });
+    });
+  }
+  // Preview-row click: sets Start and End to that row's timestamp (whole seconds). The server treats End as "through the
+  // end of that second", so this selects the sample itself. The preview panel is left in place, so the admin can go
+  // straight on to "Add to Staged Changes" (or click a different row to move the selection).
+  function setMetricsEditRangeFromRow(row) {
+    const ts = row.dataset.ts;                      // "YYYY-MM-DD  HH:MM:SS", machine timezone (same as the pickers)
+    const d = parseMetricsEditTimestamp(ts);
+    if (!d) { return; }
+    ['metrics-edit-start-time', 'metrics-edit-end-time'].forEach(function (id) {
+      const el = document.getElementById(id);
+      if (el._flatpickr) { el._flatpickr.setDate(d, false); } else { el.value = ts; }
+    });
+    showMetricsEditStatus('Start and End set to ' + ts + '.', false);
+  }
+
+  document.addEventListener('DOMContentLoaded', initMetricsEditPickers);
+  if (document.readyState !== 'loading') { initMetricsEditPickers(); }
+
   function selectMetricsEditTable(btn) {
     document.querySelectorAll('.metrics-edit-table-btn').forEach(function (b) {
       b.classList.remove('bg-mpg-600', 'text-white');
@@ -263,6 +347,9 @@
     MetricsEditState.tableName = btn.dataset.tableName;
     MetricsEditState.deviceInfoId = null;
     MetricsEditState.deviceLabel = null;
+
+    // The narrow companion only applies to wide tables (the narrow table IS the narrow table).
+    document.getElementById('metrics-edit-narrow-wrap').classList.toggle('hidden', MetricsEditState.tableKind !== 'wide');
 
     // A new table means the device/field/preview selections below are
     // stale -- clear them rather than leaving a mismatched field list
@@ -336,10 +423,10 @@
       showMetricsEditStatus('Select a field to edit.', true);
       return null;
     }
-    const startTime = document.getElementById('metrics-edit-start-time').value;
-    const endTime = document.getElementById('metrics-edit-end-time').value;
+    const startTime = readMetricsEditTimestamp('metrics-edit-start-time');
+    const endTime = readMetricsEditTimestamp('metrics-edit-end-time');
     if (!startTime || !endTime) {
-      showMetricsEditStatus('Pick a start and end date/time.', true);
+      showMetricsEditStatus('Enter a start and end as YYYY-MM-DD  HH:MM:SS (or pick them from the calendar).', true);
       return null;
     }
     if (endTime < startTime) {
@@ -353,7 +440,11 @@
       return null;
     }
 
+    const alsoNarrow = MetricsEditState.tableKind === 'wide' &&
+      document.getElementById('metrics-edit-also-narrow').checked;
+
     return {
+      also_narrow: alsoNarrow,
       table_kind: MetricsEditState.tableKind,
       protocol_name: MetricsEditState.protocolName,
       table_name: MetricsEditState.tableName,
@@ -384,6 +475,7 @@
           field_names: sel.field_names,
           start_time: sel.start_time,
           end_time: sel.end_time,
+          also_narrow: sel.also_narrow,
         }),
       });
       html = await resp.text();
@@ -410,7 +502,8 @@
       : 'set "' + sel.field_names[0] + '" to "' + sel.new_value + '"';
     const proceed = window.confirm(
       'Stage: ' + summary + ' for ' + (sel.device_label || 'this device') + ' between ' +
-      sel.start_time + ' and ' + sel.end_time + '.\n\nNothing is written to TimescaleDB until you press ' +
+      sel.start_time + ' and ' + sel.end_time + (sel.also_narrow ? ' (wide table + shared narrow table)' : '') +
+      '.\n\nNothing is written to TimescaleDB until you press ' +
       '"Commit All Changes" in the header. Continue?'
     );
     if (!proceed) { return; }

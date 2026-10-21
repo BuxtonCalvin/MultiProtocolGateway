@@ -123,15 +123,6 @@
   --color-input-hover-border: #648cb4;
   --color-tab-active-dark: #38485f;     /* raised tab-active background on dark panels */
 }
-/* Note on --mpg-900: base.html's original palette defined this as
-   rgb(15 25 35), but .theme-input's dark branch, .chrome-input,
-   .ts-description-input, and .diff-table-header had all independently
-   drifted to a second, slightly bluer near-black (rgb(15 23 42)) instead
-   — both were informally labeled "mpg-900" in comments. Merged into one
-   token at rgb(15 23 42) (2026-08, explicit decision): the scrollbar
-   track and the Help/Docs screenshot frame / code block backgrounds
-   shift very slightly bluer as a result; every other --mpg-900 usage was
-   already at this value. */
 
 /* ── Brand mark — the "MPG" text logo in the top nav ─────────────────────
    Flat color only, no glow/gradient (the source logo artwork has those,
@@ -1212,3 +1203,88 @@ aside .theme-input {
 /* stylelint-enable color-no-hex, declaration-property-value-disallowed-list */
 
 } /* end @layer components */
+
+/* ── Flatpickr (Metrics Edit date/time range pickers) ─────────────────────
+   Vendored base stylesheet is flatpickr.min.css; this only re-skins it with
+   the app's tokens. Light mode follows .theme-input (blue-grey, dark text);
+   `.dark` swaps to the same near-black panel as the dark .theme-input.
+   The calendar is appended to <body>, so selectors can't hang off the page
+   wrapper -- hence the plain .flatpickr-calendar prefix. */
+.flatpickr-calendar {
+  background: var(--mpg-50);
+  border: 1px solid var(--color-input-light-border);
+  box-shadow: 0 6px 20px rgb(15 23 42 / 0.25);
+  color: var(--mpg-800);
+  font-size: 12px;
+}
+.flatpickr-calendar.arrowTop:before,  .flatpickr-calendar.arrowTop:after    { border-bottom-color: var(--color-input-light-border); }
+.flatpickr-calendar.arrowBottom:before, .flatpickr-calendar.arrowBottom:after { border-top-color: var(--color-input-light-border); }
+.flatpickr-months .flatpickr-month,
+.flatpickr-current-month .flatpickr-monthDropdown-months,
+.flatpickr-current-month input.cur-year,
+span.flatpickr-weekday,
+.flatpickr-day,
+.flatpickr-time input,
+.flatpickr-time .flatpickr-time-separator,
+.flatpickr-time .flatpickr-am-pm {
+  color: var(--mpg-800);
+  fill: var(--mpg-800);
+}
+.flatpickr-months .flatpickr-prev-month svg,
+.flatpickr-months .flatpickr-next-month svg { fill: var(--mpg-800); }
+.flatpickr-day:hover,
+.flatpickr-day.prevMonthDay:hover,
+.flatpickr-day.nextMonthDay:hover {
+  background: var(--color-input-light-bg);
+  border-color: var(--color-input-light-bg);
+}
+.flatpickr-day.today { border-color: var(--color-primary); }
+.flatpickr-day.selected,
+.flatpickr-day.selected:hover {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #fff;
+}
+.flatpickr-day.flatpickr-disabled,
+.flatpickr-day.prevMonthDay,
+.flatpickr-day.nextMonthDay { color: var(--mpg-400); }
+.flatpickr-time { border-top-color: var(--color-input-light-border); }
+.flatpickr-time input:hover,
+.flatpickr-time input:focus,
+.flatpickr-calendar .numInputWrapper:hover { background: var(--color-input-light-bg); }
+.flatpickr-time input { font-variant-numeric: tabular-nums; }
+
+.dark .flatpickr-calendar,
+aside .flatpickr-calendar {
+  background: var(--mpg-900);
+  border-color: var(--mpg-600);
+  color: var(--mpg-100);
+}
+.dark .flatpickr-calendar.arrowTop:before,  .dark .flatpickr-calendar.arrowTop:after    { border-bottom-color: var(--mpg-600); }
+.dark .flatpickr-calendar.arrowBottom:before, .dark .flatpickr-calendar.arrowBottom:after { border-top-color: var(--mpg-600); }
+.dark .flatpickr-months .flatpickr-month,
+.dark .flatpickr-current-month .flatpickr-monthDropdown-months,
+.dark .flatpickr-current-month input.cur-year,
+.dark span.flatpickr-weekday,
+.dark .flatpickr-day,
+.dark .flatpickr-time input,
+.dark .flatpickr-time .flatpickr-time-separator {
+  color: var(--mpg-100);
+  fill: var(--mpg-100);
+}
+.dark .flatpickr-current-month .flatpickr-monthDropdown-months { background: var(--mpg-900); }
+.dark .flatpickr-months .flatpickr-prev-month svg,
+.dark .flatpickr-months .flatpickr-next-month svg { fill: var(--mpg-100); }
+.dark .flatpickr-day:hover,
+.dark .flatpickr-day.prevMonthDay:hover,
+.dark .flatpickr-day.nextMonthDay:hover {
+  background: var(--mpg-700);
+  border-color: var(--mpg-700);
+}
+.dark .flatpickr-day.flatpickr-disabled,
+.dark .flatpickr-day.prevMonthDay,
+.dark .flatpickr-day.nextMonthDay { color: var(--mpg-500); }
+.dark .flatpickr-time { border-top-color: var(--mpg-600); }
+.dark .flatpickr-time input:hover,
+.dark .flatpickr-time input:focus,
+.dark .flatpickr-calendar .numInputWrapper:hover { background: var(--mpg-700); }

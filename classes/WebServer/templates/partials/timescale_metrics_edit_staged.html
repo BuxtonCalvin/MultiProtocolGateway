@@ -23,7 +23,7 @@
   Staged Changes", and after removing one entry. Context: staged_edits —
   a list of StagedMetricEdit dicts (services/bridge_service.py):
   {edit_id, table_kind, protocol_name, table_name, device_info_id,
-  device_label, field_names, start_time, end_time, action, new_value}.
+  device_label, field_names, start_time, end_time, action, new_value, also_narrow}.
 
   Nothing here is written to TimescaleDB until the admin presses the
   existing header "Commit All Changes" button, which runs
@@ -61,11 +61,14 @@
     <tbody>
       {% for e in staged_edits %}
       <tr class="border-t border-mpg-700/50 bg-dirty/5">
-        <td class="px-2 py-1.5 font-mono mini-table-value whitespace-nowrap">{{ e.table_name }}</td>
+        <td class="px-2 py-1.5 font-mono mini-table-value whitespace-nowrap">
+          {{ e.table_name }}
+          {% if e.also_narrow %}<span class="block text-[10px] surface-muted" title="Also applied to device_metrics_narrow at commit">+ device_metrics_narrow</span>{% endif %}
+        </td>
         <td class="px-2 py-1.5 mini-table-value whitespace-nowrap">{{ e.device_label }}</td>
         <td class="px-2 py-1.5 font-mono mini-table-value">{{ e.field_names|join(', ') }}</td>
         <td class="px-2 py-1.5 mini-table-value whitespace-nowrap">
-          {{ e.start_time.strftime('%Y-%m-%d %H:%M') }} → {{ e.end_time.strftime('%Y-%m-%d %H:%M') }}
+          {{ e.start_time.strftime('%Y-%m-%d  %H:%M:%S') }} → {{ e.end_time.strftime('%Y-%m-%d  %H:%M:%S') }}
         </td>
         <td class="px-2 py-1.5 whitespace-nowrap">
           {% if e.action == 'delete' %}

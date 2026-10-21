@@ -176,7 +176,7 @@ def do_commit(request: Request, db: Session = Depends(get_session))-> CommitResp
         )
         if metric_edit_results:
             timescale_summary["timescale_metric_rows_edited"] = sum(
-                r["rows_affected"] for r in metric_edit_results
+                r["rows_affected"] + r["narrow_rows_affected"] for r in metric_edit_results
             )
             timescale_summary["timescale_metric_edits_applied"] = len(metric_edit_results)
 

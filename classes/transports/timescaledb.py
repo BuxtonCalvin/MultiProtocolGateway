@@ -149,14 +149,6 @@ else:
     from typing_extensions import NotRequired
 
 
-# Result shapes for the web UI's admin/diagnostic panels (consumed by
-# classes/WebServer/services/bridge_service.py) are declared directly above the
-# class that builds them: HyperTableManager, RollupManager and
-# BridgeAdminManager. Values read out of a SQL result row are Any as far as the
-# type checker is concerned (SQLAlchemy Row access), so for those fields the
-# declared type is the column's observed type, not something pyright verifies.
-
-
 # ---------------------------------------------------------------------------------------------------------------------
 # SQL safety helpers shared by HyperTableManager and RollupManager
 # ---------------------------------------------------------------------------------------------------------------------
@@ -2679,7 +2671,7 @@ class timescaledb(transport_base):
                     clean_key, field_type = mapping_info
                     field_type_upper: str = field_type.upper()
                 else:
-                    clean_key = k
+                    clean_key: str = k
                     field_type_upper = "UNKNOWN"
 
                 # 2. Prepare Narrow Data
@@ -2799,7 +2791,7 @@ class timescaledb(transport_base):
 
         # Comparison Logic (Numeric + Strict)
         for key, val in row.items():
-            prev = state["last_row"].get(key)
+            prev: int | float | str | None = state["last_row"].get(key)
             if isinstance(val, (int, float)) and isinstance(prev, (int, float)):
                 if not math.isclose(val, prev, rel_tol=1e-4, abs_tol=1e-6):
                     return False
@@ -2807,7 +2799,7 @@ class timescaledb(transport_base):
                 return False
 
         # Data is unchanged; check elapsed time
-        elapsed = timestamp - state["start_ts"]
+        elapsed: timedelta = timestamp - state["start_ts"]
         return elapsed > timedelta(seconds=int(self.stale_data_timeout))
 
     def _commit_transport_state(self, transport_id: str, row: dict[str, int | float | str], timestamp: datetime, is_stale: bool) -> None:
@@ -2849,7 +2841,7 @@ class timescaledb(transport_base):
             # max_stale_attempts cap and the retry_delay_mins throttle, so calling it repeatedly is what lets retries happen.
             # last_event_ts must be left alone here (None on the first stale batch) or the throttle would swallow the first request.
             state["is_stale"] = True
-            elapsed = timestamp - state["start_ts"]
+            elapsed: timedelta = timestamp - state["start_ts"]
             self._handle_stale_event(transport_id, timestamp, elapsed)
 
     def _cleanup_orphaned_locks(self) -> None:
@@ -3103,8 +3095,6 @@ def _flush_payload_from_json(payload_str: str, m_time: datetime) -> FlushPayload
         "protocol": protocol,
         "wide_table_name": wide_table_name,
     }
-
-
 class BacklogManager:
     """
     Manages persistent backlog storage and replay for TimescaleDB writes.
@@ -8436,6 +8426,9 @@ class MetricEditPreview:
     """Read-only preview of what a BridgeAdminManager.edit_metric_values() call would affect, before it's staged."""
     row_count: int
     sample: list[MetricValueSample]
+    # Only set when preview_metric_edit() was asked to include the narrow companion (also_narrow=True on a wide
+    # table): how many device_metrics_narrow rows the same device/field/range would touch.
+    narrow_row_count: int | None = None
 
 
 @dataclass
@@ -9292,6 +9285,7 @@ class BridgeAdminManager:
         start_time: datetime,
         end_time: datetime,
         sample_limit: int = 25,
+        also_narrow: bool = False,
         ) -> MetricEditPreview:
         """
         Read-only count + small sample of what an edit_metric_values()
@@ -9312,6 +9306,7 @@ class BridgeAdminManager:
 
         table_name, protocol_id = self._resolve_metric_edit_table(table_kind, protocol_name)
         sample: list[MetricValueSample] = []
+        narrow_row_count: int | None = None
 
         with self.SessionFactory() as session:
             if table_kind == "narrow":
@@ -9377,7 +9372,21 @@ class BridgeAdminManager:
                     for i, col in enumerate(to_read, start=1):
                         sample.append(MetricValueSample(m_time=m_time, field_name=col, value=r[i]))
 
-        return MetricEditPreview(row_count=int(row_count), sample=sample)
+                if also_narrow:
+                    # The writer stores every sample in BOTH tables (see _flush_batch_narrow), so a wide-table edit
+                    # alone leaves the narrow copy -- and the narrow rollups -- untouched. Count what the companion
+                    # narrow edit would hit, using the same metric names the wide columns were written under.
+                    narrow_row_count = int(session.execute(
+                        text("""
+                            SELECT COUNT(*) FROM device_metrics_narrow
+                            WHERE device_info_id = :did
+                              AND metric_name = ANY(:names)
+                              AND m_time BETWEEN :start AND :end
+                        """),
+                        {"did": device_info_id, "names": to_read, "start": start_time, "end": end_time},
+                    ).scalar_one())
+
+        return MetricEditPreview(row_count=int(row_count), sample=sample, narrow_row_count=narrow_row_count)
 
     def validate_metric_edit_value(
         self,
@@ -9387,6 +9396,7 @@ class BridgeAdminManager:
         field_names: list[str],
         action: str,
         new_value: float | str | None,
+        also_narrow: bool = False,
         ) -> None:
         """
         Read-only type-check of a "set_value" edit's replacement value
@@ -9434,6 +9444,9 @@ class BridgeAdminManager:
                 raise ValueError("None of the requested fields exist on this wide table.")
             for col in to_check:
                 _coerce_value_for_data_type(new_value, existing_columns[col][1])
+            if also_narrow:
+                # Raises ValueError if the selected columns would need different narrow representations.
+                self.narrow_companion_value(protocol_name, to_check, new_value)
         else:
             kinds: dict[str, str] = self._infer_narrow_field_kinds(table_name, device_info_id, requested)
             distinct_kinds: set[str] = set(kinds.values())
@@ -9450,6 +9463,51 @@ class BridgeAdminManager:
                     msg = f"'{new_value}' is not a valid number for the selected metric(s)."
                     raise ValueError(msg) from None
 
+    def narrow_companion_value(
+        self, protocol_name: str | None, field_names: list[str], new_value: float | str | None
+        ) -> float | str:
+        """
+        Converts a wide-table "set_value" replacement into the form the narrow table stores for the same metric, so
+        a wide edit and its narrow companion write the same logical value.
+
+        _flush_batch_narrow() stores bool as 1.0/0.0, every other number as float, and everything else as text in
+        metric_ascii -- unlike the wide table, there's no declared column type, so this derives it from the wide
+        column's metric_catalog.data_type (via _coerce_value_for_data_type) rather than from whatever the narrow rows
+        happen to contain (_infer_narrow_field_kinds would call a metric "text" just because a description was
+        folded into its metric_ascii).
+
+        Raises:
+            ValueError: new_value is None, doesn't fit a field's declared type, none of field_names exist on the
+                        wide table, or the selected fields map to different narrow representations.
+        """
+        if new_value is None:
+            raise ValueError("new_value is required when action is 'set_value'.")
+        _table_name, protocol_id = self._resolve_metric_edit_table("wide", protocol_name)
+        existing_columns: dict[str, tuple[int, str]] = self._load_existing_wide_columns(protocol_id or -1)
+        present: list[str] = [f for f in field_names if f in existing_columns]
+        if not present:
+            raise ValueError("None of the requested fields exist on this wide table.")
+
+        converted: dict[str, float | str] = {}
+        for col in present:
+            coerced: float | str | bool = _coerce_value_for_data_type(new_value, existing_columns[col][1])
+            if isinstance(coerced, bool):
+                converted[col] = 1.0 if coerced else 0.0
+            elif isinstance(coerced, (int, float)):
+                converted[col] = float(coerced)
+            else:
+                converted[col] = str(coerced)
+
+        distinct: set[float | str] = set(converted.values())
+        kinds: set[str] = {"text" if isinstance(v, str) else "numeric" for v in distinct}
+        if len(distinct) > 1 or len(kinds) > 1:
+            msg: str = (
+                f"Selected fields need different values in the narrow table ({converted}); "
+                "edit them in separate operations."
+            )
+            raise ValueError(msg)
+        return next(iter(distinct))
+
     # -------------------------
     # Edit / delete
     # -------------------------
@@ -9464,6 +9522,7 @@ class BridgeAdminManager:
         end_time: datetime,
         action: Literal["delete", "set_value"],
         new_value: float | str | None = None,
+        narrow_kind: Literal["numeric", "text"] | None = None,
         ) -> MetricEditResult:
         """
         Edits or deletes existing metric VALUES for one device over
@@ -9520,6 +9579,11 @@ class BridgeAdminManager:
             action: "delete" or "set_value".
             new_value: required when action is "set_value"; ignored for
                         "delete".
+            narrow_kind: narrow table only. Forces "numeric"/"text" handling of
+                        new_value instead of inferring it from the rows already
+                        stored -- used by the wide-edit "also apply to narrow"
+                        companion, where the kind comes from the wide column's
+                        declared type (see narrow_companion_value()).
 
         Returns:
             MetricEditResult summarizing what happened.
@@ -9591,7 +9655,10 @@ class BridgeAdminManager:
         else:
             to_edit = requested
             if action == "set_value":
-                kinds: dict[str, str] = self._infer_narrow_field_kinds(table_name, device_info_id, to_edit)
+                kinds: dict[str, str] = (
+                    dict.fromkeys(to_edit, narrow_kind) if narrow_kind is not None
+                    else self._infer_narrow_field_kinds(table_name, device_info_id, to_edit)
+                )
                 distinct_kinds: set[str] = set(kinds.values())
                 if len(distinct_kinds) > 1:
                     msg = (

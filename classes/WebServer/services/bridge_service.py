@@ -79,6 +79,8 @@ from typing import TYPE_CHECKING, Generator, Iterable, Literal, cast
 import requests
 from starlette.datastructures import State
 
+from classes.transports.timescaledb import timescaledb
+
 from ...protocol_settings import Registry_Type, registry_map_entry
 from ...transports.transport_base import (
     BridgeHealthSnapshot,
@@ -203,6 +205,7 @@ class BackgroundJobRow(TypedDict):
 class MetricPreviewSample(TypedDict):
     """One matched row in preview_metric_edit()'s sample (m_time is ISO-8601)."""
     m_time: str
+    m_time_display: str   # "YYYY-MM-DD  HH:MM:SS.ffffff" -- same look as the range picker, sub-second kept to tell rows apart
     field_name: str
     value: float | str | None
 
@@ -210,6 +213,7 @@ class MetricPreviewSample(TypedDict):
 class MetricPreview(TypedDict):
     row_count: int
     sample: list[MetricPreviewSample]
+    narrow_row_count: int | None   # only set when "also apply to narrow" was requested for a wide table
 
 
 # -- TimescaleDB: Rebuild screens ----------------------------------------
@@ -319,6 +323,9 @@ class MetricEditCommitResult(TypedDict):
     action: str
     rows_affected: int
     rollups_refreshed: bool
+    also_narrow: bool              # True when a companion narrow-table edit was applied in the same commit
+    narrow_rows_affected: int      # rows the companion narrow edit touched (0 when also_narrow is False)
+    narrow_rollups_refreshed: bool
 
 
 # -- InfluxDB v1/v3 --------------------------------------------------------
@@ -593,7 +600,7 @@ def _active_metric_names_for_protocol(gateway: "Protocol_Gateway | None", protoc
 
 
 def _field_manager(gateway: "Protocol_Gateway | None") -> "BridgeAdminManager":
-    bridge = get_timescale_bridge(gateway)
+    bridge: timescaledb | None = get_timescale_bridge(gateway)
     if bridge is None:
         raise RuntimeError("No TimescaleDB bridge is attached to this gateway.")
     if _BridgeAdminManagerImpl is None:
@@ -728,21 +735,42 @@ def preview_metric_edit(
     field_names: list[str],
     start_time: datetime,
     end_time: datetime,
+    also_narrow: bool = False,
     ) -> MetricPreview:
     """
     Returns {row_count, sample: [{m_time, field_name, value}, ...]} for the
     Metrics Edit "Preview" step — a read-only look at what a matching
-    edit_metric_values() call would affect, before it's staged.
+    edit_metric_values() call would affect, before it's staged. With
+    also_narrow (wide tables only) it also reports how many
+    device_metrics_narrow rows the companion edit would touch.
     """
+    # Imported here, not at module level, to keep this service's import graph as it was.
+    from zoneinfo import ZoneInfo
+
+    from ...transports.timescaledb import get_machine_timezone
+
     mgr: BridgeAdminManager = _field_manager(gateway)
     preview: MetricEditPreview = mgr.preview_metric_edit(
-        table_kind, protocol_name, device_info_id, field_names, start_time, end_time
+        table_kind, protocol_name, device_info_id, field_names, start_time, end_time,
+        also_narrow=also_narrow and table_kind == "wide",
     )
+
+    # m_time_display is what the admin sees AND what a click on a preview row copies into the Start/End pickers, which
+    # the router reads in the app's machine timezone (routers/timescale._parse_local_datetime) -- so show the row in
+    # that same zone, not whatever zone the database session happens to hand back.
+    machine_tz: ZoneInfo = ZoneInfo(get_machine_timezone())
+
+    def _display(m_time: datetime) -> str:
+        local: datetime = m_time.astimezone(machine_tz) if m_time.tzinfo is not None else m_time
+        return local.strftime("%Y-%m-%d  %H:%M:%S.%f")
+
     return {
         "row_count": preview.row_count,
+        "narrow_row_count": preview.narrow_row_count,
         "sample": [
             {
                 "m_time": s.m_time.isoformat(),
+                "m_time_display": _display(s.m_time),
                 "field_name": s.field_name,
                 "value": s.value,
             }
@@ -1496,6 +1524,7 @@ class StagedMetricEdit(TypedDict):
     end_time: datetime
     action: str                    # "delete" or "set_value"
     new_value: float | str | None
+    also_narrow: bool              # wide edits only: also apply the same edit to device_metrics_narrow at commit
 
 
 def _metric_edit_store(app_state: State) -> dict[str, StagedMetricEdit]:
@@ -1526,6 +1555,7 @@ def stage_metric_edit(
     end_time: datetime,
     action: str,
     new_value: float | str | None = None,
+    also_narrow: bool = False,
     ) -> str:
     """
     Stages one Metrics Edit request. Called from the "Add to Staged
@@ -1544,8 +1574,13 @@ def stage_metric_edit(
     Returns the generated edit_id, so the caller can render it into the
     staged-changes list with a matching "remove" control.
     """
+    # also_narrow only means something for a wide table -- the narrow table IS the narrow table.
+    also_narrow = bool(also_narrow) and table_kind == "wide"
+
     mgr: BridgeAdminManager = _field_manager(gateway)
-    mgr.validate_metric_edit_value(table_kind, protocol_name, device_info_id, field_names, action, new_value)
+    mgr.validate_metric_edit_value(
+        table_kind, protocol_name, device_info_id, field_names, action, new_value, also_narrow=also_narrow
+    )
 
     edit_id: str = uuid.uuid4().hex
     with _metric_edit_lock(app_state):
@@ -1561,6 +1596,7 @@ def stage_metric_edit(
             "end_time": end_time,
             "action": action,
             "new_value": new_value,
+            "also_narrow": also_narrow,
         }
     return edit_id
 
@@ -1603,6 +1639,15 @@ def commit_staged_metric_edits(gateway: "Protocol_Gateway | None", app_state: St
     commit_staged_deletions() (Delete Columns) — independent staging
     stores, both applied on the same commit.
 
+    An entry staged with also_narrow (wide tables only) runs as two steps:
+    the wide-table edit, then the same device/field/range edit against
+    device_metrics_narrow (which also refreshes the narrow rollup views).
+    The writer stores every sample in both tables, so editing only one
+    leaves the other -- and its rollups -- serving the old value. The two
+    steps are not one DB transaction; if the narrow step fails the entry
+    stays staged, and retrying re-runs both, which is safe because
+    "delete" and "set_value" are idempotent.
+
     Each entry that completes successfully is cleared from staging
     immediately, so a failure partway through does not re-offer
     already-applied edits for retry on the next commit attempt. Any
@@ -1638,6 +1683,26 @@ def commit_staged_metric_edits(gateway: "Protocol_Gateway | None", app_state: St
                     action=entry["action"],  # type: ignore[arg-type]
                     new_value=entry["new_value"],
                 )
+                narrow_result: MetricEditResult | None = None
+                if entry.get("also_narrow") and entry["table_kind"] == "wide":
+                    narrow_kind: Literal["numeric", "text"] | None = None
+                    narrow_value: float | str | None = None
+                    if entry["action"] == "set_value":
+                        narrow_value = mgr.narrow_companion_value(
+                            entry["protocol_name"], entry["field_names"], entry["new_value"]
+                        )
+                        narrow_kind = "text" if isinstance(narrow_value, str) else "numeric"
+                    narrow_result = mgr.edit_metric_values(
+                        table_kind="narrow",
+                        protocol_name=None,
+                        device_info_id=entry["device_info_id"],
+                        field_names=entry["field_names"],
+                        start_time=entry["start_time"],
+                        end_time=entry["end_time"],
+                        action=entry["action"],  # type: ignore[arg-type]
+                        new_value=narrow_value,
+                        narrow_kind=narrow_kind,
+                    )
             except Exception:
                 _log.error(
                     "commit_staged_metric_edits: failed applying edit_id=%s (%s on %s, device=%s) — "
@@ -1657,11 +1722,16 @@ def commit_staged_metric_edits(gateway: "Protocol_Gateway | None", app_state: St
                     "action": result.action,
                     "rows_affected": result.rows_affected,
                     "rollups_refreshed": result.rollups_refreshed,
+                    "also_narrow": narrow_result is not None,
+                    "narrow_rows_affected": narrow_result.rows_affected if narrow_result else 0,
+                    "narrow_rollups_refreshed": narrow_result.rollups_refreshed if narrow_result else True,
                 })
 
     _log.info(
-        "commit_staged_metric_edits: committed %d edit(s), %d row(s) total.",
-        len(results), sum(r["rows_affected"] for r in results),
+        "commit_staged_metric_edits: committed %d edit(s), %d row(s) total (%d in the narrow companion).",
+        len(results),
+        sum(r["rows_affected"] + r["narrow_rows_affected"] for r in results),
+        sum(r["narrow_rows_affected"] for r in results),
     )
     return results
 

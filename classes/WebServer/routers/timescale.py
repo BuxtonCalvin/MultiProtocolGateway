@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime
 from typing import TYPE_CHECKING, Iterable, Iterator
 from zoneinfo import ZoneInfo
@@ -278,19 +279,32 @@ def stage_field(
 # so there's a "stage" and "unstage by id" rather than a per-field toggle.
 # ---------------------------------------------------------------------------
 
-def _parse_local_datetime(value: str) -> datetime:
+def _parse_local_datetime(value: str, end_of_second: bool = False) -> datetime:
     """
-    Parses a <input type="datetime-local"> value ("YYYY-MM-DDTHH:MM[:SS]")
-    from the Metrics Edit screen's date/time range picker into a tz-aware
-    datetime, localized to the app's configured machine timezone
-    (get_machine_timezone()) — the same timezone _now_tz() stamps every
-    row's m_time with when it's written, so a range picked in the browser
-    lines up with what's actually stored.
+    Parses a date/time value from the Metrics Edit screen's range picker
+    into a tz-aware datetime, localized to the app's configured machine
+    timezone (get_machine_timezone()) — the same timezone _now_tz() stamps
+    every row's m_time with when it's written, so a range picked in the
+    browser lines up with what's actually stored.
+
+    Accepts the picker's display format ("YYYY-MM-DD  HH:MM:SS", any run of
+    whitespace between date and time) as well as the ISO forms
+    ("YYYY-MM-DDTHH:MM[:SS]") an API client or the older datetime-local
+    input would send.
+
+    end_of_second: the picker only has whole-second precision but m_time is
+    stored to the microsecond, so an END of "20:05:49" would otherwise miss
+    a row stamped 20:05:49.810365. Passing True moves the value to the last
+    microsecond of that second (…:49.999999), making the end bound mean
+    "through the end of the second shown". Start bounds are left as-is.
     """
+    iso: str = re.sub(r"\s+", "T", value.strip())
     try:
-        naive: datetime = datetime.fromisoformat(value)
+        naive: datetime = datetime.fromisoformat(iso)
     except ValueError:
         raise HTTPException(status_code=400, detail=f"'{value}' is not a valid date/time.")
+    if end_of_second:
+        naive = naive.replace(microsecond=999999)
     return naive.replace(tzinfo=ZoneInfo(get_machine_timezone()))
 
 
@@ -389,8 +403,9 @@ class MetricEditPreviewRequest(BaseModel):
     protocol_name: str | None = None
     device_info_id: int
     field_names: list[str]
-    start_time: str    # <input type="datetime-local"> value
+    start_time: str    # "YYYY-MM-DD  HH:MM:SS" (see _parse_local_datetime)
     end_time: str
+    also_narrow: bool = False   # wide tables only: also count the matching device_metrics_narrow rows
 
 
 @router.post("/api/timescale/metrics-edit/preview", response_class=HTMLResponse, response_model=None)
@@ -410,7 +425,7 @@ def timescale_metrics_edit_preview(payload: MetricEditPreviewRequest, request: R
         raise HTTPException(status_code=400, detail="Select at least one field to preview.")
 
     start_dt: datetime = _parse_local_datetime(payload.start_time)
-    end_dt: datetime = _parse_local_datetime(payload.end_time)
+    end_dt: datetime = _parse_local_datetime(payload.end_time, end_of_second=True)
     if end_dt < start_dt:
         raise HTTPException(status_code=400, detail="End time must not be before start time.")
 
@@ -423,6 +438,7 @@ def timescale_metrics_edit_preview(payload: MetricEditPreviewRequest, request: R
             payload.field_names,
             start_dt,
             end_dt,
+            also_narrow=payload.also_narrow,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -443,10 +459,11 @@ class MetricEditStageRequest(BaseModel):
     device_info_id: int
     device_label: str
     field_names: list[str]
-    start_time: str    # <input type="datetime-local"> value
+    start_time: str    # "YYYY-MM-DD  HH:MM:SS" (see _parse_local_datetime)
     end_time: str
     action: str        # "delete" or "set_value"
     new_value: str | None = None
+    also_narrow: bool = False   # wide tables only: at commit, also apply this edit to device_metrics_narrow
 
 
 @router.post("/api/timescale/metrics-edit/stage", response_class=HTMLResponse, response_model=None)
@@ -464,7 +481,12 @@ def timescale_metrics_edit_stage(payload: MetricEditStageRequest, request: Reque
     Returns the refreshed staged-changes list partial, for an HTMX swap.
     """
     _require_bridge(request)
-    _require_protocols_linked(request, [payload.protocol_name if payload.table_kind == "wide" else None])
+    # The narrow companion edit also writes the shared narrow table, so it must be linked as well.
+    _require_protocols_linked(
+        request,
+        [payload.protocol_name, None] if (payload.table_kind == "wide" and payload.also_narrow)
+        else [payload.protocol_name if payload.table_kind == "wide" else None],
+    )
     gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
 
     if not payload.field_names:
@@ -475,7 +497,7 @@ def timescale_metrics_edit_stage(payload: MetricEditStageRequest, request: Reque
         raise HTTPException(status_code=400, detail="Enter a replacement value.")
 
     start_dt: datetime = _parse_local_datetime(payload.start_time)
-    end_dt: datetime = _parse_local_datetime(payload.end_time)
+    end_dt: datetime = _parse_local_datetime(payload.end_time, end_of_second=True)
     if end_dt < start_dt:
         raise HTTPException(status_code=400, detail="End time must not be before start time.")
 
@@ -493,6 +515,7 @@ def timescale_metrics_edit_stage(payload: MetricEditStageRequest, request: Reque
             end_time=end_dt,
             action=payload.action,
             new_value=payload.new_value,
+            also_narrow=payload.also_narrow,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
