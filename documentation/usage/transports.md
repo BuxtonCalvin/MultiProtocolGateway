@@ -9,11 +9,13 @@ A **transport** is MPG's fundamental unit of configuration. Every device you rea
 - [Universal Base Settings](#universal-base-settings)
 - [Write Safety System](#write-safety-system)
 - [Custom Transports](#custom-transports)
+  - [Writing a New Serial Transport](#writing-a-new-serial-transport)
 - [Scraper Transports](#scraper-transports)
   - [Modbus RTU](#modbus-rtu)
   - [Modbus TCP](#modbus-tcp)
   - [Modbus TLS](#modbus-tls)
   - [Modbus UDP](#modbus-udp)
+  - [Serial Pylon](#serial-pylon)
   - [CAN Bus](#can-bus)
 - [Bridge Transports](#bridge-transports)
   - [MQTT](#mqtt)
@@ -135,6 +137,42 @@ transport = mqtt.custom
 ```
 
 Files ending in `.custom.py` are ignored by git and will never be touched by `git pull` or package upgrades.
+
+### Writing a New Serial Transport
+
+Scraper transports for command/response protocols over a serial port (RS485, RS232, USB) should subclass `serial_base` (`classes/transports/serial_base.py`), the serial counterpart of `modbus_base`. It provides everything that is not specific to one wire format:
+
+- the `port`, `baudrate` and `address` settings (with `baud` and `unit_id` accepted as aliases), including hardware-ID port addressing
+- one serial client per port, shared by every config section on that port, and a per-port lock so a request and its response are never interleaved with another device's
+- a `scrape_target` (port, protocol and address), so the gateway schedules the transport in every `read_mode` and consolidates duplicate sections for the same device. A scraper without a `scrape_target` is treated as a bridge and is never polled
+- `read_data()` for sequential and concurrent modes, and `read_data_iter()` for interleaved mode, which yields after every command and takes the gateway's bus lock only for one exchange at a time
+- cycle completeness bookkeeping, so a poll where some commands got no answer is not written by bridges that require complete cycles
+
+A subclass supplies the wire format:
+
+| Member | Purpose |
+| --- | --- |
+| `SOI`, `EOI` | Frame start and end markers (required). |
+| `build_frame(command, info)` | Build a request frame without the markers. |
+| `decode_frame(raw_frame)` | Validate and split a response; return `None` if it is invalid. |
+| `_read_command(command)` | Send one registry command and return its payload as raw bytes for the protocol map, or `None`. |
+| `_handshake()` | Optional. Negotiate a version or read a device name on connect; return `True` if the device answered. |
+| `_serial_parameters()` | Optional. Override for anything other than 8N1. |
+| `MIN_ADDRESS`, `MAX_ADDRESS` | Optional. Valid range for `address` (default 0-255). |
+
+`serial_pylon` is the reference implementation. Two things must be done by hand because the web UI reads each transport file with `ast` and does not follow Python inheritance:
+
+1. Declare a literal `transport_type = "scraper"` in the subclass itself. An inherited value is not seen, and the UI would classify the transport as a general section.
+2. Add an entry to `classes/WebServer/transport_defaults.json` that extends the shared serial template, plus a description for each new setting in `classes/WebServer/setting_descriptions.json`:
+
+```json
+"serial_jbd": {
+  "$extends": "_serial_base",
+  "my_new_setting": "false"
+}
+```
+
+`pytests/test_serial_transport_webui.py` fails for any `serial_base` subclass that skips either step.
 
 ---
 
@@ -264,6 +302,41 @@ bridge = transport.mqtt
 
 ---
 
+### Serial Pylon
+
+Reads a Pylontech (or Pylon-compatible) battery over RS485 using the Pylon ASCII command protocol. Built on `serial_base`; see [Pylon Batteries](../devices/Pylon.md) for wiring, addressing and troubleshooting.
+
+```ini
+[transport.pylon_battery_1]
+transport = serial_pylon
+protocol_version = pylon_rs485_v3.3
+port = /dev/ttyUSB0
+baudrate = 9600
+address = 2
+read_interval = 15
+bridge = transport.mqtt
+
+[transport.pylon_battery_2]
+transport = serial_pylon
+protocol_version = pylon_rs485_v3.3
+port = /dev/ttyUSB0
+baudrate = 9600
+address = 3
+read_interval = 15
+bridge = transport.mqtt
+```
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `port` | `/dev/ttyUSB0` | Serial port path. Hardware-ID addressing works as described under [Modbus RTU](#modbus-rtu). |
+| `baudrate` | `9600` | Baud rate. Must match the battery's DIP setting (`9600` or `115200`). Also accepted as `baud`. |
+| `address` | `0` | Battery address, 0-255 (Pylon batteries usually start at 2). Also accepted as `unit_id`. |
+| `ignore_checksum_errors` | `false` | Decode responses that fail the Pylon checksum instead of discarding them. Leave off unless the firmware is known to send bad checksums. |
+
+Several batteries can share one port: add one section per address with the same `port` and `baudrate`. Each section is a separate device. On connect MPG asks the battery for its protocol version and uses it in later requests. Commands that get no valid response are skipped for that cycle, and bridges that require complete cycles will not write that poll.
+
+---
+
 ### CAN Bus
 
 Reads a device connected via CAN bus. CAN bus is a passive broadcast protocol — MPG listens to the bus and caches all messages, then processes them against the protocol map at the configured read interval.
@@ -332,7 +405,7 @@ json = false
 | `error_topic` | `/error` | Topic suffix for error messages. |
 | `discovery_enabled` | `false` | Enable Home Assistant MQTT discovery. Publishes device config payloads so entities appear automatically in HA. |
 | `discovery_topic` | `homeassistant` | Home Assistant discovery prefix. Must match the value configured in your HA MQTT integration. |
-| `discovery_entity_types` | `auto` | `auto` publishes native Home Assistant `sensor`, `binary_sensor`, `number`, `select` and `switch` entities. `sensor` publishes everything as a read-only sensor (behaviour before this option existed). See the [MQTT bridge guide](../bridges/MQTT/MQTT_bridge.md#home-assistant-discovery). |
+| `discovery_entity_types` | `auto` | `auto` publishes native Home Assistant `sensor`, `binary_sensor`, `number`, `select` and `switch` entities. `sensor` publishes everything as a read-only sensor (behavior before this option existed). See the [MQTT bridge guide](../bridges/MQTT/MQTT_bridge.md#home-assistant-discovery). |
 | `discovery_expire_after` | `0` | Seconds after which Home Assistant marks a sensor unavailable if no value arrives. `0` = off. |
 | `json` | `false` | When `true`, publish all register values as a single JSON payload per cycle instead of individual topics. |
 | `holding_register_prefix` | *(empty)* | Optional prefix appended to holding register topic names. |

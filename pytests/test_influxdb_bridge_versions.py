@@ -22,8 +22,9 @@ from jinja2 import Environment, FileSystemLoader
 import classes.WebServer.services.bridge_service as bs
 from classes.transports.influxdb3_out import influxdb3_out
 from classes.transports.influxdb_out import influxdb_out
+from classes.transports.transport_base import BridgeVersionRow
 
-TEMPLATES = Path(__file__).resolve().parents[1] / "classes" / "WebServer" / "templates"
+TEMPLATES: Path = Path(__file__).resolve().parents[1] / "classes" / "WebServer" / "templates"
 
 
 # --------------------------------------------------------------------------- a tiny fake InfluxDB /ping
@@ -32,7 +33,7 @@ class _PingServer:
 
     def __init__(self, mode: str, token: str = "tok", headers: bool = True, status: int | None = None) -> None:
         self.hits: int = 0
-        outer = self
+        outer: _PingServer = self
 
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self) -> None:  # noqa: N802 - http.server API
@@ -46,7 +47,7 @@ class _PingServer:
                         self.send_response(401)
                         self.end_headers()
                         return
-                    body = json.dumps({"version": "3.9.1", "revision": "abc", "process_id": "1"}).encode()
+                    body: bytes = json.dumps({"version": "3.9.1", "revision": "abc", "process_id": "1"}).encode()
                     self.send_response(200)
                     if headers:
                         self.send_header("x-influxdb-version", "3.9.1")
@@ -113,18 +114,18 @@ def test_v1_reports_server_version_build_and_client_library(servers: list[_PingS
 
 
 def test_v1_not_connected_makes_no_request(servers: list[_PingServer]) -> None:
-    srv = _serve(servers, "v1")
+    srv: _PingServer = _serve(servers, "v1")
     row = _v1(srv.port, connected=False).get_version_info()[0]
     assert row["version"] is None and srv.hits == 0
 
 
 def test_v1_result_is_cached_and_failure_is_cached_briefly(servers: list[_PingServer]) -> None:
-    srv = _serve(servers, "v1")
+    srv: _PingServer = _serve(servers, "v1")
     b = _v1(srv.port)
     b.get_version_info()
     b.get_version_info()
     assert srv.hits == 1  # second call served from cache
-    bad = _serve(servers, "v1", status=500)
+    bad: _PingServer = _serve(servers, "v1", status=500)
     b2 = _v1(bad.port)
     assert b2.get_version_info()[0]["version"] is None
     b2.get_version_info()
@@ -149,7 +150,7 @@ def test_v3_falls_back_to_json_body_when_headers_missing(servers: list[_PingServ
 
 
 def test_v3_other_http_status_and_unreachable_server(servers: list[_PingServer]) -> None:
-    srv = _serve(servers, "v3", status=503)
+    srv: _PingServer = _serve(servers, "v3", status=503)
     assert _v3(srv.port).get_version_info()[0]["detail"] == "/ping returned HTTP 503"
     port = srv.port
     srv.close()  # nothing listening any more
@@ -158,7 +159,7 @@ def test_v3_other_http_status_and_unreachable_server(servers: list[_PingServer])
 
 
 def test_v3_not_connected_makes_no_request(servers: list[_PingServer]) -> None:
-    srv = _serve(servers, "v3")
+    srv: _PingServer = _serve(servers, "v3")
     row = _v3(srv.port, connected=False).get_version_info()[0]
     assert row["version"] is None and row["detail"] == "not connected" and srv.hits == 0
 
@@ -216,7 +217,7 @@ def test_parse_version_tuple() -> None:
 
 
 def test_fetch_takes_the_maximum_per_major_and_skips_prereleases(monkeypatch: pytest.MonkeyPatch) -> None:
-    payload = [  # newest-first, with a 3.10 maintenance release published after 3.11.x
+    payload: list[dict[str, Any]] = [  # newest-first, with a 3.10 maintenance release published after 3.11.x
         _release("v3.11.4"), _release("v3.10.6"), _release("v1.13.1"), _release("v2.9.1"),
         _release("v3.12.0-rc1", prerelease=True), _release("v3.99.0", draft=True), _release("v1.12.4"), _release("weird"),
     ]
@@ -262,6 +263,11 @@ class _Bridge:
         return {"last_periodic_reconnect_attempt": 0.0}
 
 
+def _version_rows(bridge: _Bridge) -> tuple[list[BridgeVersionRow], bool]:
+    """_build_influxdb_version_rows() on the fake bridge; it only reads what _Bridge provides."""
+    return bs._build_influxdb_version_rows(cast(influxdb_out, bridge))
+
+
 def _rows(version: str | None) -> list[dict[str, Any]]:
     return [{"label": "InfluxDB server", "version": version, "detail": "OSS"},
             {"label": "Python client (influxdb)", "version": "5.3.2", "detail": None}]
@@ -269,37 +275,37 @@ def _rows(version: str | None) -> list[dict[str, Any]]:
 
 def test_rows_without_the_opt_in_make_no_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(bs, "get_latest_influxdb_release", _fake_latest())
-    rows, enabled = bs._build_influxdb_version_rows(_Bridge(_rows("1.11.7"), check=False))
+    rows, enabled = _version_rows(_Bridge(_rows("1.11.7"), check=False))
     assert enabled is False and "latest" not in rows[0] and rows[0]["version"] == "1.11.7"
 
 
 def test_rows_with_opt_in_get_a_verdict_from_the_servers_own_major(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[int] = []
     monkeypatch.setattr(bs, "get_latest_influxdb_release", _fake_latest(table={1: (1, 13, 1), 3: (3, 11, 4)}, seen=seen))
-    behind, _ = bs._build_influxdb_version_rows(_Bridge(_rows("1.11.7"), check=True))
-    assert (behind[0]["latest"], behind[0]["up_to_date"]) == ("1.13.1", False)
-    current, _ = bs._build_influxdb_version_rows(_Bridge(_rows("3.11.4"), check=True))
-    assert (current[0]["latest"], current[0]["up_to_date"]) == ("3.11.4", True)
-    ahead, _ = bs._build_influxdb_version_rows(_Bridge(_rows("3.12.0"), check=True))
-    assert ahead[0]["up_to_date"] is True  # newer than the newest stable (e.g. a preview build) is not "outdated"
+    behind, _ = _version_rows(_Bridge(_rows("1.11.7"), check=True))
+    assert (behind[0].get("latest"), behind[0].get("up_to_date")) == ("1.13.1", False)
+    current, _ = _version_rows(_Bridge(_rows("3.11.4"), check=True))
+    assert (current[0].get("latest"), current[0].get("up_to_date")) == ("3.11.4", True)
+    ahead, _ = _version_rows(_Bridge(_rows("3.12.0"), check=True))
+    assert ahead[0].get("up_to_date") is True  # newer than the newest stable (e.g. a preview build) is not "outdated"
     assert seen == [1, 3, 3]
     assert "latest" not in behind[1]  # the client library row never gets a verdict
 
 
 def test_rows_leave_out_the_verdict_when_version_or_latest_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(bs, "get_latest_influxdb_release", _fake_latest(table={}))
-    assert "latest" not in bs._build_influxdb_version_rows(_Bridge(_rows("1.11.7"), check=True))[0][0]
+    assert "latest" not in _version_rows(_Bridge(_rows("1.11.7"), check=True))[0][0]
     monkeypatch.setattr(bs, "get_latest_influxdb_release", _fake_latest())
-    assert "latest" not in bs._build_influxdb_version_rows(_Bridge(_rows(None), check=True))[0][0]
+    assert "latest" not in _version_rows(_Bridge(_rows(None), check=True))[0][0]
 
 
 def test_a_failing_probe_cannot_break_the_panel() -> None:
-    assert bs._build_influxdb_version_rows(_Bridge([], check=True, boom=True)) == ([], True)
+    assert _version_rows(_Bridge([], check=True, boom=True)) == ([], True)
 
 
 def test_get_influxdb_health_adds_the_version_fields() -> None:
     class influxdb_out:  # noqa: N801 - get_influxdb_bridge matches on the class name
-        transport_name = "transport.influx"
+        transport_name: str = "transport.influx"
         check_latest_release = False
 
         def get_health_snapshot(self) -> dict[str, Any]:
@@ -309,7 +315,7 @@ def test_get_influxdb_health_adds_the_version_fields() -> None:
             return _rows("1.11.7")
 
     gateway = SimpleNamespace(_Protocol_Gateway__transports=[influxdb_out()])
-    health = bs.get_influxdb_health(cast(Any, gateway), "transport.influx")
+    health: bs.InfluxDBHealthPanel = bs.get_influxdb_health(cast(Any, gateway), "transport.influx")
     assert health["version_rows"][0]["version"] == "1.11.7"
     assert health["latest_release_check_enabled"] is False
     assert health["last_periodic_reconnect_display"] == "never"  # existing behavior untouched
@@ -332,24 +338,24 @@ def _health(**over: Any) -> dict[str, Any]:
 
 
 def test_template_shows_versions_and_the_opt_in_hint() -> None:
-    html = _render(_health(version_rows=_rows("1.11.7")))
+    html: str = _render(_health(version_rows=_rows("1.11.7")))
     assert "Versions" in html and "1.11.7" in html and "OSS" in html and "5.3.2" in html
     assert "check_latest_release = true" in html  # hint while the check is off
     assert "Up to date" not in html and "Latest release" not in html
 
 
 def test_template_shows_verdicts_when_the_check_is_on() -> None:
-    behind = _rows("1.11.7")
+    behind: list[dict[str, Any]] = _rows("1.11.7")
     behind[0].update(latest="1.13.1", up_to_date=False)
-    html = _render(_health(latest_release_check_enabled=True, version_rows=behind))
+    html: str = _render(_health(latest_release_check_enabled=True, version_rows=behind))
     assert "Latest release" in html and "1.13.1" in html and "check_latest_release = true" not in html
-    current = _rows("3.11.4")
+    current: list[dict[str, Any]] = _rows("3.11.4")
     current[0].update(latest="3.11.4", up_to_date=True)
     assert "Up to date" in _render(_health(latest_release_check_enabled=True, version_rows=current))
 
 
 def test_template_explains_an_unavailable_server_version() -> None:
-    html = _render(_health(version_rows=[{"label": "InfluxDB 3 server", "version": None, "detail": "/ping needs a valid token"}]))
+    html: str = _render(_health(version_rows=[{"label": "InfluxDB 3 server", "version": None, "detail": "/ping needs a valid token"}]))
     assert "Unavailable" in html and "/ping needs a valid token" in html
 
 

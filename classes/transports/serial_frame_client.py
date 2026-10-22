@@ -29,7 +29,7 @@ import serial
 
 class serial_frame_client():
 
-    transport_type = "base class"
+    transport_type: str = "base class"
     ''' basic serial client implementing an empty SOI/EOI frame'''
     client : serial.Serial
     running : bool = False

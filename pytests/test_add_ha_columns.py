@@ -28,6 +28,7 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
+
 from classes.ha_metadata import infer_ha_attributes, split_unit_symbol
 
 ROOT = Path(__file__).resolve().parents[1]

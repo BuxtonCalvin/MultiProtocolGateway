@@ -282,7 +282,7 @@ What happens if the order is wrong:
 | **Metric removed from the scrape, column not deleted** | Every write to that wide table logs a warning that the column is missing from the scrape data and suggests deleting it. The wide row is still written, with NULL in that column, so no data is lost. The column only wastes space and adds log noise until it is deleted. |
 | **Column deleted while the metric is still scraped** | The wide table has no column for the incoming metric, so the **entire reading is dropped for that cycle, both narrow and wide**, and this repeats every cycle. The log shows *Database schema is still missing columns after resync* followed by *Fatal Flush Worker Crash* (the worker keeps running). Remove the metric from the scrape, or restore it by reloading the gateway with the metric still in the mask (which recreates the column, empty), to stop the loss. |
 
-A column deletion cannot be undone: it drops the column for every device and every timestamp. After the drop, MPG rebuilds that protocol's rollup views, indexes and compression and retention policies. Writes are paused, and queued in memory, while it runs. Delete Columns affects only the wide table. Old rows for the removed metric remain in the narrow table until you delete them with Metrics Edit.
+A column deletion cannot be undone: it drops the column for every device and every timestamp. After the drop, MPG rebuilds that protocol's rollup views, indexes and compression and retention policies. Writes are paused, and queued in memory, while it runs. Delete Columns affects only the wide table. Old rows for the removed metric remain in the narrow table until you delete them with Metrics Edit (select the narrow table itself: the wide column no longer exists, so a wide-table edit cannot reach them).
 
 > **Note:** Delete Columns changes a wide table's *shape* — it drops a column outright, for every device and every timestamp. To correct or remove specific *values* (e.g. a bad reading from a sensor fault, or data captured during a known test/outage) for one device over a chosen time range without touching the schema, use **Metrics Edit** instead — see section 4.5 below.
 
@@ -334,7 +334,7 @@ Here is a screen shot of how the schema looks in PGadmin.  The tables reside in 
 
 The **Timescale DB → Metrics Edit** admin screen lets an administrator correct or remove specific metric *values* — for one device, over a chosen date/time range — on either the shared narrow table or a wide table, without changing either table's schema. This is the tool to reach for when a sensor fault, a mis-wired input, a device test, or a known outage window put bad or unwanted values into the database and you want them fixed or cleared, as opposed to Wide Table Column Deletion (section 4.2), which permanently drops an entire metric column, table-wide, for every device and timestamp.
 
-> **One table per edit.** Live data is written to the narrow table *and*, when the protocol has one, to its wide table. Metrics Edit changes only the table you select. To correct a value everywhere it was recorded, make the same edit once against the narrow table and once against the wide table.
+> **Every sample lives in two tables.** Live data is written to the narrow table *and*, when the protocol has one, to its wide table. A wide-table edit on its own would leave the narrow copy, and the narrow rollups built from it, serving the old value. So when you select a wide table the screen offers **Also apply to the shared narrow table**, ticked by default: committing then runs the same edit against `device_metrics_narrow` too. Untick it to change the wide table only. Selecting the narrow table edits the narrow table only; it has no matching option for the wide table.
 
 ![Timescale Metrics Edit](../../../classes/WebServer/static/screenshots/timescale_metrics_edit.png)
 
@@ -344,17 +344,40 @@ The **Timescale DB → Metrics Edit** admin screen lets an administrator correct
 2. Pick a **table** on the left — either the shared `device_metrics_narrow` table, or one wide-table protocol.
 3. Pick the **device** whose data you want to edit. Only devices that already have at least one row in the selected table are listed, so a device that has only ever written to the narrow table will not appear when a wide table is selected, and vice versa.
 4. Pick the **field** to target from the dropdown — **one field per edit**. For a wide table the list is the protocol's metric columns, shown with their declared data type. For the narrow table it is the distinct metric names already recorded for the chosen device. Only one field is allowed because a single replacement value is applied to whatever is selected, and different metrics can have different types (for example an `INTEGER` and a `BOOLEAN`). To change several metrics, stage one edit per metric.
-5. Pick a **start** and **end** date/time for the range to affect. Both ends are inclusive. The range is interpreted in the same timezone the bridge stamps rows with: the machine's local timezone, or UTC when `use_utc_timestamp = True` (see section 6.5).
+5. Pick a **start** and **end** date/time for the range to affect (see "Entering the Time Range" below). Both ends are inclusive. The range is interpreted in the same timezone the bridge stamps rows with: the machine's local timezone, or UTC when `use_utc_timestamp = True` (see section 6.5).
 6. Choose an **action**:
    - **Delete value(s)** — clears the selected field over the range.
    - **Set value** — overwrites the selected field with a replacement value you enter.
-7. Click **Preview** to see how many rows match and a sample of their current values (up to the 25 most recent matching rows) before changing anything. Preview is a plain read: it does not lock, pause, or decompress anything. For a wide table the count is the number of rows for that device in the range, whether or not the selected column currently holds a value in each of them.
-8. Click **Add to Staged Changes** and confirm the browser prompt. The value is validated first (see "Value Type Validation"); an invalid value is rejected at this step and nothing is staged.
-9. Use the **Commit All Changes** button in the header to apply every staged Metrics Edit (and any staged Delete Columns changes) at once. Nothing is written to TimescaleDB before this step. Staged edits can be reviewed and individually removed from the Staged Changes list, or abandoned entirely with **Discard Changes**.
+7. For a wide table, decide whether to leave **Also apply to the shared narrow table** ticked (the default). See "Narrow Companion Edit" below. The option is hidden when the narrow table itself is selected.
+8. Click **Preview** to see how many rows match and a sample of their current values (up to the 25 most recent matching rows) before changing anything. Preview is a plain read: it does not lock, pause, or decompress anything. For a wide table the count is the number of rows for that device in the range, whether or not the selected column currently holds a value in each of them. With the narrow companion ticked, Preview adds a second line with the number of `device_metrics_narrow` rows that would also be changed. **Click any row in the sample to set both Start and End to that row's second**: the quickest way to target a single bad reading. Then continue to the next step.
+9. Click **Add to Staged Changes** and confirm the browser prompt. The value is validated first (see "Value Type Validation"); an invalid value is rejected at this step and nothing is staged.
+10. Use the **Commit All Changes** button in the header to apply every staged Metrics Edit (and any staged Delete Columns changes) at once. Nothing is written to TimescaleDB before this step. Staged edits can be reviewed and individually removed from the Staged Changes list, or abandoned entirely with **Discard Changes**.
+
+#### Entering the Time Range
+
+The Start and End boxes use one compact format: `YYYY-MM-DD  HH:MM:SS` on a 24-hour clock, for example `2026-10-17  20:05:55`, with two spaces between the date and the time. You can type a value directly (a single space between date and time is accepted too) or click the box to open a calendar with hour, minute and second fields. A time entered without seconds is taken as `:00`.
+
+- **Picking only a day** (no time) gives `00:00:00` for Start and `23:59:59` for End, so a single date selects the whole day.
+- **Whole seconds, inclusive of the End second.** Stored timestamps carry microseconds (for example `20:05:49.810365`), but the boxes only hold whole seconds. Start is taken at the beginning of the second shown and End at the very end of its second (`:49.999999`). Setting Start and End to the same second therefore selects every row stamped within that second, which is what you want for a single sample. This is also what clicking a Preview row does.
+- **Preview times use the same format**, with the microseconds shown (`2026-10-17  20:05:49.810365`) so that two rows in the same second can be told apart, and in the same timezone the boxes are read in.
+
+The picker is the Flatpickr library, vendored with the Admin UI so it works without internet access. If it fails to load, the boxes still work as plain text fields.
+
+#### Narrow Companion Edit
+
+When you select a wide table, **Also apply to the shared narrow table** (ticked by default) stages the edit together with a matching edit of `device_metrics_narrow`: the same device, the same field name, the same time range and the same action. The writer stores each metric under the same name in both tables, so no mapping is needed.
+
+- **Delete** removes the matching narrow rows outright, where the wide edit sets the column to `NULL`. Both tables then agree that the value is gone.
+- **Set Value** writes the replacement to the narrow row's `metric_value` or `metric_ascii`, converted from the wide column's declared type the same way the live writer would store it: numeric types become a number, `BOOLEAN` becomes `1` or `0`, and `TEXT` stays text. The type comes from the wide column, not from what the narrow rows currently hold.
+- **Rollups.** Committing refreshes the rollup views of both stacks over the edited range: the protocol's own wide rollups for the wide edit, and the shared narrow rollups for the companion.
+- **Staged Changes** lists the edit with `+ device_metrics_narrow` under its table name, and the browser confirmation names both tables.
+- **Preview** counts the narrow rows that will be touched, so a mismatch (for example no narrow rows in that range) is visible before you stage anything.
+
+Untick the box to change the wide table only, for example to correct a value in the wide copy while leaving the narrow history as it was recorded.
 
 #### Staging
 
-Each press of **Add to Staged Changes** stores one complete edit request: table, device, field, time range, action, and replacement value. Several edits can be staged before a commit, even against the same table and device, and they are applied in the order they were staged.
+Each press of **Add to Staged Changes** stores one complete edit request: table, device, field, time range, action, replacement value, and whether the narrow companion is included. Several edits can be staged before a commit, even against the same table and device, and they are applied in the order they were staged.
 
 Staged edits are held in memory by the running MPG web server. They are not written to `config.cfg`, to the SQLite staging database, or to TimescaleDB. They survive navigating between admin pages, but are lost if MPG is restarted before you commit.
 
@@ -376,6 +399,8 @@ A replacement value entered for **Set Value** is checked against the field's typ
 - **Wide table columns** are checked against their declared `metric_catalog.data_type`. An `INTEGER`, `SMALLINT` or `BIGINT` column rejects non-whole numbers and out-of-range values, a `BOOLEAN` column accepts `true`/`false`, `t`/`f`, `1`/`0`, `yes`/`no` and `on`/`off`, and a `TEXT` column accepts anything.
 - **Narrow table metrics** have no fixed declared type (every metric shares the same `metric_value`/`metric_ascii` pair), so the screen infers numeric vs. text from what is already recorded for that device and metric: if any existing row has `metric_ascii` populated the metric is treated as text, otherwise as numeric. A metric with no existing rows defaults to numeric. A numeric metric only accepts a value that parses as a number.
 
+- **The narrow companion of a wide edit** is validated against the wide column's declared type, and is refused at staging if the selected column cannot be given a single consistent narrow value.
+
 An invalid value is rejected immediately, with a clear error, rather than only surfacing when Commit All Changes is pressed.
 
 #### Enum Metrics
@@ -385,7 +410,9 @@ A metric with a code-to-description mapping keeps its numeric code and its descr
 - In the **narrow** table both live in one row (`metric_value` holds the code and `metric_ascii` the description). Because `metric_ascii` is populated, the screen treats the metric as text, so **Set Value** replaces the description with the text you enter and sets `metric_value` to 0. That produces a code and description combination the scraper would never write.
 - In a **wide** table the code column and its `<metric>_desc` column are separate fields, and **Set Value** changes only the one you select, so the pair can be left inconsistent unless you edit both.
 
-To remove bad enum readings, use **Delete value(s)** rather than Set Value.
+With the narrow companion ticked, **Set Value** on a wide enum code column also rewrites the matching narrow rows as a plain number, which clears the description stored alongside the code in those rows.
+
+To remove bad enum readings, use **Delete value(s)** rather than Set Value. With the narrow companion ticked, Delete removes each narrow row whole, code and description together.
 
 #### What Happens on Commit
 
@@ -396,6 +423,7 @@ To remove bad enum readings, use **Delete value(s)** rather than Set Value.
 3. The `UPDATE`/`DELETE` runs in a single transaction under the same schema locks used for structural changes, so it can't race a concurrent Delete Columns commit against the same table.
 4. The four rollup views (hourly, daily, weekly, monthly) for that table's own stack are refreshed over the edited range, so pre-aggregated rollups reflect the correction instead of continuing to serve the old numbers. If the range is narrower than a view's bucket (for example a few minutes against a weekly bucket), the refresh window is widened to whole buckets.
 5. The flush worker and the compression job are resumed, whether or not the edit succeeded. The chunks that were decompressed are compressed again later by the normal compression policy.
+6. **If the narrow companion was ticked**, steps 1 to 5 are then repeated for `device_metrics_narrow`, with its own transaction and its own (shared narrow) rollup refresh. The wide edit always runs first.
 
 ```mermaid
 sequenceDiagram
@@ -407,9 +435,11 @@ sequenceDiagram
     participant DB as TimescaleDB
 
     Admin->>UI: Pick table, device, field, range, action
-    UI->>DB: Preview (read-only count + sample)
+    Admin->>UI: Wide table - leave "Also apply to narrow" ticked (default) or untick
+    UI->>DB: Preview (read-only count + sample, plus narrow row count)
+    Admin->>UI: Optionally click a preview row to set Start and End
     Admin->>UI: Add to Staged Changes
-    UI->>Bridge: Validate value against field type
+    UI->>Bridge: Validate value against field type (and narrow companion)
     Bridge-->>UI: OK, or error (nothing staged)
     UI->>Stage: Store edit
     Admin->>UI: Commit All Changes
@@ -419,11 +449,20 @@ sequenceDiagram
         Bridge->>DB: UPDATE or DELETE, one transaction, schema lock held
         Bridge->>DB: Refresh 4 rollup views over the range
         Bridge->>Bridge: Resume compression job and flush worker
+        opt Narrow companion ticked (wide edits)
+            Bridge->>Bridge: Pause flush worker again
+            Bridge->>DB: Pause compression job, decompress narrow chunks in range
+            Bridge->>DB: DELETE or UPDATE on device_metrics_narrow, one transaction
+            Bridge->>DB: Refresh 4 narrow rollup views over the range
+            Bridge->>Bridge: Resume compression job and flush worker
+        end
         Bridge->>Stage: Remove the applied edit
     end
 ```
 
 **If something fails.** A failure while applying an edit stops the remaining edits and the commit reports an error. Edits that already completed are removed from staging, so they are not applied a second time; the edit that failed, and any after it, stay staged so the commit can be retried once the cause is fixed. A common cause is a staged Delete Columns change that removed the column a later staged edit targets: the edit is re-validated at commit and refused. If only the rollup refresh in step 4 fails, the edit itself has already been applied; the failure is written to the log as a warning. Run **Rebuild Rollup Views** (section 4.6) to bring the rollups back in line.
+
+A wide edit and its narrow companion are two separate transactions, not one. If the narrow step fails after the wide step succeeded, the wide table is already changed and the whole entry stays staged; pressing Commit again repeats both steps, which is safe because Delete and Set Value give the same result when run twice.
 
 No row data outside the selected device, field, and time range is ever touched.
 
@@ -603,12 +642,12 @@ After a successful import the screen reports the number of rows written (one per
 | | Live ingestion | Metrics Edit (4.5) | Timeshift Data import (4.7) |
 | --- | --- | --- | --- |
 | **Where data comes from** | Scraper, via the bridge's flush queue | Existing rows in the selected table | An uploaded CSV or EG4 spreadsheet |
-| **Tables written** | Narrow, plus wide when the protocol has one | Only the one table you select | Narrow; a wide-table import also writes the wide table |
+| **Tables written** | Narrow, plus wide when the protocol has one | The table you select; for a wide table, also the narrow table unless you untick *Also apply to the shared narrow table* | Narrow; a wide-table import also writes the wide table |
 | **Existing rows** | Narrow: a duplicate is skipped. Wide: plain insert | Updated or deleted | Overwritten if the timestamp already exists |
 | **Staged until Commit All Changes** | No | Yes | No — writes on confirm |
 | **Flush worker paused** | No | Yes, for the duration | No |
 | **Compression** | Background policy | Job paused, chunks in range decompressed | Job paused, chunks in range decompressed (same as Metrics Edit, but the flush worker keeps running) |
-| **Rollup views** | Background refresh | Refreshed automatically over the edited range | Not refreshed; refresh or rebuild afterward |
+| **Rollup views** | Background refresh | Refreshed automatically over the edited range, for each stack edited (wide and narrow when the companion is used) | Not refreshed; refresh or rebuild afterward |
 | **If TimescaleDB is down** | Queued to the persistent backlog (when `enable_persistent_storage` is on) and replayed later | Fails; the edit stays staged | Fails immediately; nothing is kept |
 
 ### 4.9 Bridge Diagnostic Panels

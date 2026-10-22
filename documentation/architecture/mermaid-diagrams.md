@@ -805,7 +805,8 @@ flowchart LR
 
     subgraph Edit["Metrics Edit (admin, staged)"]
         direction TB
-        E1["Admin stages an edit,<br/>Commit All Changes applies it"] --> E2["UPDATE/DELETE on existing<br/>rows, one table, one device,<br/>one time range"]
+        E1["Admin stages an edit,<br/>Commit All Changes applies it"] --> E2["UPDATE/DELETE on existing<br/>rows, selected table, one device,<br/>one field, one time range"]
+        E2 --> E3["Wide edit with 'Also apply to<br/>narrow' ticked (default):<br/>same edit on device_metrics_narrow,<br/>then its rollups refresh"]
     end
 
     subgraph Shift["Timeshift Data import (admin, immediate)"]
@@ -815,14 +816,18 @@ flowchart LR
 
     L2 --> T[("device_metrics_narrow /<br/>device_metrics_wide__*")]
     E2 --> T
+    E3 --> T
     S2 --> T
 
     style L2 fill:#dbeafe,stroke:#2563eb
     style E2 fill:#fef3c7,stroke:#d97706
+    style E3 fill:#fef3c7,stroke:#d97706,stroke-dasharray: 4 3
     style S2 fill:#dcfce7,stroke:#16a34a
 ```
 
 Only live ingestion queues to the persistent backlog on failure. Metrics Edit and Timeshift Data both fail outright if TimescaleDB is unreachable, and neither is retried automatically.
+
+Live ingestion writes every sample to both the narrow and the wide table, so a Metrics Edit of a wide table also offers the narrow companion edit (dashed box above) to keep the two copies, and their rollups, in agreement. The two steps run one after the other as separate transactions: the wide edit first, then the narrow one.
 
 ### TimescaleDB Startup — Extension Version Check & Auto-Update
 

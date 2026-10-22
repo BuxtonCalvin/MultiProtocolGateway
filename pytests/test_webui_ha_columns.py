@@ -200,7 +200,7 @@ def test_scanner_accepts_space_separated_header_names(tmp_path: Path) -> None:
 
 def test_scanner_paired_registers_inherit_ha_values_from_high_half(tmp_path: Path) -> None:
     """If only the _h half carries a value, the merged register still gets it."""
-    path = _write_csv(
+    path: Path = _write_csv(
         tmp_path,
         "1,energy_l,Energy,kWh,,0-65535,,,\n2,energy_h,Energy,kWh,,0-65535,energy,total_increasing,\n",
     )
@@ -368,7 +368,7 @@ def test_route_returns_422_for_invalid_value_and_404_for_missing(db: Session, tm
         )
     assert missing.value.status_code == 404
 
-    ok: dict[str, Any] = protocols.update_register_field(
+    ok: protocols.RegisterFieldUpdateResult = protocols.update_register_field(
         row.id, protocols.FieldUpdateRequest(field="ha_state_class", value="measurement"), db
     )
     assert ok["value"] == "measurement"
@@ -395,9 +395,8 @@ def test_registers_view_exposes_ha_values(db: Session, tmp_path: Path) -> None:
     rows[0].ha_state_class = None
     db.commit()
 
-    page: dict[str, str | int | list[DeviceRegisterView]] = protocol_service.get_protocol_registers(db, "acme_x.input_registry_map", "input")
-    views: str | int | list[DeviceRegisterView] = page["rows"]
-    assert isinstance(views, list)
+    page: protocols.RegistersPage = protocol_service.get_protocol_registers(db, "acme_x.input_registry_map", "input")
+    views: list[DeviceRegisterView] = page["rows"]
 
     assert (views[0].ha_device_class, views[0].ha_state_class, views[0].ha_entity_category) == (
         "voltage", "", "diagnostic",

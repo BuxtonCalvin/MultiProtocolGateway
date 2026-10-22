@@ -35,6 +35,17 @@
     "slave_id": "1",
     "timeout": "7"
   },
+  "_serial_base": {
+    "$extends": "_base",
+    "address": "0",
+    "baudrate": "9600",
+    "batch_size": "40",
+    "enable_synthetic_metrics": "True",
+    "port": "/dev/ttyUSB0",
+    "protocol_version": "",
+    "variable_mask": "",
+    "variable_screen": ""
+  },
   "_general": {
     "read_mode": "interleaved"
   },
@@ -144,15 +155,8 @@
     "variable_screen": ""
   },
   "serial_pylon": {
-    "$extends": "_base",
-    "address": "0",
-    "batch_size": "40",
-    "baudrate": "9600",
-    "enable_synthetic_metrics": "True",
-    "port": "/dev/ttyUSB0",
-    "protocol_version": "",
-    "variable_mask": "",
-    "variable_screen": ""
+    "$extends": "_serial_base",
+    "ignore_checksum_errors": "False"
   },
   "modbus_pace": {
     "$extends": "_modbus_base",
@@ -338,5 +342,10 @@
     "staleness_multiplier": "3.0",
     "max_label_value_length": "128",
     "metrics_port": "9110"
+  },
+  "serial_base": {
+    "$extends": "_serial_base",
+    "baud": "9600",
+    "unit_id": "0"
   }
 }

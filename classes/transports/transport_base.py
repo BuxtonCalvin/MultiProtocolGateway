@@ -899,13 +899,15 @@ class transport_base:
     @property
     def scrape_target(self) -> str:
         """
-        Scheduling path: All (Sequential, Concurrent, Interleaved) — base default; modbus_base overrides with the real endpoint identifier.
+        Scheduling path: All (Sequential, Concurrent, Interleaved) — base default; modbus_base and serial_base override with the real endpoint identifier.
 
         Identifies the physical device this transport reads from.
         Two transports with the same scrape_target share an endpoint
         and can be consolidated into a scrape group.
         Returns empty string for bridge transports (no scrape target).
-        Override in scraper subclasses to return a normalized identifier.
+        Override in scraper subclasses to return a normalized identifier:
+        the gateway only schedules transports with a non-empty scrape_target,
+        so a scraper that keeps this default is never polled.
         """
         return ""
 

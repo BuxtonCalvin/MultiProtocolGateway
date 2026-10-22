@@ -68,7 +68,7 @@ def _recent(**kwargs: float) -> datetime:
 
 def _insert_row(path: Path, m_time_text: str, payload_text: str) -> None:
     """Write a backlog row exactly as another version of the app (or a corrupt file) might have left it."""
-    con = sqlite3.connect(str(path))
+    con: sqlite3.Connection = sqlite3.connect(str(path))
     try:
         con.execute("CREATE TABLE IF NOT EXISTS backlog (id INTEGER PRIMARY KEY AUTOINCREMENT, m_time TEXT NOT NULL, payload TEXT NOT NULL)")
         con.execute("INSERT INTO backlog (m_time, payload) VALUES (?, ?)", (m_time_text, payload_text))
@@ -79,13 +79,13 @@ def _insert_row(path: Path, m_time_text: str, payload_text: str) -> None:
 
 def _reload(path: Path) -> list[FlushPayload]:
     """What a restarted app would see: a brand-new manager reading the same file."""
-    reloaded = _manager(path, queue.Queue())
+    reloaded: BacklogManager = _manager(path, queue.Queue())
     reloaded.load_from_disk()
     return reloaded.backlog_points
 
 
 def _row_count(path: Path) -> int:
-    con = sqlite3.connect(str(path))
+    con: sqlite3.Connection = sqlite3.connect(str(path))
     try:
         return int(con.execute("SELECT COUNT(*) FROM backlog").fetchone()[0])
     finally:
@@ -106,8 +106,8 @@ def _row_count(path: Path) -> int:
     ],
 )
 def test_m_time_survives_the_disk_round_trip_as_a_datetime(tmp_path: Path, m_time: datetime) -> None:
-    path = tmp_path / "backlog.sqlite"
-    writer = _manager(path, queue.Queue(), max_age=10**9)
+    path: Path = tmp_path / "backlog.sqlite"
+    writer: BacklogManager = _manager(path, queue.Queue(), max_age=10**9)
     writer.enqueue(_payload(m_time))
 
     (point,) = _reload_with_age(path, 10**9)
@@ -117,14 +117,14 @@ def test_m_time_survives_the_disk_round_trip_as_a_datetime(tmp_path: Path, m_tim
 
 
 def _reload_with_age(path: Path, max_age: int) -> list[FlushPayload]:
-    reloaded = _manager(path, queue.Queue(), max_age=max_age)
+    reloaded: BacklogManager = _manager(path, queue.Queue(), max_age=max_age)
     reloaded.load_from_disk()
     return reloaded.backlog_points
 
 
 def test_every_field_survives_the_round_trip(tmp_path: Path) -> None:
-    path = tmp_path / "backlog.sqlite"
-    original = _payload(_recent(minutes=5))
+    path: Path = tmp_path / "backlog.sqlite"
+    original: FlushPayload = _payload(_recent(minutes=5))
     _manager(path, queue.Queue()).enqueue(original)
 
     (point,) = _reload(path)
@@ -132,7 +132,7 @@ def test_every_field_survives_the_round_trip(tmp_path: Path) -> None:
 
 
 def test_narrow_only_payload_keeps_its_null_wide_table(tmp_path: Path) -> None:
-    path = tmp_path / "backlog.sqlite"
+    path: Path = tmp_path / "backlog.sqlite"
     _manager(path, queue.Queue()).enqueue(_payload(_recent(minutes=1), wide_table_name=None))
 
     (point,) = _reload(path)
@@ -140,18 +140,18 @@ def test_narrow_only_payload_keeps_its_null_wide_table(tmp_path: Path) -> None:
 
 
 def test_replay_after_a_restart_puts_datetime_payloads_on_the_flush_queue(tmp_path: Path) -> None:
-    path = tmp_path / "backlog.sqlite"
-    originals = [_payload(_recent(minutes=n)) for n in (3, 2, 1)]
-    writer = _manager(path, queue.Queue())
+    path: Path = tmp_path / "backlog.sqlite"
+    originals: list[FlushPayload] = [_payload(_recent(minutes=n)) for n in (3, 2, 1)]
+    writer: BacklogManager = _manager(path, queue.Queue())
     for point in originals:
         writer.enqueue(point)
 
     flush_queue: queue.Queue[FlushPayload | None] = queue.Queue()
-    restarted = _manager(path, flush_queue)
+    restarted: BacklogManager = _manager(path, flush_queue)
     restarted.load_from_disk()
     assert restarted.replay_to_queue() == 3
 
-    replayed = [flush_queue.get_nowait() for _ in range(3)]
+    replayed: list[FlushPayload | None] = [flush_queue.get_nowait() for _ in range(3)]
     assert replayed == originals
     assert all(p is not None and isinstance(p["m_time"], datetime) for p in replayed)
     assert _row_count(path) == 0  # replay clears the journal
@@ -160,8 +160,8 @@ def test_replay_after_a_restart_puts_datetime_payloads_on_the_flush_queue(tmp_pa
 def test_in_memory_replay_without_a_restart_is_unchanged(tmp_path: Path) -> None:
     """The in-memory working set holds the original objects, so no round trip happens when the app stayed up."""
     flush_queue: queue.Queue[FlushPayload | None] = queue.Queue()
-    manager = _manager(tmp_path / "backlog.sqlite", flush_queue)
-    original = _payload(_recent(minutes=1))
+    manager: BacklogManager = _manager(tmp_path / "backlog.sqlite", flush_queue)
+    original: FlushPayload = _payload(_recent(minutes=1))
     manager.enqueue(original)
     manager.replay_to_queue()
     assert flush_queue.get_nowait() is original
@@ -169,13 +169,13 @@ def test_in_memory_replay_without_a_restart_is_unchanged(tmp_path: Path) -> None
 
 def test_the_flush_worker_receives_a_datetime_for_a_reloaded_point(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """End to end: disk -> new manager -> flush queue -> the real _flush_worker, which used to convert a string itself."""
-    path = tmp_path / "backlog.sqlite"
+    path: Path = tmp_path / "backlog.sqlite"
     m_time = datetime(2026, 6, 2, 14, 23, 11, 123456, tzinfo=timezone(timedelta(hours=2)))
     # Narrow-only (no wide table), so the worker needs no real table metadata behind its fake session.
     _manager(path, queue.Queue(), max_age=10**9).enqueue(_payload(m_time, wide_table_name=None))
 
     flush_queue: queue.Queue[FlushPayload | None] = queue.Queue()
-    restarted = _manager(path, flush_queue, max_age=10**9)
+    restarted: BacklogManager = _manager(path, flush_queue, max_age=10**9)
     restarted.load_from_disk()
     restarted.replay_to_queue()
     flush_queue.put(None)  # tells the worker to exit
@@ -243,9 +243,9 @@ def test_the_flush_worker_receives_a_datetime_for_a_reloaded_point(tmp_path: Pat
 
 def test_a_row_written_by_the_previous_version_still_loads(tmp_path: Path) -> None:
     """The on-disk format is unchanged: m_time is str(datetime) in both the column and the JSON."""
-    path = tmp_path / "backlog.sqlite"
-    when = tsdb._now_tz().replace(microsecond=250000) - timedelta(minutes=10)
-    legacy_payload = {
+    path: Path = tmp_path / "backlog.sqlite"
+    when: datetime = tsdb._now_tz().replace(microsecond=250000) - timedelta(minutes=10)
+    legacy_payload: dict[str, Any] = {
         "device_info_id": 7,
         "metrics": {"battery_soc": 88.5},
         "m_time": str(when),
@@ -263,8 +263,8 @@ def test_a_row_written_by_the_previous_version_still_loads(tmp_path: Path) -> No
 
 def test_the_on_disk_text_is_still_str_of_the_datetime(tmp_path: Path) -> None:
     """Downgrade safety: an older build must still be able to read what this one writes."""
-    path = tmp_path / "backlog.sqlite"
-    when = datetime(2026, 6, 2, 14, 23, 11, tzinfo=timezone.utc)
+    path: Path = tmp_path / "backlog.sqlite"
+    when: datetime = datetime(2026, 6, 2, 14, 23, 11, tzinfo=timezone.utc)
     _manager(path, queue.Queue()).enqueue(_payload(when))
 
     con = sqlite3.connect(str(path))
@@ -277,12 +277,12 @@ def test_the_on_disk_text_is_still_str_of_the_datetime(tmp_path: Path) -> None:
 
 
 def test_expired_rows_are_still_dropped_by_age(tmp_path: Path) -> None:
-    path = tmp_path / "backlog.sqlite"
-    writer = _manager(path, queue.Queue(), max_age=10**9)
+    path: Path = tmp_path / "backlog.sqlite"
+    writer: BacklogManager = _manager(path, queue.Queue(), max_age=10**9)
     writer.enqueue(_payload(tsdb._now_tz() - timedelta(hours=48)))
     writer.enqueue(_payload(_recent(minutes=1)))
 
-    points = _reload_with_age(path, 86400)  # the default 24 h window
+    points: list[FlushPayload] = _reload_with_age(path, 86400)  # the default 24 h window
     assert len(points) == 1
     assert _row_count(path) == 1  # the expired row was deleted from disk too
 
@@ -320,20 +320,20 @@ _VALID: dict[str, Any] = {
     ],
 )
 def test_a_row_that_is_not_a_valid_payload_is_dropped_not_loaded(tmp_path: Path, bad_payload: str) -> None:
-    path = tmp_path / "backlog.sqlite"
-    good = _payload(_recent(minutes=2))
-    writer = _manager(path, queue.Queue())
+    path: Path = tmp_path / "backlog.sqlite"
+    good: FlushPayload = _payload(_recent(minutes=2))
+    writer: BacklogManager = _manager(path, queue.Queue())
     writer.enqueue(good)
     _insert_row(path, str(_recent(minutes=1)), bad_payload)  # lands after the good row
     assert _row_count(path) == 2
 
-    points = _reload(path)
+    points: list[FlushPayload] = _reload(path)
     assert points == [good]  # the good row loads; the bad one does not
     assert _row_count(path) == 1  # and is deleted from disk like any other corrupted row
 
 
 def test_a_row_with_an_unparseable_m_time_column_is_dropped(tmp_path: Path) -> None:
-    path = tmp_path / "backlog.sqlite"
+    path: Path = tmp_path / "backlog.sqlite"
     _insert_row(path, "yesterday-ish", json.dumps(_VALID))
     assert _reload(path) == []
     assert _row_count(path) == 0

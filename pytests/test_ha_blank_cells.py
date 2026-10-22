@@ -196,7 +196,7 @@ def test_editor_dropdown_left_on_auto_is_accepted_and_commits_blank(db: Session,
     assert soc.ha_device_class == "battery"
 
     for column in HA_COLUMNS:
-        result: dict[str, Any] = protocols.update_register_field(
+        result: protocols.RegisterFieldUpdateResult = protocols.update_register_field(
             soc.id, protocols.FieldUpdateRequest(field=column, value=""), db
         )
         assert result["value"] == ""

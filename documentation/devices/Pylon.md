@@ -33,10 +33,10 @@ Use CAN when you want the same aggregate values an inverter would consume: charg
 
 | Battery Family | Protocol Version | Transport | Baud |
 | --- | --- | --- | --- |
-| Pylon low-voltage RS485 v3.3 | `pylon_rs485_v3.3` | `serial_pylon` | 115200 default in MPG |
+| Pylon low-voltage RS485 v3.3 | `pylon_rs485_v3.3` | `serial_pylon` | set `baudrate` to match the battery (MPG default 9600) |
 | Pylon low-voltage CAN v1.2 | `pylon_can` | `canbus` | 500000 |
 
-The RS485 protocol document notes DIP-selectable RS485 speeds of 9600 and 115200. MPG's current protocol definition defaults to 115200.
+The RS485 protocol document notes DIP-selectable RS485 speeds of 9600 and 115200. The `serial_pylon` transport uses 9600 unless `baudrate` is set in the config (the protocol definition file lists 115200), so set `baudrate` explicitly to match the battery's DIP setting.
 
 ---
 
@@ -63,14 +63,15 @@ Do not connect RS485 adapters to CAN ports or CAN adapters to RS485 ports. The c
 The Pylon RS485 protocol is master/slave. MPG acts as the master and the first battery or selected battery acts as the slave.
 
 ``` ini
+[transport.pylon_battery]
 transport = serial_pylon
 port = /dev/ttyUSB0
-baud = 115200
-unit_id = 2
+baudrate = 115200
+address = 2
 protocol_version = pylon_rs485_v3.3
 ```
 
-Pylon documentation states that battery addresses start from 2 when communicating with an inverter or upper computer. If unit ID 1 does not respond, try unit ID 2 and verify the DIP settings.
+Pylon documentation states that battery addresses start from 2 when communicating with an inverter or upper computer. If address 1 does not respond, try address 2 and verify the DIP settings. `unit_id` and `baud` are accepted as aliases of `address` and `baudrate`.
 
 ---
 
@@ -107,9 +108,45 @@ For RS485, Pylon documentation describes single-group and multi-group modes. The
 Practical setup:
 
 1. Start with the vendor-recommended single-group master setting.
-2. Try `unit_id = 2` first for RS485.
+2. Try `address = 2` first for RS485.
 3. If multiple groups are installed, calculate the address from the group setting and battery position.
 4. Restart the battery after changing DIP switch baud or group settings.
+
+### Multiple batteries on one RS485 bus
+
+Create one section per battery address, all pointing at the same `port` and `baudrate`. Each section is its own device, with its own name, bridges and data. MPG opens the serial port once and shares it between the sections (this comes from the `serial_base` class that `serial_pylon` is built on), and each request/response exchange is serialized so the batteries never interleave on the bus.
+
+``` ini
+[transport.pylon_battery_1]
+transport = serial_pylon
+port = /dev/ttyUSB0
+baudrate = 9600
+address = 2
+protocol_version = pylon_rs485_v3.3
+
+[transport.pylon_battery_2]
+transport = serial_pylon
+port = /dev/ttyUSB0
+baudrate = 9600
+address = 3
+protocol_version = pylon_rs485_v3.3
+```
+
+`address` must be 0-255. Sections that share a port must use the same baud rate.
+
+How the batteries are scheduled depends on `read_mode` in `[general]`:
+
+| `read_mode` | Behavior with several batteries on one port |
+| --- | --- |
+| `sequential` | Batteries are polled one after another. Recommended for a shared bus. |
+| `interleaved` | Batteries take turns on the bus between individual commands, so a slow battery does not hold up the others for a whole poll. |
+| `concurrent` | Safe, because exchanges are serialized, but no faster than sequential. This mode is meant for devices on independent connections. |
+
+Two sections that point at the same port, protocol and address are treated as the same device (see [ScrapeGroup consolidation](../architecture/mermaid-diagrams.md#10-flowchart--scrapegroup-consolidation)). In `sequential` and `concurrent` modes they share a single poll; in `interleaved` mode each section currently polls the battery separately.
+
+### Protocol version and checksums
+
+On connect MPG asks the battery for its protocol version and uses it in every later request (0x20 until the battery has answered). Responses that are truncated or fail the Pylon checksum are discarded with a warning rather than decoded. If a battery's firmware is known to send a bad checksum, `ignore_checksum_errors = true` restores the old behavior of accepting those frames.
 
 ---
 
@@ -145,8 +182,9 @@ protocol_version = pylon_can
 
 | Symptom | Likely Cause | Resolution |
 | --- | --- | --- |
-| RS485 no response | Wrong unit ID | Try `unit_id = 2` and confirm DIP settings |
+| RS485 no response | Wrong address | Try `address = 2` and confirm DIP settings |
 | RS485 no response after DIP change | Battery not restarted | Power-cycle or restart the battery stack |
+| `Serial Pylon checksum error` in the log, no data | Corrupted frames (noise, wrong baud, missing termination) | Check baud rate, cabling and termination; `ignore_checksum_errors = true` only if the firmware is known to send bad checksums |
 | CAN interface receives nothing | Wrong bitrate or no termination | Set 500000 baud and check termination |
 | CAN values update once per second | Normal protocol behavior | Pylon CAN transmits on a 1 second cycle |
 | Inverter comms fail after adding MPG | Two masters on same bus | Avoid placing MPG as a second active master on an inverter-controlled link |

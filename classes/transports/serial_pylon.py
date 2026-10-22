@@ -19,24 +19,23 @@ from __future__ import annotations
 
 # scraper transport for serial communication with Pylontech batteries, using their
 # specific ASCII Hex protocol with SOI/EOI framing and checksum validation.
+#
+# Port handling, the shared serial client, locking, scheduling and polling live in
+# serial_base; this module only implements the Pylon wire format (framing, checksum,
+# version negotiation) on top of it.
 import struct
 from enum import Enum
 from types import SimpleNamespace
 from typing import Any
 
-import serial
-
 from classes.protocol_settings import (
     registry_map_entry,
 )
-from classes.transports.serial_frame_client import serial_frame_client
 from defs.common import (
     TransportSettings,
-    find_usb_serial_port,
-    get_usb_serial_port_info,
 )
 
-from .transport_base import transport_base
+from .serial_base import serial_base
 
 
 class return_codes(Enum):
@@ -58,131 +57,86 @@ class return_codes(Enum):
         except ValueError:
             return return_codes.UNKNOWN_ERROR
 
-class serial_pylon(transport_base):
+class serial_pylon(serial_base):
 
     transport_type = "scraper"
-    ''' for a lack of a better name'''
+    ''' declared here, not inherited: the web UI scanner reads this file with ast and does not follow inheritance '''
 
-    addresses : list[int] = []
-
-    client : serial_frame_client
-
-    #this format is pretty common; i need a name for it.
+    # Frame layout (ASCII hex): VER(2) ADR(2) CID1(2) CID2(2) LENGTH(4) INFO(n) CHKSUM(4)
+    # LENGTH holds LENID plus its own checksum nibble; SOI and EOI are added by the frame client.
     SOI : bytes = b"\x7e" # aka b"~"
-    ver : bytes = b"\x00"
-    ''' version has to be fetched first '''
-    adr : bytes
-    CID1 : bytes
-    CID2 : bytes
-    LENGTH : bytes
-    ''' 2 bytes - include LENID & LCHKSUM'''
-    INFO : bytes
-    CHKSUM : bytes
     EOI : bytes = b"\x0d" # aka b"\r"
+
+    DEFAULT_VER : bytes = b"\x20"
+    ''' protocol version used until the battery reports its own (v2.0) '''
+    ver : bytes = b"\x00"
+    ''' negotiated version as a single raw byte; zero means not fetched yet '''
+    adr : bytes
+    ''' the battery address as a single raw byte '''
+
+    MIN_FRAME_LENGTH : int = 16
+    ''' ASCII chars: VER(2) ADR(2) CID1(2) CID2(2) LENGTH(4) CHKSUM(4), i.e. a frame with no INFO '''
 
     def __init__(self, settings : TransportSettings) -> None:
         super().__init__(settings)
-        '''address is required to be specified '''
-        self.port = settings.get("port", fallback="/dev/ttyUSB0")
-        self.baudrate = settings.getint("baudrate", fallback=9600)
-        if not self.port:
-            raise ValueError("Port is not set")
+        self.adr = struct.pack("B", self.address)
 
-        resolved_port: str | None = find_usb_serial_port(self.port)
-        if not resolved_port:
-            raise ValueError("Port is not valid / not found")
-        self.port: str = resolved_port
+        self.ignore_checksum_errors: bool = settings.getboolean("ignore_checksum_errors", fallback=False)
+        ''' accept frames that fail the checksum (old behavior); off by default '''
 
-        self._log.info("Serial Port : " + self.port + " = "+get_usb_serial_port_info(self.port)) #print for config convenience
+    @staticmethod
+    def _parse_version(value : Any) -> bytes | None:
+        ''' converts the ASCII hex VER field of a response (b"20") to the single raw byte 0x20.
+        returns None if it is not a usable version. '''
+        if not isinstance(value, (bytes, bytearray)) or len(value) != 2:
+            return None
+        try:
+            parsed: bytes = bytes.fromhex(bytes(value).decode("ascii"))
+        except (ValueError, UnicodeDecodeError):
+            return None
+        return parsed if parsed != b"\x00" else None
 
-        self.baudrate: int = settings.getint("baudrate", 9600)
+    def _handshake(self) -> bool:
+        ''' negotiates the protocol version and logs the battery name; True when the battery answered '''
+        if self.ver != b"\x00":
+            return True  # already negotiated on an earlier connect
 
-        address : int = settings.getint("address", 0)
-        self.addresses = [address]
+        # Get the version. Requests use DEFAULT_VER until this succeeds.
+        # Note: If attribute is NOT "info", read_variable returns the 'raw' attribute value.
+        version_result: dict[str, int | float | str] | Any | None = self.read_variable("version", attribute="ver")
+        if not version_result:
+            return False
 
-        self.adr = struct.pack("B", address)
-        #todo, multi address support later
+        detected: bytes | None = self._parse_version(version_result)
+        if detected is None:
+            self._log.warning(f"Unusable pylon protocol version {version_result!r}; using default {self.DEFAULT_VER!r}")
+        else:
+            self.ver = detected
+            self._log.info(f"pylon protocol version is {self.ver!r}")
 
-        self.client = serial_frame_client(self.port,
-                                          self.baudrate,
-                                          self.SOI,
-                                          self.EOI,
-                                          bytesize=8,
-                                          parity=serial.PARITY_NONE,
-                                          stopbits=1,
-                                          exclusive=True)
+        # Get the battery name (this returns a dict)
+        name_dict: dict[str, int | float | str] | Any | None = self.read_variable("battery_name")
+        self._log.info(f"Battery Name: {name_dict}")
+        return True
 
+    def _query(self, command : int) -> SimpleNamespace | None:
+        ''' one validated command/response round trip; None if no (valid) response '''
+        frame: bytes | None = self._exchange(command)
+        return self.decode_frame(frame) if frame else None
 
-        pass
+    def _info_bytes(self, decoded : SimpleNamespace | None) -> bytes | None:
+        ''' INFO field of a decoded frame as raw bytes (it is ASCII hex on the wire) '''
+        raw_attr: Any | None = getattr(decoded, "info", None)
+        if not raw_attr:
+            return None
+        try:
+            return bytes.fromhex(raw_attr.decode("utf8"))
+        except (ValueError, UnicodeDecodeError):
+            self._log.warning(f"Serial Pylon INFO is not valid hex: {raw_attr!r}")
+            return None
 
-    def connect(self) -> None:
-        self.client.connect()
-
-        if self.ver == b"\x00":
-            # Get the version.
-            # Note: If attribute is NOT "info", read_variable returns the 'raw' attribute value.
-            version_result: dict[str, int | float | str] | Any | None = self.read_variable("version", attribute="ver")
-
-            if version_result:
-                # Ensure version_result is treated as bytes
-                # If read_variable returns a dict, then: version_result.get("version")
-                # But since attribute="ver", it likely returns the raw bytes directly.
-                if isinstance(version_result, bytes):
-                    self.ver = version_result
-                else:
-                    # Fallback: try to convert to bytes if it's a string/int
-                    self.ver = str(version_result).encode("utf-8")
-
-                self.connected = True
-                self._log.info(f"pylon protocol version is {self.ver!r}")
-
-                # Get the battery name (this returns a dict)
-                name_dict: dict[str, int | float | str] | Any | None = self.read_variable("battery_name")
-                self._log.info(f"Battery Name: {name_dict}")
-
-    def read_data(self) -> dict[str, int | float | str]:
-        # Initialize 'info' outside the IF to satisfy the return type
-        info: dict[str, int | float | str] = {}
-
-        if self.protocolSettings is not None:
-            registry_map: list[registry_map_entry] = self.protocolSettings.get_registry_map()
-
-            # We'll use a temporary dict to collect all raw register data first
-            all_raw_data: dict[int, bytes] = {}
-
-            for entry in registry_map:
-                # Note: Using 'all_raw_data' to check if we already polled this register
-                if entry.register not in all_raw_data:
-                    command: int = entry.register
-                    self.send_command(command)
-                    frame: list[bytes] | bytes | None = self.client.read()
-
-                    if frame:
-                        # 1. Standardize 'frame' into a single 'bytes' object
-                        if isinstance(frame, list):
-                            frame = b"".join(frame)
-
-                        # 'frame' is guaranteed to be type 'bytes'
-                        raw_attr: Any | None = getattr(self.decode_frame(frame), "info", None)
-
-                        if raw_attr:
-                            # Decode hex string bytes to literal bytes
-                            raw_bytes: bytes = bytes.fromhex(raw_attr.decode("utf8"))
-                            all_raw_data[entry.register] = raw_bytes
-
-
-            # Process everything once, or update 'info' cumulatively
-            # If process_registery can take the whole map at once, do it here:
-            if all_raw_data:
-                processed: dict[str, int | float | str] = self.protocolSettings.process_registery(all_raw_data, registry_map=registry_map)
-                info.update(processed)
-
-        # logs if NO data was gathered across any registers
-        if not info:
-            self._log.info("Data is Empty; Serial Pylon Transport busy?")
-
-        # Always returns a dict (even if empty), satisfying the type checker
-        return info
+    def _read_command(self, command : int) -> bytes | None:
+        return self._info_bytes(self._query(command))
 
     def read_variable(self, variable_name: str, entry: "registry_map_entry | None" = None, attribute: str = "info") -> dict[str, int | float | str] | Any | None:
         ## clean for convenience
@@ -199,25 +153,19 @@ class serial_pylon(transport_base):
                         break
 
             if entry:
-                command: int = entry.register
-                self.send_command(command)
-                frame: list[bytes] | bytes | None = self.client.read()
+                decoded: SimpleNamespace | None = self._query(entry.register)
+                if decoded is None:
+                    return None
 
-                if frame:
-                    # Standardize 'frame' into 'bytes' to fix the type error
-                    if isinstance(frame, list):
-                        frame = b"".join(frame)
-
-                    # Extract the attribute (e.g., "info") safely
-                    raw: Any | None = getattr(self.decode_frame(frame), attribute, None)
-
-                    if raw and attribute == "info":
-                        # Decode from hex string bytes to literal bytes
-                        raw_bytes = bytes.fromhex(raw.decode("utf8"))
+                if attribute == "info":
+                    raw_bytes: bytes | None = self._info_bytes(decoded)
+                    if raw_bytes is not None:
                         # Process into the final dictionary format
                         return self.protocolSettings.process_registery({entry.register: raw_bytes}, registry_map=registry_map)
-                    # Return 'raw' if it's a different attribute (like a status code)
-                    return raw
+                    return None
+
+                # Return the raw attribute if it's a different one (like ver or a status code)
+                return getattr(decoded, attribute, None) or None
 
         return None
 
@@ -241,18 +189,29 @@ class serial_pylon(transport_base):
         checksum: int = (~remainder + 1) & 0xFFFF
 
         return checksum
+
     # returning object not bytes
-    def decode_frame(self, raw_frame: bytes) -> SimpleNamespace:
+    def decode_frame(self, raw_frame: bytes) -> SimpleNamespace | None:
+        ''' splits a response (SOI/EOI already stripped) into its fields.
+        returns None for a truncated frame or one that fails its checksum, unless
+        ignore_checksum_errors is set. '''
         raw_frame = bytes(raw_frame)
 
+        if len(raw_frame) < self.MIN_FRAME_LENGTH:
+            self._log.warning(f"Serial Pylon frame too short ({len(raw_frame)} bytes): {raw_frame!r}")
+            return None
+
         frame_data: bytes = raw_frame[0:-4]
-        frame_checksum: bytes = raw_frame[-4:]
+        frame_checksum: bytes = raw_frame[-4:].upper()
 
         # Calculate checksum
         calc_checksum: bytes = struct.pack(">H", self.calculate_checksum(frame_data)).hex().upper().encode()
 
         if calc_checksum != frame_checksum:
-            self._log.warning(f"Serial Pylon checksum error, got {calc_checksum!r}, expected {frame_checksum!r}")
+            self._log.warning(f"Serial Pylon checksum error, expected {calc_checksum!r}, got {frame_checksum!r}"
+                              + (" (ignored)" if self.ignore_checksum_errors else "; frame discarded"))
+            if not self.ignore_checksum_errors:
+                return None
 
         # 2. Use SimpleNamespace instead of Object()
         data = SimpleNamespace()
@@ -284,13 +243,13 @@ class serial_pylon(transport_base):
             lenid_sum: int = (lenid & 0xF) + ((lenid >> 4) & 0xF) + ((lenid >> 8) & 0xF)
             lenid_modulo: int = lenid_sum % 16
             lenid_invert_plus_one: int = 0b1111 - lenid_modulo + 1
-            info_length: int = (lenid_invert_plus_one << 12) + lenid
+            info_length = (lenid_invert_plus_one << 12) + lenid
 
-        # Ensure ver and adr are bytes before calling .hex()
-        self.ver = b"\x20"
+        # Use the version negotiated in connect(); until then fall back to the default.
+        ver: bytes = self.ver if self.ver != b"\x00" else self.DEFAULT_VER
 
         # Build the frame as a string first (ASCII Hex protocol)
-        frame_str: str = self.ver.hex().upper()
+        frame_str: str = ver.hex().upper()
         frame_str += self.adr.hex().upper()
         frame_str += struct.pack(">H", command).hex().upper()
         frame_str += f"{info_length:04X}" # Cleaner way to get 4-char hex
@@ -307,9 +266,3 @@ class serial_pylon(transport_base):
         final_frame: bytes = frame_bytes + checksum_hex
 
         return final_frame
-
-
-    def send_command(self, cmd: int, info: bytes = b"") -> None:
-        data: bytes = self.build_frame(cmd, info)
-        self.client.write(data)
-
