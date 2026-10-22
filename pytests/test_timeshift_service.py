@@ -781,7 +781,7 @@ class TestWritePointsTimescale:
         # must degrade to the pre-fix behavior (no pause/decompress calls at
         # all) rather than raising an AttributeError.
         bridge, _session = self._bridge()
-        points = [ts.TimescalePointDict(time_iso="2025-06-01T00:00:00", fields={"soc": 50.0})]
+        points: list[ts.TimescalePointDict] = [ts.TimescalePointDict(time_iso="2025-06-01T00:00:00", fields={"soc": 50.0})]
         with patch.object(ts, "get_timescale_bridge", return_value=bridge):
             written, narrow_rows = ts.write_points_timescale(None, "narrow", "device_metrics_narrow", 7, points)
         assert (written, narrow_rows) == (1, 1)

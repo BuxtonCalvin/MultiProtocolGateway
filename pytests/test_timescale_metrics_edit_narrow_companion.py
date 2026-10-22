@@ -237,11 +237,11 @@ def test_narrow_failure_keeps_the_entry_staged_for_retry(state: Any) -> None:
 def test_preview_shows_picker_style_timestamps_and_narrow_count() -> None:
     preview: dict[str, Any] = {
         "row_count": 13, "narrow_row_count": 13,
-        "sample": [{"m_time": "2026-10-17T20:05:49.810365-07:00", "m_time_display": "2026-10-17  20:05:49.810365",
+        "sample": [{"m_time": "2026-10-17T20:05:49.810365-07:00", "m_time_display": "2026-10-17  20:05:49",
                     "field_name": "pload", "value": None}],
     }
     html: str = _env.get_template("partials/timescale_metrics_edit_preview.html").render(preview=preview)
-    assert "2026-10-17  20:05:49.810365" in html and "T20:05" not in html
+    assert "2026-10-17  20:05:49" in html and ".810365" not in html and "T20:05" not in html
     assert "matching row(s) in the shared narrow table will also be changed" in html
     preview["narrow_row_count"] = None
     assert "shared narrow table" not in _env.get_template("partials/timescale_metrics_edit_preview.html").render(preview=preview)
@@ -273,8 +273,8 @@ def test_preview_rows_are_clickable_and_carry_the_second() -> None:
     preview: dict[str, Any] = {
         "row_count": 2, "narrow_row_count": None,
         "sample": [
-            {"m_time": "x", "m_time_display": "2026-10-17  20:05:49.810365", "field_name": "pload", "value": None},
-            {"m_time": "y", "m_time_display": "2026-10-17  20:05:34.874720", "field_name": "pload", "value": 670},
+            {"m_time": "x", "m_time_display": "2026-10-17  20:05:49", "field_name": "pload", "value": None},
+            {"m_time": "y", "m_time_display": "2026-10-17  20:05:34", "field_name": "pload", "value": 670},
         ],
     }
     html: str = _env.get_template("partials/timescale_metrics_edit_preview.html").render(preview=preview)
@@ -309,4 +309,4 @@ def test_preview_timestamps_are_shown_in_the_machine_timezone(monkeypatch: pytes
 
     monkeypatch.setattr(bs, "_field_manager", field_manager)
     out = bs.preview_metric_edit(None, "wide", "p", 3, ["pload"], T0, T1)
-    assert out["sample"][0]["m_time_display"] == "2026-10-17  20:05:49.810365"
+    assert out["sample"][0]["m_time_display"] == "2026-10-17  20:05:49"

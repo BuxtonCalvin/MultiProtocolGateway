@@ -58,8 +58,8 @@
           pages/timescale_metrics_edit.html. The End bound covers the whole second, so this selects exactly this sample
           (and any other row stamped within the same second). m_time_display is already in the app's machine timezone. #}
       <tr class="border-t border-mpg-700/50 cursor-pointer hover:bg-mpg-700/20"
-          data-ts="{{ s.m_time_display[:20] }}"
-          title="Click to set Start and End to {{ s.m_time_display[:20] }}"
+          data-ts="{{ s.m_time_display }}"
+          title="Click to set Start and End to {{ s.m_time_display }}"
           tabindex="0" role="button"
           onclick="setMetricsEditRangeFromRow(this)"
           onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setMetricsEditRangeFromRow(this); }">

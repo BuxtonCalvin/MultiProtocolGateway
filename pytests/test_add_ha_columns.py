@@ -24,6 +24,7 @@ import importlib.util
 import io
 import json
 import sys
+from importlib.machinery import ModuleSpec
 from pathlib import Path
 from types import ModuleType
 
@@ -31,20 +32,20 @@ import pytest
 
 from classes.ha_metadata import infer_ha_attributes, split_unit_symbol
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT: Path = Path(__file__).resolve().parents[1]
 
 
 def _load_tool() -> ModuleType:
-    spec = importlib.util.spec_from_file_location("add_ha_columns", ROOT / "tools" / "add_ha_columns.py")
+    spec: ModuleSpec | None = importlib.util.spec_from_file_location("add_ha_columns", ROOT / "tools" / "add_ha_columns.py")
     assert spec is not None
     assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
+    module: ModuleType = importlib.util.module_from_spec(spec)
     sys.modules["add_ha_columns"] = module
     spec.loader.exec_module(module)
     return module
 
 
-tool = _load_tool()
+tool: ModuleType = _load_tool()
 
 
 # ---------------------------------------------------------------------------
@@ -116,7 +117,7 @@ def test_infer_entity_category() -> None:
 # the script
 # ---------------------------------------------------------------------------
 HEADER = "register;variable_name;documented_name;unit;data_type;values;writable"
-ROWS = [
+ROWS: list[str] = [
     "1;vpv1;Vpv1;0.1V;;0-65535;R",
     "2;soc;Soc;%;;0-100;R",
     "3;fw_version;Firmware Version;;ASCII;0-65535;R",
@@ -130,7 +131,7 @@ ROWS = [
 
 
 def _make_protocols(tmp_path: Path, *, eol: str = "\r\n") -> Path:
-    folder = tmp_path / "protocols" / "acme"
+    folder: Path = tmp_path / "protocols" / "acme"
     folder.mkdir(parents=True)
     (folder / "acme_x.json").write_text(json.dumps({"work_mode_codes": {"0": "Self", "1": "Grid"}}))
     (folder / "acme_x.input_registry_map.csv").write_bytes((eol.join([HEADER, *ROWS])).encode("latin-1"))
@@ -139,7 +140,7 @@ def _make_protocols(tmp_path: Path, *, eol: str = "\r\n") -> Path:
 
 
 def _read(path: Path) -> list[dict[str, str]]:
-    text = path.read_bytes().decode("latin-1")
+    text: str = path.read_bytes().decode("latin-1")
     return list(csv.DictReader(io.StringIO(text, newline=""), delimiter=";"))
 
 
@@ -149,8 +150,8 @@ def _csv(tmp_path: Path) -> Path:
 
 def test_dry_run_writes_nothing(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """Without --apply the files are untouched and the summary says so."""
-    protocols = _make_protocols(tmp_path)
-    before = _csv(tmp_path).read_bytes()
+    protocols: Path = _make_protocols(tmp_path)
+    before: bytes = _csv(tmp_path).read_bytes()
 
     assert tool.main([str(protocols)]) == 0
 
@@ -160,11 +161,11 @@ def test_dry_run_writes_nothing(tmp_path: Path, capsys: pytest.CaptureFixture[st
 
 def test_apply_adds_columns_and_fills_inferred_values(tmp_path: Path) -> None:
     """The three columns are appended (underscore style, like this file) and populated."""
-    protocols = _make_protocols(tmp_path)
+    protocols: Path = _make_protocols(tmp_path)
 
     assert tool.main([str(protocols), "--apply"]) == 0
 
-    rows = {r["variable_name"]: r for r in _read(_csv(tmp_path))}
+    rows: dict[str, dict[str, str]] = {r["variable_name"]: r for r in _read(_csv(tmp_path))}
     assert list(rows["vpv1"])[-3:] == ["ha_device_class", "ha_state_class", "ha_entity_category"]
     assert (rows["vpv1"]["ha_device_class"], rows["vpv1"]["ha_state_class"]) == ("voltage", "measurement")
     assert rows["soc"]["ha_device_class"] == "battery"
@@ -180,16 +181,16 @@ def test_apply_adds_columns_and_fills_inferred_values(tmp_path: Path) -> None:
 
 def test_apply_preserves_encoding_delimiter_and_line_endings(tmp_path: Path) -> None:
     """Existing cells and the file's byte-level conventions survive the rewrite."""
-    protocols = _make_protocols(tmp_path)
-    original = _read(_csv(tmp_path))
+    protocols: Path = _make_protocols(tmp_path)
+    original: list[dict[str, str]] = _read(_csv(tmp_path))
 
     tool.main([str(protocols), "--apply"])
 
-    raw = _csv(tmp_path).read_bytes()
+    raw: bytes = _csv(tmp_path).read_bytes()
     assert b"\r\n" in raw
     assert b"\n" not in raw.replace(b"\r\n", b"")  # no mixed line endings introduced
     assert "\u00c2\u00b0C".encode("latin-1") in raw  # the mis-encoded unit is byte-for-byte unchanged
-    after = _read(_csv(tmp_path))
+    after: list[dict[str, str]] = _read(_csv(tmp_path))
     for old, new in zip(original, after, strict=True):
         for key, value in old.items():
             assert new[key] == value
@@ -197,9 +198,9 @@ def test_apply_preserves_encoding_delimiter_and_line_endings(tmp_path: Path) -> 
 
 def test_second_run_changes_nothing(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """Idempotent: re-running (e.g. in CI) produces no further changes."""
-    protocols = _make_protocols(tmp_path)
+    protocols: Path = _make_protocols(tmp_path)
     tool.main([str(protocols), "--apply"])
-    first = _csv(tmp_path).read_bytes()
+    first: bytes = _csv(tmp_path).read_bytes()
     capsys.readouterr()
 
     tool.main([str(protocols), "--apply"])
@@ -210,35 +211,35 @@ def test_second_run_changes_nothing(tmp_path: Path, capsys: pytest.CaptureFixtur
 
 def test_hand_edited_cells_survive_unless_overwrite(tmp_path: Path) -> None:
     """A value a person set is never replaced by a guess, unless --overwrite is passed."""
-    protocols = _make_protocols(tmp_path)
+    protocols: Path = _make_protocols(tmp_path)
     tool.main([str(protocols), "--apply"])
-    path = _csv(tmp_path)
-    text = path.read_bytes().decode("latin-1").replace(";voltage;measurement;", ";battery;total;", 1)
+    path: Path = _csv(tmp_path)
+    text: str = path.read_bytes().decode("latin-1").replace(";voltage;measurement;", ";battery;total;", 1)
     path.write_bytes(text.encode("latin-1"))
 
     tool.main([str(protocols), "--apply"])
-    kept = {r["variable_name"]: r for r in _read(path)}["vpv1"]
+    kept: dict[str, str] = {r["variable_name"]: r for r in _read(path)}["vpv1"]
     assert (kept["ha_device_class"], kept["ha_state_class"]) == ("battery", "total")
 
     tool.main([str(protocols), "--apply", "--overwrite"])
-    replaced = {r["variable_name"]: r for r in _read(path)}["vpv1"]
+    replaced: dict[str, str] = {r["variable_name"]: r for r in _read(path)}["vpv1"]
     assert (replaced["ha_device_class"], replaced["ha_state_class"]) == ("voltage", "measurement")
 
 
 def test_config_writable_flag_marks_settings(tmp_path: Path) -> None:
     """--config-writable puts writable registers in HA's 'config' category."""
-    protocols = _make_protocols(tmp_path)
+    protocols: Path = _make_protocols(tmp_path)
 
     tool.main([str(protocols), "--apply", "--config-writable"])
 
-    rows = {r["variable_name"]: r for r in _read(_csv(tmp_path))}
+    rows: dict[str, dict[str, str]] = {r["variable_name"]: r for r in _read(_csv(tmp_path))}
     assert rows["work_mode"]["ha_entity_category"] == "config"
     assert rows["vpv1"]["ha_entity_category"] == ""
 
 
 def test_space_style_headers_get_space_style_columns(tmp_path: Path) -> None:
     """New column names follow the file's own convention (spaces vs underscores)."""
-    folder = tmp_path / "protocols" / "acme"
+    folder: Path = tmp_path / "protocols" / "acme"
     folder.mkdir(parents=True)
     (folder / "p.input_registry_map.csv").write_text(
         "register,variable name,documented name,unit\n1,vpv1,Vpv1,V\n", encoding="latin-1"
@@ -246,20 +247,20 @@ def test_space_style_headers_get_space_style_columns(tmp_path: Path) -> None:
 
     tool.main([str(tmp_path / "protocols"), "--apply"])
 
-    header = (folder / "p.input_registry_map.csv").read_text(encoding="latin-1").splitlines()[0]
+    header: str = (folder / "p.input_registry_map.csv").read_text(encoding="latin-1").splitlines()[0]
     assert header == "register,variable name,documented name,unit,ha device class,ha state class,ha entity category"
 
 
 def test_rows_with_extra_cells_stay_extra(tmp_path: Path) -> None:
     """A row longer than the header keeps its extra cells after the new columns."""
-    folder = tmp_path / "protocols" / "acme"
+    folder: Path = tmp_path / "protocols" / "acme"
     folder.mkdir(parents=True)
-    path = folder / "p.input_registry_map.csv"
+    path: Path = folder / "p.input_registry_map.csv"
     path.write_text("register,variable name,documented name,unit\n1,vpv1,Vpv1,V,stray\n", encoding="latin-1")
 
     tool.main([str(tmp_path / "protocols"), "--apply"])
 
-    row = path.read_text(encoding="latin-1").splitlines()[1].split(",")
+    row: list[str] = path.read_text(encoding="latin-1").splitlines()[1].split(",")
     assert row[:4] == ["1", "vpv1", "Vpv1", "V"]
     assert row[4] == "voltage"
     assert row[-1] == "stray"

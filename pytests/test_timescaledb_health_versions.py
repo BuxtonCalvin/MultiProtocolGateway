@@ -74,7 +74,7 @@ def _manager(session: _Session, connected: bool = True, auto_update: bool = Fals
 
 
 def test_snapshot_reports_installed_available_and_status() -> None:
-    rows = [("timescaledb", "2.25.1", "2.30.1"), ("timescaledb_toolkit", "1.26.0", "1.26.0")]
+    rows: list[tuple[str, str, str]] = [("timescaledb", "2.25.1", "2.30.1"), ("timescaledb_toolkit", "1.26.0", "1.26.0")]
     snap = _manager(_Session(rows, "18.0 (Debian 18.0-1.pgdg13+1)")).get_health_snapshot()
     ts, tk = snap["extension_versions"]
     assert (ts["label"], ts["installed"], ts["available"], ts["up_to_date"]) == ("TimescaleDB", "2.25.1", "2.30.1", False)
@@ -118,7 +118,7 @@ def _ext(name: str, installed: str, available: str) -> dict[str, Any]:
 
 
 def test_template_shows_up_to_date_and_update_available() -> None:
-    html = _render(_health(extension_versions=[_ext("timescaledb", "2.25.1", "2.30.1"), _ext("timescaledb_toolkit", "1.26.0", "1.26.0")]))
+    html: str = _render(_health(extension_versions=[_ext("timescaledb", "2.25.1", "2.30.1"), _ext("timescaledb_toolkit", "1.26.0", "1.26.0")]))
     assert "2.25.1" in html and "Update available" in html and "2.30.1" in html
     assert "Up to date" in html and "1.26.0" in html
     assert "18.0" in html
@@ -126,7 +126,7 @@ def test_template_shows_up_to_date_and_update_available() -> None:
 
 
 def test_template_hint_reflects_auto_update_setting() -> None:
-    html = _render(_health(auto_update_extensions=True, extension_versions=[_ext("timescaledb", "2.25.1", "2.30.1")]))
+    html: str = _render(_health(auto_update_extensions=True, extension_versions=[_ext("timescaledb", "2.25.1", "2.30.1")]))
     assert "will update it on the next start" in html and "Set auto_update_extensions = true" not in html
 
 

@@ -99,7 +99,7 @@ def test_transport_write_mode_maps_edge_values() -> None:
 
 def test_json_out_writes_structured_payload_to_mock_file(dummy_settings: type[DummySettings]) -> None:
     """Mocks filesystem I/O: json_out writes device metadata, timestamp, and data as JSON."""
-    settings = dummy_settings(
+    settings: DummySettings = dummy_settings(
         output_file="output/test.json",
         pretty_print="false",
         include_timestamp="false",

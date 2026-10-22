@@ -33,6 +33,7 @@ import pytest
 from conftest import DummySettings
 
 from classes.transports.serial_base import serial_base
+from protocol_gateway import Protocol_Gateway, ScrapeGroup
 
 BASE_MODULE = "classes.transports.serial_base"
 
@@ -43,8 +44,8 @@ class FakeClient:
     timeout: float = 5
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
-        self.args = args
-        self.kwargs = kwargs
+        self.args: tuple[Any, ...] = args
+        self.kwargs: dict[str, Any] = kwargs
         self.connected_calls = 0
         self.last_written: bytes = b""
         self.on_write: Any = None
@@ -79,7 +80,7 @@ def _process_registery(raw: dict[int, bytes], registry_map: object = None) -> di
 class FakeSerial(serial_base):
     """Smallest possible concrete serial protocol: frame = 2 hex chars address + 2 hex chars command."""
 
-    transport_type = "scraper"
+    transport_type: str = "scraper"
     SOI = b"<"
     EOI = b">"
 
@@ -116,7 +117,7 @@ def make(cls: type[serial_base] = FakeSerial, **values: Any) -> Any:
         patch(f"{BASE_MODULE}.get_usb_serial_port_info", return_value="mock"),
         patch(f"{BASE_MODULE}.serial_frame_client", side_effect=_new_client),
     ):
-        transport = cls(settings)  # type: ignore[arg-type]
+        transport: serial_base = cls(settings)  # type: ignore[arg-type]
     transport._log = MagicMock()
     return transport
 
@@ -138,7 +139,7 @@ def test_base_class_is_marked_abstract_for_the_web_ui() -> None:
 
 def test_subclass_without_frame_markers_is_rejected() -> None:
     class NoMarkers(serial_base):
-        transport_type = "scraper"
+        transport_type: str = "scraper"
 
     with pytest.raises(NotImplementedError, match="SOI and EOI"):
         make(NoMarkers)
@@ -231,12 +232,12 @@ def test_exchanges_from_threads_on_a_shared_port_never_interleave() -> None:
 
     def hammer(transport: FakeSerial) -> None:
         for _ in range(200):
-            sent = transport.build_frame(1)
-            got = transport._exchange(1)
+            sent: bytes = transport.build_frame(1)
+            got: bytes | None = transport._exchange(1)
             if got != sent:
                 mismatches.append((sent, got))
 
-    threads = [threading.Thread(target=hammer, args=(t,)) for t in (first, second)]
+    threads: list[threading.Thread] = [threading.Thread(target=hammer, args=(t,)) for t in (first, second)]
     for t in threads:
         t.start()
     for t in threads:
@@ -309,9 +310,9 @@ def test_gateway_builds_one_scrape_group_per_device() -> None:
     for transport in (battery1, battery1_again, battery2):
         transport.read_interval = 10
 
-    gateway = Protocol_Gateway.__new__(Protocol_Gateway)
+    gateway: Protocol_Gateway = Protocol_Gateway.__new__(Protocol_Gateway)
     gateway._Protocol_Gateway__transports = [battery1, battery1_again, battery2]  # type: ignore[attr-defined]
-    groups = gateway._build_scrape_groups()
+    groups: list[ScrapeGroup] = gateway._build_scrape_groups()
 
     assert len(groups) == 2
     assert sorted(len(g.members) for g in groups) == [1, 2]
@@ -346,7 +347,7 @@ def test_connect_stays_disconnected_when_handshake_fails() -> None:
 
 def test_default_handshake_trusts_the_port() -> None:
     class Plain(serial_base):
-        transport_type = "scraper"
+        transport_type: str = "scraper"
         SOI = b"<"
         EOI = b">"
 

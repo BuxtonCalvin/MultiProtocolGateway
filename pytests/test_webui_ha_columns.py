@@ -189,9 +189,9 @@ def test_scanner_parses_ha_columns_lowercased_and_blank_when_absent(tmp_path: Pa
 
 def test_scanner_accepts_space_separated_header_names(tmp_path: Path) -> None:
     """'ha device class' (as documented) and 'ha_device_class' (as the editor writes) are equivalent."""
-    folder = tmp_path / "protocols" / "acme"
+    folder: Path = tmp_path / "protocols" / "acme"
     folder.mkdir(parents=True)
-    path = folder / "acme_x.input_registry_map.csv"
+    path: Path = folder / "acme_x.input_registry_map.csv"
     path.write_text(
         "register;variable name;documented name;unit;ha device class\n1;soc;Soc;%;battery\n", encoding="utf-8"
     )

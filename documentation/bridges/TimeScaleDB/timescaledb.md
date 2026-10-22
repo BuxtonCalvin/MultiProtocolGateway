@@ -359,7 +359,7 @@ The Start and End boxes use one compact format: `YYYY-MM-DD  HH:MM:SS` on a 24-h
 
 - **Picking only a day** (no time) gives `00:00:00` for Start and `23:59:59` for End, so a single date selects the whole day.
 - **Whole seconds, inclusive of the End second.** Stored timestamps carry microseconds (for example `20:05:49.810365`), but the boxes only hold whole seconds. Start is taken at the beginning of the second shown and End at the very end of its second (`:49.999999`). Setting Start and End to the same second therefore selects every row stamped within that second, which is what you want for a single sample. This is also what clicking a Preview row does.
-- **Preview times use the same format**, with the microseconds shown (`2026-10-17  20:05:49.810365`) so that two rows in the same second can be told apart, and in the same timezone the boxes are read in.
+- **Preview times use the same format** (`2026-10-17  20:05:49`, whole seconds) and the same timezone the boxes are read in, so a time you see in the list is exactly what you would type into Start or End.
 
 The picker is the Flatpickr library, vendored with the Admin UI so it works without internet access. If it fails to load, the boxes still work as plain text fields.
 

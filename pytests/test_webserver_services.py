@@ -215,7 +215,7 @@ def test_get_transport_library_shapes_scanner_output(mock_scan: MagicMock, tmp_p
 
 def test_scanner_classifies_transport_from_transport_type_attribute(tmp_path: Path) -> None:
     """Happy path: scanner classification uses the transport_type class attribute, not comments."""
-    transports_dir = tmp_path / "transports"
+    transports_dir: Path = tmp_path / "transports"
     transports_dir.mkdir()
     (transports_dir / "fake_bridge.py").write_text(
         "# scraper misleading old comment\n"
@@ -237,7 +237,7 @@ def test_scanner_classifies_transport_from_transport_type_attribute(tmp_path: Pa
     assert _classify_transport("transport.out", {"transport": "fake_bridge"}, transports_dir) == "bridge"
     assert _classify_transport("transport.in", {"transport": "fake_scraper"}, transports_dir) == "scraper"
 
-    library = scan_transport_library(transports_dir)
+    library: dict[str, device_service.TransportLibraryEntry] = scan_transport_library(transports_dir)
     assert library["fake_bridge"]["classification"] == "bridge"
     assert library["fake_scraper"]["classification"] == "scraper"
 
@@ -253,5 +253,5 @@ def test_scanner_treats_missing_transport_type_as_base_class(tmp_path: Path) -> 
         encoding="utf-8",
     )
 
-    library = scan_transport_library(transports_dir)
+    library: dict[str, device_service.TransportLibraryEntry] = scan_transport_library(transports_dir)
     assert library["helper"]["classification"] == "base class"

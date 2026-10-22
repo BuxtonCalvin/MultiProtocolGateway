@@ -15,10 +15,10 @@ from jinja2 import ChoiceLoader, DictLoader, Environment, FileSystemLoader
 from classes.WebServer.services import faq_service
 from classes.WebServer.services.faq_service import FaqLoadError, load_faq, parse_faq
 
-TEMPLATES = Path(__file__).resolve().parents[1] / "classes" / "WebServer" / "templates"
+TEMPLATES: Path = Path(__file__).resolve().parents[1] / "classes" / "WebServer" / "templates"
 
-_TOKEN_RE = re.compile(r"\d{8,10}:[A-Za-z0-9_-]{30,}")  # shape of a Telegram bot token
-_BOT_URL_RE = re.compile(r"api\.telegram\.org/(?:file/)?bot\d")
+_TOKEN_RE: re.Pattern[str] = re.compile(r"\d{8,10}:[A-Za-z0-9_-]{30,}")  # shape of a Telegram bot token
+_BOT_URL_RE: re.Pattern[str] = re.compile(r"api\.telegram\.org/(?:file/)?bot\d")
 
 
 def _good() -> dict[str, Any]:
@@ -39,8 +39,8 @@ def _good() -> dict[str, Any]:
 
 # --------------------------------------------------------------------------- the real faq.json
 def test_shipped_faq_loads_and_follows_the_rules() -> None:
-    cats = load_faq()
-    ids = [i.id for c in cats for i in c.items]
+    cats: list[faq_service.FaqCategory] = load_faq()
+    ids: list[str] = [i.id for c in cats for i in c.items]
     assert ids and len(ids) == len(set(ids))
     for cat in cats:
         assert cat.title and cat.items
@@ -50,22 +50,22 @@ def test_shipped_faq_loads_and_follows_the_rules() -> None:
 
 
 def test_shipped_faq_contains_no_secrets_or_device_identifiers() -> None:
-    raw = faq_service.FAQ_PATH.read_text(encoding="utf-8")
+    raw: str = faq_service.FAQ_PATH.read_text(encoding="utf-8")
     assert not _TOKEN_RE.search(raw), "a Telegram-bot-token-shaped string is in faq.json"
     assert not _BOT_URL_RE.search(raw), "a real bot URL (api.telegram.org/bot<digits>…) is in faq.json"
     assert not re.search(r"\b(?:10|192\.168|172\.(?:1[6-9]|2\d|3[01]))\.\d+\.\d+(?:\.\d+)?\b", raw), "a private IP address is in faq.json"
 
 
 def test_shipped_faq_links_point_at_real_pages() -> None:
-    raw = faq_service.FAQ_PATH.read_text(encoding="utf-8")
-    pages_src = (TEMPLATES.parent / "routers" / "pages.py").read_text(encoding="utf-8")
+    raw: str = faq_service.FAQ_PATH.read_text(encoding="utf-8")
+    pages_src: str = (TEMPLATES.parent / "routers" / "pages.py").read_text(encoding="utf-8")
     for link in set(re.findall(r"\]\((/pages/[a-z0-9-/]+)\)", raw)):
         assert f'"{link}"' in pages_src or link == "/pages/help", f"{link} is not a known page route"
 
 
 # --------------------------------------------------------------------------- parsing and validation
 def test_parse_renders_markdown_and_builds_search_text() -> None:
-    cat = parse_faq(_good())[0]
+    cat: faq_service.FaqCategory = parse_faq(_good())[0]
     first, second = cat.items
     assert "<code>x</code>" in first.answer_html and "<strong>y</strong>" in first.answer_html
     assert "<li>one</li>" in second.answer_html
@@ -133,7 +133,7 @@ def _items_not_a_list(d: dict[str, Any]) -> None:
     ],
 )
 def test_parse_rejects_bad_content_with_a_pointer_to_the_problem(mutate: Callable[[dict[str, Any]], None], message: str) -> None:
-    data = _good()
+    data: dict[str, Any] = _good()
     mutate(data)
     with pytest.raises(FaqLoadError, match=re.escape(message)):
         parse_faq(data)
@@ -142,17 +142,17 @@ def test_parse_rejects_bad_content_with_a_pointer_to_the_problem(mutate: Callabl
 def test_load_reports_missing_and_invalid_files(tmp_path: Path) -> None:
     with pytest.raises(FaqLoadError, match="cannot read"):
         load_faq(tmp_path / "missing.json")
-    bad = tmp_path / "bad.json"
+    bad: Path = tmp_path / "bad.json"
     bad.write_text("{not json", encoding="utf-8")
     with pytest.raises(FaqLoadError, match="not valid JSON"):
         load_faq(bad)
 
 
 def test_load_picks_up_edits_without_a_restart(tmp_path: Path) -> None:
-    path = tmp_path / "faq.json"
+    path: Path = tmp_path / "faq.json"
     path.write_text(json.dumps(_good()), encoding="utf-8")
     assert load_faq(path) is load_faq(path)  # cached while unchanged
-    edited = _good()
+    edited: dict[str, Any] = _good()
     edited["categories"][0]["items"][1]["q"] = "Changed question"
     path.write_text(json.dumps(edited), encoding="utf-8")
     os.utime(path, ns=(10**18, 10**18))  # guarantee a different mtime even on coarse clocks
@@ -167,8 +167,8 @@ def _render(**ctx: Any) -> str:
 
 
 def test_template_renders_every_entry_with_anchor_and_escapes_text() -> None:
-    cats = parse_faq(_good())
-    html = _render(faq_categories=cats, faq_error=None)
+    cats: list[faq_service.FaqCategory] = parse_faq(_good())
+    html: str = _render(faq_categories=cats, faq_error=None)
     assert html.count("<details") == 2
     assert 'id="faq-first-item"' in html and 'id="faq-second-item"' in html
     assert "What &lt;is&gt; this?" in html and "What <is> this?" not in html  # question text is escaped
@@ -178,14 +178,14 @@ def test_template_renders_every_entry_with_anchor_and_escapes_text() -> None:
 
 
 def test_template_shows_the_error_instead_of_the_faq() -> None:
-    html = _render(faq_categories=[], faq_error="faq.json is not valid JSON: boom")
+    html: str = _render(faq_categories=[], faq_error="faq.json is not valid JSON: boom")
     assert "could not be loaded" in html and "boom" in html
     assert "<details" not in html and "<script>" not in html
 
 
 def test_shipped_faq_renders_completely() -> None:
-    cats = load_faq()
-    html = _render(faq_categories=cats, faq_error=None)
+    cats: list[faq_service.FaqCategory] = load_faq()
+    html: str = _render(faq_categories=cats, faq_error=None)
     assert html.count("<details") == sum(len(c.items) for c in cats)
     for cat in cats:
         for item in cat.items:

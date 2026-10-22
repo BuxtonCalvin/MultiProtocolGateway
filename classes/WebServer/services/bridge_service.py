@@ -79,8 +79,6 @@ from typing import TYPE_CHECKING, Generator, Iterable, Literal, cast
 import requests
 from starlette.datastructures import State
 
-from classes.transports.timescaledb import timescaledb
-
 from ...protocol_settings import Registry_Type, registry_map_entry
 from ...transports.transport_base import (
     BridgeHealthSnapshot,
@@ -205,7 +203,7 @@ class BackgroundJobRow(TypedDict):
 class MetricPreviewSample(TypedDict):
     """One matched row in preview_metric_edit()'s sample (m_time is ISO-8601)."""
     m_time: str
-    m_time_display: str   # "YYYY-MM-DD  HH:MM:SS.ffffff" -- same look as the range picker, sub-second kept to tell rows apart
+    m_time_display: str   # "YYYY-MM-DD  HH:MM:SS" -- same look as the range picker, whole seconds
     field_name: str
     value: float | str | None
 
@@ -762,7 +760,7 @@ def preview_metric_edit(
 
     def _display(m_time: datetime) -> str:
         local: datetime = m_time.astimezone(machine_tz) if m_time.tzinfo is not None else m_time
-        return local.strftime("%Y-%m-%d  %H:%M:%S.%f")
+        return local.strftime("%Y-%m-%d  %H:%M:%S")
 
     return {
         "row_count": preview.row_count,

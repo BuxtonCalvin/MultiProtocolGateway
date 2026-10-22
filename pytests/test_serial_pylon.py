@@ -86,15 +86,15 @@ def make_transport(**values: Any) -> serial_pylon:
 # --------------------------------------------------------------------------- #
 
 def test_build_frame_uses_default_version_until_negotiated() -> None:
-    transport = make_transport()
+    transport: serial_pylon = make_transport()
     assert transport.ver == b"\x00"
-    frame = transport.build_frame(0x4642)
+    frame: bytes = transport.build_frame(0x4642)
     assert frame.startswith(b"2002" + b"4642")  # VER 0x20, ADR 0x02, CID1/CID2
     assert transport.ver == b"\x00", "building a frame must not change the stored version"
 
 
 def test_build_frame_uses_negotiated_version() -> None:
-    transport = make_transport()
+    transport: serial_pylon = make_transport()
     transport.ver = b"\x25"
     assert transport.build_frame(0x4642).startswith(b"2502" + b"4642")
 
@@ -116,7 +116,7 @@ def test_parse_version(value: Any, expected: bytes | None) -> None:
 
 
 def test_connect_stores_negotiated_version_as_raw_byte() -> None:
-    transport = make_transport()
+    transport: serial_pylon = make_transport()
     # the battery reports its version as ASCII hex; it must be stored raw so build_frame hex-encodes it once
     transport.read_variable = MagicMock(side_effect=[b"20", {"battery_name": "US2000"}])  # type: ignore[method-assign]
     transport.connect()
@@ -126,7 +126,7 @@ def test_connect_stores_negotiated_version_as_raw_byte() -> None:
 
 
 def test_connect_with_unusable_version_keeps_default() -> None:
-    transport = make_transport()
+    transport: serial_pylon = make_transport()
     transport.read_variable = MagicMock(side_effect=[b"ZZ", None])  # type: ignore[method-assign]
     transport.connect()
     assert transport.ver == b"\x00"
@@ -138,10 +138,10 @@ def test_connect_with_unusable_version_keeps_default() -> None:
 # --------------------------------------------------------------------------- #
 
 def test_decode_frame_round_trip_with_info() -> None:
-    transport = make_transport()
+    transport: serial_pylon = make_transport()
     # build_frame() output has no SOI/EOI, i.e. it looks like what serial_frame_client.read() returns
-    frame = transport.build_frame(0x4642, b"\x02")
-    decoded = transport.decode_frame(frame)
+    frame: bytes = transport.build_frame(0x4642, b"\x02")
+    decoded: SimpleNamespace | None = transport.decode_frame(frame)
     assert decoded is not None
     assert decoded.ver == b"20"
     assert decoded.adr == b"02"
@@ -150,33 +150,33 @@ def test_decode_frame_round_trip_with_info() -> None:
 
 
 def test_decode_frame_rejects_bad_checksum() -> None:
-    transport = make_transport()
-    frame = transport.build_frame(0x4642, b"\x02")
-    corrupted = frame[:-1] + (b"0" if frame[-1:] != b"0" else b"1")
+    transport: serial_pylon = make_transport()
+    frame: bytes = transport.build_frame(0x4642, b"\x02")
+    corrupted: bytes = frame[:-1] + (b"0" if frame[-1:] != b"0" else b"1")
     assert transport.decode_frame(corrupted) is None
-    log = log_of(transport)
+    log: MagicMock = log_of(transport)
     log.warning.assert_called()
     message = str(log.warning.call_args.args[0])
     assert "expected" in message and "got" in message
 
 
 def test_decode_frame_checksum_comparison_is_case_insensitive() -> None:
-    transport = make_transport()
-    frame = transport.build_frame(0x4642)
+    transport: serial_pylon = make_transport()
+    frame: bytes = transport.build_frame(0x4642)
     assert transport.decode_frame(frame[:-4] + frame[-4:].lower()) is not None
 
 
 def test_decode_frame_can_ignore_checksum_errors() -> None:
-    transport = make_transport(ignore_checksum_errors=True)
-    frame = transport.build_frame(0x4642)
-    corrupted = frame[:-1] + (b"0" if frame[-1:] != b"0" else b"1")
-    decoded = transport.decode_frame(corrupted)
+    transport: serial_pylon = make_transport(ignore_checksum_errors=True)
+    frame: bytes = transport.build_frame(0x4642)
+    corrupted: bytes = frame[:-1] + (b"0" if frame[-1:] != b"0" else b"1")
+    decoded: SimpleNamespace | None = transport.decode_frame(corrupted)
     assert decoded is not None
     assert decoded.cid1 == b"46"
 
 
 def test_decode_frame_rejects_truncated_frame() -> None:
-    transport = make_transport()
+    transport: serial_pylon = make_transport()
     assert transport.decode_frame(b"2002464") is None
     assert transport.decode_frame(b"") is None
 
@@ -193,10 +193,10 @@ def fake_protocol(registers: list[int]) -> MagicMock:
 
 
 def test_read_data_skips_corrupt_frames_and_keeps_good_ones() -> None:
-    transport = make_transport()
+    transport: serial_pylon = make_transport()
     transport.protocolSettings = fake_protocol([0x4642, 0x4644])
-    good = transport.build_frame(0x4642, b"\x01\x02")
-    bad = transport.build_frame(0x4644, b"\x01\x02")
+    good: bytes = transport.build_frame(0x4642, b"\x01\x02")
+    bad: bytes = transport.build_frame(0x4644, b"\x01\x02")
     bad = bad[:-1] + (b"0" if bad[-1:] != b"0" else b"1")
     transport._exchange = MagicMock(side_effect=[good, bad])  # type: ignore[method-assign]
     assert transport.read_data() == {"v17986": "0102"}

@@ -43,6 +43,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from fastapi import FastAPI
 
 from classes.transports.serial_base import serial_base
 from classes.transports.serial_pylon import serial_pylon
@@ -53,9 +54,9 @@ from classes.WebServer.scanner import (
     scan_transport_library,
 )
 
-REPO = Path(__file__).resolve().parent.parent
-WEBSERVER_DIR = REPO / "classes" / "WebServer"
-TRANSPORTS_DIR = REPO / "classes" / "transports"
+REPO: Path = Path(__file__).resolve().parent.parent
+WEBSERVER_DIR: Path = REPO / "classes" / "WebServer"
+TRANSPORTS_DIR: Path = REPO / "classes" / "transports"
 
 
 def raw_defaults() -> dict[str, Any]:
@@ -83,7 +84,7 @@ def test_scanner_classifies_serial_pylon_sections_as_scrapers() -> None:
 
 
 def test_library_lists_serial_base_as_a_base_class_like_modbus_base() -> None:
-    library = scan_transport_library(TRANSPORTS_DIR)
+    library: dict[str, tr.TransportLibraryEntry] = scan_transport_library(TRANSPORTS_DIR)
     assert library["serial_base"]["classification"] == "base class"
     assert library["serial_base"]["classification"] == library["modbus_base"]["classification"]
     assert library["serial_pylon"]["classification"] == "scraper"
@@ -91,10 +92,10 @@ def test_library_lists_serial_base_as_a_base_class_like_modbus_base() -> None:
 
 def test_serial_base_keys_reach_the_ui_through_the_template() -> None:
     """Keys read in serial_base.py are not visible in serial_pylon.py's AST; the template must carry them."""
-    base_keys = set(_extract_settings_keys_from_ast(TRANSPORTS_DIR / "serial_base.py"))
+    base_keys: set[str] = set(_extract_settings_keys_from_ast(TRANSPORTS_DIR / "serial_base.py"))
     assert {"port", "baudrate", "baud", "address", "unit_id"} <= base_keys
 
-    resolved = tr._resolve_transport("serial_pylon", raw_defaults())
+    resolved: dict[str, str] = tr._resolve_transport("serial_pylon", raw_defaults())
     for key in ("port", "baudrate", "address"):
         assert key in resolved, f"serial_pylon would lose the '{key}' setting in the UI"
     assert "ignore_checksum_errors" in _extract_settings_keys_from_ast(TRANSPORTS_DIR / "serial_pylon.py")
@@ -106,15 +107,15 @@ def test_serial_base_keys_reach_the_ui_through_the_template() -> None:
 # --------------------------------------------------------------------------- #
 
 def test_serial_template_chain_mirrors_modbus() -> None:
-    raw = raw_defaults()
+    raw: dict[str, Any] = raw_defaults()
     assert raw["_serial_base"]["$extends"] == raw["_modbus_base"]["$extends"] == "_base"
     assert raw["serial_base"]["$extends"] == "_serial_base"
     assert raw["modbus_base"]["$extends"] == "_modbus_base"
 
 
 def test_serial_pylon_defaults_are_unchanged_by_the_refactor() -> None:
-    resolved = tr._resolve_transport("serial_pylon", raw_defaults())
-    expected = {
+    resolved: dict[str, str] = tr._resolve_transport("serial_pylon", raw_defaults())
+    expected: dict[str, str] = {
         "address": "0",
         "baudrate": "9600",
         "port": "/dev/ttyUSB0",
@@ -134,8 +135,8 @@ def test_serial_pylon_defaults_are_unchanged_by_the_refactor() -> None:
 
 @pytest.mark.parametrize("cls", serial_subclasses(), ids=lambda c: c.__name__)
 def test_every_serial_transport_is_wired_into_the_web_ui(cls: type[serial_base]) -> None:
-    name = cls.__name__
-    source = (TRANSPORTS_DIR / f"{cls.__module__.rsplit('.', 1)[-1]}.py").read_text(encoding="utf-8")
+    name: str = cls.__name__
+    source: str = (TRANSPORTS_DIR / f"{cls.__module__.rsplit('.', 1)[-1]}.py").read_text(encoding="utf-8")
 
     assert 'transport_type = "scraper"' in source, f"{name} must declare its own literal transport_type (AST scanner)"
     assert _classify_transport("transport.x", {"transport": name}, TRANSPORTS_DIR) == "scraper"
@@ -184,7 +185,7 @@ class Manager:
     """GatewayManagerLike test double that records reload requests."""
 
     def __init__(self, gateway: object) -> None:
-        self._gateway = gateway
+        self._gateway: object = gateway
         self.reloads: list[str] = []
 
     @property
@@ -203,22 +204,22 @@ def web(tmp_path_factory: pytest.TempPathFactory) -> Iterator[SimpleNamespace]:
 
     from classes.WebServer.main import create_app
 
-    tmp = tmp_path_factory.mktemp("mpg_web")
-    registry = tmp / "registry"
+    tmp: Path = tmp_path_factory.mktemp("mpg_web")
+    registry: Path = tmp / "registry"
     registry.mkdir()
     for name in ("transport_defaults.json", "setting_descriptions.json"):
         shutil.copy(WEBSERVER_DIR / name, registry / name)
 
-    previous_registry_dir = tr._registry_dir
+    previous_registry_dir: Path = tr._registry_dir
     tr.configure(registry)
 
-    config_path = tmp / "config.cfg"
+    config_path: Path = tmp / "config.cfg"
     config_path.write_text(CONFIG, encoding="utf-8")
 
     gateway = SimpleNamespace(web_server=None)
     manager = Manager(gateway)
 
-    app = create_app(
+    app: FastAPI = create_app(
         config_dir=tmp, config_path=config_path, db_dir=tmp, gateway_instance=gateway,
         gateway_manager=manager, log_path=tmp / "mpg.log", project_root=REPO,
         protocols_dir=REPO / "protocols",
@@ -249,7 +250,7 @@ def test_device_pages_exist_for_each_battery_section(web: SimpleNamespace) -> No
 
 
 def test_device_settings_api_gets_defaults_from_the_serial_template(web: SimpleNamespace) -> None:
-    rows = {r["key"]: r for r in web.client.get("/api/devices/pylon_battery_1/settings").json()}
+    rows: dict[Any, Any] = {r["key"]: r for r in web.client.get("/api/devices/pylon_battery_1/settings").json()}
     assert {"transport", "port", "baudrate", "address", "protocol_version"} <= set(rows)
     assert rows["address"]["value_disk"] == "2"
     assert rows["address"]["default_value"] == "0"
@@ -258,7 +259,7 @@ def test_device_settings_api_gets_defaults_from_the_serial_template(web: SimpleN
 
 
 def test_transport_settings_api_describes_the_serial_keys(web: SimpleNamespace) -> None:
-    rows = {r["key"]: r for r in web.client.get("/api/transport-settings").json()}
+    rows: dict[Any, Any] = {r["key"]: r for r in web.client.get("/api/transport-settings").json()}
     assert rows["ignore_checksum_errors"]["transports"] == "serial_pylon"
     assert rows["ignore_checksum_errors"]["description"]
     assert rows["unit_id"]["description"]
@@ -275,7 +276,7 @@ def test_startup_sync_leaves_the_committed_registry_unchanged(web: SimpleNamespa
 
 def test_editing_and_committing_a_serial_device_writes_config_cfg(web: SimpleNamespace) -> None:
     client = web.client
-    rows = {r["key"]: r for r in client.get("/api/devices/pylon_battery_1/settings").json()}
+    rows: dict[Any, Any] = {r["key"]: r for r in client.get("/api/devices/pylon_battery_1/settings").json()}
 
     assert client.patch(f"/api/devices/pylon_battery_1/settings/{rows['address']['id']}", json={"value_staged": "4"}).status_code == 200
 
