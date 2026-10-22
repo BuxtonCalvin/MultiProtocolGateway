@@ -959,8 +959,8 @@
   "timescale_metrics_edit": [
     {
       "id": "timescale_metrics_edit-table",
-      "x_percent": 5.3,
-      "y_percent": 22,
+      "x_percent": 4.307382607006528,
+      "y_percent": 19.31476869025683,
       "label": "Choose the data table that you want to edit first.",
       "shape_type": "dot",
       "label_x_percent": 8.7,
@@ -968,8 +968,8 @@
     },
     {
       "id": "timescale_metrics_edit-scraper-device",
-      "x_percent": 68,
-      "y_percent": 9.7,
+      "x_percent": 63.65729890565356,
+      "y_percent": 8.059025310712506,
       "label": "Choose the Scraper data you want to edit.",
       "shape_type": "dot",
       "label_x_percent": 72.5925925925926,
@@ -977,47 +977,65 @@
     },
     {
       "id": "timescale_metrics_edit-fields",
-      "x_percent": 68.2,
-      "y_percent": 18.2,
+      "x_percent": 63.36099020915684,
+      "y_percent": 16.111486759088642,
       "label": "Fields you can edit that are related to the table/scraper combination.",
       "shape_type": "dot",
-      "label_x_percent": 73.6068100358423,
-      "label_y_percent": 11.722913004313636
+      "label_x_percent": 72.9864241652214,
+      "label_y_percent": 10.529476866650004
     },
     {
       "id": "timescale_metrics_edit-dates",
       "x_percent": 67.6,
-      "y_percent": 27.1,
+      "y_percent": 24.862307241880693,
       "label": "The date range of the data you want to edit.",
       "shape_type": "rect",
-      "label_x_percent": 14.9,
-      "label_y_percent": 23.5,
-      "width_percent": 54.6,
-      "height_percent": 8.6,
+      "label_x_percent": 15.39630869649674,
+      "label_y_percent": 20.36723013863297,
+      "width_percent": 53.85553695525491,
+      "height_percent": 5.914768690256826,
       "stroke_color": "rgb(14,165,233)",
       "fill_color": "rgba(14,165,233,0.18)"
     },
     {
       "id": "timescale_metrics_edit-EditValue",
-      "x_percent": 66.7,
-      "y_percent": 36.2,
+      "x_percent": 66.3,
+      "y_percent": 32.2,
       "label": "Set the value of the metric(s).",
       "shape_type": "rect",
-      "label_x_percent": 41.679450418160094,
-      "label_y_percent": 40.995417399137274,
-      "width_percent": 52.2,
-      "height_percent": 7.6,
+      "label_x_percent": 68,
+      "label_y_percent": 30,
+      "width_percent": 52,
+      "height_percent": 6.1,
       "stroke_color": "rgb(14,165,233)",
       "fill_color": "rgba(14,165,233,0.18)"
     },
     {
+      "id": "timescale_metrics_edit-checkbox",
+      "x_percent": 43.4,
+      "y_percent": 38.3,
+      "label": "Check Narrow table box if you want to also delete/change the value of the narrow table value that corresponds to the wide table value.",
+      "shape_type": "dot",
+      "label_x_percent": 57.490353234477,
+      "label_y_percent": 34.54917951720795
+    },
+    {
       "id": "timescale_metrics_edit-stage",
-      "x_percent": 69.02735961768221,
-      "y_percent": 48.57888693563393,
+      "x_percent": 69.27551396593059,
+      "y_percent": 50.369041142129376,
       "label": "Stage your changes.",
       "shape_type": "dot",
-      "label_x_percent": 77.9,
-      "label_y_percent": 46.6
+      "label_x_percent": 77.77592282587582,
+      "label_y_percent": 48.390154206495446
+    },
+    {
+      "id": "timescale_metrics_edit-values",
+      "x_percent": 52.9,
+      "y_percent": 74.9,
+      "label": "Click on a value to set it as the start and end date.  Then press preview again. Only that metric will be visible for editing/deleting.",
+      "shape_type": "dot",
+      "label_x_percent": 70.6,
+      "label_y_percent": 69.8
     },
     {
       "id": "timescale_metrics_edit-changes",
