@@ -1,4 +1,4 @@
-# Description: scraper transport for serial communication with SOI/EOI framing, supporting both synchronous and asynchronous modes.
+# Description: listen-only scraper transport for serial communication with SOI/EOI framing, built on serial_base, supporting both synchronous and asynchronous modes.
 # File: serial_frame_transport.py
 #
 # Copyright 2026 Kevin Burke
@@ -17,51 +17,74 @@
 
 from __future__ import annotations
 
-# scraper transport for serial communication with SOI/EOI framing, supporting both synchronous and asynchronous modes.
+# Listen-only scraper transport for serial communication with SOI/EOI framing, supporting
+# both synchronous and asynchronous modes.
+#
+# Port handling, the shared serial client, locking, scheduling and shutdown live in
+# serial_base; this module adds what is specific to a listen-only framed protocol: frame
+# markers read from the config, one frame per read, and optional background reading.
+from collections.abc import Iterator
+from typing import Callable
+
 from classes.protocol_settings import Registry_Type, registry_map_entry
-from classes.transports.serial_frame_client import serial_frame_client
 from classes.transports.transport_base import TransportWriteMode, transport_base
 from defs.common import TransportSettings
 
+from .serial_base import serial_base, serial_frame_client
 
-class serial_frame_transport(transport_base):
 
-    transport_type = "scraper"
+class serial_frame_transport(serial_base):
+
+    transport_type: str = "scraper"
     """
     Transport that communicates over a serial port using an SOI/EOI framing
-    protocol, implemented via serial_frame_client.
+    protocol, implemented via serial_frame_client and built on serial_base.
 
     Required config keys (in addition to transport_base keys):
         port        - serial device path, e.g. /dev/ttyUSB0
-        baud        - baud rate, e.g. 9600
+        baudrate    - baud rate, e.g. 9600 (also accepted as "baud")
         soi         - start-of-information byte(s) as a hex string, e.g. 0x7E or 7E
         eoi         - end-of-information byte(s) as a hex string, e.g. 0x0D or 0D
 
     Optional config keys:
         timeout     - read timeout in seconds (default 5.0)
-        async_mode  - if true, run the background read thread (default false)
+        async_mode  - if true, run the background read thread (default false). The
+                      port then belongs to this transport; it cannot be shared.
+
+    The port is opened in connect() rather than at start-up, so a device that is not
+    plugged in yet is retried every cycle instead of stopping the gateway.
     """
 
-    _client: serial_frame_client | None = None
+    OPEN_ON_INIT = False
 
     # ------------------------------------------------------------------ #
     # Construction                                                         #
     # ------------------------------------------------------------------ #
 
     def __init__(self, settings: TransportSettings) -> None:
-        # Pull serial-specific settings before calling super().__init__,
-        # because super raises if protocolSettings cannot be loaded.
-        self._port: str    = settings.get("port", fallback="/dev/ttyUSB0")
-        self._baud: int    = int(settings.get("baud", fallback="9600"))
+        # serial_base reads port, baudrate/baud and the SOI/EOI markers (see _frame_markers);
+        # transport_base loads protocolSettings and device metadata.
+        super().__init__(settings)
+
         self._timeout: float = float(settings.get("timeout", fallback="5.0"))
         self._async_mode: bool = settings.getboolean("async_mode", fallback=False)
 
-        # SOI / EOI may be provided as hex strings ("7E", "0x7E") or raw chars.
-        self._soi: bytes = self._parse_frame_marker(settings.get("soi", fallback="7E"))
-        self._eoi: bytes = self._parse_frame_marker(settings.get("eoi", fallback="0D"))
+    # Attribute names kept for subclasses written against the earlier, standalone version.
+    @property
+    def _port(self) -> str:
+        return self.port
 
-        # transport_base.__init__ loads protocolSettings and device metadata.
-        super().__init__(settings)
+    @property
+    def _baud(self) -> int:
+        return self.baudrate
+
+    @property
+    def _soi(self) -> bytes:
+        return self._markers[0]
+
+    @property
+    def _eoi(self) -> bytes:
+        return self._markers[1]
 
     # ------------------------------------------------------------------ #
     # Helpers                                                              #
@@ -79,34 +102,38 @@ class serial_frame_transport(transport_base):
             # Fallback: treat as a literal ASCII/UTF-8 string.
             return value.encode("utf-8")
 
+    def _frame_markers(self, settings: TransportSettings) -> tuple[bytes, bytes]:
+        # SOI / EOI may be provided as hex strings ("7E", "0x7E") or raw chars.
+        return (self._parse_frame_marker(settings.get("soi", fallback="7E")),
+                self._parse_frame_marker(settings.get("eoi", fallback="0D")))
+
+    def _serial_parameters(self) -> dict[str, object]:
+        # pyserial defaults (8N1) and no exclusive lock, as before this transport used serial_base
+        return {}
+
     # ------------------------------------------------------------------ #
     # transport_base interface                                             #
     # ------------------------------------------------------------------ #
 
-    def connect(self) -> bool:
-        """Open the serial port and (optionally) start the async read thread."""
-        try:
-            self._client = serial_frame_client(port=self._port, baud=self._baud, soi=self._soi, eoi=self._eoi)
-            self._client.timeout    = self._timeout
-            self._client.asynchronous = self._async_mode
+    def _prepare_client(self, client: serial_frame_client) -> None:
+        """Apply the read timeout and, in async mode, hook up the frame callback."""
+        client.timeout = self._timeout
+        client.asynchronous = self._async_mode
 
-            if self._async_mode:
-                self._client.on_message = self._on_async_frame
+        if self._async_mode:
+            owner: Callable[[bytes], None] | None = client.on_message
+            if owner is not None and owner != self._on_async_frame:
+                msg = f"async_mode needs serial port {self.port} to itself, but another section is already listening on it"
+                raise ValueError(msg)
+            client.on_message = self._on_async_frame
 
-            result: bool = self._client.connect()
-            self.connected = bool(result)
+    def _handshake(self) -> bool:
+        self._log.info("Connected to serial port %s @ %d baud (async=%s)", self.port, self.baudrate, self._async_mode)
+        return True
 
-            if self.connected:
-                self._log.info("Connected to serial port %s @ %d baud (async=%s)", self._port, self._baud, self._async_mode)
-            else:
-                self._log.warning("serial_frame_client.connect() returned falsy for %s", self._port)
-
-        except Exception:
-            self._log.exception("Failed to connect to serial port %s", self._port)
-            self.connected = False
-
-        return self.connected
-
+    def interleaved_cycle_timeout(self) -> float:
+        """One frame per read, so the cycle is bounded by a single read timeout, not by the registry size."""
+        return max(transport_base.interleaved_cycle_timeout(self), 2.0 * self._timeout)
 
     def read_data(self) -> dict[str, int | float | str]:
         """
@@ -124,21 +151,27 @@ class serial_frame_transport(transport_base):
             return {}
 
         try:
-            raw: bytes | list[bytes] | None = self._client.read(reset_buffer=True, frames=1)
+            with self._get_port_lock():
+                raw: bytes | list[bytes] | None = self._client.read(reset_buffer=True, frames=1)
         except Exception:
-            self._log.exception("Error reading from serial port %s", self._port)
+            self._log.exception("Error reading from serial port %s", self.port)
             self.connected = False
             return {}
 
         if not raw or isinstance(raw, list):
-            self._log.debug("No frame received from %s", self._port)
+            self._log.debug("No frame received from %s", self.port)
             return {}
 
         return self._decode_frame(raw)
 
+    def read_data_iter(self) -> Iterator[bool]:
+        """Interleaved mode: a read is one frame, so the whole read is a single block (the transport_base default)."""
+        return transport_base.read_data_iter(self)
+
     def write_data(self, data: dict[str, int | float | str], from_transport: "transport_base") -> None:
         """Write registry values to the device as a raw frame."""
-        if self.write_mode in (None, TransportWriteMode.READ):
+        # write_mode only exists when write_type is configured, hence getattr
+        if getattr(self, "write_mode", None) in (None, TransportWriteMode.READ):
             self._log.debug("Write skipped — transport is in READ mode.")
             return
 
@@ -150,36 +183,12 @@ class serial_frame_transport(transport_base):
         if payload:
             try:
                 if self._client is not None:
-                    self._client.write(payload)
-                    self._log.debug("Wrote %d bytes to %s", len(payload), self._port)
+                    with self._get_port_lock():
+                        self._client.write(payload)
+                    self._log.debug("Wrote %d bytes to %s", len(payload), self.port)
             except Exception:
-                self._log.exception("Error writing to serial port %s", self._port)
+                self._log.exception("Error writing to serial port %s", self.port)
                 self.connected = False
-
-    def cleanup(self) -> None:
-        """Stop the async thread (if running) and close the serial port."""
-        self._log.debug("Cleaning up serial_frame_transport %s", self.transport_name)
-
-        if self._client is not None:
-            try:
-                # Stop the background thread if async mode was used.
-                self._client.running = False
-
-                if hasattr(self._client, "thread"):
-                    self._client.thread.join(timeout=2.0)
-
-                # Close the underlying pyserial port.
-                if self._client.client and self._client.client.is_open:
-                    self._client.client.close()
-                    self._log.info("Serial port %s closed.", self._port)
-
-            except Exception:
-                self._log.exception("Error during cleanup of %s", self._port)
-            finally:
-                self._client = None
-
-        self.connected = False
-        super().cleanup()
 
     # ------------------------------------------------------------------ #
     # Frame encoding / decoding                                           #

@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import configparser
 import json
+import re
 import shutil
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -46,6 +47,7 @@ import pytest
 from fastapi import FastAPI
 
 from classes.transports.serial_base import serial_base
+from classes.transports.serial_frame_transport import serial_frame_transport
 from classes.transports.serial_pylon import serial_pylon
 from classes.WebServer import transport_registry as tr
 from classes.WebServer.scanner import (
@@ -69,7 +71,7 @@ def serial_subclasses() -> list[type[serial_base]]:
     found: list[type[serial_base]] = []
     pending: list[type[serial_base]] = list(serial_base.__subclasses__())
     while pending:
-        cls = pending.pop()
+        cls: type[serial_base] = pending.pop()
         found.append(cls)
         pending.extend(cls.__subclasses__())
     return [c for c in found if c.__module__.startswith("classes.transports.")]
@@ -138,15 +140,29 @@ def test_every_serial_transport_is_wired_into_the_web_ui(cls: type[serial_base])
     name: str = cls.__name__
     source: str = (TRANSPORTS_DIR / f"{cls.__module__.rsplit('.', 1)[-1]}.py").read_text(encoding="utf-8")
 
-    assert 'transport_type = "scraper"' in source, f"{name} must declare its own literal transport_type (AST scanner)"
+    assert re.search(r'^\s+transport_type\s*(:\s*str\s*)?=\s*"scraper"', source, re.MULTILINE), (
+        f"{name} must declare its own literal transport_type (AST scanner); inheriting it is not enough"
+    )
     assert _classify_transport("transport.x", {"transport": name}, TRANSPORTS_DIR) == "scraper"
     assert raw_defaults()[name]["$extends"] == "_serial_base", f"{name} must extend _serial_base in transport_defaults.json"
 
 
-def test_serial_pylon_is_the_only_serial_subclass_today() -> None:
+def test_known_serial_transports() -> None:
     """If this fails you have added a serial transport: good. Add its tests, then update this list."""
     assert serial_pylon in serial_subclasses()
-    assert sorted(c.__name__ for c in serial_subclasses()) == ["serial_pylon"]
+    assert serial_frame_transport in serial_subclasses()
+    assert sorted(c.__name__ for c in serial_subclasses()) == ["serial_frame_transport", "serial_pylon"]
+
+
+def test_serial_frame_transport_defaults_keep_its_own_settings() -> None:
+    resolved: dict[str, str] = tr._resolve_transport("serial_frame_transport", raw_defaults())
+    for key, value in (("soi", "7E"), ("eoi", "0D"), ("timeout", "5.0"), ("async_mode", "False"),
+                       ("port", "/dev/ttyUSB0"), ("baudrate", "9600")):
+        assert resolved.get(key) == value, key
+    assert "baud" not in resolved, "baud is still accepted in a config, but the UI offers the canonical baudrate"
+
+    keys: set[str] = set(_extract_settings_keys_from_ast(TRANSPORTS_DIR / "serial_frame_transport.py"))
+    assert {"soi", "eoi", "timeout", "async_mode"} <= keys
 
 
 # --------------------------------------------------------------------------- #
@@ -169,6 +185,13 @@ port = /dev/ttyUSB0
 baudrate = 9600
 address = 3
 protocol_version = pylon_rs485_v3.3
+
+[transport.frame_listener]
+transport = serial_frame_transport
+port = /dev/ttyUSB1
+baud = 19200
+soi = 7E
+eoi = 0D
 """
 
 
@@ -247,6 +270,19 @@ def test_device_pages_exist_for_each_battery_section(web: SimpleNamespace) -> No
         assert "serial_pylon" in response.text
         assert f'value="{address}"' in response.text
         assert "ignore_checksum_errors" in response.text
+
+
+def test_serial_frame_device_page_offers_its_own_and_the_serial_settings(web: SimpleNamespace) -> None:
+    response = web.client.get("/device/frame_listener")
+    assert response.status_code == 200
+    assert "serial_frame_transport" in response.text
+
+    rows: dict[Any, Any] = {r["key"]: r for r in web.client.get("/api/devices/frame_listener/settings").json()}
+    assert {"transport", "port", "baud", "soi", "eoi"} <= set(rows), "the keys the section actually uses"
+    assert rows["soi"]["value_disk"] == "7E"
+    assert rows["baud"]["value_disk"] == "19200"
+    assert rows["soi"]["default_value"] == "7E"
+    assert tr.get_default_for("serial_frame_transport", "timeout") == "5.0"
 
 
 def test_device_settings_api_gets_defaults_from_the_serial_template(web: SimpleNamespace) -> None:

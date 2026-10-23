@@ -63,9 +63,13 @@ from classes.transports.modbus_base import (
     interpret_modbus_exception_code,
 )
 from classes.transports.mqtt import mqtt
-from classes.transports.serial_frame_client import serial_frame_client
+from classes.transports.serial_base import serial_frame_client
 from classes.transports.serial_frame_transport import serial_frame_transport
-from classes.transports.transport_base import TransportWriteMode, transport_base
+from classes.transports.transport_base import (
+    TransportCycleResult,
+    TransportWriteMode,
+    transport_base,
+)
 
 
 def test_transport_base_tracks_cycle_and_emits_messages(dummy_settings: type[DummySettings]) -> None:
@@ -82,7 +86,7 @@ def test_transport_base_tracks_cycle_and_emits_messages(dummy_settings: type[Dum
     transport.finish_cycle_tracking({"soc": 99})
     transport._emit_message(entry, 99)
 
-    result = transport.get_cycle_result()
+    result: TransportCycleResult = transport.get_cycle_result()
     assert result.has_data is True
     assert result.is_complete is False
     assert result.expected_units == 2
@@ -252,7 +256,7 @@ def test_mqtt_reconnect_loop_clears_thread_ref_on_success(mock_mqtt_client: Magi
     out.reconnect_delay = 0
     out._connected = False
 
-    def fake_reconnect():
+    def fake_reconnect() -> None:
         # Simulate the paho loop setting connected after one attempt
         out._connected = True
 
@@ -483,7 +487,7 @@ def test_influxdb_out_connect_and_builds_points_with_mock_client(mock_client_cls
     assert fields == {"soc": 99.0, "status": "online"}
 
 
-@patch("classes.transports.serial_frame_client.serial.Serial")
+@patch("classes.transports.serial_base.serial.Serial")
 def test_serial_frame_client_reads_and_writes_framed_data(mock_serial_cls: MagicMock) -> None:
     """Mocks serial I/O: serial_frame_client frames writes and extracts complete reads."""
     serial = MagicMock()
@@ -500,14 +504,14 @@ def test_serial_frame_transport_marker_parsing_and_raw_decode(dummy_settings: ty
     """Happy path: serial_frame_transport parses hex/literal markers and returns raw hex without a protocol map."""
     assert serial_frame_transport._parse_frame_marker("0x7E") == b"~"
     assert serial_frame_transport._parse_frame_marker("END") == b"END"
-    transport = serial_frame_transport.__new__(serial_frame_transport)
+    transport: serial_frame_transport = serial_frame_transport.__new__(serial_frame_transport)
     transport.protocolSettings = None
     assert transport._decode_frame(b"\x01\x02") == {"raw_frame": "0102"}
 
 
 def test_canbus_serial_number_scoring_and_cache_cleanup(dummy_settings: type[DummySettings]) -> None:
     """Happy path and edge case: CAN serial-number heuristics score ASCII payloads and drop stale cache."""
-    instance = canbus.__new__(canbus)
+    instance: canbus = canbus.__new__(canbus)
     instance._SN_ASCII_RATIO = canbus._SN_ASCII_RATIO
     instance._SN_MIN_ALNUM = canbus._SN_MIN_ALNUM
     instance._log = MagicMock()

@@ -54,7 +54,9 @@ def _same_port(port: str) -> str:
 
 
 def _new_client(*args: Any, **kwargs: Any) -> MagicMock:
-    return MagicMock(name="client")
+    client = MagicMock(name="client")
+    client.soi, client.eoi = args[2], args[3]  # serial_base compares them when a section joins a shared client
+    return client
 
 
 def _process_registery(raw: dict[int, bytes], registry_map: object = None) -> dict[str, str]:

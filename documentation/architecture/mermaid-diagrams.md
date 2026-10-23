@@ -239,6 +239,33 @@ classDiagram
         +process_registry()
     }
 
+    class serial_base {
+        +clients: dict~str, serial_frame_client~
+        +SOI: bytes
+        +EOI: bytes
+        +OPEN_ON_INIT: bool
+        +address: int
+        +scrape_target: str
+        +build_frame()
+        +decode_frame()
+        +read_data()
+        +read_data_iter()
+        +cleanup()
+        -_frame_markers()
+        -_read_command()
+        -_exchange()
+        -_handshake()
+    }
+
+    class serial_frame_client {
+        +soi: bytes
+        +eoi: bytes
+        +asynchronous: bool
+        +read()
+        +write()
+        +close()
+    }
+
     class RegisterFailureTracker {
         +record_failure()
         +is_disabled(range)
@@ -309,8 +336,10 @@ classDiagram
     modbus_base <|-- modbus_udp
     modbus_base <|-- modbus_pace
     transport_base <|-- canbus
-    transport_base <|-- serial_pylon
-    transport_base <|-- serial_frame_transport
+    transport_base <|-- serial_base
+    serial_base <|-- serial_pylon
+    serial_base <|-- serial_frame_transport
+    serial_base --> serial_frame_client : owns one per port
     transport_base <|-- mqtt
     transport_base <|-- timescaledb
     transport_base <|-- influxdb_out
@@ -719,6 +748,8 @@ sequenceDiagram
 ## 10. Flowchart — ScrapeGroup Consolidation
 
 `ScrapeGroup` gives multiple logical transports pointed at the *same physical device* (`scrape_target`) a single shared read, instead of each one re-polling the hardware independently.
+
+`scrape_target` is defined by `modbus_base` (endpoint, protocol and slave ID) and by `serial_base` (port, protocol and bus address), so two Pylon batteries with different addresses on one RS485 port are separate groups, while two sections for the same battery are one. The gateway only schedules transports with a non-empty `scrape_target`; a scraper that does not override the empty default in `transport_base` is treated as a bridge and is never polled.
 
 ```mermaid
 flowchart TD

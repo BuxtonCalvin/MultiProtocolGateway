@@ -16,6 +16,7 @@ A **transport** is MPG's fundamental unit of configuration. Every device you rea
   - [Modbus TLS](#modbus-tls)
   - [Modbus UDP](#modbus-udp)
   - [Serial Pylon](#serial-pylon)
+  - [Serial Frame](#serial-frame)
   - [CAN Bus](#can-bus)
 - [Bridge Transports](#bridge-transports)
   - [MQTT](#mqtt)
@@ -140,27 +141,35 @@ Files ending in `.custom.py` are ignored by git and will never be touched by `gi
 
 ### Writing a New Serial Transport
 
-Scraper transports for command/response protocols over a serial port (RS485, RS232, USB) should subclass `serial_base` (`classes/transports/serial_base.py`), the serial counterpart of `modbus_base`. It provides everything that is not specific to one wire format:
+Scraper transports for serial protocols (RS485, RS232, USB) with SOI/EOI framed messages should subclass `serial_base` (`classes/transports/serial_base.py`), the serial counterpart of `modbus_base`. `serial_pylon` (command/response) and `serial_frame_transport` (listen-only) are both built on it.
+
+`serial_base.py` holds the two layers of the serial stack. `serial_frame_client` is the wire: one instance per physical port, which finds framed messages in the byte stream and knows nothing about protocols, settings or the gateway. `serial_base` is the base transport: one instance per config section (per device), which owns the clients, creating one per port, sharing it between the sections on that port, and closing it on shutdown. A transport subclass never creates or imports a client; it works through `self.client`. The split exists because several devices on one RS485 bus are several transports sharing one client.
+
+`serial_base` provides everything that is not specific to one wire format:
 
 - the `port`, `baudrate` and `address` settings (with `baud` and `unit_id` accepted as aliases), including hardware-ID port addressing
 - one serial client per port, shared by every config section on that port, and a per-port lock so a request and its response are never interleaved with another device's
 - a `scrape_target` (port, protocol and address), so the gateway schedules the transport in every `read_mode` and consolidates duplicate sections for the same device. A scraper without a `scrape_target` is treated as a bridge and is never polled
 - `read_data()` for sequential and concurrent modes, and `read_data_iter()` for interleaved mode, which yields after every command and takes the gateway's bus lock only for one exchange at a time
 - cycle completeness bookkeeping, so a poll where some commands got no answer is not written by bridges that require complete cycles
+- `cleanup()`, which closes the serial port (stopping any background reader) and removes the shared client from the registry. The gateway calls it on every transport before a web UI reload builds the replacements, so the new transports open the port afresh instead of reusing a closed client. This is the same contract as `modbus_base.cleanup()`
 
 A subclass supplies the wire format:
 
 | Member | Purpose |
 | --- | --- |
-| `SOI`, `EOI` | Frame start and end markers (required). |
+| `SOI`, `EOI` | Frame start and end markers (required, unless `_frame_markers()` is overridden). |
+| `_frame_markers(settings)` | Optional. Return `(SOI, EOI)` from the config instead of class constants. Sections that share a port must agree on them. |
 | `build_frame(command, info)` | Build a request frame without the markers. |
 | `decode_frame(raw_frame)` | Validate and split a response; return `None` if it is invalid. |
 | `_read_command(command)` | Send one registry command and return its payload as raw bytes for the protocol map, or `None`. |
 | `_handshake()` | Optional. Negotiate a version or read a device name on connect; return `True` if the device answered. |
-| `_serial_parameters()` | Optional. Override for anything other than 8N1. |
+| `_prepare_client(client)` | Optional. Apply per-transport client settings (timeout, background reading) before the client starts. |
+| `_serial_parameters()` | Optional. Override for anything other than 8N1 and an exclusive port lock. |
+| `OPEN_ON_INIT` | Optional. `True` (default) opens the port when the transport is constructed, so a missing port stops start-up. `False` opens it in `connect()`, so a device that is not there yet is retried every cycle. |
 | `MIN_ADDRESS`, `MAX_ADDRESS` | Optional. Valid range for `address` (default 0-255). |
 
-`serial_pylon` is the reference implementation. Two things must be done by hand because the web UI reads each transport file with `ast` and does not follow Python inheritance:
+A listen-only protocol has no commands to send, so it overrides `read_data()` and `read_data_iter()` instead of implementing `_read_command()`; `serial_frame_transport` is the reference for that. `serial_pylon` is the reference for command/response. Two things must be done by hand because the web UI reads each transport file with `ast` and does not follow Python inheritance:
 
 1. Declare a literal `transport_type = "scraper"` in the subclass itself. An inherited value is not seen, and the UI would classify the transport as a general section.
 2. Add an entry to `classes/WebServer/transport_defaults.json` that extends the shared serial template, plus a description for each new setting in `classes/WebServer/setting_descriptions.json`:
@@ -337,6 +346,33 @@ Several batteries can share one port: add one section per address with the same 
 
 ---
 
+### Serial Frame
+
+A generic listen-only reader for devices that stream SOI/EOI framed messages over a serial port. It sends nothing: each read waits for one frame and decodes it through the protocol's input registry map, treating the frame as a flat array of bytes keyed by byte index. Without a protocol map the raw frame is returned as hex under `raw_frame`. Built on `serial_base`, and meant as a starting point: override `_decode_frame()` (and `_encode_frame()` for writes) in a subclass for a real protocol.
+
+```ini
+[transport.frame_listener]
+transport = serial_frame_transport
+port = /dev/ttyUSB0
+baudrate = 9600
+soi = 7E
+eoi = 0D
+timeout = 5.0
+```
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `port` | `/dev/ttyUSB0` | Serial port path. Hardware-ID addressing works as described under [Modbus RTU](#modbus-rtu). |
+| `baudrate` | `9600` | Baud rate. Also accepted as `baud`, the name this transport used before it moved onto `serial_base`. |
+| `soi` | `7E` | Start-of-information marker: hex (`7E` or `0x7E`) or literal characters. |
+| `eoi` | `0D` | End-of-information marker, in the same format. |
+| `timeout` | `5.0` | Seconds to wait for a frame. |
+| `async_mode` | `false` | Read in a background thread and deliver each frame to the `on_message` callback. The port then belongs to this section; it cannot be shared. |
+
+The port is opened when the transport first connects, so a device that is not plugged in yet does not stop the gateway: the open is retried on every cycle. Writing is only attempted when `write_type` is set to something other than `read`, and the default encoder is a placeholder, so a writing protocol needs its own `_encode_frame()`.
+
+---
+
 ### CAN Bus
 
 Reads a device connected via CAN bus. CAN bus is a passive broadcast protocol — MPG listens to the bus and caches all messages, then processes them against the protocol map at the configured read interval.
@@ -492,7 +528,7 @@ New registers added to the protocol map are automatically added as new columns o
 | `migrate_data` | `true` | Rebuild rollup views when rollup settings change. |
 | `drop_after` | `1 year` | Hypertable data retention period. Older chunks are dropped automatically. |
 
-#### Persistent Backlog
+#### Persistent Backlog InfluxDB
 
 If the database is unavailable, MPG buffers data points to disk and replays them when connectivity is restored.
 
@@ -504,7 +540,7 @@ If the database is unavailable, MPG buffers data points to disk and replays them
 | `max_backlog_size` | `10000` | Maximum data points to store in the backlog before dropping oldest. |
 | `max_backlog_age` | `86400` | Maximum backlog age in seconds (default: 24 hours). Older points are discarded on reconnect. |
 
-#### Connection Resilience
+#### Connection Resilience InfluxDB
 
 | Setting | Default | Description |
 | --- | --- | --- |
@@ -586,7 +622,7 @@ fields:
 timestamp: 1703123456789000000
 ```
 
-#### Persistent Backlog
+#### Persistent Backlog TimescaleDB
 
 | Setting | Default | Description |
 | --- | --- | --- |
@@ -595,7 +631,7 @@ timestamp: 1703123456789000000
 | `max_backlog_size` | `10000` | Maximum buffered data points. |
 | `max_backlog_age` | `86400` | Maximum backlog age in seconds before points are discarded (default: 24 hours). |
 
-#### Connection Resilience
+#### Connection Resilience TimescaleDB
 
 | Setting | Default | Description |
 | --- | --- | --- |

@@ -32,6 +32,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from conftest import DummySettings
 
+from classes.transports import serial_base as serial_base_module
 from classes.transports.serial_base import serial_base
 from protocol_gateway import Protocol_Gateway, ScrapeGroup
 
@@ -46,13 +47,20 @@ class FakeClient:
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         self.args: tuple[Any, ...] = args
         self.kwargs: dict[str, Any] = kwargs
-        self.connected_calls = 0
+        self.soi: bytes = args[2] if len(args) > 2 else b""
+        self.eoi: bytes = args[3] if len(args) > 3 else b""
+        self.connected_calls: int = 0
+        self.close_calls: int = 0
+        self.on_message: Any = None
         self.last_written: bytes = b""
         self.on_write: Any = None
 
     def connect(self) -> bool:
         self.connected_calls += 1
         return True
+
+    def close(self) -> None:
+        self.close_calls += 1
 
     def write(self, data: bytes) -> None:
         self.last_written = data
@@ -66,6 +74,16 @@ class FakeClient:
 def _same_port(port: str) -> str:
     """find_usb_serial_port stand-in: every port path resolves to itself."""
     return port
+
+
+def _port_info(port: str) -> str:
+    """get_usb_serial_port_info stand-in."""
+    return "mock"
+
+
+def _no_port(port: str) -> str | None:
+    """find_usb_serial_port stand-in for a port that is not plugged in."""
+    return None
 
 
 def _new_client(*args: Any, **kwargs: Any) -> FakeClient:
@@ -472,3 +490,183 @@ def test_read_data_iter_releases_the_bus_between_commands() -> None:
 
     for _ in transport.read_data_iter():
         assert not bus_lock.locked()
+
+
+# --------------------------------------------------------------------------- #
+# lifecycle: cleanup, lazy open, frame markers                                 #
+# --------------------------------------------------------------------------- #
+
+class LazySerial(FakeSerial):
+    """Opens its port in connect() instead of at construction."""
+
+    OPEN_ON_INIT = False
+
+
+class MarkersFromSettings(FakeSerial):
+    """Reads its frame markers from the config, like serial_frame_transport."""
+
+    def _frame_markers(self, settings: Any) -> tuple[bytes, bytes]:
+        return str(settings.get("soi", fallback="<")).encode(), str(settings.get("eoi", fallback=">")).encode()
+
+
+@pytest.fixture
+def serial_layer(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Keeps the fake serial layer patched for the whole test, for transports that open their port later."""
+    monkeypatch.setattr(serial_base_module, "find_usb_serial_port", _same_port)
+    monkeypatch.setattr(serial_base_module, "get_usb_serial_port_info", _port_info)
+    monkeypatch.setattr(serial_base_module, "serial_frame_client", FakeClient)
+    yield
+
+
+def build(cls: type[serial_base] = FakeSerial, **values: Any) -> Any:
+    merged: dict[str, Any] = {"port": "/dev/ttyUSB0", "baudrate": 9600, "address": 2, **values}
+    transport: serial_base = cls(DummySettings(**merged))  # type: ignore[arg-type]
+    transport._log = MagicMock()
+    return transport
+
+
+def test_client_property_raises_until_the_port_is_open(serial_layer: None) -> None:
+    transport = build(LazySerial)
+    with pytest.raises(RuntimeError, match="has not opened its serial port"):
+        _ = transport.client
+    transport.connect()
+    assert transport.client is transport._client
+
+
+def test_eager_transport_opens_at_construction_and_fails_start_up_if_it_cannot() -> None:
+    def refuse(*args: Any, **kwargs: Any) -> FakeClient:
+        raise OSError("no such device")
+
+    settings = DummySettings(port="/dev/ttyUSB0", address=2)
+    with (
+        patch(f"{BASE_MODULE}.find_usb_serial_port", side_effect=_same_port),
+        patch(f"{BASE_MODULE}.get_usb_serial_port_info", return_value="mock"),
+        patch(f"{BASE_MODULE}.serial_frame_client", side_effect=refuse),
+        pytest.raises(OSError, match="no such device"),
+    ):
+        FakeSerial(settings)  # type: ignore[arg-type]
+
+
+def test_lazy_transport_opens_in_connect_and_tolerates_a_missing_port(serial_layer: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(serial_base_module, "find_usb_serial_port", _no_port)
+    transport = build(LazySerial)
+    assert transport._client is None
+    assert transport.connect() is False
+
+    monkeypatch.setattr(serial_base_module, "find_usb_serial_port", _same_port)
+    assert transport.connect() is True
+    assert transport.client.connected_calls == 1
+
+
+def test_cleanup_closes_the_client_and_evicts_it_from_the_registry() -> None:
+    transport = make()
+    client = transport.client
+    transport.connect()
+    assert transport.connected is True
+
+    transport.cleanup()
+
+    assert client.close_calls == 1
+    assert serial_base.clients == {}
+    assert transport._client is None
+    assert transport.connected is False
+
+
+def test_a_transport_built_after_cleanup_gets_a_fresh_client() -> None:
+    """The reload path: Protocol_Gateway.stop() cleans every old transport before the replacements are built."""
+    old = make()
+    old_client = old.client
+    old.cleanup()
+
+    new = make()
+    assert new.client is not old_client
+    assert old_client.close_calls == 1
+    assert new.client.close_calls == 0
+
+
+def test_cleanup_is_safe_for_every_section_sharing_a_client() -> None:
+    first, second = make(address=2), make(address=3)
+    shared = first.client
+    first.cleanup()
+    second.cleanup()  # the second section finds the registry already empty
+    assert shared.close_calls == 2, "closing twice is harmless, and neither call raises"
+    assert serial_base.clients == {}
+
+
+def test_a_late_cleanup_does_not_evict_a_replacement_client() -> None:
+    stale = make()
+    stale_client = stale.client
+    stale.cleanup()
+    replacement = make()
+
+    other = make()  # shares the replacement
+    assert other.client is replacement.client
+    stale._client = stale_client  # an old section whose cleanup runs late
+    stale.cleanup()
+
+    assert list(serial_base.clients.values()) == [replacement.client], "the replacement must stay registered"
+    assert replacement.client.close_calls == 0, "and must not be closed"
+    assert stale_client.close_calls == 2, "only the stale client is closed, again"
+
+
+def test_cleanup_before_the_port_was_opened_is_safe(serial_layer: None) -> None:
+    transport = build(LazySerial)
+    transport.cleanup()
+    assert transport.connected is False
+
+
+def test_cleanup_survives_a_client_that_will_not_close() -> None:
+    transport = make()
+    transport.client.close = MagicMock(side_effect=OSError("stuck"))  # type: ignore[method-assign]
+    transport.cleanup()  # must not raise: the gateway cleans up every transport in turn
+    transport._log.warning.assert_called()
+    assert serial_base.clients == {}
+
+
+def test_frame_markers_can_come_from_the_settings() -> None:
+    transport = make(MarkersFromSettings, soi="[", eoi="]")
+    assert transport._markers == (b"[", b"]")
+    assert transport.client.args[2:4] == (b"[", b"]")
+
+
+def test_sections_that_disagree_about_frame_markers_cannot_share_a_port() -> None:
+    make(MarkersFromSettings, soi="[", eoi="]")
+    with pytest.raises(ValueError, match="frame markers"):
+        make(MarkersFromSettings, soi="{", eoi="}")
+
+
+def test_interleaved_timeout_does_not_need_an_open_client(serial_layer: None) -> None:
+    transport = build(LazySerial)
+    transport.protocolSettings = fake_protocol(list(range(1, 11)))
+    assert transport._client is None
+    assert transport.interleaved_cycle_timeout() == 100.0  # 10 commands * 2 * the default 5s client timeout
+
+
+def test_gateway_stop_cleans_up_serial_transports_so_a_reload_reopens_the_port() -> None:
+    """Drives the real Protocol_Gateway.stop(), the call a web UI reload makes before it builds the replacements."""
+    from pathlib import Path
+
+    from protocol_gateway import Protocol_Gateway
+
+    first, second = make(address=2), make(address=3)
+    shared = first.client
+    first.connect()
+    second.connect()
+
+    stopped = threading.Event()
+    stopped.set()
+    gateway = Protocol_Gateway.__new__(Protocol_Gateway)
+    gateway._Protocol_Gateway__transports = [first, second]  # type: ignore[attr-defined]
+    gateway._Protocol_Gateway__stopped_event = stopped  # type: ignore[attr-defined]
+    gateway._Protocol_Gateway__running = True  # type: ignore[attr-defined]
+    gateway._Protocol_Gateway__log = MagicMock()  # type: ignore[attr-defined]
+    gateway.config_file = Path("config.cfg")
+
+    assert gateway.stop(timeout=1.0) is True
+    assert serial_base.clients == {}
+    assert first.connected is False
+    assert second.connected is False
+    assert shared.close_calls == 2
+
+    replacement = make(address=2)
+    assert replacement.client is not shared, "the replacement gateway must open the port afresh"

@@ -141,18 +141,11 @@
     "port": "502"
   },
   "serial_frame_transport": {
-    "$extends": "_base",
+    "$extends": "_serial_base",
     "async_mode": "False",
-    "baud": "9600",
-    "enable_synthetic_metrics": "True",
     "eoi": "0D",
-    "port": "/dev/ttyUSB0",
-    "protocol_version": "",
     "soi": "7E",
-    "timeout": "5.0",
-    "transport": "",
-    "variable_mask": "",
-    "variable_screen": ""
+    "timeout": "5.0"
   },
   "serial_pylon": {
     "$extends": "_serial_base",
@@ -175,25 +168,6 @@
     "device_model": "",
     "device_name": "",
     "device_serial_number": "",
-    "log_level": "INFO",
-    "max_precision": "2",
-    "protocol_version": "",
-    "read_interval": "15",
-    "transport": "",
-    "variable_mask": "",
-    "variable_screen": "",
-    "write_enabled": "false",
-    "write_type": ""
-  },
-  "serial_frame_client": {
-    "batch_size": "40",
-    "bridge": "",
-    "device_location": "",
-    "device_manufacturer": "",
-    "device_model": "",
-    "device_name": "",
-    "device_serial_number": "",
-    "enable_synthetic_metrics": "True",
     "log_level": "INFO",
     "max_precision": "2",
     "protocol_version": "",
