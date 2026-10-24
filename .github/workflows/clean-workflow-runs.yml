@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Targeted Workflow Cleanup
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const daysToKeep = 14;
@@ -29,7 +29,7 @@ jobs:
               "codeql.yml"
             ];
 
-            // 1. Fetch all workflows in the repository to map names to files
+            // 1. Fetch all workflows in the repository
             const workflowsRes = await github.rest.actions.listRepoWorkflows({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -37,7 +37,7 @@ jobs:
 
             // 2. Loop through every workflow found
             for (const workflow of workflowsRes.data.workflows) {
-              const isProtected = protectedFiles.some(file => workflow.path.endsWith(file));
+              const isProtectedBadge = protectedFiles.some(file => workflow.path.endsWith(file));
               
               // Fetch the runs for this specific workflow
               const runsRes = await github.rest.actions.listWorkflowRuns({
@@ -52,22 +52,47 @@ jobs:
               // Sort runs from newest to oldest
               runs.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
-              // 3. Evaluate each run
+              // 3. Evaluate each run individually
               for (let i = 0; i < runs.length; i++) {
                 const run = runs[i];
                 const runDate = new Date(run.created_at);
 
-                if (isProtected) {
-                  // For your Python and CodeQL files: ALWAYS keep the 2 most recent runs
-                  if (i < 2) {
-                    console.log(`[PROTECTED] Keeping recent badge run for ${workflow.path}: #${run.run_number}`);
-                    continue;
-                  }
+                // --- GLOBAL RULE 1: UNIVERSAL COLD BUFFER ---
+                // Keep the 2 most recent runs for EVERY workflow, badge or non-badge
+                if (i < 2) {
+                  console.log(`[MINIMUM BUFFER] Keeping history slot #${i + 1} for ${workflow.path}: #${run.run_number}`);
+                  continue;
                 }
 
-                // Delete if it's older than 14 days
-                if (runDate < cutoffDate) {
-                  console.log(`[DELETING] ${workflow.path} run #${run.run_number} (Created: ${run.created_at})`);
+                // --- GLOBAL RULE 2: INDEFINITE FAILURE RETENTION ---
+                // Never delete any run that did not complete successfully
+                if (run.conclusion === 'failure') {
+                  console.log(`[RETAIN FAILURE] Keeping failed run indefinitely for ${workflow.path}: #${run.run_number}`);
+                  continue;
+                }
+
+                // --- PATH A: BADGE WORKFLOW RETENTION (AGE BASED) ---
+                if (isProtectedBadge) {
+                  if (runDate < cutoffDate) {
+                    console.log(`[DELETING OLD BADGE RUN] ${workflow.path} run #${run.run_number}`);
+                    try {
+                      await github.rest.actions.deleteWorkflowRun({
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        run_id: run.id
+                      });
+                    } catch (err) {
+                      console.log(`Failed to delete run ${run.id}: ${err.message}`);
+                    }
+                  } else {
+                    console.log(`[KEEPING RECENT BADGE RUN] ${workflow.path}: #${run.run_number}`);
+                  }
+                } 
+                
+                // --- PATH B: NON-BADGE WORKFLOW RETENTION (AGGRESSIVE) ---
+                else {
+                  // If it has survived the minimum 2-run buffer and isn't a failure, prune it
+                  console.log(`[DELETING UNPROTECTED HISTORICAL] Cleaning extra history for ${workflow.path} run #${run.run_number}`);
                   try {
                     await github.rest.actions.deleteWorkflowRun({
                       owner: context.repo.owner,
@@ -77,8 +102,6 @@ jobs:
                   } catch (err) {
                     console.log(`Failed to delete run ${run.id}: ${err.message}`);
                   }
-                } else {
-                  console.log(`[KEEPING] Recent run for ${workflow.path}: #${run.run_number}`);
                 }
               }
             }
