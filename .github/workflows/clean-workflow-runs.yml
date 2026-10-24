@@ -20,7 +20,7 @@ jobs:
             const cutoffDate = new Date();
             cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
 
-            // Your exact protected filenames to keep safe for your badges
+            // Protected filenames to keep safe for badges
             const protectedFiles = [
               "python-3.11.yml",
               "python-3.12.yml",
