@@ -12,7 +12,73 @@ jobs:
   clean:
     runs-on: ubuntu-latest
     steps:
-      - uses: igorjs/gh-actions-clean-workflow@v8
+      - name: Targeted Workflow Cleanup
+        uses: actions/github-script@v7
         with:
-          runs_older_than: 7
-          runs_to_keep: 15
+          script: |
+            const daysToKeep = 14;
+            const cutoffDate = new Date();
+            cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
+
+            // Your exact protected filenames to keep safe for your badges
+            const protectedFiles = [
+              "python-3.11.yml",
+              "python-3.12.yml",
+              "python-3.13.yml",
+              "python-3.14.yml",
+              "codeql.yml"
+            ];
+
+            // 1. Fetch all workflows in the repository to map names to files
+            const workflowsRes = await github.rest.actions.listRepoWorkflows({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+            });
+
+            // 2. Loop through every workflow found
+            for (const workflow of workflowsRes.data.workflows) {
+              const isProtected = protectedFiles.some(file => workflow.path.endsWith(file));
+              
+              // Fetch the runs for this specific workflow
+              const runsRes = await github.rest.actions.listWorkflowRuns({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: workflow.id,
+                per_page: 100
+              });
+
+              let runs = runsRes.data.workflow_runs;
+
+              // Sort runs from newest to oldest
+              runs.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+              // 3. Evaluate each run
+              for (let i = 0; i < runs.length; i++) {
+                const run = runs[i];
+                const runDate = new Date(run.created_at);
+
+                if (isProtected) {
+                  // For your Python and CodeQL files: ALWAYS keep the 2 most recent runs
+                  if (i < 2) {
+                    console.log(`[PROTECTED] Keeping recent badge run for ${workflow.path}: #${run.run_number}`);
+                    continue;
+                  }
+                }
+
+                // Delete if it's older than 14 days
+                if (runDate < cutoffDate) {
+                  console.log(`[DELETING] ${workflow.path} run #${run.run_number} (Created: ${run.created_at})`);
+                  try {
+                    await github.rest.actions.deleteWorkflowRun({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      run_id: run.id
+                    });
+                  } catch (err) {
+                    console.log(`Failed to delete run ${run.id}: ${err.message}`);
+                  }
+                } else {
+                  console.log(`[KEEPING] Recent run for ${workflow.path}: #${run.run_number}`);
+                }
+              }
+            }
