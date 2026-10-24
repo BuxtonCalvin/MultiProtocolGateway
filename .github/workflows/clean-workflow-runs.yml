@@ -16,7 +16,7 @@ jobs:
         uses: actions/github-script@v9
         with:
           script: |
-            const daysToKeep = 14;
+            const daysToKeep = 7;
             const cutoffDate = new Date();
             cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
 
