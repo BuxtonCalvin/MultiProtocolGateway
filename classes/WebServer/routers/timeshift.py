@@ -84,6 +84,7 @@ import csv
 import io
 import json
 import logging
+import re
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, cast
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -184,12 +185,22 @@ def _require_bridge(request: Request, version: str) -> influxdb_out | influxdb3_
     return bridge
 
 
-def _parse_local_datetime(value: str, tz_name: str) -> datetime:
-    """Parses a <input type="datetime-local"> value into a tz-aware datetime. See routers/influxdb.py's identical helper."""
+def _parse_local_datetime(value: str, tz_name: str, end_of_second: bool = False) -> datetime:
+    """
+    Parses a value from the Timeshift screen's date/time boxes into a tz-aware datetime in tz_name. Accepts the picker's
+    display format ("YYYY-MM-DD  HH:MM:SS", any run of whitespace between date and time) and ISO ("YYYY-MM-DDTHH:MM[:SS]").
+
+    end_of_second: for the export's Source End only -- moves the value to the last microsecond of the second shown, so a
+    row stamped 20:05:49.81 is inside an End of "20:05:49". The Source Start / Target Start values that define the time
+    shift are always parsed exactly (the delta is Target - Source).
+    """
+    iso: str = re.sub(r"\s+", "T", value.strip())
     try:
-        naive: datetime = datetime.fromisoformat(value)
+        naive: datetime = datetime.fromisoformat(iso)
     except ValueError:
         raise HTTPException(status_code=400, detail=f"'{value}' is not a valid date/time.")
+    if end_of_second:
+        naive = naive.replace(microsecond=999999)
     return naive.replace(tzinfo=ZoneInfo(tz_name))
 
 
@@ -857,7 +868,7 @@ def timeshift_export_csv(
         raise HTTPException(status_code=400, detail="A Table and Device must be selected first.")
 
     start_dt: datetime = _parse_local_datetime(start_time, local_timezone)
-    end_dt: datetime = _parse_local_datetime(end_time, local_timezone)
+    end_dt: datetime = _parse_local_datetime(end_time, local_timezone, end_of_second=True)
     target_dt: datetime = _parse_local_datetime(target_start, local_timezone)
 
     header: list[str]

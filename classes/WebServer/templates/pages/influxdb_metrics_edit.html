@@ -89,6 +89,12 @@
 
 {% extends "base.html" %}
 {% block title %}InfluxDB — Metrics Edit {{ version }}.x — MPG Admin{% endblock %}
+{% block head %}
+{#- Flatpickr (MIT) + the shared picker helper, both vendored under /static so the admin UI works with no internet access. #}
+<link rel="stylesheet" href="/static/css/flatpickr.min.css">
+<script src="/static/js/flatpickr.min.js"></script>
+<script src="/static/js/mpg-datetime-picker.js"></script>
+{% endblock %}
 {% block content %}
 <div class="col-span-12 flex gap-4" style="height: calc(100vh - 56px); overflow: hidden;">
 
@@ -176,20 +182,22 @@
           <label for="influx-metrics-edit-start-time" class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">
             Start
           </label>
-          <input type="datetime-local"
+          <input type="text"
                  id="influx-metrics-edit-start-time"
-                 step="1"
-                 class="theme-input w-full text-xs rounded px-2 py-1.5
+                 placeholder="YYYY-MM-DD  HH:MM:SS"
+                 autocomplete="off" spellcheck="false"
+                 class="theme-input w-full text-xs font-mono rounded px-2 py-1.5
                         focus:outline-none focus:ring-1 focus:ring-accent">
         </div>
         <div>
           <label for="influx-metrics-edit-end-time" class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">
             End
           </label>
-          <input type="datetime-local"
+          <input type="text"
                  id="influx-metrics-edit-end-time"
-                 step="1"
-                 class="theme-input w-full text-xs rounded px-2 py-1.5
+                 placeholder="YYYY-MM-DD  HH:MM:SS"
+                 autocomplete="off" spellcheck="false"
+                 class="theme-input w-full text-xs font-mono rounded px-2 py-1.5
                         focus:outline-none focus:ring-1 focus:ring-accent">
         </div>
       </div>
@@ -279,6 +287,18 @@
 </div>
 
 <script>
+  // Date/time range boxes: "YYYY-MM-DD  HH:MM:SS" with a calendar popup (see static/js/mpg-datetime-picker.js).
+  // The server reads the End box as "through the end of that second" (stored timestamps carry sub-second precision).
+  (function initInfluxMetricsEditPickers() {
+    function attach() {
+      MpgDateTime.init([
+        { id: 'influx-metrics-edit-start-time', end: false },
+        { id: 'influx-metrics-edit-end-time', end: true },
+      ]);
+    }
+    if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', attach); } else { attach(); }
+  })();
+
   // version is read from the current page's own URL rather than
   // rendered via Jinja — this is the last segment of /pages/influxdb-
   // metrics-edit/{version} by construction, and sidesteps any
@@ -291,7 +311,41 @@
   const InfluxEditState = {
     version: window.location.pathname.split('/').filter(Boolean).pop(),
     measurement: null, deviceIdentifier: null, deviceLabel: null,
+    showUtc: false,   // preview table: false = bridge machine timezone (matches Start/End), true = UTC as stored
   };
+
+  // Preview time column: InfluxDB stores UTC; the preview rows arrive in the bridge's machine timezone so they line up
+  // with the Start/End boxes. The "Show times in UTC" checkbox (in the preview partial) flips every row between the two
+  // forms the server rendered into each cell's data-local / data-utc. The choice survives later previews.
+  function applyInfluxPreviewTz() {
+    const box = document.getElementById('influx-preview-show-utc');
+    if (box) { box.checked = InfluxEditState.showUtc; }
+    const useUtc = InfluxEditState.showUtc && box !== null;     // no checkbox (machine tz already UTC) -> nothing to flip
+    document.querySelectorAll('#influx-metrics-edit-preview-container .influx-preview-time').forEach(function (td) {
+      td.textContent = useUtc ? td.dataset.utc : td.dataset.local;
+    });
+    const heading = document.getElementById('influx-preview-time-heading');
+    if (heading) { heading.textContent = 'Time (' + (useUtc ? 'UTC' : heading.dataset.localTz) + ')'; }
+  }
+
+  function setInfluxPreviewUtc(on) {
+    InfluxEditState.showUtc = !!on;
+    applyInfluxPreviewTz();
+  }
+
+  // Preview-row click: sets Start and End to that row's time (whole seconds). The boxes are always read in the bridge's
+  // timezone, so this uses the row's data-ts (that zone) and NOT the text on screen, which is UTC while "Show times in UTC"
+  // is ticked. The server reads End as "through the end of that second", so this selects the point itself. The preview is
+  // left in place, so the admin can go straight on to "Add to Staged Changes" or click another row.
+  function setInfluxRangeFromRow(row) {
+    const ts = row.dataset.ts;                      // "YYYY-MM-DD  HH:MM:SS", bridge timezone (same as the pickers)
+    if (!MpgDateTime.parse(ts)) { return; }
+    MpgDateTime.set('influx-metrics-edit-start-time', ts);
+    MpgDateTime.set('influx-metrics-edit-end-time', ts);
+    const heading = document.getElementById('influx-preview-time-heading');
+    const zone = heading ? ' (' + heading.dataset.localTz + ')' : '';
+    showInfluxStatus('Start and End set to ' + ts + zone + '.', false);
+  }
 
   function selectInfluxMeasurement(btn) {
     document.querySelectorAll('.influx-metrics-edit-measurement-btn').forEach(function (b) {
@@ -393,10 +447,11 @@
       showInfluxStatus('Select a field to edit.', true);
       return null;
     }
-    const startTime = document.getElementById('influx-metrics-edit-start-time').value;
-    const endTime = document.getElementById('influx-metrics-edit-end-time').value;
+    // read() returns "YYYY-MM-DD HH:MM:SS" (also tidies the box), "" when empty, null when unparseable.
+    const startTime = MpgDateTime.read('influx-metrics-edit-start-time');
+    const endTime = MpgDateTime.read('influx-metrics-edit-end-time');
     if (!startTime || !endTime) {
-      showInfluxStatus('Pick a start and end date/time.', true);
+      showInfluxStatus('Enter a start and end as YYYY-MM-DD  HH:MM:SS (or pick them from the calendar).', true);
       return null;
     }
     if (endTime < startTime) {
@@ -451,6 +506,7 @@
 
     if (resp.ok) {
       document.getElementById('influx-metrics-edit-preview-container').innerHTML = html;
+      applyInfluxPreviewTz();
     } else {
       let detail = 'Preview failed.';
       try { detail = JSON.parse(html).detail || detail; } catch (e) { /* non-JSON error body */ }

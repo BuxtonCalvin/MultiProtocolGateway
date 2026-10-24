@@ -22,8 +22,9 @@
   Swapped into #influx-metrics-edit-preview-container after "Preview" is
   clicked (see runInfluxMetricsEditPreview() in pages/
   influxdb_metrics_edit.html). Context: preview — {row_count, sample:
-  [{time_iso, value}, ...]} (see services/influxdb_service.
-  preview_metric_edit). Read-only — this never stages or writes anything;
+  [{time_iso, time_local, time_utc, value}, ...]} (see services/
+  influxdb_service.preview_metric_edit); timezone_name — the bridge's
+  machine timezone (the zone the Start/End boxes are read in). Read-only — this never stages or writes anything;
   it's purely "here's what currently matches your selection." It needs no
   replacement value -- listing the existing values lets the admin narrow the
   date range and see what a valid replacement looks like. No "Field"
@@ -40,17 +41,37 @@
   </p>
 
   {% if preview.sample %}
+  {#- InfluxDB stores every time as UTC. The transports convert it to the bridge's machine timezone so these rows line up with
+      the Start/End boxes (which are read in that zone); this checkbox flips the table to the stored UTC instants. Pointless
+      when the machine timezone already is UTC (use_utc_timestamp), so it is left out then. The choice is kept in
+      InfluxEditState.showUtc by the page script, which re-applies it after every preview swap. #}
+  {% if timezone_name != 'UTC' %}
+  <label class="flex items-center gap-2 text-[10px] surface-subtle mb-1 cursor-pointer">
+    <input type="checkbox" id="influx-preview-show-utc" onchange="setInfluxPreviewUtc(this.checked)">
+    <span>Show times in UTC (as stored by InfluxDB) instead of {{ timezone_name }}</span>
+  </label>
+  {% endif %}
+  <p class="surface-subtle text-[10px] mb-1">Click a row to set Start and End to that point's time ({{ timezone_name }}).</p>
   <table class="w-auto text-xs border-collapse">
     <thead>
       <tr class="mini-table-header uppercase tracking-wide">
-        <th class="px-2 py-1.5 text-left font-semibold whitespace-nowrap">Time</th>
+        <th id="influx-preview-time-heading" data-local-tz="{{ timezone_name }}" class="px-2 py-1.5 text-left font-semibold whitespace-nowrap">Time ({{ timezone_name }})</th>
         <th class="px-2 py-1.5 text-left font-semibold whitespace-nowrap">Current Value</th>
       </tr>
     </thead>
     <tbody>
       {% for s in preview.sample %}
-      <tr class="border-t border-mpg-700/50">
-        <td class="px-2 py-1.5 mini-table-value font-mono whitespace-nowrap">{{ s.time_iso }}</td>
+      {#- Clicking a row copies its time (whole seconds, ALWAYS the bridge-timezone value in data-ts -- never the UTC text that may be
+          on screen) into Start AND End; see setInfluxRangeFromRow() in pages/influxdb_metrics_edit.html. The server reads End as
+          "through the end of that second", so this selects the point itself (and any others stamped within the same second). #}
+      <tr class="border-t border-mpg-700/50 cursor-pointer hover:bg-mpg-700/20"
+          data-ts="{{ s.time_local }}"
+          title="Click to set Start and End to {{ s.time_local }} ({{ timezone_name }})"
+          tabindex="0" role="button"
+          onclick="setInfluxRangeFromRow(this)"
+          onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setInfluxRangeFromRow(this); }">
+        <td class="influx-preview-time px-2 py-1.5 mini-table-value font-mono whitespace-nowrap"
+            data-local="{{ s.time_local }}" data-utc="{{ s.time_utc }}">{{ s.time_local }}</td>
         <td class="px-2 py-1.5 mini-table-value font-mono whitespace-nowrap">{{ s.value if s.value is not none else '—' }}</td>
       </tr>
       {% endfor %}

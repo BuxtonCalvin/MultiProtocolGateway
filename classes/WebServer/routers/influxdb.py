@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import html
 import logging
+import re
 from datetime import datetime
 from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
@@ -101,16 +102,29 @@ def _machine_timezone(request: Request, version: str) -> str:
     return getattr(bridge, "machine_timezone", "UTC") if bridge is not None else "UTC"
 
 
-def _parse_local_datetime(value: str, tz_name: str) -> datetime:
+def _parse_local_datetime(value: str, tz_name: str, end_of_second: bool = False) -> datetime:
     """
-    Parses a <input type="datetime-local"> value ("YYYY-MM-DDTHH:MM[:SS]")
-    from the Metrics Edit screen's date/time range picker into a tz-aware
-    datetime, localized to tz_name (see _machine_timezone above).
+    Parses a value from the Metrics Edit screen's date/time range picker
+    into a tz-aware datetime, localized to tz_name (see _machine_timezone
+    above).
+
+    Accepts the picker's display format ("YYYY-MM-DD  HH:MM:SS", any run of
+    whitespace between date and time) as well as the ISO forms
+    ("YYYY-MM-DDTHH:MM[:SS]") an API client would send.
+
+    end_of_second: the picker only holds whole seconds but stored points can
+    carry sub-second timestamps, so an END of "20:05:49" would otherwise miss
+    a point stamped 20:05:49.81. True moves the value to the last microsecond
+    of that second, making the end bound mean "through the end of the second
+    shown". Start bounds are left as-is.
     """
+    iso: str = re.sub(r"\s+", "T", value.strip())
     try:
-        naive: datetime = datetime.fromisoformat(value)
+        naive: datetime = datetime.fromisoformat(iso)
     except ValueError:
         raise HTTPException(status_code=400, detail=f"'{value}' is not a valid date/time.")
+    if end_of_second:
+        naive = naive.replace(microsecond=999999)
     return naive.replace(tzinfo=ZoneInfo(tz_name))
 
 
@@ -271,7 +285,7 @@ class InfluxMetricEditPreviewRequest(BaseModel):
     measurement: str
     device_identifier: str
     field_name: str
-    start_time: str    # <input type="datetime-local"> value
+    start_time: str    # "YYYY-MM-DD  HH:MM:SS" (see _parse_local_datetime)
     end_time: str
 
 
@@ -291,7 +305,7 @@ def influxdb_metrics_edit_preview(payload: InfluxMetricEditPreviewRequest, reque
 
     tz_name: str = _machine_timezone(request, version)
     start_dt: datetime = _parse_local_datetime(payload.start_time, tz_name)
-    end_dt: datetime = _parse_local_datetime(payload.end_time, tz_name)
+    end_dt: datetime = _parse_local_datetime(payload.end_time, tz_name, end_of_second=True)
     if end_dt < start_dt:
         raise HTTPException(status_code=400, detail="End time must not be before start time.")
 
@@ -307,7 +321,7 @@ def influxdb_metrics_edit_preview(payload: InfluxMetricEditPreviewRequest, reque
     return request.app.state.templates.TemplateResponse(
         request=request,
         name="partials/influxdb_metrics_edit_preview.html",
-        context={"preview": preview},
+        context={"preview": preview, "timezone_name": tz_name},
     )
 
 
@@ -316,7 +330,7 @@ class InfluxMetricEditStageRequest(BaseModel):
     device_identifier: str
     device_label: str
     field_name: str | None = None
-    start_time: str    # <input type="datetime-local"> value
+    start_time: str    # "YYYY-MM-DD  HH:MM:SS" (see _parse_local_datetime)
     end_time: str
     action: str        # "delete" (v1 only) or "set_value"
     new_value: str | None = None
@@ -359,7 +373,7 @@ def influxdb_metrics_edit_stage(payload: InfluxMetricEditStageRequest, request: 
 
     tz_name: str = _machine_timezone(request, version)
     start_dt: datetime = _parse_local_datetime(payload.start_time, tz_name)
-    end_dt: datetime = _parse_local_datetime(payload.end_time, tz_name)
+    end_dt: datetime = _parse_local_datetime(payload.end_time, tz_name, end_of_second=True)
     if end_dt < start_dt:
         raise HTTPException(status_code=400, detail="End time must not be before start time.")
 

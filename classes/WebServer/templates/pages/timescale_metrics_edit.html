@@ -75,6 +75,7 @@
 {#- Flatpickr (MIT), vendored under /static like htmx so the admin UI keeps working with no internet access. #}
 <link rel="stylesheet" href="/static/css/flatpickr.min.css">
 <script src="/static/js/flatpickr.min.js"></script>
+<script src="/static/js/mpg-datetime-picker.js"></script>
 {% endblock %}
 {% block content %}
 <div class="col-span-12 flex gap-4" style="height: calc(100vh - 56px); overflow: hidden;">
@@ -276,60 +277,25 @@
   };
 
   // ── Date/time range pickers ────────────────────────────────────────────
-  // Display/entry format: "2026-10-17  20:05:55" (two spaces between date and time, whole seconds, 24h).
-  // Typing is first-class (allowInput) -- the pickers are only a convenience. parseDate is custom so a typed
-  // value with ONE space (or several) between date and time is accepted too; Flatpickr's built-in parser
-  // would insist on exactly the two characters in the format string.
-  const METRICS_EDIT_TS_FORMAT = 'Y-m-d  H:i:S';
-  const METRICS_EDIT_TS_RE = /^(\d{4})-(\d{1,2})-(\d{1,2})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?$/;
-
-  function parseMetricsEditTimestamp(str) {
-    const m = METRICS_EDIT_TS_RE.exec((str || '').trim());
-    if (!m) { return undefined; }
-    const d = new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], m[6] ? +m[6] : 0);
-    // Reject roll-overs such as month 13 or Feb 30.
-    return (d.getFullYear() === +m[1] && d.getMonth() === +m[2] - 1 && d.getDate() === +m[3]) ? d : undefined;
-  }
-
-  // Normalizes the field to the canonical format and returns "YYYY-MM-DD HH:MM:SS" (single space) or null.
-  function readMetricsEditTimestamp(id) {
-    const el = document.getElementById(id);
-    const d = parseMetricsEditTimestamp(el.value);
-    if (!d) { return null; }
-    if (el._flatpickr) { el._flatpickr.setDate(d, false); }
-    const p = function (n) { return String(n).padStart(2, '0'); };
-    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' +
-           p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
-  }
-
+  // The "YYYY-MM-DD  HH:MM:SS" boxes and their calendar popups come from the shared helper (static/js/mpg-datetime-picker.js,
+  // also used by the InfluxDB Metrics Edit and Timeshift pages): typing is first-class, a day picked with no time means
+  // 00:00:00 for Start and 23:59:59 for End, and MpgDateTime.read() returns "YYYY-MM-DD HH:MM:SS" ("" when empty, null when
+  // unparseable). The server reads End as "through the end of that second" (routers/timescale._parse_local_datetime).
   function initMetricsEditPickers() {
-    if (typeof flatpickr !== 'function') { return; }  // asset failed to load: plain typing still works
-    [['metrics-edit-start-time', 0, 0, 0], ['metrics-edit-end-time', 23, 59, 59]].forEach(function (cfg) {
-      flatpickr('#' + cfg[0], {
-        enableTime: true, enableSeconds: true, time_24hr: true,
-        dateFormat: METRICS_EDIT_TS_FORMAT,
-        allowInput: true, disableMobile: true,
-        parseDate: parseMetricsEditTimestamp,
-        // Picking just a day (no time) means the whole day: 00:00:00 for Start, 23:59:59 for End.
-        defaultHour: cfg[1], defaultMinute: cfg[2], defaultSeconds: cfg[3],
-        onClose: function (_sel, _str, fp) {
-          const d = parseMetricsEditTimestamp(fp.input.value);
-          if (d) { fp.setDate(d, false); }
-        },
-      });
-    });
+    MpgDateTime.init([
+      { id: 'metrics-edit-start-time', end: false },
+      { id: 'metrics-edit-end-time', end: true },
+    ]);
   }
+
   // Preview-row click: sets Start and End to that row's timestamp (whole seconds). The server treats End as "through the
   // end of that second", so this selects the sample itself. The preview panel is left in place, so the admin can go
   // straight on to "Add to Staged Changes" (or click a different row to move the selection).
   function setMetricsEditRangeFromRow(row) {
     const ts = row.dataset.ts;                      // "YYYY-MM-DD  HH:MM:SS", machine timezone (same as the pickers)
-    const d = parseMetricsEditTimestamp(ts);
-    if (!d) { return; }
-    ['metrics-edit-start-time', 'metrics-edit-end-time'].forEach(function (id) {
-      const el = document.getElementById(id);
-      if (el._flatpickr) { el._flatpickr.setDate(d, false); } else { el.value = ts; }
-    });
+    if (!MpgDateTime.parse(ts)) { return; }
+    MpgDateTime.set('metrics-edit-start-time', ts);
+    MpgDateTime.set('metrics-edit-end-time', ts);
     showMetricsEditStatus('Start and End set to ' + ts + '.', false);
   }
 
@@ -423,8 +389,8 @@
       showMetricsEditStatus('Select a field to edit.', true);
       return null;
     }
-    const startTime = readMetricsEditTimestamp('metrics-edit-start-time');
-    const endTime = readMetricsEditTimestamp('metrics-edit-end-time');
+    const startTime = MpgDateTime.read('metrics-edit-start-time');
+    const endTime = MpgDateTime.read('metrics-edit-end-time');
     if (!startTime || !endTime) {
       showMetricsEditStatus('Enter a start and end as YYYY-MM-DD  HH:MM:SS (or pick them from the calendar).', true);
       return null;

@@ -556,7 +556,7 @@ The two times are compared as real instants (both converted to UTC first), so a 
 #### Export: Date Range to CSV
 
 1. Choose the **Export** source option, then the table and device.
-2. Enter a **Source Start** and **Source End**. Both ends are inclusive.
+2. Enter a **Source Start** and **Source End**. Both ends are inclusive, and Source End is taken through the end of the second shown. The boxes take `YYYY-MM-DD  HH:MM:SS` (24-hour clock, two spaces between date and time, e.g. `2026-10-17  20:05:55`): type the value or pick it from the calendar popup. This is the same picker as Metrics Edit (see "Entering the Time Range" in section 4.5), and it is used for the Target Start and the import's Source Start as well.
 3. Enter a **Target Start**, or leave it equal to Source Start for an unshifted copy.
 4. Click **Export to CSV**. Your browser's Save dialog is where the file goes.
 

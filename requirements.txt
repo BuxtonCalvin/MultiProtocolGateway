@@ -18,7 +18,7 @@ pydantic>=2.14.1              # for data validation and settings management in F
 uvicorn[standard]>=0.54.0     # for running FastAPI applications
 jinja2>=3.1.6                 # for HTML templating in FastAPI
 python-multipart>=0.0.32      # required for form parsing in FastAPI
-markdown>=3.11.1                # for rendering Markdown in FastAPI docs
+markdown>=3.11.1              # for rendering Markdown in FastAPI docs
 pygments>=2.21.0              # for syntax highlighting in FastAPI docs
 pymdown-extensions>=12.3      # for rendering Markdown in FastAPI docs
 watchdog>=6.0.0               # file watcher
@@ -37,7 +37,9 @@ pyarrow>=26.0.0               # imported directly (influxdb3_out)
 # one place). Served from classes/WebServer/static/ so the Admin UI has no CDN / internet dependency at runtime.
 #   htmx 1.9.12                 static/js/htmx.min.js, htmx-sse.js, json-enc.js    (BSD-2-Clause)
 #   flatpickr 4.6.13            static/js/flatpickr.min.js, static/css/flatpickr.min.css   (MIT)
-#                               date/time range pickers on Timescale DB -> Metrics Edit; licence: static/js/flatpickr.LICENSE.md
+#                               date/time boxes on Timescale DB -> Metrics Edit, InfluxDB -> Metrics Edit 1.x/3.x and
+#                               Timeshift Data (InfluxDB 1.x/3.x, TimescaleDB); shared setup: static/js/mpg-datetime-picker.js;
+#                               license: static/js/flatpickr.LICENSE.md
 #                               to upgrade: `npm pack flatpickr@<version>` and copy dist/flatpickr.min.js and
 #                               dist/flatpickr.min.css over the two files; re-skinning lives at the end of static/css/mpg.css
 # ---------------------------------------------------------------------------------------------------------------------

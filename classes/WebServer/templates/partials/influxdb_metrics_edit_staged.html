@@ -77,7 +77,7 @@
         <td class="px-2 py-1.5 mini-table-value whitespace-nowrap">{{ e.device_label }}</td>
         <td class="px-2 py-1.5 font-mono mini-table-value whitespace-nowrap">{{ e.field_name or '—' }}</td>
         <td class="px-2 py-1.5 mini-table-value whitespace-nowrap">
-          {{ e.start_time.strftime('%Y-%m-%d %H:%M') }} → {{ e.end_time.strftime('%Y-%m-%d %H:%M') }}
+          {{ e.start_time.strftime('%Y-%m-%d  %H:%M:%S') }} → {{ e.end_time.strftime('%Y-%m-%d  %H:%M:%S') }}
         </td>
         <td class="px-2 py-1.5 whitespace-nowrap">
           {% if e.action == 'delete' and e.version == '3' %}

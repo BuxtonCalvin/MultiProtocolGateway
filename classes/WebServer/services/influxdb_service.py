@@ -41,7 +41,7 @@ from __future__ import annotations
 import logging
 import threading
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Literal
 
 try:
@@ -58,7 +58,9 @@ _log: logging.Logger = logging.getLogger(__name__)
 
 class InfluxPreviewSample(TypedDict):
     """One matched (time, value) pair in preview_metric_edit()'s sample."""
-    time_iso: str
+    time_iso: str      # ISO 8601 with offset, in the bridge's machine_timezone (see influxdb_out._ns_to_iso)
+    time_local: str    # "YYYY-MM-DD  HH:MM:SS" in that machine timezone -- the zone the Start/End boxes are read in
+    time_utc: str      # the same instant as "YYYY-MM-DD  HH:MM:SS" in UTC -- how InfluxDB itself stores it
     value: float | int | str | bool | None
 
 
@@ -298,6 +300,24 @@ def list_metric_edit_fields(
     return [{"name": f.name, "data_type": f.data_type} for f in v3_fields]
 
 
+_PREVIEW_TIME_FORMAT: str = "%Y-%m-%d  %H:%M:%S"
+
+
+def _preview_sample(time_iso: str, value: float | int | str | bool | None) -> InfluxPreviewSample:
+    """
+    Builds one preview row. InfluxDB stores every point's time as a UTC epoch; the transports convert it to the
+    bridge's machine_timezone (so the preview lines up with the Start/End the admin typed) and hand back an ISO string
+    carrying that offset. This keeps that string and adds the two compact display forms the page toggles between.
+    """
+    try:
+        moment: datetime = datetime.fromisoformat(time_iso)
+    except ValueError:
+        return {"time_iso": time_iso, "time_local": time_iso, "time_utc": time_iso, "value": value}
+    local: str = moment.strftime(_PREVIEW_TIME_FORMAT)
+    utc: str = moment.astimezone(timezone.utc).strftime(_PREVIEW_TIME_FORMAT) if moment.tzinfo is not None else local
+    return {"time_iso": time_iso, "time_local": local, "time_utc": utc, "value": value}
+
+
 def preview_metric_edit(
     gateway: "Protocol_Gateway | None",
     version: str,
@@ -319,14 +339,14 @@ def preview_metric_edit(
         )
         return {
             "row_count": v1_preview.row_count,
-            "sample": [{"time_iso": s.time_iso, "value": s.value} for s in v1_preview.sample],
+            "sample": [_preview_sample(s.time_iso, s.value) for s in v1_preview.sample],
         }
     v3_preview: "Influx3EditPreview" = _v3_admin_manager(gateway).preview_metric_edit(
         measurement, device_identifier, field_name, start_time, end_time
     )
     return {
         "row_count": v3_preview.row_count,
-        "sample": [{"time_iso": s.time_iso, "value": s.value} for s in v3_preview.sample],
+        "sample": [_preview_sample(s.time_iso, s.value) for s in v3_preview.sample],
     }
 
 

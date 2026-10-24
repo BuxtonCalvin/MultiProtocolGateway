@@ -752,11 +752,11 @@ This is the InfluxDB counterpart of [TimescaleDB's Metrics Edit screen](../TimeS
 2. Pick a **measurement** on the left.
 3. Pick the **device** whose data you want to edit.
 4. Pick the **field** to target — exactly one field per edit; see "Why only one field at a time" below.
-5. Pick a **start** and **end** date/time for the range to affect.
+5. Pick a **start** and **end** date/time for the range to affect. Type each as `YYYY-MM-DD  HH:MM:SS` (24-hour clock, two spaces between date and time, e.g. `2026-10-17  20:05:55`) or pick it from the calendar popup; a day picked without a time means `00:00:00` for Start and `23:59:59` for End. The End is taken through the end of the second shown, so setting both boxes to the same second selects every point stamped within it.
 6. Choose an **action**:
    - **Delete value(s)** — see the version-specific warning below; both versions remove the *entire point/row*, not just the selected field.
    - **Set value** — overwrites the selected field with a replacement value you enter.
-7. Click **Preview** to see how many points/rows match and a sample of their current values before changing anything.
+7. Click **Preview** to see how many points/rows match and a sample of their current values before changing anything. The Time column is shown as `YYYY-MM-DD  HH:MM:SS` in the bridge's timezone (its configured local timezone, or UTC when `use_utc_timestamp` is set), which is the same zone the Start and End boxes are read in, so a time you see in the list is the time you would type. InfluxDB itself stores every time as UTC; to see the stored instants, tick **Show times in UTC (as stored by InfluxDB)** above the table. The choice carries over to later previews on the page. The checkbox is omitted when the bridge's timezone already is UTC. **Click any row to set both Start and End to that point's second**, the quickest way to target a single bad reading, and then continue to the next step. The click always fills the boxes in the bridge's timezone, even while the table is showing UTC, so the selection is the one you clicked. Because End is taken through the end of that second, any other point stamped within the same second is included too.
 8. Click **Add to Staged Changes**.
 9. Use the existing **Commit All Changes** button in the header to apply every staged edit — InfluxDB edits, TimescaleDB Metrics Edit changes, and TimescaleDB column deletions are all applied together by that one button. Staged edits can be reviewed and individually removed before committing, or abandoned entirely with **Discard Changes**.
 
@@ -841,7 +841,7 @@ These apply regardless of source mode:
 With **Export InfluxDB range to CSV** selected:
 
 1. Optionally filter to one **Device Identifier**.
-2. Pick a **Source Start** and **Source End** for the range to export.
+2. Pick a **Source Start** and **Source End** for the range to export. Date/time boxes take `YYYY-MM-DD  HH:MM:SS` (24-hour clock, two spaces between date and time, e.g. `2026-10-17  20:05:55`): type the value or pick it from the calendar popup. Source End is taken through the end of the second shown.
 3. Pick a **Target Start** for the shifted timestamps that will appear in the CSV — leave it equal to Source Start to export with no shift.
 4. Click **Export to CSV**. The browser's own Save dialog is where the file lands.
 
@@ -852,7 +852,7 @@ Every timestamp in the export is shifted by `Target Start − Source Start`, app
 With **Import EG4 spreadsheet** or **Re-import an exported/edited CSV** selected:
 
 1. Choose the **File** (`.csv`, `.xls`, or `.xlsx`).
-2. Set **Source Start** and **Target Start** — the same `Target Start − Source Start` delta is applied to every row's timestamp; leave them equal for no shift. For an EG4 upload, Source Start defaults to the earliest timestamp found in the file once it's scanned.
+2. Set **Source Start** and **Target Start** — the same `Target Start − Source Start` delta is applied to every row's timestamp; leave them equal for no shift. For an EG4 upload, Source Start defaults to the earliest timestamp found in the file once it's scanned. The boxes use the same `YYYY-MM-DD  HH:MM:SS` format and calendar popup as the export.
 3. Click **Upload & Scan Fields**. The file is parsed and held server-side, and a **Field Matchup** table appears.
 4. Pick the **Time Column** — the column holding each row's timestamp. The page guesses one automatically where it can (an exact "time"/"date"/"timestamp" header, the first column already typed as a date/time, or a header that's clearly a time label).
 5. Review the Field Matchup table (see below), adjusting any row as needed.

@@ -77,6 +77,12 @@
 
 {% extends "base.html" %}
 {% block title %}{{ 'TimescaleDB' if version == 'timescale' else 'InfluxDB' }} — Timeshift Data — MPG Admin{% endblock %}
+{% block head %}
+{#- Flatpickr (MIT) + the shared picker helper, both vendored under /static so the admin UI works with no internet access. #}
+<link rel="stylesheet" href="/static/css/flatpickr.min.css">
+<script src="/static/js/flatpickr.min.js"></script>
+<script src="/static/js/mpg-datetime-picker.js"></script>
+{% endblock %}
 {% block content %}
 <div class="col-span-12 flex flex-col gap-4" id="timeshift-root" data-version="{{ version }}" data-standard-tags='{{ standard_tag_keys|tojson }}' style="max-width: 900px;">
 
@@ -255,12 +261,12 @@
       {% endif %}
       <div>
         <label for="ts-export-start" class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">Source Start</label>
-        <input type="datetime-local" step="1" id="ts-export-start"
+        <input type="text" id="ts-export-start" placeholder="YYYY-MM-DD  HH:MM:SS" autocomplete="off" spellcheck="false"
                class="theme-input w-full text-xs rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-accent">
       </div>
       <div>
         <label for="ts-export-end" class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">Source End</label>
-        <input type="datetime-local" step="1" id="ts-export-end"
+        <input type="text" id="ts-export-end" placeholder="YYYY-MM-DD  HH:MM:SS" autocomplete="off" spellcheck="false"
                class="theme-input w-full text-xs rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-accent">
       </div>
     </div>
@@ -268,7 +274,7 @@
       <label for="ts-export-target" class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">
         Target Start <span class="surface-subtle font-normal normal-case">(for the shifted timestamps in the CSV)</span>
       </label>
-      <input type="datetime-local" step="1" id="ts-export-target"
+      <input type="text" id="ts-export-target" placeholder="YYYY-MM-DD  HH:MM:SS" autocomplete="off" spellcheck="false"
              class="theme-input w-full text-xs rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-accent" style="max-width: 260px;">
       <p class="surface-subtle text-xs mt-1">Leave equal to Source Start to export with no shift.</p>
     </div>
@@ -291,13 +297,13 @@
     <div class="grid grid-cols-2 gap-3">
       <div>
         <label for="ts-import-start" class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">Source Start</label>
-        <input type="datetime-local" step="1" id="ts-import-start"
-               class="theme-input w-full text-xs rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-accent">
+        <input type="text" id="ts-import-start" placeholder="YYYY-MM-DD  HH:MM:SS" autocomplete="off" spellcheck="false"
+               class="theme-input w-full text-xs font-mono rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-accent">
         <p id="ts-import-start-note" class="surface-subtle text-xs mt-1 hidden"></p>
       </div>
       <div>
         <label for="ts-import-target" class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">Target Start</label>
-        <input type="datetime-local" step="1" id="ts-import-target"
+        <input type="text" id="ts-import-target" placeholder="YYYY-MM-DD  HH:MM:SS" autocomplete="off" spellcheck="false"
                class="theme-input w-full text-xs rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-accent">
       </div>
     </div>
@@ -332,6 +338,22 @@
 </div>
 
 <script>
+  // Date/time boxes: "YYYY-MM-DD  HH:MM:SS" with a calendar popup (see static/js/mpg-datetime-picker.js). Source End is
+  // an "end" box: a day picked with no time means 23:59:59, and the server reads it as "through the end of that second".
+  // The Target Start boxes only define the time shift (Target - Source Start), so they default to 00:00:00 like Source Start.
+  (function initTimeshiftPickers() {
+    function attach() {
+      MpgDateTime.init([
+        { id: 'ts-export-start', end: false },
+        { id: 'ts-export-end', end: true },
+        { id: 'ts-export-target', end: false },
+        { id: 'ts-import-start', end: false },
+        { id: 'ts-import-target', end: false },
+      ]);
+    }
+    if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', attach); } else { attach(); }
+  })();
+
   // version comes from a data attribute on #timeshift-root, not rendered
   // directly via Jinja into this script block -- see the identical
   // comment/fix in pages/influxdb_metrics_edit.html: rendering a Jinja
@@ -739,12 +761,15 @@
   // ---- Export ----
   function doExport() {
     const measurement = getMeasurement();
-    const start = document.getElementById('ts-export-start').value;
-    const end = document.getElementById('ts-export-end').value;
-    const target = document.getElementById('ts-export-target').value || start;
+    // MpgDateTime.read(): "YYYY-MM-DD HH:MM:SS", "" when the box is empty, null when it holds something unparseable.
+    const start = MpgDateTime.read('ts-export-start');
+    const end = MpgDateTime.read('ts-export-end');
+    const targetRaw = MpgDateTime.read('ts-export-target');
+    const target = targetRaw || start;
     if (!measurement) { showStatus('ts-export-status', 'Pick a ' + (isTimescale() ? 'table' : 'measurement') + '.', true); return; }
     if (isTimescale() && getDeviceInfoId() === null) { showStatus('ts-export-status', 'Pick a device.', true); return; }
-    if (!start || !end) { showStatus('ts-export-status', 'Pick a source start and end.', true); return; }
+    if (!start || !end) { showStatus('ts-export-status', 'Enter a source start and end as YYYY-MM-DD  HH:MM:SS (or pick them from the calendar).', true); return; }
+    if (targetRaw === null) { showStatus('ts-export-status', 'Target Start is not a valid date/time (use YYYY-MM-DD  HH:MM:SS).', true); return; }
     if (end < start) { showStatus('ts-export-status', 'Source End must not be before Source Start.', true); return; }
 
     const params = new URLSearchParams({
@@ -854,7 +879,7 @@
       if (!resp.ok || uploadId !== TimeshiftState.uploadId) { return; }
       const data = await resp.json();
       if (data.earliest) {
-        document.getElementById('ts-import-start').value = data.earliest;
+        MpgDateTime.set('ts-import-start', data.earliest);   // server sends YYYY-MM-DDTHH:MM:SS; shown as YYYY-MM-DD  HH:MM:SS
         note.textContent = 'Set to the earliest timestamp in the file (all sheets combined). You can still edit it.';
         note.classList.remove('hidden');
       } else {
@@ -943,10 +968,12 @@
     if (!upload) { showStatus('ts-import-status', 'Upload a file first.', true); return null; }
     const measurement = getMeasurement();
     const timeColumn = document.getElementById('ts-time-column').value;
-    const start = document.getElementById('ts-import-start').value;
-    const target = document.getElementById('ts-import-target').value || start;
+    const start = MpgDateTime.read('ts-import-start');
+    const targetRaw = MpgDateTime.read('ts-import-target');
+    const target = targetRaw || start;
     if (!timeColumn) { showStatus('ts-import-status', 'Select the time column.', true); return null; }
-    if (!start) { showStatus('ts-import-status', 'Pick a source start time.', true); return null; }
+    if (!start) { showStatus('ts-import-status', 'Enter a source start as YYYY-MM-DD  HH:MM:SS (or pick it from the calendar).', true); return null; }
+    if (targetRaw === null) { showStatus('ts-import-status', 'Target Start is not a valid date/time (use YYYY-MM-DD  HH:MM:SS).', true); return null; }
     if (isTimescale() && getDeviceInfoId() === null) { showStatus('ts-import-status', 'Pick a device.', true); return null; }
 
     const payload = {
