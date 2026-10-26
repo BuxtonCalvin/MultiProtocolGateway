@@ -1,0 +1,152 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note,ha_device_class,ha_state_class,ha_entity_category
+"# SOURCE: Wattsonic 'GEN3 Hybrid Inverter MODBUS RTU Protocol' register tables, as transcribed at smarthome.exposed (vendor PDF itself not retrievable). Cross-checked against TapHome Gen3 template which cites the vendor PDF.",,,,,,,,,,,,
+# DEVICE FAMILY: a-TroniX AX hybrid inverters (AKKU SYS GmbH) are rebadged Wattsonic Gen3 units (also sold as M-TEC / Solinteg / Sunways / St-ems). Clone relationship is reported by TapHome + Homey + evcc; NOT yet confirmed by a hardware test of an AX unit.,,,,,,,,,,,,
+"# SERIAL: Modbus RTU via EMS port, 9600 8N1, slave id 247 (Gen3 default; some docs say 1). Modbus TCP: port 502 unit 255. All registers read with FC03 (holding). Addresses are 0-based protocol addresses.",,,,,,,,,,,,
+"# NOT COVERED: bit tables for fault flags / equipment info / working-mode / battery-config (vendor tables 3.x not transcribed); 53500-53523 'BMS data for EMS' block (written BY an EMS, not inverter telemetry); older a-TroniX Gen2 (WTS) units use a different 1xxxx-5xxxx map.",,,,,,,,,,,,
+"# WRITABLE: every row is R in this file by design. Vendor marks 20000, 25100, 25103, 5xxxx rows as read/write.",,,,,,,,,,,,
+10000,inverter_sn,Inverter SN,,ASCII.16,,,R,,"Serial number, 8 registers (16 chars)",,,diagnostic
+10008,equipment_info,Equipment Info,,USHORT,,,R,,Bit table in vendor 'Equipment info' table (not transcribed),,,diagnostic
+10011,firmware_version,Firmware Version,,UINT,,,R,,2 registers 10011-10012,,,diagnostic
+10104,grid_regulation,Grid Regulation,,USHORT,,,R,,Grid safety standard id,,,diagnostic
+10105,inverter_running_status,Inverter Running Status,,USHORT,0-5,,R,,0 wait / 1 self-check / 2 on-grid / 3 fault / 4 firmware update / 5 off-grid,,,
+10112,fault_flag1,Fault Flag 1,,UINT,,,R,,"32-bit fault bitmask, vendor table 3.3 (e.g. bit0 mains lost, bit8 inverter over temperature)",,,
+10114,fault_flag2,Fault Flag 2,,UINT,,,R,,32-bit fault bitmask,,,
+10120,fault_flag3,Fault Flag 3,,UINT,,,R,,32-bit fault bitmask,,,
+18000,arm_fault_flag1,ARM Fault Flag 1,,UINT,,,R,,32-bit ARM fault bitmask,,,
+10994,meter_power_phase_a,Phase A Power on Meter,W,INT,,,R,,raw is W (vendor: kW x1000),power,measurement,
+10996,meter_power_phase_b,Phase B Power on Meter,W,INT,,,R,,raw is W,power,measurement,
+10998,meter_power_phase_c,Phase C Power on Meter,W,INT,,,R,,raw is W,power,measurement,
+11000,meter_power_total,Total Power on Meter,W,INT,,,R,,raw is W; sign per vendor meter convention,power,measurement,
+11002,meter_total_grid_injection_energy,Total Grid Injection Energy on Meter,0.01kWh,UINT,,,R,,,energy,total_increasing,
+11004,meter_total_grid_purchase_energy,Total Purchasing Energy from Grid on Meter,0.01kWh,UINT,,,R,,,energy,total_increasing,
+11006,grid_voltage_ab,Grid Line A/B Voltage,0.1V,USHORT,,,R,,,voltage,measurement,
+11007,grid_voltage_bc,Grid Line B/C Voltage,0.1V,USHORT,,,R,,,voltage,measurement,
+11008,grid_voltage_ca,Grid Line C/A Voltage,0.1V,USHORT,,,R,,,voltage,measurement,
+11009,grid_voltage_a,Grid Phase A Voltage,0.1V,USHORT,,,R,,,voltage,measurement,
+11011,grid_voltage_b,Grid Phase B Voltage,0.1V,USHORT,,,R,,,voltage,measurement,
+11013,grid_voltage_c,Grid Phase C Voltage,0.1V,USHORT,,,R,,,voltage,measurement,
+11010,grid_current_a,Grid Phase A Current,0.1A,USHORT,,,R,,,current,measurement,
+11012,grid_current_b,Grid Phase B Current,0.1A,USHORT,,,R,,,current,measurement,
+11014,grid_current_c,Grid Phase C Current,0.1A,USHORT,,,R,,,current,measurement,
+11015,grid_frequency,Grid Frequency,0.01Hz,USHORT,,,R,,,frequency,measurement,
+11016,p_ac,P_AC,W,INT,,,R,,Inverter AC active power; raw is W,power,measurement,
+11018,pv_generation_today,Total PV Generation on that day,0.1kWh,UINT,,,R,,,energy,total_increasing,
+11020,pv_generation_total,Total PV Generation from Installation,0.1kWh,UINT,,,R,,,energy,total_increasing,
+11022,pv_generation_hours_total,Total PV Generation Time from Installation,h,UINT,,,R,,,duration,total_increasing,
+11028,pv_input_power_total,PV Input Total Power,W,UINT,,,R,,raw is W,power,measurement,
+11032,temperature_sensor_1,Temperature Sensor 1,0.1C,SHORT,,,R,,,temperature,measurement,diagnostic
+11033,temperature_sensor_2,Temperature Sensor 2,0.1C,SHORT,,,R,,,temperature,measurement,diagnostic
+11034,temperature_sensor_3,Temperature Sensor 3,0.1C,SHORT,,,R,,,temperature,measurement,diagnostic
+11035,temperature_sensor_4,Temperature Sensor 4,0.1C,SHORT,,,R,,,temperature,measurement,diagnostic
+11038,pv1_voltage,PV1 Voltage,0.1V,USHORT,,,R,,,voltage,measurement,
+11039,pv1_current,PV1 Current,0.1A,USHORT,,,R,,,current,measurement,
+11040,pv2_voltage,PV2 Voltage,0.1V,USHORT,,,R,,,voltage,measurement,
+11041,pv2_current,PV2 Current,0.1A,USHORT,,,R,,,current,measurement,
+11062,pv1_input_power,PV1 Input Power,W,UINT,,,R,,raw is W,power,measurement,
+11064,pv2_input_power,PV2 Input Power,W,UINT,,,R,,raw is W,power,measurement,
+30200,backup_a_voltage,Backup A Voltage,0.1V,USHORT,,,R,,,voltage,measurement,
+30201,backup_a_current,Backup A Current,0.1A,USHORT,,,R,,,current,measurement,
+30202,backup_a_frequency,Backup A Frequency,0.01Hz,USHORT,,,R,,,frequency,measurement,
+30204,backup_a_power,Backup A Power,W,INT,,,R,,raw is W,power,measurement,
+30210,backup_b_voltage,Backup B Voltage,0.1V,USHORT,,,R,,,voltage,measurement,
+30211,backup_b_current,Backup B Current,0.1A,USHORT,,,R,,,current,measurement,
+30212,backup_b_frequency,Backup B Frequency,0.01Hz,USHORT,,,R,,,frequency,measurement,
+30214,backup_b_power,Backup B Power,W,INT,,,R,,raw is W,power,measurement,
+30220,backup_c_voltage,Backup C Voltage,0.1V,USHORT,,,R,,,voltage,measurement,
+30221,backup_c_current,Backup C Current,0.1A,USHORT,,,R,,,current,measurement,
+30222,backup_c_frequency,Backup C Frequency,0.01Hz,USHORT,,,R,,,frequency,measurement,
+30224,backup_c_power,Backup C Power,W,INT,,,R,,raw is W,power,measurement,
+30230,backup_total_power,Total Backup Power,W,INT,,,R,,raw is W,power,measurement,
+30236,inverter_power_phase_a,Inverter Phase A Active Power,W,INT,,,R,,raw is W,power,measurement,
+30242,inverter_power_phase_b,Inverter Phase B Active Power,W,INT,,,R,,raw is W,power,measurement,
+30248,inverter_power_phase_c,Inverter Phase C Active Power,W,INT,,,R,,raw is W,power,measurement,
+30254,battery_voltage,Battery Voltage,0.1V,USHORT,,,R,,,voltage,measurement,
+30255,battery_current,Battery Current,0.1A,SHORT,,,R,,signed; positive while charging (see battery_mode),current,measurement,
+30256,battery_mode,Battery Mode,,USHORT,0-1,,R,,0 discharge / 1 charge,,,
+30258,battery_power,Battery Power,W,INT,,,R,,"raw is W; vendor: positive when charging, negative when discharging",power,measurement,
+31000,grid_injection_energy_today,Grid Injection Energy on that day [Meter],0.1kWh,USHORT,,,R,,,energy,total_increasing,
+31001,grid_purchase_energy_today,Grid Purchasing Energy on that day [Meter],0.1kWh,USHORT,,,R,,,energy,total_increasing,
+31002,backup_output_energy_today,Backup Output Energy on that day,0.1kWh,USHORT,,,R,,,energy,total_increasing,
+31003,battery_charge_energy_today,Battery Charge Energy on that day,0.1kWh,USHORT,,,R,,,energy,total_increasing,
+31004,battery_discharge_energy_today,Battery Discharge Energy on that day,0.1kWh,USHORT,,,R,,,energy,total_increasing,
+31005,pv_generation_energy_today,PV Generation Energy on that day,0.1kWh,USHORT,,,R,,,energy,total_increasing,
+31006,loading_energy_today,Loading Energy on that day,0.1kWh,USHORT,,,R,,Reported inaccurate on some units; cross-check as PV + grid - battery,energy,total_increasing,
+31008,grid_purchase_energy_inverter_today,Energy Purchased from Grid on that day,0.1kWh,USHORT,,,R,,,energy,total_increasing,
+31102,total_energy_injected_to_grid,Total Energy injected to grid,0.1kWh,UINT,,,R,,,energy,total_increasing,
+31104,total_energy_purchased_from_grid_meter,Total Energy Purchased from Grid from Meter,0.1kWh,UINT,,,R,,,energy,total_increasing,
+31106,total_output_energy_backup_port,Total Output Energy on backup port,0.1kWh,UINT,,,R,,,energy,total_increasing,
+31108,total_energy_charged_to_battery,Total Energy Charged to Battery,0.1kWh,UINT,,,R,,,energy,total_increasing,
+31110,total_energy_discharged_from_battery,Total Energy Discharged from Battery,0.1kWh,UINT,,,R,,,energy,total_increasing,
+31112,total_pv_generation,Total PV Generation,0.1kWh,UINT,,,R,,,energy,total_increasing,
+31114,total_loading_energy_grid_side,Total Loading Energy consumed at grid side,0.1kWh,UINT,,,R,,,energy,total_increasing,
+31118,total_energy_purchased_from_grid_inverter,Total Energy Purchased from Grid at inverter side,0.1kWh,UINT,,,R,,,energy,total_increasing,
+32000,battery_type,Battery Types,,USHORT,,,R,,Vendor 'Battery configuration' table,,,diagnostic
+32001,battery_strings,Battery Strings,,USHORT,,,R,,,,,diagnostic
+32002,battery_protocol,Battery Protocol,,USHORT,,,R,,,,,diagnostic
+32003,battery_software_version,Software Version,,USHORT,,,R,,,,,diagnostic
+32004,battery_hardware_version,Hardware Version,,USHORT,,,R,,,,,diagnostic
+32005,bms_charge_current_max,BMS Charge Imax,0.1A,USHORT,,,R,,,current,measurement,
+32006,bms_discharge_current_max,BMS Discharge Imax,0.1A,USHORT,,,R,,,current,measurement,
+33000,battery_soc,SOC,0.01%,USHORT,,,R,,raw 0-10000,battery,measurement,
+33001,battery_soh,SOH,0.01%,USHORT,,,R,,raw 0-10000,,measurement,diagnostic
+33002,bms_status,BMS Status,,USHORT,0-4,,R,,0 init / 1 self-check / 2 normal / 3 warning / 4 fault,,,
+33003,bms_pack_temperature,BMS Pack Temperature,0.1C,USHORT,,,R,,,temperature,measurement,diagnostic
+33008,max_cell_temperature_id,Max Cell Temperature ID,,USHORT,,,R,,,,,diagnostic
+33009,max_cell_temperature,Max Cell Temperature,0.1C,USHORT,,,R,,,temperature,measurement,diagnostic
+33010,min_cell_temperature_id,Min Cell Temperature ID,,USHORT,,,R,,,,,diagnostic
+33011,min_cell_temperature,Min Cell Temperature,0.1C,USHORT,,,R,,,temperature,measurement,diagnostic
+33012,max_cell_voltage_id,Max Cell Voltage ID,,USHORT,,,R,,,,,diagnostic
+33013,max_cell_voltage,Max Cell Voltage,0.001V,USHORT,,,R,,,voltage,measurement,diagnostic
+33014,min_cell_voltage_id,Min Cell Voltage ID,,USHORT,,,R,,,,,diagnostic
+33015,min_cell_voltage,Min Cell Voltage,0.001V,USHORT,,,R,,,voltage,measurement,diagnostic
+33016,bms_error_code,BMS Error Code,,UINT,,,R,,"32-bit bitmask, vendor BMS fault table",,,
+33018,bms_warn_code,BMS Warn Code,,UINT,,,R,,32-bit bitmask,,,
+25100,grid_injection_limit_switch,Grid Injection Power Limit Switch,,USHORT,0-1,,R,,0 off / 1 on (vendor R/W),,,config
+25103,grid_injection_limit_setting,Grid Injection Power Limit Setting,0.1%,USHORT,0-1000,,R,,vendor R/W; raw 0-1000 = 0.0-100.0%,,,config
+25104,smart_meter_comm_status,Smart Meter Comm Status,,USHORT,0-1,,R,,0 abnormal / 1 normal,,,
+25105,meter_power_a_w,Phase A Power On Meter (W),W,INT,,,R,,Second copy of meter phase power in W (accuracy 1),power,measurement,
+25107,meter_power_b_w,Phase B Power On Meter (W),W,INT,,,R,,,power,measurement,
+25109,meter_power_c_w,Phase C Power On Meter (W),W,INT,,,R,,,power,measurement,
+50000,working_mode_setting,Hybrid Inverter Working Mode Setting,,USHORT,,,R,,Vendor 'Hybrid Inverter Working Modes' table (not transcribed); vendor R/W,,,config
+50001,eps_ups_switch,EPS/UPS Function Switch,,USHORT,0-1,,R,,0 off / 1 on (vendor R/W),,,config
+50004,offgrid_voltage_setting,Off-grid Voltage Setting,0.1V,USHORT,,,R,,vendor R/W,,,config
+50005,offgrid_frequency_setting,Off-grid Frequency Setting,0.01Hz,USHORT,4500-6500,,R,,vendor R/W,,,config
+50006,offgrid_asymmetric_switch,Off-grid Asymmetric Output Switch,,USHORT,0-1,,R,,vendor R/W,,,config
+50007,peak_load_shifting_switch,Peak Load Shifting Switch,,USHORT,0-1,,R,,vendor R/W,,,config
+50009,max_grid_power_setting,Max. Grid Power Value Setting,0.1kVA,USHORT,,,R,,vendor R/W,,,config
+52500,battery_configuration,Battery Configuration,,USHORT,,,R,,Vendor 'Battery configuration' table; vendor R/W,,,config
+52502,ongrid_soc_protection_switch,On-grid Battery SOC Protection Switch,,USHORT,0-1,,R,,vendor R/W,,,config
+52503,ongrid_battery_end_soc,On-grid Battery End SOC,0.1%,USHORT,0-1000,,R,,vendor R/W; raw 0-1000 = 0.0-100.0%,,,config
+52504,offgrid_soc_protection_switch,Off-grid Battery SOC Protection Switch,,USHORT,0-1,,R,,vendor R/W,,,config
+52505,offgrid_battery_end_soc,Off-grid Battery End SOC,0.1%,USHORT,0-1000,,R,,vendor R/W,,,config
+53006,scheduled_charge_discharge_enable,Scheduled Charge&Discharge,,_16BIT_FLAGS,,,R,,bit0-bit5 = period 1-6 enabled; vendor R/W,,,config
+53007,period1_mode,Period 1 Charge/Discharge Setting,,USHORT,0-2,,R,,0 none / 1 charge / 2 discharge; vendor R/W,,,config
+53008,period1_charge_by,Period 1 Battery Charge By,,USHORT,0-1,,R,,0 PV / 1 PV+grid; vendor R/W,,,config
+53010,period1_power_limit,Period 1 Power Limit,0.1%,USHORT,0-1000,,R,,vendor R/W,,,config
+53012,period1_start_time,Period 1 Start Time,,USHORT,,,R,,high byte hour / low byte minute; vendor R/W,,,config
+53013,period1_stop_time,Period 1 Stop Time,,USHORT,,,R,,high byte hour / low byte minute; vendor R/W,,,config
+53014,period2_mode,Period 2 Charge/Discharge Setting,,USHORT,0-2,,R,,0 none / 1 charge / 2 discharge; vendor R/W,,,config
+53015,period2_charge_by,Period 2 Battery Charge By,,USHORT,0-1,,R,,0 PV / 1 PV+grid; vendor R/W,,,config
+53017,period2_power_limit,Period 2 Power Limit,0.1%,USHORT,0-1000,,R,,vendor R/W,,,config
+53019,period2_start_time,Period 2 Start Time,,USHORT,,,R,,high byte hour / low byte minute; vendor R/W,,,config
+53020,period2_stop_time,Period 2 Stop Time,,USHORT,,,R,,high byte hour / low byte minute; vendor R/W,,,config
+53021,period3_mode,Period 3 Charge/Discharge Setting,,USHORT,0-2,,R,,0 none / 1 charge / 2 discharge; vendor R/W,,,config
+53022,period3_charge_by,Period 3 Battery Charge By,,USHORT,0-1,,R,,0 PV / 1 PV+grid; vendor R/W,,,config
+53024,period3_power_limit,Period 3 Power Limit,0.1%,USHORT,0-1000,,R,,vendor R/W,,,config
+53026,period3_start_time,Period 3 Start Time,,USHORT,,,R,,high byte hour / low byte minute; vendor R/W,,,config
+53027,period3_stop_time,Period 3 Stop Time,,USHORT,,,R,,high byte hour / low byte minute; vendor R/W,,,config
+53028,period4_mode,Period 4 Charge/Discharge Setting,,USHORT,0-2,,R,,0 none / 1 charge / 2 discharge; vendor R/W,,,config
+53029,period4_charge_by,Period 4 Battery Charge By,,USHORT,0-1,,R,,0 PV / 1 PV+grid; vendor R/W,,,config
+53031,period4_power_limit,Period 4 Power Limit,0.1%,USHORT,0-1000,,R,,vendor R/W,,,config
+53033,period4_start_time,Period 4 Start Time,,USHORT,,,R,,high byte hour / low byte minute; vendor R/W,,,config
+53034,period4_stop_time,Period 4 Stop Time,,USHORT,,,R,,high byte hour / low byte minute; vendor R/W,,,config
+53035,period5_mode,Period 5 Charge/Discharge Setting,,USHORT,0-2,,R,,0 none / 1 charge / 2 discharge; vendor R/W,,,config
+53036,period5_charge_by,Period 5 Battery Charge By,,USHORT,0-1,,R,,0 PV / 1 PV+grid; vendor R/W,,,config
+53038,period5_power_limit,Period 5 Power Limit,0.1%,USHORT,0-1000,,R,,vendor R/W,,,config
+53040,period5_start_time,Period 5 Start Time,,USHORT,,,R,,high byte hour / low byte minute; vendor R/W,,,config
+53041,period5_stop_time,Period 5 Stop Time,,USHORT,,,R,,high byte hour / low byte minute; vendor R/W,,,config
+53042,period6_mode,Period 6 Charge/Discharge Setting,,USHORT,0-2,,R,,0 none / 1 charge / 2 discharge; vendor R/W,,,config
+53043,period6_charge_by,Period 6 Battery Charge By,,USHORT,0-1,,R,,0 PV / 1 PV+grid; vendor R/W,,,config
+53045,period6_power_limit,Period 6 Power Limit,0.1%,USHORT,0-1000,,R,,vendor R/W,,,config
+53047,period6_start_time,Period 6 Start Time,,USHORT,,,R,,high byte hour / low byte minute; vendor R/W,,,config
+53048,period6_stop_time,Period 6 Stop Time,,USHORT,,,R,,high byte hour / low byte minute; vendor R/W,,,config

@@ -20,12 +20,14 @@
 
 """Unit tests for classes.transports.serial_pylon (no serial hardware required).
 
-Port handling, the shared client, locking and polling are tested in test_serial_base.py;
-this module covers the Pylon wire format: version negotiation, framing and checksums.
+Port handling, the shared client, locking and polling are tested in test_serial_base.py, and
+SOI/EOI framing in test_serial_frame_transport.py; this module covers the Pylon wire format
+(version negotiation, frame layout, checksums) and how Pylon sits on those two layers.
 """
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Iterator
 from types import SimpleNamespace
 from typing import Any, cast
@@ -35,9 +37,14 @@ import pytest
 from conftest import DummySettings
 
 from classes.transports.serial_base import serial_base
+from classes.transports.serial_frame_transport import (
+    serial_frame_client,
+    serial_frame_transport,
+)
 from classes.transports.serial_pylon import serial_pylon
 
 BASE_MODULE = "classes.transports.serial_base"
+FRAME_MODULE = "classes.transports.serial_frame_transport"
 
 
 @pytest.fixture(autouse=True)
@@ -53,10 +60,25 @@ def _same_port(port: str) -> str:
     return port
 
 
-def _new_client(*args: Any, **kwargs: Any) -> MagicMock:
-    client = MagicMock(name="client")
-    client.soi, client.eoi = args[2], args[3]  # serial_base compares them when a section joins a shared client
-    return client
+class FakeFrameClient(serial_frame_client):
+    """A serial_frame_client in type only: the transport checks the type of its client, but no port is opened."""
+
+    def __init__(self, port: str, baud: int, soi: bytes, eoi: bytes, **kwargs: Any) -> None:  # pyright: ignore[reportMissingSuperCall]
+        self.port = port
+        self.baud = baud
+        self.soi = soi
+        self.eoi = eoi
+        self.pending_frames = []
+        self.callback_lock = threading.Lock()
+        self.kwargs: dict[str, Any] = kwargs
+        self.connect_calls: int = 0
+
+    def connect(self) -> bool:
+        self.connect_calls += 1
+        return True
+
+    def close(self) -> None:
+        pass
 
 
 def _process_registery(raw: dict[int, bytes], registry_map: object = None) -> dict[str, str]:
@@ -76,7 +98,7 @@ def make_transport(**values: Any) -> serial_pylon:
     with (
         patch(f"{BASE_MODULE}.find_usb_serial_port", side_effect=_same_port),
         patch(f"{BASE_MODULE}.get_usb_serial_port_info", return_value="mock"),
-        patch(f"{BASE_MODULE}.serial_frame_client", side_effect=_new_client),
+        patch(f"{FRAME_MODULE}.serial_frame_client", new=FakeFrameClient),
     ):
         transport = serial_pylon(settings)  # type: ignore[arg-type]
     transport._log = MagicMock()
@@ -214,3 +236,45 @@ def test_is_a_serial_base_scraper_with_literal_transport_type() -> None:
     assert issubclass(serial_pylon, serial_base)
     assert "transport_type" in vars(serial_pylon)
     assert serial_pylon.transport_type == "scraper"
+
+
+# --------------------------------------------------------------------------- #
+# how Pylon sits on serial_frame_transport and serial_base                     #
+# --------------------------------------------------------------------------- #
+
+def test_pylon_is_a_command_response_member_of_the_soi_eoi_family() -> None:
+    assert issubclass(serial_pylon, serial_frame_transport)
+    assert issubclass(serial_pylon, serial_base)
+    assert serial_pylon.LISTEN_ONLY is False, "the battery only answers when asked"
+
+
+def test_pylon_opens_its_port_at_start_up_with_an_exclusive_lock() -> None:
+    transport: serial_pylon = make_transport()
+    assert transport._client is not None, "eager: a missing adapter must stop the gateway, as it always did"
+    client: FakeFrameClient = cast(FakeFrameClient, transport.client)
+    assert client.kwargs["exclusive"] is True
+    assert client.kwargs["bytesize"] == 8
+
+
+def test_pylon_frame_markers_are_fixed_and_not_configurable() -> None:
+    transport: serial_pylon = make_transport(soi="02", eoi="03")
+    client: FakeFrameClient = cast(FakeFrameClient, transport.client)
+    assert transport._markers == (b"~", b"\r")
+    assert (client.soi, client.eoi) == (b"~", b"\r")
+
+
+def test_async_mode_is_rejected_for_a_command_response_protocol() -> None:
+    with pytest.raises(ValueError, match="async_mode cannot be used"):
+        make_transport(async_mode="true")
+
+
+def test_read_timeout_is_configurable() -> None:
+    transport: serial_pylon = make_transport(timeout="2.5")
+    transport.connect()
+    assert transport.client.timeout == 2.5
+
+
+def test_polling_goes_through_the_command_loop_not_the_listen_path() -> None:
+    transport: serial_pylon = make_transport()
+    transport.protocolSettings = fake_protocol([0x4642, 0x4644])
+    assert transport._poll_commands() == [0x4642, 0x4644]

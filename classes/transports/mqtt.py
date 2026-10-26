@@ -23,6 +23,7 @@ import atexit
 import contextlib
 import csv
 import json
+import math
 import random
 import sys
 import threading
@@ -142,8 +143,8 @@ _HA_CONTROL_COMPONENTS: frozenset[str] = frozenset({"number", "select", "switch"
 
 _HA_NUMERIC_DATA_TYPES: frozenset[Data_Type] = frozenset({
     Data_Type.BYTE, Data_Type.USHORT, Data_Type.UINT, Data_Type.SHORT,
-    Data_Type.INT, Data_Type.UINT64, Data_Type.FLOAT32, Data_Type.FLOAT64,
-    Data_Type.ACC32,
+    Data_Type.INT, Data_Type.UINT64, Data_Type.INT64, Data_Type.FLOAT32,
+    Data_Type.FLOAT64, Data_Type.ACC32,
 })
 _DATA_TYPE_1BIT: int = 201
 
@@ -169,8 +170,19 @@ def _csv_choice(csv_value: str, inferred: str) -> str:
 
 
 def _ha_number(value: float) -> int | float:
-    """Tidy a float for JSON: drop float noise, and the ``.0`` on whole numbers."""
+    """Tidy a float for JSON: drop float noise, and the ``.0`` on whole numbers.
+
+    Non-finite values (e.g. a FLOAT64 range scaled by ``unit_mod`` overflowing to
+    infinity) are clamped to the largest finite float, because ``inf`` is not
+    valid JSON.  Magnitudes beyond 2**53 stay floats: they are no longer exact as
+    integers anyway, and parsers such as orjson (used by Home Assistant) reject
+    integers outside the 64-bit range.
+    """
+    if not math.isfinite(value):
+        value = math.copysign(sys.float_info.max, value)
     rounded: float = round(value, 6)
+    if abs(rounded) >= 2 ** 53:
+        return rounded
     return int(rounded) if float(rounded).is_integer() else rounded
 
 

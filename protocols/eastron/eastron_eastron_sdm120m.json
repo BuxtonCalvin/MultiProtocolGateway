@@ -1,9 +1,9 @@
 {
   "transport": "modbus_rtu",
-  "baud": "9600",
-  "batch_size": "40",
-  "send_holding_register": "true",
-  "send_input_register": "false",
-  "send_coil_register": "false",
-  "send_discrete_register": "false"
+  "baud": 2400,
+  "batch_size": 20,
+  "send_holding_register": true,
+  "send_input_register": true,
+  "send_coil_register": false,
+  "send_discrete_register": false
 }

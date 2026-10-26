@@ -114,7 +114,7 @@ Practical setup:
 
 ### Multiple batteries on one RS485 bus
 
-Create one section per battery address, all pointing at the same `port` and `baudrate`. Each section is its own device, with its own name, bridges and data. MPG opens the serial port once and shares it between the sections (this comes from the `serial_base` class that `serial_pylon` is built on), and each request/response exchange is serialized so the batteries never interleave on the bus.
+Create one section per battery address, all pointing at the same `port` and `baudrate`. Each section is its own device, with its own name, bridges and data. MPG opens the serial port once and shares it between the sections (the sharing comes from the `serial_base` class, which `serial_pylon` reaches through `serial_frame_transport`), and each request/response exchange is serialized so the batteries never interleave on the bus.
 
 ``` ini
 [transport.pylon_battery_1]

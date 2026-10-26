@@ -20,9 +20,9 @@ from __future__ import annotations
 # scraper transport for serial communication with Pylontech batteries, using their
 # specific ASCII Hex protocol with SOI/EOI framing and checksum validation.
 #
-# Port handling, the shared serial client, locking, scheduling and polling live in
-# serial_base; this module only implements the Pylon wire format (framing, checksum,
-# version negotiation) on top of it.
+# SOI/EOI framing and its client live in serial_frame_transport; port handling, the shared
+# serial client, locking, scheduling and polling live in serial_base. This module only
+# implements the Pylon wire format (frame layout, checksum, version negotiation) on top of them.
 import struct
 from enum import Enum
 from types import SimpleNamespace
@@ -35,7 +35,7 @@ from defs.common import (
     TransportSettings,
 )
 
-from .serial_base import serial_base
+from .serial_frame_transport import serial_frame_transport
 
 
 class return_codes(Enum):
@@ -57,7 +57,7 @@ class return_codes(Enum):
         except ValueError:
             return return_codes.UNKNOWN_ERROR
 
-class serial_pylon(serial_base):
+class serial_pylon(serial_frame_transport):
 
     transport_type = "scraper"
     ''' declared here, not inherited: the web UI scanner reads this file with ast and does not follow inheritance '''
@@ -66,6 +66,13 @@ class serial_pylon(serial_base):
     # LENGTH holds LENID plus its own checksum nibble; SOI and EOI are added by the frame client.
     SOI : bytes = b"\x7e" # aka b"~"
     EOI : bytes = b"\x0d" # aka b"\r"
+
+    LISTEN_ONLY : bool = False
+    ''' Pylon is command/response: the battery only answers when asked '''
+    OPEN_ON_INIT : bool = True
+    ''' open the port at start-up, so a missing adapter stops the gateway early (the original behavior) '''
+    EXCLUSIVE_PORT : bool = True
+    ''' nothing else on the machine may open the port while the gateway polls the bus '''
 
     DEFAULT_VER : bytes = b"\x20"
     ''' protocol version used until the battery reports its own (v2.0) '''

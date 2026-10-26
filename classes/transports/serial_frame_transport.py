@@ -1,4 +1,4 @@
-# Description: listen-only scraper transport for serial communication with SOI/EOI framing, built on serial_base, supporting both synchronous and asynchronous modes.
+# Description: SOI/EOI framed serial transports: the serial_frame_client wire layer and serial_frame_transport, a listen-only reader that command/response protocols such as Pylon build on
 # File: serial_frame_transport.py
 #
 # Copyright 2026 Kevin Burke
@@ -17,20 +17,206 @@
 
 from __future__ import annotations
 
-# Listen-only scraper transport for serial communication with SOI/EOI framing, supporting
-# both synchronous and asynchronous modes.
+# This module is the SOI/EOI (start/end delimiter) framing family of serial_base, and holds its
+# two layers:
 #
-# Port handling, the shared serial client, locking, scheduling and shutdown live in
-# serial_base; this module adds what is specific to a listen-only framed protocol: frame
-# markers read from the config, one frame per read, and optional background reading.
-from collections.abc import Iterator
-from typing import Callable
+#   serial_frame_client      the wire. One instance per physical serial port. Finds framed
+#                            messages in the byte stream, on demand or in a background thread.
+#                            Knows nothing about protocols, settings, scheduling or bridges.
+#   serial_frame_transport   the transport. One instance per config section (per device). On its
+#                            own it is a generic listen-only reader: it waits for a frame and
+#                            decodes it through the protocol's input registry map. A protocol
+#                            that sends a command and reads the reply (see serial_pylon)
+#                            subclasses it with LISTEN_ONLY = False and implements the protocol.
+#
+# Protocols whose frames are not delimited this way (length-prefixed or fixed-length binary,
+# text blocks) are not built on this module: they subclass serial_base and bring their own
+# client through _create_client().
+import threading
+import time
+from collections.abc import Callable
+from typing import Any
+
+import serial
 
 from classes.protocol_settings import Registry_Type, registry_map_entry
 from classes.transports.transport_base import TransportWriteMode, transport_base
 from defs.common import TransportSettings
 
-from .serial_base import serial_base, serial_frame_client
+from .serial_base import SerialClient, serial_base
+
+
+class serial_frame_client():
+    '''
+    The wire layer: one instance per physical serial port, shared by every transport on that
+    port (see serial_base). It finds SOI/EOI framed messages in the byte stream, either on
+    demand (read) or in a background thread (asynchronous), and knows nothing about
+    protocols, settings, scheduling or bridges.
+    '''
+    client : serial.Serial
+    running : bool = False
+    soi : bytes
+    '''start of information'''
+    eoi : bytes
+    '''end of information'''
+    pending_frames : list[bytes]
+
+    max_frame_size : int = 256
+
+    port : str = "/dev/ttyUSB0"
+    baud :  int = 9600
+
+    timeout : float = 5
+    ''' timeout in seconds '''
+
+    #region asynchronous
+    asynchronous : bool = False
+    ''' if set, runs main loop'''
+
+    on_message : Callable[[bytes], None] | None = None
+    ''' async mode only'''
+
+    thread : threading.Thread | None = None
+    ''' main thread for read loop'''
+
+    callback_lock : threading.Lock
+    '''lock for callback'''
+    #endregion asynchronous
+
+
+    def __init__(self, port : str , baud : int , soi : bytes, eoi : bytes, **kwrgs: Any) -> None:
+        self.soi = soi
+        self.eoi = eoi
+        self.port = port
+        self.baud = baud
+        # per instance, not class level: a class-level list and lock would be shared by the
+        # clients of every serial port
+        self.pending_frames = []
+        self.callback_lock = threading.Lock()
+        self.client = serial.Serial(port, baud, **kwrgs)
+
+    def connect(self) -> bool:
+        if self.asynchronous:
+            if self.thread is not None and self.thread.is_alive():
+                return True  # already listening; a second reader thread would split the frames
+            self.running = True
+            self.pending_frames = []
+            self.thread = threading.Thread(target=self.read_thread, name="Serial_Read", daemon=True)
+            self.thread.start()
+        return True
+
+    def close(self) -> None:
+        ''' stop the async read loop (if one is running) and release the serial port. Safe to call more than once. '''
+        self.running = False
+
+        thread: threading.Thread | None = self.thread
+        if thread is not None and thread.is_alive() and thread is not threading.current_thread():
+            thread.join(timeout=2.0)
+
+        if self.client.is_open:
+            self.client.close()
+
+    def write(self, data : bytes) -> None:
+        ''' write data, excluding SOI and EOI bytes'''
+        data = self.soi + data + self.eoi
+        self.client.write(data)
+
+    def read(self, reset_buffer: bool = True, frames: int = 1) -> list[bytes] | bytes | None:
+        buffer = bytearray()
+        self.pending_frames.clear()
+
+        if reset_buffer:
+            self.client.reset_input_buffer()
+
+        timedout: float = time.time() + self.timeout
+        self.client.timeout = self.timeout
+
+        while time.time() < timedout:
+            data: bytes = self.client.read()
+
+            if data:
+                buffer += data
+                soi_index: int = buffer.find(self.soi)
+
+                while soi_index != -1:
+                    buffer: bytearray = buffer[soi_index:]
+                    eoi_index: int = buffer.find(self.eoi)
+
+                    if eoi_index != -1:
+                        # Convert slice to immutable bytes right away
+                        frame: bytes = bytes(buffer[len(self.soi):eoi_index])
+
+                        if frames == 1:
+                            return frame
+
+                        # Accumulate frames and return when we have enough
+                        self.pending_frames.append(frame)
+                        if len(self.pending_frames) == frames:
+
+                            return self.pending_frames
+
+                        buffer = buffer[eoi_index + len(self.eoi):]
+                        soi_index = buffer.find(self.soi)
+
+                    else:
+                        if len(buffer) > self.max_frame_size:
+                            buffer.clear()
+                        break
+
+            time.sleep(0.01)
+
+        # Timeout reached — return whatever was collected
+        return self.pending_frames if self.pending_frames else None
+
+
+    def read_thread(self) -> None:
+        buffer = bytearray()
+        self.running = True
+        while self.running:
+            # Read data from serial port
+            data: bytes = self.client.read()
+
+            # Check if data is available
+            if data:
+                # Append data to buffer
+                buffer: bytearray = buffer + data
+
+                # Find SOI index in buffer
+                soi_index: int = buffer.find(self.soi)
+
+                # Process all occurrences of SOI in buffer
+                while soi_index != -1:
+                    # Remove data before SOI sequence
+                    buffer: bytearray = buffer[soi_index:]
+
+                    # Find EOI index in buffer
+                    eoi_index: int = buffer.find(self.eoi)
+
+                    if eoi_index != -1:
+                        # Extract and store the complete frame as immutable bytes
+                        self.pending_frames.append(bytes(buffer[len(self.soi):eoi_index]))
+
+                        # Remove the processed data from the buffer
+                        buffer: bytearray = buffer[eoi_index + len(self.eoi) : ]
+
+                        # Find next SOI index in the remaining buffer
+                        soi_index: int = buffer.find(self.soi)
+                    else:
+                        # If no EOI is found and buffer size exceeds max_frame_size, clear buffer
+                        if len(buffer) > self.max_frame_size:
+                            buffer.clear()
+                        break #no eoi, continue waiting
+
+                # Process new frames
+                for frame in self.pending_frames:
+                    with self.callback_lock:
+                        if self.on_message:
+                            self.on_message(frame)
+
+                # Clear the processed frames so they don't trigger again on the next read iteration
+                self.pending_frames.clear()
+
+            time.sleep(0.01)
 
 
 class serial_frame_transport(serial_base):
@@ -40,7 +226,8 @@ class serial_frame_transport(serial_base):
     Transport that communicates over a serial port using an SOI/EOI framing
     protocol, implemented via serial_frame_client and built on serial_base.
 
-    Required config keys (in addition to transport_base keys):
+    Used directly it is a listen-only reader. Required config keys (in addition to
+    transport_base keys):
         port        - serial device path, e.g. /dev/ttyUSB0
         baudrate    - baud rate, e.g. 9600 (also accepted as "baud")
         soi         - start-of-information byte(s) as a hex string, e.g. 0x7E or 7E
@@ -53,21 +240,47 @@ class serial_frame_transport(serial_base):
 
     The port is opened in connect() rather than at start-up, so a device that is not
     plugged in yet is retried every cycle instead of stopping the gateway.
+
+    Subclassing for a command/response protocol: set LISTEN_ONLY = False, SOI and EOI,
+    and implement build_frame(), decode_frame() and _read_command() (see serial_pylon).
     """
 
-    OPEN_ON_INIT = False
+    LISTEN_ONLY : bool = True
+    '''
+    True: the device speaks on its own, so each read waits for one frame (the generic reader).
+    False: a command/response protocol, polled through serial_base's command loop.
+    '''
+
+    LISTEN : int = 0
+    ''' the single pseudo-command a listen-only read uses '''
+
+    SOI : bytes = b""
+    EOI : bytes = b""
+    ''' frame markers. A protocol with fixed markers sets them; otherwise they come from the soi/eoi settings. '''
+
+    OPEN_ON_INIT : bool = False
+    EXCLUSIVE_PORT : bool = False
 
     # ------------------------------------------------------------------ #
     # Construction                                                         #
     # ------------------------------------------------------------------ #
 
     def __init__(self, settings: TransportSettings) -> None:
-        # serial_base reads port, baudrate/baud and the SOI/EOI markers (see _frame_markers);
-        # transport_base loads protocolSettings and device metadata.
-        super().__init__(settings)
+        # These come first: serial_base opens the port during construction when OPEN_ON_INIT
+        # is True, and the client needs the markers.
+        self._markers: tuple[bytes, bytes] = self._frame_markers(settings)
+        if not self._markers[0] or not self._markers[1]:
+            msg: str = f"{type(self).__name__} frame markers (SOI/EOI) must not be empty"
+            raise ValueError(msg)
 
         self._timeout: float = float(settings.get("timeout", fallback="5.0"))
         self._async_mode: bool = settings.getboolean("async_mode", fallback=False)
+        if self._async_mode and not self.LISTEN_ONLY:
+            msg = f"{type(self).__name__} is a command/response protocol, so async_mode cannot be used"
+            raise ValueError(msg)
+
+        # serial_base reads port and baudrate/baud; transport_base loads protocolSettings and device metadata.
+        super().__init__(settings)
 
     # Attribute names kept for subclasses written against the earlier, standalone version.
     @property
@@ -103,20 +316,33 @@ class serial_frame_transport(serial_base):
             return value.encode("utf-8")
 
     def _frame_markers(self, settings: TransportSettings) -> tuple[bytes, bytes]:
+        """The (SOI, EOI) markers: the class constants when a protocol fixes them, else the soi/eoi settings."""
+        if self.SOI and self.EOI:
+            return self.SOI, self.EOI
         # SOI / EOI may be provided as hex strings ("7E", "0x7E") or raw chars.
         return (self._parse_frame_marker(settings.get("soi", fallback="7E")),
                 self._parse_frame_marker(settings.get("eoi", fallback="0D")))
 
-    def _serial_parameters(self) -> dict[str, object]:
-        # pyserial defaults (8N1) and no exclusive lock, as before this transport used serial_base
-        return {}
-
     # ------------------------------------------------------------------ #
-    # transport_base interface                                             #
+    # serial_base interface                                                #
     # ------------------------------------------------------------------ #
 
-    def _prepare_client(self, client: serial_frame_client) -> None:
+    def _create_client(self) -> serial_frame_client:
+        soi, eoi = self._markers
+        return serial_frame_client(self.port, self.baudrate, soi, eoi, **self._serial_parameters())
+
+    def _check_shared_client(self, shared: SerialClient) -> None:
+        if isinstance(shared, serial_frame_client) and (shared.soi != self._soi or shared.eoi != self._eoi):
+            msg: str = (f"{type(self).__name__} on {self.port} uses frame markers {self._soi!r}/{self._eoi!r}, "
+                        f"but another section on the same port opened it with {shared.soi!r}/{shared.eoi!r}")
+            raise ValueError(msg)
+
+    def _prepare_client(self, client: SerialClient) -> None:
         """Apply the read timeout and, in async mode, hook up the frame callback."""
+        if not isinstance(client, serial_frame_client):
+            msg: str = f"{type(self).__name__} needs a serial_frame_client, got {type(client).__name__}"
+            raise TypeError(msg)
+
         client.timeout = self._timeout
         client.asynchronous = self._async_mode
 
@@ -127,28 +353,44 @@ class serial_frame_transport(serial_base):
                 raise ValueError(msg)
             client.on_message = self._on_async_frame
 
+    def _client_timeout(self) -> float:
+        return self._timeout
+
     def _handshake(self) -> bool:
         self._log.info("Connected to serial port %s @ %d baud (async=%s)", self.port, self.baudrate, self._async_mode)
         return True
 
-    def interleaved_cycle_timeout(self) -> float:
-        """One frame per read, so the cycle is bounded by a single read timeout, not by the registry size."""
-        return max(transport_base.interleaved_cycle_timeout(self), 2.0 * self._timeout)
+    # ------------------------------------------------------------------ #
+    # Reading                                                              #
+    # ------------------------------------------------------------------ #
 
-    def read_data(self) -> dict[str, int | float | str]:
+    def _poll_commands(self) -> list[int]:
+        """A listen-only read has no commands to send: one read is one frame, however big the map is."""
+        return [self.LISTEN] if self.LISTEN_ONLY else super()._poll_commands()
+
+    def _read_command(self, command: int) -> bytes | None:
+        if not self.LISTEN_ONLY:
+            return super()._read_command(command)
+        return self._listen_for_frame()
+
+    def _process_raw(self, raw_data: dict[int, bytes]) -> dict[str, int | float | str]:
+        if not self.LISTEN_ONLY:
+            return super()._process_raw(raw_data)
+        frame: bytes | None = raw_data.get(self.LISTEN)
+        return self._decode_frame(frame) if frame else {}
+
+    def _listen_for_frame(self) -> bytes | None:
         """
-        Synchronous read: send nothing (pure listen), receive one frame,
-        decode it through protocolSettings.
-
-        Override this method in a subclass when your protocol requires
-        sending a request command before the device replies.
+        Send nothing (pure listen) and wait for one frame, opening the port first if it is
+        not open yet. Override read_data()/_read_command() in a subclass when your protocol
+        requires sending a request command before the device replies.
         """
         if not self.connected or self._client is None:
             if not self.connect():
-                return {}
+                return None
 
         if self._client is None:
-            return {}
+            return None
 
         try:
             with self._get_port_lock():
@@ -156,17 +398,13 @@ class serial_frame_transport(serial_base):
         except Exception:
             self._log.exception("Error reading from serial port %s", self.port)
             self.connected = False
-            return {}
+            return None
 
         if not raw or isinstance(raw, list):
             self._log.debug("No frame received from %s", self.port)
-            return {}
+            return None
 
-        return self._decode_frame(raw)
-
-    def read_data_iter(self) -> Iterator[bool]:
-        """Interleaved mode: a read is one frame, so the whole read is a single block (the transport_base default)."""
-        return transport_base.read_data_iter(self)
+        return bytes(raw)
 
     def write_data(self, data: dict[str, int | float | str], from_transport: "transport_base") -> None:
         """Write registry values to the device as a raw frame."""

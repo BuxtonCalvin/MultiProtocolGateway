@@ -1,0 +1,9 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note,ha_device_class,ha_state_class,ha_entity_category
+0,demand_time,Demand Time,min,FLOAT32,,,R,,Minutes elapsed into first demand calculation; demand values valid once it reaches Demand Period (read-only per vendor),,,diagnostic
+2,demand_period,Demand Period,min,FLOAT32,0-60,,R,,Vendor: R/W 0-60 min default 60; 0 disables demand. Kept read-only here,,,config
+12,relay_pulse_width,Relay Pulse Width,ms,FLOAT32,,,R,,Vendor: R/W 60/100/200 ms default 100,,,config
+18,network_parity_stop,Network Parity Stop,,FLOAT32,"{""0"":""1 stop no parity"",""1"":""1 stop even parity"",""2"":""1 stop odd parity"",""3"":""2 stop no parity""}",,R,,Vendor: R/W; restart required to take effect,,,config
+20,meter_id,Meter ID,,FLOAT32,1-247,,R,,Vendor: R/W Modbus address 1-247 default 1,,,config
+28,baud_rate,Baud Rate,,FLOAT32,"{""0"":""2400"",""1"":""4800"",""2"":""9600"",""5"":""1200""}",,R,,Vendor: R/W; 0 (2400) is default,,,config
+50,ct1_primary,CT1 Primary Current,A,FLOAT32,5-9999,,R,,Vendor: R/W CT primary current default 5 (SDM120CT variants),,,config
+52,ct2_secondary,CT2 Secondary Rating,A,FLOAT32,,,R,,Vendor: R/W 1A or 5A default 5A (SDM120CT variants),,,config

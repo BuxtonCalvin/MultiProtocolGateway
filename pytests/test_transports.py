@@ -63,8 +63,10 @@ from classes.transports.modbus_base import (
     interpret_modbus_exception_code,
 )
 from classes.transports.mqtt import mqtt
-from classes.transports.serial_base import serial_frame_client
-from classes.transports.serial_frame_transport import serial_frame_transport
+from classes.transports.serial_frame_transport import (
+    serial_frame_client,
+    serial_frame_transport,
+)
 from classes.transports.transport_base import (
     TransportCycleResult,
     TransportWriteMode,
@@ -487,7 +489,7 @@ def test_influxdb_out_connect_and_builds_points_with_mock_client(mock_client_cls
     assert fields == {"soc": 99.0, "status": "online"}
 
 
-@patch("classes.transports.serial_base.serial.Serial")
+@patch("classes.transports.serial_frame_transport.serial.Serial")
 def test_serial_frame_client_reads_and_writes_framed_data(mock_serial_cls: MagicMock) -> None:
     """Mocks serial I/O: serial_frame_client frames writes and extracts complete reads."""
     serial = MagicMock()

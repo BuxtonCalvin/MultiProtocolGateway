@@ -240,10 +240,9 @@ classDiagram
     }
 
     class serial_base {
-        +clients: dict~str, serial_frame_client~
-        +SOI: bytes
-        +EOI: bytes
+        +clients: dict~str, SerialClient~
         +OPEN_ON_INIT: bool
+        +EXCLUSIVE_PORT: bool
         +address: int
         +scrape_target: str
         +build_frame()
@@ -251,10 +250,29 @@ classDiagram
         +read_data()
         +read_data_iter()
         +cleanup()
-        -_frame_markers()
+        -_create_client()
+        -_check_shared_client()
         -_read_command()
+        -_process_raw()
         -_exchange()
         -_handshake()
+    }
+
+    class SerialClient {
+        <<interface>>
+        +timeout: float
+        +connect()
+        +read()
+        +write()
+        +close()
+    }
+
+    class serial_frame_transport {
+        +LISTEN_ONLY: bool
+        +SOI: bytes
+        +EOI: bytes
+        -_decode_frame()
+        -_encode_frame()
     }
 
     class serial_frame_client {
@@ -278,7 +296,6 @@ classDiagram
     class modbus_pace
     class canbus
     class serial_pylon
-    class serial_frame_transport
     class mqtt
     class timescaledb {
         +auto_update_extensions: bool
@@ -337,9 +354,11 @@ classDiagram
     modbus_base <|-- modbus_pace
     transport_base <|-- canbus
     transport_base <|-- serial_base
-    serial_base <|-- serial_pylon
     serial_base <|-- serial_frame_transport
-    serial_base --> serial_frame_client : owns one per port
+    serial_frame_transport <|-- serial_pylon
+    serial_base --> SerialClient : shares one per port
+    SerialClient <|.. serial_frame_client
+    serial_frame_transport --> serial_frame_client : creates
     transport_base <|-- mqtt
     transport_base <|-- timescaledb
     transport_base <|-- influxdb_out

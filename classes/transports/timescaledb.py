@@ -597,10 +597,11 @@ class timescaledb(transport_base):
         "BYTE": "SMALLINT",
         "USHORT": "INTEGER",
         "SHORT": "SMALLINT",
-        # 32-bit Unsigned/Signed
+        # 32/64-bit Unsigned/Signed
         "UINT": "BIGINT",
         "INT": "INTEGER",
-        "UINT64": "NUMERIC",
+        "UINT64": "NUMERIC",  # exceeds BIGINT's signed 64-bit range
+        "INT64": "BIGINT",    # PostgreSQL BIGINT is a signed 64-bit integer
         "ACC32": "BIGINT",
         # Flags & Bits (Integers for Delta-Delta compression)
         "_8BIT_FLAGS": "SMALLINT",

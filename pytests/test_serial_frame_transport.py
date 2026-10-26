@@ -29,10 +29,12 @@ from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
+import serial
 from conftest import DummySettings
 
 from classes.transports import serial_base as serial_base_module
-from classes.transports.serial_base import serial_base
+from classes.transports import serial_frame_transport as frame_module
+from classes.transports.serial_base import SerialClient, serial_base
 from classes.transports.serial_frame_transport import serial_frame_transport
 from protocol_gateway import Protocol_Gateway, ScrapeGroup
 
@@ -110,7 +112,7 @@ def env(monkeypatch: pytest.MonkeyPatch) -> Iterator[Env]:
     monkeypatch.setattr(serial_base, "_port_locks", {})
     monkeypatch.setattr(serial_base_module, "find_usb_serial_port", find_port)
     monkeypatch.setattr(serial_base_module, "get_usb_serial_port_info", _port_info)
-    monkeypatch.setattr(serial_base_module, "serial_frame_client", FakeClient)
+    monkeypatch.setattr(frame_module, "serial_frame_client", FakeClient)
     yield state
 
 
@@ -119,6 +121,11 @@ def make(**values: Any) -> serial_frame_transport:
     transport = serial_frame_transport(DummySettings(**merged))  # type: ignore[arg-type]
     transport._log = MagicMock()
     return transport
+
+
+def _process_registery(raw: dict[int, bytes], registry_map: object = None) -> dict[str, str]:
+    """protocol_settings.process_registery stand-in: one variable per command, value is the payload in hex."""
+    return {f"v{command}": payload.hex() for command, payload in raw.items()}
 
 
 def fake_protocol(rows: int) -> MagicMock:
@@ -209,7 +216,7 @@ def test_connect_applies_the_timeout_to_the_client(env: Env) -> None:
     assert client.asynchronous is False
     assert client.on_message is None
     assert client.args[:4] == ("/dev/ttyUSB0", 9600, b"~", b"\r")
-    assert client.kwargs == {}, "pyserial defaults, as before this transport used serial_base"
+    assert client.kwargs == {"bytesize": 8, "parity": serial.PARITY_NONE, "stopbits": 1}, "no exclusive lock: nothing else is stopped from opening the port, as before"
 
 
 def test_async_mode_wires_the_frame_callback(env: Env) -> None:
@@ -422,3 +429,80 @@ def test_cleanup_before_connect_is_safe(env: Env) -> None:
     transport: serial_frame_transport = make()
     transport.cleanup()
     assert FakeClient.created == []
+
+
+# --------------------------------------------------------------------------- #
+# the listen-only switch: command/response protocols build on this class      #
+# --------------------------------------------------------------------------- #
+
+class Asker(serial_frame_transport):
+    """A command/response protocol on the SOI/EOI family, the way serial_pylon is."""
+
+    transport_type: str = "scraper"
+    LISTEN_ONLY: bool = False
+    OPEN_ON_INIT: bool = True
+    SOI: bytes = b"<"
+    EOI: bytes = b">"
+
+    def __init__(self, settings: Any) -> None:
+        super().__init__(settings)
+        self.replies: dict[int, bytes | None] = {}
+
+    def build_frame(self, command: int, info: bytes = b"") -> bytes:
+        return f"{command:02X}".encode()
+
+    def _read_command(self, command: int) -> bytes | None:
+        return self.replies.get(command)
+
+
+def make_asker(**values: Any) -> Asker:
+    merged: dict[str, Any] = {"port": "/dev/ttyUSB0", "baud": 9600, **values}
+    transport: Asker = Asker(DummySettings(**merged))  # type: ignore[arg-type]
+    transport._log = MagicMock()
+    return transport
+
+
+def test_listen_only_is_the_default_for_the_generic_transport(env: Env) -> None:
+    assert serial_frame_transport.LISTEN_ONLY is True
+    assert make()._poll_commands() == [serial_frame_transport.LISTEN]
+
+
+def test_a_command_response_subclass_polls_the_registry_not_the_listen_path(env: Env) -> None:
+    transport: Asker = make_asker()
+    transport.protocolSettings = fake_protocol(3)
+    assert transport._poll_commands() == [0, 1, 2]
+
+    transport.replies = {0: b"\x0a", 2: b"\x0c"}
+    transport.protocolSettings.process_registery.side_effect = _process_registery
+    assert transport.read_data() == {"v0": "0a", "v2": "0c"}
+    assert FakeClient.created[0].read_calls == [], "nothing is listened for: the port is only read through the command loop"
+
+
+def test_a_command_response_subclass_does_not_use_the_listen_decoder(env: Env) -> None:
+    """The listen decoder would turn this frame into {"raw_frame": "01"}; a command/response protocol decodes via its map only."""
+    transport: Asker = make_asker()
+    transport.protocolSettings = None
+    assert transport._process_raw({1: b"\x01"}) == {}
+    assert make()._process_raw({serial_frame_transport.LISTEN: b"\x01"}) == {"raw_frame": "01"}
+
+
+def test_a_subclass_with_fixed_markers_ignores_the_soi_eoi_settings(env: Env) -> None:
+    transport: Asker = make_asker(soi="02", eoi="03")
+    assert transport._markers == (b"<", b">")
+
+
+def test_a_command_response_subclass_opens_eagerly_when_it_asks_to(env: Env) -> None:
+    transport: Asker = make_asker()
+    assert transport._client is not None
+    assert len(FakeClient.created) == 1
+
+
+def test_async_mode_is_refused_for_a_command_response_subclass(env: Env) -> None:
+    with pytest.raises(ValueError, match="async_mode cannot be used"):
+        make_asker(async_mode="true")
+
+
+def test_a_foreign_client_is_refused_by_the_frame_transport(env: Env) -> None:
+    transport: serial_frame_transport = make()
+    with pytest.raises(TypeError, match="needs a serial_frame_client"):
+        transport._prepare_client(cast(SerialClient, object()))

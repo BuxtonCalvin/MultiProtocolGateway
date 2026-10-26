@@ -25,6 +25,7 @@ import logging
 import os
 import re
 import struct
+import sys
 import time
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
@@ -33,6 +34,10 @@ from pathlib import Path
 from typing import Any, Callable, Literal, Optional, cast
 
 from defs.common import TransportSettings, strtoint_safe
+
+# Largest finite IEEE-754 values, as ints, for the default FLOAT32/FLOAT64 value ranges.
+_FLOAT32_MAX: int = int(3.4028234663852886e38)
+_FLOAT64_MAX: int = int(sys.float_info.max)
 
 
 class Data_Type(Enum):
@@ -57,6 +62,8 @@ class Data_Type(Enum):
     '''64 bit floating point'''
     ACC32 = 12
     '''32 bit unsigned accumulator'''
+    INT64 = 13
+    '''64 bit signed int'''
 
     ASCII = 84
     ''' 2 characters '''
@@ -165,6 +172,9 @@ class Data_Type(Enum):
             "U64": "UINT64",
             "INT32": "INT",
             "S32": "INT",
+            "INT64": "INT64",
+            "S64": "INT64",
+            "DOUBLE": "FLOAT64",
             "FLOAT": "FLOAT32",
             "REAL": "FLOAT32",
             "STRING": "STRING",
@@ -182,6 +192,45 @@ class Data_Type(Enum):
             return None
 
     @classmethod
+    def getDefaultRange(cls, data_type: "Data_Type") -> tuple[int, int]:
+        """Return the default ``(min, max)`` raw value range for ``data_type``.
+
+        Used when a CSV row has no explicit ``values`` range.  Signed types get a
+        range that includes negative numbers: two's-complement bounds for
+        ``SHORT``/``INT``/``INT64`` and signed bit-fields (``_nSBIT``),
+        sign-and-magnitude bounds for ``_nSMBIT`` (which cannot represent
+        ``-2**(n-1)``), and the largest finite value either side of zero for
+        ``FLOAT32``/``FLOAT64``.  Unsigned types start at 0.  Types without a
+        numeric range (strings, flags, unsigned bit-fields) keep the historical
+        ``(0, 65535)`` default.
+        """
+        ranges: dict[Data_Type, tuple[int, int]] = {
+            Data_Type.BYTE: (0, 0xFF),
+            Data_Type.USHORT: (0, 0xFFFF),
+            Data_Type.SHORT: (-(1 << 15), (1 << 15) - 1),
+            Data_Type.UINT: (0, 0xFFFFFFFF),
+            Data_Type.ACC32: (0, 0xFFFFFFFF),
+            Data_Type.INT: (-(1 << 31), (1 << 31) - 1),
+            Data_Type.UINT64: (0, 0xFFFFFFFFFFFFFFFF),
+            Data_Type.INT64: (-(1 << 63), (1 << 63) - 1),
+            Data_Type.FLOAT32: (-_FLOAT32_MAX, _FLOAT32_MAX),
+            Data_Type.FLOAT64: (-_FLOAT64_MAX, _FLOAT64_MAX),
+        }
+        if data_type in ranges:
+            return ranges[data_type]
+
+        if 300 < data_type.value < 400:   # signed (two's complement) bit-field
+            bits: int = data_type.value - 300
+            return -(1 << (bits - 1)), (1 << (bits - 1)) - 1
+
+        if data_type.value > 400:         # signed magnitude bit-field
+            bits = data_type.value - 400
+            limit: int = (1 << (bits - 1)) - 1
+            return -limit, limit
+
+        return 0, 0xFFFF
+
+    @classmethod
     def getSize(cls, data_type: "Data_Type") -> int:
         """Return the bit-width of ``data_type``.
 
@@ -196,6 +245,7 @@ class Data_Type(Enum):
             Data_Type.USHORT: 16,
             Data_Type.UINT: 32,
             Data_Type.UINT64: 64,
+            Data_Type.INT64: 64,
             Data_Type.SHORT: 16,
             Data_Type.INT: 32,
             Data_Type.FLOAT32: 32,
@@ -1331,14 +1381,9 @@ class protocol_settings:
 
             # region values
             values: list[int | str] = []
-            value_min: int = 0
-            value_max: int = 65535
-            if data_type in (Data_Type.UINT, Data_Type.ACC32, Data_Type.FLOAT32):
-                value_max = 0xFFFFFFFF
-            elif data_type in (Data_Type.UINT64, Data_Type.FLOAT64):
-                value_max = 0xFFFFFFFFFFFFFFFF
-            elif data_type == Data_Type.BYTE:
-                value_max = 0xFF
+            value_min: int
+            value_max: int
+            value_min, value_max = Data_Type.getDefaultRange(data_type)
             value_regex: str = ""
             value_is_json: bool = False
 
@@ -1401,7 +1446,7 @@ class protocol_settings:
             # The underscore-separated format explicitly lists every register
             # address in the order they contribute words to the combined value.
             # Token 0 is the low word, token 1 is the high word (for UINT32),
-            # tokens 0-3 for UINT64 etc.  This differs from the range format
+            # tokens 0-3 for UINT64/INT64/FLOAT64 etc.  This differs from the range format
             # "40-43" which implies consecutive addresses in ascending order.
             # Detection rule: all tokens are plain non-negative integers and
             # there is at least one underscore.
@@ -1540,7 +1585,7 @@ class protocol_settings:
                         Data_Type.UINT: 2, Data_Type.INT: 2,
                         Data_Type.FLOAT32: 2, Data_Type.ACC32: 2,
                         Data_Type.BIT32_FLAGS: 2,
-                        Data_Type.UINT64: 4, Data_Type.FLOAT64: 4,
+                        Data_Type.UINT64: 4, Data_Type.INT64: 4, Data_Type.FLOAT64: 4,
                     }
                     expected: int | None = expected_words.get(item.data_type)
                     actual: int = len(item.register_list)
@@ -2015,6 +2060,14 @@ class protocol_settings:
                 raw_bytes = _swap_words(raw_bytes)
             value = int.from_bytes(raw_bytes, byteorder="big", signed=False)
 
+        elif entry.data_type == Data_Type.INT64:
+            raw_bytes = register[:8]
+            if word_order.word_reversed:
+                raw_bytes = _reverse_words(raw_bytes, 4)
+            if word_order.bytes_reversed:
+                raw_bytes = _swap_words(raw_bytes)
+            value = int.from_bytes(raw_bytes, byteorder="big", signed=True)
+
         elif entry.data_type == Data_Type.ACC32:
             raw_bytes = register[:4]
             if word_order.word_reversed:
@@ -2214,6 +2267,7 @@ class protocol_settings:
             Data_Type.ACC32: 2,
             Data_Type.BIT32_FLAGS: 2,
             Data_Type.UINT64: 4,
+            Data_Type.INT64: 4,
             Data_Type.FLOAT64: 4,
             Data_Type.STRING16: 8,
             Data_Type.STRING32: 16,
@@ -2346,6 +2400,12 @@ class protocol_settings:
             if register_bytes is None:
                 return None
             value = int.from_bytes(register_bytes, byteorder="big", signed=False)
+
+        elif entry.data_type == Data_Type.INT64:
+            register_bytes = self._register_words_to_bytes(registry, entry.register, 4, word_order, entry.register_list or None)
+            if register_bytes is None:
+                return None
+            value = int.from_bytes(register_bytes, byteorder="big", signed=True)
 
         elif entry.data_type == Data_Type.ACC32:
             register_bytes = self._register_words_to_bytes(registry, entry.register, 2, word_order, entry.register_list or None)

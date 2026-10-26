@@ -141,20 +141,27 @@ Files ending in `.custom.py` are ignored by git and will never be touched by `gi
 
 ### Writing a New Serial Transport
 
-Scraper transports for serial protocols (RS485, RS232, USB) with SOI/EOI framed messages should subclass `serial_base` (`classes/transports/serial_base.py`), the serial counterpart of `modbus_base`. `serial_pylon` (command/response) and `serial_frame_transport` (listen-only) are both built on it.
-
-`serial_base.py` holds the two layers of the serial stack. `serial_frame_client` is the wire: one instance per physical port, which finds framed messages in the byte stream and knows nothing about protocols, settings or the gateway. `serial_base` is the base transport: one instance per config section (per device), which owns the clients, creating one per port, sharing it between the sections on that port, and closing it on shutdown. A transport subclass never creates or imports a client; it works through `self.client`. The split exists because several devices on one RS485 bus are several transports sharing one client.
-
-`serial_base` provides everything that is not specific to one wire format:
+Scraper transports for serial protocols (RS485, RS232, USB) subclass `serial_base` (`classes/transports/serial_base.py`), the serial counterpart of `modbus_base`. Like `modbus_base`, it provides everything that is not specific to one wire format and knows nothing about how a protocol delimits its messages:
 
 - the `port`, `baudrate` and `address` settings (with `baud` and `unit_id` accepted as aliases), including hardware-ID port addressing
-- one serial client per port, shared by every config section on that port, and a per-port lock so a request and its response are never interleaved with another device's
+- one serial client per port, shared by every config section on that port, and a per-port lock so a request and its response are never interleaved with another device's. The split exists because several devices on one RS485 bus are several transports sharing one client
 - a `scrape_target` (port, protocol and address), so the gateway schedules the transport in every `read_mode` and consolidates duplicate sections for the same device. A scraper without a `scrape_target` is treated as a bridge and is never polled
 - `read_data()` for sequential and concurrent modes, and `read_data_iter()` for interleaved mode, which yields after every command and takes the gateway's bus lock only for one exchange at a time
 - cycle completeness bookkeeping, so a poll where some commands got no answer is not written by bridges that require complete cycles
 - `cleanup()`, which closes the serial port (stopping any background reader) and removes the shared client from the registry. The gateway calls it on every transport before a web UI reload builds the replacements, so the new transports open the port afresh instead of reusing a closed client. This is the same contract as `modbus_base.cleanup()`
 
-A subclass supplies the wire format:
+Framing is supplied by a **framing family**, an intermediate subclass that implements `_create_client()` and returns the object that owns the port. The families are:
+
+``` ini
+transport_base
+  └─ serial_base                   port, sharing, locking, scheduling, lifecycle (no framing)
+       └─ serial_frame_transport   SOI/EOI delimited frames, listen-only or command/response
+            └─ serial_pylon        Pylon ASCII protocol, command/response
+```
+
+A protocol subclasses the family that matches its framing, so adding one never touches `serial_base` or the other protocols. There are three cases.
+
+**1. A command/response protocol with start and end markers** (Pylon is one; others in the same style would follow). Subclass `serial_frame_transport` and set `LISTEN_ONLY = False`, `SOI` and `EOI`:
 
 | Member | Purpose |
 | --- | --- |
@@ -313,7 +320,7 @@ bridge = transport.mqtt
 
 ### Serial Pylon
 
-Reads a Pylontech (or Pylon-compatible) battery over RS485 using the Pylon ASCII command protocol. Built on `serial_base`; see [Pylon Batteries](../devices/Pylon.md) for wiring, addressing and troubleshooting.
+Reads a Pylontech (or Pylon-compatible) battery over RS485 using the Pylon ASCII command protocol. A command/response protocol built on `serial_frame_transport`, with fixed `~` and carriage-return frame markers; see [Pylon Batteries](../devices/Pylon.md) for wiring, addressing and troubleshooting.
 
 ```ini
 [transport.pylon_battery_1]
@@ -341,14 +348,15 @@ bridge = transport.mqtt
 | `baudrate` | `9600` | Baud rate. Must match the battery's DIP setting (`9600` or `115200`). Also accepted as `baud`. |
 | `address` | `0` | Battery address, 0-255 (Pylon batteries usually start at 2). Also accepted as `unit_id`. |
 | `ignore_checksum_errors` | `false` | Decode responses that fail the Pylon checksum instead of discarding them. Leave off unless the firmware is known to send bad checksums. |
+| `timeout` | `5.0` | Seconds to wait for each response. Accepted in the config, but not offered in the web UI. |
 
-Several batteries can share one port: add one section per address with the same `port` and `baudrate`. Each section is a separate device. On connect MPG asks the battery for its protocol version and uses it in later requests. Commands that get no valid response are skipped for that cycle, and bridges that require complete cycles will not write that poll.
+The port is opened when the gateway starts, so a missing adapter stops it early. Several batteries can share one port: add one section per address with the same `port` and `baudrate`. Each section is a separate device. On connect MPG asks the battery for its protocol version and uses it in later requests. Commands that get no valid response are skipped for that cycle, and bridges that require complete cycles will not write that poll.
 
 ---
 
 ### Serial Frame
 
-A generic listen-only reader for devices that stream SOI/EOI framed messages over a serial port. It sends nothing: each read waits for one frame and decodes it through the protocol's input registry map, treating the frame as a flat array of bytes keyed by byte index. Without a protocol map the raw frame is returned as hex under `raw_frame`. Built on `serial_base`, and meant as a starting point: override `_decode_frame()` (and `_encode_frame()` for writes) in a subclass for a real protocol.
+A generic listen-only reader for devices that stream SOI/EOI framed messages over a serial port, and the framing family that command/response protocols such as [Serial Pylon](#serial-pylon) build on. Used directly it sends nothing: each read waits for one frame and decodes it through the protocol's input registry map, treating the frame as a flat array of bytes keyed by byte index. Without a protocol map the raw frame is returned as hex under `raw_frame`. Built on `serial_base`, and meant as a starting point: override `_decode_frame()` (and `_encode_frame()` for writes) in a subclass for a real protocol.
 
 ```ini
 [transport.frame_listener]

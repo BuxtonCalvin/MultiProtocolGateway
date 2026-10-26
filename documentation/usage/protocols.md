@@ -138,6 +138,7 @@ The CSV files are the core of a protocol — one row per logical register or reg
 | `UINT` | 32-bit | Unsigned integer spanning two 16-bit registers. |
 | `INT` | 32-bit | Signed integer spanning two 16-bit registers. |
 | `UINT64` | 64-bit | Unsigned integer spanning four 16-bit registers. |
+| `INT64` | 64-bit | Signed integer (two's complement) spanning four 16-bit registers. |
 | `FLOAT32` | 32-bit | IEEE 754 single-precision float spanning two registers. |
 | `FLOAT64` | 64-bit | IEEE 754 double-precision float spanning four registers. |
 | `BYTE` | 8-bit | Single unsigned byte. |
@@ -152,9 +153,9 @@ The CSV files are the core of a protocol — one row per logical register or reg
 | `ASCII.#` | # chars | Fixed-length string. E.g. `ASCII.7` reads 7 characters. |
 | `HEX` | varies | Hexadecimal string representation. |
 
-Common aliases are also accepted: `INT16` → `SHORT`, `UINT16` → `USHORT`, `UINT32` → `UINT`, `INT32` → `INT`.
+Common aliases are also accepted: `INT16` → `SHORT`, `UINT16` → `USHORT`, `UINT32` → `UINT`, `INT32` → `INT`, `S64` → `INT64`, `U64` → `UINT64`, `DOUBLE` → `FLOAT64`.
 
-For multi-register data types (`UINT`, `INT`, `UINT64`, `FLOAT32`, `FLOAT64`, `ACC32`), the register address must use the multi-register format described below.
+For multi-register data types (`UINT`, `INT`, `UINT64`, `INT64`, `FLOAT32`, `FLOAT64`, `ACC32`), the register address must use the multi-register format described below.
 
 ---
 
@@ -193,7 +194,7 @@ When a manufacturer encodes a value across more than one physical register, the 
 40_41         UINT32: low word at register 40, high word at register 41
 41_40         UINT32: low word at register 41, high word at register 40 (reversed physical layout)
 40_50         UINT32: non-contiguous — low word at 40, high word at 50
-40_41_42_43   UINT64: four words, lowest at 40, highest at 43
+40_41_42_43   UINT64 / INT64 / FLOAT64: four words, lowest at 40, highest at 43
 ```
 
 The key properties of this format:
@@ -315,6 +316,23 @@ The `values` column serves two purposes.
 0-100
 0~65535
 ```
+
+When no range is given, the valid range defaults to the full range of the `data type`, so signed types accept negative values:
+
+| Data type | Default range |
+| --- | --- |
+| `BYTE` | 0 – 255 |
+| `USHORT` | 0 – 65535 |
+| `SHORT` | −32768 – 32767 |
+| `UINT`, `ACC32` | 0 – 4294967295 |
+| `INT` | −2147483648 – 2147483647 |
+| `UINT64` | 0 – 18446744073709551615 |
+| `INT64` | −9223372036854775808 – 9223372036854775807 |
+| `FLOAT32` | ±3.4028235e38 |
+| `FLOAT64` | ±1.7976931348623157e308 |
+| `#sbit` (signed, N bits) | −2^(N−1) – 2^(N−1)−1 |
+| `#smbit` (sign-magnitude, N bits) | −(2^(N−1)−1) – 2^(N−1)−1 |
+| Anything else (flags, strings, `#bit`) | 0 – 65535 |
 
 **Enum codes** — a JSON object maps raw values to human-readable labels. Any data type can use codes:
 

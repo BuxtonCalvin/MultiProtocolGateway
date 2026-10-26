@@ -279,6 +279,20 @@ class ProtocolAnalysisReport(TypedDict):
     sampled addresses"). Empty when every type responded to probing."""
 
 
+def _to_exact_int(value: str | int | float) -> int:
+    """Convert a write value to ``int`` without a lossy float round-trip.
+
+    ``int(float(value))`` goes through a 53-bit-mantissa double, which corrupts
+    64-bit values (``UINT64_MAX`` becomes 2**64, ``INT64_MAX`` becomes 2**63, and
+    anything above 2**53 loses its low bits).  Integers and integer strings are
+    converted exactly; decimal strings and floats fall back to truncation.
+    """
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return int(float(value))
+
+
 class modbus_base(transport_base):
     """Scheduling path: All (Sequential, Concurrent, Interleaved) — base class for every Modbus transport regardless of read_mode."""
 
@@ -2641,7 +2655,7 @@ class modbus_base(transport_base):
             )
 
         elif entry.data_type == Data_Type.UINT64:
-            int_val = int(float(value))
+            int_val = _to_exact_int(value)
             if int_val < 0 or int_val > 0xFFFFFFFFFFFFFFFF:
                 self._log.error(
                     f"WRITE_ERROR: Value '{int_val}' out of UINT64 range for "
@@ -2650,6 +2664,19 @@ class modbus_base(transport_base):
                 return
             register_values = self._bytes_to_register_words(
                 int_val.to_bytes(8, byteorder="big", signed=False),
+                word_order,
+            )
+
+        elif entry.data_type == Data_Type.INT64:
+            int_val = _to_exact_int(value)
+            if int_val < -(1 << 63) or int_val > (1 << 63) - 1:
+                self._log.error(
+                    f"WRITE_ERROR: Value '{int_val}' out of INT64 range for "
+                    f"'{entry.variable_name}'. Unsafe to write."
+                )
+                return
+            register_values = self._bytes_to_register_words(
+                int_val.to_bytes(8, byteorder="big", signed=True),
                 word_order,
             )
 

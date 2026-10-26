@@ -227,11 +227,11 @@ Controls are only created for registers that passed **both** gates described in 
 
 Because the allowlist is read at startup, **enabling or disabling a register for writing requires a restart** before the matching control appears or disappears, just as for the write topic itself.
 
-Setting `discovery_entity_types = sensor` restores the earlier behaviour: every entry is a read-only sensor and no `command_topic` is published. Switching between the two settings clears the retained configs of the platform no longer used, so Home Assistant does not keep duplicate or orphaned entities.
+Setting `discovery_entity_types = sensor` restores the earlier behavior: every entry is a read-only sensor and no `command_topic` is published. Switching between the two settings clears the retained configs of the platform no longer used, so Home Assistant does not keep duplicate or orphaned entities.
 
 ### Units, device classes and state classes
 
-Units are normalised before publishing (`kWH`, `k Wh` and `kwh` all become `kWh`; `C` and the mis-encoded `Â°C` become `°C`). For a numeric register whose unit is one of the following, MPG also sets the device class and state class, which is what makes the entity usable in the Energy dashboard and long-term statistics:
+Units are normalized before publishing (`kWH`, `k Wh` and `kwh` all become `kWh`; `C` and the mis-encoded `Â°C` become `°C`). For a numeric register whose unit is one of the following, MPG also sets the device class and state class, which is what makes the entity usable in the Energy dashboard and long-term statistics:
 
 | Unit | Device class | State class |
 | --- | --- | --- |
@@ -272,7 +272,7 @@ Existing sensors keep their `unique_id` and history, but Home Assistant creates 
 - A register you have enabled for writing changes from `sensor.<name>` to `number.<name>`, `select.<name>` or `switch.<name>`.
 - A coil or discrete input changes from `sensor.<name>` to `binary_sensor.<name>`.
 
-The old sensor is removed, so automations, dashboards and history that referenced it need updating. To avoid any change, set `discovery_entity_types = sensor`. Entries with `write_mode = WRITEONLY` have no readable value; as a sensor they are seeded with the literal state `"WRITEONLY"` (the previous behaviour). In `auto` mode they become optimistic controls if write-enabled, and are not published at all otherwise.
+The old sensor is removed, so automations, dashboards and history that referenced it need updating. To avoid any change, set `discovery_entity_types = sensor`. Entries with `write_mode = WRITEONLY` have no readable value; as a sensor they are seeded with the literal state `"WRITEONLY"` (the previous behavior). In `auto` mode they become optimistic controls if write-enabled, and are not published at all otherwise.
 
 ---
 
@@ -292,7 +292,7 @@ error_topic = error
 discovery_enabled = false
 discovery_topic = homeassistant
 # auto = native HA sensor/binary_sensor/number/select/switch entities;
-# sensor = every register is a read-only sensor (previous behaviour)
+# sensor = every register is a read-only sensor (previous behavior)
 discovery_entity_types = auto
 # seconds; mark HA sensors unavailable after this long without a value (0 = off)
 discovery_expire_after = 0
@@ -335,7 +335,7 @@ Documented here rather than silently left unmentioned:
 
 - **A same-name collision between a holding entry and a coil entry** on the same device — see the note under [Write Topics](#write-topics) above.
 - **Controls show the last value read, not the value just sent.** A command is written to the device and the new value appears on the next scrape of that register, so a number or switch can briefly show its old value after you change it.
-- **Number limits come from the protocol's `values` range**, scaled by the unit multiplier, because Home Assistant's own defaults (1 to 100) would be wrong for almost every register. Narrow the `values` column to tighten them.
+- **Number limits come from the protocol's `values` range**, scaled by the unit multiplier, because Home Assistant's own defaults (1 to 100) would be wrong for almost every register. With no `values` range they default to the data type's full range (signed registers can go negative), so narrow the `values` column to tighten them.
 - **Write allowlist changes need a restart** to add or remove the corresponding Home Assistant control, as for the write topic itself.
 - **`error_topic` only covers write-command processing failures.** It cannot report connection-level problems (reconnect exhaustion, publish failures while disconnected) for the structural reason described in [Error Reporting](#error-reporting) above — those remain log-only, backed instead by `bridge_status`'s LWT for the connectivity case specifically.
 

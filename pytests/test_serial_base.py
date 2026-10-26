@@ -30,25 +30,24 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+import serial
 from conftest import DummySettings
 
 from classes.transports import serial_base as serial_base_module
-from classes.transports.serial_base import serial_base
+from classes.transports.serial_base import SerialClient, serial_base
 from protocol_gateway import Protocol_Gateway, ScrapeGroup
 
 BASE_MODULE = "classes.transports.serial_base"
 
 
 class FakeClient:
-    """Stands in for serial_frame_client: echoes the request frame back as the response."""
+    """Stands in for a framing family's client: echoes the request back as the response."""
 
     timeout: float = 5
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         self.args: tuple[Any, ...] = args
         self.kwargs: dict[str, Any] = kwargs
-        self.soi: bytes = args[2] if len(args) > 2 else b""
-        self.eoi: bytes = args[3] if len(args) > 3 else b""
         self.connected_calls: int = 0
         self.close_calls: int = 0
         self.on_message: Any = None
@@ -67,7 +66,7 @@ class FakeClient:
         if self.on_write:
             self.on_write()  # runs after the request is stored, i.e. between a write and its read
 
-    def read(self) -> bytes:
+    def read(self, reset_buffer: bool = True, frames: int = 1) -> bytes:
         return self.last_written
 
 
@@ -86,10 +85,6 @@ def _no_port(port: str) -> str | None:
     return None
 
 
-def _new_client(*args: Any, **kwargs: Any) -> FakeClient:
-    return FakeClient(*args, **kwargs)
-
-
 def _process_registery(raw: dict[int, bytes], registry_map: object = None) -> dict[str, str]:
     """protocol_settings.process_registery stand-in: one variable per command, value is the payload in hex."""
     return {f"v{command}": payload.hex() for command, payload in raw.items()}
@@ -99,13 +94,14 @@ class FakeSerial(serial_base):
     """Smallest possible concrete serial protocol: frame = 2 hex chars address + 2 hex chars command."""
 
     transport_type: str = "scraper"
-    SOI = b"<"
-    EOI = b">"
 
     def __init__(self, settings: Any) -> None:
         super().__init__(settings)
         self.responses: dict[int, bytes | None] = {}
         self.handshake_ok: bool = True
+
+    def _create_client(self) -> FakeClient:
+        return FakeClient(self.port, self.baudrate, **self._serial_parameters())
 
     def build_frame(self, command: int, info: bytes = b"") -> bytes:
         return f"{self.address:02X}{command:02X}".encode()
@@ -133,7 +129,6 @@ def make(cls: type[serial_base] = FakeSerial, **values: Any) -> Any:
     with (
         patch(f"{BASE_MODULE}.find_usb_serial_port", side_effect=_same_port),
         patch(f"{BASE_MODULE}.get_usb_serial_port_info", return_value="mock"),
-        patch(f"{BASE_MODULE}.serial_frame_client", side_effect=_new_client),
     ):
         transport: serial_base = cls(settings)  # type: ignore[arg-type]
     transport._log = MagicMock()
@@ -155,20 +150,32 @@ def test_base_class_is_marked_abstract_for_the_web_ui() -> None:
     assert serial_base.transport_type == "base class"
 
 
-def test_subclass_without_frame_markers_is_rejected() -> None:
-    class NoMarkers(serial_base):
+def test_base_class_knows_nothing_about_framing() -> None:
+    """A framing family brings its own markers and client; none of that belongs in serial_base."""
+    assert not hasattr(serial_base, "SOI")
+    assert not hasattr(serial_base, "EOI")
+    assert not hasattr(serial_base, "_frame_markers")
+
+
+def test_subclass_without_create_client_is_rejected() -> None:
+    class NoClient(serial_base):
         transport_type: str = "scraper"
 
-    with pytest.raises(NotImplementedError, match="SOI and EOI"):
-        make(NoMarkers)
+    with pytest.raises(NotImplementedError, match="_create_client"):
+        make(NoClient)
 
 
-def test_client_is_created_with_markers_and_default_serial_parameters() -> None:
+def test_client_is_created_with_the_port_and_default_serial_parameters() -> None:
     transport = make()
-    assert transport.client.args == ("/dev/ttyUSB0", 9600, b"<", b">")
-    assert transport.client.kwargs["bytesize"] == 8
-    assert transport.client.kwargs["stopbits"] == 1
-    assert transport.client.kwargs["exclusive"] is True
+    assert transport.client.args == ("/dev/ttyUSB0", 9600)
+    assert transport.client.kwargs == {"bytesize": 8, "parity": serial.PARITY_NONE, "stopbits": 1, "exclusive": True}
+
+
+def test_exclusive_port_lock_can_be_switched_off() -> None:
+    class Shared(FakeSerial):
+        EXCLUSIVE_PORT: bool = False
+
+    assert "exclusive" not in make(Shared).client.kwargs
 
 
 def test_subclass_can_override_serial_parameters() -> None:
@@ -185,7 +192,6 @@ def test_documented_setting_names_are_accepted() -> None:
     with (
         patch(f"{BASE_MODULE}.find_usb_serial_port", side_effect=_same_port),
         patch(f"{BASE_MODULE}.get_usb_serial_port_info", return_value="mock"),
-        patch(f"{BASE_MODULE}.serial_frame_client", side_effect=_new_client),
     ):
         transport = FakeSerial(settings)  # type: ignore[arg-type]
     assert transport.address == 5
@@ -364,12 +370,7 @@ def test_connect_stays_disconnected_when_handshake_fails() -> None:
 
 
 def test_default_handshake_trusts_the_port() -> None:
-    class Plain(serial_base):
-        transport_type: str = "scraper"
-        SOI = b"<"
-        EOI = b">"
-
-    assert make(Plain)._handshake() is True
+    assert serial_base._handshake(make()) is True
 
 
 # --------------------------------------------------------------------------- #
@@ -493,20 +494,44 @@ def test_read_data_iter_releases_the_bus_between_commands() -> None:
 
 
 # --------------------------------------------------------------------------- #
-# lifecycle: cleanup, lazy open, frame markers                                 #
+# lifecycle: cleanup, lazy open, client sharing                                #
 # --------------------------------------------------------------------------- #
 
 class LazySerial(FakeSerial):
     """Opens its port in connect() instead of at construction."""
 
-    OPEN_ON_INIT = False
+    OPEN_ON_INIT: bool = False
 
 
-class MarkersFromSettings(FakeSerial):
-    """Reads its frame markers from the config, like serial_frame_transport."""
+class PickySerial(FakeSerial):
+    """Cannot share a client another section opened (for example because it expects different framing)."""
 
-    def _frame_markers(self, settings: Any) -> tuple[bytes, bytes]:
-        return str(settings.get("soi", fallback="<")).encode(), str(settings.get("eoi", fallback=">")).encode()
+    def _check_shared_client(self, shared: SerialClient) -> None:
+        raise ValueError("this section needs a client of its own")
+
+
+class PickyLazySerial(PickySerial):
+    OPEN_ON_INIT: bool = False
+
+
+class RefusingSerial(FakeSerial):
+    """The port cannot be opened."""
+
+    def _create_client(self) -> FakeClient:
+        raise OSError("no such device")
+
+
+class ListenerSerial(FakeSerial):
+    """A family that decodes by itself: one pseudo-command and its own decoder, no protocol map."""
+
+    def _poll_commands(self) -> list[int]:
+        return [0]
+
+    def _read_command(self, command: int) -> bytes | None:
+        return b"\x01\x02"
+
+    def _process_raw(self, raw_data: dict[int, bytes]) -> dict[str, int | float | str]:
+        return {"frame": raw_data[0].hex()}
 
 
 @pytest.fixture
@@ -514,7 +539,6 @@ def serial_layer(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """Keeps the fake serial layer patched for the whole test, for transports that open their port later."""
     monkeypatch.setattr(serial_base_module, "find_usb_serial_port", _same_port)
     monkeypatch.setattr(serial_base_module, "get_usb_serial_port_info", _port_info)
-    monkeypatch.setattr(serial_base_module, "serial_frame_client", FakeClient)
     yield
 
 
@@ -533,18 +557,9 @@ def test_client_property_raises_until_the_port_is_open(serial_layer: None) -> No
     assert transport.client is transport._client
 
 
-def test_eager_transport_opens_at_construction_and_fails_start_up_if_it_cannot() -> None:
-    def refuse(*args: Any, **kwargs: Any) -> FakeClient:
-        raise OSError("no such device")
-
-    settings = DummySettings(port="/dev/ttyUSB0", address=2)
-    with (
-        patch(f"{BASE_MODULE}.find_usb_serial_port", side_effect=_same_port),
-        patch(f"{BASE_MODULE}.get_usb_serial_port_info", return_value="mock"),
-        patch(f"{BASE_MODULE}.serial_frame_client", side_effect=refuse),
-        pytest.raises(OSError, match="no such device"),
-    ):
-        FakeSerial(settings)  # type: ignore[arg-type]
+def test_eager_transport_opens_at_construction_and_fails_start_up_if_it_cannot(serial_layer: None) -> None:
+    with pytest.raises(OSError, match="no such device"):
+        build(RefusingSerial)
 
 
 def test_lazy_transport_opens_in_connect_and_tolerates_a_missing_port(serial_layer: None, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -623,16 +638,61 @@ def test_cleanup_survives_a_client_that_will_not_close() -> None:
     assert serial_base.clients == {}
 
 
-def test_frame_markers_can_come_from_the_settings() -> None:
-    transport = make(MarkersFromSettings, soi="[", eoi="]")
-    assert transport._markers == (b"[", b"]")
-    assert transport.client.args[2:4] == (b"[", b"]")
+def test_a_section_that_cannot_use_the_shared_client_is_rejected() -> None:
+    first = make()
+    with pytest.raises(ValueError, match="client of its own"):
+        make(PickySerial)
+    assert list(serial_base.clients.values()) == [first.client], "the refused section must not disturb the shared client"
 
 
-def test_sections_that_disagree_about_frame_markers_cannot_share_a_port() -> None:
-    make(MarkersFromSettings, soi="[", eoi="]")
-    with pytest.raises(ValueError, match="frame markers"):
-        make(MarkersFromSettings, soi="{", eoi="}")
+def test_a_lazy_section_that_cannot_use_the_shared_client_fails_connect_not_construction(serial_layer: None) -> None:
+    build(LazySerial).connect()
+    picky = build(PickyLazySerial)
+    assert picky.connect() is False
+    assert picky.connected is False
+    picky._log.warning.assert_called()
+
+
+def test_the_default_sharing_check_accepts_any_client() -> None:
+    first, second = make(address=2), make(address=3)
+    assert first.client is second.client
+
+
+def test_process_raw_defaults_to_the_protocol_map() -> None:
+    transport = make()
+    transport.protocolSettings = fake_protocol([1])
+    assert transport._process_raw({1: b"\x0a"}) == {"v1": "0a"}
+
+
+def test_process_raw_without_a_protocol_map_is_empty() -> None:
+    transport = make()
+    transport.protocolSettings = None
+    assert transport._process_raw({1: b"\x0a"}) == {}
+
+
+def test_a_family_can_decode_without_a_protocol_map() -> None:
+    transport = make(ListenerSerial)
+    transport.protocolSettings = None
+    assert transport.read_data() == {"frame": "0102"}
+
+    assert list(transport.read_data_iter()) == [True]
+    assert transport.get_partial_data() == {"frame": "0102"}
+
+
+def test_interleaved_timeout_uses_the_open_clients_timeout() -> None:
+    transport = make()
+    transport.client.timeout = 7.0
+    transport.protocolSettings = fake_protocol(list(range(1, 11)))
+    assert transport.interleaved_cycle_timeout() == 140.0  # 10 commands * 2 * 7s
+
+
+def test_the_default_client_timeout_can_be_overridden(serial_layer: None) -> None:
+    class Slow(LazySerial):
+        DEFAULT_CLIENT_TIMEOUT: float = 9.0
+
+    transport = build(Slow)
+    transport.protocolSettings = fake_protocol(list(range(1, 11)))
+    assert transport.interleaved_cycle_timeout() == 180.0  # 10 commands * 2 * 9s
 
 
 def test_interleaved_timeout_does_not_need_an_open_client(serial_layer: None) -> None:

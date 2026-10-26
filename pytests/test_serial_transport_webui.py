@@ -33,14 +33,16 @@ The last group boots the real FastAPI app against a temporary config and registr
 
 from __future__ import annotations
 
+import ast
 import configparser
+import importlib
 import json
 import re
 import shutil
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import pytest
@@ -145,6 +147,32 @@ def test_every_serial_transport_is_wired_into_the_web_ui(cls: type[serial_base])
     )
     assert _classify_transport("transport.x", {"transport": name}, TRANSPORTS_DIR) == "scraper"
     assert raw_defaults()[name]["$extends"] == "_serial_base", f"{name} must extend _serial_base in transport_defaults.json"
+
+
+def test_serial_base_stays_framing_agnostic() -> None:
+    """Framing belongs to a family (serial_frame_transport), so adding a protocol with another framing never touches serial_base."""
+    tree: ast.Module = ast.parse((TRANSPORTS_DIR / "serial_base.py").read_text(encoding="utf-8"))
+    imported: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            imported += [node.module or "", *(alias.name for alias in node.names)]
+        elif isinstance(node, ast.Import):
+            imported += [alias.name for alias in node.names]
+    assert not [name for name in imported if "serial_frame" in name], "serial_base must not import a framing family"
+
+    module: ModuleType = importlib.import_module("classes.transports.serial_base")
+    assert not hasattr(module, "serial_frame_client")
+    assert not hasattr(serial_base, "SOI")
+    assert not hasattr(serial_base, "EOI")
+
+
+def test_pylon_is_built_on_the_delimiter_family_and_frame_settings_stay_out_of_its_ui() -> None:
+    assert issubclass(serial_pylon, serial_frame_transport)
+    assert issubclass(serial_frame_transport, serial_base)
+
+    resolved: dict[str, str] = tr._resolve_transport("serial_pylon", raw_defaults())
+    for key in ("soi", "eoi", "async_mode"):
+        assert key not in resolved, f"{key} is fixed by the Pylon protocol, so the UI must not offer it"
 
 
 def test_known_serial_transports() -> None:

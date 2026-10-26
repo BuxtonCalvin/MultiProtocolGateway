@@ -1,4 +1,4 @@
-# Description: Unit tests for the serial_frame_client wire layer in serial_base (per-instance state, single reader thread, close).
+# Description: Unit tests for the serial_frame_client wire layer in serial_frame_transport (per-instance state, single reader thread, close).
 # File: test_serial_frame_client.py
 #
 # Copyright 2026 Kevin Burke
@@ -15,7 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Unit tests for classes.transports.serial_base.serial_frame_client with pyserial mocked out (no hardware)."""
+"""Unit tests for classes.transports.serial_frame_transport.serial_frame_client with pyserial mocked out (no hardware)."""
 
 from __future__ import annotations
 
@@ -26,13 +26,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from classes.transports.serial_base import serial_frame_client
+from classes.transports.serial_frame_transport import serial_frame_client
 
 
 @pytest.fixture
 def serial_port() -> Iterator[MagicMock]:
     """A pyserial port that is open and never has data waiting."""
-    with patch("classes.transports.serial_base.serial.Serial") as port_cls:
+    with patch("classes.transports.serial_frame_transport.serial.Serial") as port_cls:
         port: MagicMock = MagicMock()
         port.is_open = True
         port.read.return_value = b""

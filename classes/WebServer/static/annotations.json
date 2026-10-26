@@ -1050,61 +1050,79 @@
   "influxdb_metrics_edit": [
     {
       "id": "influxdb_metrics_edit-tablename",
-      "x_percent": 8.5,
-      "y_percent": 89.1,
+      "x_percent": 1,
+      "y_percent": 50.8,
       "label": "Pick your data table name here.",
       "shape_type": "dot",
-      "label_x_percent": 3.1,
-      "label_y_percent": 77.1
+      "label_x_percent": 34.1,
+      "label_y_percent": 7.2
     },
     {
       "id": "influxdb_metrics_edit-device",
-      "x_percent": 38.8,
-      "y_percent": 20.4,
+      "x_percent": 25.806484398880652,
+      "y_percent": 13.991654247391953,
       "label": "Pick your scraper device here.",
       "shape_type": "dot",
-      "label_x_percent": 32.89090909090909,
+      "label_x_percent": 34.16772854304221,
       "label_y_percent": 12.761347793770428
     },
     {
       "id": "influxdb_metrics_edit-field",
-      "x_percent": 29.8,
-      "y_percent": 27.7,
+      "x_percent": 20.33651464889574,
+      "y_percent": 22.334873323397915,
       "label": "Choose the field that you want to edit.",
       "shape_type": "dot",
-      "label_x_percent": 45.5,
-      "label_y_percent": 16.7
+      "label_x_percent": 34.30905303718623,
+      "label_y_percent": 18.041281669150525
     },
     {
       "id": "influxdb_metrics_edit-dates",
-      "x_percent": 31.7,
-      "y_percent": 35.2,
+      "x_percent": 16.828808733979017,
+      "y_percent": 30.132935916542472,
       "label": "Choose the start and end dates of the range of data you want to edit.  You can narrow this range repeatedly until you get to the range of bad data that needs correcting. ",
       "shape_type": "rect",
-      "label_x_percent": 45.13734421198397,
-      "label_y_percent": 26.313795908596198,
-      "width_percent": 24.4,
-      "height_percent": 8.3,
+      "label_x_percent": 34.47214643534266,
+      "label_y_percent": 26.164764612023916,
+      "width_percent": 31.009418340453763,
+      "height_percent": 5.319374068554399,
       "stroke_color": "rgb(14,165,233)",
       "fill_color": "rgba(14,165,233,0.18)"
     },
     {
       "id": "influxdb_metrics_edit-action",
-      "x_percent": 29.6,
-      "y_percent": 43.7,
+      "x_percent": 18.634374116974424,
+      "y_percent": 37.291654247391946,
       "label": "Choose whether to edit or delete a value.",
       "shape_type": "dot",
-      "label_x_percent": 44.7,
-      "label_y_percent": 45.1
+      "label_x_percent": 34.63565843612722,
+      "label_y_percent": 44.50387481371088
+    },
+    {
+      "id": "influxdb_metrics_edit-dot-UTC",
+      "x_percent": 22.6,
+      "y_percent": 58.7,
+      "label": "Check this box to show values in UTC time.",
+      "shape_type": "dot",
+      "label_x_percent": 34.6,
+      "label_y_percent": 53.9
+    },
+    {
+      "id": "influxdb_metrics_edit-dot-values",
+      "x_percent": 13.1,
+      "y_percent": 78.7,
+      "label": "By clicking on a single value, you can tighten the preview window to just that single metric.  This allows you to easily edit a single metric.",
+      "shape_type": "dot",
+      "label_x_percent": 34.7,
+      "label_y_percent": 63.4
     },
     {
       "id": "influxdb_metrics_edit-commit",
-      "x_percent": 91.1,
-      "y_percent": 13.8,
-      "label": "After reviewing your staged edits, commit your changes to the database.",
+      "x_percent": 92.1,
+      "y_percent": 7.8,
+      "label": "After reviewing your staged edits, commit your changes to the database.  Please wait until the commit light turns off.",
       "shape_type": "dot",
-      "label_x_percent": 86.1,
-      "label_y_percent": 21.1
+      "label_x_percent": 84.2,
+      "label_y_percent": 13.6
     }
   ],
   "influxdb_timeshift": [
