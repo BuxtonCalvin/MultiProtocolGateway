@@ -14,10 +14,7 @@ updates:
     commit-message:
       prefix: "chore(deps)"
     groups:
-      python-patch-minor:
-        update-types:
-          - "minor"
-          - "patch"
+      python-all:
         patterns:
           - "*"
 
@@ -35,10 +32,7 @@ updates:
     commit-message:
       prefix: "chore(ci)"
     groups:
-      actions-patch-minor:
-        update-types:
-          - "minor"
-          - "patch"
+      actions-all:
         patterns:
           - "*"
 
@@ -55,3 +49,7 @@ updates:
       - "docker"
     commit-message:
       prefix: "chore(docker)"
+    groups:
+      docker-all:
+        patterns:
+          - "*"
