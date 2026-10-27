@@ -1,18 +1,19 @@
 register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note,ha_device_class,ha_state_class,ha_entity_category
-"# SOURCE: Wattsonic 'GEN3 Hybrid Inverter MODBUS RTU Protocol' register tables, as transcribed at smarthome.exposed (vendor PDF itself not retrievable). Cross-checked against TapHome Gen3 template which cites the vendor PDF.",,,,,,,,,,,,
-# DEVICE FAMILY: a-TroniX AX hybrid inverters (AKKU SYS GmbH) are rebadged Wattsonic Gen3 units (also sold as M-TEC / Solinteg / Sunways / St-ems). Clone relationship is reported by TapHome + Homey + evcc; NOT yet confirmed by a hardware test of an AX unit.,,,,,,,,,,,,
-"# SERIAL: Modbus RTU via EMS port, 9600 8N1, slave id 247 (Gen3 default; some docs say 1). Modbus TCP: port 502 unit 255. All registers read with FC03 (holding). Addresses are 0-based protocol addresses.",,,,,,,,,,,,
-"# NOT COVERED: bit tables for fault flags / equipment info / working-mode / battery-config (vendor tables 3.x not transcribed); 53500-53523 'BMS data for EMS' block (written BY an EMS, not inverter telemetry); older a-TroniX Gen2 (WTS) units use a different 1xxxx-5xxxx map.",,,,,,,,,,,,
-"# WRITABLE: every row is R in this file by design. Vendor marks 20000, 25100, 25103, 5xxxx rows as read/write.",,,,,,,,,,,,
+"# SOURCE: Solinteg 'Hybrid Inverter MODBUS RTU Protocol' v00.02 (vendor PDF, 2022-12-06) - the same Gen3 register layout used by Wattsonic. Every address, type and scale below was checked against that document and matches the Wattsonic Gen3 transcription at smarthome.exposed.",,,,,,,,,,,,
+"# DEVICE FAMILY: a-TroniX AX hybrid inverters (AKKU SYS GmbH) are reported (TapHome, Homey, evcc) to be rebadged Wattsonic Gen3 units. That clone relationship is NOT yet confirmed by a hardware test of an AX unit; a-TroniX publishes no register document of its own.",,,,,,,,,,,,
+"# SERIAL: Modbus RTU on the EMS RS-485 port, 9600 8N1 (vendor default), slave id 1-247 (vendor gives no default; Wattsonic units commonly ship as 247). Modbus TCP: port 502, unit 255. All reads use FC03. Addresses are the 0-based on-wire addresses (vendor section 2.3.1); a 1-based tool such as QModMaster needs +1.",,,,,,,,,,,,
+"# BYTE ORDER: big-endian (vendor section 2.2.3). 32-bit values (U32/I32) occupy two consecutive registers, high word first = the app default ABCD, so no Register_Endian adjustment is needed. Raw values are scaled by the vendor 'accuracy' column: 10 -> 0.1, 100 -> 0.01, 1000 -> 0.001, except power in 'kW accuracy 1000' which is raw watts.",,,,,,,,,,,,
+"# NOT COVERED: 53500-53523 'BMS data for EMS' block (written BY an EMS, not inverter telemetry); 28000-28015 grid-protection limits; 50200-50211 EMS power scheduling; Table 3.2 model names (10008: high byte = inverter type, low byte = model).",,,,,,,,,,,,
+"# WRITABLE: every row is R in this file by design. The vendor marks 20000, 25000, 25100, 25103 and the 5xxxx rows as read/write. Older a-TroniX Gen2 (WTS) units use a different 1xxxx-5xxxx map.",,,,,,,,,,,,
 10000,inverter_sn,Inverter SN,,ASCII.16,,,R,,"Serial number, 8 registers (16 chars)",,,diagnostic
-10008,equipment_info,Equipment Info,,USHORT,,,R,,Bit table in vendor 'Equipment info' table (not transcribed),,,diagnostic
+10008,equipment_info,Inverter Model,,USHORT,,,R,,"High byte = inverter type, low byte = model (vendor Table 3.2)",,,diagnostic
 10011,firmware_version,Firmware Version,,UINT,,,R,,2 registers 10011-10012,,,diagnostic
-10104,grid_regulation,Grid Regulation,,USHORT,,,R,,Grid safety standard id,,,diagnostic
+10104,safety_code,Safety Code,,USHORT,,,R,,National grid safety code (vendor Table 3.10; names in the JSON),,,diagnostic
 10105,inverter_running_status,Inverter Running Status,,USHORT,0-5,,R,,0 wait / 1 self-check / 2 on-grid / 3 fault / 4 firmware update / 5 off-grid,,,
-10112,fault_flag1,Fault Flag 1,,UINT,,,R,,"32-bit fault bitmask, vendor table 3.3 (e.g. bit0 mains lost, bit8 inverter over temperature)",,,
-10114,fault_flag2,Fault Flag 2,,UINT,,,R,,32-bit fault bitmask,,,
-10120,fault_flag3,Fault Flag 3,,UINT,,,R,,32-bit fault bitmask,,,
-18000,arm_fault_flag1,ARM Fault Flag 1,,UINT,,,R,,32-bit ARM fault bitmask,,,
+10112,fault_flag1,Fault Flag 1,,32BIT_FLAGS,"{""b0"": ""Mains Lost"", ""b1"": ""Grid Voltage Fault"", ""b2"": ""Grid Frequency Fault"", ""b3"": ""DCI Fault"", ""b4"": ""ISO Over Limitation"", ""b5"": ""GFCI Fault"", ""b6"": ""PV Over Voltage"", ""b7"": ""Bus Voltage Fault"", ""b8"": ""Inverter Over Temperature""}",,R,,vendor Table 3.3,,,
+10114,fault_flag2,Fault Flag 2,,32BIT_FLAGS,"{""b1"": ""SPI Fault"", ""b2"": ""E2 Fault"", ""b3"": ""GFCI Device Fault"", ""b4"": ""AC Transducer Fault"", ""b5"": ""Relay Check Fail"", ""b6"": ""Internal Fan Fault"", ""b7"": ""External Fan Fault""}",,R,,vendor Table 3.3 (bit 0 not defined),,,
+10120,fault_flag3,Fault Flag 3,,32BIT_FLAGS,"{""b0"": ""Bus Hardware Fault"", ""b1"": ""PV Power Low"", ""b2"": ""Batt. Voltage Fault"", ""b3"": ""BAK Voltage Fault"", ""b4"": ""Bus Voltage Lower"", ""b5"": ""Sys Hardware Fault"", ""b6"": ""BAK Over Power"", ""b7"": ""Inverter Over Voltage"", ""b8"": ""Inverter Over Freq"", ""b9"": ""Inverter Over Current"", ""b10"": ""Phase Order Err""}",,R,,vendor Table 3.3 (added in protocol v00.02),,,
+18000,arm_fault_flag1,ARM Fault Flag 1,,32BIT_FLAGS,"{""b0"": ""SCI Fault"", ""b1"": ""FLASH Fault"", ""b2"": ""Meter Comm Fault""}",,R,,vendor Table 3.3,,,
 10994,meter_power_phase_a,Phase A Power on Meter,W,INT,,,R,,raw is W (vendor: kW x1000),power,measurement,
 10996,meter_power_phase_b,Phase B Power on Meter,W,INT,,,R,,raw is W,power,measurement,
 10998,meter_power_phase_c,Phase C Power on Meter,W,INT,,,R,,raw is W,power,measurement,
@@ -31,7 +32,7 @@ register,variable_name,documented_name,unit,data_type,values,read_interval,writa
 11015,grid_frequency,Grid Frequency,0.01Hz,USHORT,,,R,,,frequency,measurement,
 11016,p_ac,P_AC,W,INT,,,R,,Inverter AC active power; raw is W,power,measurement,
 11018,pv_generation_today,Total PV Generation on that day,0.1kWh,UINT,,,R,,,energy,total_increasing,
-11020,pv_generation_total,Total PV Generation from Installation,0.1kWh,UINT,,,R,,,energy,total_increasing,
+11020,pv_generation_total,Total PV Generation from Installation,0.1kWh,UINT,,,R,,"vendor: Energy-total, kWh, accuracy 10",energy,total_increasing,
 11022,pv_generation_hours_total,Total PV Generation Time from Installation,h,UINT,,,R,,,duration,total_increasing,
 11028,pv_input_power_total,PV Input Total Power,W,UINT,,,R,,raw is W,power,measurement,
 11032,temperature_sensor_1,Temperature Sensor 1,0.1C,SHORT,,,R,,,temperature,measurement,diagnostic
@@ -61,9 +62,9 @@ register,variable_name,documented_name,unit,data_type,values,read_interval,writa
 30242,inverter_power_phase_b,Inverter Phase B Active Power,W,INT,,,R,,raw is W,power,measurement,
 30248,inverter_power_phase_c,Inverter Phase C Active Power,W,INT,,,R,,raw is W,power,measurement,
 30254,battery_voltage,Battery Voltage,0.1V,USHORT,,,R,,,voltage,measurement,
-30255,battery_current,Battery Current,0.1A,SHORT,,,R,,signed; positive while charging (see battery_mode),current,measurement,
+30255,battery_current,Battery Current,0.1A,SHORT,,,R,,signed I16; the vendor table gives no sign convention - read it with battery_mode (30256) and confirm on first run,current,measurement,
 30256,battery_mode,Battery Mode,,USHORT,0-1,,R,,0 discharge / 1 charge,,,
-30258,battery_power,Battery Power,W,INT,,,R,,"raw is W; vendor: positive when charging, negative when discharging",power,measurement,
+30258,battery_power,Battery Power,W,INT,,,R,,"signed I32, raw is W; the vendor table gives no sign convention for this register (its only stated convention, Pbat>0 = discharging, is for the EMS scheduling register 50207) - read it with battery_mode (30256) and confirm on first run",power,measurement,
 31000,grid_injection_energy_today,Grid Injection Energy on that day [Meter],0.1kWh,USHORT,,,R,,,energy,total_increasing,
 31001,grid_purchase_energy_today,Grid Purchasing Energy on that day [Meter],0.1kWh,USHORT,,,R,,,energy,total_increasing,
 31002,backup_output_energy_today,Backup Output Energy on that day,0.1kWh,USHORT,,,R,,,energy,total_increasing,
@@ -80,7 +81,7 @@ register,variable_name,documented_name,unit,data_type,values,read_interval,writa
 31112,total_pv_generation,Total PV Generation,0.1kWh,UINT,,,R,,,energy,total_increasing,
 31114,total_loading_energy_grid_side,Total Loading Energy consumed at grid side,0.1kWh,UINT,,,R,,,energy,total_increasing,
 31118,total_energy_purchased_from_grid_inverter,Total Energy Purchased from Grid at inverter side,0.1kWh,UINT,,,R,,,energy,total_increasing,
-32000,battery_type,Battery Types,,USHORT,,,R,,Vendor 'Battery configuration' table,,,diagnostic
+32000,battery_type,Battery Types,,USHORT,,,R,,Battery type code (vendor Table 3.7),,,diagnostic
 32001,battery_strings,Battery Strings,,USHORT,,,R,,,,,diagnostic
 32002,battery_protocol,Battery Protocol,,USHORT,,,R,,,,,diagnostic
 32003,battery_software_version,Software Version,,USHORT,,,R,,,,,diagnostic
@@ -101,20 +102,22 @@ register,variable_name,documented_name,unit,data_type,values,read_interval,writa
 33015,min_cell_voltage,Min Cell Voltage,0.001V,USHORT,,,R,,,voltage,measurement,diagnostic
 33016,bms_error_code,BMS Error Code,,UINT,,,R,,"32-bit bitmask, vendor BMS fault table",,,
 33018,bms_warn_code,BMS Warn Code,,UINT,,,R,,32-bit bitmask,,,
+25000,safety_code_setting,Safety Code Setting,,USHORT,,,R,,vendor R/W; vendor Table 3.10,,,config
 25100,grid_injection_limit_switch,Grid Injection Power Limit Switch,,USHORT,0-1,,R,,0 off / 1 on (vendor R/W),,,config
 25103,grid_injection_limit_setting,Grid Injection Power Limit Setting,0.1%,USHORT,0-1000,,R,,vendor R/W; raw 0-1000 = 0.0-100.0%,,,config
 25104,smart_meter_comm_status,Smart Meter Comm Status,,USHORT,0-1,,R,,0 abnormal / 1 normal,,,
 25105,meter_power_a_w,Phase A Power On Meter (W),W,INT,,,R,,Second copy of meter phase power in W (accuracy 1),power,measurement,
 25107,meter_power_b_w,Phase B Power On Meter (W),W,INT,,,R,,,power,measurement,
 25109,meter_power_c_w,Phase C Power On Meter (W),W,INT,,,R,,,power,measurement,
-50000,working_mode_setting,Hybrid Inverter Working Mode Setting,,USHORT,,,R,,Vendor 'Hybrid Inverter Working Modes' table (not transcribed); vendor R/W,,,config
+50000,working_mode_setting,Hybrid Inverter Working Mode Setting,,USHORT,,,R,,"vendor Table 3.6: high byte = mode group, low byte = mode (Off Grid has no low byte, so 0x0200 = 512); vendor R/W",,,config
 50001,eps_ups_switch,EPS/UPS Function Switch,,USHORT,0-1,,R,,0 off / 1 on (vendor R/W),,,config
 50004,offgrid_voltage_setting,Off-grid Voltage Setting,0.1V,USHORT,,,R,,vendor R/W,,,config
 50005,offgrid_frequency_setting,Off-grid Frequency Setting,0.01Hz,USHORT,4500-6500,,R,,vendor R/W,,,config
 50006,offgrid_asymmetric_switch,Off-grid Asymmetric Output Switch,,USHORT,0-1,,R,,vendor R/W,,,config
 50007,peak_load_shifting_switch,Peak Load Shifting Switch,,USHORT,0-1,,R,,vendor R/W,,,config
 50009,max_grid_power_setting,Max. Grid Power Value Setting,0.1kVA,USHORT,,,R,,vendor R/W,,,config
-52500,battery_configuration,Battery Configuration,,USHORT,,,R,,Vendor 'Battery configuration' table; vendor R/W,,,config
+52500,battery_configuration,Battery Configuration,,USHORT,,,R,,"Battery brand, vendor Table 3.7; vendor R/W",,,config
+52501,battery_protocol_configuration,Battery Protocol Configuration,,USHORT,,,R,,Battery model/protocol within the brand (vendor Table 3.7); vendor R/W,,,config
 52502,ongrid_soc_protection_switch,On-grid Battery SOC Protection Switch,,USHORT,0-1,,R,,vendor R/W,,,config
 52503,ongrid_battery_end_soc,On-grid Battery End SOC,0.1%,USHORT,0-1000,,R,,vendor R/W; raw 0-1000 = 0.0-100.0%,,,config
 52504,offgrid_soc_protection_switch,Off-grid Battery SOC Protection Switch,,USHORT,0-1,,R,,vendor R/W,,,config

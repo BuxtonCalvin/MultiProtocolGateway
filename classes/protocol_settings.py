@@ -33,7 +33,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Literal, Optional, cast
 
-from defs.common import TransportSettings, strtoint_safe
+from defs.common import TransportSettings, strtoint, strtoint_safe
 
 # Largest finite IEEE-754 values, as ints, for the default FLOAT32/FLOAT64 value ranges.
 _FLOAT32_MAX: int = int(3.4028234663852886e38)
@@ -200,9 +200,9 @@ class Data_Type(Enum):
         ``SHORT``/``INT``/``INT64`` and signed bit-fields (``_nSBIT``),
         sign-and-magnitude bounds for ``_nSMBIT`` (which cannot represent
         ``-2**(n-1)``), and the largest finite value either side of zero for
-        ``FLOAT32``/``FLOAT64``.  Unsigned types start at 0.  Types without a
-        numeric range (strings, flags, unsigned bit-fields) keep the historical
-        ``(0, 65535)`` default.
+        ``FLOAT32``/``FLOAT64``.  Unsigned types, including unsigned bit-fields
+        (``_nBIT``: ``0 .. 2**n - 1``), start at 0.  Types without a numeric range
+        (strings, flags) keep the historical ``(0, 65535)`` default.
         """
         ranges: dict[Data_Type, tuple[int, int]] = {
             Data_Type.BYTE: (0, 0xFF),
@@ -218,6 +218,9 @@ class Data_Type(Enum):
         }
         if data_type in ranges:
             return ranges[data_type]
+
+        if 200 < data_type.value < 300:   # unsigned bit-field
+            return 0, (1 << (data_type.value - 200)) - 1
 
         if 300 < data_type.value < 400:   # signed (two's complement) bit-field
             bits: int = data_type.value - 300
@@ -349,6 +352,13 @@ class registry_map_entry:
     # at entry.register.  For standard consecutive entries this list is empty
     # and the legacy start_register + offset path is used unchanged.
     register_list: list[int] = field(default_factory=lambda: [])
+
+    register_key: str = ""
+    ''' literal address text for text-keyed protocols (``"register_key_type": "text"`` in the
+    protocol JSON), e.g. a VE.Direct label ``"SOC"`` or an OBIS code ``"0:1.8.0"``.  Empty for
+    numeric protocols.  ``register`` then holds a stable per-key integer id (0, 1, 2 ... in order
+    of first appearance) so integer-keyed machinery keeps working; transports should match on
+    ``register_key``, not on ``register``. '''
 
     value_regex: str = ""
 
@@ -1203,15 +1213,29 @@ class protocol_settings:
         registry_map: list[registry_map_entry] = []
 
         register_regex: re.Pattern[str] = re.compile(
-            # Matches a single register address: plain decimal, hex (0x prefix),
-            # with optional bit-offset (.b#) or byte-offset (.) suffixes.
+            # Matches a single register address: hex (``0x`` or bare ``x`` prefix) or
+            # plain decimal of any length, with an optional bit-offset (``.b#`` or a
+            # bit range ``.b#-#`` / ``.b#-b#``) or byte-offset (``.#``) suffix.
+            # Hex is listed first and the whole cell must match (^...$), otherwise
+            # ``0x5000`` would match as the decimal ``0`` and ``115~119`` as ``115``.
             # This regex is only reached when register_list is empty (i.e. the
             # "low_high" underscore format was not detected above), so it will
             # never be applied to multi-register addresses like "40_41".
-            r"(?P<register>\d{1,5}|0x[0-9A-Fa-f]{1,4})"
-            r"(?:\.b(?P<bit_start>\d{1,2})(?:-(?P<bit_end>\d{1,2}))?)?"
-            r"(?:\.(?P<byte>\d{1,2}))?"
+            r"^(?P<register>0?x[0-9a-f]+|\d+)"
+            r"(?:\.b(?P<bit_start>\d{1,2})(?:-b?(?P<bit_end>\d{1,2}))?)?"
+            r"(?:\.(?P<byte>\d{1,2}))?$",
+            re.IGNORECASE,
         )
+
+        # Text-keyed protocols (VE.Direct labels, OBIS codes, ...) declare
+        # "register_key_type": "text" in the protocol JSON.  Every register cell is
+        # then a literal key instead of a numeric address.
+        register_key_type: str = self.settings.get("register_key_type", "numeric").strip().lower()
+        if register_key_type not in ("numeric", "text"):
+            self._log.warning(f"Unknown register_key_type '{register_key_type}' (use 'numeric' or 'text'); assuming 'numeric'")
+            register_key_type = "numeric"
+        text_keys: bool = register_key_type == "text"
+        text_key_ids: dict[str, int] = {}
 
         read_interval_regex: re.Pattern[str] = re.compile(r"(?P<value>[\.\d]+)(?P<unit>[xs]|ms)")
         data_type_regex: re.Pattern[str] = re.compile(r"(?P<datatype>\w+)\.(?P<length>\d+)")
@@ -1440,6 +1464,7 @@ class protocol_settings:
             register_bit_end: int = -1
             register_byte: int = -1
 
+            register_key: str = row["register"].strip() if text_keys else ""
             row["register"] = row["register"].lower()
 
             # ── "low_high" address format (e.g. "40_41", "41_40", "40_50") ──
@@ -1451,16 +1476,18 @@ class protocol_settings:
             # Detection rule: all tokens are plain non-negative integers and
             # there is at least one underscore.
             _reg_str: str = row["register"].strip()
-            if "_" in _reg_str and not _reg_str.startswith("_"):
+            if not register_key and "_" in _reg_str and not _reg_str.startswith("_"):
                 _tokens: list[str] = _reg_str.split("_")
                 _parsed: list[int] = []
                 _all_int: bool = True
                 for _tok in _tokens:
                     _tok = _tok.strip().lower()
-                    try:
-                        # Accept plain decimal ("40") or hex ("0x28") tokens
-                        _parsed.append(int(_tok, 16) if _tok.startswith("0x") else int(_tok))
-                    except ValueError:
+                    # An empty token ("1_", "40__41") is malformed; strtoint("") would
+                    # otherwise turn it into a phantom register 0.
+                    _val: int | str = strtoint(_tok) if _tok else ""  # decimal ("40"), "0x28" or "x28"
+                    if isinstance(_val, int):
+                        _parsed.append(_val)
+                    else:
                         _all_int = False
                         break
 
@@ -1472,7 +1499,15 @@ class protocol_settings:
                     # data_type is parsed below so we defer the check until after
                     # entry construction — see post-entry cross-check block.
 
-            if not register_list:
+            if register_key:
+                # Text-keyed protocol: the whole cell is the key (case preserved, dots
+                # and colons are part of it).  Identical keys share one integer id.
+                register = text_key_ids.setdefault(register_key, len(text_key_ids))
+                register_bit = -1
+                register_bit_end = -1
+                register_byte = 0
+
+            elif not register_list:
                 reg_match: re.Match[str] | None = register_regex.search(row["register"])
 
                 if reg_match:
@@ -1503,7 +1538,7 @@ class protocol_settings:
                         return
 
                 else:
-                    range_match: re.Match[str] | None = range_regex.search(row["register"])
+                    range_match: re.Match[str] | None = range_regex.fullmatch(row["register"].strip())
                     if not range_match:
                         if "[" in row["register"]:
                             self._log.info(f"Deferred dynamic register expression: {row['register']}")
@@ -1512,7 +1547,15 @@ class protocol_settings:
                             self.dynamic_registry_rows.append(deferred_row)
                             return
                         else:
-                            register = strtoint_safe(row["register"])
+                            try:
+                                register = strtoint_safe(row["register"], context="register address")
+                            except ValueError:
+                                self._log.warning(
+                                    f"Skipping non-numeric register address '{row['register']}'. "
+                                    f"If this protocol is keyed by labels (VE.Direct, OBIS, ...) set "
+                                    f"\"register_key_type\": \"text\" in its JSON."
+                                )
+                                return
                     else:
                         reverse: str = range_match.group("reverse")
                         start = strtoint_safe(range_match.group("start"))
@@ -1554,6 +1597,7 @@ class protocol_settings:
                     register_bit_end=register_bit_end,
                     register_byte=register_byte,
                     register_list=register_list,
+                    register_key=register_key,
                     variable_name=variable_name,
                     documented_name=row["documented name"],
                     unit=str(unit_symbol),
@@ -1822,6 +1866,7 @@ class protocol_settings:
                     register_bit=entry.register_bit,
                     register_bit_end=entry.register_bit_end,
                     register_byte=entry.register_byte,
+                    register_key=entry.register_key,
                     variable_name=desc_name,
                     documented_name=f"{entry.documented_name}_desc",
                     note=f"Decoded description for {entry.note}" if entry.note else f"Decoded description for {entry.variable_name}",

@@ -1,5 +1,6 @@
 {
   "transport": "modbus_rtu",
+  "register_key_type": "text",
   "send_holding_register": true,
   "send_input_register": false,
   "send_coil_register": false,

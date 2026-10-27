@@ -34,7 +34,7 @@ register,variable_name,documented_name,unit,data_type,values,read_interval,writa
 0x0116,,Total number of battery over discharges,,,,,R,,,,,
 0x0117,,Total number of battery full charges,,,,,,,,,,
 0x0118~0x0119,,Total charging amp hrs of the battery,AH,UINT,,,R,,,,measurement,
-0x011A~011B,,Total discharging amp hrs of the Battery,AH,UINT,,,R,,,,measurement,
+0x011A~0x011B,,Total discharging amp hrs of the Battery,AH,UINT,,,R,,,,measurement,
 0x011C~0x011D,,Cumulative power Generation,W,UINT,,,R,,,power,measurement,
 0x011E~0x011F,,Cumulative power consumption,W,UINT,,,R,,,power,measurement,
 0x0120,,Load Brightness,%,7BIT,,,R,,,,measurement,

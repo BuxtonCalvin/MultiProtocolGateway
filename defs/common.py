@@ -77,12 +77,16 @@ def strtoint(val: str | int) -> int | str:
         s = '0x' + s[1:]
 
     try:
-        # base=0 automatically detects hex (0x), octal (0o), or decimal
-        # int(s, base=0) replaces all that manual padding and from_bytes logic. It handles 0x naturally.
-        return int(s, base=0)
+        if s.startswith('0x'):
+            return int(s, 16)
+        # Plain decimal only.  int(s, 0) would reject zero-padded values such as
+        # "0150", and int(s) would silently accept underscores ("231_232" -> 231232).
+        if re.fullmatch(r'[+-]?\d+', s):
+            return int(s, 10)
     except ValueError:
-        # This catches strings with letters that aren't valid hex
-        return s
+        pass
+    # Anything else (letters that aren't valid hex, underscores, ...) is not a number.
+    return s
 
 def strtoint_safe(val: str | int, context: str = "") -> int:
     """

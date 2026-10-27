@@ -1,5 +1,6 @@
 {
   "transport": "modbus_rtu",
+  "register_key_type": "text",
   "send_holding_register": true,
   "send_input_register": false,
   "send_coil_register": false,
@@ -15,7 +16,7 @@
     "6": "Error in DDC Program",
     "7": "External device connected, assistant required",
     "8": "Ground relay test failed",
-    "10": "System time synchronisation problem",
+    "10": "System time synchronization problem",
     "11": "Relay Test Fault",
     "12": "Config mismatch with 2nd MCU",
     "14": "Device cannot transmit data",

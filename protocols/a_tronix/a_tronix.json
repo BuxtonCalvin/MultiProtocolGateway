@@ -1,9 +1,115 @@
 {
   "transport": "modbus_rtu",
-  "baud": "9600",
-  "batch_size": "40",
-  "send_holding_register": "true",
-  "send_input_register": "false",
-  "send_coil_register": "false",
-  "send_discrete_register": "false"
+  "baud": 9600,
+  "batch_size": 20,
+  "send_holding_register": true,
+  "send_input_register": false,
+  "send_coil_register": false,
+  "send_discrete_register": false,
+
+  "inverter_running_status_codes": {
+    "0": "Wait (waiting for on-grid)",
+    "1": "Check (self-check)",
+    "2": "On-grid",
+    "3": "Fault",
+    "4": "Flash (firmware update)",
+    "5": "Off-grid"
+  },
+
+  "battery_mode_codes": {
+    "0": "Discharge",
+    "1": "Charge"
+  },
+
+  "bms_status_codes": {
+    "0": "Init",
+    "1": "Self-check",
+    "2": "Normal",
+    "3": "Warning",
+    "4": "Fault"
+  },
+
+  "smart_meter_comm_status_codes": {
+    "0": "Meter communication abnormal",
+    "1": "Meter communication normal"
+  },
+
+  "safety_code_codes": {
+    "4": "Customized code 1",
+    "6": "Customized code 2",
+    "10": "50Hz Default",
+    "11": "60Hz Default",
+    "12": "VDE4105",
+    "13": "AS4777.2(A)",
+    "14": "AS4777.2(NZ)",
+    "16": "EN50549",
+    "18": "IEC61727(50Hz)",
+    "19": "IEC61727(60Hz)",
+    "24": "Italy",
+    "25": "Czech(A1)",
+    "26": "Czech(A2)",
+    "29": "EN50549(PL)",
+    "31": "Belgium",
+    "35": "VDE0126",
+    "36": "Italy(MV)",
+    "37": "South Africa",
+    "40": "G98",
+    "41": "G99",
+    "42": "Austria",
+    "46": "AS4777.2(B)",
+    "47": "ES:UNE217002",
+    "48": "AS4777.2(C)",
+    "49": "ES:NTS631"
+  },
+
+  "safety_code_setting_codes": {
+    "4": "Customized code 1",
+    "6": "Customized code 2",
+    "10": "50Hz Default",
+    "11": "60Hz Default",
+    "12": "VDE4105",
+    "13": "AS4777.2(A)",
+    "14": "AS4777.2(NZ)",
+    "16": "EN50549",
+    "18": "IEC61727(50Hz)",
+    "19": "IEC61727(60Hz)",
+    "24": "Italy",
+    "25": "Czech(A1)",
+    "26": "Czech(A2)",
+    "29": "EN50549(PL)",
+    "31": "Belgium",
+    "35": "VDE0126",
+    "36": "Italy(MV)",
+    "37": "South Africa",
+    "40": "G98",
+    "41": "G99",
+    "42": "Austria",
+    "46": "AS4777.2(B)",
+    "47": "ES:UNE217002",
+    "48": "AS4777.2(C)",
+    "49": "ES:NTS631"
+  },
+
+  "working_mode_setting_codes": {
+    "257": "General Mode",
+    "258": "Economic Mode",
+    "259": "UPS Mode",
+    "512": "Off Grid Mode",
+    "769": "EMS AC Control Mode",
+    "770": "EMS General Mode",
+    "771": "EMS Battery Control Mode",
+    "772": "EMS Off-Grid Mode"
+  },
+
+  "battery_configuration_codes": {
+    "1": "Solinteg",
+    "2": "EMS (BMS access via EMS)",
+    "10": "Wattsonic Li-HV",
+    "11": "AOBOET",
+    "12": "DYNESS",
+    "13": "Pylon",
+    "14": "Soluna",
+    "15": "SheenPlus",
+    "16": "WECO"
+  }
 }

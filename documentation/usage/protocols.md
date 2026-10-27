@@ -102,6 +102,7 @@ The `.json` file sets protocol-wide defaults that apply to all registers in the 
 | `baud` | Default baud rate for RTU connections. |
 | `byteorder` | Default byte order for all registers: `big` (most common) or `little`. Individual registers override this via the `adjustments` column. |
 | `read_interval` | Default polling interval in seconds. Overridden by the transport's `read_interval` setting. |
+| `register_key_type` | How the `register` column is read: `numeric` (default) for register numbers, or `text` when the protocol is addressed by labels or codes instead of numbers (VE.Direct `SOC`, OBIS `0:1.8.0`). See [Text Keys](#text-keys-labels-and-obis-codes). |
 | `{documented_name}_codes` | Enum code mappings for flag registers. The key must match a `documented name` column value with `_codes` appended (e.g. `battery_status_codes`). |
 
 ---
@@ -163,12 +164,16 @@ For multi-register data types (`UINT`, `INT`, `UINT64`, `INT64`, `FLOAT32`, `FLO
 
 #### Single Register
 
-Plain decimal or hex (`0x`-prefixed):
+Plain decimal, or hex with a `0x` or bare `x` prefix. Hex digits and the prefix are case-insensitive, and addresses may be any length (a 29-bit CAN ID is fine):
 
 ``` ini
-17
-0x2C
+17            decimal 17
+0150          decimal 150 (leading zeros do not make it octal or hex)
+0x2C          hex 0x2C = 44
+x351          hex 0x351 = 849 (CAN IDs, Pylon commands)
 ```
+
+A cell the loader cannot read as one of the shapes on this page (for example `0x011A~011B`, where the second half lost its `0x`) is skipped with a warning in the log. It is never partly parsed.
 
 #### Bit and Byte Offsets
 
@@ -176,7 +181,8 @@ A bit offset selects one or more bits within a 16-bit register:
 
 ``` ini
 5.b0          single bit 0 of register 5
-5.b3-b7       bits 3 through 7 of register 5
+5.b3-b7       bits 3 through 7 of register 5 (5.b3-7 is accepted too)
+0x2C.b4       bit 4 of hex register 0x2C
 ```
 
 A byte offset selects one byte:
@@ -205,7 +211,7 @@ The key properties of this format:
 - **Word count is self-describing**. Two tokens = 32-bit value, four tokens = 64-bit value. MPG cross-checks this count against the `data type` column and logs a warning if they disagree.
 - **The `data type` column sets the decode format** (`UINT`, `INT`, `FLOAT32`, etc.) and is the cross-check for the address token count. The address list is the authoritative source for which registers to read and in what order.
 
-Hex addresses are supported in the same format: `0x28_0x29`.
+Hex addresses are supported in the same format, with either prefix and mixed with decimal: `0x28_0x29`, `x28_x29`, `0x28_41`. Empty tokens (`40_`, `40__41`) are rejected.
 
 The endian encoding of the words (how the bytes within each 16-bit register are ordered, and how the words are assembled) is controlled separately by the `adjustments` column — see [Endian Order](#endian-order).
 
@@ -215,7 +221,9 @@ For multi-register string or ASCII data where all addresses are consecutive, a r
 
 ``` ini
 7~14          registers 7 through 14 (ascending)
+115-119       same thing with a hyphen
 r7~14         registers 14 down to 7 (descending — reversed read order)
+0x11A~0x11B   hex range (give both ends the prefix)
 ```
 
 Range notation implies consecutive ascending addresses and is intended for `ASCII` and `HEX` types. For numeric multi-word values, always use the explicit underscore format instead.
@@ -330,9 +338,10 @@ When no range is given, the valid range defaults to the full range of the `data 
 | `INT64` | −9223372036854775808 – 9223372036854775807 |
 | `FLOAT32` | ±3.4028235e38 |
 | `FLOAT64` | ±1.7976931348623157e308 |
+| `#bit` (unsigned, N bits) | 0 – 2^N−1 |
 | `#sbit` (signed, N bits) | −2^(N−1) – 2^(N−1)−1 |
 | `#smbit` (sign-magnitude, N bits) | −(2^(N−1)−1) – 2^(N−1)−1 |
-| Anything else (flags, strings, `#bit`) | 0 – 65535 |
+| Anything else (flags, strings) | 0 – 65535 |
 
 **Enum codes** — a JSON object maps raw values to human-readable labels. Any data type can use codes:
 
@@ -429,6 +438,26 @@ For a multi-register entry (e.g. `40_41` with `data type = UINT`):
 6. The assembled bytes are decoded as the specified `data type` (`UINT` → unsigned 32-bit integer, etc.).
 7. Adjustment formulas, unit multiplier, and enum code substitution are applied.
 8. The value is published under `variable_name` (e.g. `epv1_all`) as a single logical metric.
+
+#### Text Keys (labels and OBIS codes)
+
+Some devices are not addressed by register number at all. VE.Direct sends labelled lines (`V`, `I`, `SOC`), VE.Bus uses named fields (`F_AC_IN_V_L1`), and SMA Speedwire uses OBIS codes (`0:1.8.0`). For these, set `"register_key_type": "text"` in the protocol's JSON:
+
+``` json
+{
+  "transport": "serial_vedirect",
+  "register_key_type": "text"
+}
+```
+
+In a text-keyed protocol every `register` cell is a literal key:
+
+- The key is kept exactly as written: case is significant (`soc` and `SOC` are different keys), and dots, colons and underscores belong to the key. Nothing is parsed as a bit or byte offset, range or list. A key that looks like a number (`5`, `0x10`) is still a key.
+- The key is available to transports as `entry.register_key`. Transports should match incoming data on `register_key`.
+- `entry.register` holds a stable integer id for the key (0, 1, 2 ... in order of first appearance), so code that indexes by integer keeps working. Rows that repeat a key share one id. The id depends on row order and is not an address.
+- Bit and byte offsets, ranges and underscore lists are not available. The `data type` column still sets how the value is decoded.
+
+Without this setting a label in the `register` column is treated as a malformed number: the row is skipped with a warning. That is deliberate, so that a typo in a numeric map cannot silently become a label.
 
 ### Register Merge at Scan Time
 
