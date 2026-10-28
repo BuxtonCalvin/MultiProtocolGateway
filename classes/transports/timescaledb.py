@@ -2759,11 +2759,19 @@ class timescaledb(transport_base):
                 self._log.info(f"data write complete from [{transport_name}] to timescaledb narrow table for {len(narrow_mappings)} metrics.")
 
         except SQLAlchemyError as e:
-            self._log.exception(f"Narrow flush failed: {e}")
+            # A refused/dropped connection is an expected outage, handled below (backlog + auto-reconnect).
+            # Log it as one line instead of a ~200 line stack trace; keep the full trace for anything else.
+            if isinstance(e, OperationalError) or (isinstance(e, DBAPIError) and e.connection_invalidated):
+                orig_exc: BaseException | None = e.orig
+                err_type: str = type(orig_exc if orig_exc is not None else e).__name__
+                self._log.error(f"Narrow flush failed (database unreachable): {err_type}: {str(e).splitlines()[0]}")
+            else:
+                self._log.exception(f"Narrow flush failed: {e}")
             try:
                 session.rollback()
-            except SQLAlchemyError as e2:
-                self._log.exception(f"Narrow flush rollback failed: {e2}")
+            except Exception as e2:
+                # Rolling back on a dead connection can itself raise (not always a SQLAlchemyError); never let it escape.
+                self._log.error(f"Narrow flush rollback failed: {e2}")
 
             # === Auto Reconnect handling ===
             self._set_tsdb_connected(conn_value = False, conn_reason = "Connect unsuccessful")
