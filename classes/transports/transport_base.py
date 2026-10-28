@@ -21,10 +21,13 @@
 from __future__ import annotations
 
 import logging
+import re
 import sys
 import threading
+import time
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 from typing import TYPE_CHECKING, Callable, ClassVar, Iterator, Literal, Optional
 
 from classes.messaging.message_handler import send_message as _send_message
@@ -273,12 +276,18 @@ class transport_base:
 
             self._log.info(f"[CONNECTED] {self.transport_name} connection established.")
 
-            if was_previously_connected:
-                # This is a recovery after a known loss — worth alerting.
-                # Suppressed on first startup connect since that's expected.
+            # A "connection lost" alert may have been sent by a previous run of the app that
+            # exited (restart, crash, container recreate) before it could report recovery.
+            # The persisted marker lets this run finish that story.
+            had_pending_alert: bool = self._consume_disconnect_marker()
+
+            if was_previously_connected or had_pending_alert:
+                # Recovery after a known loss — worth alerting.
+                # Still suppressed on a normal startup connect (no marker, never connected before).
+                suffix: str = "" if was_previously_connected else " (after application restart)"
                 self.send_message(
                     f"Connection restored: {self.transport_name} "
-                    f"({getattr(self, 'host', getattr(self, 'port', ''))})",
+                    f"({getattr(self, 'host', getattr(self, 'port', ''))}){suffix}",
                     title=f"MPG Connection Restored for {self.transport_name}",
                     priority=1,
                 )
@@ -297,6 +306,34 @@ class transport_base:
                     title=f"MPG Connection Alert for {self.transport_name}",
                     priority=1,
                 )
+                # Remember that the alert went out, so a restart cannot swallow the recovery notice.
+                self._mark_disconnect_alert_sent()
+
+    def _disconnect_marker_file(self) -> Path:
+        """Path of the file recording 'connection-lost alert sent, recovery not yet reported'."""
+        safe_name: str = re.sub(r"[^A-Za-z0-9_.-]", "_", self.transport_name or self.__class__.__name__)
+        # <repo root>/backlogs — same directory the TimescaleDB/InfluxDB backlogs use (persisted in Docker).
+        return Path(__file__).resolve().parent.parent.parent / "backlogs" / f".{safe_name}.disconnected"
+
+    def _mark_disconnect_alert_sent(self) -> None:
+        """Persist the 'alert sent' marker. Never raises — notification bookkeeping must not break a transport."""
+        try:
+            marker: Path = self._disconnect_marker_file()
+            marker.parent.mkdir(parents=True, exist_ok=True)
+            marker.write_text(str(time.time()))
+        except Exception as exc:
+            self._log.debug(f"Could not write disconnect marker: {exc}")
+
+    def _consume_disconnect_marker(self) -> bool:
+        """Return True (and delete the marker) if a previous run left a pending 'connection lost' alert."""
+        try:
+            marker: Path = self._disconnect_marker_file()
+            if marker.exists():
+                marker.unlink()
+                return True
+        except Exception as exc:
+            self._log.debug(f"Could not read/clear disconnect marker: {exc}")
+        return False
     _log : logging.Logger
 
     transport_type: ClassVar[Literal["scraper", "bridge", "base class", "general"]] = "base class"
