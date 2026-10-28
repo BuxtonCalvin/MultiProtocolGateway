@@ -319,3 +319,27 @@ def test_text_keyed_protocols_load(protocol: str, key: str, expected_type: Data_
     assert all(keys), "every row of a text-keyed protocol must carry its key"
     match: registry_map_entry = next(entry for entry in entries if entry.register_key == key)
     assert match.data_type is expected_type
+
+
+TEXT_KEYED_TRANSPORTS: dict[str, str] = {
+    "victron_vedirect_serial": "serial_vedirect",
+    "victron_mk3usb_vebus": "serial_vebus",
+    "sma_energy_meter_speedwire": "sma_speedwire",
+}
+PROTOCOLS_DIR: Path = Path(__file__).resolve().parent.parent / "protocols"
+
+
+@pytest.mark.parametrize(("protocol", "transport"), list(TEXT_KEYED_TRANSPORTS.items()))
+def test_text_keyed_protocols_declare_their_own_transport(protocol: str, transport: str) -> None:
+    """These are not Modbus: the JSON names the transport still to be built, and the map says so at the top."""
+    logging.disable(logging.CRITICAL)
+    try:
+        settings: protocol_settings = protocol_settings(protocol)
+    finally:
+        logging.disable(logging.NOTSET)
+    assert settings.transport == transport
+    assert not settings.transport.startswith("modbus")
+
+    csv_path: Path = next(PROTOCOLS_DIR.glob(f"*/{protocol}.holding_registry_map.csv"))
+    first_note: str = csv_path.read_text(encoding="utf-8").splitlines()[1]
+    assert "# TRANSPORT" in first_note and transport in first_note

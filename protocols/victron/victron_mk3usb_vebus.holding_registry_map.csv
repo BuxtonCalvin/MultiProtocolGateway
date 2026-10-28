@@ -1,4 +1,6 @@
 register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note,ha_device_class,ha_state_class,ha_entity_category
+# TRANSPORT: needs a new transport - suggested name serial_vebus (subclass of serial_base). Victron VE.Bus MK2/MK3 serial protocol through a MK3-USB interface; serial parameters to be confirmed against Victron's MK2/MK3 protocol document. Not Modbus.,,,,,,,,,,,,
+# KEYS: register_key_type is text; the register column holds the VE.Bus field name (case-sensitive).,,,,,,,,,,,,
 F_AC_IN1_IGN,ac_in1_ignored,Ignore AC Input 1,,bool,"0=no,1=yes",,R/W,,Disable AC input 1 (islanding/generator control),,,
 F_AC_IN2_IGN,ac_in2_ignored,Ignore AC Input 2,,bool,"0=no,1=yes",,R/W,,Disable AC input 2 (Quattro only),,,
 F_AC_IN_F,ac_in_frequency,AC Input Frequency,Hz,float,45-65,,R,,Mains supply frequency,frequency,measurement,

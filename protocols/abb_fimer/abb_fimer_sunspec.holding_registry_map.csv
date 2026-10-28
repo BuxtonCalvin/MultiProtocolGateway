@@ -1,0 +1,73 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note,ha_device_class,ha_state_class,ha_entity_category
+"# SOURCE: ABB/Power-One 'ABB SunSpec Inverter Modbus Map' workbook (J. Blair, 2013; sheets 'Inverter Modbus' and 'Status and Events'), a vendor document. Offsets are the workbook's absolute 0-based register addresses, which are the on-wire addresses (base 0, SunSpec marker 'SunS' at registers 0-1).",,,,,,,,,,,,
+"# APPLIES TO: legacy ABB/Power-One inverters with native SunSpec Modbus (PVI 10/12K, TRIO, Central, Ultra). It does NOT apply to a VSN300/VSN700 datalogger or to a REACT2: a logger serves models 1, 103, 160 and then 120/121/123, so it matches this map only up to register 171 and registers 172+ (vendor model 64061 here) would return unrelated data.",,,,,,,,,,,,
+"# SCALING: ABB fixes the SunSpec scale factors in this document (A_SF=-2, V_SF=-2, W_SF=0, Hz_SF=-2, WH_SF=0, Tmp_SF=-1; model 160 DCA_SF=DCV_SF=-1) so fixed unit multipliers are used. Points ABB marks as unimplemented (constant 0x8000/0xFFFF) are left out: line voltages AB/BC/CA, VA, VAr, PF, DCA, DCV, heat-sink and transformer temperature, and model 160 DCW/DCWH/Tmp.",,,,,,,,,,,,
+"# BYTE ORDER: SunSpec big-endian, high register first (the app default), for 32-bit integers and float32 alike; no Register_Endian adjustment needed. Energy counters in model 64061 have no unit in the vendor table; Wh is assumed (the Aurora counters are watt-hours).",,,,,,,,,,,,
+"# NOT COVERED: control block 143-173 (writable power limits and ramps); TRIO-only blocks 64062 (comm board, 298), model 403 string combiners (336 and 394; their scale factors are not fixed, so they need a dynamic scale-factor adjustment) and 64063 (fuse board, 452); Alarm4-Alarm8 (unused in practice). Serial parameters are not stated in this workbook; the Modbus slave id is the inverter address (register 68).",,,,,,,,,,,,
+0,sunspec_id,SunSpec ID,,UINT,,,R,,0x53756E53 ('SunS'); registers 0-1,,,diagnostic
+2,sunspec_did,Common Model ID,,USHORT,,,R,,Fixed 1,,,diagnostic
+3,common_length,Common Model Length,,USHORT,,,R,,"ABB uses 66 registers (the SunSpec standard is 65), so the next model starts at 70",,,diagnostic
+4,manufacturer,Manufacturer,,ASCII.32,,,R,,Fixed 'Power-One (ABB)'; 16 registers,,,diagnostic
+20,model,Model,,ASCII.32,,,R,,6-digit model string; 16 registers,,,diagnostic
+36,options,Options,,ASCII.16,,,R,,4-digit options string; 8 registers,,,diagnostic
+44,firmware_version,Firmware Version,,ASCII.16,,,R,,Inverter firmware version; 8 registers,,,diagnostic
+52,serial_number,Serial Number,,ASCII.32,,,R,,<serial number><model><manufacture week/year>; 16 registers,,,diagnostic
+68,device_address,Modbus Device Address,,USHORT,,,R,,Current Modbus address of this inverter,,,diagnostic
+70,inverter_did,Inverter Model ID,,USHORT,,,R,,Fixed 103,,,diagnostic
+71,inverter_length,Inverter Model Length,,USHORT,,,R,,Fixed 50,,,diagnostic
+72,ac_current,AC Current,0.01A,USHORT,,,R,,A_SF fixed -2 (register 76),current,measurement,
+73,ac_current_a,Phase A Current,0.01A,USHORT,,,R,,A_SF fixed -2,current,measurement,
+74,ac_current_b,Phase B Current,0.01A,USHORT,,,R,,A_SF fixed -2,current,measurement,
+75,ac_current_c,Phase C Current,0.01A,USHORT,,,R,,A_SF fixed -2,current,measurement,
+80,ac_voltage_an,Phase A-N Voltage,0.01V,USHORT,,,R,,V_SF fixed -2 (register 83),voltage,measurement,
+81,ac_voltage_bn,Phase B-N Voltage,0.01V,USHORT,,,R,,V_SF fixed -2 (register 83),voltage,measurement,
+82,ac_voltage_cn,Phase C-N Voltage,0.01V,USHORT,,,R,,V_SF fixed -2 (register 83),voltage,measurement,
+84,ac_power,AC Power,W,SHORT,,,R,,W_SF fixed 0 (register 85),power,measurement,
+86,ac_frequency,Line Frequency,0.01Hz,USHORT,,,R,,Hz_SF fixed -2 (register 87),frequency,measurement,
+94,ac_energy,AC Energy,Wh,ACC32,,,R,,"acc32, WH_SF fixed 0 (register 96); lifetime production",energy,total_increasing,
+101,dc_power,DC Power,W,SHORT,,,R,,DCW_SF fixed 0 (register 102),power,measurement,
+103,cabinet_temperature,Cabinet Temperature,0.1C,SHORT,,,R,,Tmp_SF fixed -1 (register 107),temperature,measurement,
+106,other_temperature,Other Temperature,0.1C,SHORT,,,R,,Tmp_SF fixed -1,temperature,measurement,
+108,operating_state,Operating State,,USHORT,,,R,,SunSpec I_STATUS enumeration (names in the JSON),,,
+109,vendor_operating_state,Vendor Operating State,,USHORT,,,R,,Vendor-specific state code,,,diagnostic
+110,events,Event Flags,,32BIT_FLAGS,"{""b0"": ""Ground Fault"", ""b1"": ""DC Over Voltage"", ""b2"": ""AC Disconnect"", ""b3"": ""DC Disconnect"", ""b4"": ""Grid Disconnect"", ""b5"": ""Cabinet Open"", ""b6"": ""Manual Shutdown"", ""b7"": ""Over Temperature"", ""b8"": ""Over Frequency"", ""b9"": ""Under Frequency"", ""b10"": ""AC Over Voltage"", ""b11"": ""AC Under Voltage"", ""b12"": ""Blown String Fuse"", ""b13"": ""Under Temperature"", ""b14"": ""Memory Loss"", ""b15"": ""HW Test Failure""}",,R,,SunSpec Evt1 bitfield,,,diagnostic
+122,mppt_did,Multi-MPPT Model ID,,USHORT,,,R,,Fixed 160,,,diagnostic
+123,mppt_length,Multi-MPPT Model Length,,USHORT,,,R,,Fixed 48,,,diagnostic
+130,mppt_input_count,Number of DC Inputs,,USHORT,,,R,,Fixed 2,,,diagnostic
+141,mppt1_current,DC Input 1 Current,0.1A,USHORT,,,R,,Model 160 module 1; DCA_SF fixed -1 (register 125),current,measurement,
+142,mppt1_voltage,DC Input 1 Voltage,0.1V,USHORT,,,R,,Model 160 module 1; DCV_SF fixed -1 (register 126),voltage,measurement,
+161,mppt2_current,DC Input 2 Current,0.1A,USHORT,,,R,,Model 160 module 2; DCA_SF fixed -1 (register 125),current,measurement,
+162,mppt2_voltage,DC Input 2 Voltage,0.1V,USHORT,,,R,,Model 160 module 2; DCV_SF fixed -1 (register 126),voltage,measurement,
+172,vendor_did,ABB Vendor Model ID,,USHORT,,,R,,Fixed 64061,,,diagnostic
+173,vendor_length,ABB Vendor Model Length,,USHORT,,,R,,Fixed 124,,,diagnostic
+175,hardware_version,Hardware Version,,ASCII.8,,,R,,4 registers,,,diagnostic
+179,parent,Parent,,ASCII.16,,,R,,8 registers,,,diagnostic
+187,device_presence,Device Presence,,16BIT_FLAGS,"{""b0"": ""Display present"", ""b1"": ""Comm Board present"", ""b2"": ""Fuse Control Board present"", ""b3"": ""Inverter present""}",,R,,Boards the inverter reports as fitted,,,diagnostic
+188,global_state,ABB Global State,,USHORT,,,R,,Aurora global state (names in the JSON),,,
+189,inverter_state,ABB Inverter State,,USHORT,,,R,,Aurora inverter state (names in the JSON),,,
+192,system_time,System Time,s,UINT,,,R,,Aurora clock: seconds since 2000-01-01 00:00:00 UTC (add 946684800 for a Unix timestamp); vendor R/W,,,diagnostic
+194,alarm1,Alarm 1,,32BIT_FLAGS,"{""b1"": ""W001 Sun Low"", ""b2"": ""E001 Input OC"", ""b3"": ""W002 Input UV"", ""b4"": ""E002 Input OV"", ""b5"": ""W001 Sun Low"", ""b6"": ""E003 No Parameters"", ""b7"": ""E004 Bulk OV"", ""b8"": ""E005 Comm. Error"", ""b9"": ""E006 Output OC"", ""b10"": ""E007 IGBT Sat"", ""b11"": ""W011 Bulk UV"", ""b12"": ""E009 Internal error"", ""b13"": ""W003 Grid Fail"", ""b14"": ""E010 Bulk Low"", ""b15"": ""E011 Ramp Fail"", ""b16"": ""E012 Dc/Dc Fail"", ""b17"": ""E013 Wrong Mode"", ""b18"": ""Ground Fault"", ""b19"": ""E014 Over Temp."", ""b20"": ""E015 Bulk Cap Fail"", ""b21"": ""E016 Inverter Fail"", ""b22"": ""E017 Start Timeout"", ""b23"": ""E018 Ground Fault"", ""b24"": ""E049 AC feed forward"", ""b25"": ""E019 Ileak sens.fail"", ""b26"": ""E012 DcDc Fail"", ""b27"": ""E020 Self Test Error 1"", ""b28"": ""E021 Self Test Error 2"", ""b29"": ""E019 Self Test Error 3"", ""b30"": ""E022 Self Test Error 4""}",,R,,ABB alarm codes arranged as a 256-bit field; bit 31 of each word is reserved,,,diagnostic
+196,alarm2,Alarm 2,,32BIT_FLAGS,"{""b0"": ""E023 DC inj error"", ""b1"": ""W004 Grid OV"", ""b2"": ""W005 Grid UV"", ""b3"": ""W006 Grid OF"", ""b4"": ""W007 Grid UF"", ""b5"": ""W008 Z grid Hi"", ""b6"": ""E024 Internal error"", ""b7"": ""E025 Riso Low"", ""b8"": ""E026 Vref Error"", ""b9"": ""E027 Error Meas V"", ""b10"": ""E028 Error Meas F"", ""b11"": ""E029 Error Meas Z"", ""b12"": ""E030 Error Meas Ileak"", ""b13"": ""E031 Error Read V"", ""b14"": ""E032 Error Read I"", ""b15"": ""W009 Table fail"", ""b16"": ""W010 Fan Fail"", ""b17"": ""E033 UTH"", ""b18"": ""E034 Interlock fail"", ""b19"": ""E035 Remote Off"", ""b20"": ""E036 Vout Avg error"", ""b21"": ""W012 Battery low"", ""b22"": ""W013 Clk fail"", ""b23"": ""E037 Input UC"", ""b24"": ""W014 Zero Power"", ""b25"": ""E038 Fan Stuck"", ""b26"": ""E039 DC Switch Open"", ""b27"": ""E040 Tras Switch Open"", ""b28"": ""E041 AC Switch Open"", ""b29"": ""E042 Bulk UV"", ""b30"": ""E043 Autoexclusion""}",,R,,ABB alarm codes arranged as a 256-bit field; bit 31 of each word is reserved,,,diagnostic
+198,alarm3,Alarm 3,,32BIT_FLAGS,"{""b0"": ""W015 Grid df/dt"", ""b1"": ""W016 Den switch Open"", ""b2"": ""W017 Jbox fail"", ""b3"": ""E044 DC Door Open"", ""b4"": ""E045 AC Door Open"", ""b5"": ""Anti islanding"", ""b6"": ""W020 Fuse DC Fail"", ""b7"": ""E048 Liquid Cooler Fail"", ""b8"": ""W018 SPD AC protection open"", ""b9"": ""W019 SPD DC protection open"", ""b10"": ""E046 String selftest fail"", ""b11"": ""W021 Power reduction start"", ""b12"": ""W025 Power reduction end"", ""b13"": ""W022 React. power mode changed"", ""b14"": ""W023 date/time changed"", ""b15"": ""W024 Energy data reset""}",,R,,ABB alarm codes arranged as a 256-bit field; bit 31 of each word is reserved,,,diagnostic
+210,day_energy,Daily Production,Wh,FLOAT32,,,R,,"IEEE-754 float32, engineering units, no scale factor; unit not stated in the vendor table (Wh assumed)",energy,total_increasing,
+212,total_energy,Total Production,Wh,FLOAT32,,,R,,"IEEE-754 float32, engineering units, no scale factor; unit not stated in the vendor table (Wh assumed)",energy,total_increasing,
+214,partial_energy,Partial Production,Wh,FLOAT32,,,R,,"IEEE-754 float32, engineering units, no scale factor; unit not stated in the vendor table (Wh assumed)",energy,total_increasing,
+216,week_energy,Week Production,Wh,FLOAT32,,,R,,"IEEE-754 float32, engineering units, no scale factor; unit not stated in the vendor table (Wh assumed)",energy,total_increasing,
+218,month_energy,Month Production,Wh,FLOAT32,,,R,,"IEEE-754 float32, engineering units, no scale factor; unit not stated in the vendor table (Wh assumed)",energy,total_increasing,
+220,year_energy,Year Production,Wh,FLOAT32,,,R,,"IEEE-754 float32, engineering units, no scale factor; unit not stated in the vendor table (Wh assumed)",energy,total_increasing,
+222,ac_voltage,AC Voltage,V,FLOAT32,,,R,,"IEEE-754 float32, engineering units, no scale factor",voltage,measurement,
+224,ac_current_total,AC Current,A,FLOAT32,,,R,,"IEEE-754 float32, engineering units, no scale factor",current,measurement,
+226,ac_power_total,AC Power,W,FLOAT32,,,R,,"IEEE-754 float32, engineering units, no scale factor",power,measurement,
+228,ac_frequency_total,AC Frequency,Hz,FLOAT32,,,R,,"IEEE-754 float32, engineering units, no scale factor",frequency,measurement,
+230,dc1_power,DC Input 1 Power,W,FLOAT32,,,R,,"IEEE-754 float32, engineering units, no scale factor",power,measurement,
+232,dc1_voltage,DC Input 1 Voltage,V,FLOAT32,,,R,,"IEEE-754 float32, engineering units, no scale factor",voltage,measurement,
+234,dc1_current,DC Input 1 Current,A,FLOAT32,,,R,,"IEEE-754 float32, engineering units, no scale factor",current,measurement,
+236,dc2_power,DC Input 2 Power,W,FLOAT32,,,R,,"IEEE-754 float32, engineering units, no scale factor",power,measurement,
+238,dc2_voltage,DC Input 2 Voltage,V,FLOAT32,,,R,,"IEEE-754 float32, engineering units, no scale factor",voltage,measurement,
+240,dc2_current,DC Input 2 Current,A,FLOAT32,,,R,,"IEEE-754 float32, engineering units, no scale factor",current,measurement,
+242,temperature,Temperature,C,FLOAT32,,,R,,"IEEE-754 float32, engineering units, no scale factor",temperature,measurement,
+244,booster_temperature,Booster Temperature,C,FLOAT32,,,R,,"IEEE-754 float32, engineering units, no scale factor",temperature,measurement,
+246,isolation_resistance_1,Isolation Resistance Input 1,MOhm,FLOAT32,,,R,,"IEEE-754 float32, engineering units, no scale factor",,measurement,
+248,isolation_resistance_2,Isolation Resistance Input 2,MOhm,FLOAT32,,,R,,"IEEE-754 float32, engineering units, no scale factor",,measurement,
+250,wind_generator_frequency,Wind Generator Frequency,Hz,FLOAT32,,,R,,"IEEE-754 float32, engineering units, no scale factor",frequency,measurement,
+252,power_factor,Power Factor (cos phi),,FLOAT32,,,R,,"IEEE-754 float32, engineering units, no scale factor",power_factor,measurement,
