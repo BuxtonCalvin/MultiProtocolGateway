@@ -2318,7 +2318,11 @@ class protocol_settings:
             Data_Type.STRING32: 16,
         }
 
-        if entry.data_type == Data_Type.STRING and entry.data_type_size > 0:
+        # Fixed-length strings ("STRING.16", "ASCII.16"): the size is in characters
+        # (bytes), two per register.  Without this an "ASCII.16" entry counted as one
+        # register, so a 16-bit-word read returned only its first two characters and
+        # the read range could stop short of the string.
+        if entry.data_type in (Data_Type.STRING, Data_Type.ASCII) and entry.data_type_size > 0:
             return max(1, (entry.data_type_size + 1) // 2)
 
         return word_counts.get(entry.data_type, 1)
@@ -2577,9 +2581,14 @@ class protocol_settings:
             value = raw.to_bytes(2, byteorder="big").hex()
 
         elif entry.data_type == Data_Type.ASCII:
-            raw_bytes: bytes | None = self._register_words_to_bytes(registry, entry.register, 1, word_order, entry.register_list or None)
+            # A range member ("115~119") is one register whose text is concatenated with
+            # its neighbors later; a sized entry ("ASCII.16") holds its whole string.
+            ascii_words: int = 1 if entry.concatenate or entry.data_type_size <= 0 else self.entry_word_count(entry)
+            raw_bytes: bytes | None = self._register_words_to_bytes(registry, entry.register, ascii_words, word_order, entry.register_list or None)
             if raw_bytes is None:
                 return None
+            if entry.data_type_size > 0 and not entry.concatenate:
+                raw_bytes = raw_bytes[:entry.data_type_size]
             value = self._decode_text_bytes(raw_bytes)
 
         elif entry.data_type in (Data_Type.STRING, Data_Type.STRING16, Data_Type.STRING32):

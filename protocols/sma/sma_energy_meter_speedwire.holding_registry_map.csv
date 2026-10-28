@@ -1,4 +1,6 @@
 register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note,ha_device_class,ha_state_class,ha_entity_category
+"# TRANSPORT: needs a new transport - suggested name sma_speedwire. This is a NETWORK protocol, not a serial_base subclass: join UDP multicast group 239.12.255.254, port 9522, and decode the SMA Speedwire energy-meter datagrams (protocol id 0x6069; SMA 'EMETER-Protocol-TI-en-10'). Not Modbus.",,,,,,,,,,,,
+"# KEYS: register_key_type is text; the register column holds the OBIS identifier (channel:index.type.tariff) as written in the SMA document, e.g. 0:1.4.0.",,,,,,,,,,,,
 0:1.4.0,power_import_total,Active Power Draw Total,0.1W,U32,0-4294967295,,R,,Total active power being imported from grid across all phases; divide by 10,power,measurement,
 0:1.8.0,energy_import_total,Total Energy Drawn,Ws,U64,0-18446744073709551615,,R,,Cumulative grid import energy (Watt-seconds); divide by 3600000 for kWh; 64-bit,,,
 0:10.4.0,apparent_power_export_total,Apparent Power Feed Total,0.1VA,U32,,,R,,Total apparent power export; divide by 10,apparent_power,measurement,

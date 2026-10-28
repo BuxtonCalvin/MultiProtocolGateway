@@ -388,3 +388,54 @@ def test_uint64_write_rejects_out_of_range(abb: protocol_settings, value: int | 
     modbus_base.write_variable(fake, entry, value)
     write_registers.assert_not_called()
     assert fake._log.error.called
+
+
+# --------------------------------------------------------------------------
+# Fixed-length strings occupy size/2 registers (ASCII.N and STRING.N)
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("data_type", [Data_Type.ASCII, Data_Type.STRING], ids=lambda t: t.name)
+@pytest.mark.parametrize(("chars", "words"), [(1, 1), (2, 1), (3, 2), (6, 3), (16, 8), (32, 16)])
+def test_sized_string_word_count(abb: protocol_settings, data_type: Data_Type, chars: int, words: int) -> None:
+    """``ASCII.N`` / ``STRING.N`` span ceil(N / 2) registers."""
+    entry: registry_map_entry = _probe_entry(
+        abb, data_type=data_type, data_type_size=chars, register_list=[], concatenate=False, concatenate_registers=[]
+    )
+    assert abb.entry_word_count(entry) == words
+
+
+def test_unsized_ascii_is_still_one_register(abb: protocol_settings) -> None:
+    """A plain ``ASCII`` with no size keeps the one-register default (ranges set the length instead)."""
+    entry: registry_map_entry = _probe_entry(
+        abb, data_type=Data_Type.ASCII, data_type_size=-1, register_list=[], concatenate=False, concatenate_registers=[]
+    )
+    assert abb.entry_word_count(entry) == 1
+
+
+def test_a_tronix_serial_number_decodes_from_register_words() -> None:
+    """The 16-character serial is rebuilt from its eight 16-bit registers (it used to return two characters)."""
+    serial: bytes = b"WTS3P10K00001234"
+    entry: registry_map_entry = _entries("a_tronix", Registry_Type.HOLDING)["inverter_sn"]
+    logging.disable(logging.CRITICAL)
+    try:
+        proto: protocol_settings = protocol_settings("a_tronix")
+    finally:
+        logging.disable(logging.NOTSET)
+    words: dict[int, int] = {entry.register + i: int.from_bytes(serial[2 * i:2 * i + 2], "big") for i in range(8)}
+    assert proto.process_registery(words, [entry]) == {"inverter_sn": "WTS3P10K00001234"}
+
+
+@pytest.mark.parametrize(
+    ("protocol", "variable"),
+    [("a_tronix", "inverter_sn"), ("abb_fimer_sunspec", "options"), ("abb_fimer_sunspec", "serial_number")],
+)
+def test_string_registers_are_fully_inside_a_read_range(protocol: str, variable: str) -> None:
+    """The planned Modbus reads cover every register of a multi-register string, including at window edges."""
+    logging.disable(logging.CRITICAL)
+    try:
+        proto: protocol_settings = protocol_settings(protocol)
+    finally:
+        logging.disable(logging.NOTSET)
+    entry: registry_map_entry = next(e for e in proto.registry_map[Registry_Type.HOLDING] if e.variable_name == variable)
+    last: int = entry.register + proto.entry_word_count(entry) - 1
+    assert any(start <= entry.register and start + count - 1 >= last for start, count in proto.registry_map_ranges[Registry_Type.HOLDING])

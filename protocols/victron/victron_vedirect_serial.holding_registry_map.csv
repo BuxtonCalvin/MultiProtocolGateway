@@ -1,4 +1,6 @@
 register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note,ha_device_class,ha_state_class,ha_entity_category
+"# TRANSPORT: needs a new transport - suggested name serial_vedirect (already declared in this protocol's JSON; subclass of serial_base). Victron VE.Direct text protocol: 19200 baud 8N1, one 'label<TAB>value' line per field, block checksum. Not Modbus.",,,,,,,,,,,,
+# KEYS: register_key_type is text; the register column holds the VE.Direct field label exactly as sent (case-sensitive).,,,,,,,,,,,,
 Alarm,alarm_state,Alarm State,,string,"ON,OFF",,R,,General alarm flag,,,
 AR,alarm_reason,Alarm Reason,,uint,0-65535,,R,,Bitmask; see BMV register 266 for bit definitions (BMV only),,,
 BMV,bmv_model,BMV Model String,,string,,,R,,Model identifier string (e.g. BMV-712 Smart); sent at  only,,,diagnostic
