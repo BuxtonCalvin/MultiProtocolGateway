@@ -362,7 +362,7 @@ class TimescaleDBConnectionManager:
         max_overflow: int = 10,
         pool_recycle: int = 3600,
         log: logging.Logger | None = None,
-        connect_timeout: int = 10,
+        connection_timeout: int = 10,
     ) -> None:
 
         self.host: str = host
@@ -376,7 +376,7 @@ class TimescaleDBConnectionManager:
         # Without these an unreachable host (powered off, firewall DROP) blocks every connect for the OS TCP timeout
         # (about two minutes), stalling the flush worker and each reconnect attempt, and a half-open connection can hang
         # a write for far longer.
-        self.connect_timeout: int = connect_timeout
+        self.connection_timeout: int = connection_timeout
         self._log: logging.Logger = log or logging.getLogger(__name__)
 
         self._engine: Engine | None = None
@@ -401,13 +401,13 @@ class TimescaleDBConnectionManager:
             max_overflow=settings.getint("max_overflow", fallback=10),
             pool_recycle=settings.getint("pool_recycle", fallback=3600),
             log=log,
-            connect_timeout=settings.getint("connect_timeout", fallback=10),
+            connection_timeout=settings.getint("connection_timeout", fallback=10),
         )
 
     def _connect_args(self) -> dict[str, int]:
         """libpq options passed to every new connection: a bounded connect, and TCP keepalives to notice a dead link."""
         return {
-            "connect_timeout": self.connect_timeout,
+            "connection_timeout": self.connection_timeout,
             "keepalives": 1,
             "keepalives_idle": 30,
             "keepalives_interval": 10,
@@ -723,8 +723,11 @@ class timescaledb(transport_base):
         Configuration options:
             - auto_refresh_interval (int): Seconds between rollup refreshes (default: 21600)
             - backlog_storage_path (str): Path for backlog files (default: "parent/timescaledb_backlog")
+            - backlog_file_name (str): Name for the backlog file (default: "timescaledb_backlog")
+            - connection_timeout (int): Seconds to wait for a database connection (default: 10)
             - database (str): Database name (default: "solar")
             - device_name (str): Name for the bridge (default: "TimeScaleDB MPG Bridge")
+            - drop_after (str): Retention policy for raw data (default: "1 year")
             - enable_auto_refresh (bool): Enable periodic rollup refresh (default: True)
             - enable_compression (bool): Enable compression on hypertables at startup (default: True)
             - enable_persistent_storage (bool): Enable disk backlog (default: True)
@@ -789,8 +792,8 @@ class timescaledb(transport_base):
         self.max_reconnect_delay: int = settings.getint("max_reconnect_delay", fallback=self.max_reconnect_delay)
         self.reconnect_attempts: int = settings.getint("reconnect_attempts", fallback=self.reconnect_attempts)
         self.reconnect_delay: int = settings.getint("reconnect_delay", fallback=self.reconnect_delay)
-        # seconds to wait for a database connection to be established (config key: connect_timeout)
-        self.connect_timeout: int = max(1, settings.getint("connect_timeout", fallback=10))
+        # seconds to wait for a database connection to be established (config key: connection_timeout)
+        self.connection_timeout: int = max(1, settings.getint("connection_timeout", fallback=10))
         self.force_float: bool = settings.getboolean("force_float", fallback=self.force_float)
 
         # stale data settings
@@ -890,7 +893,7 @@ class timescaledb(transport_base):
                 password=self.password,
                 pool_size=pool_size,
                 log=self._log,
-                connect_timeout=self.connect_timeout,
+                connection_timeout=self.connection_timeout,
             )
             self._connection_manager.connect()
 
@@ -1106,7 +1109,7 @@ class timescaledb(transport_base):
                 dbapi: Any = self.engine.dialect.dbapi
                 raw = dbapi.connect(
                     host=url.host, port=url.port, dbname=url.database, user=url.username, password=url.password,
-                    connect_timeout=10,
+                    connection_timeout=10,
                 )
                 raw.autocommit = True  # must be set BEFORE any statement: psycopg2 would otherwise send BEGIN first
                 with raw.cursor() as cur:
@@ -2698,7 +2701,7 @@ class timescaledb(transport_base):
             first_line: str = (str(e1).splitlines() or [type(e1).__name__])[0]
 
             if connection_lost:
-                # Flag the outage BEFORE deciding about the backlog, so the decision below never sees a stale "connected".
+                # Flag the outage before deciding about the backlog, so the decision below never sees a stale "connected".
                 # Only the write that discovers the outage is an error; probes made while it is already known are debug.
                 with self._reconnect_lock:
                     already_down: bool = not self.tsdb_connected
