@@ -84,6 +84,19 @@ def _reload(path: Path) -> list[FlushPayload]:
     return reloaded.backlog_points
 
 
+def _without_rowid(point: FlushPayload | None) -> FlushPayload:
+    """A replayed point is tagged with the SQLite rowid the flush worker uses to acknowledge it; compare without the tag."""
+    assert point is not None
+    return {key: value for key, value in point.items() if key != "backlog_rowid"}  # type: ignore[return-value]
+
+
+def _rowid(point: FlushPayload | None) -> int:
+    assert point is not None
+    rowid: int | None = point.get("backlog_rowid")
+    assert rowid is not None
+    return rowid
+
+
 def _row_count(path: Path) -> int:
     con: sqlite3.Connection = sqlite3.connect(str(path))
     try:
@@ -152,19 +165,65 @@ def test_replay_after_a_restart_puts_datetime_payloads_on_the_flush_queue(tmp_pa
     assert restarted.replay_to_queue() == 3
 
     replayed: list[FlushPayload | None] = [flush_queue.get_nowait() for _ in range(3)]
-    assert replayed == originals
+    assert [_without_rowid(p) for p in replayed] == originals
     assert all(p is not None and isinstance(p["m_time"], datetime) for p in replayed)
-    assert _row_count(path) == 0  # replay clears the journal
+
+    # Replay does NOT clear the journal: a point leaves SQLite only after the flush worker has settled it.
+    assert _row_count(path) == 3
+    for point in replayed:
+        restarted.ack(_rowid(point))
+    restarted.commit_acks()
+    assert _row_count(path) == 0
 
 
 def test_in_memory_replay_without_a_restart_is_unchanged(tmp_path: Path) -> None:
-    """The in-memory working set holds the original objects, so no round trip happens when the app stayed up."""
+    """The in-memory working set holds the original values, so no round trip happens when the app stayed up."""
     flush_queue: queue.Queue[FlushPayload | None] = queue.Queue()
     manager: BacklogManager = _manager(tmp_path / "backlog.sqlite", flush_queue)
     original: FlushPayload = _payload(_recent(minutes=1))
     manager.enqueue(original)
     manager.replay_to_queue()
-    assert flush_queue.get_nowait() is original
+    replayed: FlushPayload | None = flush_queue.get_nowait()
+    assert replayed is not None
+    assert _without_rowid(replayed) == original
+    assert replayed["m_time"] is original["m_time"]  # the very same datetime object, not a re-parsed copy
+
+
+def test_a_replayed_point_stays_in_the_backlog_until_it_is_settled(tmp_path: Path) -> None:
+    """The point of the ack protocol: a failed write or a crash after replay must not lose the point."""
+    path: Path = tmp_path / "backlog.sqlite"
+    flush_queue: queue.Queue[FlushPayload | None] = queue.Queue()
+    manager: BacklogManager = _manager(path, flush_queue)
+    manager.enqueue(_payload(_recent(minutes=1)))
+
+    assert manager.replay_to_queue() == 1
+    assert manager.replay_to_queue() == 0  # already waiting in the flush queue: not queued twice
+    assert _row_count(path) == 1 and len(manager.backlog_points) == 1
+
+    manager.release(_rowid(flush_queue.get_nowait()))  # the database was down: keep it
+    assert len(_reload(path)) == 1  # a restart still finds it
+    assert manager.replay_to_queue() == 1  # and the next replay re-sends it
+
+
+def test_enqueue_reports_failure_instead_of_silently_dropping_when_the_lock_is_busy(tmp_path: Path) -> None:
+    manager: BacklogManager = _manager(tmp_path / "backlog.sqlite", queue.Queue())
+    held: threading.Event = threading.Event()
+    release: threading.Event = threading.Event()
+
+    def hold_lock() -> None:
+        with manager._backlog_lock:
+            held.set()
+            release.wait(5)
+
+    holder: threading.Thread = threading.Thread(target=hold_lock)
+    holder.start()
+    try:
+        assert held.wait(5)
+        assert manager.enqueue(_payload(_recent(minutes=1)), timeout=0.2) is False
+    finally:
+        release.set()
+        holder.join()
+    assert manager.enqueue(_payload(_recent(minutes=1))) is True
 
 
 def test_the_flush_worker_receives_a_datetime_for_a_reloaded_point(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -225,6 +284,7 @@ def test_the_flush_worker_receives_a_datetime_for_a_reloaded_point(tmp_path: Pat
     bridge.enable_persistent_storage = True
     bridge._last_cleanup_time = time.time()
     bridge.SessionFactory = _Session
+    bridge.backlog = restarted  # the worker settles each replayed point against its backlog
     monkeypatch.setattr(bridge, "_check_is_stale", not_stale)
     monkeypatch.setattr(bridge, "_commit_transport_state", noop)
     monkeypatch.setattr(bridge, "_process_raw_metrics", one_narrow_metric)
@@ -235,6 +295,10 @@ def test_the_flush_worker_receives_a_datetime_for_a_reloaded_point(tmp_path: Pat
     (timestamp,) = seen
     assert isinstance(timestamp, datetime)
     assert timestamp == m_time
+
+    # The point was written, so the worker acknowledged it; once the batched delete commits the journal is empty.
+    restarted.commit_acks()
+    assert _row_count(path) == 0
 
 
 # ---------------------------------------------------------------------------

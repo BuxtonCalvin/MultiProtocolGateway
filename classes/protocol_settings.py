@@ -745,7 +745,7 @@ class DataAdjustments:
                 return value
 
             cases: object = context_adjustment.get("cases", {})
-            formula = ""
+            formula: str = ""
             context_value: int | float | str = context[key]
             if isinstance(cases, dict):
                 cases = cast(dict[object, object], cases)

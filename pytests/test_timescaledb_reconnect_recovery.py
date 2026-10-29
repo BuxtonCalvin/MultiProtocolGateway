@@ -20,10 +20,11 @@ import threading
 import time
 import types
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, Callable
 
 import pytest
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import IntegrityError, OperationalError
 
 import classes.transports.timescaledb as tsdb
 
@@ -95,6 +96,42 @@ def _join_reconnect_thread(timeout: float = 5.0) -> None:
             thread.join(timeout)
 
 
+@pytest.fixture(autouse=True)
+def _isolated_disconnect_marker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The connected setter persists a "connection lost, not yet reported restored" marker; keep it out of the repo."""
+
+    def marker_in_tmp(_self: object) -> Path:
+        return tmp_path / "disconnect.marker"
+
+    monkeypatch.setattr(tsdb.timescaledb, "_disconnect_marker_file", marker_in_tmp)
+
+
+class _FakeBacklog:
+    """The slice of BacklogManager the flush worker and reconnect worker use, recording what they do to it."""
+
+    def __init__(self, events: list[str]) -> None:
+        self.events: list[str] = events
+        self.released: list[int] = []
+        self.acked: list[int] = []
+
+    def replay_to_queue(self) -> int:
+        self.events.append("replay")
+        return 0
+
+    def enqueue(self, _payload: object) -> bool:
+        self.events.append("enqueue")
+        return True
+
+    def ack(self, rowid: int) -> None:
+        self.acked.append(rowid)
+
+    def release(self, rowid: int) -> None:
+        self.released.append(rowid)
+
+    def commit_acks(self) -> None:
+        return None
+
+
 @pytest.fixture
 def bridge() -> Any:
     """A timescaledb bridge with just enough state for its reconnect and flush-worker code, flagged disconnected."""
@@ -124,10 +161,7 @@ def bridge() -> Any:
     b._rediscover_protocols = lambda: events.append("rediscover")
     b.rollup_mgr = types.SimpleNamespace(repopulate_known_rollup_views=lambda: events.append("repopulate"))
 
-    def enqueue(_payload: object) -> None:
-        events.append("enqueue")
-
-    b.backlog = types.SimpleNamespace(replay_to_queue=lambda: events.append("replay"), enqueue=enqueue)
+    b.backlog = _FakeBacklog(events)
     messages: list[str] = []
     b.messages = messages
 
@@ -284,8 +318,9 @@ def _no_metrics(*_args: object, **_kwargs: object) -> tuple[dict[str, Any], dict
     return {}, {}
 
 
-def _backlog_disk_full(_payload: object) -> None:
-    raise OSError("No space left on device")
+class _FullDiskBacklog(_FakeBacklog):
+    def enqueue(self, _payload: object) -> bool:
+        raise OSError("No space left on device")
 
 
 def _apply_scenario(bridge: Any, monkeypatch: pytest.MonkeyPatch, scenario: str) -> None:
@@ -301,7 +336,7 @@ def _apply_scenario(bridge: Any, monkeypatch: pytest.MonkeyPatch, scenario: str)
     elif scenario == "no_data":
         monkeypatch.setattr(bridge, "_process_raw_metrics", _no_metrics)
     elif scenario == "backlog_write_fails":
-        bridge.backlog = types.SimpleNamespace(enqueue=_backlog_disk_full)
+        bridge.backlog = _FullDiskBacklog(bridge.events)
     monkeypatch.setattr(bridge, "_trigger_reconnect", _noop)  # the recovery path is tested above; no threads here
 
 
@@ -398,3 +433,80 @@ def test_queue_join_does_not_return_before_the_last_item_is_processed(bridge: An
     assert joined.wait(timeout=5.0)  # and released once everything, including the sentinel, is done
     worker.join(timeout=5.0)
     assert not worker.is_alive()
+
+
+# ---------------------------------------------------------------------------
+# connection notices, rejected rows and replayed points
+# ---------------------------------------------------------------------------
+
+def test_the_connection_notice_is_sent_after_the_locks_are_released(bridge: Any) -> None:
+    """Messaging is network I/O: it must never run while _reconnect_lock is held (it would stall the flush and write paths)."""
+    lock_held_while_sending: list[bool] = []
+
+    def send_message(message: str = "", **_kwargs: object) -> None:
+        bridge.messages.append(message)
+        lock_held_while_sending.append(bridge._reconnect_lock._is_owned())
+
+    bridge.send_message = send_message
+    bridge.tsdb_connected = True
+    bridge._connected = True
+
+    bridge._set_tsdb_connected(conn_value=False, conn_reason="test")
+
+    assert [m.split(":")[0] for m in bridge.messages] == ["Connection lost"]
+    assert lock_held_while_sending == [False]
+
+
+def test_a_row_the_database_rejects_is_not_treated_as_an_outage(bridge: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A constraint violation is the database answering: no "connection lost" alert, no reconnect, no backlog."""
+
+    def rejected(*_args: object, **_kwargs: object) -> None:
+        raise IntegrityError("INSERT", {}, Exception("duplicate key"))
+
+    bridge.tsdb_connected = True
+    bridge._connected = True
+    bridge.rollup_policy["tsdb_connected"] = True
+    _prime_flush_worker(bridge, monkeypatch, narrow=rejected)
+    reconnects: list[int] = []
+    monkeypatch.setattr(bridge, "_trigger_reconnect", lambda: reconnects.append(1))
+    bridge._flush_queue = _queue_of(_item())
+    bridge._flush_worker()
+
+    assert reconnects == []
+    assert bridge.tsdb_connected is True
+    assert bridge.messages == []
+    assert bridge.events == []  # dropped, not journalled
+    assert bridge._flush_queue.unfinished_tasks == 0
+
+
+def test_a_replayed_point_is_kept_when_the_database_is_down_and_acknowledged_when_written(
+    bridge: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    replayed: dict[str, Any] = {**_item(0), "backlog_rowid": 41}
+
+    _prime_flush_worker(bridge, monkeypatch, narrow=_failing_write)
+    monkeypatch.setattr(bridge, "_trigger_reconnect", _noop)
+    bridge._flush_queue = _queue_of(replayed)
+    bridge._flush_worker()
+    assert bridge.backlog.released == [41]  # still in the backlog; the next replay re-sends it
+    assert bridge.backlog.acked == []
+    assert bridge.events == []  # and it was not journalled a second time
+
+    _prime_flush_worker(bridge, monkeypatch, narrow=_noop)
+    bridge._flush_queue = _queue_of(replayed)
+    bridge._flush_worker()
+    assert bridge.backlog.acked == [41]  # written: now it may leave the backlog
+
+
+def test_a_live_point_in_hand_at_shutdown_is_journalled_not_lost(bridge: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    writes: list[int] = []
+
+    def counting_write(*_args: object, **_kwargs: object) -> None:
+        writes.append(1)
+
+    _prime_flush_worker(bridge, monkeypatch, narrow=counting_write)
+    bridge._stop_event.set()
+    bridge._flush_queue = _queue_of(_item(0))
+    bridge._flush_worker()
+    assert writes == []
+    assert bridge.events == ["enqueue"]

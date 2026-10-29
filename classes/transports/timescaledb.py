@@ -2848,9 +2848,9 @@ class timescaledb(transport_base):
 
     def _log_data_loss_throttled(self, reason: str) -> None:
         """Count a data point that could not be stored anywhere and report the running total at most once a minute."""
-        self._dropped_points += 1
+        self._dropped_points = getattr(self, "_dropped_points", 0) + 1
         now: float = time.monotonic()
-        if now - self._last_drop_log >= 60.0:
+        if now - getattr(self, "_last_drop_log", 0.0) >= 60.0:
             self._log.warning(f"{self._dropped_points} data point(s) could not be stored and were dropped ({reason}).")
             self._dropped_points = 0
             self._last_drop_log = now

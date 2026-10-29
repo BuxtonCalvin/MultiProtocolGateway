@@ -333,30 +333,36 @@ class transport_base:
     # queued while the lock is held and sent, on the same thread, only after every lock has been released.
     # No extra thread is involved.
     # ------------------------------------------------------------------
+    def _notice_state(self) -> threading.local:
+        """Per-instance, per-thread hold depth. Created on first use so an instance built without __init__ still works."""
+        return self.__dict__.setdefault("_notice_tls", threading.local())
+
     @contextmanager
     def _notices_held(self) -> Generator[None, None, None]:
-        depth: int = getattr(self._notice_tls, "hold", 0)
-        self._notice_tls.hold = depth + 1
+        state: threading.local = self._notice_state()
+        depth: int = getattr(state, "hold", 0)
+        state.hold = depth + 1
         try:
             yield
         finally:
-            self._notice_tls.hold = depth
+            state.hold = depth
             if depth == 0:
                 self._deliver_pending_notices()
 
     def _queue_notice(self, message: str, title: str, priority: int = 1) -> None:
         """Queue a notification; it is sent immediately unless this thread is inside _notices_held()."""
         with transport_base._conn_state_lock:
-            self._pending_notices.append((message, title, priority))
-        if getattr(self._notice_tls, "hold", 0) == 0:
+            self.__dict__.setdefault("_pending_notices", []).append((message, title, priority))
+        if getattr(self._notice_state(), "hold", 0) == 0:
             self._deliver_pending_notices()
 
     def _deliver_pending_notices(self) -> None:
         while True:
             with transport_base._conn_state_lock:
-                if not self._pending_notices:
+                pending: list[tuple[str, str, int]] = self.__dict__.setdefault("_pending_notices", [])
+                if not pending:
                     return
-                message, title, priority = self._pending_notices.pop(0)
+                message, title, priority = pending.pop(0)
             try:
                 self.send_message(message, title=title, priority=priority)
             except Exception as exc:
