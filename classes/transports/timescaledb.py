@@ -361,7 +361,8 @@ class TimescaleDBConnectionManager:
         pool_size: int = 5,
         max_overflow: int = 10,
         pool_recycle: int = 3600,
-        log: logging.Logger | None = None
+        log: logging.Logger | None = None,
+        connect_timeout: int = 10,
     ) -> None:
 
         self.host: str = host
@@ -372,6 +373,10 @@ class TimescaleDBConnectionManager:
         self.pool_size: int = pool_size
         self.max_overflow: int = max_overflow
         self.pool_recycle: int = pool_recycle
+        # Without these an unreachable host (powered off, firewall DROP) blocks every connect for the OS TCP timeout
+        # (about two minutes), stalling the flush worker and each reconnect attempt, and a half-open connection can hang
+        # a write for far longer.
+        self.connect_timeout: int = connect_timeout
         self._log: logging.Logger = log or logging.getLogger(__name__)
 
         self._engine: Engine | None = None
@@ -395,8 +400,19 @@ class TimescaleDBConnectionManager:
             pool_size=settings.getint("pool_size", fallback=5),
             max_overflow=settings.getint("max_overflow", fallback=10),
             pool_recycle=settings.getint("pool_recycle", fallback=3600),
-            log=log
+            log=log,
+            connect_timeout=settings.getint("connect_timeout", fallback=10),
         )
+
+    def _connect_args(self) -> dict[str, int]:
+        """libpq options passed to every new connection: a bounded connect, and TCP keepalives to notice a dead link."""
+        return {
+            "connect_timeout": self.connect_timeout,
+            "keepalives": 1,
+            "keepalives_idle": 30,
+            "keepalives_interval": 10,
+            "keepalives_count": 3,
+        }
 
     # -------------------------
     # Connection lifecycle
@@ -422,7 +438,8 @@ class TimescaleDBConnectionManager:
                     future=True,
                     pool_recycle=self.pool_recycle,
                     pool_size=self.pool_size,
-                    max_overflow=self.max_overflow
+                    max_overflow=self.max_overflow,
+                    connect_args=self._connect_args(),
                 )
                 with self._engine.connect() as conn:
                     conn.execute(text("SELECT 1"))
@@ -514,7 +531,7 @@ class TimescaleDBConnectionManager:
             f"@{self.host}:{self.port}/postgres"
         )
         try:
-            default_engine: Engine = create_engine(default_url, isolation_level="AUTOCOMMIT", pool_pre_ping=True)
+            default_engine: Engine = create_engine(default_url, isolation_level="AUTOCOMMIT", pool_pre_ping=True, connect_args=self._connect_args())
             with default_engine.connect() as conn:
                 row: Row[int] | None = conn.execute(
                     text("SELECT 1 FROM pg_database WHERE datname = :d"),
@@ -772,6 +789,8 @@ class timescaledb(transport_base):
         self.max_reconnect_delay: int = settings.getint("max_reconnect_delay", fallback=self.max_reconnect_delay)
         self.reconnect_attempts: int = settings.getint("reconnect_attempts", fallback=self.reconnect_attempts)
         self.reconnect_delay: int = settings.getint("reconnect_delay", fallback=self.reconnect_delay)
+        # seconds to wait for a database connection to be established (config key: connect_timeout)
+        self.connect_timeout: int = max(1, settings.getint("connect_timeout", fallback=10))
         self.force_float: bool = settings.getboolean("force_float", fallback=self.force_float)
 
         # stale data settings
@@ -870,7 +889,8 @@ class timescaledb(transport_base):
                 username=self.username,
                 password=self.password,
                 pool_size=pool_size,
-                log=self._log
+                log=self._log,
+                connect_timeout=self.connect_timeout,
             )
             self._connection_manager.connect()
 
@@ -2636,6 +2656,15 @@ class timescaledb(transport_base):
                 break
             time.sleep(0.5)
         try:
+            # A reconnect is already in progress and the database is known to be down: attempting the write would only
+            # wait out a connect timeout per point. Keep the point (backlog) and move on. When no reconnect is running
+            # (attempts exhausted) writes are still attempted: a committed write is what restarts the recovery.
+            with self._reconnect_lock:
+                outage_in_progress: bool = (not self.tsdb_connected) and self._reconnect_thread_running
+            if outage_in_progress:
+                self._keep_unwritten(data_in)
+                return False
+
             with self.schema_lock:
                 with session.begin():
                     # Further process the narrow data with the timestamp and device_info_id for insertion
@@ -2665,13 +2694,18 @@ class timescaledb(transport_base):
             except Exception as rollback_error:
                 self._log.error(f"Rollback after a failed write also failed: {rollback_error}")
 
-            replayed_rowid: int | None = data_in.get("backlog_rowid")
             connection_lost: bool = self._is_connection_error(e1)
             first_line: str = (str(e1).splitlines() or [type(e1).__name__])[0]
 
             if connection_lost:
                 # Flag the outage BEFORE deciding about the backlog, so the decision below never sees a stale "connected".
-                self._log.error(f"Database unreachable during flush write ({type(e1).__name__}): {first_line}")
+                # Only the write that discovers the outage is an error; probes made while it is already known are debug.
+                with self._reconnect_lock:
+                    already_down: bool = not self.tsdb_connected
+                self._log.log(
+                    logging.DEBUG if already_down else logging.ERROR,
+                    f"Database unreachable during flush write ({type(e1).__name__}): {first_line}",
+                )
                 self._set_tsdb_connected(conn_value = False, conn_reason = "Connection failure")
                 self._trigger_reconnect()
             elif isinstance(e1, SQLAlchemyError):
@@ -2686,18 +2720,7 @@ class timescaledb(transport_base):
 
             # Backlog only when the database is down (never for a batch the database rejected).
             if connection_lost or not tsdb_connected:
-                if replayed_rowid is not None:
-                    # Already stored in the backlog; keep it there for the next replay.
-                    self._retain_unwritten = True
-                else:
-                    self._backlog_live_point({
-                        "metrics": metrics_only,
-                        "device_info_id": device_info_id,
-                        "m_time": timestamp,
-                        "transport_name": transport_name,
-                        "protocol": protocol,
-                        "wide_table_name": wide_table_name,
-                    })
+                self._keep_unwritten(data_in)
         else:
             # The write committed. Runs here, not inside the try, so a problem in the recovery
             # hand-off can never be mistaken for a failed write, and is caught on its own so it
@@ -2845,6 +2868,14 @@ class timescaledb(transport_base):
             return pgcode.startswith("08") or pgcode in ("57P01", "57P02", "57P03")
         # No server error code: the client never got an answer (refused, reset, timed out, DNS failure...).
         return isinstance(exc, (OperationalError, InterfaceError))
+
+    def _keep_unwritten(self, data_in: FlushPayload) -> None:
+        """A point that could not be written because the database is down: a replayed point is already in the backlog and
+        simply stays there; a live point is journalled to it."""
+        if data_in.get("backlog_rowid") is not None:
+            self._retain_unwritten = True
+        else:
+            self._backlog_live_point(data_in)
 
     def _log_data_loss_throttled(self, reason: str) -> None:
         """Count a data point that could not be stored anywhere and report the running total at most once a minute."""
@@ -6231,6 +6262,11 @@ class RollupManager:
                 break # Success!
             except Exception as e:
                 if "lock_timeout" in str(e):
+                    if attempt == max_rollup_retries - 1:
+                        # Out of retries: report the failure to the caller (both callers log it and mark the rebuild
+                        # failed) instead of falling out of the loop as if the rollup setup had succeeded.
+                        self._log.error(f"Lock timeout on final attempt {attempt+1}/{max_rollup_retries}; giving up.")
+                        raise
                     self._log.warning(f"Lock timeout on attempt {attempt+1}. Retrying...")
                     time.sleep(5) # Wait for flush thread to clear
                 else:
@@ -8276,6 +8312,25 @@ class RollupManager:
             self._current_watchdog_signal[0] = True
             self._current_watchdog_signal = None
 
+    def _describe_lock_blockers(self, session: Session, pattern: str) -> str:
+        """What is holding the lock a refresh is waiting on, for the alert text. Best effort: returns "" on any problem."""
+        try:
+            rows: Sequence[Row[Tuple[Any, ...]]] = session.execute(text("""
+                SELECT b.pid, b.state, b.application_name, now() - b.xact_start AS open_for, left(b.query, 120) AS query
+                FROM pg_stat_activity a
+                CROSS JOIN LATERAL unnest(pg_blocking_pids(a.pid)) AS blocker(pid)
+                JOIN pg_stat_activity b ON b.pid = blocker.pid
+                WHERE a.query LIKE :pattern AND a.state != 'idle' AND a.pid != pg_backend_pid()
+            """), {"pattern": pattern}).fetchall()
+        except Exception as e:
+            self._log.debug(f"Could not look up the blocking sessions: {e}")
+            return ""
+        lines: list[str] = [
+            f"Blocked by pid {r.pid} ({r.state}, app '{r.application_name}', transaction open {r.open_for}): {r.query}"
+            for r in rows[:3]
+        ]
+        return ("\n" + "\n".join(lines)) if lines else ""
+
     # watchdog thread to monitor long-running refreshes
     def _start_refresh_watchdog_helper(self, view_name: str) -> List[bool]:
         """
@@ -8296,40 +8351,46 @@ class RollupManager:
         self._current_watchdog_signal: List[bool] | None = stop_signal
 
         def monitor() -> None:
+            alerted: bool = False
+            pattern: str = f"%refresh_continuous_aggregate%'{view_name}'%"
             # Use a short-lived session specifically for monitoring
             with self.SessionFactory() as session:
-                # Check both the signal and the DB state
                 while not stop_signal[0]:
+                    # The alert says the refresh has been running "for over 30 seconds", so wait that long BEFORE the
+                    # first look. Checking immediately flagged the brief lock waits every refresh has when it starts
+                    # (and raced the refresh query not having been sent yet). A refresh that completes sooner sets
+                    # the stop signal and this thread leaves without having touched the database.
+                    for _ in range(30):
+                        if stop_signal[0]:
+                            return
+                        time.sleep(1)
                     try:
-                        # We check if the refresh is still running
                         sql: TextClause = text("""
                             SELECT wait_event_type FROM pg_stat_activity
                             WHERE query LIKE :pattern
                             AND state != 'idle'
                             AND pid != pg_backend_pid()
                         """)
-                        res: AnyRow | None = session.execute(sql, {"pattern": f"%refresh_continuous_aggregate%'{view_name}'%"}).fetchone()
+                        res: AnyRow | None = session.execute(sql, {"pattern": pattern}).fetchone()
 
                         # If the query is gone from pg_stat_activity, the refresh is done
                         if not res:
                             break
 
-                        if res.wait_event_type == "Lock":  # Postgres reports the wait type as the string "Lock" (not threading.Lock)
+                        if res.wait_event_type == "Lock" and not alerted:  # Postgres reports the wait type as the string "Lock"
+                            alerted = True  # one alert per refresh; this watchdog is replaced by the next refresh's
+                            blockers: str = self._describe_lock_blockers(session, pattern)
                             msg: str = (
                                 f"⚠️ {view_name} is BLOCKED by a lock.\n"
                                 f"The refresh for {view_name} has been running for over 30 seconds and is "
                                 f"currently blocked by a lock. Please investigate the database locks to ensure "
-                                f"the refresh can complete successfully."
+                                f"the refresh can complete successfully.{blockers}"
                             )
-
+                            self._log.warning(msg.replace("\n", " | "))
                             self.send_message(message=msg, title="MPG Blocked View Alert", priority=1)
 
-
-                        # Sleep in small increments to remain responsive to the stop_signal
-                        for _ in range(30):
-                            if stop_signal[0]:
-                                return
-                            time.sleep(1)
+                        # End the read-only transaction so this monitor never sits "idle in transaction" between checks.
+                        session.rollback()
 
                     except Exception:
                         break

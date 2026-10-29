@@ -498,6 +498,25 @@ def test_a_replayed_point_is_kept_when_the_database_is_down_and_acknowledged_whe
     assert bridge.backlog.acked == [41]  # written: now it may leave the backlog
 
 
+def test_while_a_reconnect_is_running_points_are_kept_without_attempting_a_write(bridge: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The database is known to be down and a reconnect is in progress: each write would only wait out a connect timeout."""
+    writes: list[int] = []
+
+    def counting_write(*_args: object, **_kwargs: object) -> None:
+        writes.append(1)
+
+    bridge._reconnect_thread_running = True  # tsdb_connected is already False in the fixture
+    _prime_flush_worker(bridge, monkeypatch, narrow=counting_write)
+    replayed: dict[str, Any] = {**_item(1), "backlog_rowid": 7}
+    bridge._flush_queue = _queue_of(_item(0), replayed)
+    bridge._flush_worker()
+
+    assert writes == []  # no database round trip for either point
+    assert bridge.events == ["enqueue"]  # the live point was journalled
+    assert bridge.backlog.released == [7]  # the replayed one stays where it is
+    assert bridge._flush_queue.unfinished_tasks == 0
+
+
 def test_a_live_point_in_hand_at_shutdown_is_journalled_not_lost(bridge: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     writes: list[int] = []
 
