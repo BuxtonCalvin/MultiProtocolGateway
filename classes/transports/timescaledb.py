@@ -112,7 +112,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 # from sqlalchemy.engine.interfaces import ReflectedColumn
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.engine.interfaces import ReflectedColumn
-from sqlalchemy.exc import DBAPIError, OperationalError, SQLAlchemyError
+from sqlalchemy.exc import DBAPIError, InterfaceError, OperationalError, SQLAlchemyError
 from sqlalchemy.orm import (
     DeclarativeBase,
     Mapped,
@@ -895,6 +895,12 @@ class timescaledb(transport_base):
         self._flush_event: threading.Event = getattr(self, "_flush_event", threading.Event())
         # event used to stop all threads
         self._stop_event: threading.Event = getattr(self, "_stop_event", threading.Event())
+        # Flush-worker-only flag: the item just processed was NOT written and must stay in (or go to) the backlog.
+        self._retain_unwritten: bool = False
+        # Throttled accounting of data points that could not be stored anywhere (see _log_data_loss_throttled).
+        self._dropped_points: int = 0
+        self._last_drop_log: float = 0.0
+        self._closed: bool = False
 
         # init runtime backoff settings for connection attempts
         self._reconnect_lock: RLock = threading.RLock()     # prevents multiple concurrent TSDB reconnect triggers
@@ -1188,12 +1194,15 @@ class timescaledb(transport_base):
         Connection status messaging is handled separately in the connect base property setter to avoid issues with calling
         send_message before the transport is fully initialized.  This method focuses on internal state management and logging.
         """
-        with self._reconnect_lock:
-            if self.tsdb_connected != conn_value:   # if we change state
-                self.tsdb_connected: bool = conn_value  # new state
-                self.connected = self.tsdb_connected  # set the MPG connected flag here to mimic central connection state.
-                self.rollup_policy["tsdb_connected"] = conn_value  # set the connect status in the rollup class.
-                self._log.info(f"TimescaleDB is connected -> {conn_value} ({conn_reason})")
+        # _notices_held: the connection-state notification is queued while the lock is held and sent, on this thread,
+        # only after the lock is released, so slow messaging services can never stall the flush/write paths.
+        with self._notices_held():
+            with self._reconnect_lock:
+                if self.tsdb_connected != conn_value:   # if we change state
+                    self.tsdb_connected: bool = conn_value  # new state
+                    self.connected = self.tsdb_connected  # set the MPG connected flag here to mimic central connection state.
+                    self.rollup_policy["tsdb_connected"] = conn_value  # set the connect status in the rollup class.
+                    self._log.info(f"TimescaleDB is connected -> {conn_value} ({conn_reason})")
 
     # -------------------------
     # reconnect/backoff
@@ -1267,8 +1276,8 @@ class timescaledb(transport_base):
 
                     try:
                         if getattr(self, "enable_persistent_storage", False):
-                            with self._backlog_lock:
-                                self.backlog.replay_to_queue()
+                            # BacklogManager takes its own lock and sends its notice after releasing it.
+                            self.backlog.replay_to_queue()
                     except Exception as e:
                         self._log.error(f"Backlog flush failed after reconnect: {e}")
                         self.send_message(
@@ -1315,15 +1324,17 @@ class timescaledb(transport_base):
         if self._stop_event.is_set():
             return
 
-        with self._reconnect_lock:
-            if self._reconnect_thread_running:
-                return
-            self._reconnect_thread_running = True
-            # set tsdb_connected False immediately to cause upstream to stop DB work
-            self._set_tsdb_connected(conn_value = False, conn_reason = "Connect unsuccessful")
-            self._stop_reconnect_event.clear()
-            threading.Thread(target=self._attempt_reconnect, daemon=True, name= "TSDB ReconnectThread").start()
-            self._log.info("Reconnect thread started.")
+        # Notices queued by the state change below are sent after the lock is released.
+        with self._notices_held():
+            with self._reconnect_lock:
+                if self._reconnect_thread_running:
+                    return
+                self._reconnect_thread_running = True
+                # set tsdb_connected False immediately to cause upstream to stop DB work
+                self._set_tsdb_connected(conn_value = False, conn_reason = "Connect unsuccessful")
+                self._stop_reconnect_event.clear()
+                threading.Thread(target=self._attempt_reconnect, daemon=True, name= "TSDB ReconnectThread").start()
+                self._log.info("Reconnect thread started.")
 
     def _recover_if_flagged_disconnected(self) -> None:
         """
@@ -2492,12 +2503,21 @@ class timescaledb(transport_base):
                 # in the registry map for that transport. This is to prevent the registry map from growing indefinitely
                 # with old transports that are no longer sending data.
                 if time.time() - self._last_cleanup_time > 86400:
-                    self._cleanup_stale_registry()
+                    try:
+                        self._cleanup_stale_registry()
+                    except Exception as e:
+                        self._log.error(f"Stale registry cleanup failed: {e}")
                     self._last_cleanup_time = time.time()
 
-                self._flush_event.wait(timeout=0)
-                #************** Drain the queue with a 1s timeout to stay responsive************
-                data_in: FlushPayload | None = self._flush_queue.get(block=True)
+                # Wake at least once a second so the cleanup above runs even when no data arrives, any
+                # acknowledged backlog rows get committed, and a stop request is noticed without a sentinel.
+                try:
+                    data_in: FlushPayload | None = self._flush_queue.get(timeout=1.0)
+                except queue.Empty:
+                    self.backlog.commit_acks()
+                    if self._stop_event.is_set():
+                        break
+                    continue
 
                 # Every item taken off the queue is marked done exactly once, by the finally below, whether
                 # _flush_one finishes it, asks the worker to stop, or raises. (Calling task_done() from several
@@ -2507,16 +2527,45 @@ class timescaledb(transport_base):
                 try:
                     stop = self._flush_one(data_in, session)
                 except Exception as e:
-                    self._log.critical(f" Fatal Flush Worker Crash: {e}")
+                    # One bad item must not stop the worker; log it with its traceback and carry on.
+                    self._log.exception(f"Flush worker error while processing one item (item skipped): {e}")
                 finally:
                     self._flush_queue.task_done()
                 if stop:
                     break
+                if self._flush_queue.empty():
+                    self.backlog.commit_acks()
 
         finally:
             session.close()
 
     def _flush_one(self, data_in: FlushPayload | None, session: Session) -> bool:
+        """
+        Process one queue item with _flush_one_inner, then settle where that item now lives.
+
+        A point replayed from the backlog carries a `backlog_rowid` and stays in the backlog (memory + SQLite)
+        until it has actually been handled: it is acknowledged (removed) once written or deliberately dropped, and
+        released (kept, eligible for the next replay) if the database was unreachable or the app is shutting down.
+        A live point that could not be written because the app is shutting down is journalled to the backlog.
+        """
+        rowid: int | None = data_in.get("backlog_rowid") if data_in is not None else None
+        self._retain_unwritten = False
+        try:
+            # Notices raised while schema/session locks are held (stale alerts, connection state) go out when this exits.
+            with self._notices_held():
+                return self._flush_one_inner(data_in, session)
+        finally:
+            retain: bool = self._retain_unwritten
+            self._retain_unwritten = False
+            if rowid is not None:
+                if retain:
+                    self.backlog.release(rowid)
+                else:
+                    self.backlog.ack(rowid)
+            elif retain and data_in is not None:
+                self._backlog_live_point(data_in)
+
+    def _flush_one_inner(self, data_in: FlushPayload | None, session: Session) -> bool:
         """
         Process one item taken off the flush queue: check it for staleness, write it to the narrow (and wide) table,
         or route it to the backlog if the write fails. Returns True when the worker should stop (the shutdown
@@ -2579,6 +2628,7 @@ class timescaledb(transport_base):
             }
 
         if self._stop_event.is_set():
+            self._retain_unwritten = True  # not written: keep it (replayed) or journal it (live) instead of losing it
             return True
 
         while self.migration_in_progress.is_set():
@@ -2610,38 +2660,44 @@ class timescaledb(transport_base):
                 self._commit_transport_state(transport_name, metrics_only, timestamp, is_stale=False)
 
         except (SQLAlchemyError, ValueError) as e1:
-            session.rollback()
-            self._log.error(f"metrics data write failed.{e1}")
+            try:
+                session.rollback()
+            except Exception as rollback_error:
+                self._log.error(f"Rollback after a failed write also failed: {rollback_error}")
 
-            # Only backlog if setting enabled and DB is down
+            replayed_rowid: int | None = data_in.get("backlog_rowid")
+            connection_lost: bool = self._is_connection_error(e1)
+            first_line: str = (str(e1).splitlines() or [type(e1).__name__])[0]
+
+            if connection_lost:
+                # Flag the outage BEFORE deciding about the backlog, so the decision below never sees a stale "connected".
+                self._log.error(f"Database unreachable during flush write ({type(e1).__name__}): {first_line}")
+                self._set_tsdb_connected(conn_value = False, conn_reason = "Connection failure")
+                self._trigger_reconnect()
+            elif isinstance(e1, SQLAlchemyError):
+                # The database answered and refused this batch (bad value, constraint, missing column...). The
+                # connection is fine, so this is not an outage: no "connection lost" alert, no reconnect.
+                self._log.error(f"Data write rejected by the database (connection is fine); this batch is dropped: {e1}", exc_info=True)
+            else:
+                self._log.error(f"Data write skipped; this batch is dropped: {e1}")
+
             with self._reconnect_lock:
                 tsdb_connected: bool = self.tsdb_connected
 
-            if self.enable_persistent_storage and not tsdb_connected:
-                # Check if we can get the lock
-                acquired: bool = self._backlog_lock.acquire(blocking=False)
-                try:
-                    if acquired:
-                        payload: FlushPayload = {
-                            "metrics": metrics_only,
-                            "device_info_id": device_info_id,
-                            "m_time": timestamp,
-                            "transport_name": transport_name,
-                            "protocol": protocol,
-                            "wide_table_name": wide_table_name,
-                        }
-                        self.backlog.enqueue(payload)
-
-                finally:
-                    if acquired:
-                        self._backlog_lock.release()
-
-            # Handle recovery
-            if isinstance(e1, SQLAlchemyError):
-                self._set_tsdb_connected(conn_value = False, conn_reason = "Connection failure")
-                msg = ("Connection failure detected during flush worker write. Data has been "
-                "enqueued to backlog and will be retried when connection is restored.")
-                self._trigger_reconnect()
+            # Backlog only when the database is down (never for a batch the database rejected).
+            if connection_lost or not tsdb_connected:
+                if replayed_rowid is not None:
+                    # Already stored in the backlog; keep it there for the next replay.
+                    self._retain_unwritten = True
+                else:
+                    self._backlog_live_point({
+                        "metrics": metrics_only,
+                        "device_info_id": device_info_id,
+                        "m_time": timestamp,
+                        "transport_name": transport_name,
+                        "protocol": protocol,
+                        "wide_table_name": wide_table_name,
+                    })
         else:
             # The write committed. Runs here, not inside the try, so a problem in the recovery
             # hand-off can never be mistaken for a failed write, and is caught on its own so it
@@ -2759,13 +2815,9 @@ class timescaledb(transport_base):
                 self._log.info(f"data write complete from [{transport_name}] to timescaledb narrow table for {len(narrow_mappings)} metrics.")
 
         except SQLAlchemyError as e:
-            # A refused/dropped connection is an expected outage, handled below (backlog + auto-reconnect).
-            # Log it as one line instead of a ~200 line stack trace; keep the full trace for anything else.
-            if isinstance(e, OperationalError) or (isinstance(e, DBAPIError) and e.connection_invalidated):
-                orig_exc: BaseException | None = e.orig
-                err_type: str = type(orig_exc if orig_exc is not None else e).__name__
-                self._log.error(f"Narrow flush failed (database unreachable): {err_type}: {str(e).splitlines()[0]}")
-            else:
+            # Connection failures are reported once, by the outer handler in _flush_one_inner (which also flags the
+            # outage and starts the reconnect). Only unexpected database errors get a traceback here.
+            if not self._is_connection_error(e):
                 self._log.exception(f"Narrow flush failed: {e}")
             try:
                 session.rollback()
@@ -2773,12 +2825,69 @@ class timescaledb(transport_base):
                 # Rolling back on a dead connection can itself raise (not always a SQLAlchemyError); never let it escape.
                 self._log.error(f"Narrow flush rollback failed: {e2}")
 
-            # === Auto Reconnect handling ===
-            self._set_tsdb_connected(conn_value = False, conn_reason = "Connect unsuccessful")
-            self._trigger_reconnect()
+            raise  # Re-raise: the outer handler decides between backlog, drop and reconnect
 
-            raise  # Re-raise to be caught by outer handler for potential backlog queuing
 
+    @staticmethod
+    def _is_connection_error(exc: BaseException) -> bool:
+        """
+        True only when the database could not be reached or the connection broke. Errors the server answered
+        (constraint violations, bad values, lock/statement timeouts, serialization failures) are NOT connection
+        problems even though SQLAlchemy may wrap some of them in OperationalError.
+        """
+        if not isinstance(exc, DBAPIError):
+            return False
+        if exc.connection_invalidated:
+            return True
+        pgcode: object = getattr(exc.orig, "pgcode", None)
+        if isinstance(pgcode, str):
+            # 08xxx = connection exception; 57P01/02/03 = server shutdown / crash shutdown / cannot connect now.
+            return pgcode.startswith("08") or pgcode in ("57P01", "57P02", "57P03")
+        # No server error code: the client never got an answer (refused, reset, timed out, DNS failure...).
+        return isinstance(exc, (OperationalError, InterfaceError))
+
+    def _log_data_loss_throttled(self, reason: str) -> None:
+        """Count a data point that could not be stored anywhere and report the running total at most once a minute."""
+        self._dropped_points += 1
+        now: float = time.monotonic()
+        if now - self._last_drop_log >= 60.0:
+            self._log.warning(f"{self._dropped_points} data point(s) could not be stored and were dropped ({reason}).")
+            self._dropped_points = 0
+            self._last_drop_log = now
+
+    def _backlog_live_point(self, payload: FlushPayload) -> None:
+        """Journal a live (not yet written) point to the backlog; never lose it silently."""
+        if not self.enable_persistent_storage:
+            self._log_data_loss_throttled("database unavailable and persistent storage is disabled")
+            return
+        try:
+            if not self.backlog.enqueue(payload):
+                self._log_data_loss_throttled("backlog busy")
+        except Exception as e:
+            self._log.error(f"Backlog enqueue failed; data point from [{payload['transport_name']}] was lost: {e}")
+
+    def _persist_unflushed_queue(self) -> None:
+        """At shutdown, journal any live points still waiting in the flush queue so a restart does not lose them."""
+        saved: int = 0
+        lost: int = 0
+        while True:
+            try:
+                item: FlushPayload | None = self._flush_queue.get_nowait()
+            except queue.Empty:
+                break
+            try:
+                if item is not None and item.get("backlog_rowid") is None:
+                    if self.enable_persistent_storage and self.backlog.enqueue(item):
+                        saved += 1
+                    else:
+                        lost += 1
+            except Exception as e:
+                lost += 1
+                self._log.error(f"Could not journal an unflushed point at shutdown: {e}")
+            finally:
+                self._flush_queue.task_done()
+        if saved or lost:
+            self._log.info(f"Shutdown: {saved} unflushed point(s) saved to the backlog, {lost} lost.")
 
     def _check_is_stale(self, transport_id: str, row: dict[str, int | float | str], timestamp: datetime) -> bool:
         """_summary_   Stale Data Detection and Handling
@@ -2966,7 +3075,8 @@ class timescaledb(transport_base):
             minutes: float = total_stale_elapsed.total_seconds() / 60
             msg: str = (f"Transport [{transport_id}] stale for {minutes:.1f} mins. "
                 f"Attempt {state['stale_event_count']} of {self.max_stale_attempts}.")
-            self.send_message(message=msg,title="MPG Stale Event Alert", priority=1)
+            # Queued, not sent: this runs inside the flush worker's lock scope; _flush_one sends it after the locks are released.
+            self._queue_notice(msg, "MPG Stale Event Alert", 1)
         except Exception:
             self._log.exception(f"[{transport_id}] Failed sending MPG notification.")
 
@@ -2983,6 +3093,9 @@ class timescaledb(transport_base):
     # Close / cleanup
     # -------------------------
     def close(self) -> None:
+        if getattr(self, "_closed", False):
+            return  # close() is also reached from __del__; only the first call does the work
+        self._closed = True
         self._log.debug("Closing transport")
 
         if self.rollup_mgr:
@@ -3008,6 +3121,13 @@ class timescaledb(transport_base):
         except Exception as e:
             self._log.error(f"Error stopping flush thread: {e}")
 
+        # Whatever the flush worker did not get to must survive the restart: journal it, and commit pending acks.
+        try:
+            self._persist_unflushed_queue()
+            self.backlog.commit_acks()
+        except Exception as e:
+            self._log.error(f"Error saving unflushed data at shutdown: {e}")
+
         try:
             self._connection_manager.unregister()
         except Exception as e:
@@ -3015,14 +3135,14 @@ class timescaledb(transport_base):
 
     def __del__(self) -> None:
         try:
-            if hasattr(self, "close") and callable(getattr(self, "close", None)):
-                self.close()
+            self.close()
         except Exception as e:
-            if hasattr(self, '_log'):
-                try:
-                    self._log.error(f"Exception in __del__: {e}")
-                except Exception:
-                    self._log.error(f"Exception in __del__: {e}")
+            log: logging.Logger | None = getattr(self, "_log", None)
+            if log is not None:
+                msg: str = f"Exception in __del__ of {self.__class__.__name__}: {e}"
+                log.exception(msg)
+
+
 class SendMessageProtocol(Protocol):
     def __call__(
         self,
@@ -3041,7 +3161,7 @@ class SendMessageProtocol(Protocol):
 # point to SQLite as JSON), so it is also the only place its types can be lost, and the only place they are restored.
 # ---------------------------------------------------------------------------------------------------------------------
 
-class FlushPayload(TypedDict):
+class _FlushPayloadBase(TypedDict):
     """One data point in the flush queue. `m_time` is always a datetime here. The on-disk backlog stores it as text
     (json.dumps(..., default=str) turns it into str(datetime)), and BacklogManager.load_from_disk restores the
     datetime when it reads a point back, so nothing downstream of that boundary ever sees a string. `metrics` is the
@@ -3053,6 +3173,12 @@ class FlushPayload(TypedDict):
     transport_name: str
     protocol: str
     wide_table_name: str | None  # None means a narrow-only protocol
+
+
+class FlushPayload(_FlushPayloadBase, total=False):
+    """A _FlushPayloadBase plus `backlog_rowid`, present only on a point replayed from the backlog: the SQLite rowid
+    the flush worker uses to acknowledge (delete) the point once it has really been written."""
+    backlog_rowid: int
 
 
 class _MalformedFlushPayload(ValueError):
@@ -3131,9 +3257,16 @@ class BacklogManager:
     Atomicity contract:
     - enqueue():         SQLite write first -> memory update only if disk succeeds.
     - overflow eviction: SQLite DELETE first -> memory pop only if disk succeeds.
-    - replay_to_queue(): memory cleared, then SQLite wiped via _clear_disk().
+    - replay_to_queue(): points are COPIED to the flush queue (tagged with their rowid) and stay in memory and
+      on disk. The flush worker calls ack(rowid) once a point has really been written (or deliberately dropped),
+      or release(rowid) if the database was unreachable, so a crash or a failed write never loses a replayed point.
+      Acknowledged rows are deleted from SQLite in batches (commit_acks()); a crash in between can at worst
+      replay a few already-written points after a restart, never lose one.
     This ordering ensures SQLite is always the authoritative record on crash. At worst a point
     exists on disk but not in memory (recovered on next load_from_disk()), never the reverse.
+
+    Notifications: nothing here sends a message while the backlog lock is held. Messages are collected in an outbox
+    and sent by flush_notices() after the lock is released (no extra thread).
 
     rowid tracking:
     A parallel list (_backlog_rowids) stores the SQLite rowid for each entry in backlog_points
@@ -3164,6 +3297,30 @@ class BacklogManager:
 
         self.backlog_points: list[FlushPayload] = []
         self._backlog_rowids: list[int] = []    # parallel to backlog_points: rowid[i] belongs to backlog_points[i]
+        self._inflight: set[int] = set()        # rowids currently sitting in the flush queue (replayed, not yet settled)
+        self._pending_deletes: list[int] = []   # acknowledged rowids not yet deleted from SQLite
+        self._outbox: list[tuple[str, str, int]] = []
+        self._outbox_lock: threading.Lock = threading.Lock()
+
+    # -------------------------
+    # Notifications (sent only after the backlog lock is released)
+    # -------------------------
+
+    def _say(self, message: str, title: str, priority: int = 1) -> None:
+        """Queue a notification. Safe to call while holding the backlog lock; nothing is sent until flush_notices()."""
+        with self._outbox_lock:
+            self._outbox.append((message, title, priority))
+
+    def flush_notices(self) -> None:
+        """Send queued notifications. Callers must NOT hold the backlog lock."""
+        with self._outbox_lock:
+            items: list[tuple[str, str, int]] = list(self._outbox)
+            self._outbox.clear()
+        for message, title, priority in items:
+            try:
+                self.send_message(message=message, title=title, priority=priority)
+            except Exception as e:
+                self._log.error(f"Failed to send backlog notification '{title}': {e}")
 
     # -------------------------
     # Load Persistent backlog
@@ -3234,21 +3391,28 @@ class BacklogManager:
 
                 self.backlog_points = loaded_points
                 self._backlog_rowids = loaded_rowids
+                self._inflight.clear()
+                self._pending_deletes.clear()
 
             self._log.info("Loaded %d points from disk", len(loaded_points))
 
         except Exception as e:
             self._log.exception(f"Failed to process backlog file: {e}")
-            self.send_message(
+            self._say(
                 message="Failed to load backlog from disk. Check logs for details.",
                 title="MPG Backlog Load Error",
                 priority=1
             )
+        finally:
+            self.flush_notices()
 
-    def enqueue(self, point: FlushPayload) -> None:
+    def enqueue(self, point: FlushPayload, timeout: float = 5.0) -> bool:
         """
         Add a point to the backlog. SQLite is always written before memory is updated so that
         a crash mid-call leaves SQLite as the authoritative record.
+
+        Returns True when the point was stored, False when the backlog lock could not be obtained within `timeout`
+        seconds (the point is NOT stored and the caller must account for it). Disk errors still raise.
 
         On overflow, the oldest row is deleted from SQLite first, then removed from memory.
         The new point is then inserted into SQLite first, then appended to memory. If either
@@ -3274,7 +3438,10 @@ class BacklogManager:
                 }
 }
         """
-        with self._backlog_lock:
+        if not self._backlog_lock.acquire(timeout=timeout):
+            self._log.error(f"Backlog busy for more than {timeout}s; a data point from [{point['transport_name']}] was not stored.")
+            return False
+        try:
             if len(self.backlog_points) >= self.max_backlog_size:
                 self._log.warning(f"Max backlog size ({self.max_backlog_size}) reached. Dropping oldest point.")
                 # Delete oldest from SQLite first — memory is unchanged until disk succeeds.
@@ -3283,37 +3450,87 @@ class BacklogManager:
                 # Disk succeeded — safe to evict from memory.
                 self.backlog_points.pop(0)
                 self._backlog_rowids.pop(0)
+                self._inflight.discard(oldest_rowid)
 
             # Insert new point into SQLite first — memory is unchanged until disk succeeds.
             new_rowid: int = self._append_to_disk(point)
             # Disk succeeded — safe to append to memory.
             self.backlog_points.append(point)
             self._backlog_rowids.append(new_rowid)
+            return True
+        finally:
+            self._backlog_lock.release()
+            self.flush_notices()
 
     def replay_to_queue(self) -> int:
         """
-        Transfer all backlog points to the flush queue, then clear both memory and disk.
-        Returns the number of points replayed.
+        Copy every backlog point that is not already queued into the flush queue, tagged with its rowid.
+        The points stay in the backlog until the flush worker settles them with ack() or release().
+        Returns the number of points queued by this call.
         """
+        count: int = 0
         with self._backlog_lock:
-            if not self.backlog_points:
-                return 0
-            count: int = len(self.backlog_points)
-            self._log.debug(f"Replaying {count} points to flush queue.")
-            for payload in self.backlog_points:
-                self._flush_queue.put(payload)
-            # Clear memory first — the flush queue holds the authoritative copy during the
-            # brief window before _clear_disk() completes.
-            self.backlog_points.clear()
-            self._backlog_rowids.clear()
-            self._clear_disk()
-            self.send_message(
-                message=f"Replayed {count} backlog points to flush queue.",
-                title="MPG Backlog Sent to Queue",
-                priority=1
-            )
-            self._log.info(f"Backlog replay complete: {count} points sent to flush queue.")
+            untracked: list[int] = []
+            for index, (payload, rowid) in enumerate(zip(self.backlog_points, self._backlog_rowids)):
+                if rowid in self._inflight:
+                    continue  # already waiting in the flush queue from an earlier replay
+                if rowid < 0:
+                    # Not journalled to SQLite, so it cannot be acknowledged later: hand it over for good.
+                    self._flush_queue.put(payload)
+                    untracked.append(index)
+                else:
+                    self._flush_queue.put(cast(FlushPayload, {**payload, "backlog_rowid": rowid}))
+                    self._inflight.add(rowid)
+                count += 1
+            for index in reversed(untracked):
+                self.backlog_points.pop(index)
+                self._backlog_rowids.pop(index)
+            if count:
+                self._log.debug(f"Replaying {count} points to flush queue.")
+                self._say(
+                    message=f"Replayed {count} backlog points to flush queue.",
+                    title="MPG Backlog Sent to Queue",
+                    priority=1
+                )
+                self._log.info(f"Backlog replay complete: {count} points sent to flush queue.")
+        self.flush_notices()
         return count
+
+    def ack(self, rowid: int) -> None:
+        """A replayed point was written (or deliberately dropped): remove it from memory now and from SQLite in a batch."""
+        do_commit: bool = False
+        with self._backlog_lock:
+            self._inflight.discard(rowid)
+            try:
+                index: int = self._backlog_rowids.index(rowid)
+            except ValueError:
+                return  # already evicted by the overflow rule
+            self.backlog_points.pop(index)
+            self._backlog_rowids.pop(index)
+            self._pending_deletes.append(rowid)
+            do_commit = len(self._pending_deletes) >= 200
+        if do_commit:
+            self.commit_acks()
+
+    def release(self, rowid: int) -> None:
+        """A replayed point could not be written (database down / shutdown): keep it; the next replay re-sends it."""
+        with self._backlog_lock:
+            self._inflight.discard(rowid)
+
+    def commit_acks(self) -> None:
+        """Delete acknowledged rows from SQLite in one transaction. Failures are reported and retried on the next call."""
+        try:
+            with self._backlog_lock:
+                if not self._pending_deletes:
+                    return
+                batch: list[int] = list(self._pending_deletes)
+                try:
+                    self._delete_rows_from_disk(batch)
+                except Exception:
+                    return  # already logged and queued as a notification; the rows stay pending for a retry
+                del self._pending_deletes[:len(batch)]
+        finally:
+            self.flush_notices()
 
     # -------------------------
     # Disk helpers
@@ -3327,7 +3544,7 @@ class BacklogManager:
         if not self.backlog_file_path:
             return -1
         m_time_str: str = str(point["m_time"])
-        payload_str: str = json.dumps(point, default=str)
+        payload_str: str = json.dumps({k: v for k, v in point.items() if k != "backlog_rowid"}, default=str)
 
         try:
             con: sqlite3.Connection = self._db_connect()
@@ -3344,7 +3561,7 @@ class BacklogManager:
                 con.close()
         except Exception as e:
             self._log.error(f"Failed to append point to backlog disk: {e}")
-            self.send_message(
+            self._say(
                 message="Failed to write point to backlog on disk. Check logs for details.",
                 title="MPG Backlog Write Error",
                 priority=1
@@ -3367,31 +3584,31 @@ class BacklogManager:
                 con.close()
         except Exception as e:
             self._log.error(f"Failed to delete row {rowid} from backlog disk: {e}")
-            self.send_message(
+            self._say(
                 message="Failed to delete oldest point from backlog on disk. Check logs for details.",
                 title="MPG Backlog Delete Error",
                 priority=1
             )
             raise
 
-    def _clear_disk(self) -> None:
+    def _delete_rows_from_disk(self, rowids: list[int]) -> None:
         """
-        Delete all rows from the SQLite backlog table. Called after replay_to_queue()
-        once memory has already been cleared.
+        Delete several rows from SQLite in one transaction (acknowledged replay points).
+        Raises on failure — the caller keeps the rowids pending so the delete is retried.
         """
-        if not self.backlog_file_path:
+        if not self.backlog_file_path or not rowids:
             return
         try:
             con: sqlite3.Connection = self._db_connect()
             try:
-                con.execute("DELETE FROM backlog")
+                con.executemany("DELETE FROM backlog WHERE id = ?", [(rowid,) for rowid in rowids])
                 con.commit()
             finally:
                 con.close()
         except Exception as e:
-            self._log.error(f"Failed to clear backlog from disk: {e}")
-            self.send_message(
-                message="Failed to clear backlog on disk. Check logs for details.",
+            self._log.error(f"Failed to delete {len(rowids)} acknowledged rows from backlog disk: {e}")
+            self._say(
+                message="Failed to clear replayed points from the backlog on disk. Check logs for details.",
                 title="MPG Backlog Clear Error",
                 priority=1
             )
@@ -5711,7 +5928,7 @@ class RollupManager:
         4 _flush_worker finishes writing everything to the Hypertable and calls task_done() for each.
         5 RollupManager resumes and calls refresh_continuous_aggregate.
 
-        Backlog Safety: The _refresh_rollup_loop wraps replay_to_queue() in the _backlog_lock and waits for completion via .join().
+        Backlog Safety: The _refresh_rollup_loop calls replay_to_queue() (which locks internally) and then waits for completion via .join() without holding the backlog lock.
         Attribute Persistence: All granular intervals (e.g., hourly_compress_after_interval) are mapped from the rollup_policy in __init__.
         Live State: tsdb_connected and current_metric_count are implemented as @property to track the timescaledb class state in real-time.
         SQL Execution: The SET work_mem uses the single-quote fix to prevent f-string placeholder errors.
@@ -8097,7 +8314,7 @@ class RollupManager:
                         if not res:
                             break
 
-                        if res.wait_event_type == Lock:
+                        if res.wait_event_type == "Lock":  # Postgres reports the wait type as the string "Lock" (not threading.Lock)
                             msg: str = (
                                 f"⚠️ {view_name} is BLOCKED by a lock.\n"
                                 f"The refresh for {view_name} has been running for over 30 seconds and is "
@@ -8162,12 +8379,13 @@ class RollupManager:
                 # 3. Drain Backlog Before Refresh
                 # This ensures late/backlogged data is in the hypertable
                 # so the CAGG refresh includes it.
-                with self._backlog_lock:
-                    count: int = self.backlog.replay_to_queue()
-                    if count > 0:
-                        self._log.debug(f"Replayed {count} points. Waiting for flush...")
-                        # Wait for flush worker to finish writing replayed points
-                        self._flush_queue.join()
+                # replay_to_queue() takes the backlog lock only for the replay itself. The wait below must NOT hold
+                # it: the flush worker needs that lock to journal points while the database is down.
+                count: int = self.backlog.replay_to_queue()
+                if count > 0:
+                    self._log.debug(f"Replayed {count} points. Waiting for flush...")
+                    # Wait for flush worker to finish writing replayed points
+                    self._flush_queue.join()
 
                 # 4. Sequential Hierarchical Refresh
                 # Order: Hourly -> Daily -> Weekly -> Monthly

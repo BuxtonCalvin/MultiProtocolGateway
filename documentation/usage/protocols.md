@@ -226,6 +226,8 @@ r7~14         registers 14 down to 7 (descending — reversed read order)
 0x11A~0x11B   hex range (give both ends the prefix)
 ```
 
+In a range, each register is decoded on its own and the pieces are joined. NUL bytes inside a piece are skipped, so devices that send one character per register (`00 31` for `1`, as ABB's native Modbus maps do) read correctly. A sized single-address string such as `ASCII.16` is different: it is one field, and text after its first NUL byte is ignored.
+
 Range notation implies consecutive ascending addresses and is intended for `ASCII` and `HEX` types. For numeric multi-word values, always use the explicit underscore format instead.
 
 ---

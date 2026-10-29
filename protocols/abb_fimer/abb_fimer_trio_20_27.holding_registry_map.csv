@@ -1,0 +1,8 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note,ha_device_class,ha_state_class,ha_entity_category
+"# SOURCE: ABB/FIMER 'Modbus RTU Register Map - Version GT05, TRIO-20.0(27.6)-TL-OUTD (rev 1.6, 2016)' (vendor document). ABB's tables give 1-based Modbus Data Addresses and state that the PDU address on the wire is one less, so every CSV register here is the table address minus 1 (each note shows the table address).",,,,,,,,,,,,
+"# FUNCTION CODES: measurements are input registers (FC04); heartbeat and grid measures in the holding map are FC03. Controls and set points (holding 180-227, 299, 501-516) are writable in the inverter but deliberately not mapped here.",,,,,,,,,,,,
+299,heartbeat,Heartbeat Counter,s,USHORT,,,R,,"table 300; increments every second, wraps at 65535",,,diagnostic
+300,grid_reactive_power,Inverter - Grid Reactive Power,VAr,FLOAT32,,,R,"{""Register_Endian"": ""little_endian-CDAB""}","table 301; IEEE-754 float, word-swapped (low register first). Returns 0xFFFFFFFF if the inverter does not support it.",reactive_power,measurement,
+302,grid_voltage_holding,Inverter - Grid Voltage,V,FLOAT32,,,R,"{""Register_Endian"": ""little_endian-CDAB""}","table 303; IEEE-754 float, word-swapped (low register first).",voltage,measurement,
+304,grid_power_holding,Inverter - Grid Power,W,FLOAT32,,,R,"{""Register_Endian"": ""little_endian-CDAB""}","table 305; IEEE-754 float, word-swapped (low register first).",power,measurement,
+306,grid_current_holding,Inverter - Grid Current,A,FLOAT32,,,R,"{""Register_Endian"": ""little_endian-CDAB""}","table 307; IEEE-754 float, word-swapped (low register first).",current,measurement,

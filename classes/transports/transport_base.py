@@ -25,10 +25,19 @@ import re
 import sys
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, ClassVar, Iterator, Literal, Optional
+from typing import (
+    TYPE_CHECKING,
+    Callable,
+    ClassVar,
+    Generator,
+    Iterator,
+    Literal,
+    Optional,
+)
 
 from classes.messaging.message_handler import send_message as _send_message
 from classes.protocol_settings import (
@@ -236,6 +245,10 @@ class TransportWriteMode(Enum):
 class transport_base:
     """Scheduling path: All (Sequential, Concurrent, Interleaved) — base class for every transport regardless of read_mode."""
 
+    # Guards the tiny connection-state transition in the `connected` setter and the pending-notice list.
+    # It is never held while a notification is sent or a file is touched.
+    _conn_state_lock: ClassVar[threading.Lock] = threading.Lock()
+
     @property
     def connected(self) -> bool:
         """Scheduling path: All (Sequential, Concurrent, Interleaved)."""
@@ -259,21 +272,28 @@ class transport_base:
         - Does not call connect() itself — that remains the caller's
         responsibility to avoid re-entrance on the setter
         """
-        previous: bool = self._connected
-        self._connected = value
+        # Only the state transition itself happens under the (tiny, never-held-during-I/O) state lock.
+        # Logging, marker-file I/O and notifications all happen after it is released.
+        with transport_base._conn_state_lock:
+            previous: bool = self._connected
+            self._connected = value
 
-        # Ignore no-op assignments — subclass code sets
-        # self.connected = False in multiple error handlers and that's fine;
-        # we only care about genuine transitions.
-        if value == previous:
-            return
+            # Ignore no-op assignments — subclass code sets
+            # self.connected = False in multiple error handlers and that's fine;
+            # we only care about genuine transitions.
+            if value == previous:
+                return
+
+            was_ever_connected: bool = self._ever_connected
+            if value:
+                # False → True: connection established or re-established
+                self._needs_reconnection = False
+                self._ever_connected = True
+            else:
+                # True → False: connection lost
+                self._needs_reconnection = True
 
         if value:
-            # False → True: connection established or re-established
-            self._needs_reconnection = False
-            was_previously_connected: bool = self._ever_connected
-            self._ever_connected = True
-
             self._log.info(f"[CONNECTED] {self.transport_name} connection established.")
 
             # A "connection lost" alert may have been sent by a previous run of the app that
@@ -281,33 +301,66 @@ class transport_base:
             # The persisted marker lets this run finish that story.
             had_pending_alert: bool = self._consume_disconnect_marker()
 
-            if was_previously_connected or had_pending_alert:
+            if was_ever_connected or had_pending_alert:
                 # Recovery after a known loss — worth alerting.
                 # Still suppressed on a normal startup connect (no marker, never connected before).
-                suffix: str = "" if was_previously_connected else " (after application restart)"
-                self.send_message(
+                suffix: str = "" if was_ever_connected else " (after application restart)"
+                self._queue_notice(
                     f"Connection restored: {self.transport_name} "
                     f"({getattr(self, 'host', getattr(self, 'port', ''))}){suffix}",
-                    title=f"MPG Connection Restored for {self.transport_name}",
-                    priority=1,
+                    f"MPG Connection Restored for {self.transport_name}",
+                    1,
                 )
-        else:
-            # True → False: connection lost
-            self._needs_reconnection = True
+        elif was_ever_connected:
+            # Only alert if we were genuinely connected before.
+            # Guards against subclass __init__ code that sets
+            # self.connected = False before any connection is attempted.
+            self._log.error(f"[DISCONNECTED] {self.transport_name} connection lost.")
+            self._queue_notice(
+                f"Connection lost: {self.transport_name} "
+                f"({getattr(self, 'host', '')}:{getattr(self, 'port', '')})",
+                f"MPG Connection Alert for {self.transport_name}",
+                1,
+            )
+            # Remember that the alert went out, so a restart cannot swallow the recovery notice.
+            self._mark_disconnect_alert_sent()
 
-            if self._ever_connected:
-                # Only alert if we were genuinely connected before.
-                # Guards against subclass __init__ code that sets
-                # self.connected = False before any connection is attempted.
-                self._log.error(f"[DISCONNECTED] {self.transport_name} connection lost.")
-                self.send_message(
-                    f"Connection lost: {self.transport_name} "
-                    f"({getattr(self, 'host', '')}:{getattr(self, 'port', '')})",
-                    title=f"MPG Connection Alert for {self.transport_name}",
-                    priority=1,
-                )
-                # Remember that the alert went out, so a restart cannot swallow the recovery notice.
-                self._mark_disconnect_alert_sent()
+    # ------------------------------------------------------------------
+    # Deferred notifications
+    #
+    # Sending a notification is network I/O. Code that changes connection state while holding a lock
+    # (the TimescaleDB transport does) wraps that region in `with self._notices_held():` so the notice is
+    # queued while the lock is held and sent, on the same thread, only after every lock has been released.
+    # No extra thread is involved.
+    # ------------------------------------------------------------------
+    @contextmanager
+    def _notices_held(self) -> Generator[None, None, None]:
+        depth: int = getattr(self._notice_tls, "hold", 0)
+        self._notice_tls.hold = depth + 1
+        try:
+            yield
+        finally:
+            self._notice_tls.hold = depth
+            if depth == 0:
+                self._deliver_pending_notices()
+
+    def _queue_notice(self, message: str, title: str, priority: int = 1) -> None:
+        """Queue a notification; it is sent immediately unless this thread is inside _notices_held()."""
+        with transport_base._conn_state_lock:
+            self._pending_notices.append((message, title, priority))
+        if getattr(self._notice_tls, "hold", 0) == 0:
+            self._deliver_pending_notices()
+
+    def _deliver_pending_notices(self) -> None:
+        while True:
+            with transport_base._conn_state_lock:
+                if not self._pending_notices:
+                    return
+                message, title, priority = self._pending_notices.pop(0)
+            try:
+                self.send_message(message, title=title, priority=priority)
+            except Exception as exc:
+                self._log.error(f"Failed to send notification '{title}': {exc}")
 
     def _disconnect_marker_file(self) -> Path:
         """Path of the file recording 'connection-lost alert sent, recovery not yet reported'."""
@@ -378,6 +431,9 @@ class transport_base:
         self.transport_name: str = ""
         self._connected: bool = False
         self._ever_connected: bool = False
+        # notifications queued by the `connected` setter, sent once no lock is held (see _notices_held)
+        self._notice_tls: threading.local = threading.local()
+        self._pending_notices: list[tuple[str, str, int]] = []
         # Whether connect() has ever been called on THIS object before.
         # Originally modbus_base-only; generalized up here since "first
         # connect vs. reconnect" isn't a modbus-specific distinction — any

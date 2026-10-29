@@ -2242,7 +2242,7 @@ class protocol_settings:
             value = bytes(register).hex()
 
         elif entry.data_type == Data_Type.ASCII:
-            value = self._decode_text_bytes(bytes(register))
+            value = self._decode_text_bytes(self._ascii_fragment(bytes(register), entry))
 
         elif entry.data_type in (Data_Type.STRING, Data_Type.STRING16, Data_Type.STRING32):
             value = self._decode_text_bytes(bytes(register))
@@ -2394,6 +2394,18 @@ class protocol_settings:
     def _swap_bytes_16(self, val: int) -> int:
         """Swap the high and low bytes of a 16-bit integer."""
         return ((val & 0xFF) << 8) | ((val >> 8) & 0xFF)
+
+    @staticmethod
+    def _ascii_fragment(raw_bytes: bytes, entry: registry_map_entry) -> bytes:
+        """Prepare the bytes of one register of a concatenated ASCII range for decoding.
+
+        A range member ("1008~1013") is a fragment of a longer string, not a null-terminated
+        field.  Some devices (ABB's native Modbus maps) send one character per register in
+        the low byte, so a member reads ``00 31``; skipping the NUL keeps the character
+        where ``_decode_text_bytes`` would stop at it and return nothing.  Whole-field
+        entries (no range) keep the null-terminator behavior.
+        """
+        return raw_bytes.replace(b"\x00", b"") if entry.concatenate else raw_bytes
 
     def _decode_text_bytes(self, raw_bytes: bytes) -> str:
         """Decode raw register bytes as a printable ASCII string.
@@ -2589,7 +2601,7 @@ class protocol_settings:
                 return None
             if entry.data_type_size > 0 and not entry.concatenate:
                 raw_bytes = raw_bytes[:entry.data_type_size]
-            value = self._decode_text_bytes(raw_bytes)
+            value = self._decode_text_bytes(self._ascii_fragment(raw_bytes, entry))
 
         elif entry.data_type in (Data_Type.STRING, Data_Type.STRING16, Data_Type.STRING32):
             word_count: int = self.entry_word_count(entry)
