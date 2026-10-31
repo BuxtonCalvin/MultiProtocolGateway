@@ -54,6 +54,7 @@ Continuous Rollups	 This term refers to the process of downsampling data into su
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import math
@@ -64,6 +65,7 @@ import sys
 import threading
 import time
 import warnings
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -71,6 +73,7 @@ from threading import Lock, RLock
 from typing import (
     Any,
     Callable,
+    ClassVar,
     Generator,
     List,
     Literal,
@@ -407,7 +410,7 @@ class TimescaleDBConnectionManager:
     def _connect_args(self) -> dict[str, int]:
         """libpq options passed to every new connection: a bounded connect, and TCP keepalives to notice a dead link."""
         return {
-            "connection_timeout": self.connection_timeout,
+            "connect_timeout": self.connection_timeout,  # libpq's own option name
             "keepalives": 1,
             "keepalives_idle": 30,
             "keepalives_interval": 10,
@@ -605,6 +608,7 @@ class timescaledb(transport_base):
     database: str = "solar"
     username: str = ""
     password: str = ""
+    connection_timeout: int = 10   # SECONDS to wait for a database connection to be established (also enables TCP keepalives)
 
     force_float: bool = True
 
@@ -723,14 +727,16 @@ class timescaledb(transport_base):
         Configuration options:
             - auto_refresh_interval (int): Seconds between rollup refreshes (default: 21600)
             - backlog_storage_path (str): Path for backlog files (default: "parent/timescaledb_backlog")
-            - backlog_file_name (str): Name for the backlog file (default: "timescaledb_backlog")
-            - connection_timeout (int): Seconds to wait for a database connection (default: 10)
+            - backlog_file_name (str): Name of the backlog file (default: "timescaledb_backlog")
+            - connection_timeout (int): Seconds to wait for a database connection to be established; an unreachable host fails after this instead of the OS TCP timeout of about two minutes (default: 10)
             - database (str): Database name (default: "solar")
             - device_name (str): Name for the bridge (default: "TimeScaleDB MPG Bridge")
-            - drop_after (str): Retention policy for raw data (default: "1 year")
+            - drop_after (str): Retention policy for raw data in tables and views (default: "1 year")
             - enable_auto_refresh (bool): Enable periodic rollup refresh (default: True)
             - enable_compression (bool): Enable compression on hypertables at startup (default: True)
             - enable_persistent_storage (bool): Enable disk backlog (default: True)
+            - enable_rollups (bool): Enable continuous aggregate rollups (default: True)
+            - enable_dynamic_chunk_sizing (bool): Enable dynamic hypertable chunk sizing (default: True)
             - force_float (bool): Force metric values to float (default: True)
             - host (str): Database host (default: "localhost")
             - hypertable_defaults: Dicts for hypertable narrow and wide creation and policies
@@ -763,6 +769,8 @@ class timescaledb(transport_base):
         """
         # Per-protocol state — populated as init_bridge is called for each scraper
         self._registered_protocols: set[str] = set()
+        # protocol -> (registry_map, synthetic_fields) for registrations that failed in init_bridge; see _retry_failed_registrations
+        self._failed_registrations: dict[str, tuple[dict[Registry_Type, list[registry_map_entry]], list[tuple[str, str, Any, Any]] | None]] = {}
 
         # Maps protocol_name -> wide_table_name (or None if narrow-only)
         self._protocol_wide_table_map: dict[str, str | None] = {}
@@ -780,6 +788,7 @@ class timescaledb(transport_base):
         self.database = settings.get("database", fallback=self.database)
         self.username = settings.get("username", fallback=self.username)
         self.password = settings.get("password", fallback=self.password)
+        self.connection_timeout = max(1, settings.getint("connection_timeout", fallback=self.connection_timeout))
 
         if not self.username:
             raise ValueError("TimeScaleDB User is not set")
@@ -792,8 +801,6 @@ class timescaledb(transport_base):
         self.max_reconnect_delay: int = settings.getint("max_reconnect_delay", fallback=self.max_reconnect_delay)
         self.reconnect_attempts: int = settings.getint("reconnect_attempts", fallback=self.reconnect_attempts)
         self.reconnect_delay: int = settings.getint("reconnect_delay", fallback=self.reconnect_delay)
-        # seconds to wait for a database connection to be established (config key: connection_timeout)
-        self.connection_timeout: int = max(1, settings.getint("connection_timeout", fallback=10))
         self.force_float: bool = settings.getboolean("force_float", fallback=self.force_float)
 
         # stale data settings
@@ -930,7 +937,7 @@ class timescaledb(transport_base):
         self._reconnect_thread_running = False      # guard to prevent duplicate reconnect threads
         self._stop_reconnect_event:  threading.Event = getattr(self, "_stop_reconnect_event", threading.Event())
 
-        self.migration_in_progress = threading.Event()  # event to pause flushes during rollup migration
+        self.migration_in_progress: threading.Event = MigrationGate()  # pauses flushes during schema migration (nesting-safe)
 
         # Protects the BacklogManager (the list and the .jsonl file).
         self._backlog_lock: RLock = threading.RLock()  # lock for backlog operations
@@ -1109,7 +1116,7 @@ class timescaledb(transport_base):
                 dbapi: Any = self.engine.dialect.dbapi
                 raw = dbapi.connect(
                     host=url.host, port=url.port, dbname=url.database, user=url.username, password=url.password,
-                    connection_timeout=10,
+                    connect_timeout=self.connection_timeout,  # libpq's own option name
                 )
                 raw.autocommit = True  # must be set BEFORE any statement: psycopg2 would otherwise send BEGIN first
                 with raw.cursor() as cur:
@@ -1250,7 +1257,7 @@ class timescaledb(transport_base):
                     self._log.info("Auto-reconnect: stop requested, exiting reconnect loop.")
                     break
 
-                attempt_no: int = attempt_no + 1
+                attempt_no += 1
                 self._log.info(f"Reconnect attempt {attempt_no}{'' if attempts <= 0 else f'/{attempts}'} — waiting {delay}s before connect.")
                 # Wait but allow early exit on stop
                 waited: float = 0.0
@@ -1273,7 +1280,10 @@ class timescaledb(transport_base):
                 except Exception as e:
                     self._set_tsdb_connected(conn_value = False, conn_reason = f"Reconnect attempt {attempt_no} unsuccessful")
                     self._log.warning(f"Reconnect attempt {attempt_no} failed during connect(): {e}")
-                    self._log.warning(f"❌ [COMMUNICATION LOST] {e} --- to TimescaleDB --- Attempt {attempt_no}{'' if attempts <= 0 else f'/{attempts}'} --- Will retry in {delay}s.")
+                    next_delay: int = min(delay * 2, max_delay) if use_exp else min(delay, max_delay)
+                    outlook: str = (f"Will retry in {next_delay}s." if (attempts <= 0 or attempt_no < attempts)
+                                    else "No further automatic attempts; the next successful write restarts recovery.")
+                    self._log.warning(f"❌ [COMMUNICATION LOST] {e} --- to TimescaleDB --- Attempt {attempt_no}{'' if attempts <= 0 else f'/{attempts}'} --- {outlook}")
 
                 with self._reconnect_lock:
                     tsdb_connected: bool = self.tsdb_connected
@@ -1281,7 +1291,9 @@ class timescaledb(transport_base):
                 if tsdb_connected:
                     self._log.info("Auto-reconnect: connection re-established.")
 
-                    # Restore runtime state before allowing flush worker to resume
+                    # Restore runtime state now that the connection is back. tsdb_connected has to be True already:
+                    # rollup_mgr.add_wide_rollup() (called from _rediscover_protocols) refuses to run while it is False.
+                    # The in-memory protocol maps are not cleared by an outage, so writes that resume meanwhile still route correctly.
                     try:
                         self._rediscover_protocols()
                         # repopulate rollup views after reconnect to ensure they're up to date before any flushes occur.
@@ -1322,7 +1334,7 @@ class timescaledb(transport_base):
                 if attempts > 0 and attempt_no >= attempts:
                     self._log.error("Auto-reconnect: exhausted reconnect attempts. Will continue buffering to backlog.")
                     msg: str = (f"❌ [COMMUNICATION LOST] --- to TimescaleDB --- Attempt "
-                                f"{attempt_no}{'' if attempts <= 0 else f'/{attempts}'} --- Will retry in {delay}s.")
+                                f"{attempt_no}/{attempts} --- giving up automatic attempts; the next successful write restarts recovery.")
                     self._log.error(msg)
                 else:
                     self._log.info("Auto-reconnect: stopped without establishing connection.")
@@ -1536,7 +1548,7 @@ class timescaledb(transport_base):
         # from the cache for any reason, including a name change, which is safe since the DB will be the source of truth on the first
         # call and will populate the cache.
         if t_name in self._device_cache and t_name in self._verified_devices:
-            return self._device_cache.get(t_name) or 100
+            return self._device_cache[t_name]
 
         # Slow path — first packet for this transport this session.
         # Lock prevents two concurrent threads racing to insert the same row.
@@ -1605,8 +1617,11 @@ class timescaledb(transport_base):
                 except Exception as e:
                     session.rollback()
                     self._log.error(f"Upsert failed for '{t_name}': {e}")
-                    # Return cached id if available, otherwise a sentinel value.
-                    return self._device_cache.get(t_name, 100)
+                    # Return the cached id if there is one. Otherwise 0, which write_data treats as "could not resolve the
+                    # device" and drops the packet. It used to return 100 here, a perfectly valid-looking id: the packet was
+                    # queued and then either failed the device_info foreign key or, if a device 100 existed, was written
+                    # against the WRONG device.
+                    return self._device_cache.get(t_name, 0)
                 else:
                     self._device_cache[t_name] = db_id
                     self._verified_devices.add(t_name)
@@ -2137,6 +2152,8 @@ class timescaledb(transport_base):
         physical tables and metric_catalog entries already exist — only the
         in-memory state and any incomplete rollup views need recovery.
         """
+        self._retry_failed_registrations()
+
         with self.SessionFactory() as session:
             try:
                 rows: Sequence[Row[str, str | None, bool]] = session.execute(
@@ -2159,26 +2176,35 @@ class timescaledb(transport_base):
 
         for protocol_name, wide_table_name, setup_complete in rows:
 
-            # Restore runtime mapping — this is what lets write_data and
-            # _flush_worker route correctly without re-running full schema setup
-            self._protocol_wide_table_map[protocol_name] = wide_table_name
-            self._registered_protocols.add(protocol_name)
+            try:
+                # Restore runtime mapping — this is what lets write_data and
+                # _flush_worker route correctly without re-running full schema setup
+                self._protocol_wide_table_map[protocol_name] = wide_table_name
+                self._registered_protocols.add(protocol_name)
 
-            # Re-reflect the wide table into Base.metadata so the flush worker
-            # can look it up by name after reconnect.
-            if wide_table_name is not None:
-                with self.schema_lock:
-                    Table(
-                        wide_table_name,
-                        Base.metadata,
-                        autoload_with=self.engine,
-                        extend_existing=True
-                    )
-                self._cache_wide_table_columns(wide_table_name)
+                # Re-reflect the wide table into Base.metadata so the flush worker
+                # can look it up by name after reconnect.
+                if wide_table_name is not None:
+                    with self.schema_lock:
+                        Table(
+                            wide_table_name,
+                            Base.metadata,
+                            autoload_with=self.engine,
+                            extend_existing=True
+                        )
+                    self._cache_wide_table_columns(wide_table_name)
 
-            # Restore per-protocol metric mapping from metric_catalog
-            # so _process_raw_metrics can coerce values correctly
-            self._restore_metric_mapping(protocol_name)
+                # Restore per-protocol metric mapping from metric_catalog
+                # so _process_raw_metrics can coerce values correctly
+                self._restore_metric_mapping(protocol_name)
+            except Exception as e:
+                if isinstance(e, SQLAlchemyError) and self._is_connection_error(e):
+                    raise  # the connection is gone again: let the reconnect worker treat it as a failed attempt
+                # Anything else (e.g. a wide table dropped by hand) is a problem with THIS protocol. Raising would stop the
+                # remaining protocols from being restored and make the reconnect worker report the connection as failed
+                # again and again, with a lost/restored alert each time.
+                self._log.error(f"Could not restore protocol '{protocol_name}' after reconnect: {e}")
+                continue
 
             self._log.info(f"Rediscovered protocol '{protocol_name}' (table='{wide_table_name}', setup_complete={setup_complete})")
 
@@ -2190,6 +2216,18 @@ class timescaledb(transport_base):
                     self._log.error(f"Recovery failed for protocol '{protocol_name}': {e} — will retry on next startup.")
                     # Non-fatal — protocol data can still flow via narrow table
                     # even if wide table rollups are incomplete
+
+    def _retry_failed_registrations(self) -> None:
+        """Finish protocol schema registrations that failed in init_bridge (database unreachable at startup)."""
+        pending: dict[Any, Any] = dict(getattr(self, "_failed_registrations", {}))
+        for protocol, (registry_map, synthetic) in pending.items():
+            try:
+                self._register_protocol_schema(protocol, registry_map, synthetic_fields=synthetic)
+                self._registered_protocols.add(protocol)
+                self._failed_registrations.pop(protocol, None)
+                self._log.info(f"Schema registration for protocol '{protocol}' completed after reconnect.")
+            except Exception as e:
+                self._log.error(f"Retry of schema registration for protocol '{protocol}' failed: {e} — will try again after the next reconnect.")
 
     def _restore_metric_mapping(self, protocol: str) -> None:
         """
@@ -2276,6 +2314,10 @@ class timescaledb(transport_base):
         if metric_count >= self.WIDE_TABLE_COLUMN_LIMIT:
             self._log.warning(f"Protocol '{protocol}' has {metric_count} metrics — exceeds {self.WIDE_TABLE_COLUMN_LIMIT} column limit, using narrow table only.")
             self._protocol_wide_table_map[protocol] = None
+            # A narrow-only protocol still writes to the shared narrow table, so with rollups enabled it needs the shared
+            # narrow rollups (and the rollup manager that owns them) just like a protocol with a wide table. Without this
+            # call, a deployment whose first protocol was narrow-only never got a RollupManager at all.
+            self._init_or_update_rollup_manager(protocol)
             return
 
         # 5. Ensure the wide table exists as a physical table in postgres
@@ -2336,10 +2378,15 @@ class timescaledb(transport_base):
             self.rollup_mgr.setup_narrow_rollup()
             # First protocol also needs per-protocol setup.
             # setup_narrow_rollup() only creates shared narrow rollups.
-            self.rollup_mgr.add_wide_rollup(
-                protocol_name=protocol,
-                wide_table_name=self._protocol_wide_table_map[protocol]
-            )
+            try:
+                self.rollup_mgr.add_wide_rollup(
+                    protocol_name=protocol,
+                    wide_table_name=self._protocol_wide_table_map[protocol]
+                )
+            except Exception as e:
+                # The protocol stays marked incomplete and is retried after the next reconnect or restart. Auto refresh and
+                # the backlog replay below must still happen: this protocol's data is already flowing.
+                self._log.error(f"Rollup setup for protocol '{protocol}' failed: {e} — it will be retried after the next reconnect or restart.")
 
             if self.rollup_policy["enable_auto_refresh"]:
                 self.rollup_mgr.start_auto_refresh()
@@ -2422,8 +2469,13 @@ class timescaledb(transport_base):
                     synthetic_fields=synthetic or None,
                 )
                 self._registered_protocols.add(protocol)
+                self._failed_registrations.pop(protocol, None)
             except Exception as e:
-                self._log.error(f"Failed to register schema for protocol '{protocol}': {e}")
+                # Typically the database was unreachable at startup. Remember what was needed so the reconnect worker can
+                # finish the job: without this a protocol seen for the first time while the database was down (a fresh
+                # install, a new device) would write to the narrow table only until the app was restarted.
+                self._log.error(f"Failed to register schema for protocol '{protocol}': {e} — will retry after the next reconnect.")
+                self._failed_registrations[protocol] = (from_transport.registry_map, synthetic or None) # type: ignore
         else:
             self._log.debug(f"Protocol '{protocol}' already registered, skipping.")
 
@@ -2451,33 +2503,6 @@ class timescaledb(transport_base):
                 f"init_bridge: hypertable_mgr unavailable for '{from_transport.transport_name}' "
                 f"(protocol '{protocol}') — read_interval not recorded."
             )
-
-        if protocol in self._registered_protocols:
-            self._log.debug(f"Protocol '{protocol}' already registered, skipping.")
-            return
-
-        self._log.info(f"Registering protocol '{protocol}' from transport '{from_transport.transport_name}'")
-
-        try:
-            # Synthetic fields are opt-in: only those chosen via (M)ask are
-            # forwarded, so only those get a wide-table column.
-            synthetic: list[tuple[str, str, Any, Any]] = getattr(
-                from_transport, 'selected_synthetic_fields_metadata', []
-            )
-            if synthetic:
-                self._log.info(
-                    f"Transport '{from_transport.transport_name}' has "
-                    f"{len(synthetic)} chosen synthetic field(s) for schema registration: "
-                    f"{[s[0] for s in synthetic]}"
-                )
-            self._register_protocol_schema(
-                protocol,
-                from_transport.registry_map,
-                synthetic_fields=synthetic or None,
-            )
-            self._registered_protocols.add(protocol)
-        except Exception as e:
-            self._log.error(f"Failed to register schema for protocol '{protocol}': {e}")
 
     # using  override transport_base.write_data method
 
@@ -2614,11 +2639,15 @@ class timescaledb(transport_base):
         transport_name: str = data_in["transport_name"]
         protocol: str = data_in["protocol"]
         wide_table_name: str | None = data_in["wide_table_name"]
+        # A point replayed from the backlog already passed the stale check when it was first received. Judging it again
+        # would compare the past with the live registry (flagging old, unchanged readings as stale and raising stale
+        # alerts / upstream reconnect requests for a period that is over), and committing it would rewind that registry.
+        replayed: bool = data_in.get("backlog_rowid") is not None
 
         # Check for stale data before attempting to process/write to the database. This is based on the timestamp from the transport
         # and the previous saved timestamp.
 
-        is_stale: bool = self._check_is_stale(transport_name, metrics_only, timestamp)
+        is_stale: bool = False if replayed else self._check_is_stale(transport_name, metrics_only, timestamp)
 
         if is_stale:
             self._commit_transport_state(transport_name, metrics_only, timestamp, is_stale=True)
@@ -2689,7 +2718,8 @@ class timescaledb(transport_base):
                         else:
                             self._log.info(f"Not a complete valid row for the wide table because {msg}, but wrote metrics anyway.")
 
-                self._commit_transport_state(transport_name, metrics_only, timestamp, is_stale=False)
+                if not replayed:
+                    self._commit_transport_state(transport_name, metrics_only, timestamp, is_stale=False)
 
         except (SQLAlchemyError, ValueError) as e1:
             try:
@@ -2698,10 +2728,11 @@ class timescaledb(transport_base):
                 self._log.error(f"Rollback after a failed write also failed: {rollback_error}")
 
             connection_lost: bool = self._is_connection_error(e1)
+            transient: bool = (not connection_lost) and self._is_transient_error(e1)
             first_line: str = (str(e1).splitlines() or [type(e1).__name__])[0]
 
             if connection_lost:
-                # Flag the outage before deciding about the backlog, so the decision below never sees a stale "connected".
+                # Flag the outage BEFORE deciding about the backlog, so the decision below never sees a stale "connected".
                 # Only the write that discovers the outage is an error; probes made while it is already known are debug.
                 with self._reconnect_lock:
                     already_down: bool = not self.tsdb_connected
@@ -2711,6 +2742,9 @@ class timescaledb(transport_base):
                 )
                 self._set_tsdb_connected(conn_value = False, conn_reason = "Connection failure")
                 self._trigger_reconnect()
+            elif transient:
+                # Not an outage and not a bad batch: the database said "not now" (lock timeout, deadlock...). Keep the point.
+                self._log.warning(f"Database temporarily refused the write ({type(e1).__name__}); the data point is kept for a retry: {first_line}")
             elif isinstance(e1, SQLAlchemyError):
                 # The database answered and refused this batch (bad value, constraint, missing column...). The
                 # connection is fine, so this is not an outage: no "connection lost" alert, no reconnect.
@@ -2722,7 +2756,7 @@ class timescaledb(transport_base):
                 tsdb_connected: bool = self.tsdb_connected
 
             # Backlog only when the database is down (never for a batch the database rejected).
-            if connection_lost or not tsdb_connected:
+            if connection_lost or transient or not tsdb_connected:
                 self._keep_unwritten(data_in)
         else:
             # The write committed. Runs here, not inside the try, so a problem in the recovery
@@ -2841,9 +2875,9 @@ class timescaledb(transport_base):
                 self._log.info(f"data write complete from [{transport_name}] to timescaledb narrow table for {len(narrow_mappings)} metrics.")
 
         except SQLAlchemyError as e:
-            # Connection failures are reported once, by the outer handler in _flush_one_inner (which also flags the
-            # outage and starts the reconnect). Only unexpected database errors get a traceback here.
-            if not self._is_connection_error(e):
+            # Connection failures and temporary refusals are reported once, by the outer handler in _flush_one_inner (which
+            # also flags an outage and starts the reconnect). Only unexpected database errors get a traceback here.
+            if not (self._is_connection_error(e) or self._is_transient_error(e)):
                 self._log.exception(f"Narrow flush failed: {e}")
             try:
                 session.rollback()
@@ -2879,6 +2913,25 @@ class timescaledb(transport_base):
             self._retain_unwritten = True
         else:
             self._backlog_live_point(data_in)
+
+    # SQLSTATEs for errors that say "not now" rather than "no": the same batch is expected to succeed later.
+    _TRANSIENT_PGCODES: ClassVar[frozenset[str]] = frozenset({
+        "55P03",  # lock_not_available (lock_timeout)
+        "57014",  # query_canceled (statement_timeout)
+        "53000", "53100", "53200", "53300", "53400",  # insufficient resources: disk full, out of memory, too many connections...
+    })
+
+    @classmethod
+    def _is_transient_error(cls, exc: BaseException) -> bool:
+        """
+        True when the database answered with a temporary refusal (lock timeout, deadlock, serialization failure,
+        statement timeout, out of resources). The connection is fine, so this is not an outage, but the batch is valid
+        and must be kept for a retry, not dropped like a batch the database rejected for its content.
+        """
+        if not isinstance(exc, DBAPIError):
+            return False
+        pgcode: object = getattr(exc.orig, "pgcode", None)
+        return isinstance(pgcode, str) and (pgcode in cls._TRANSIENT_PGCODES or pgcode.startswith("40"))  # class 40 = rolled back
 
     def _log_data_loss_throttled(self, reason: str) -> None:
         """Count a data point that could not be stored anywhere and report the running total at most once a minute."""
@@ -3002,8 +3055,10 @@ class timescaledb(transport_base):
         tables but have no active query — typically left by a crashed client.
 
         Runs once at startup after connection is verified, before any schema
-        work. Targets only connections to our specific database that are idle
-        or idle-in-transaction and have been so for more than 60 seconds,
+        work. Targets only connections to our specific database that are idle in
+        transaction, have been so for more than 60 seconds, and actually hold
+        relation locks (a session that is merely sitting in a transaction, such
+        as a person's open query tool, blocks nothing and is left alone),
         excluding our own connection and the TimescaleDB background workers.
 
         Non-fatal — a failure here is logged and skipped, not raised.
@@ -3028,6 +3083,10 @@ class timescaledb(transport_base):
                     AND application_name NOT LIKE 'TimescaleDB%'
                     AND state IN ('idle in transaction', 'idle in transaction (aborted)')
                     AND now() - state_change > INTERVAL '60 seconds'
+                    AND EXISTS (
+                        SELECT 1 FROM pg_locks l
+                        WHERE l.pid = pg_stat_activity.pid AND l.granted AND l.locktype = 'relation'
+                    )
                 """), {"dbname": self.database}).fetchall()
 
                 if not stale:
@@ -3173,8 +3232,37 @@ class timescaledb(transport_base):
         except Exception as e:
             log: logging.Logger | None = getattr(self, "_log", None)
             if log is not None:
-                msg: str = f"Exception in __del__ of {self.__class__.__name__}: {e}"
+                msg: str = (f"Exception in __del__: {e}")
                 log.exception(msg)
+
+
+class MigrationGate(threading.Event):
+    """
+    The flag that pauses the flush worker during a schema migration, safe for nested and overlapping migrations.
+
+    A plain Event has one state: when two migrations overlap (a reconnect's rollup recovery while an admin Delete Columns
+    or Metrics Edit is running, or delete_fields calling add_wide_rollup), whichever finishes first clears the flag and
+    flushing resumes while the other is still altering tables. Here every set() is a claim and every clear() releases one;
+    the flag stays set until the last claim is released. Each caller already pairs one set() with one clear() in a
+    finally block, so they need no change. An unmatched clear() is ignored rather than going negative.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._claims: int = 0
+        self._claims_lock: threading.Lock = threading.Lock()
+
+    def set(self) -> None:
+        with self._claims_lock:
+            self._claims += 1
+            super().set()
+
+    def clear(self) -> None:
+        with self._claims_lock:
+            if self._claims > 0:
+                self._claims -= 1
+            if self._claims == 0:
+                super().clear()
 
 
 class SendMessageProtocol(Protocol):
@@ -4221,6 +4309,11 @@ class HyperTableManager:
         climbing) once the scheduler's own retry picked it back up --
         i.e. harmless, but avoidable.
 
+        A job that is paused (scheduled = false) never counts as a match, so the remove-then-add path re-creates it as
+        scheduled. Rebuild Compression and the column/metric edit flows pause the compression job and resume it afterward;
+        if the app dies in between (a container restart, say) the job would otherwise stay paused for good, because the
+        interval still "matches".
+
         Deliberately conservative: only ever returns True on a clean,
         confirmed match. "No existing job for this target/proc_name",
         "config key missing from that job", "value doesn't parse as an
@@ -4236,6 +4329,7 @@ class HyperTableManager:
                     SELECT config->>:config_key
                     FROM timescaledb_information.jobs
                     WHERE proc_name = :proc_name AND hypertable_name = :target_name
+                      AND scheduled = true
                     ORDER BY job_id DESC
                     LIMIT 1
                 """),
@@ -4289,7 +4383,7 @@ class HyperTableManager:
 
             try:
                 if self.policy_config_matches_helper(
-                    session, table_name, "policy_retention", "drop_after", self.drop_after
+                    session, table_name, "policy_retention", "drop_after", drop_after
                 ):
                     self._log.debug(
                         f"apply_retention_policy: '{table_name}' already drop_after={self.drop_after}, "
@@ -6181,6 +6275,7 @@ class RollupManager:
         intervals already match config. Used by the admin's "Force Rebuild"
         button; normal startup/reconnect calls leave this False.
         """
+        cagg_error: Exception | None = None
         # 1 Hypertable & Policies
         try:
             self.hypertable_mgr.ensure_hypertables([table_name], chunk_time_interval=chunk_time_interval)
@@ -6224,6 +6319,7 @@ class RollupManager:
                     self._ensure_cagg_views_for_protocol(protocol_name, wide_table_name, force=force)
                 except Exception as e:
                     self._log.error(f"CAGG view creation failed for protocol '{protocol_name}': {e}")
+                    cagg_error = e
 
                 # 4b
                 try:
@@ -6233,6 +6329,12 @@ class RollupManager:
                         f"Initial rollup refresh failed for '{protocol_name}': {e}"
                         f" — views exist but data may not be pre-aggregated."
                     )
+
+        if cagg_error is not None:
+            # Not swallowed: add_wide_rollup would otherwise mark this protocol's rollup setup COMPLETE, which stops the
+            # reconnect/rediscovery path from ever retrying it (it only retries protocols that are not complete).
+            msg: str = f"Rollup views could not be created for protocol '{protocol_name}': {cagg_error}"
+            raise RuntimeError(msg) from cagg_error
 
     def start_auto_refresh(self) -> None:
 
@@ -6492,6 +6594,22 @@ class RollupManager:
             self._log.error(f"Failed to create {view_name}: {e}")
             raise
 
+    @staticmethod
+    def _granularity_from_view_name_helper(view_name: str) -> str:
+        """
+        "hourly" / "daily" / "weekly" / "monthly" for a rollup view, "default" for anything else.
+
+        Every rollup view is named "<granularity>_rollup_...", so the prefix decides. Looking for the word anywhere in the name
+        mis-reads a view whose protocol name contains another granularity (weekly_rollup_wide__hourly_meter would be taken for
+        an hourly view and get the hourly chunk size and compression schedule).
+        """
+        granularities: tuple[str, ...] = ("hourly", "daily", "weekly", "monthly")
+        name_lower: str = view_name.lower()
+        prefix: str = name_lower.split("_", 1)[0]
+        if prefix in granularities:
+            return prefix
+        return next((g for g in granularities if g in name_lower), "default")
+
     def _add_aggregate_policy_helper(self, session: Session, view_name: str, bucket_interval: str, start_offset: str) -> None:
         """
         Applies (or re-applies) refresh, retention, and compression
@@ -6544,13 +6662,7 @@ class RollupManager:
             start_offset: The offset for the continuous aggregate policy (e.g., "3 hours", "3 days").
         """
         # 1. Map view name to its granularity key for lookup
-        name_lower: str = view_name.lower()
-
-        # Define the supported granularities
-        granularities: List[str] = ["hourly", "daily", "weekly", "monthly"]
-
-        # Find the first matching granularity or use "default"
-        granularity: str = next((g for g in granularities if g in name_lower), "default")
+        granularity: str = self._granularity_from_view_name_helper(view_name)
 
         # Resolve compress_after AND chunk_time_interval together — dynamic
         # (cardinality-based) if enabled and there's live data, else the
@@ -6665,6 +6777,31 @@ class RollupManager:
             raise
 
 
+    @staticmethod
+    def _rollup_aliases_helper(prefix: str, column_names: Sequence[str]) -> dict[str, str]:
+        """
+        The rollup column alias (prefix + column name) for each metric column, unique within Postgres' 63-byte identifier limit.
+
+        A wide rollup carries three columns per metric: min_<col>, max_<col> and stats_summary_<col>. Postgres silently cuts
+        identifiers to 63 bytes, so for long column names the alias is shortened by the database and two columns that differ only
+        late in their names (the last ~49 characters, for stats_summary_) end up with the SAME alias; CREATE MATERIALIZED VIEW then
+        fails with "column specified more than once".
+
+        An alias that fits, or whose cut-down form is unique, is returned exactly as before (the cut-down form is what Postgres
+        would have produced), so existing views keep their column names. Only colliding aliases are rebuilt as a shortened name
+        plus an 8-character hash of the full column name, which is stable and unique per column.
+        """
+        natural: dict[str, str] = {column: f"{prefix}{column}"[:63] for column in column_names}
+        counts: Counter[str] = Counter(natural.values())
+        aliases: dict[str, str] = {}
+        for column in column_names:
+            alias: str = natural[column]
+            if counts[alias] > 1:
+                digest: str = hashlib.sha1(column.encode("utf-8")).hexdigest()[:8]  # noqa: S324
+                alias = f"{f'{prefix}{column}'[:54]}_{digest}"  # 54 + "_" + 8 = 63
+            aliases[column] = alias
+        return aliases
+
     def _resolve_rollup_metric_descriptors_helper(
         self,
         session: Session,
@@ -6712,16 +6849,21 @@ class RollupManager:
 
         column_names: list[str] = list(result.scalars())
 
+        # The same alias is used where a view creates the column and where the next view up reads it, so both always agree.
+        min_aliases: dict[str, str] = self._rollup_aliases_helper("min_", column_names)
+        max_aliases: dict[str, str] = self._rollup_aliases_helper("max_", column_names)
+        summary_aliases: dict[str, str] = self._rollup_aliases_helper("stats_summary_", column_names)
+
         return [
             RollupManager.RollupMetricDescriptor(
                 group_key_sql=None,
                 raw_value_sql=column_name,
-                rolled_min_sql=f"min_{column_name}",
-                rolled_max_sql=f"max_{column_name}",
-                rolled_summary_sql=f"stats_summary_{column_name}",
-                min_alias=f"min_{column_name}",
-                max_alias=f"max_{column_name}",
-                summary_alias=f"stats_summary_{column_name}",
+                rolled_min_sql=min_aliases[column_name],
+                rolled_max_sql=max_aliases[column_name],
+                rolled_summary_sql=summary_aliases[column_name],
+                min_alias=min_aliases[column_name],
+                max_alias=max_aliases[column_name],
+                summary_alias=summary_aliases[column_name],
             )
             for column_name in column_names
         ]
@@ -6956,9 +7098,12 @@ class RollupManager:
         """
         r_settings: PerformanceTier = self.hypertable_mgr.get_dynamic_settings_helper()
 
+        # Dependents first: monthly, weekly, daily, then hourly. The granularity comes from the view-name prefix; looking for
+        # the word anywhere in the name mis-ranks a view whose protocol name contains another granularity.
+        drop_rank: dict[str, int] = {"hourly": 0, "daily": 1, "weekly": 2, "monthly": 3}
         ordered_view_names: list[str] = sorted(
             view_names,
-            key=lambda name: 0 if "hourly" in name else 1 if "daily" in name else 2 if "weekly" in name else 3,
+            key=lambda name: drop_rank.get(self._granularity_from_view_name_helper(name), 3),
             reverse=True,
         )
 
@@ -7224,9 +7369,12 @@ class RollupManager:
                 return "OK"
 
         except SQLAlchemyError as e:
-            self._log.error(f"Database error while checking rollup {view_name}: {e}")
-            # Default to True to ensure we don't skip a necessary build on error
-            return "rebuild"
+            # A database error says nothing about the view, so it must not be answered with "rebuild": the caller
+            # (ensure_rollups) responds to "rebuild" by dropping every continuous aggregate and re-materializing them, and
+            # a lock timeout or a dropped connection during this read-only check would trigger exactly that. Let the
+            # error propagate; every caller already logs it and the next connect/startup pass simply checks again.
+            self._log.error(f"Database error while checking rollup {view_name}; not changing anything: {e}")
+            raise
 
 
     # -------------------------
@@ -8013,6 +8161,11 @@ class RollupManager:
 
             def get_drop_rank(v_tuple: Row[str, str]) -> int:
                 name_lower: str = v_tuple[1].lower()
+                # Every view is named "<granularity>_rollup_...": rank by that prefix. Matching the word anywhere in the name
+                # mis-ranked a view whose protocol name contains another granularity (hourly_rollup_wide__weekly_meter).
+                prefix: str = name_lower.split("_", 1)[0]
+                if prefix in priority_map:
+                    return priority_map[prefix]
                 for key, val in priority_map.items():
                     if key in name_lower:
                         return val
@@ -8030,8 +8183,11 @@ class RollupManager:
                 self.hypertable_mgr.set_lock_timeout(session, r_settings['lock_timeout'])
 
                 # 4. Disable Compression (Mandatory for a clean drop of compressed CAGGs)
+                # Inside a SAVEPOINT: in Postgres a failed statement aborts the whole transaction, so without one the
+                # "already uncompressed" error below would make every following statement fail as well.
                 try:
-                    session.execute(text(f"ALTER MATERIALIZED VIEW {full_name} SET (timescaledb.enable_columnstore = false);"))
+                    with session.begin_nested():
+                        session.execute(text(f"ALTER MATERIALIZED VIEW {full_name} SET (timescaledb.enable_columnstore = false);"))
                 except Exception:
                     self._log.info(f"View was already uncompressed: {full_name}")
                     pass # Already uncompressed or doesn't support it
@@ -8147,6 +8303,19 @@ class RollupManager:
             else:
                 return
 
+    def _reset_session_settings_helper(self, conn: Connection) -> None:
+        """
+        Undo the session-level SET work_mem / lock_timeout applied to an AUTOCOMMIT connection before it goes back to the pool.
+        Those settings belong to the pooled database connection, not to this refresh: left in place, the flush worker (or any
+        other user of that connection) inherits e.g. the refresh's short lock_timeout and starts failing writes with
+        "canceling statement due to lock timeout". (SET LOCAL cannot be used here: outside a transaction it does nothing.)
+        """
+        try:
+            conn.execute(text("RESET work_mem"))
+            conn.execute(text("RESET lock_timeout"))
+        except Exception as e:
+            self._log.debug(f"Could not reset session settings on the refresh connection: {e}")
+
     def _refresh_single_rollup_helper(self, view_name: str, start_offset: str, force_full: bool = False) -> None:
         """
         Refreshes a rollup with duration tracking and performance logging.
@@ -8203,6 +8372,7 @@ class RollupManager:
             finally:
                 # Ensure the watchdog thread stops
                 stop_signal[0] = True
+                self._reset_session_settings_helper(conn)
 
     def _bucket_interval_for_view(self, view_name: str) -> str:
         """
@@ -8459,17 +8629,19 @@ class RollupManager:
                     tier: PerformanceTier = self.hypertable_mgr.get_dynamic_settings_helper()
                     conn.execute(text(f"SET work_mem = '{tier['work_mem']}';"))
                     conn.execute(text(f"SET lock_timeout = '{tier['lock_timeout']}';"))
-
-                    # Refresh all registered CAGG views in insertion order
-                    # (hourly -> daily -> weekly -> monthly, narrow before wide per protocol).
-                    for view_name in list(self.known_rollup_views):
-                        if not self._view_exists_conn_helper(conn, view_name):
-                            self._log.warning(f"Skipping refresh: '{view_name}' not found.")
-                            continue
-                        self._log.debug(f"Refreshing continuous aggregate: {view_name}")
-                        self._execute_refresh_with_retry(
-                            conn, "CALL refresh_continuous_aggregate(CAST(:view AS regclass), NULL, NULL)", {"view": view_name}, view_name
-                        )
+                    try:
+                        # Refresh all registered CAGG views in insertion order
+                        # (hourly -> daily -> weekly -> monthly, narrow before wide per protocol).
+                        for view_name in list(self.known_rollup_views):
+                            if not self._view_exists_conn_helper(conn, view_name):
+                                self._log.warning(f"Skipping refresh: '{view_name}' not found.")
+                                continue
+                            self._log.debug(f"Refreshing continuous aggregate: {view_name}")
+                            self._execute_refresh_with_retry(
+                                conn, "CALL refresh_continuous_aggregate(CAST(:view AS regclass), NULL, NULL)", {"view": view_name}, view_name
+                            )
+                    finally:
+                        self._reset_session_settings_helper(conn)  # never leave this loop's lock_timeout on a pooled connection
 
                 # 5. Dynamic Sleep
                 # Use the interval from policy (convert seconds to float for wait)
@@ -8548,8 +8720,13 @@ class RollupManager:
         """
         self._log.info("Initiating dynamic ghost & stale job sweep...")
 
-        # Define thresholds based on TimescaleDB common job patterns
+        # Define thresholds based on TimescaleDB common job patterns (matched on the stable proc_name, not the display name,
+        # which differs between versions, e.g. "Compression Policy" vs "Columnstore Policy")
         # Refresh: Short (30m), Compression/Retention: Long (6h), Others: Standard (1h)
+        #
+        # Worker backends are matched on their bracketed job id, "...Policy [1004]". A bare LIKE '%1004%' also matches job 4,
+        # 10, 100... and any session whose name merely contains those digits, which could make the sweep terminate an
+        # unrelated backend.
         """ The backend_pid subquery uses the same application_name LIKE '%job_id%' pattern as the GHOST_PROCESS check, so it's consistent
             with how TimescaleDB names its workers. If TimescaleDB changes that naming convention, both checks break together, which is easier to spot.
             The LIMIT 1 guard is important — a job could theoretically have multiple pg_stat_activity rows if it spawned subprocesses, and
@@ -8562,12 +8739,13 @@ class RollupManager:
                 SELECT
                     j.job_id,
                     j.application_name,
+                    j.proc_name,
                     js.last_run_started_at,
                     js.last_run_status,
-                    CASE
-                        WHEN j.application_name LIKE 'Refresh Continuous Aggregate%' THEN INTERVAL '30 minutes'
-                        WHEN j.application_name LIKE 'Compression Policy%' THEN INTERVAL '6 hours'
-                        WHEN j.application_name LIKE 'Retention Policy%' THEN INTERVAL '2 hours'
+                    CASE j.proc_name
+                        WHEN 'policy_refresh_continuous_aggregate' THEN INTERVAL '30 minutes'
+                        WHEN 'policy_compression' THEN INTERVAL '6 hours'
+                        WHEN 'policy_retention' THEN INTERVAL '2 hours'
                         ELSE INTERVAL '1 hour'
                     END as allowed_duration
                 FROM timescaledb_information.jobs j
@@ -8578,25 +8756,35 @@ class RollupManager:
                     t.job_id,
                     t.application_name,
                     CASE
-                        WHEN (t.application_name LIKE 'Refresh%' OR t.application_name LIKE 'Retention%')
+                        -- Orphaned = the target of the job is neither a continuous aggregate nor a hypertable any more. A
+                        -- retention policy on a RAW hypertable (device_metrics_narrow / a wide table) is NOT an orphan:
+                        -- it only looks like one if continuous aggregates are the only thing checked, and the sweep
+                        -- would then delete that retention policy (apply_retention_policy runs before the rollup
+                        -- setup that calls this sweep).
+                        WHEN t.proc_name IN ('policy_refresh_continuous_aggregate', 'policy_retention')
                             AND NOT EXISTS (
-                                SELECT 1 FROM timescaledb_information.continuous_aggregates c
-                                JOIN timescaledb_information.jobs j2 ON t.job_id = j2.job_id
-                                WHERE j2.hypertable_name = c.view_name
+                                SELECT 1 FROM timescaledb_information.jobs j2
+                                WHERE j2.job_id = t.job_id
+                                  AND (
+                                    EXISTS (SELECT 1 FROM timescaledb_information.continuous_aggregates c
+                                            WHERE c.view_name = j2.hypertable_name)
+                                    OR EXISTS (SELECT 1 FROM timescaledb_information.hypertables h
+                                               WHERE h.hypertable_name = j2.hypertable_name)
+                                  )
                             ) THEN 'ORPHANED_METADATA'
                         WHEN t.last_run_status = 'Started' AND t.last_run_started_at < now() - t.allowed_duration
                             THEN 'STALE_EXECUTION'
                         WHEN t.last_run_status = 'Started'
                             AND NOT EXISTS (
                                 SELECT 1 FROM pg_stat_activity p
-                                WHERE p.application_name LIKE '%' || t.job_id || '%'
+                                WHERE p.application_name LIKE '%[' || t.job_id || ']%'
                             ) THEN 'GHOST_PROCESS'
                         ELSE NULL
                     END as aberrancy_type,
                     (
                         SELECT p.pid
                         FROM pg_stat_activity p
-                        WHERE p.application_name LIKE '%' || t.job_id || '%'
+                        WHERE p.application_name LIKE '%[' || t.job_id || ']%'
                         LIMIT 1
                     ) as backend_pid
                 FROM job_thresholds t

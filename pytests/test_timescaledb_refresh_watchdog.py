@@ -7,7 +7,7 @@ holding the lock.
 """
 
 # These tests deliberately exercise the manager's private helpers.
-# pyright: reportPrivateUsage=false
+# pyright: strict, reportPrivateUsage=false
 
 from __future__ import annotations
 
