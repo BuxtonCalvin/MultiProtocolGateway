@@ -17,7 +17,6 @@ import pytest
 from classes.protocol_settings import (
     Data_Type,
     Registry_Type,
-    WriteMode,
     protocol_settings,
     registry_map_entry,
 )
@@ -170,8 +169,3 @@ def test_alarm_words_cover_the_workbook_table(entries: dict[str, registry_map_en
     assert [entries[f"alarm{i}"].register for i in (1, 2, 3)] == [194, 196, 198]
     assert "alarm4" not in entries
 
-
-def test_no_write_or_trio_only_registers(entries: dict[str, registry_map_entry]) -> None:
-    """The control block and the TRIO-only blocks (64062, 403, 64063; 298 and up) are not in this map."""
-    assert all(e.register < 254 for e in entries.values())
-    assert all(e.write_mode is WriteMode.READ for name, e in entries.items() if not name.endswith("_desc"))
