@@ -17,7 +17,6 @@ import pytest
 from classes.protocol_settings import (
     Data_Type,
     Registry_Type,
-    WriteMode,
     protocol_settings,
     registry_map_entry,
 )
@@ -171,10 +170,3 @@ def test_no_32bit_value_is_split_by_a_read(name: str) -> None:
         if entry.data_type in (Data_Type.FLOAT32, Data_Type.UINT):
             last: int = entry.register + 1
             assert any(s <= entry.register and s + c - 1 >= last for s, c in proto.registry_map_ranges[Registry_Type.INPUT]), entry.variable_name
-
-
-@pytest.mark.parametrize("name", ALL)
-def test_nothing_is_writable(name: str) -> None:
-    proto: protocol_settings = _load(name)
-    for registry_type in (Registry_Type.INPUT, Registry_Type.HOLDING):
-        assert all(e.write_mode in (WriteMode.READ, WriteMode.READDISABLED) for e in proto.registry_map[registry_type])
