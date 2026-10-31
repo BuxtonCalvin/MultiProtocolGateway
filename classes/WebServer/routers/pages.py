@@ -48,7 +48,7 @@ from fastapi.responses import (
     RedirectResponse,
     StreamingResponse,
 )
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.engine.row import Row
 from sqlalchemy.orm import Session
@@ -898,6 +898,9 @@ class CreateDeviceRequest(BaseModel):
 
 
 class CreateProtocolRowInput(BaseModel):
+    # This tells Pydantic v2 to allow 'register' without warnings
+    model_config = ConfigDict(protected_namespaces=())
+
     register: str = ""
     variable_name: str = ""
     documented_name: str = ""
