@@ -446,7 +446,10 @@ def earliest_timestamp(df: pd.DataFrame, time_column: str, local_tz: str) -> str
     """
     if time_column not in df.columns:
         return None
-    ts: pd.Series[pd.Timestamp] = pd.to_datetime(df[time_column], errors="coerce").dropna()
+
+    # ADDED format="mixed" to eliminate the UserWarning and handle varied string variations
+    ts: pd.Series[pd.Timestamp] = pd.to_datetime(df[time_column], format="mixed", errors="coerce").dropna()
+
     if ts.empty:
         return None
     if ts.dt.tz is not None:
