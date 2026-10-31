@@ -1240,6 +1240,9 @@ class protocol_settings:
         read_interval_regex: re.Pattern[str] = re.compile(r"(?P<value>[\.\d]+)(?P<unit>[xs]|ms)")
         data_type_regex: re.Pattern[str] = re.compile(r"(?P<datatype>\w+)\.(?P<length>\d+)")
         range_regex: re.Pattern[str] = re.compile(r"(?P<reverse>r|)(?P<start>(?:0?x[\da-z]+|[\d]+))[\-~](?P<end>(?:0?x[\da-z]+|[\d]+))")
+        # Validation range in the ``values`` column: "0-100", "0~65535", "-100~100", "-32768-32767".
+        # Either end may be negative.  (range_regex above is for register ranges and has no sign.)
+        value_range_regex: re.Pattern[str] = re.compile(r"(?P<start>-?(?:0?x[\da-z]+|\d+))[\-~](?P<end>-?(?:0?x[\da-z]+|\d+))", re.IGNORECASE)
         ascii_value_regex: re.Pattern[str] = re.compile(r"(?P<regex>^\[.+\]$)")
         list_regex: re.Pattern[str] = re.compile(r"\s*(?:(?P<range_start>(?:0?x[\da-z]+|[\d]+))-(?P<range_end>(?:0?x[\da-z]+|[\d]+))|(?P<element>[^,\s][^,]*?))\s*(?:,|$)")
 
@@ -1438,7 +1441,7 @@ class protocol_settings:
                             values.append(element)
                 else:
                     unit_matched: bool = False
-                    val_match: re.Match[str] | None = range_regex.search(row["values"])
+                    val_match: re.Match[str] | None = value_range_regex.search(row["values"])
                     if val_match:
                         value_min = strtoint_safe(val_match.group("start"))
                         value_max = strtoint_safe(val_match.group("end"))

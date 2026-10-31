@@ -1,4 +1,5 @@
 register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note,ha_device_class,ha_state_class,ha_entity_category
+"# SCALING: the float models need no scale factors; the two nameplate ratings (rated_power, rated_va) are integers with a scale factor and now carry a Context adjustment that reads it (10**SF), so they publish in W and VA. Writable rows are not scaled.",,,,,,,,,,,,
 40001,sunspec_id,SunSpec ID,,uint32,,,R,,"Fixed value 0x53756E53 (""SunS""); confirms SunSpec compliance",,,
 40003,sunspec_did,SunSpec Device ID,,uint16,,,R,,Fixed 0x0001 = SunSpec common block,,,
 40004,sunspec_length,Common Block Length,,uint16,,,R,,Fixed value 65 (registers),,,
@@ -50,9 +51,9 @@ register,variable_name,documented_name,unit,data_type,values,read_interval,writa
 40132,ic120_id,Nameplate Model ID,,uint16,120,,R,,Fixed 120 = SunSpec nameplate model,,,
 40133,ic120_length,Nameplate Block Length,,uint16,,,R,,Number of registers in nameplate block (26),,,
 40134,der_type,DER Device Type,,uint16,4,,R,,Fixed 4 = PV inverter device type,,,
-40135,rated_power,Rated Power,W,uint16,,,R,,Continuous power output rating; apply WRtg_SF (40136),power,measurement,
+40135,rated_power,Rated Power,W,uint16,,,R,"{""Context"":{""key"":""rated_power_sf"",""cases"":{""-10"":""x/10000000000"",""-9"":""x/1000000000"",""-8"":""x/100000000"",""-7"":""x/10000000"",""-6"":""x/1000000"",""-5"":""x/100000"",""-4"":""x/10000"",""-3"":""x/1000"",""-2"":""x/100"",""-1"":""x/10"",""0"":""x*1"",""1"":""x*10"",""2"":""x*100"",""3"":""x*1000"",""4"":""x*10000"",""5"":""x*100000"",""6"":""x*1000000"",""7"":""x*10000000"",""8"":""x*100000000"",""9"":""x*1000000000"",""10"":""x*10000000000""}}}",Continuous power output rating; apply WRtg_SF (40136); scaled by 10**rated_power_sf (Context),power,measurement,
 40136,rated_power_sf,Rated Power Scale Factor,,int16,,,R,,Scale factor for WRtg; e.g. -1 means divide by 10,,,
-40137,rated_va,Rated VA,VA,uint16,,,R,,Continuous apparent power rating; apply VARtg_SF (40138),apparent_power,measurement,
+40137,rated_va,Rated VA,VA,uint16,,,R,"{""Context"":{""key"":""rated_va_sf"",""cases"":{""-10"":""x/10000000000"",""-9"":""x/1000000000"",""-8"":""x/100000000"",""-7"":""x/10000000"",""-6"":""x/1000000"",""-5"":""x/100000"",""-4"":""x/10000"",""-3"":""x/1000"",""-2"":""x/100"",""-1"":""x/10"",""0"":""x*1"",""1"":""x*10"",""2"":""x*100"",""3"":""x*1000"",""4"":""x*10000"",""5"":""x*100000"",""6"":""x*1000000"",""7"":""x*10000000"",""8"":""x*100000000"",""9"":""x*1000000000"",""10"":""x*10000000000""}}}",Continuous apparent power rating; apply VARtg_SF (40138); scaled by 10**rated_va_sf (Context),apparent_power,measurement,
 40138,rated_va_sf,Rated VA Scale Factor,,int16,,,R,,Scale factor for VARtg,,,
 # ─── SunSpec Basic Settings IC121 ─────────────────────────────────────────────,,,,,,,,,,,,
 40163,ic121_id,Basic Settings Model ID,,uint16,121,,R,,Fixed 121 = SunSpec basic settings model,,,

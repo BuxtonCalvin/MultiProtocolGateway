@@ -18,6 +18,7 @@ A **protocol** is the map between raw register addresses on a hardware device an
   - [Adjustments](#adjustments)
     - [Endian Order](#endian-order)
     - [Value Formulas](#value-formulas)
+    - [Context (values that depend on another register)](#context-values-that-depend-on-another-register)
     - [Bit Flag Codes](#bit-flag-codes)
   - [Write Mode](#write-mode)
   - [Value Ranges and Codes](#value-ranges-and-codes)
@@ -274,6 +275,30 @@ Applies a conditional formula to scale or transform the raw register value befor
 ```
 
 The `x` variable holds the raw decoded value. Each condition uses interval notation (`(` exclusive, `]` inclusive). Conditions are evaluated left to right; the first match wins.
+
+#### Context (values that depend on another register)
+
+`Context` chooses a formula from the **current value of another decoded variable**. It is how a protocol applies a scale factor that the device reports in a register of its own, as SunSpec does (`A_SF`, `V_SF`, `W_SF`, ...).
+
+```json
+{"Context": {"key": "current_sf", "cases": {"-2": "x/100", "-1": "x/10", "0": "x", "1": "x*10"}, "default": "x"}}
+```
+
+- `key` is the `variable name` of another row in the same map. That row is read and decoded like any other, so keep it in the map (a `diagnostic` row is fine).
+- `cases` maps a value of that variable (written as text, `"-2"`) to a formula in `x`, the raw value of this row. Formulas are the same arithmetic expressions as in [Value Formulas](#value-formulas).
+- `default` is optional and is used when no case matches. Without it the raw value is published unchanged. SunSpec marks "scale factor not implemented" as `0x8000` (-32768), so those readings are published raw.
+- The adjustment runs after every value in the read has been decoded, so the order of rows in the CSV does not matter. The key variable must be read in the same polling pass.
+
+For SunSpec, write one case per scale factor from -10 to 10 (the range the standard allows). Use division for negative factors (`x/100`, not `x*0.01`) so results such as 12.5 stay exact:
+
+``` ini
+72,ac_current,AC Current,A,USHORT,,,R,"{""Context"":{""key"":""current_sf"",""cases"":{""-2"":""x/100"",""-1"":""x/10"",""0"":""x""}}}",...
+76,current_sf,AC Current Scale Factor,,SHORT,,,R,,...
+```
+
+`Context` is applied when reading only. It cannot be inverted, so a **writable** row that carries one would send the user's value unscaled. Leave writable SunSpec points raw (no `Context`) and publish their scale-factor register beside them, as the ABB/FIMER SunSpec maps do.
+
+The same mechanism handles a sign or direction register: `{"Context": {"key": "direction", "cases": {"1": "-x", "0": "x"}}}` makes a power value negative while `direction` is 1.
 
 #### Bit Flag Codes
 
