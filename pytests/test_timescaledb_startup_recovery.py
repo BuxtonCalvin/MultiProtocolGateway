@@ -26,7 +26,7 @@ def _noop(*_args: object, **_kwargs: object) -> None:
     return None
 
 
-def _pending_registration(protocol: str) -> dict[str, tuple[dict[str, object], list[object] | None]]:
+def _pending_registration(protocol: str) -> tsdb.timescaledb.FailedRegistrations:
     """What init_bridge remembers about a registration that failed: the protocol's registry map and its synthetic fields."""
     return {protocol: ({}, None)}
 

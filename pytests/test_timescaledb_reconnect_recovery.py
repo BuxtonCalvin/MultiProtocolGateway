@@ -517,6 +517,75 @@ def test_while_a_reconnect_is_running_points_are_kept_without_attempting_a_write
     assert bridge._flush_queue.unfinished_tasks == 0
 
 
+def test_a_replayed_point_skips_stale_detection_and_leaves_the_stale_registry_alone(bridge: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Replayed points are history: they must not be judged against, or rewind, the live stale-data registry."""
+    writes: list[int] = []
+    commits: list[bool] = []
+
+    def counting_write(*_args: object, **_kwargs: object) -> None:
+        writes.append(1)
+
+    def always_stale(*_args: object, **_kwargs: object) -> bool:
+        return True
+
+    def recording_commit(_transport: str, _row: object, _timestamp: object, is_stale: bool) -> None:
+        commits.append(is_stale)
+
+    _prime_flush_worker(bridge, monkeypatch, narrow=counting_write)
+    monkeypatch.setattr(bridge, "_check_is_stale", always_stale)
+    monkeypatch.setattr(bridge, "_commit_transport_state", recording_commit)
+    bridge.tsdb_connected = True
+    bridge._flush_queue = _queue_of({**_item(0), "backlog_rowid": 3})
+    bridge._flush_worker()
+    assert writes == [1]  # written even though the live registry would call it stale
+    assert commits == []  # and the registry was not touched
+    assert bridge.backlog.acked == [3]
+
+    # A live point is still judged: the same stale verdict skips the write and records the stale batch.
+    writes.clear()
+    bridge._flush_queue = _queue_of(_item(1))
+    bridge._flush_worker()
+    assert writes == []
+    assert commits == [True]
+
+
+class _PgCode(Exception):
+    """Stand-in for the driver's error object: psycopg2 exposes the server's SQLSTATE as .pgcode."""
+
+    def __init__(self, message: str, pgcode: str) -> None:
+        super().__init__(message)
+        self.pgcode: str = pgcode
+
+
+@pytest.mark.parametrize(
+    "pgcode",
+    ["55P03", "40P01", "40001", "57014", "53300"],  # lock timeout, deadlock, serialization failure, statement timeout, too many connections
+)
+def test_a_temporary_refusal_keeps_the_point_without_declaring_an_outage(
+    bridge: Any, monkeypatch: pytest.MonkeyPatch, pgcode: str
+) -> None:
+    """The database answered "not now": not a lost connection (no alert, no reconnect), and not a bad batch (do not drop it)."""
+
+    def refused(*_args: object, **_kwargs: object) -> None:
+        raise OperationalError("INSERT", {}, _PgCode("canceling statement due to lock timeout", pgcode))
+
+    bridge.tsdb_connected = True
+    bridge._connected = True
+    bridge.rollup_policy["tsdb_connected"] = True
+    _prime_flush_worker(bridge, monkeypatch, narrow=refused)
+    reconnects: list[int] = []
+    monkeypatch.setattr(bridge, "_trigger_reconnect", lambda: reconnects.append(1))
+    bridge._flush_queue = _queue_of(_item(0), {**_item(1), "backlog_rowid": 9})
+    bridge._flush_worker()
+
+    assert reconnects == []
+    assert bridge.tsdb_connected is True
+    assert bridge.messages == []
+    assert bridge.events == ["enqueue"]  # the live point is journalled for a retry
+    assert bridge.backlog.released == [9]  # and the replayed one stays in the backlog
+    assert bridge.backlog.acked == []
+
+
 def test_a_live_point_in_hand_at_shutdown_is_journalled_not_lost(bridge: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     writes: list[int] = []
 

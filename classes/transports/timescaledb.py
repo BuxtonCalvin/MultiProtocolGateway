@@ -154,6 +154,7 @@ else:
 
 # ---------------------------------------------------------------------------------------------------------------------
 # SQL safety helpers shared by HyperTableManager and RollupManager
+# module level because the methods are used in multiple classes and functions, and the regex is compiled once for efficiency
 # ---------------------------------------------------------------------------------------------------------------------
 
 _INTERVAL_PART: str = (
@@ -162,7 +163,6 @@ _INTERVAL_PART: str = (
 _INTERVAL_RE: re.Pattern[str] = re.compile(rf"^{_INTERVAL_PART}(?:\s+{_INTERVAL_PART})*$", re.IGNORECASE)
 _SQL_IDENT: str = r'(?:[A-Za-z_][A-Za-z0-9_$]*|"(?:[^"]|"")+")'
 _RELATION_NAME_RE: re.Pattern[str] = re.compile(rf"^{_SQL_IDENT}(?:\.{_SQL_IDENT})?$")
-
 
 def validated_interval(value: str, what: str = "interval") -> str:
     """
@@ -599,6 +599,16 @@ class timescaledb(transport_base):
     """
     __version__: str = "1.0.0"
 
+    # What init_bridge remembers about a protocol whose schema registration failed (database unreachable at startup): the
+    # protocol's registry map and its synthetic fields, kept so _retry_failed_registrations can finish the job after a reconnect.
+    # A synthetic field as transport_base.synthetic_fields_metadata / selected_synthetic_fields_metadata declare it:
+    # (variable_name, data_type, unit_mod, note, registry_tag). _extract_metric_names still accepts the legacy form
+    # without the trailing registry tag. A Sequence, not a list: list is invariant, so a list of 5-tuples would not be
+    # accepted where a list of "either form" is declared.
+    SyntheticField: TypeAlias = tuple[str, str, float, str, str] | tuple[str, str, float, str]
+    SyntheticFields: TypeAlias = Sequence[SyntheticField]
+    FailedRegistrations: TypeAlias = dict[str, tuple[dict[Registry_Type, list[registry_map_entry]], SyntheticFields | None]]
+
     # -------------------------
     # Default settings (overridable by settings SectionProxy)
     # -------------------------
@@ -770,7 +780,7 @@ class timescaledb(transport_base):
         # Per-protocol state — populated as init_bridge is called for each scraper
         self._registered_protocols: set[str] = set()
         # protocol -> (registry_map, synthetic_fields) for registrations that failed in init_bridge; see _retry_failed_registrations
-        self._failed_registrations: dict[str, tuple[dict[Registry_Type, list[registry_map_entry]], list[tuple[str, str, Any, Any]] | None]] = {}
+        self._failed_registrations: timescaledb.FailedRegistrations = {}
 
         # Maps protocol_name -> wide_table_name (or None if narrow-only)
         self._protocol_wide_table_map: dict[str, str | None] = {}
@@ -1647,7 +1657,7 @@ class timescaledb(transport_base):
     def _extract_metric_names(
         self,
         registry_map: dict[Registry_Type, list[registry_map_entry]],
-        synthetic_fields: list[tuple[str, str, Any, Any]] | None = None,
+        synthetic_fields: timescaledb.SyntheticFields | None = None,
     ) -> list[tuple[str, str, Any, Any]]:
 
         """
@@ -2219,7 +2229,8 @@ class timescaledb(transport_base):
 
     def _retry_failed_registrations(self) -> None:
         """Finish protocol schema registrations that failed in init_bridge (database unreachable at startup)."""
-        pending: dict[Any, Any] = dict(getattr(self, "_failed_registrations", {}))
+        # getattr rather than self._failed_registrations so an instance built without __init__ (as unit tests do) still works
+        pending: timescaledb.FailedRegistrations = dict(getattr(self, "_failed_registrations", {}))
         for protocol, (registry_map, synthetic) in pending.items():
             try:
                 self._register_protocol_schema(protocol, registry_map, synthetic_fields=synthetic)
@@ -2276,7 +2287,7 @@ class timescaledb(transport_base):
         self,
         protocol: str,
         registry_map: dict[Registry_Type, list[registry_map_entry]],
-        synthetic_fields: list[tuple[str, str, Any, Any]] | None = None,
+        synthetic_fields: timescaledb.SyntheticFields | None = None,
     ) -> None:
         """
         Ensures wide table columns and metric_catalog entries exist for
@@ -2451,12 +2462,13 @@ class timescaledb(transport_base):
         already_registered: bool = protocol in self._registered_protocols
         if not already_registered:
             self._log.info(f"Registering protocol '{protocol}' from transport '{from_transport.transport_name}'")
+            # Synthetic fields are opt-in: only those chosen via (M)ask are
+            # forwarded, so only those get a wide-table column.
+            # Read before the try so it is always bound: the except handler below saves it for the retry after a reconnect.
+            synthetic: timescaledb.SyntheticFields = getattr(
+                from_transport, 'selected_synthetic_fields_metadata', []
+            )
             try:
-                # Synthetic fields are opt-in: only those chosen via (M)ask are
-                # forwarded, so only those get a wide-table column.
-                synthetic: list[tuple[str, str, Any, Any]] = getattr(
-                    from_transport, 'selected_synthetic_fields_metadata', []
-                )
                 if synthetic:
                     self._log.info(
                         f"Transport '{from_transport.transport_name}' has "
@@ -2475,7 +2487,7 @@ class timescaledb(transport_base):
                 # finish the job: without this a protocol seen for the first time while the database was down (a fresh
                 # install, a new device) would write to the narrow table only until the app was restarted.
                 self._log.error(f"Failed to register schema for protocol '{protocol}': {e} — will retry after the next reconnect.")
-                self._failed_registrations[protocol] = (from_transport.registry_map, synthetic or None) # type: ignore
+                self._failed_registrations[protocol] = (from_transport.registry_map, synthetic or None)
         else:
             self._log.debug(f"Protocol '{protocol}' already registered, skipping.")
 
@@ -3070,7 +3082,7 @@ class timescaledb(transport_base):
 
                 # Find stale idle connections holding locks on our tables.
                 # Excludes our own pid, TimescaleDB workers, and active queries.
-                stale = conn.execute(text("""
+                stale: Sequence[Row[int, str | None, str, timedelta, str | None]] = conn.execute(text("""
                     SELECT
                         pid,
                         state,
@@ -3232,7 +3244,7 @@ class timescaledb(transport_base):
         except Exception as e:
             log: logging.Logger | None = getattr(self, "_log", None)
             if log is not None:
-                msg: str = (f"Exception in __del__: {e}")
+                msg: str = f"Exception in __del__ of {self.__class__.__name__}: {e}"
                 log.exception(msg)
 
 
@@ -6797,7 +6809,7 @@ class RollupManager:
         for column in column_names:
             alias: str = natural[column]
             if counts[alias] > 1:
-                digest: str = hashlib.sha1(column.encode("utf-8")).hexdigest()[:8]  # noqa: S324
+                digest: str = hashlib.sha256(column.encode("utf-8")).hexdigest()[:8]
                 alias = f"{f'{prefix}{column}'[:54]}_{digest}"  # 54 + "_" + 8 = 63
             aliases[column] = alias
         return aliases
@@ -8056,7 +8068,7 @@ class RollupManager:
 
         try:
             # Keep ONLY the risky operation in the try block
-            result = session.execute(check_sql, {"name": view_name}).fetchone()
+            result: Row[int] | None = session.execute(check_sql, {"name": view_name}).fetchone()
         except Exception as e:
             # Handle the error and clean up
             self._log.error(f"Error checking view existence for {view_name}: {e}")
@@ -8488,7 +8500,7 @@ class RollupManager:
     def _describe_lock_blockers(self, session: Session, pattern: str) -> str:
         """What is holding the lock a refresh is waiting on, for the alert text. Best effort: returns "" on any problem."""
         try:
-            rows: Sequence[Row[Tuple[Any, ...]]] = session.execute(text("""
+            rows: Sequence[Row[int, str | None, str, timedelta | None, str | None]] = session.execute(text("""
                 SELECT b.pid, b.state, b.application_name, now() - b.xact_start AS open_for, left(b.query, 120) AS query
                 FROM pg_stat_activity a
                 CROSS JOIN LATERAL unnest(pg_blocking_pids(a.pid)) AS blocker(pid)
@@ -9394,7 +9406,7 @@ class BridgeAdminManager:
                 # Whitelist requested names against what's actually in
                 # metric_catalog for this protocol -- column names handed in
                 # from the UI layer are never trusted directly in DDL.
-                catalog_rows = session.execute(
+                catalog_rows: Sequence[Row[int, str]] = session.execute(
                     text("""
                         SELECT catalog_id, clean_column_name
                         FROM metric_catalog
@@ -9847,7 +9859,7 @@ class BridgeAdminManager:
                     {"did": device_info_id, "start": start_time, "end": end_time, "lim": sample_limit},
                 ).fetchall()
                 for r in wide_sample_rows:
-                    m_time = r[0]
+                    m_time: datetime = r[0]
                     for i, col in enumerate(to_read, start=1):
                         sample.append(MetricValueSample(m_time=m_time, field_name=col, value=r[i]))
 
