@@ -1,0 +1,65 @@
+{
+  "transport": "modbus_tcp",
+  "batch_size": 40,
+  "send_holding_register": true,
+  "send_input_register": false,
+  "send_coil_register": false,
+  "send_discrete_register": false,
+
+  "control_conn_codes": {
+    "0": "DISCONNECT",
+    "1": "CONNECT"
+  },
+
+  "control_outpfset_ena_codes": {
+    "0": "DISABLED",
+    "1": "ENABLED"
+  },
+
+  "control_varpct_ena_codes": {
+    "0": "DISABLED",
+    "1": "ENABLED"
+  },
+
+  "control_varpct_mod_codes": {
+    "1": "WMax",
+    "2": "VArMax"
+  },
+
+  "control_wmaxlim_ena_codes": {
+    "0": "DISABLED",
+    "1": "ENABLED"
+  },
+
+  "inverter_st_codes": {
+    "1": "Off (OFF)",
+    "2": "Sleeping (SLEEPING)",
+    "3": "Starting (STARTING)",
+    "4": "MPPT",
+    "5": "Throttled (THROTTLED)",
+    "6": "Shutting down (SHUTTING_DOWN)",
+    "7": "Fault (FAULT)",
+    "8": "Standby (STANDBY)"
+  },
+
+  "meter_insmd_codes": {
+    "0": "L123",
+    "1": "L1",
+    "2": "L2",
+    "3": "L3"
+  },
+
+  "mppt1_dcst_codes": {
+    "1": "Off (OFF)",
+    "2": "Sleeping (SLEEPING)",
+    "3": "Starting (STARTING)",
+    "4": "MPPT",
+    "5": "Throttled (THROTTLED)",
+    "7": "Fault (FAULT)"
+  },
+
+  "nameplate_dertyp_codes": {
+    "4": "PV",
+    "82": "PV_STOR"
+  }
+}

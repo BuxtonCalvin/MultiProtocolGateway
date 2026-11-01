@@ -745,7 +745,7 @@ class DataAdjustments:
                 return value
 
             cases: object = context_adjustment.get("cases", {})
-            formula = ""
+            formula: str = ""
             context_value: int | float | str = context[key]
             if isinstance(cases, dict):
                 cases = cast(dict[object, object], cases)
@@ -1240,6 +1240,9 @@ class protocol_settings:
         read_interval_regex: re.Pattern[str] = re.compile(r"(?P<value>[\.\d]+)(?P<unit>[xs]|ms)")
         data_type_regex: re.Pattern[str] = re.compile(r"(?P<datatype>\w+)\.(?P<length>\d+)")
         range_regex: re.Pattern[str] = re.compile(r"(?P<reverse>r|)(?P<start>(?:0?x[\da-z]+|[\d]+))[\-~](?P<end>(?:0?x[\da-z]+|[\d]+))")
+        # Validation range in the ``values`` column: "0-100", "0~65535", "-100~100", "-32768-32767".
+        # Either end may be negative.  (range_regex above is for register ranges and has no sign.)
+        value_range_regex: re.Pattern[str] = re.compile(r"(?P<start>-?(?:0?x[\da-z]+|\d+))[\-~](?P<end>-?(?:0?x[\da-z]+|\d+))", re.IGNORECASE)
         ascii_value_regex: re.Pattern[str] = re.compile(r"(?P<regex>^\[.+\]$)")
         list_regex: re.Pattern[str] = re.compile(r"\s*(?:(?P<range_start>(?:0?x[\da-z]+|[\d]+))-(?P<range_end>(?:0?x[\da-z]+|[\d]+))|(?P<element>[^,\s][^,]*?))\s*(?:,|$)")
 
@@ -1438,7 +1441,7 @@ class protocol_settings:
                             values.append(element)
                 else:
                     unit_matched: bool = False
-                    val_match: re.Match[str] | None = range_regex.search(row["values"])
+                    val_match: re.Match[str] | None = value_range_regex.search(row["values"])
                     if val_match:
                         value_min = strtoint_safe(val_match.group("start"))
                         value_max = strtoint_safe(val_match.group("end"))
@@ -2242,7 +2245,7 @@ class protocol_settings:
             value = bytes(register).hex()
 
         elif entry.data_type == Data_Type.ASCII:
-            value = self._decode_text_bytes(bytes(register))
+            value = self._decode_text_bytes(self._ascii_fragment(bytes(register), entry))
 
         elif entry.data_type in (Data_Type.STRING, Data_Type.STRING16, Data_Type.STRING32):
             value = self._decode_text_bytes(bytes(register))
@@ -2394,6 +2397,18 @@ class protocol_settings:
     def _swap_bytes_16(self, val: int) -> int:
         """Swap the high and low bytes of a 16-bit integer."""
         return ((val & 0xFF) << 8) | ((val >> 8) & 0xFF)
+
+    @staticmethod
+    def _ascii_fragment(raw_bytes: bytes, entry: registry_map_entry) -> bytes:
+        """Prepare the bytes of one register of a concatenated ASCII range for decoding.
+
+        A range member ("1008~1013") is a fragment of a longer string, not a null-terminated
+        field.  Some devices (ABB's native Modbus maps) send one character per register in
+        the low byte, so a member reads ``00 31``; skipping the NUL keeps the character
+        where ``_decode_text_bytes`` would stop at it and return nothing.  Whole-field
+        entries (no range) keep the null-terminator behavior.
+        """
+        return raw_bytes.replace(b"\x00", b"") if entry.concatenate else raw_bytes
 
     def _decode_text_bytes(self, raw_bytes: bytes) -> str:
         """Decode raw register bytes as a printable ASCII string.
@@ -2589,7 +2604,7 @@ class protocol_settings:
                 return None
             if entry.data_type_size > 0 and not entry.concatenate:
                 raw_bytes = raw_bytes[:entry.data_type_size]
-            value = self._decode_text_bytes(raw_bytes)
+            value = self._decode_text_bytes(self._ascii_fragment(raw_bytes, entry))
 
         elif entry.data_type in (Data_Type.STRING, Data_Type.STRING16, Data_Type.STRING32):
             word_count: int = self.entry_word_count(entry)

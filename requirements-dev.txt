@@ -5,3 +5,4 @@ hbmqtt
 pyright
 mypy
 pandas-stubs
+httpx2

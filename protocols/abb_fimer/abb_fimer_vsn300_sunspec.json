@@ -1,0 +1,24 @@
+{
+  "transport": "modbus_tcp",
+  "batch_size": 40,
+  "send_holding_register": true,
+  "send_input_register": false,
+  "send_coil_register": false,
+  "send_discrete_register": false,
+
+  "operating_state_codes": {
+    "1": "Off",
+    "2": "Sleeping",
+    "3": "Starting",
+    "4": "MPPT",
+    "5": "Throttled",
+    "6": "Shutting down",
+    "7": "Fault",
+    "8": "Standby"
+  },
+
+  "power_limit_enable_codes": {
+    "0": "Disabled",
+    "1": "Enabled"
+  }
+}

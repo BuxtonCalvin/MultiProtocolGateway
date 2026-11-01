@@ -273,6 +273,7 @@
     "auto_refresh_interval": "21600",
     "backlog_file_name": "no_connect_timescale_backlog",
     "backlog_storage_path": "backlogs",
+    "connection_timeout": "10",
     "database": "solar1",
     "device_location": "",
     "device_name": "TimescaleDB MPG Bridge",

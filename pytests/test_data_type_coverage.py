@@ -439,3 +439,26 @@ def test_string_registers_are_fully_inside_a_read_range(protocol: str, variable:
     entry: registry_map_entry = next(e for e in proto.registry_map[Registry_Type.HOLDING] if e.variable_name == variable)
     last: int = entry.register + proto.entry_word_count(entry) - 1
     assert any(start <= entry.register and start + count - 1 >= last for start, count in proto.registry_map_ranges[Registry_Type.HOLDING])
+
+
+def test_whole_field_ascii_still_stops_at_a_null_terminator() -> None:
+    """A sized ``ASCII.N`` entry is a null-terminated field: text after the first NUL is ignored."""
+    entry: registry_map_entry = _entries("a_tronix", Registry_Type.HOLDING)["inverter_sn"]
+    logging.disable(logging.CRITICAL)
+    try:
+        proto: protocol_settings = protocol_settings("a_tronix")
+    finally:
+        logging.disable(logging.NOTSET)
+    assert proto.process_registery({entry.register: b"AB\x00CDEFGHIJKLMNO"}, [entry]) == {"inverter_sn": "AB"}
+
+
+def test_ascii_range_members_skip_nul_bytes() -> None:
+    """Range members are fragments: ABB's one-character-per-register strings (``00 31``) must not decode to nothing."""
+    logging.disable(logging.CRITICAL)
+    try:
+        proto: protocol_settings = protocol_settings("abb_fimer_trio_50_60")
+    finally:
+        logging.disable(logging.NOTSET)
+    entries: list[registry_map_entry] = [e for e in proto.registry_map[Registry_Type.INPUT] if e.variable_name == "serial_number"]
+    words: dict[int, int] = {1008 + i: ord(ch) for i, ch in enumerate("123789")}
+    assert proto.process_registery(words, entries) == {"serial_number": "123789"}
