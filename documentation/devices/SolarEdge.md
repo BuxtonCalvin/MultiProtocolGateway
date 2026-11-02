@@ -254,16 +254,20 @@ Inverter GND  →   Adapter GND (optional)
 
 SolarEdge implements SunSpec Modbus with a base address of 40000. Scale factors are in adjacent registers.
 
-| Register | Description | Scale Factor Register |
+The register numbers below are the Modbus (wire) addresses used by the `solaredge_sunspec` map. SolarEdge's own document numbers SunSpec registers from 1, so each one appears there as the number below plus 1 (AC power is "register 40084" in SolarEdge's table and is read at address 40083).
+
+| Address | Description | Scale Factor Address |
 | --- | --- | --- |
-| 40071 | AC Power output (W) | 40075 |
-| 40083 | AC Energy lifetime (Wh) | 40087 |
-| 40100 | DC Voltage string 1 (V) | 40104 |
-| 40101 | DC Power string 1 (W) | 40104 |
-| 40093 | Inverter operating status | — |
-| 40736 | Battery SOC (%) — StorEdge | 40737 |
+| 40083 | AC Power output (W) | 40084 |
+| 40093 | AC Energy lifetime (Wh, 2 registers) | 40095 |
+| 40098 | DC Voltage (V) | 40099 |
+| 40100 | DC Power (W) | 40101 |
+| 40107 | Inverter operating status | — |
+| 62852 | Battery 1 state of energy (%) — StorEdge; this block of the map is not verified against a device | — |
 
 > **Scale factor rule:** Multiply the raw register value by 10^(scale factor). For example, AC power register = 3420 with scale factor register = -1 → 342.0 W.
+>
+> **MPG applies this for you.** In the `solaredge_sunspec` map every scaled value (current, voltage, power, frequency, energy, temperature, rated power) carries a `Context` adjustment that reads its scale-factor register and publishes the value in real units. The `*_sf` registers are published too, as diagnostics. See the `Context` adjustment in the [protocol reference](../usage/protocols.md#context-values-that-depend-on-another-register).
 
 Full SunSpec register documentation:
 <https://knowledge-center.solaredge.com/sites/kc/files/sunspec-implementation-technical-note.pdf>
@@ -415,5 +419,5 @@ Configuration reference:
 | RS485 no response | RS485-1 in Leader/Follower mode | Use RS485-2; or change RS485-1 to Non-SE mode via SetApp |
 | Baud rate mismatch | 115200 vs 9600 | Verify actual baud via SetApp; SetApp model default is 115200 |
 | Duplicate Device IDs | Common multi-inverter setup error | Set unique Device ID per inverter individually in SetApp |
-| Scale factor = 0 gives wrong value | Scale factor register not read | Read both data register and scale factor register; apply per Section 9 |
+| Scale factor = 0 gives wrong value | Scale factor register not read | The `solaredge_sunspec` map reads both and applies the scale factor itself; if you build your own map, include the `*_sf` register in the same read and use a `Context` adjustment (Section 9) |
 | Local API returns 401 | Session expired | Re-authenticate via `/api/v1/login` and refresh session token |
