@@ -236,14 +236,15 @@ Baud rate and slave address are configurable from the GEN24 web UI under Communi
 
 Using SunSpec float format (default). Base address: 40000.
 
-| Register | Description | Unit |
+The register numbers below are the Modbus (wire) addresses used by the `fronius_sunspec` map. Fronius's manual numbers registers from 1 and states that the address is always one less than the register number, so each one appears there as the number below plus 1 (AC power is "register 40092" in Fronius's table and is read at address 40091). Each value is a 32-bit float spanning two registers.
+
+| Address | Description | Unit |
 | --- | --- | --- |
-| 40070 | AC Power output | W |
-| 40072 | AC Frequency | Hz |
-| 40078 | AC Energy total (lifetime) | Wh |
-| 40102 | DC Voltage string 1 | V |
-| 40103 | DC Current string 1 | A |
-| 40240 | Battery SOC (if storage connected) | % |
+| 40091 | AC Power output | W |
+| 40093 | AC Frequency | Hz |
+| 40101 | AC Energy total (lifetime) | Wh |
+| 40103 | DC Current | A |
+| 40105 | DC Voltage | V |
 
 > **Known issue — `NaN` on startup:** Fronius inverters may return NaN or 0 for scale factors during the first 30–60 seconds after boot. Wait for full initialization before relying on register reads.
 
