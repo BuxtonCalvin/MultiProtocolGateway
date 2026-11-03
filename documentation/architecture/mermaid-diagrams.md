@@ -1307,5 +1307,6 @@ flowchart TD
 - [Analyze Guide](../usage/Analyze.md) — beginner-friendly walkthrough of Create Protocol, Create Scraper, and Analyze
 - [Transports](../usage/transports.md) — scraper and bridge configuration
 - [Protocols](../usage/protocols.md) — register map editing
+- [Dynamic Register Discovery](dynamic_register_discovery.md) — template rows, anchors and discovery providers for SunSpec-style dynamic maps
 - [TimescaleDB Bridge](../bridges/TimeScaleDB/timescaledb.md) — telemetry schema and queries
 - [MQTT Bridge](../bridges/MQTT/MQTT_bridge.md) — publish topics and writeback

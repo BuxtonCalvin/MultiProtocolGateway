@@ -203,6 +203,8 @@ The create protocol wizard walks you through creating a hardware protocol from s
 
 This is typically the first step for undocumented hardware — see [Analyze.md](documentation/usage/Analyze.md) for the full walkthrough, and the [Protocol Map Directory Structure diagram](documentation/architecture/mermaid-diagrams.md#16-mindmap--protocol-map-directory-structure) for how the resulting JSON descriptor and register-map CSVs are laid out on disk.
 
+Protocols whose register layout depends on the attached equipment (SunSpec) can use [dynamic register discovery](documentation/architecture/dynamic_register_discovery.md): the protocol JSON names a discovery provider and the CSV describes registers relative to the anchors it reports. Static protocols are unaffected.
+
 ### Live Device Analysis
 
 The **Analyze** page is the tool for working with new or undocumented hardware — including any of the 74 [stub protocols](#community-help-wanted-stub-protocols) that don't have a register map yet. For a plain-language, no-prior-experience walkthrough of this whole workflow, see [**Analyze.md**](documentation/usage/Analyze.md).

@@ -27,7 +27,7 @@ import re
 import struct
 import sys
 import time
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -38,6 +38,14 @@ from defs.common import TransportSettings, strtoint, strtoint_safe
 # Largest finite IEEE-754 values, as ints, for the default FLOAT32/FLOAT64 value ranges.
 _FLOAT32_MAX: int = int(3.4028234663852886e38)
 _FLOAT64_MAX: int = int(sys.float_info.max)
+
+# Template rows (dynamic register maps).  ``{i}`` in a CSV row's register / variable name /
+# documented name is replaced by the 1-based instance number; the number of instances comes from
+# the anchor ``<stem>_count`` where ``<stem>`` is the text before ``_{i}_`` in the register cell
+# (``model_203_{i}_base`` -> ``model_203_count``).  See documentation/architecture/dynamic_register_discovery.md.
+_INSTANCE_TOKEN: str = "{i}"  # noqa: S105
+_INSTANCE_STEM_REGEX: re.Pattern[str] = re.compile(r"(?P<stem>[A-Za-z_][A-Za-z0-9_]*?)_\{i\}_")
+_TEMPLATE_ROW_KEYS: tuple[str, ...] = ("register", "variable name", "documented name", "adjustments", "note")
 
 
 class Data_Type(Enum):
@@ -399,6 +407,12 @@ class registry_map_entry:
 
     ha_entity_category: str = ""
     ''' optional Home Assistant entity_category ("ha entity category" CSV column): config or diagnostic '''
+
+    dynamic: bool = False
+    ''' True when the register address was resolved from a template row (``[anchor+offset]`` and/or ``{i}`` in
+    the CSV register cell) rather than written literally.  Runtime-only: it is never read from or written to a CSV,
+    so discovered rows cannot be committed back and analysis tools can tell them apart from static rows.  Always
+    False for static protocol maps. '''
 
     def __str__(self) -> str:
         """Return the entry's ``variable_name`` as its string representation."""
@@ -923,6 +937,14 @@ class protocol_settings:
         self.registry_map_ranges: dict[Registry_Type, list[tuple[int, int]]] = {}
         self.dynamic_registry_rows: list[dict[str, object]] = []
         self.dynamic_registry_resolved = False
+        self.discovery_provider: str = ""
+        ''' name of the discovery provider declared by the protocol JSON ``"discovery"`` key; empty for static maps '''
+        self.anchor_defaults: dict[str, str | float | int] = {}
+        ''' anchor values from the protocol JSON ``"discovery_defaults"`` object; the map is fully materialized from these before any discovery runs '''
+        self.anchors: dict[str, str | float | int] = {}
+        ''' anchors the loaded maps were last built with: the defaults overlaid with whatever discovery reported '''
+        self.dynamic_registry_types: set[Registry_Type] = set()
+        ''' registry types whose CSV contains template rows and so must be reloaded when the anchors change '''
         self.codes: dict[str, object] = {}
         self.settings: dict[str, str] = {}
         self.variable_mask: list[str] = []
@@ -963,6 +985,7 @@ class protocol_settings:
         self.variable_screen = [e for e in raw_screen if not e.startswith(SYNTHETIC_FILTER_PREFIX)]
 
         self.load__json()
+        self._init_discovery_settings()
 
         if "transport" in self.settings:
             self.transport = self.settings["transport"]
@@ -1622,6 +1645,7 @@ class protocol_settings:
                     ha_device_class=(row.get("ha device class") or "").strip().lower(),
                     ha_state_class=(row.get("ha state class") or "").strip().lower(),
                     ha_entity_category=(row.get("ha entity category") or "").strip().lower(),
+                    dynamic=row.get("_dynamic") == "1",
                 )
 
                 # Cross-check register_list token count against data_type word width.
@@ -1660,7 +1684,8 @@ class protocol_settings:
             reader: csv.DictReader[str] = csv.DictReader(csvfile_iter, delimiter=delimeter, restval="")
 
             for row in reader:
-                process_row(row)
+                for expanded_row in self._expand_template_row(row, registry_type):
+                    process_row(expanded_row)
 
             if overrides is not None:
                 for key in override_keys:
@@ -2002,6 +2027,10 @@ class protocol_settings:
 
         if not path:
             return
+
+        # A reload (see rebuild_dynamic_maps) must not accumulate the deferred rows of the previous load.
+        self.dynamic_registry_rows = [row for row in self.dynamic_registry_rows if row.get("_registry_type") != registry_type]
+        self.dynamic_registry_types.discard(registry_type)
 
         self.registry_map[registry_type] = self.load__registry(path, registry_type)
 
@@ -2786,11 +2815,142 @@ class protocol_settings:
 
         return 0
 
-    def evaluate_expressions(self, expression: str, variables: dict[str, str | float | int]) -> list[str]:
+    def _init_discovery_settings(self) -> None:
+        """Read the discovery declaration from the protocol JSON and seed ``anchors`` with its defaults.
+
+        ``"discovery"`` names the provider to run on connect (see ``classes/discovery``); it is absent for static
+        protocols, which then never pay for discovery.  ``"discovery_defaults"`` is an object of anchor name to
+        value (for SolarEdge: where each SunSpec model normally sits).  Template rows are resolved from these
+        defaults at load time, so the registry map is complete before anything has been discovered and tools
+        that read the map without a device (tests, the web UI, protocol analysis) keep working.
+        """
+        self.discovery_provider = self.settings.get("discovery", "").strip().lower()
+
+        defaults: dict[str, str | float | int] = {}
+        raw_defaults: object = self.codes.get("discovery_defaults")
+        if isinstance(raw_defaults, dict):
+            for name, value in cast("dict[str, object]", raw_defaults).items():
+                if isinstance(value, (int, float, str)) and not isinstance(value, bool):
+                    defaults[str(name)] = value
+                else:
+                    self._log.warning(f"[{self.protocol}] ignoring discovery_defaults entry '{name}': expected a number or string")
+        elif raw_defaults is not None:
+            self._log.warning(f"[{self.protocol}] ignoring discovery_defaults: expected a JSON object")
+
+        self.anchor_defaults = defaults
+        self.anchors = dict(defaults)
+
+    @property
+    def is_dynamic(self) -> bool:
+        """Return True when the protocol JSON declares a discovery provider or discovery probes.
+
+        Static protocols (the great majority) return False, and the transport skips discovery entirely.
+        """
+        return bool(self.discovery_provider) or "discovery_probes" in self.codes
+
+    def _expand_template_row(self, row: dict[str, str], registry_type: Registry_Type) -> list[dict[str, str]]:
+        """Expand one CSV row that uses anchors into the concrete row(s) the normal parser can read.
+
+        A row is a template when its register cell contains a ``[...]`` expression or any of its register /
+        variable name / documented name cells contains ``{i}``.  ``[anchor+offset]`` is resolved from
+        ``anchors``.  ``{i}`` repeats the row once per instance (1-based); the instance count is the anchor
+        ``<stem>_count`` named by the ``<stem>_{i}_`` part of the register cell, and a count of zero or a
+        missing count anchor yields no rows (the equipment is not present).
+
+        Resolved rows get ``_dynamic = "1"`` so the entry is marked ``dynamic``.  Rows that still contain an
+        unresolved ``[...]`` pass through unchanged and are deferred by ``process_row`` exactly as before.
+        Plain rows, comments and everything in a static protocol come back untouched as a one-item list.
+        """
+        register: str = (row.get("register") or "").strip()
+        has_instance_token: bool = any(_INSTANCE_TOKEN in (row.get(key) or "") for key in _TEMPLATE_ROW_KEYS)
+
+        if not has_instance_token and "[" not in register:
+            return [row]
+        if register.startswith("#") or (row.get("variable name") or "").startswith("#"):
+            return [row]
+
+        self.dynamic_registry_types.add(registry_type)
+
+        instances: list[int | None] = [None]
+        if has_instance_token:
+            stem_match: re.Match[str] | None = _INSTANCE_STEM_REGEX.search(register)
+            if stem_match is None:
+                self._log.warning(
+                    f"[{self.protocol}] template row '{row.get('variable name')}' uses {_INSTANCE_TOKEN} but its register "
+                    f"cell has no '<name>_{_INSTANCE_TOKEN}_' anchor to take the instance count from; row skipped"
+                )
+                return []
+            count_name: str = f"{stem_match.group('stem')}_count"
+            try:
+                count: int = int(self.anchors.get(count_name, 0))
+            except (TypeError, ValueError):
+                self._log.warning(f"[{self.protocol}] anchor '{count_name}' is not a number; treating as 0 instances")
+                count = 0
+            instances = list(range(1, count + 1))
+
+        expanded: list[dict[str, str]] = []
+        for instance in instances:
+            new_row: dict[str, str] = dict(row)
+            if instance is not None:
+                for key in _TEMPLATE_ROW_KEYS:
+                    new_row[key] = (new_row.get(key) or "").replace(_INSTANCE_TOKEN, str(instance))
+            resolved: list[str] = self.evaluate_expressions(new_row.get("register") or "", self.anchors)
+            if len(resolved) == 1 and "[" not in resolved[0]:
+                new_row["register"] = resolved[0]
+                new_row["_dynamic"] = "1"
+            expanded.append(new_row)
+        return expanded
+
+    def apply_anchors(
+        self,
+        discovered: Mapping[str, str | float | int],
+        owned_patterns: Sequence[re.Pattern[str]] = (),
+    ) -> bool:
+        """Rebuild the dynamic registry maps from ``discovered`` anchors laid over the JSON defaults.
+
+        Scheduling path: N/A — runs on connect / reconnect from the transport's discovery step, never inside a read cycle.
+
+        The anchors are always ``anchor_defaults`` overlaid with ``discovered``, never accumulated across
+        calls.  Default anchors whose names match one of ``owned_patterns`` (the names the discovery provider is
+        authoritative for) are dropped first, so equipment that has disappeared since the last discovery leaves
+        the map instead of lingering from the defaults.  Returns False without touching the maps when the result
+        equals the anchors they were already built with.
+        """
+        kept_defaults: dict[str, str | float | int] = {
+            name: value
+            for name, value in self.anchor_defaults.items()
+            if not any(pattern.match(name) for pattern in owned_patterns)
+        }
+        merged: dict[str, str | float | int] = {**kept_defaults, **discovered}
+        if merged == self.anchors:
+            return False
+        self.anchors = merged
+        self.rebuild_dynamic_maps()
+        return True
+
+    def rebuild_dynamic_maps(self) -> list[Registry_Type]:
+        """Reload every registry map that contains template rows so it reflects the current ``anchors``.
+
+        Scheduling path: N/A — see ``apply_anchors``.
+
+        Reuses ``load_registry_map``, so masks, screens, ``_l``/``_h`` merging, read ranges and
+        ``registry_map_size`` are all recomputed by the same code that built the original map.  Returns the
+        registry types that were reloaded (empty for a static protocol).
+        """
+        rebuilt: list[Registry_Type] = []
+        for registry_type in sorted(self.dynamic_registry_types, key=lambda item: item.value):
+            self.load_registry_map(registry_type)
+            rebuilt.append(registry_type)
+        return rebuilt
+
+    def evaluate_expressions(self, expression: str, variables: Mapping[str, str | float | int]) -> list[str]:
         """Resolve a dynamic register expression and return the list of concrete register name strings it expands to.
 
         Three transform passes are applied in order: (1) variable substitution —
-        ``[name]`` tokens are replaced with the matching value from ``variables``;
+        ``[name]`` tokens are replaced with the matching value from ``variables``, and a
+        token that is an expression over known names (``[model_103_1_base+14]``,
+        ``[1~meter_count]``) has each name replaced in place and keeps its brackets so the
+        later passes can finish it;
         (2) range expansion — ``[x~y]`` tokens are expanded into one copy of the
         expression per integer in ``[x, y]``, recursively; (3) arithmetic
         evaluation — ``[expr]`` tokens containing only digits and operators are
@@ -2798,16 +2958,22 @@ class protocol_settings:
         Unresolvable tokens are left unchanged.
         """
 
+        identifier_pattern: re.Pattern[str] = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
         def evaluate_variables(expr: str) -> str:
             """Replace ``[name]`` tokens with their values from ``variables``; leave unmatched tokens unchanged."""
             var_pattern: re.Pattern[str] = re.compile(r"\[([^\[\]]+)\]")
 
             def replace_vars(match: re.Match[str]) -> str:
-                """Return the variable's value as a string, or the original token if the name is not in ``variables``."""
+                """Return the variable's value as a string, or the original token if a name in it is not in ``variables``."""
                 var_name: str = match.group(1)
                 if var_name in variables:
                     return str(variables[var_name])
-                return match.group(0)
+                names: list[str] = identifier_pattern.findall(var_name)
+                if not names or any(name not in variables for name in names):
+                    return match.group(0)
+                # Expression over known names: substitute in place and keep the brackets for the math/range passes.
+                return "[" + identifier_pattern.sub(lambda name: str(variables[name.group(0)]), var_name) + "]"
 
             return var_pattern.sub(replace_vars, expr)
 
@@ -2851,42 +3017,24 @@ class protocol_settings:
         expanded: list[str] = evaluate_ranges(substituted)
         return [evaluate_math(r) for r in expanded]
 
-    def resolve_dynamic_registry_entries(self, live_values: dict[str, int | float | str]) -> None:
-        """Attempt to resolve deferred dynamic register expressions using ``live_values``.
-        NOTE not implemented yet TODO as a full dependency resolution since the expected use case
-        is simple one-level variable substitution (e.g. register names like ``[prefix][1~3]`` where
-        ``prefix`` is defined in a static registry row and the range expands to concrete register names).
-        More complex cases with interdependent variables or multi-level nesting may require multiple calls to this
-        method as values become resolvable in stages, but should still resolve correctly as long as there are
-        no circular dependencies.
+    def resolve_dynamic_registry_entries(self, live_values: Mapping[str, int | float | str]) -> None:
+        """Resolve deferred dynamic register expressions using ``live_values`` and load the resulting entries.
 
-        Iterates ``dynamic_registry_rows`` — rows whose register field contained
-        a ``[variable]`` expression that could not be resolved at load time.  For
-        each row, calls ``evaluate_expressions`` with the current ``live_values``
-        dict.  Rows that resolve successfully are removed from the deferred list;
-        rows that fail (missing variables or evaluation error) remain for the next
-        call.  Logs the count of newly resolved entries when any succeed.
+        Rows whose register cell held a ``[expression]`` that could not be resolved at load time are
+        parked in ``dynamic_registry_rows``.  This merges ``live_values`` into ``anchors`` and reloads the
+        affected registry maps (see ``rebuild_dynamic_maps``), so every row that can now be resolved becomes a
+        real ``registry_map_entry`` (with ``dynamic=True``) and the rest stay deferred.  Callers may invoke it
+        repeatedly as more values become known; it is a no-op when nothing is deferred.
+
+        Logs the number of rows that left the deferred list.
         """
         if not self.dynamic_registry_rows:
             return
 
-        resolved_count = 0
-
-        for row in self.dynamic_registry_rows.copy():
-            try:
-                register_expression = str(row["register"])
-                resolved_registers: list[str] = self.evaluate_expressions(register_expression, live_values)
-
-                for resolved_register in resolved_registers:
-                    resolved_row: dict[str, object] = dict(row)
-                    resolved_row["register"] = resolved_register
-                    self._log.info(f"Resolved dynamic register {register_expression} -> {resolved_register}")
-                    resolved_count += 1
-
-                self.dynamic_registry_rows.remove(row)
-
-            except Exception as e:
-                self._log.warning(f"Failed resolving dynamic register '{row['register']}': {e}")
+        deferred_before: int = len(self.dynamic_registry_rows)
+        self.anchors = {**self.anchors, **live_values}
+        self.rebuild_dynamic_maps()
+        resolved_count: int = max(deferred_before - len(self.dynamic_registry_rows), 0)
 
         if resolved_count:
             self._log.info(f"Resolved {resolved_count} dynamic registry entries")
