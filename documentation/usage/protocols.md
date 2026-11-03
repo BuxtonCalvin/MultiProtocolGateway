@@ -14,6 +14,7 @@ A **protocol** is the map between raw register addresses on a hardware device an
     - [Bit and Byte Offsets](#bit-and-byte-offsets)
     - [Multi-Register (32-bit and 64-bit) Values](#multi-register-32-bit-and-64-bit-values)
     - [Concatenated Ranges (ASCII / String)](#concatenated-ranges-ascii--string)
+    - [Template Rows (dynamic register maps)](#template-rows-dynamic-register-maps)
   - [Byte and Word Order](#byte-and-word-order)
   - [Adjustments](#adjustments)
     - [Endian Order](#endian-order)
@@ -104,6 +105,10 @@ The `.json` file sets protocol-wide defaults that apply to all registers in the 
 | `byteorder` | Default byte order for all registers: `big` (most common) or `little`. Individual registers override this via the `adjustments` column. |
 | `read_interval` | Default polling interval in seconds. Overridden by the transport's `read_interval` setting. |
 | `register_key_type` | How the `register` column is read: `numeric` (default) for register numbers, or `text` when the protocol is addressed by labels or codes instead of numbers (VE.Direct `SOC`, OBIS `0:1.8.0`). See [Text Keys](#text-keys-labels-and-obis-codes). |
+| `discovery` | Name of a discovery provider to run on every connect (currently `sunspec`) for protocols whose register layout depends on the attached equipment. Omit it for ordinary static protocols. See [Template Rows](#template-rows-dynamic-register-maps). |
+| `discovery_defaults` | Object of anchor name to value used to resolve [template rows](#template-rows-dynamic-register-maps) before (or without) a device. |
+| `discovery_probes` | List of firmware/model string probes that set anchors, for protocols that ship two layouts. See [Dynamic Register Discovery](../architecture/dynamic_register_discovery.md#discovery-probes). |
+| `sunspec_base_address`, `sunspec_registry_type` | Options of the `sunspec` provider: the wire address of the `SunS` marker (default: try 40000, 0, 50000) and `holding` (default) or `input`. |
 | `{documented_name}_codes` | Enum code mappings for flag registers. The key must match a `documented name` column value with `_codes` appended (e.g. `battery_status_codes`). |
 
 ---
@@ -485,6 +490,21 @@ In a text-keyed protocol every `register` cell is a literal key:
 - Bit and byte offsets, ranges and underscore lists are not available. The `data type` column still sets how the value is decoded.
 
 Without this setting a label in the `register` column is treated as a malformed number: the row is skipped with a warning. That is deliberate, so that a typo in a numeric map cannot silently become a label.
+
+#### Template Rows (dynamic register maps)
+
+Some specifications, SunSpec in particular, let a device place its blocks wherever its equipment requires, so a fixed address in the CSV would be wrong for some devices. A protocol like that names a discovery provider in its JSON (`"discovery": "sunspec"`). On every connect the gateway asks the device where its blocks are and reports the answers as named **anchors**. The CSV describes registers relative to those anchors:
+
+| In the `register` column | Meaning |
+| --- | --- |
+| `[inverter_1_base+14]` | Anchor `inverter_1_base` plus 14 (`+ - * / %` and parentheses are allowed). |
+| `[meter_{i}_base+18]` | Offset 18 into meter number `i`. |
+
+`{i}` (also usable in `variable_name`, `documented_name`, `adjustments` and `note`) repeats the row once per instance found, numbered from 1. The instance count is the anchor named after the text before `_{i}_` with `_count` added (`meter_count` here). No instances means no rows. A `Context` adjustment that must follow the instance says `"key": "meter_{i}_ac_power_sf"`.
+
+The JSON's `discovery_defaults` give every anchor a value at load time, so the map is complete before any device is read. For `solaredge_sunspec` those defaults reproduce the fixed layout the map had before, and the rows the device does not have simply drop out once it has been read. Static protocols do not use any of this and are never touched.
+
+Rows built from a template are marked as dynamic in memory only; they are never written back to a CSV. Equipment that repeats is named with an instance number in the variable name (`meter_2_ac_power`), and the variable mask and screen files use those names like any other. The full design, the SunSpec anchors and how to write a provider are in [Dynamic Register Discovery](../architecture/dynamic_register_discovery.md).
 
 ### Register Merge at Scan Time
 

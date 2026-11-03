@@ -11,6 +11,10 @@ The register failure tracking system automatically detects and soft-disables pro
 3. **Recovery**: Successful reads reset the failure count and re-enable the range
 4. **Periodic Logging**: Disabled ranges are logged every 10 minutes for monitoring
 
+### Dynamic register maps
+
+For a protocol with [dynamic register discovery](../architecture/dynamic_register_discovery.md), the register ranges can change when the device is reconnected. Whenever discovery rebuilds the register map, all failure tracking is cleared, because the trackers are keyed by address range and the ranges are new.
+
 ## Configuration
 
 Add these settings to your transport configuration:

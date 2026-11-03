@@ -269,6 +269,16 @@ The register numbers below are the Modbus (wire) addresses used by the `solaredg
 >
 > **MPG applies this for you.** In the `solaredge_sunspec` map every scaled value (current, voltage, power, frequency, energy, temperature, rated power) carries a `Context` adjustment that reads its scale-factor register and publishes the value in real units. The `*_sf` registers are published too, as diagnostics. See the `Context` adjustment in the [protocol reference](../usage/protocols.md#context-values-that-depend-on-another-register).
 
+### Dynamic discovery of the SunSpec model chain
+
+SunSpec places each block (model) one after another in a chain, so where a block sits depends on the equipment fitted. The `solaredge_sunspec` protocol therefore reads the chain on every connect and reconnect and positions its registers from it:
+
+- The inverter, nameplate (120) and basic settings (121) rows are templates anchored on the models the inverter actually reports. A device with the usual layout (inverter at 40069) behaves exactly as before.
+- **Meters** (SunSpec models 201 to 204) appear as `meter_1_...`, `meter_2_...` for each meter the inverter reports, with their scale factors applied. These rows come from the SunSpec standard layout and have not been verified against a SolarEdge meter.
+- **Early StorEdge hardware** keeps its battery data in a proprietary block starting at 57600 (battery 1), 57856 (battery 2) and 58368 (battery 3), as `battery_legacy_1_...` and so on, with word-swapped little-endian float32 values. These rows are included only when the CPU version string in the common block (the `version` row, wire address 40044) starts with `0003`, which the protocol JSON declares as a probe. The block offsets are taken from community implementations and are **not verified against hardware**; check them before relying on them. The three batteries are all added when the probe matches, and a battery that is not fitted will simply fail to read and be disabled by [register failure tracking](../usage/register_failure_tracking.md). The older `battery_1_...` rows at 62836 and above are unchanged.
+
+If the inverter does not answer during discovery, the fixed layout above stays in force until the next reconnect. How it works, and how to adapt another SunSpec map, is described in [Dynamic Register Discovery](../architecture/dynamic_register_discovery.md).
+
 Full SunSpec register documentation:
 <https://knowledge-center.solaredge.com/sites/kc/files/sunspec-implementation-technical-note.pdf>
 

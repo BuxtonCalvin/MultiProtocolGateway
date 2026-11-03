@@ -6,6 +6,32 @@
   "send_coil_register": false,
   "send_discrete_register": false,
 
+  "discovery": "sunspec",
+  "sunspec_base_address": 40000,
+  "discovery_defaults": {
+    "inverter_count": 1,
+    "inverter_1_base": 40069,
+    "model_120_count": 1,
+    "model_120_1_base": 40121,
+    "model_121_count": 1,
+    "model_121_1_base": 40149,
+    "meter_count": 0,
+    "battery_legacy_count": 0,
+    "battery_legacy_1_base": 57600,
+    "battery_legacy_2_base": 57856,
+    "battery_legacy_3_base": 58368
+  },
+  "discovery_probes": [
+    {
+      "anchor": "battery_legacy_count",
+      "registry": "holding",
+      "address": 40044,
+      "count": 8,
+      "prefix": "0003",
+      "value": 3
+    }
+  ],
+
   "inverter_did_codes": {
     "101": "single-phase",
     "102": "split-phase",

@@ -36,6 +36,7 @@ from pymodbus.pdu import ModbusPDU
 from defs.common import TransportSettings, strtobool
 
 from .. import eg4_metadata
+from ..discovery import DiscoveryResult, run_discovery
 from ..protocol_settings import (
     Data_Type,
     Registry_Type,
@@ -1213,6 +1214,61 @@ class modbus_base(transport_base):
             tracker.failure_count = 0
         self._log.info(f"Manually enabled register range {registry_type.name} {register_range[0]}-{register_range[1]}")
 
+    def read_discovery_registers(self, start: int, count: int, registry_type: Registry_Type) -> list[int] | None:
+        """Scheduling path: N/A — setup, called only from discovery during connect, regardless of read_mode.
+
+        Implements ``classes.discovery.DiscoveryReader``: make one read attempt and return exactly ``count``
+        raw 16-bit words, or ``None`` if the device does not answer, reports an error, or returns fewer
+        words than requested.  Never raises, so a provider can probe addresses that may not exist.
+        """
+        response: ModbusResponseLike | bytes | None = self.read_registers(start, count, registry_type)
+        if response is None or isinstance(response, bytes):
+            return None
+        if hasattr(response, "isError") and response.isError():
+            return None
+        values: dict[int, int] | None = self._extract_response_values(response, registry_type, (start, count))
+        if values is None or len(values) < count:
+            return None
+        return [values[start + offset] for offset in range(count)]
+
+    def discover_register_structure(self) -> bool:
+        """Scheduling path: N/A — setup, runs once per connect/reconnect regardless of read_mode.
+
+        Build the register map for a dynamic protocol (one whose JSON declares ``"discovery"`` and/or
+        ``"discovery_probes"``) from what the connected device reports.  Static protocols return False
+        immediately and cost nothing.
+
+        When discovery learns something that changes the map, the protocol's template rows are re-resolved
+        (``protocol_settings.apply_anchors``) and all register failure tracking is cleared, because the
+        trackers are keyed by address range and the ranges have just changed.  If the device cannot be read,
+        the layout already in place (the JSON defaults on first connect) is kept and discovery runs again on
+        the next reconnect.  Never raises: a discovery fault must not prevent the connection from coming up.
+
+        Returns True when the registry map was rebuilt.
+        """
+        if not self._protocol.is_dynamic:
+            return False
+
+        changed: bool = False
+        try:
+            result: DiscoveryResult | None = run_discovery(self, self._protocol, self._log)
+            if result is None:
+                self._log.warning(
+                    f"[{self.transport_name}] register discovery found nothing; keeping the current "
+                    f"register layout until the next reconnect"
+                )
+            else:
+                changed = self._protocol.apply_anchors(result.anchors, result.owned_patterns)
+                if changed:
+                    self.reset_register_failure_tracking()
+                    self._log.info(f"[{self.transport_name}] register map rebuilt from discovery: {result.summary or 'probes only'}")
+                else:
+                    self._log.debug(f"[{self.transport_name}] register discovery matches the current layout; map unchanged")
+        except Exception:
+            self._log.exception(f"[{self.transport_name}] register discovery failed — keeping the current register layout.")
+            changed = False
+        return changed
+
     def init_after_connect(self) -> None:
         """Scheduling path: N/A — setup, runs once per connect/reconnect regardless of read_mode."""
         # Use transport lock to prevent concurrent access during initialization
@@ -1221,6 +1277,11 @@ class modbus_base(transport_base):
         #from transport_base settings
             if self.write_enabled:
                 self.enable_write()
+
+            # Dynamic register maps: learn where this device put its blocks BEFORE anything reads
+            # the map (identification below included).  A no-op for static protocols; runs on every
+            # connect so a reconnect picks up equipment that was added or removed while we were away.
+            self.discover_register_structure()
 
             # Device identification (serial number, and for EG4 protocols,
             # hardware-kind + extended metadata) — runs exactly ONCE per
