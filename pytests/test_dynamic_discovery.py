@@ -13,6 +13,17 @@ import math
 from pathlib import Path
 
 import pytest
+from discovery_helpers import (
+    BASE,
+    DEFAULT_CHAIN,
+    VERSION_ADDRESS,
+    FakeReader,
+    ascii_words,
+    chain_image,
+    discover_and_apply,
+    holding,
+    load,
+)
 
 from classes.discovery import (
     DiscoveryResult,
@@ -22,7 +33,6 @@ from classes.discovery import (
     run_discovery,
     run_probes,
 )
-from classes.discovery.probes import ProbeSpec
 from classes.protocol_settings import (
     Data_Type,
     Registry_Type,
@@ -30,70 +40,7 @@ from classes.protocol_settings import (
     registry_map_entry,
 )
 
-BASE: int = 40000
 SUNS: tuple[int, int] = (0x5375, 0x6E53)
-DEFAULT_CHAIN: list[tuple[int, int]] = [(1, 65), (103, 50), (120, 26), (121, 30)]
-"""The SolarEdge layout the JSON defaults describe: (model_id, length) in chain order."""
-VERSION_ADDRESS: int = 40044
-"""Wire address of the SunSpec common-model version string (the CSV ``version`` row)."""
-
-
-class FakeReader:
-    """A register image that implements ``DiscoveryReader``; unknown addresses read as a failure."""
-
-    def __init__(self, words: dict[int, int] | None = None) -> None:
-        """Start with ``words`` (address -> 16-bit value)."""
-        self.words: dict[int, int] = dict(words or {})
-        self.reads: list[tuple[int, int, Registry_Type]] = []
-
-    def read_discovery_registers(self, start: int, count: int, registry_type: Registry_Type) -> list[int] | None:
-        """Return ``count`` words from ``start`` or ``None`` if any is missing."""
-        self.reads.append((start, count, registry_type))
-        if any(start + offset not in self.words for offset in range(count)):
-            return None
-        return [self.words[start + offset] for offset in range(count)]
-
-
-def chain_image(models: list[tuple[int, int]], base: int = BASE, end_marker: bool = True) -> dict[int, int]:
-    """Build the register image of a SunSpec chain: marker, one header per model, then the end header."""
-    words: dict[int, int] = {base: SUNS[0], base + 1: SUNS[1]}
-    address: int = base + 2
-    for model_id, length in models:
-        words[address] = model_id
-        words[address + 1] = length
-        address += 2 + length
-    if end_marker:
-        words[address] = 0xFFFF
-        words[address + 1] = 0
-    return words
-
-
-def ascii_words(text: str, count: int = 8) -> dict[int, int]:
-    """Encode ``text`` as ``count`` ASCII registers starting at the version address (NUL padded)."""
-    raw: bytes = text.encode("ascii").ljust(count * 2, b"\x00")
-    return {VERSION_ADDRESS + index: (raw[2 * index] << 8) | raw[2 * index + 1] for index in range(count)}
-
-
-def load(name: str) -> protocol_settings:
-    """Load a protocol with logging silenced."""
-    logging.disable(logging.CRITICAL)
-    try:
-        return protocol_settings(name)
-    finally:
-        logging.disable(logging.NOTSET)
-
-
-def holding(proto: protocol_settings) -> dict[str, registry_map_entry]:
-    """Return the HOLDING map keyed by variable name."""
-    return {entry.variable_name: entry for entry in proto.registry_map[Registry_Type.HOLDING]}
-
-
-def discover_and_apply(proto: protocol_settings, reader: FakeReader) -> bool:
-    """Run discovery against ``reader`` and apply the result the way the transport does."""
-    result: DiscoveryResult | None = run_discovery(reader, proto, logging.getLogger("test"))
-    assert result is not None
-    return proto.apply_anchors(result.anchors, result.owned_patterns)
-
 
 # --------------------------------------------------------------------------------------------------
 # Static protocols are untouched
@@ -291,6 +238,58 @@ def test_provider_stops_at_the_model_limit_on_a_corrupt_chain() -> None:
 
 
 # --------------------------------------------------------------------------------------------------
+# Repeating blocks (model 160: one sub-block per MPPT input)
+# --------------------------------------------------------------------------------------------------
+
+MPPT_HEADER: int = 40069
+"""Where model 160 sits in ``mppt_chain``: right after the 65-register common model that starts at 40002."""
+
+
+def mppt_chain(length: int, modules: int | None) -> dict[int, int]:
+    """A chain of common(65) + model 160 of ``length``; ``modules`` is the value of the N register, or None to leave it unreadable."""
+    image: dict[int, int] = chain_image([(1, 65), (160, length)])
+    if modules is not None:
+        image[MPPT_HEADER + 8] = modules
+    return image
+
+
+def mppt_anchors(image: dict[int, int]) -> dict[str, int]:
+    """Run the SunSpec provider on ``image`` and return its anchors."""
+    result: DiscoveryResult | None = SunSpecProvider().discover(FakeReader(image), load("solaredge_sunspec"))
+    assert result is not None
+    return result.anchors
+
+
+def test_each_mppt_module_gets_a_base_from_the_register_count() -> None:
+    anchors: dict[str, int] = mppt_anchors(mppt_chain(length=88, modules=3))  # room for four, three reported
+    assert anchors["mppt_count"] == 3
+    assert [anchors[f"mppt_{k}_base"] for k in (1, 2, 3)] == [MPPT_HEADER + 10, MPPT_HEADER + 30, MPPT_HEADER + 50]
+    assert "mppt_4_base" not in anchors
+
+
+def test_a_module_count_larger_than_the_model_can_hold_is_capped() -> None:
+    anchors: dict[str, int] = mppt_anchors(mppt_chain(length=48, modules=9))
+    assert anchors["mppt_count"] == 2
+
+
+def test_an_unreadable_module_count_falls_back_to_what_the_length_holds() -> None:
+    anchors: dict[str, int] = mppt_anchors(mppt_chain(length=48, modules=None))
+    assert anchors["mppt_count"] == 2 and anchors["mppt_2_base"] == MPPT_HEADER + 30
+
+
+def test_modules_are_numbered_across_every_instance_of_the_model() -> None:
+    anchors: dict[str, int] = SunSpecProvider().build_anchors(BASE, [(160, 100, 48), (160, 200, 28)], {100: 2, 200: 1})
+    assert anchors["mppt_count"] == 3
+    assert anchors["mppt_3_base"] == 200 + 10 and anchors["model_160_count"] == 2
+
+
+def test_module_anchors_belong_to_the_provider_but_variable_names_do_not() -> None:
+    pattern = SunSpecProvider.owned_pattern()
+    assert pattern.match("mppt_count") and pattern.match("mppt_2_base")
+    assert not pattern.match("mppt1_current")
+
+
+# --------------------------------------------------------------------------------------------------
 # Probes and the early StorEdge battery block
 # --------------------------------------------------------------------------------------------------
 
@@ -307,13 +306,13 @@ def test_malformed_probes_are_skipped_without_stopping_the_good_ones() -> None:
         {"anchor": "bad_registry", "address": 1, "prefix": "A", "registry": "nope"},
         "not an object",
     ]
-    probes: list[ProbeSpec] = parse_probes(raw, logging.getLogger("test"))
+    probes = parse_probes(raw, logging.getLogger("test"))
     assert [probe.anchor for probe in probes] == ["ok"] and probes[0].address == 0x9C6C and probes[0].count == 8
 
 
 def test_probe_sets_value_on_match_else_value_on_mismatch_and_nothing_when_unreadable() -> None:
     raw: list[object] = [{"anchor": "legacy", "address": VERSION_ADDRESS, "count": 8, "prefix": "0003", "value": 3}]
-    probes: list[ProbeSpec] = parse_probes(raw, logging.getLogger("test"))
+    probes = parse_probes(raw, logging.getLogger("test"))
     log: logging.Logger = logging.getLogger("test")
     assert run_probes(FakeReader(ascii_words("0003.2519")), probes, log) == {"legacy": 3}
     assert run_probes(FakeReader(ascii_words("0004.0016")), probes, log) == {"legacy": 0}
@@ -341,7 +340,7 @@ def test_legacy_battery_float_is_decoded_word_swapped() -> None:
     voltage: registry_map_entry = holding(proto)["battery_legacy_1_voltage"]
     # 52.5 V is 0x42520000; word-swapped little-endian puts the low word first.
     registers: dict[int, int] = {voltage.register: 0x0000, voltage.register + 1: 0x4252}
-    out: dict[str, int | float | str] = proto.process_registery(registers, [voltage])
+    out = proto.process_registery(registers, [voltage])
     assert math.isclose(float(out["battery_legacy_1_voltage"]), 52.5)
 
 

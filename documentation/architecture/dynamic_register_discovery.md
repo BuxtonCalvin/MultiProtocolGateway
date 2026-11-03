@@ -12,6 +12,8 @@ Dynamic register discovery lets a protocol describe its registers **relative to 
 - [Anchors and defaults](#anchors-and-defaults)
 - [Discovery probes](#discovery-probes)
 - [The SunSpec provider](#the-sunspec-provider)
+- [Repeating blocks](#repeating-blocks)
+- [SunSpec maps in the library](#sunspec-maps-in-the-library)
 - [What happens on connect and reconnect](#what-happens-on-connect-and-reconnect)
 - [Naming of repeated equipment](#naming-of-repeated-equipment)
 - [Runtime-only rows](#runtime-only-rows)
@@ -110,7 +112,34 @@ A SunSpec device exposes a chain of models: the marker `SunS`, then a header (mo
 
 Aliases: `inverter` (101, 102, 103), `inverter_float` (111, 112, 113), `meter` (201 to 204) and `meter_float` (211 to 214). The integer and float families have different register layouts, which is why they are separate aliases.
 
+### Repeating blocks
+
+Some models end in a run of identical sub-blocks. Model 160 (multiple MPPT) holds one 20-register block per MPPT input, after a 10-register header that includes the count `N` at offset 8. For these models the provider also reports where each sub-block starts, numbered across the whole chain:
+
+| Anchor | Meaning |
+| --- | --- |
+| `mppt_<k>_base` | Address of the k-th MPPT module block (header address + 10 + 20 x (k - 1)). |
+| `mppt_count` | Number of module blocks. |
+
+The count is the model's own `N` register when it can be read, never larger than what the model's declared length can hold. If `N` cannot be read, the length decides. Rows then use the anchors like any other, for example `[mppt_1_base+9]` for the first module's DC current.
+
 Other SunSpec-derived maps use the same pattern: put `"discovery": "sunspec"` and the default anchors in the JSON, and write the rows as offsets from the matching anchors. `solaredge_sunspec` is the worked example.
+
+## SunSpec maps in the library
+
+Every SunSpec protocol map below keeps its previous fixed layout as the `discovery_defaults`, so with no device (tests, the web UI, analysis) the map is exactly what it was. Only a device that reports something different changes it.
+
+| Protocol | Marker address | Anchored on | Notes |
+| --- | --- | --- | --- |
+| `solaredge_sunspec` | 40000 | inverter (101-103), 120, 121, meters (201-204), early StorEdge battery block | Meter and battery rows exist only when found. The battery block is chosen by a firmware probe. |
+| `fronius_sunspec` | 40000 | inverter float (111-113) **or** inverter integer (101-103), 120, 121 | Float and integer variants share variable names; whichever the inverter reports is used. The storage rows (40357+), Fronius-specific registers (211-216) and site totals (499-509) stay fixed. |
+| `apsystems_ecu_sunspec` | 40000 | inverter float (111-113) | The common-model rows stay fixed. |
+| `enphase_iq_gateway_sunspec` | 40000 | inverter (101-103), meter (201-204), DER model 704 | The meter follows the chain instead of being assumed to follow the inverter. The 704 rows disappear when the gateway has no model 704. Their offsets are still unverified. |
+| `abb_fimer_vsn300_sunspec` | **0** | inverter (103), 160 and its MPPT modules, 120, 123 | Marker at address 0, set with `sunspec_base_address`. |
+| `abb_fimer_react2_sunspec` | 40000 | inverter (101), 120, 121, 122, 123, 160 and its MPPT modules, vendor models 65230, 65233, 65234 | Models 126-145 that the map does not cover sit inside the model 123 gap. |
+| `abb_fimer_sunspec` | 0 | not converted | The covered prefix (models 1, 103, 160 and vendor model 64061) is fixed by the vendor, so static rows are correct. Only the TRIO-only blocks after it (64062, 403, 64063) move, and the map does not cover them yet. |
+
+The `abb_fimer_trio_*` maps are proprietary register maps rather than SunSpec and are unaffected.
 
 ## What happens on connect and reconnect
 

@@ -30,6 +30,7 @@ protocol_version = apsystems_ecu_sunspec
 ## Notes
 
 - Enable SunSpec Modbus in EMA Manager / ECU APP.
+- The float inverter rows are anchored on the SunSpec model the ECU reports (see [Dynamic Register Discovery](../architecture/dynamic_register_discovery.md)); the common-model rows (manufacturer, model, version, serial number) stay at fixed addresses.
 - APsystems documentation states RTU uses RS485 and TCP uses Ethernet.
 - For RTU, use 8 data bits, 1 stop bit, no parity, and the same baud configured in the ECU.
 

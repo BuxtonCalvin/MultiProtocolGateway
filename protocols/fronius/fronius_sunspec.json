@@ -6,10 +6,21 @@
   "send_coil_register": false,
   "send_discrete_register": false,
 
+  "discovery": "sunspec",
+  "sunspec_base_address": 40000,
+  "discovery_defaults": {
+      "inverter_float_1_base": 40069,
+      "model_120_1_base": 40131,
+      "model_121_1_base": 40162
+  },
+
   "sunspec_inverter_did_codes": {
     "111": "single-phase",
     "112": "split-phase",
-    "113": "three-phase"
+    "113": "three-phase",
+    "101": "single-phase (integer model)",
+    "102": "split-phase (integer model)",
+    "103": "three-phase (integer model)"
   },
 
   "operating_state_codes": {

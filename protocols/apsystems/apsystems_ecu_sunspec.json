@@ -7,6 +7,12 @@
   "send_coil_register": "false",
   "send_discrete_register": "false",
 
+  "discovery": "sunspec",
+  "sunspec_base_address": 40000,
+  "discovery_defaults": {
+      "inverter_float_1_base": 40069
+  },
+
   "operating_state_codes": {
     "1": "off",
     "2": "sleeping",

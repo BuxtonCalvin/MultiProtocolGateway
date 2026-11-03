@@ -6,6 +6,17 @@
   "send_coil_register": false,
   "send_discrete_register": false,
 
+  "discovery": "sunspec",
+  "sunspec_base_address": 0,
+  "discovery_defaults": {
+      "inverter_1_base": 70,
+      "model_160_1_base": 122,
+      "mppt_1_base": 132,
+      "mppt_2_base": 152,
+      "model_120_1_base": 172,
+      "model_123_1_base": 232
+  },
+
   "operating_state_codes": {
     "1": "Off",
     "2": "Sleeping",

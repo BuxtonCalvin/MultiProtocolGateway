@@ -16,34 +16,10 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
-from classes.protocol_settings import (
-    Registry_Type,
-    protocol_settings,
-    registry_map_entry,
-)
+from discovery_helpers import DEFAULT_CHAIN, chain_image, holding, load
+
+from classes.protocol_settings import Registry_Type, protocol_settings
 from classes.transports.modbus_base import modbus_base
-
-SUNS: tuple[int, int] = (0x5375, 0x6E53)
-
-
-def chain_image(models: list[tuple[int, int]], base: int = 40000) -> dict[int, int]:
-    """Build the register image of a SunSpec chain: marker, one header per model, then the end header."""
-    words: dict[int, int] = {base: SUNS[0], base + 1: SUNS[1]}
-    address: int = base + 2
-    for model_id, length in models:
-        words[address], words[address + 1] = model_id, length
-        address += 2 + length
-    words[address], words[address + 1] = 0xFFFF, 0
-    return words
-
-
-def load(name: str) -> protocol_settings:
-    """Load a protocol with logging silenced."""
-    logging.disable(logging.CRITICAL)
-    try:
-        return protocol_settings(name)
-    finally:
-        logging.disable(logging.NOTSET)
 
 
 class FakeModbus:
@@ -95,14 +71,6 @@ class FakeModbus:
 
     def update_identifier(self) -> None:
         """Nothing to refresh on the fake."""
-
-
-DEFAULT_CHAIN: list[tuple[int, int]] = [(1, 65), (103, 50), (120, 26), (121, 30)]
-
-
-def holding(proto: protocol_settings) -> dict[str, registry_map_entry]:
-    """Return the HOLDING map keyed by variable name."""
-    return {entry.variable_name: entry for entry in proto.registry_map[Registry_Type.HOLDING]}
 
 
 def test_a_static_protocol_never_touches_the_device() -> None:

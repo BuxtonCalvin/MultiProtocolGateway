@@ -248,6 +248,12 @@ The register numbers below are the Modbus (wire) addresses used by the `fronius_
 
 > **Known issue — `NaN` on startup:** Fronius inverters may return NaN or 0 for scale factors during the first 30–60 seconds after boot. Wait for full initialization before relying on register reads.
 
+### Float and integer models (automatic)
+
+The inverter's **SunSpec Model Type** setting (section 4) changes the layout of everything after the common block: float uses models 111-113 (60 registers) and int+SF uses models 101-103 (50 registers). The `fronius_sunspec` map follows whichever the inverter reports. On every connect MPG reads the SunSpec model chain, and the float rows (anchored on `inverter_float_1_base`) or the integer rows (anchored on `inverter_1_base`, with the scale factors applied) are used, with the same variable names either way. No MPG setting selects the model type any more.
+
+The nameplate (120) and basic settings (121) rows are anchored on their models and move with the chain. The storage rows from 40357, the Fronius-specific registers (211-216) and the site totals (499-509) are not part of the chain and stay at fixed addresses. The integer rows follow the SunSpec standard layout and have not been verified against a Fronius inverter in integer mode. See [Dynamic Register Discovery](../architecture/dynamic_register_discovery.md).
+
 Full GEN24 Modbus register documentation:
 <https://manuals.fronius.com/html/4204102649/en-US.html>
 
@@ -355,7 +361,6 @@ host = 192.168.1.xxx
 port = 502
 unit_id = 1
 protocol_version = fronius_sunspec_v1
-sunspec_model_type = float
 ```
 
 **RS485 RTU (GEN24 only):**

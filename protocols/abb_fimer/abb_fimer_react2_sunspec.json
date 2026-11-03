@@ -6,6 +6,22 @@
   "send_coil_register": false,
   "send_discrete_register": false,
 
+  "discovery": "sunspec",
+  "sunspec_base_address": 40000,
+  "discovery_defaults": {
+      "inverter_1_base": 40070,
+      "model_120_1_base": 40122,
+      "model_121_1_base": 40150,
+      "model_122_1_base": 40182,
+      "model_123_1_base": 40228,
+      "model_160_1_base": 41104,
+      "mppt_1_base": 41114,
+      "mppt_2_base": 41134,
+      "model_65230_1_base": 41154,
+      "model_65233_1_base": 41179,
+      "model_65234_1_base": 41364
+  },
+
   "control_conn_codes": {
     "0": "DISCONNECT",
     "1": "CONNECT"

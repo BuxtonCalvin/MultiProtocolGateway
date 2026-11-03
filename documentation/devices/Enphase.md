@@ -33,10 +33,13 @@
 
 ## 1. Overview & MPG Compatibility Note
 
-> ⚠️ **Important:** Enphase does **not** use RS485, Modbus RTU, or Modbus TCP. There is no wired serial interface accessible to third parties. MPG cannot connect to an Enphase system via its standard Modbus transports.
+> ⚠️ **Important:** Enphase has no RS485 or Modbus RTU interface that third parties can use. The IQ Gateway can serve SunSpec over **Modbus TCP (port 502)**, but it is **not enabled by default** and cannot be turned on from the local UI or the app.
 
-All monitoring integration with Enphase is through the **IQ Gateway's local HTTPS REST API** (LAN access) or the **Enphase Enlighten Cloud API**. A custom MPG protocol module polling the local IQ Gateway API would be required to bring Enphase data into the MPG/MQTT pipeline.
+- **Enabling it:** Contact Enphase Support and ask them to enable Modbus TCP on your IQ Gateway.
+- **Typical use:** Monitoring production and consumption in third-party systems (Victron VRM, evcc, Home Assistant, MPG). Some integrations also use it to limit PV output.
+- **Reliability:** Users report that a firmware update can leave port 502 closed until Enphase re-enables it.
 
+Once Modbus TCP is enabled, MPG can read the gateway with the `enphase_iq_gateway_sunspec` protocol. Without it, integration is through the IQ Gateway's **local HTTPS REST API** (LAN access) or the **Enphase Enlighten Cloud API**, and a custom MPG protocol module polling the local API would be required.
 > **MPG module note:** A `enphase_iq_gateway_v1` protocol module polling `/ivp/livedata/status` on the local IQ Gateway would provide comprehensive real-time data for all Enphase systems — microinverter production, battery SOC and power, grid import/export, and home consumption — without any additional hardware beyond a LAN connection to the IQ Gateway.
 
 ---
@@ -360,6 +363,8 @@ OAuth 2.0 tokens are obtained via the Enlighten developer portal. API keys are i
 ---
 
 ## 8. MPG Integration Path
+
+> **SunSpec map in the protocol library:** `protocols/enphase/enphase_iq_gateway_sunspec` reads the IQ Gateway's SunSpec model chain over Modbus TCP for gateways that have it enabled (see the comments at the top of that map). The inverter, meter (models 201-204) and DER model 704 rows are anchored on the models the gateway reports, so the meter is found wherever it sits and the 704 rows are dropped for a gateway without that model. The 704 register offsets in that map are unverified. See [Dynamic Register Discovery](../architecture/dynamic_register_discovery.md).
 
 Since Enphase does not support Modbus, a dedicated HTTP protocol module is required for MPG integration.
 

@@ -28,6 +28,9 @@ import pytest
 PROJECT_ROOT: Path = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+PYTESTS_DIR: Path = Path(__file__).resolve().parent
+if str(PYTESTS_DIR) not in sys.path:
+    sys.path.insert(0, str(PYTESTS_DIR))  # lets tests import shared helper modules such as discovery_helpers
 
 
 def pytest_configure(config: pytest.Config) -> None:

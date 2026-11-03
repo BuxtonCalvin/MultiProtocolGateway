@@ -1,6 +1,7 @@
 register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note,ha_device_class,ha_state_class,ha_entity_category
 "# ADDRESS SHIFT: the register column holds the Modbus PDU (wire) address, which is the vendor's printed register number minus 1 (SunSpec and Fronius number registers from 1, so the SunSpec marker 'SunS' is register 40001 and is read at address 40000). The rows in this file were shifted by -1 for that reason. To compare a row with the vendor document, add 1 to its register (for example Fronius lists total AC power as 40092 and it is read at 40091).",,,,,,,,,,,,
 "# CORRECTED, NOT JUST SHIFTED: manufacturer was already a 0-based address (40004); version and serial_number pointed at 40053 and 40061, which are neither the SunSpec Vr (40044) nor SN (40052) fields; and operating_state and event_1 skipped three temperature floats and were 6 registers too low (they are now St 40117 and Evt1 40119). These corrections come from the SunSpec float inverter model, not from APsystems documentation.",,,,,,,,,,,,
+"# DYNAMIC MAP: rows whose register column is [anchor+offset] are template rows. The anchors come from the SunSpec model chain the device reports (discovery in the protocol JSON) and fall back to the discovery_defaults in that JSON, which reproduce the fixed layout this file used before, so nothing changes until a device reports something different. The float inverter rows (models 111-113) are anchored on the model the ECU reports; the common-model rows stay at their fixed addresses. See documentation/architecture/dynamic_register_discovery.md.",,,,,,,,,,,,
 40000,sunspec_id,SunSpec ID,,UINT,,,R,,Fixed value 0x53756E53 (SunS),,,
 40002,sunspec_common_did,SunSpec common model ID,,USHORT,,,R,,Common model ID,,,
 40004,manufacturer,Manufacturer,,STRING16,,,R,,Common model Mn (16 registers). Already a 0-based address in the original map; APsystems' manufacturer string is expected here,,,diagnostic
@@ -8,12 +9,12 @@ register,variable_name,documented_name,unit,data_type,values,read_interval,writa
 40044,version,Version,,STRING16,,,R,,"Common model Vr (8 registers). Corrected from 40053, which is the start of the serial number in the vendor's 1-based numbering",,,diagnostic
 40052,serial_number,Serial number,,STRING32,,,R,,"Common model SN (16 registers). Corrected from 40061, which is inside the serial number and not a field start",,,diagnostic
 40068,device_address,Modbus device address,,USHORT,1-247,,R,,Configured Modbus address,,,
-40071,ac_current_total,AC total current,A,FLOAT32,,,R,,SunSpec single-phase float example,current,measurement,
-40073,ac_current_a,AC phase A current,A,FLOAT32,,,R,,Phase A current,current,measurement,
-40085,ac_voltage_an,AC voltage A-N,V,FLOAT32,,,R,,Phase A to neutral voltage,voltage,measurement,
-40091,ac_power,AC active power,W,FLOAT32,,,R,,Total AC active power,power,measurement,
-40093,ac_frequency,AC frequency,Hz,FLOAT32,,,R,,AC frequency,frequency,measurement,
-40101,ac_energy_total,AC lifetime energy,Wh,FLOAT32,,,R,,Lifetime AC energy,energy,total_increasing,
-40117,operating_state,Operating state,,USHORT,,,R,,SunSpec operating state,,,
-40119,event_1,Event flags 1,,32BIT_FLAGS,,,R,,SunSpec event flags,,,
+[inverter_float_1_base+2],ac_current_total,AC total current,A,FLOAT32,,,R,,SunSpec single-phase float example,current,measurement,
+[inverter_float_1_base+4],ac_current_a,AC phase A current,A,FLOAT32,,,R,,Phase A current,current,measurement,
+[inverter_float_1_base+16],ac_voltage_an,AC voltage A-N,V,FLOAT32,,,R,,Phase A to neutral voltage,voltage,measurement,
+[inverter_float_1_base+22],ac_power,AC active power,W,FLOAT32,,,R,,Total AC active power,power,measurement,
+[inverter_float_1_base+24],ac_frequency,AC frequency,Hz,FLOAT32,,,R,,AC frequency,frequency,measurement,
+[inverter_float_1_base+32],ac_energy_total,AC lifetime energy,Wh,FLOAT32,,,R,,Lifetime AC energy,energy,total_increasing,
+[inverter_float_1_base+48],operating_state,Operating state,,USHORT,,,R,,SunSpec operating state,,,
+[inverter_float_1_base+50],event_1,Event flags 1,,32BIT_FLAGS,,,R,,SunSpec event flags,,,
 # Source: APsystems SunSpec Modbus Rev 3.0. APsystems ECU-R/ECU-C support Modbus RTU and TCP and use SunSpec holding-register reads.,,,,,,,,,,,,

@@ -6,6 +6,14 @@
   "send_coil_register": false,
   "send_discrete_register": false,
 
+  "discovery": "sunspec",
+  "sunspec_base_address": 40000,
+  "discovery_defaults": {
+      "inverter_1_base": 40069,
+      "meter_1_base": 40121,
+      "model_704_1_base": 704
+  },
+
   "inverter_did_codes": {
     "101": "single-phase",
     "103": "three-phase"

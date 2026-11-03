@@ -40,6 +40,12 @@ Anchors reported (all integers; addresses are wire/PDU addresses, matching the r
     ``inverter_1_base`` instead of caring whether the device implements model 101, 102 or 103.  See
     ``SunSpecProvider.MODEL_ALIASES``.  ``<alias>_<n>_model`` is the actual model ID found.
 
+``<alias>_<k>_base`` / ``<alias>_count`` for *repeating blocks*
+    Some models hold a variable number of identical sub-blocks (model 160 holds one block per MPPT
+    input).  For these the provider also reports where each sub-block starts, numbered across the whole
+    chain.  See ``SunSpecProvider.REPEATING_MODELS``.  The count comes from the model's own ``N`` register
+    when it can be read and is never larger than what the model's declared length can hold.
+
 Protocol JSON settings read by this provider (all optional):
 
 ``sunspec_base_address``
@@ -52,12 +58,27 @@ from __future__ import annotations
 
 import logging
 import re
+from dataclasses import dataclass
 from typing import ClassVar
 
 from ..protocol_settings import Registry_Type, protocol_settings
 from .base import DiscoveryProvider, DiscoveryReader, DiscoveryResult
 
 _log: logging.Logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class RepeatingModel:
+    """Describes a SunSpec model that ends in a run of identical sub-blocks (for example model 160, one per MPPT input)."""
+
+    alias: str
+    """Anchor family for the sub-blocks: ``<alias>_<k>_base`` and ``<alias>_count``."""
+    count_offset: int
+    """Offset from the model header of the register holding the number of sub-blocks (``N``)."""
+    first_offset: int
+    """Offset from the model header of the first sub-block."""
+    block_length: int
+    """Registers per sub-block."""
 
 
 class SunSpecProvider(DiscoveryProvider):
@@ -85,16 +106,24 @@ class SunSpecProvider(DiscoveryProvider):
     }
     """Equipment kind -> model IDs that share one register layout (integer + scale-factor, or float)."""
 
+    REPEATING_MODELS: ClassVar[dict[int, RepeatingModel]] = {
+        160: RepeatingModel(alias="mppt", count_offset=8, first_offset=10, block_length=20),
+    }
+    """Model ID -> layout of its repeating sub-blocks.  Model 160 (multiple MPPT): ``N`` at +8, modules from +10, 20 registers each."""
+
     @classmethod
     def owned_pattern(cls) -> re.Pattern[str]:
         """Return the regex matching every anchor name this provider can emit (see ``DiscoveryResult.owned_patterns``)."""
         aliases: str = "|".join(re.escape(alias) for alias in sorted(cls.MODEL_ALIASES, key=len, reverse=True))
+        repeating: str = "|".join(re.escape(spec.alias) for spec in cls.REPEATING_MODELS.values())
         return re.compile(
             r"^(?:sunspec_base"
             r"|model_\d+_count"
             r"|model_\d+_\d+_(?:base|length)"
             rf"|(?:{aliases})_count"
-            rf"|(?:{aliases})_\d+_(?:base|length|model))$"
+            rf"|(?:{aliases})_\d+_(?:base|length|model)"
+            rf"|(?:{repeating})_count"
+            rf"|(?:{repeating})_\d+_base)$"
         )
 
     def discover(self, reader: DiscoveryReader, protocol: protocol_settings) -> DiscoveryResult | None:
@@ -112,7 +141,7 @@ class SunSpecProvider(DiscoveryProvider):
                 continue
 
             models: list[tuple[int, int, int]] = self._walk_chain(reader, registry_type, base)
-            anchors: dict[str, int] = self.build_anchors(base, models)
+            anchors: dict[str, int] = self.build_anchors(base, models, self._read_block_counts(reader, registry_type, models))
             summary: str = f"SunSpec marker at {base}, {len(models)} model(s): " + ", ".join(str(model_id) for model_id, _, _ in models)
             _log.info(f"[{protocol.protocol}] {summary}")
             return DiscoveryResult(anchors=anchors, owned_patterns=(self.owned_pattern(),), summary=summary)
@@ -120,13 +149,22 @@ class SunSpecProvider(DiscoveryProvider):
         _log.warning(f"[{protocol.protocol}] no SunSpec marker found at {list(self._candidate_bases(protocol))}")
         return None
 
-    def build_anchors(self, base: int, models: list[tuple[int, int, int]]) -> dict[str, int]:
+    def build_anchors(
+        self,
+        base: int,
+        models: list[tuple[int, int, int]],
+        block_counts: dict[int, int] | None = None,
+    ) -> dict[str, int]:
         """Turn a walked chain into the anchor dict described in the module docstring.
 
-        ``models`` is a list of ``(model_id, header_address, length)`` in chain order.  Kept public and free
-        of I/O so the numbering rules can be tested without a device.
+        ``models`` is a list of ``(model_id, header_address, length)`` in chain order.  ``block_counts`` maps the
+        header address of each repeating-block model (see ``REPEATING_MODELS``) to its number of sub-blocks; a
+        model missing from it falls back to what its declared length can hold.  Kept public and free of I/O so
+        the numbering rules can be tested without a device.
         """
         anchors: dict[str, int] = {"sunspec_base": base}
+        counts: dict[int, int] = block_counts or {}
+        per_repeating: dict[str, int] = {}
 
         per_model: dict[int, int] = {}
         per_alias: dict[str, int] = {}
@@ -145,7 +183,39 @@ class SunSpecProvider(DiscoveryProvider):
                     anchors[f"{alias}_{alias_instance}_length"] = length
                     anchors[f"{alias}_{alias_instance}_model"] = model_id
                     anchors[f"{alias}_count"] = alias_instance
+
+            repeating: RepeatingModel | None = self.REPEATING_MODELS.get(model_id)
+            if repeating is not None:
+                capacity: int = max(length - (repeating.first_offset - 2), 0) // repeating.block_length
+                blocks: int = min(counts.get(header, capacity), capacity)
+                for block in range(blocks):
+                    ordinal: int = per_repeating.get(repeating.alias, 0) + 1
+                    per_repeating[repeating.alias] = ordinal
+                    anchors[f"{repeating.alias}_{ordinal}_base"] = header + repeating.first_offset + block * repeating.block_length
+                    anchors[f"{repeating.alias}_count"] = ordinal
         return anchors
+
+    def _read_block_counts(
+        self,
+        reader: DiscoveryReader,
+        registry_type: Registry_Type,
+        models: list[tuple[int, int, int]],
+    ) -> dict[int, int]:
+        """Read the ``N`` register of every repeating-block model in the chain.
+
+        Returns header address -> N for the models whose register could be read and holds a plausible value.
+        A model whose count cannot be read is left out, and ``build_anchors`` then uses the capacity implied by
+        the model's declared length.
+        """
+        counts: dict[int, int] = {}
+        for model_id, header, _length in models:
+            repeating: RepeatingModel | None = self.REPEATING_MODELS.get(model_id)
+            if repeating is None:
+                continue
+            words: list[int] | None = reader.read_discovery_registers(header + repeating.count_offset, 1, registry_type)
+            if words and 0 < words[0] < 0x8000:
+                counts[header] = words[0]
+        return counts
 
     def _walk_chain(self, reader: DiscoveryReader, registry_type: Registry_Type, base: int) -> list[tuple[int, int, int]]:
         """Follow the model headers from the marker and return ``(model_id, header_address, length)`` for each model.
