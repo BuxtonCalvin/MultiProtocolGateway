@@ -449,18 +449,31 @@ If MQTT values appear as "Unknown" right after setup, wait for the next read cyc
 
 ## Grafana Sample
 
-Data produced by any of the MPG bridges can be visualized in Grafana. This example is using the influxdb bridge.
+Data produced by MPG bridges can be visualized in Grafana. The examples below include dashboards for InfluxDB, InfluxDB3, and TimescaleDB.
 
 [![Grafana Dashboard](documentation/assets/GrafanaSolar.png)](documentation/assets/GrafanaSolar.png)
 
-The code for this InfluxDB dashboard: [Grafana InfluxDB JSON](documentation/dashboards/GrafanaInfluxDBDashboard.json)
+- InfluxDB: [Grafana InfluxDB Dashboard JSON](documentation/dashboards/GrafanaInfluxDBDashboard.json)
+- InfluxDB3: [Grafana InfluxDB3 Dashboard JSON](documentation/dashboards/GrafanaInfluxDB3Dashboard.json)
+- TimescaleDB (wide table): [Grafana TimescaleDB Wide Table Dashboard JSON](documentation/dashboards/GrafanaTimescaleDBWideDashboard.json)
+- TimescaleDB (narrow table): [Grafana TimescaleDB Narrow Table Dashboard JSON](documentation/dashboards/GrafanaTimescaleDBNarrowDashboard.json)
 
-The code for the same InfluxDB3 dashboard can be found here: [Grafana InfluxDB3 JSON](documentation/dashboards/GrafanaInfluxDB3Dashboard.json)
+### Reusing the Dashboards With Other Hardware
 
-The code for the exact same style TimescaleDB dashboards:
+The Grafana dashboards are designed to be reusable across different hardware protocols. A protocol's registry-map CSV is the field-name mapping source for that hardware: its note column describes what each register measures, while variable_name determines the name MPG publishes and stores as the telemetry field/column used by Grafana.
 
-- [Grafana TimescaleDB Wide Table JSON](documentation/dashboards/GrafanaTimescaleDBWideDashboard.json)
-- [Grafana TimescaleDB Narrow Table JSON](documentation/dashboards/GrafanaTimescaleDBNarrowDashboard.json)
+- Field Names: [Grafana variable_names and descriptions](documentation/dashboards/grafana_fields.csv)
+
+To use the dashboard with another inverter, BMS, meter, or other supported device:
+
+1. Open the hardware's relevant protocol registry-map CSV (input_registry_map, holding_registry_map, or the applicable register map).
+2. For each register you want to display, read its note and identify the matching measurement represented by a field in the Grafana dashboard ie. the grafana_fields.csv.
+3. Replace that row's variable_name with the corresponding Grafana field name. Match the meaning of the measurement, not merely a similar-looking register label. For example, if a register's note describes battery state of charge, set its variable_name to "soc".
+4. Repeat for the dashboard fields supported by that hardware, then save the CSV and reload/restart or otherwise refresh the MPG protocol configuration so the renamed variables are used.  New fields will be added to your database, which can then provide data to Grafana.  Alternately, you can change the data names in the Grafana dashboard to match your existing registry map, but this will take much more effort.
+5. Import the appropriate TimescaleDB dashboard JSON into Grafana and point it at the TimescaleDB data source populated by MPG.
+This lets the same dashboard JSON work with different hardware without editing its SQL queries or creating a separate dashboard for every protocol. The protocol CSV provides the hardware-specific translation: the register address and decoding stay specific to the device, while the standardized variable_name values give Grafana a consistent set of field names.
+
+Compatibility requirements: the dashboard can display only measurements that the hardware actually exposes and MPG successfully reads. The required Grafana field names must be present in the resulting data tables, and their values must have compatible meanings, units, and data types.  Renaming a variable_name does not create a measurement that the hardware does not provide, and fields that are not available will not produce meaningful panel data. Use the narrow-table dashboard when your TimescaleDB schema is configured for the narrow-table layout rather than the one column per variable wide-table layout.
 
 ---
 
