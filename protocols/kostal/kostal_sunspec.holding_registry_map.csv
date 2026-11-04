@@ -1,0 +1,198 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note,ha_device_class,ha_state_class,ha_entity_category
+"# SOURCE: KOSTAL Interface description MODBUS (TCP) & SunSpec, revision 2.7 (valid from PIKO/PLENTICORE G1 UI 01.30.12092, G2 SW 02.15, G3 and MP G3 SW 3.06). Section 4.2 lists the implemented models: 1, 103, 113, 120, 123, 160, 203, 802 and the end model. Model 203 (meter) is valid from PLENTICORE G2 SW 02.12, G3 SW 3.04.01 and MP G3 SW 3.05.00.",,,,,,,,,,,,
+"# CONNECTION: Modbus TCP on port 1502 (not 502), unit ID 71 by default. Enable Modbus under Settings > Modbus/SunSpec (TCP) and set the byte order there to big-endian (ABCD) Sunspec. The interface description gives little-endian (CDAB) Standard Modbus as the default, and SunSpec data is big-endian.",,,,,,,,,,,,
+# NOT VERIFIED: these rows use the standard SunSpec layouts of the implemented models and have not been checked against a Kostal inverter. Float model 113 is the float counterpart of model 103 and is not mapped; Kostal's own (non-SunSpec) register table is also not covered here.,,,,,,,,,,,,
+"# DYNAMIC MAP: rows whose register column is [anchor+offset] are template rows. The anchors come from the SunSpec model chain the device reports (discovery in the protocol JSON) and fall back to the discovery_defaults in that JSON, so the map is complete before a device has been read. {i} repeats a row once per instance found (MPPT modules, meters). See documentation/architecture/dynamic_register_discovery.md.",,,,,,,,,,,,
+# ─── SunSpec Common Model Block ────────────────────────────────────────────────────────────────,,,,,,,,,,,,
+40000,sunspec_id,SunSpec ID,,uint32,,,R,,"Fixed 0x53756E53 (""SunS""); spans registers 40000-40001",,,
+40002,sunspec_did,Common Block DID,,uint16,1,,R,,Fixed 1; SunSpec common model identifier,,,
+40003,common_length,Common Block Length,,uint16,66,,R,,66 registers in the SunSpec common model,,,
+40004,manufacturer,Manufacturer,,string32,,,R,,Common model Mn; ASCII string across 16 registers (32 characters),,,
+40020,model,Model,,string32,,,R,,Common model Md; 16 registers,,,
+40036,options,Options,,string16,,,R,,Common model Opt (8 registers),,,
+40044,version,Version,,string16,,,R,,Common model Vr (8 registers),,,
+40052,serial_number,Serial Number,,string32,,,R,,Common model SN (16 registers),,,
+40068,device_address,Device Address,,uint16,1-247,,R,,Configured Modbus unit ID (common model DA),,,
+"# ─── Inverter Model 103 (Three Phase, Integer + Scale Factor) ──────────────────────────────────",,,,,,,,,,,,
+[inverter_1_base+0],inverter_did,Inverter Model DID,,uint16,103=three-phase,,R,,Determines which phase registers are populated (others return NaN),,,
+[inverter_1_base+1],inverter_length,Inverter Block Length,,uint16,,,R,,Always 50 registers for models 101-103,,,
+[inverter_1_base+2],ac_current_total,AC Current Total,A,uint16,0-65535,,R,"{""Context"":{""key"":""ac_current_sf"",""range"":[-10,10]}}",Total AC output current; apply I_SF at 40075; actual A = raw × 10^SF; scaled by 10**ac_current_sf (Context),,,
+[inverter_1_base+3],ac_current_a,AC Phase A Current,A,uint16,,,R,"{""Context"":{""key"":""ac_current_sf"",""range"":[-10,10]}}",Phase A current; apply I_SF (40075); scaled by 10**ac_current_sf (Context),,,
+[inverter_1_base+4],ac_current_b,AC Phase B Current,A,uint16,,,R,"{""Context"":{""key"":""ac_current_sf"",""range"":[-10,10]}}",Phase B current; apply I_SF; NaN if single-phase; scaled by 10**ac_current_sf (Context),,,
+[inverter_1_base+5],ac_current_c,AC Phase C Current,A,uint16,,,R,"{""Context"":{""key"":""ac_current_sf"",""range"":[-10,10]}}",Phase C current; apply I_SF; three-phase only; scaled by 10**ac_current_sf (Context),,,
+[inverter_1_base+6],ac_current_sf,Current Scale Factor,,int16,-10-10,,R,,Exponent for current registers; e.g. -2 means divide by 100,,,
+[inverter_1_base+7],ac_voltage_ab,AC Voltage Phase A-B,V,uint16,,,R,"{""Context"":{""key"":""ac_voltage_sf"",""range"":[-10,10]}}",Line-to-line voltage A-B; apply V_SF (40082); scaled by 10**ac_voltage_sf (Context),,,
+[inverter_1_base+8],ac_voltage_bc,AC Voltage Phase B-C,V,uint16,,,R,"{""Context"":{""key"":""ac_voltage_sf"",""range"":[-10,10]}}",Line-to-line voltage B-C; apply V_SF; three-phase only; scaled by 10**ac_voltage_sf (Context),,,
+[inverter_1_base+9],ac_voltage_ca,AC Voltage Phase C-A,V,uint16,,,R,"{""Context"":{""key"":""ac_voltage_sf"",""range"":[-10,10]}}",Line-to-line voltage C-A; apply V_SF; three-phase only; scaled by 10**ac_voltage_sf (Context),,,
+[inverter_1_base+10],ac_voltage_an,AC Voltage Phase A-N,V,uint16,,,R,"{""Context"":{""key"":""ac_voltage_sf"",""range"":[-10,10]}}",Phase A to neutral voltage; apply V_SF; scaled by 10**ac_voltage_sf (Context),,,
+[inverter_1_base+11],ac_voltage_bn,AC Voltage Phase B-N,V,uint16,,,R,"{""Context"":{""key"":""ac_voltage_sf"",""range"":[-10,10]}}",Phase B to neutral; NaN if single-phase; scaled by 10**ac_voltage_sf (Context),,,
+[inverter_1_base+12],ac_voltage_cn,AC Voltage Phase C-N,V,uint16,,,R,"{""Context"":{""key"":""ac_voltage_sf"",""range"":[-10,10]}}",Phase C to neutral; three-phase only; scaled by 10**ac_voltage_sf (Context),,,
+[inverter_1_base+13],ac_voltage_sf,Voltage Scale Factor,,int16,-10-10,,R,,Exponent for all AC voltage registers,,,
+[inverter_1_base+14],ac_power,AC Active Power,W,int16,-32767-32767,,R,"{""Context"":{""key"":""ac_power_sf"",""range"":[-10,10]}}",Total AC output power; apply W_SF (40084); positive = generating; scaled by 10**ac_power_sf (Context),,,
+[inverter_1_base+15],ac_power_sf,Power Scale Factor,,int16,-10-10,,R,,Exponent for AC power; e.g. -1 means divide by 10,,,
+[inverter_1_base+16],ac_frequency,AC Frequency,Hz,uint16,4500-6500,,R,"{""Context"":{""key"":""ac_frequency_sf"",""range"":[-10,10]}}",Grid frequency; apply Hz_SF (40086); scaled by 10**ac_frequency_sf (Context),,,
+[inverter_1_base+17],ac_frequency_sf,Frequency Scale Factor,,int16,-10-10,,R,,Exponent for frequency register,,,
+[inverter_1_base+18],ac_apparent_power,AC Apparent Power,VA,int16,,,R,"{""Context"":{""key"":""ac_apparent_power_sf"",""range"":[-10,10]}}",Apparent power; apply VA_SF (40088); scaled by 10**ac_apparent_power_sf (Context),,,
+[inverter_1_base+19],ac_apparent_power_sf,Apparent Power Scale Factor,,int16,-10-10,,R,,Exponent for apparent power,,,
+[inverter_1_base+20],ac_reactive_power,AC Reactive Power,VAr,int16,,,R,"{""Context"":{""key"":""ac_reactive_power_sf"",""range"":[-10,10]}}",Reactive power; apply VAr_SF (40090); scaled by 10**ac_reactive_power_sf (Context),,,
+[inverter_1_base+21],ac_reactive_power_sf,Reactive Power Scale Factor,,int16,-10-10,,R,,Exponent for reactive power,,,
+[inverter_1_base+22],ac_power_factor,Power Factor,%,int16,-100-100,,R,"{""Context"":{""key"":""ac_power_factor_sf"",""range"":[-10,10]}}",Displacement power factor; apply PF_SF (40092); scaled by 10**ac_power_factor_sf (Context),,,
+[inverter_1_base+23],ac_power_factor_sf,Power Factor Scale Factor,,int16,-10-10,,R,,Exponent for power factor,,,
+[inverter_1_base+24],ac_energy_total,AC Lifetime Energy,Wh,acc32,,daily,R,"{""Context"":{""key"":""ac_energy_sf"",""range"":[-10,10]}}",Cumulative AC energy (Wh); 32-bit accumulator; spans 40093-40094; apply E_SF (40095); scaled by 10**ac_energy_sf (Context),energy,total_increasing,
+[inverter_1_base+26],ac_energy_sf,Energy Scale Factor,,uint16,-10-10,,R,,Exponent for energy registers,,,
+[inverter_1_base+27],dc_current,DC Current,A,uint16,,,R,"{""Context"":{""key"":""dc_current_sf"",""range"":[-10,10]}}",DC input current (from PV); apply DC_I_SF (40097); scaled by 10**dc_current_sf (Context),,,
+[inverter_1_base+28],dc_current_sf,DC Current Scale Factor,,int16,-10-10,,R,,Exponent for DC current,,,
+[inverter_1_base+29],dc_voltage,DC Voltage,V,uint16,,,R,"{""Context"":{""key"":""dc_voltage_sf"",""range"":[-10,10]}}",DC input voltage (from PV string); apply DC_V_SF (40099); scaled by 10**dc_voltage_sf (Context),,,
+[inverter_1_base+30],dc_voltage_sf,DC Voltage Scale Factor,,int16,-10-10,,R,,Exponent for DC voltage,,,
+[inverter_1_base+31],dc_power,DC Power,W,int16,,,R,"{""Context"":{""key"":""dc_power_sf"",""range"":[-10,10]}}",DC input power; apply DC_W_SF (40101); scaled by 10**dc_power_sf (Context),,,
+[inverter_1_base+32],dc_power_sf,DC Power Scale Factor,,int16,-10-10,,R,,Exponent for DC power,,,
+[inverter_1_base+34],inverter_temperature,Heat Sink Temperature,°C,int16,,,R,"{""Context"":{""key"":""temperature_sf"",""range"":[-10,10]}}",Inverter heat sink temperature; apply T_SF (40106); scaled by 10**temperature_sf (Context),,,
+[inverter_1_base+35],temp_other_1,Other Temperature 1,°C,int16,,,R,"{""Context"":{""key"":""temperature_sf"",""range"":[-10,10]}}",Additional temperature sensor 1 (NaN if not available); scaled by 10**temperature_sf (Context),,,
+[inverter_1_base+36],temp_other_2,Other Temperature 2,°C,int16,,,R,"{""Context"":{""key"":""temperature_sf"",""range"":[-10,10]}}",Additional temperature sensor 2; scaled by 10**temperature_sf (Context),,,
+[inverter_1_base+37],temperature_sf,Temperature Scale Factor,,int16,-10-10,,R,,Exponent for temperature registers,,,
+[inverter_1_base+38],operating_state,Operating State,,uint16,"1=off,2=sleeping,3=waking,4=MPPT,5=throttled,6=shutting down,7=fault,8=standby,9=no power",,R,,Current inverter operational state,,,
+[inverter_1_base+39],vendor_state,Vendor Status,,uint16,,,R,,SolarEdge-specific extended status code,,,
+[inverter_1_base+40],alarm_1,Alarm Bitmask 1,,uint32,,,R,,Event flag bitmask word 1; spans 40109-40110,,,
+[inverter_1_base+42],alarm_2,Alarm Bitmask 2,,uint32,,,R,,Event flag bitmask word 2; spans 40111-40112,,,
+[inverter_1_base+44],alarm_3,Alarm Bitmask 3,,uint32,,,R,,Event flag bitmask word 3,,,
+[inverter_1_base+46],alarm_4,Alarm Bitmask 4,,uint32,,,R,,Event flag bitmask word 4,,,
+# ─── Nameplate Model 120 ───────────────────────────────────────────────────────────────────────,,,,,,,,,,,,
+[model_120_1_base+0],nameplate_id,Nameplate Model ID,,USHORT,,,R,,model 120 point ID; fixed 120,,,diagnostic
+[model_120_1_base+1],nameplate_l,Nameplate Model Length,,USHORT,,,R,,model 120 point L; fixed 26,,,diagnostic
+[model_120_1_base+2],nameplate_dertyp,Nameplate DERTyp,,USHORT,,,R,,model 120 point DERTyp,,,
+[model_120_1_base+3],nameplate_wrtg,Nameplate WRtg,W,USHORT,,,R,"{""Context"":{""key"":""nameplate_wrtg_sf"",""range"":[-10,10]}}",model 120 point WRtg; scaled by 10**nameplate_wrtg_sf,power,measurement,
+[model_120_1_base+4],nameplate_wrtg_sf,Nameplate WRtg_SF Scale Factor,,SHORT,,,R,,model 120 point WRtg_SF; PICS value 1,,,diagnostic
+[model_120_1_base+5],nameplate_vartg,Nameplate VARtg,VA,USHORT,,,R,"{""Context"":{""key"":""nameplate_vartg_sf"",""range"":[-10,10]}}",model 120 point VARtg; scaled by 10**nameplate_vartg_sf,apparent_power,measurement,
+[model_120_1_base+6],nameplate_vartg_sf,Nameplate VARtg_SF Scale Factor,,SHORT,,,R,,model 120 point VARtg_SF; PICS value 1,,,diagnostic
+[model_120_1_base+7],nameplate_varrtgq1,Nameplate VArRtgQ1,var,SHORT,,,R,"{""Context"":{""key"":""nameplate_varrtg_sf"",""range"":[-10,10]}}",model 120 point VArRtgQ1; scaled by 10**nameplate_varrtg_sf,reactive_power,measurement,
+[model_120_1_base+8],nameplate_varrtgq2,Nameplate VArRtgQ2,var,SHORT,,,R,"{""Context"":{""key"":""nameplate_varrtg_sf"",""range"":[-10,10]}}",model 120 point VArRtgQ2; scaled by 10**nameplate_varrtg_sf,reactive_power,measurement,
+[model_120_1_base+9],nameplate_varrtgq3,Nameplate VArRtgQ3,var,SHORT,,,R,"{""Context"":{""key"":""nameplate_varrtg_sf"",""range"":[-10,10]}}",model 120 point VArRtgQ3; scaled by 10**nameplate_varrtg_sf,reactive_power,measurement,
+[model_120_1_base+10],nameplate_varrtgq4,Nameplate VArRtgQ4,var,SHORT,,,R,"{""Context"":{""key"":""nameplate_varrtg_sf"",""range"":[-10,10]}}",model 120 point VArRtgQ4; scaled by 10**nameplate_varrtg_sf,reactive_power,measurement,
+[model_120_1_base+11],nameplate_varrtg_sf,Nameplate VArRtg_SF Scale Factor,,SHORT,,,R,,model 120 point VArRtg_SF; PICS value 1,,,diagnostic
+[model_120_1_base+12],nameplate_artg,Nameplate ARtg,A,USHORT,,,R,"{""Context"":{""key"":""nameplate_artg_sf"",""range"":[-10,10]}}",model 120 point ARtg; scaled by 10**nameplate_artg_sf,current,measurement,
+[model_120_1_base+13],nameplate_artg_sf,Nameplate ARtg_SF Scale Factor,,SHORT,,,R,,model 120 point ARtg_SF; PICS value 0,,,diagnostic
+[model_120_1_base+14],nameplate_pfrtgq1,Nameplate PFRtgQ1,cos(),SHORT,,,R,"{""Context"":{""key"":""nameplate_pfrtg_sf"",""range"":[-10,10]}}",model 120 point PFRtgQ1; scaled by 10**nameplate_pfrtg_sf,,,
+[model_120_1_base+15],nameplate_pfrtgq2,Nameplate PFRtgQ2,cos(),SHORT,,,R,"{""Context"":{""key"":""nameplate_pfrtg_sf"",""range"":[-10,10]}}",model 120 point PFRtgQ2; scaled by 10**nameplate_pfrtg_sf,,,
+[model_120_1_base+16],nameplate_pfrtgq3,Nameplate PFRtgQ3,cos(),SHORT,,,R,"{""Context"":{""key"":""nameplate_pfrtg_sf"",""range"":[-10,10]}}",model 120 point PFRtgQ3; scaled by 10**nameplate_pfrtg_sf,,,
+[model_120_1_base+17],nameplate_pfrtgq4,Nameplate PFRtgQ4,cos(),SHORT,,,R,"{""Context"":{""key"":""nameplate_pfrtg_sf"",""range"":[-10,10]}}",model 120 point PFRtgQ4; scaled by 10**nameplate_pfrtg_sf,,,
+[model_120_1_base+18],nameplate_pfrtg_sf,Nameplate PFRtg_SF Scale Factor,,SHORT,,,R,,model 120 point PFRtg_SF; PICS value -3,,,diagnostic
+# ─── Immediate Controls Model 123 ──────────────────────────────────────────────────────────────,,,,,,,,,,,,
+[model_123_1_base+0],control_id,Controls Model ID,,USHORT,,,R,,model 123 point ID; fixed 123,,,diagnostic
+[model_123_1_base+1],control_l,Controls Model Length,,USHORT,,,R,,model 123 point L; fixed 24,,,diagnostic
+[model_123_1_base+2],control_conn_wintms,Controls Conn_WinTms,s,USHORT,,,RW,,model 123 point Conn_WinTms,,,config
+[model_123_1_base+3],control_conn_rvrttms,Controls Conn_RvrtTms,s,USHORT,,,RW,,model 123 point Conn_RvrtTms,,,config
+[model_123_1_base+4],control_conn,Controls Conn,,USHORT,,,RW,,model 123 point Conn,,,config
+[model_123_1_base+5],control_wmaxlimpct,Controls WMaxLimPct,% WMax,USHORT,,,RW,,"model 123 point WMaxLimPct; RAW value, scale by 10**control_wmaxlimpct_sf",,,config
+[model_123_1_base+6],control_wmaxlimpct_wintms,Controls WMaxLimPct_WinTms,s,USHORT,,,RW,,model 123 point WMaxLimPct_WinTms,,,config
+[model_123_1_base+7],control_wmaxlimpct_rvrttms,Controls WMaxLimPct_RvrtTms,s,USHORT,,,RW,,model 123 point WMaxLimPct_RvrtTms,,,config
+[model_123_1_base+8],control_wmaxlimpct_rmptms,Controls WMaxLimPct_RmpTms,s,USHORT,,,RW,,model 123 point WMaxLimPct_RmpTms,,,config
+[model_123_1_base+9],control_wmaxlim_ena,Controls WMaxLim_Ena,,USHORT,,,RW,,model 123 point WMaxLim_Ena,,,config
+[model_123_1_base+10],control_outpfset,Controls OutPFSet,cos(),SHORT,,,RW,,"model 123 point OutPFSet; RAW value, scale by 10**control_outpfset_sf",,,config
+[model_123_1_base+11],control_outpfset_wintms,Controls OutPFSet_WinTms,s,USHORT,,,RW,,model 123 point OutPFSet_WinTms,,,config
+[model_123_1_base+12],control_outpfset_rvrttms,Controls OutPFSet_RvrtTms,s,USHORT,,,RW,,model 123 point OutPFSet_RvrtTms,,,config
+[model_123_1_base+13],control_outpfset_rmptms,Controls OutPFSet_RmpTms,s,USHORT,,,RW,,model 123 point OutPFSet_RmpTms,,,config
+[model_123_1_base+14],control_outpfset_ena,Controls OutPFSet_Ena,,USHORT,,,RW,,model 123 point OutPFSet_Ena,,,config
+[model_123_1_base+15],control_varwmaxpct,Controls VArWMaxPct,% WMax,SHORT,,,RW,,"model 123 point VArWMaxPct; RAW value, scale by 10**control_varpct_sf",,,config
+[model_123_1_base+16],control_varmaxpct,Controls VArMaxPct,% VArMax,SHORT,,,RW,,"model 123 point VArMaxPct; RAW value, scale by 10**control_varpct_sf",,,config
+[model_123_1_base+18],control_varpct_wintms,Controls VArPct_WinTms,s,USHORT,,,RW,,model 123 point VArPct_WinTms,,,config
+[model_123_1_base+19],control_varpct_rvrttms,Controls VArPct_RvrtTms,s,USHORT,,,RW,,model 123 point VArPct_RvrtTms,,,config
+[model_123_1_base+20],control_varpct_rmptms,Controls VArPct_RmpTms,s,USHORT,,,RW,,model 123 point VArPct_RmpTms,,,config
+[model_123_1_base+21],control_varpct_mod,Controls VArPct_Mod,,USHORT,,,RW,,model 123 point VArPct_Mod,,,config
+[model_123_1_base+22],control_varpct_ena,Controls VArPct_Ena,,USHORT,,,RW,,model 123 point VArPct_Ena,,,config
+[model_123_1_base+23],control_wmaxlimpct_sf,Controls WMaxLimPct_SF Scale Factor,,SHORT,,,R,,model 123 point WMaxLimPct_SF; PICS value -1,,,diagnostic
+[model_123_1_base+24],control_outpfset_sf,Controls OutPFSet_SF Scale Factor,,SHORT,,,R,,model 123 point OutPFSet_SF; PICS value -4,,,diagnostic
+[model_123_1_base+25],control_varpct_sf,Controls VArPct_SF Scale Factor,,SHORT,,,R,,model 123 point VArPct_SF; PICS value -1,,,diagnostic
+# ─── Multiple MPPT Model 160 (one module block per MPPT input) ─────────────────────────────────,,,,,,,,,,,,
+[model_160_1_base+0],mppt_model_id,MPPT Model ID,,USHORT,,,R,,model 160 point ID; fixed 160,,,diagnostic
+[model_160_1_base+1],mppt_l,MPPT Model Length,,USHORT,,,R,,model 160 point L; fixed 48,,,diagnostic
+[model_160_1_base+2],mppt_dca_sf,MPPT Current Scale Factor Scale Factor,,SHORT,,,R,,model 160 point DCA_SF; PICS value -1,,,diagnostic
+[model_160_1_base+3],mppt_dcv_sf,MPPT Voltage Scale Factor Scale Factor,,SHORT,,,R,,model 160 point DCV_SF; PICS value -1,,,diagnostic
+[model_160_1_base+4],mppt_dcw_sf,MPPT Power Scale Factor Scale Factor,,SHORT,,,R,,model 160 point DCW_SF; PICS value 1,,,diagnostic
+[model_160_1_base+6],mppt_evt,MPPT Global Events,,32BIT_FLAGS,"{""b0"": ""1 =Ground Fault (GROUND_FAULT)"", ""b1"": ""1 =Input Over Voltage (INPUT_OVER_VOLTAGE)"", ""b6"": ""1 =Manual Shutdown (MANUAL_SHUTDOWN)"", ""b7"": ""1 =Over Temperature (OVER_TEMP)"", ""b13"": ""Under Temperature (UNDER_TEMP)"", ""b14"": ""Memory Loss (MEMORY_LOSS)"", ""b15"": ""Arc Detection (ARC_DETECTION)"", ""b20"": ""Test Failed (TEST_FAILED)"", ""b21"": ""Under Voltage (INPUT_UNDER_VOLTAGE)"", ""b22"": ""Over Current (INPUT_OVER_CURRENT)""}",,R,,model 160 point Evt,,,
+[model_160_1_base+8],mppt_n,MPPT Number of Modules,,USHORT,,,R,,model 160 point N,,,
+[mppt_{i}_base+0],mppt{i}_id,MPPT Model ID,,USHORT,,,R,,model 160 point ID; fixed supported,,,diagnostic
+[mppt_{i}_base+1],mppt{i}_idstr,MPPT {i} Input ID Sting,,ASCII.16,,,R,,model 160 point IDStr; 8 registers,,,diagnostic
+[mppt_{i}_base+9],mppt{i}_dca,MPPT {i} DC Current,A,USHORT,,,R,"{""Context"":{""key"":""mppt_dca_sf"",""range"":[-10,10]}}",model 160 point DCA; scaled by 10**mppt_dca_sf,current,measurement,
+[mppt_{i}_base+10],mppt{i}_dcv,MPPT {i} DC Voltage,V,USHORT,,,R,"{""Context"":{""key"":""mppt_dcv_sf"",""range"":[-10,10]}}",model 160 point DCV; scaled by 10**mppt_dcv_sf,voltage,measurement,
+[mppt_{i}_base+11],mppt{i}_dcw,MPPT {i} DC Power,W,USHORT,,,R,"{""Context"":{""key"":""mppt_dcw_sf"",""range"":[-10,10]}}",model 160 point DCW; scaled by 10**mppt_dcw_sf,power,measurement,
+[mppt_{i}_base+17],mppt{i}_dcst,MPPT {i} Operating State,,USHORT,,,R,,model 160 point DCSt,,,
+[mppt_{i}_base+18],mppt{i}_dcevt,MPPT {i} Module Events,,32BIT_FLAGS,"{""b0"": ""1 =Ground Fault (GROUND_FAULT)"", ""b1"": ""1 =Input Over Voltage (INPUT_OVER_VOLTAGE)"", ""b6"": ""1 =Manual Shutdown (MANUAL_SHUTDOWN)"", ""b7"": ""1 =Over Temperature (OVER_TEMP)"", ""b13"": ""Under Temperature (UNDER_TEMP)"", ""b14"": ""Memory Loss (MEMORY_LOSS)"", ""b15"": ""Arc Detection (ARC_DETECTION)"", ""b20"": ""Test Failed (TEST_FAILED)"", ""b21"": ""Under Voltage (INPUT_UNDER_VOLTAGE)"", ""b22"": ""Over Current (INPUT_OVER_CURRENT)""}",,R,,model 160 point DCEvt,,,
+"# ─── Meter Model 203 (Wye Three Phase, Integer + Scale Factor) ─────────────────────────────────",,,,,,,,,,,,
+[meter_{i}_base+2],meter_{i}_ac_current_total,Meter {i} AC Current Total,A,int16,,,R,"{""Context"":{""key"":""meter_{i}_ac_current_sf"",""range"":[-10,10]}}",,,,
+[meter_{i}_base+3],meter_{i}_ac_current_a,Meter {i} AC Phase A Current,A,int16,,,R,"{""Context"":{""key"":""meter_{i}_ac_current_sf"",""range"":[-10,10]}}",,,,
+[meter_{i}_base+4],meter_{i}_ac_current_b,Meter {i} AC Phase B Current,A,int16,,,R,"{""Context"":{""key"":""meter_{i}_ac_current_sf"",""range"":[-10,10]}}",,,,
+[meter_{i}_base+5],meter_{i}_ac_current_c,Meter {i} AC Phase C Current,A,int16,,,R,"{""Context"":{""key"":""meter_{i}_ac_current_sf"",""range"":[-10,10]}}",,,,
+[meter_{i}_base+6],meter_{i}_ac_current_sf,Meter {i} Current Scale Factor,,int16,-10-10,,R,,Exponent for the meter current registers,,,
+[meter_{i}_base+7],meter_{i}_ac_voltage_ln,Meter {i} AC Voltage Line-Neutral Average,V,int16,,,R,"{""Context"":{""key"":""meter_{i}_ac_voltage_sf"",""range"":[-10,10]}}",,,,
+[meter_{i}_base+8],meter_{i}_ac_voltage_an,Meter {i} AC Voltage Phase A-N,V,int16,,,R,"{""Context"":{""key"":""meter_{i}_ac_voltage_sf"",""range"":[-10,10]}}",,,,
+[meter_{i}_base+9],meter_{i}_ac_voltage_bn,Meter {i} AC Voltage Phase B-N,V,int16,,,R,"{""Context"":{""key"":""meter_{i}_ac_voltage_sf"",""range"":[-10,10]}}",,,,
+[meter_{i}_base+10],meter_{i}_ac_voltage_cn,Meter {i} AC Voltage Phase C-N,V,int16,,,R,"{""Context"":{""key"":""meter_{i}_ac_voltage_sf"",""range"":[-10,10]}}",,,,
+[meter_{i}_base+11],meter_{i}_ac_voltage_ll,Meter {i} AC Voltage Line-Line Average,V,int16,,,R,"{""Context"":{""key"":""meter_{i}_ac_voltage_sf"",""range"":[-10,10]}}",,,,
+[meter_{i}_base+12],meter_{i}_ac_voltage_ab,Meter {i} AC Voltage Phase A-B,V,int16,,,R,"{""Context"":{""key"":""meter_{i}_ac_voltage_sf"",""range"":[-10,10]}}",,,,
+[meter_{i}_base+13],meter_{i}_ac_voltage_bc,Meter {i} AC Voltage Phase B-C,V,int16,,,R,"{""Context"":{""key"":""meter_{i}_ac_voltage_sf"",""range"":[-10,10]}}",,,,
+[meter_{i}_base+14],meter_{i}_ac_voltage_ca,Meter {i} AC Voltage Phase C-A,V,int16,,,R,"{""Context"":{""key"":""meter_{i}_ac_voltage_sf"",""range"":[-10,10]}}",,,,
+[meter_{i}_base+15],meter_{i}_ac_voltage_sf,Meter {i} Voltage Scale Factor,,int16,-10-10,,R,,Exponent for the meter voltage registers,,,
+[meter_{i}_base+16],meter_{i}_ac_frequency,Meter {i} AC Frequency,Hz,int16,,,R,"{""Context"":{""key"":""meter_{i}_ac_frequency_sf"",""range"":[-10,10]}}",,,,
+[meter_{i}_base+17],meter_{i}_ac_frequency_sf,Meter {i} Frequency Scale Factor,,int16,-10-10,,R,,Exponent for the meter frequency register,,,
+[meter_{i}_base+18],meter_{i}_ac_power,Meter {i} AC Active Power,W,int16,,,R,"{""Context"":{""key"":""meter_{i}_ac_power_sf"",""range"":[-10,10]}}",Total real power; negative = exporting to the grid depending on meter orientation,,,
+[meter_{i}_base+19],meter_{i}_ac_power_a,Meter {i} AC Phase A Active Power,W,int16,,,R,"{""Context"":{""key"":""meter_{i}_ac_power_sf"",""range"":[-10,10]}}",,,,
+[meter_{i}_base+20],meter_{i}_ac_power_b,Meter {i} AC Phase B Active Power,W,int16,,,R,"{""Context"":{""key"":""meter_{i}_ac_power_sf"",""range"":[-10,10]}}",,,,
+[meter_{i}_base+21],meter_{i}_ac_power_c,Meter {i} AC Phase C Active Power,W,int16,,,R,"{""Context"":{""key"":""meter_{i}_ac_power_sf"",""range"":[-10,10]}}",,,,
+[meter_{i}_base+22],meter_{i}_ac_power_sf,Meter {i} Active Power Scale Factor,,int16,-10-10,,R,,Exponent for the meter real power registers,,,
+[meter_{i}_base+23],meter_{i}_ac_apparent_power,Meter {i} AC Apparent Power,VA,int16,,,R,"{""Context"":{""key"":""meter_{i}_ac_apparent_power_sf"",""range"":[-10,10]}}",,,,
+[meter_{i}_base+24],meter_{i}_ac_apparent_power_a,Meter {i} AC Phase A Apparent Power,VA,int16,,,R,"{""Context"":{""key"":""meter_{i}_ac_apparent_power_sf"",""range"":[-10,10]}}",,,,
+[meter_{i}_base+25],meter_{i}_ac_apparent_power_b,Meter {i} AC Phase B Apparent Power,VA,int16,,,R,"{""Context"":{""key"":""meter_{i}_ac_apparent_power_sf"",""range"":[-10,10]}}",,,,
+[meter_{i}_base+26],meter_{i}_ac_apparent_power_c,Meter {i} AC Phase C Apparent Power,VA,int16,,,R,"{""Context"":{""key"":""meter_{i}_ac_apparent_power_sf"",""range"":[-10,10]}}",,,,
+[meter_{i}_base+27],meter_{i}_ac_apparent_power_sf,Meter {i} Apparent Power Scale Factor,,int16,-10-10,,R,,Exponent for the meter apparent power registers,,,
+[meter_{i}_base+28],meter_{i}_ac_reactive_power,Meter {i} AC Reactive Power,VAr,int16,,,R,"{""Context"":{""key"":""meter_{i}_ac_reactive_power_sf"",""range"":[-10,10]}}",,,,
+[meter_{i}_base+29],meter_{i}_ac_reactive_power_a,Meter {i} AC Phase A Reactive Power,VAr,int16,,,R,"{""Context"":{""key"":""meter_{i}_ac_reactive_power_sf"",""range"":[-10,10]}}",,,,
+[meter_{i}_base+30],meter_{i}_ac_reactive_power_b,Meter {i} AC Phase B Reactive Power,VAr,int16,,,R,"{""Context"":{""key"":""meter_{i}_ac_reactive_power_sf"",""range"":[-10,10]}}",,,,
+[meter_{i}_base+31],meter_{i}_ac_reactive_power_c,Meter {i} AC Phase C Reactive Power,VAr,int16,,,R,"{""Context"":{""key"":""meter_{i}_ac_reactive_power_sf"",""range"":[-10,10]}}",,,,
+[meter_{i}_base+32],meter_{i}_ac_reactive_power_sf,Meter {i} Reactive Power Scale Factor,,int16,-10-10,,R,,Exponent for the meter reactive power registers,,,
+[meter_{i}_base+33],meter_{i}_ac_power_factor,Meter {i} AC Power Factor,%,int16,,,R,"{""Context"":{""key"":""meter_{i}_ac_power_factor_sf"",""range"":[-10,10]}}",,,,
+[meter_{i}_base+34],meter_{i}_ac_power_factor_a,Meter {i} AC Phase A Power Factor,%,int16,,,R,"{""Context"":{""key"":""meter_{i}_ac_power_factor_sf"",""range"":[-10,10]}}",,,,
+[meter_{i}_base+35],meter_{i}_ac_power_factor_b,Meter {i} AC Phase B Power Factor,%,int16,,,R,"{""Context"":{""key"":""meter_{i}_ac_power_factor_sf"",""range"":[-10,10]}}",,,,
+[meter_{i}_base+36],meter_{i}_ac_power_factor_c,Meter {i} AC Phase C Power Factor,%,int16,,,R,"{""Context"":{""key"":""meter_{i}_ac_power_factor_sf"",""range"":[-10,10]}}",,,,
+[meter_{i}_base+37],meter_{i}_ac_power_factor_sf,Meter {i} Power Factor Scale Factor,,int16,-10-10,,R,,Exponent for the meter power factor registers,,,
+[meter_{i}_base+38],meter_{i}_energy_exported,Meter {i} Total Exported Energy,Wh,acc32,,,R,"{""Context"":{""key"":""meter_{i}_energy_sf"",""range"":[-10,10]}}",Cumulative real energy exported; 32-bit accumulator; spans two registers,energy,total_increasing,
+[meter_{i}_base+46],meter_{i}_energy_imported,Meter {i} Total Imported Energy,Wh,acc32,,,R,"{""Context"":{""key"":""meter_{i}_energy_sf"",""range"":[-10,10]}}",Cumulative real energy imported; 32-bit accumulator; spans two registers,energy,total_increasing,
+[meter_{i}_base+54],meter_{i}_energy_sf,Meter {i} Energy Scale Factor,,int16,-10-10,,R,,Exponent for the meter energy registers,,,
+# ─── Battery Base Model 802 ────────────────────────────────────────────────────────────────────,,,,,,,,,,,,
+[model_802_1_base+2],battery_capacity_ah,Battery Nameplate Charge Capacity,Ah,uint16,,,R,"{""Context"":{""key"":""battery_ahrtg_sf"",""range"":[-10,10]}}",,,,
+[model_802_1_base+3],battery_capacity_wh,Battery Nameplate Energy Capacity,Wh,uint16,,,R,"{""Context"":{""key"":""battery_whrtg_sf"",""range"":[-10,10]}}",,energy_storage,,
+[model_802_1_base+4],battery_max_charge_rate,Battery Nameplate Max Charge Rate,W,uint16,,,R,"{""Context"":{""key"":""battery_wchadischamax_sf"",""range"":[-10,10]}}",,,,
+[model_802_1_base+5],battery_max_discharge_rate,Battery Nameplate Max Discharge Rate,W,uint16,,,R,"{""Context"":{""key"":""battery_wchadischamax_sf"",""range"":[-10,10]}}",,,,
+[model_802_1_base+7],battery_soc_max,Battery Nameplate Max SoC,%,uint16,,,R,"{""Context"":{""key"":""battery_soc_sf"",""range"":[-10,10]}}",,,,
+[model_802_1_base+8],battery_soc_min,Battery Nameplate Min SoC,%,uint16,,,R,"{""Context"":{""key"":""battery_soc_sf"",""range"":[-10,10]}}",,,,
+[model_802_1_base+9],battery_reserve_max,Battery Max Reserve Percent,%,uint16,,,R,"{""Context"":{""key"":""battery_soc_sf"",""range"":[-10,10]}}",,,,
+[model_802_1_base+10],battery_reserve_min,Battery Min Reserve Percent,%,uint16,,,R,"{""Context"":{""key"":""battery_soc_sf"",""range"":[-10,10]}}",,,,
+[model_802_1_base+11],battery_soc,Battery State of Charge,%,uint16,,,R,"{""Context"":{""key"":""battery_soc_sf"",""range"":[-10,10]}}",,battery,measurement,
+[model_802_1_base+12],battery_depth_of_discharge,Battery Depth of Discharge,%,uint16,,,R,"{""Context"":{""key"":""battery_dod_sf"",""range"":[-10,10]}}",,,,
+[model_802_1_base+13],battery_soh,Battery State of Health,%,uint16,,,R,"{""Context"":{""key"":""battery_soh_sf"",""range"":[-10,10]}}",,,measurement,
+[model_802_1_base+14],battery_cycle_count,Battery Cycle Count,,uint32,,,R,,Spans two registers,,total_increasing,
+[model_802_1_base+16],battery_charge_status,Battery Charge Status,,uint16,"1=off,2=empty,3=discharging,4=charging,5=full,6=holding,7=testing",,R,,,,,
+[model_802_1_base+17],battery_control_mode,Battery Control Mode,,uint16,"0=remote,1=local",,R,,,,,
+[model_802_1_base+21],battery_type,Battery Type,,uint16,"0=unknown,1=lead acid,2=nickel metal hydride,3=nickel cadmium,4=lithium ion,5=carbon zinc,6=zinc chloride,7=alkaline,8=rechargeable alkaline,9=sodium sulfur,10=flow,99=other",,R,,,,,
+[model_802_1_base+22],battery_state,Battery State,,uint16,"1=disconnected,2=initializing,3=connected,4=standby,5=soc protection,6=suspending,99=fault",,R,,,,,
+[model_802_1_base+26],battery_events,Battery Event Flags,,32BIT_FLAGS,,,R,,Model 802 Evt1 bitfield; spans two registers,,,
+[model_802_1_base+34],battery_voltage,Battery Voltage,V,uint16,,,R,"{""Context"":{""key"":""battery_v_sf"",""range"":[-10,10]}}",,voltage,measurement,
+[model_802_1_base+35],battery_voltage_max,Battery Max Voltage,V,uint16,,,R,"{""Context"":{""key"":""battery_v_sf"",""range"":[-10,10]}}",,,,
+[model_802_1_base+36],battery_voltage_min,Battery Min Voltage,V,uint16,,,R,"{""Context"":{""key"":""battery_v_sf"",""range"":[-10,10]}}",,,,
+[model_802_1_base+37],battery_cell_voltage_max,Battery Max Cell Voltage,V,uint16,,,R,"{""Context"":{""key"":""battery_cellv_sf"",""range"":[-10,10]}}",,,,
+[model_802_1_base+40],battery_cell_voltage_min,Battery Min Cell Voltage,V,uint16,,,R,"{""Context"":{""key"":""battery_cellv_sf"",""range"":[-10,10]}}",,,,
+[model_802_1_base+43],battery_cell_voltage_avg,Battery Average Cell Voltage,V,uint16,,,R,"{""Context"":{""key"":""battery_cellv_sf"",""range"":[-10,10]}}",,,,
+[model_802_1_base+44],battery_current,Battery Current,A,int16,,,R,"{""Context"":{""key"":""battery_a_sf"",""range"":[-10,10]}}",Total DC current to/from the battery,current,measurement,
+[model_802_1_base+45],battery_charge_current_max,Battery Max Charge Current,A,uint16,,,R,"{""Context"":{""key"":""battery_amax_sf"",""range"":[-10,10]}}",,,,
+[model_802_1_base+46],battery_discharge_current_max,Battery Max Discharge Current,A,uint16,,,R,"{""Context"":{""key"":""battery_amax_sf"",""range"":[-10,10]}}",,,,
+[model_802_1_base+47],battery_power,Battery Power,W,int16,,,R,"{""Context"":{""key"":""battery_w_sf"",""range"":[-10,10]}}",Total DC power to/from the battery; sign convention per the device,power,measurement,
+[model_802_1_base+52],battery_ahrtg_sf,Battery Charge Capacity Scale Factor,,int16,-10-10,,R,,,,,
+[model_802_1_base+53],battery_whrtg_sf,Battery Energy Capacity Scale Factor,,int16,-10-10,,R,,,,,
+[model_802_1_base+54],battery_wchadischamax_sf,Battery Max Charge/Discharge Rate Scale Factor,,int16,-10-10,,R,,,,,
+[model_802_1_base+56],battery_soc_sf,Battery State of Charge Scale Factor,,int16,-10-10,,R,,,,,
+[model_802_1_base+57],battery_dod_sf,Battery Depth of Discharge Scale Factor,,int16,-10-10,,R,,,,,
+[model_802_1_base+58],battery_soh_sf,Battery State of Health Scale Factor,,int16,-10-10,,R,,,,,
+[model_802_1_base+59],battery_v_sf,Battery Voltage Scale Factor,,int16,-10-10,,R,,,,,
+[model_802_1_base+60],battery_cellv_sf,Battery Cell Voltage Scale Factor,,int16,-10-10,,R,,,,,
+[model_802_1_base+61],battery_a_sf,Battery Current Scale Factor,,int16,-10-10,,R,,,,,
+[model_802_1_base+62],battery_amax_sf,Battery Max Current Scale Factor,,int16,-10-10,,R,,,,,
+[model_802_1_base+63],battery_w_sf,Battery Power Scale Factor,,int16,-10-10,,R,,,,,

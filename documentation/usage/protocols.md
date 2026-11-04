@@ -291,13 +291,14 @@ The `x` variable holds the raw decoded value. Each condition uses interval notat
 
 - `key` is the `variable name` of another row in the same map. That row is read and decoded like any other, so keep it in the map (a `diagnostic` row is fine).
 - `cases` maps a value of that variable (written as text, `"-2"`) to a formula in `x`, the raw value of this row. Formulas are the same arithmetic expressions as in [Value Formulas](#value-formulas).
-- `default` is optional and is used when no case matches. Without it the raw value is published unchanged. SunSpec marks "scale factor not implemented" as `0x8000` (-32768), so those readings are published raw.
+- `range` is a shortcut for power-of-ten scale factors: `[low, high]` (or the text `"low~high"`, each bound within +/-50). When the key variable's value is a whole number inside the range, the formula is `x/10**n` for negative `n`, `x` for 0 and `x*10**n` for positive `n`. `cases` is checked first, so an explicit case overrides the range for that value. It can be used with or without `cases`.
+- `default` is optional and is used when no case (and no range) matches. Without it the raw value is published unchanged. SunSpec marks "scale factor not implemented" as `0x8000` (-32768), so those readings are published raw.
 - The adjustment runs after every value in the read has been decoded, so the order of rows in the CSV does not matter. The key variable must be read in the same polling pass.
 
-For SunSpec, write one case per scale factor from -10 to 10 (the range the standard allows). Use division for negative factors (`x/100`, not `x*0.01`) so results such as 12.5 stay exact:
+For SunSpec, use `"range": [-10, 10]` (the range the standard allows) instead of writing a case for every value. Negative factors divide (`x/100`, not `x*0.01`) so results such as 12.5 stay exact, and the range does this for you:
 
 ``` ini
-72,ac_current,AC Current,A,USHORT,,,R,"{""Context"":{""key"":""current_sf"",""cases"":{""-2"":""x/100"",""-1"":""x/10"",""0"":""x""}}}",...
+72,ac_current,AC Current,A,USHORT,,,R,"{""Context"":{""key"":""current_sf"",""range"":[-10,10]}}",...
 76,current_sf,AC Current Scale Factor,,SHORT,,,R,,...
 ```
 
@@ -675,6 +676,7 @@ MPG ships with pre-built protocols for the following devices. All protocols are 
 | `growatt_v0.14` | Growatt SPF / off-grid inverter v0.14 | Modbus RTU |
 | `hdhk_16ch_ac_module` | HDHK 16-channel AC power monitor | Modbus RTU |
 | `huawei_sun2000` | Huawei SUN2000 inverters | Modbus TCP |
+| `kostal_sunspec` | Kostal PLENTICORE / PIKO IQ SunSpec inverters | Modbus TCP |
 | `next_power_victor_nm_re` | Next Power Victor NM RE | Modbus RTU |
 | `pace_bms_v1.3` | PACE BMS RS-485 v1.3 | Modbus RTU |
 | `pylon_can` | Pylon / Pylontech low-voltage CAN bus | CAN bus |
@@ -688,6 +690,7 @@ MPG ships with pre-built protocols for the following devices. All protocols are 
 | `sma_sunny_island` | SMA Sunny Island | Modbus RTU |
 | `sma_sunny_island_v1` | SMA Sunny Island v1 | Modbus RTU |
 | `sma_sunnyboy_tripower` | SMA Sunny Boy / Tripower | Modbus RTU |
+| `sma_sunspec` | SMA Sunny Boy / Tripower / Highpower SunSpec inverters | Modbus TCP |
 | `sma_tripower_storage_hybrid` | SMA Tripower Storage Hybrid | Modbus RTU |
 | `sok_sk48v100_pace_bms` | SOK SK48V100 / PACE BMS | Modbus RTU |
 | `solaredge_sunspec` | SolarEdge SunSpec inverters | Modbus TCP |

@@ -527,6 +527,51 @@ _WORD_ORDER_ALIASES: dict[str, WordOrder] = {
 }
 
 
+_CONTEXT_RANGE_LIMIT: int = 50
+_CONTEXT_RANGE_TEXT: re.Pattern[str] = re.compile(r"^\s*(-?\d+)\s*(?:~|\.\.|,|-)\s*(-?\d+)\s*$")
+_context_range_warned: set[str] = set()
+
+
+def context_range_bounds(spec: object) -> tuple[int, int] | None:
+    """Parse the ``range`` of a ``Context`` adjustment into ordered inclusive ``(low, high)`` integers.
+
+    Accepts a two-item JSON list (``[-10, 10]``) or text (``"-10~10"``, ``"-10..10"``, ``"-10,10"``, ``"-10--5"``).
+    Reversed bounds are put in order.  Returns None for anything else, or when a bound is outside
+    +/-``_CONTEXT_RANGE_LIMIT`` (a power of ten that large is never a real scale factor).
+    """
+    low: int
+    high: int
+    if isinstance(spec, (list, tuple)):
+        items: list[object] = list(cast("list[object]", spec))
+        if len(items) != 2:
+            return None
+        try:
+            low, high = int(cast("int | str", items[0])), int(cast("int | str", items[1]))
+        except (TypeError, ValueError):
+            return None
+    elif isinstance(spec, str):
+        match: re.Match[str] | None = _CONTEXT_RANGE_TEXT.match(spec)
+        if match is None:
+            return None
+        low, high = int(match.group(1)), int(match.group(2))
+    else:
+        return None
+    if low > high:
+        low, high = high, low
+    if max(abs(low), abs(high)) > _CONTEXT_RANGE_LIMIT:
+        return None
+    return low, high
+
+
+def context_power_of_ten_formula(exponent: int) -> str:
+    """The formula a ``Context`` range gives for ``exponent``: ``x/10**n`` below zero, ``x*1`` at zero, ``x*10**n`` above."""
+    if exponent < 0:
+        return f"x/{10 ** -exponent}"
+    if exponent == 0:
+        return "x*1"
+    return f"x*{10 ** exponent}"
+
+
 class DataAdjustments:
     """Parses, queries, and applies CSV-driven adjustments for registry entries.
 
@@ -759,11 +804,26 @@ class DataAdjustments:
                 return value
 
             cases: object = context_adjustment.get("cases", {})
-            formula: str = ""
+            formula = ""
             context_value: int | float | str = context[key]
+            if isinstance(context_value, float) and context_value.is_integer():
+                context_value = int(context_value)            # a scale factor read as 2.0 matches case "2"
             if isinstance(cases, dict):
                 cases = cast(dict[object, object], cases)
                 formula = str(cases.get(str(context_value), cases.get(context_value, "")))
+            if not formula and "range" in context_adjustment:
+                # "range": [-10, 10] -> 10**k scaling for every integer k in the range (explicit cases win)
+                bounds: tuple[int, int] | None = context_range_bounds(context_adjustment["range"])
+                if bounds is None:
+                    bad: str = f"{entry.variable_name}:{context_adjustment['range']!r}"
+                    if bad not in _context_range_warned:
+                        _context_range_warned.add(bad)
+                        self._log.warning(
+                            f"Ignoring invalid Context range {context_adjustment['range']!r} for {entry.variable_name} "
+                            f"(use [low, high] or \"low~high\", each within +/-{_CONTEXT_RANGE_LIMIT})"
+                        )
+                elif isinstance(context_value, int) and bounds[0] <= context_value <= bounds[1]:
+                    formula = context_power_of_ten_formula(context_value)
             if not formula:
                 formula = str(context_adjustment.get("default", ""))
             if not formula:
@@ -1782,7 +1842,7 @@ class protocol_settings:
                         f"({len(registry_map)} available) — excluding the ENTIRE "
                         f"{registry_type.name} registry type (0 metrics will be scraped from "
                         f"it). This almost always means the mask file references register "
-                        f"names that no longer exist (e.g. after a protocol CSV update) "
+                        f"names that no longer exist (e.g. after a protocol CSV update)"
                         f"or that no metrics have been chosen from only one of the registers."
                     )
                 for index in reversed(range(len(registry_map))):

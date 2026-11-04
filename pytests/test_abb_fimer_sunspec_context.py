@@ -125,8 +125,7 @@ def test_every_context_key_is_a_scale_factor_in_the_same_map(name: str) -> None:
         context: dict[str, Any] = cast("dict[str, Any]", _context(entry))
         key: str = str(context["key"])
         assert key in entries and entries[key].variable_name.endswith("_sf"), entry.variable_name
-        cases: dict[str, str] = cast("dict[str, str]", context["cases"])
-        assert sorted(int(k) for k in cases) == list(range(-10, 11))     # the SunSpec range
+        assert context["range"] == [-10, 10]     # the SunSpec scale-factor range, as a Context range instead of 21 cases
 
 
 @pytest.mark.parametrize("name", [VSN, REACT2])
