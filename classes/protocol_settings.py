@@ -31,7 +31,7 @@ from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Literal, Optional, cast
+from typing import Any, Callable, ClassVar, Literal, Optional, cast
 
 from defs.common import TransportSettings, strtoint, strtoint_safe
 
@@ -527,51 +527,6 @@ _WORD_ORDER_ALIASES: dict[str, WordOrder] = {
 }
 
 
-_CONTEXT_RANGE_LIMIT: int = 50
-_CONTEXT_RANGE_TEXT: re.Pattern[str] = re.compile(r"^\s*(-?\d+)\s*(?:~|\.\.|,|-)\s*(-?\d+)\s*$")
-_context_range_warned: set[str] = set()
-
-
-def context_range_bounds(spec: object) -> tuple[int, int] | None:
-    """Parse the ``range`` of a ``Context`` adjustment into ordered inclusive ``(low, high)`` integers.
-
-    Accepts a two-item JSON list (``[-10, 10]``) or text (``"-10~10"``, ``"-10..10"``, ``"-10,10"``, ``"-10--5"``).
-    Reversed bounds are put in order.  Returns None for anything else, or when a bound is outside
-    +/-``_CONTEXT_RANGE_LIMIT`` (a power of ten that large is never a real scale factor).
-    """
-    low: int
-    high: int
-    if isinstance(spec, (list, tuple)):
-        items: list[object] = list(cast("list[object]", spec))
-        if len(items) != 2:
-            return None
-        try:
-            low, high = int(cast("int | str", items[0])), int(cast("int | str", items[1]))
-        except (TypeError, ValueError):
-            return None
-    elif isinstance(spec, str):
-        match: re.Match[str] | None = _CONTEXT_RANGE_TEXT.match(spec)
-        if match is None:
-            return None
-        low, high = int(match.group(1)), int(match.group(2))
-    else:
-        return None
-    if low > high:
-        low, high = high, low
-    if max(abs(low), abs(high)) > _CONTEXT_RANGE_LIMIT:
-        return None
-    return low, high
-
-
-def context_power_of_ten_formula(exponent: int) -> str:
-    """The formula a ``Context`` range gives for ``exponent``: ``x/10**n`` below zero, ``x*1`` at zero, ``x*10**n`` above."""
-    if exponent < 0:
-        return f"x/{10 ** -exponent}"
-    if exponent == 0:
-        return "x*1"
-    return f"x*{10 ** exponent}"
-
-
 class DataAdjustments:
     """Parses, queries, and applies CSV-driven adjustments for registry entries.
 
@@ -611,6 +566,11 @@ class DataAdjustments:
     little-endian Modbus convention used by EG4 and many other inverter
     manufacturers.
     """
+
+    # Context ``range`` support (see ``context_range_bounds``).  A power of ten beyond +/-50 is never a real scale factor.
+    CONTEXT_RANGE_LIMIT: ClassVar[int] = 50
+    _CONTEXT_RANGE_TEXT: ClassVar[re.Pattern[str]] = re.compile(r"^\s*(-?\d+)\s*(?:~|\.\.|,|-)\s*(-?\d+)\s*$")
+    _context_range_warned: ClassVar[set[str]] = set()      # invalid ranges already reported, so each is logged once per process
 
     def __init__(self, log: logging.Logger, default_word_order: WordOrder = _DEFAULT_WORD_ORDER) -> None:
         """Initialise with a shared logger and the protocol-level default ``WordOrder``.
@@ -804,7 +764,7 @@ class DataAdjustments:
                 return value
 
             cases: object = context_adjustment.get("cases", {})
-            formula = ""
+            formula: str = ""
             context_value: int | float | str = context[key]
             if isinstance(context_value, float) and context_value.is_integer():
                 context_value = int(context_value)            # a scale factor read as 2.0 matches case "2"
@@ -813,17 +773,17 @@ class DataAdjustments:
                 formula = str(cases.get(str(context_value), cases.get(context_value, "")))
             if not formula and "range" in context_adjustment:
                 # "range": [-10, 10] -> 10**k scaling for every integer k in the range (explicit cases win)
-                bounds: tuple[int, int] | None = context_range_bounds(context_adjustment["range"])
+                bounds: tuple[int, int] | None = self.context_range_bounds(context_adjustment["range"])
                 if bounds is None:
                     bad: str = f"{entry.variable_name}:{context_adjustment['range']!r}"
-                    if bad not in _context_range_warned:
-                        _context_range_warned.add(bad)
+                    if bad not in self._context_range_warned:
+                        self._context_range_warned.add(bad)
                         self._log.warning(
                             f"Ignoring invalid Context range {context_adjustment['range']!r} for {entry.variable_name} "
-                            f"(use [low, high] or \"low~high\", each within +/-{_CONTEXT_RANGE_LIMIT})"
+                            f"(use [low, high] or \"low~high\", each within +/-{self.CONTEXT_RANGE_LIMIT})"
                         )
                 elif isinstance(context_value, int) and bounds[0] <= context_value <= bounds[1]:
-                    formula = context_power_of_ten_formula(context_value)
+                    formula = self.context_power_of_ten_formula(context_value)
             if not formula:
                 formula = str(context_adjustment.get("default", ""))
             if not formula:
@@ -842,6 +802,50 @@ class DataAdjustments:
 
         return value  # unreachable but satisfies type checker
 
+    # ------------------------------------------------------------------
+    # Context scale-factor helpers
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def context_range_bounds(cls, spec: object) -> tuple[int, int] | None:
+        """Parse the ``range`` of a ``Context`` adjustment into ordered inclusive ``(low, high)`` integers.
+
+        Accepts a two-item JSON list (``[-10, 10]``) or text (``"-10~10"``, ``"-10..10"``, ``"-10,10"``, ``"-10--5"``).
+        Reversed bounds are put in order.  Returns None for anything else, or when a bound is outside
+        +/-``CONTEXT_RANGE_LIMIT`` (a power of ten that large is never a real scale factor).
+        """
+        low: int
+        high: int
+        if isinstance(spec, (list, tuple)):
+            items: list[object] = list(cast("list[object]", spec))
+            if len(items) != 2:
+                return None
+            try:
+                low, high = int(cast("int | str", items[0])), int(cast("int | str", items[1]))
+            except (TypeError, ValueError):
+                return None
+        elif isinstance(spec, str):
+            match: re.Match[str] | None = cls._CONTEXT_RANGE_TEXT.match(spec)
+            if match is None:
+                return None
+            low, high = int(match.group(1)), int(match.group(2))
+        else:
+            return None
+        if low > high:
+            low, high = high, low
+        if max(abs(low), abs(high)) > cls.CONTEXT_RANGE_LIMIT:
+            return None
+        return low, high
+
+    @staticmethod
+    def context_power_of_ten_formula(exponent: int) -> str:
+        """The formula a ``Context`` range gives for ``exponent``: ``x/10**n`` below zero, ``x*1`` at zero, ``x*10**n`` above."""
+        if exponent < 0:
+            return f"x/{10 ** -exponent}"
+        if exponent == 0:
+            return "x*1"
+        return f"x*{10 ** exponent}"
+
     def apply_range_formula(self, raw_value: float, logic: str) -> float:
         """Apply conditional range formulas based on *raw_value*.
 
@@ -854,7 +858,7 @@ class DataAdjustments:
         pattern = (
             r"x\?\s*[\(\[]\s*([\-0-9.]+)\s*,\s*([\-0-9.]+)\s*[\)\]]\s*->\s*(.+?)(?=x\?|$)"
         )
-        logic_blocks = re.findall(pattern, cleaned_logic)
+        logic_blocks: list[Any] = re.findall(pattern, cleaned_logic)
 
         for lower, upper, formula in logic_blocks:
             lower_f = float(lower)
