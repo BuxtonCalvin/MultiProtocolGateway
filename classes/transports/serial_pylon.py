@@ -151,7 +151,7 @@ class serial_pylon(serial_frame_transport):
             variable_name = variable_name.strip().lower().replace(" ", "_")
 
         if self.protocolSettings is not None:
-            registry_map: list[registry_map_entry] = self.protocolSettings.get_registry_map()
+            registry_map: list[registry_map_entry] = self._registry_map()
 
             if entry is None:
                 for e in registry_map:

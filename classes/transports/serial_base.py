@@ -52,6 +52,8 @@ from typing import Any, Protocol
 import serial
 
 from classes.protocol_settings import (
+    Data_Type,
+    Registry_Type,
     registry_map_entry,
 )
 from defs.common import (
@@ -117,6 +119,16 @@ class serial_base(transport_base):
     EXCLUSIVE_PORT : bool = True
     ''' open the port with an exclusive lock, so nothing else on the machine can open it '''
 
+    DEFAULT_BAUDRATE : int = 9600
+    ''' baud rate used when the config does not set baudrate; a protocol sets its device's usual speed '''
+
+    PRUNE_SHORT_PAYLOADS : bool = False
+    '''
+    Drop registry rows whose bytes lie beyond the payload the device actually returned, instead of
+    decoding them as zero. For protocols whose payload length varies, such as a pack with fewer
+    cells or temperature sensors than the map has rows for.
+    '''
+
     DEFAULT_CLIENT_TIMEOUT : float = 5.0
     ''' response timeout assumed for scheduling before the client exists '''
 
@@ -135,7 +147,7 @@ class serial_base(transport_base):
         self.port: str = self._port_setting
 
         # "baud" and "unit_id" are the names used in the device docs.
-        self.baudrate: int = settings.getint(["baudrate", "baud"], fallback=9600)
+        self.baudrate: int = settings.getint(["baudrate", "baud"], fallback=self.DEFAULT_BAUDRATE)
 
         address: int = settings.getint(["address", "unit_id"], fallback=0)
         if not self.MIN_ADDRESS <= address <= self.MAX_ADDRESS:
@@ -314,7 +326,13 @@ class serial_base(transport_base):
         request/response round trip, so devices sharing the bus never interleave a request
         with another device's response. The bus_lock is only held for one exchange, never
         across a yield, so other transports on the wire get their turn between commands.
+
+        A transport that opens its port on connect (OPEN_ON_INIT False) connects here if it has not
+        yet, so a device that was not plugged in at start-up simply returns None until it is.
         '''
+        if self._client is None and not self.connect():
+            return None
+
         bus_lock: threading.Lock | None = self.bus_lock
         if bus_lock is not None:
             bus_lock.acquire()
@@ -333,6 +351,33 @@ class serial_base(transport_base):
     # ------------------------------------------------------------------ #
     # connection                                                         #
     # ------------------------------------------------------------------ #
+
+    def _listen(self) -> bytes | None:
+        '''
+        For a device that speaks on its own: send nothing and wait for one message, opening the port
+        first if it is not open yet. A read error marks the transport disconnected, so the next
+        cycle reopens the port. Returns None when nothing usable arrived.
+        '''
+        if not self.connected or self._client is None:
+            if not self.connect():
+                return None
+
+        if self._client is None:
+            return None
+
+        try:
+            with self._get_port_lock():
+                raw: bytes | list[bytes] | None = self._client.read(reset_buffer=True, frames=1)
+        except Exception:
+            self._log.exception("Error reading from serial port %s", self.port)
+            self.connected = False
+            return None
+
+        if not raw or isinstance(raw, list):
+            self._log.debug("No message received from %s", self.port)
+            return None
+
+        return bytes(raw)
 
     def _handshake(self) -> bool:
         '''
@@ -379,6 +424,17 @@ class serial_base(transport_base):
         '''
         raise NotImplementedError
 
+    def _registry_map(self) -> list[registry_map_entry]:
+        '''
+        The protocol's registry map. A custom-bus map (<protocol>.registry_map.csv) wins; otherwise
+        the HOLDING map (<protocol>.holding_registry_map.csv), which is how the shipped serial and
+        CAN protocol files are named. Asking only for the custom-bus map left those protocols with
+        no commands to poll.
+        '''
+        if self.protocolSettings is None:
+            return []
+        return self.protocolSettings.get_registry_map(Registry_Type.CUSTOM_BUS) or self.protocolSettings.get_registry_map(Registry_Type.HOLDING)
+
     def _poll_commands(self) -> list[int]:
         ''' the distinct commands to send each cycle: the registry map's register numbers, in order '''
         if self.protocolSettings is None:
@@ -387,7 +443,7 @@ class serial_base(transport_base):
         commands: list[int] = []
         seen: set[int] = set()
         entry: registry_map_entry
-        for entry in self.protocolSettings.get_registry_map():
+        for entry in self._registry_map():
             if entry.register not in seen:
                 seen.add(entry.register)
                 commands.append(entry.register)
@@ -412,6 +468,26 @@ class serial_base(transport_base):
                 self._cycle_mark_unit_complete()
             yield command, payload
 
+    def _entries_within(self, raw_data : dict[int, bytes], entries : list[registry_map_entry]) -> list[registry_map_entry]:
+        '''
+        The rows whose command answered and whose bytes all lie inside the payload it returned.
+        Text and hex rows are variable length, so they only need to start inside the payload.
+        '''
+        kept: list[registry_map_entry] = []
+        for entry in entries:
+            payload: bytes | None = raw_data.get(entry.register)
+            if payload is None:
+                continue
+
+            if entry.data_type in (Data_Type.ASCII, Data_Type.HEX, Data_Type.STRING, Data_Type.STRING16, Data_Type.STRING32):
+                width: int = 1
+            else:
+                width = max(1, (Data_Type.getSize(entry.data_type) + 7) // 8)
+
+            if entry.register_byte + width <= len(payload):
+                kept.append(entry)
+        return kept
+
     def _process_raw(self, raw_data : dict[int, bytes]) -> dict[str, int | float | str]:
         '''
         Decodes every payload collected this cycle in one pass, through the protocol's registry
@@ -420,7 +496,11 @@ class serial_base(transport_base):
         '''
         if self.protocolSettings is None:
             return {}
-        return self.protocolSettings.process_registery(raw_data, registry_map=self.protocolSettings.get_registry_map())
+
+        entries: list[registry_map_entry] = self._registry_map()
+        if self.PRUNE_SHORT_PAYLOADS:
+            entries = self._entries_within(raw_data, entries)
+        return self.protocolSettings.process_registery(raw_data, registry_map=entries)
 
     def read_data(self) -> dict[str, int | float | str]:
         '''

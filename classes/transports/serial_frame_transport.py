@@ -385,26 +385,7 @@ class serial_frame_transport(serial_base):
         not open yet. Override read_data()/_read_command() in a subclass when your protocol
         requires sending a request command before the device replies.
         """
-        if not self.connected or self._client is None:
-            if not self.connect():
-                return None
-
-        if self._client is None:
-            return None
-
-        try:
-            with self._get_port_lock():
-                raw: bytes | list[bytes] | None = self._client.read(reset_buffer=True, frames=1)
-        except Exception:
-            self._log.exception("Error reading from serial port %s", self.port)
-            self.connected = False
-            return None
-
-        if not raw or isinstance(raw, list):
-            self._log.debug("No frame received from %s", self.port)
-            return None
-
-        return bytes(raw)
+        return self._listen()
 
     def write_data(self, data: dict[str, int | float | str], from_transport: "transport_base") -> None:
         """Write registry values to the device as a raw frame."""
