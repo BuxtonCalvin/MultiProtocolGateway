@@ -1,0 +1,8 @@
+{
+  "transport": "enphase_rest",
+  "register_key_type": "text",
+  "send_holding_register": false,
+  "send_input_register": false,
+  "send_coil_register": false,
+  "send_discrete_register": false
+}

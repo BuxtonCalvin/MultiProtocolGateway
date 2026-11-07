@@ -8,6 +8,7 @@ EG4,GridBOSS / related equipment,eg4_gridboss_re,ModBus,https://github.com/Buxto
 EG4,LL-S battery,eg4_ll_s,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/EG4.md
 EG4,6000XP / 12000XP / 18KPV family,eg4_v58,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/EG4.md
 Enphase,IQ Gateway SunSpec,enphase_iq_gateway_sunspec,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Enphase.md
+Enphase,IQ Gateway local REST API,enphase_iq_gateway_rest,HTTPS REST,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Enphase.md
 FoxESS,H1 LAN / KH / H3-style holding-register map,foxess_h1_lan,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/FoxESS.md
 Fronius,SunSpec inverter,fronius_sunspec,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Fronius.md
 Growatt,Inverter protocol v1.24,growatt_2020_v1.24,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Growatt.md

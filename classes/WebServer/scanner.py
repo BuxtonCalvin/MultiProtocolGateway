@@ -35,19 +35,33 @@ import csv
 import json
 import logging
 import sys
+from collections import Counter
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, List, Literal
 
 from sqlalchemy.orm import Session
 
+from classes.WebServer.protocol_reconcile import ReconcilePlan
+
 from .database import refresh_app_state, session_scope
 from .models import (
     AppState,
     DeviceProtocolSelection,
     OrphanedFilterName,
+    ProtocolFileState,
     ProtocolRegister,
     Setting,
+)
+from .protocol_reconcile import (
+    VIRTUAL_ADDRESS_PREFIX,
+    ReconcileOutcome,
+    StoredRegister,
+    StoredSelection,
+    apply_plan,
+    file_sha256,
+    plan_reconciliation,
 )
 from .transport_registry import (
     TransportLibraryEntry,
@@ -412,17 +426,44 @@ def scan_transport_library(transports_dir: Path) -> dict[str, TransportLibraryEn
 # Protocol scanner
 # ---------------------------------------------------------------------------
 
-def scan_protocols_dir(protocols_dir: Path) -> list[dict[str, Any]]:
+@dataclass(frozen=True)
+class ProtocolFileScan:
+    """One protocol file as the scanner read it, with what is needed to reconcile its stored rows."""
+
+    protocol_group: str
+    protocol_name: str
+    """File stem, the same value ProtocolRegister.protocol_name holds."""
+    path: Path
+    sha256: str
+    """Hex SHA-256 of the file's bytes."""
+    parsed_ok: bool
+    """False when the file could not be read or parsed completely; nothing may be pruned on that basis."""
+    registers: list[dict[str, Any]]
+
+    @property
+    def is_register_map(self) -> bool:
+        """True for a CSV register map (a JSON descriptor is one fixed row and has nothing to reconcile)."""
+        return self.path.suffix.lower() == ".csv"
+
+    @property
+    def registry_type(self) -> str:
+        """The registry type of the parsed rows (``holding``, ``input``...), or empty when there are none."""
+        return str(self.registers[0]["registry_type"]) if self.registers else ""
+
+
+def scan_protocol_files(protocols_dir: Path) -> list[ProtocolFileScan]:
     """
-    Scan the protocols directory.
+    Scan the protocols directory, one result per protocol file.
     Structure expected:  protocols/<group>/<protocol>.csv|json
 
-    Returns a flat list of register dicts ready for DB upsert.
+    Besides the register dicts ready for DB upsert, each result carries the file's hash
+    and whether it parsed completely, which the reconcile step needs.
     """
-    registers: list[dict[str, Any]] = []
+    scans: list[ProtocolFileScan] = []
     if not protocols_dir.exists():
-        _log.warning(f"Protocols directory not found: {protocols_dir}")
-        return registers
+        msg: str = f"Protocols directory not found: {protocols_dir}"
+        _log.warning(msg)
+        return scans
 
     for group_dir in sorted(protocols_dir.iterdir()):
         if not group_dir.is_dir():
@@ -430,20 +471,53 @@ def scan_protocols_dir(protocols_dir: Path) -> list[dict[str, Any]]:
         group_name: str = group_dir.name
 
         for proto_file in sorted(group_dir.iterdir()):
-            if proto_file.suffix.lower() == ".csv":
-                regs: List[dict[str, Any]] = _parse_protocol_csv(proto_file, group_name)
-                registers.extend(regs)
-            elif proto_file.suffix.lower() == ".json" and not proto_file.name.endswith(".override.json"):
-                regs = _parse_protocol_json(proto_file, group_name)
-                registers.extend(regs)
+            suffix: str = proto_file.suffix.lower()
+            if suffix == ".csv":
+                regs, parsed_ok = _parse_protocol_csv_checked(proto_file, group_name)
+            elif suffix == ".json" and not proto_file.name.endswith(".override.json"):
+                regs: List[dict[str, Any]] = _parse_protocol_json(proto_file, group_name)
+                parsed_ok = bool(regs)
+            else:
+                continue
+            scans.append(
+                ProtocolFileScan(
+                    protocol_group=group_name,
+                    protocol_name=proto_file.stem,
+                    path=proto_file,
+                    sha256=file_sha256(proto_file),
+                    parsed_ok=parsed_ok,
+                    registers=regs,
+                )
+            )
 
-    _log.info(f"Protocol scan found {len(registers)} register entries across all protocols.")
-    return registers
+    total: int = sum(len(scan.registers) for scan in scans)
+    msg = f"Protocol scan found {total} register entries across all protocols."
+    _log.info(msg)
+    return scans
+
+
+def scan_protocols_dir(protocols_dir: Path) -> list[dict[str, Any]]:
+    """
+    Scan the protocols directory.
+    Structure expected:  protocols/<group>/<protocol>.csv|json
+
+    Returns a flat list of register dicts ready for DB upsert.
+    """
+    return [reg for scan in scan_protocol_files(protocols_dir) for reg in scan.registers]
 
 
 def _parse_protocol_csv(csv_path: Path, group_name: str) -> list[dict[str, Any]]:
+    """Parse a protocol CSV file into a list of register dicts (see ``_parse_protocol_csv_checked``)."""
+    return _parse_protocol_csv_checked(csv_path, group_name)[0]
+
+
+def _parse_protocol_csv_checked(csv_path: Path, group_name: str) -> tuple[list[dict[str, Any]], bool]:
     """
     Parse a protocol CSV file into a list of register dicts.
+
+    Returns ``(registers, parsed_ok)``.  ``parsed_ok`` is False when the file had no header
+    or reading it failed part-way; the rows read before the failure are still returned, but
+    the caller must not treat them as the complete set of addresses in the file.
 
     Robustness rules
     ----------------
@@ -476,6 +550,7 @@ def _parse_protocol_csv(csv_path: Path, group_name: str) -> list[dict[str, Any]]
     # Ordered dict so later rows overwrite earlier ones for the same address.
     # This silently resolves duplicate rows in source CSVs (like the PF_S case).
     rows_by_address: dict[str, dict[str, Any]] = {}
+    parsed_ok: bool = True
 
     try:
         with open(csv_path, newline="", encoding="latin-1") as f:
@@ -493,7 +568,7 @@ def _parse_protocol_csv(csv_path: Path, group_name: str) -> list[dict[str, Any]]
             )
             if reader.fieldnames is None:
                 _log.warning(f"CSV has no header row: {csv_path}")
-                return []
+                return [], False
 
             # ── Normalize header names ────────────────────────────────────
             # Maps original header → normalized snake_case key
@@ -611,6 +686,7 @@ def _parse_protocol_csv(csv_path: Path, group_name: str) -> list[dict[str, Any]]
 
     except Exception as exc:
         _log.error(f"Error parsing protocol CSV {csv_path}: {exc}", exc_info=True)
+        parsed_ok = False
 
     # ── Merge consecutive _l / _h register pairs ─────────────────────────
     # Mirrors the same merge logic in protocol_settings.load__registry so
@@ -702,7 +778,7 @@ def _parse_protocol_csv(csv_path: Path, group_name: str) -> list[dict[str, Any]]
 
     _log.debug(f"Parsed {len(result)} logical registers from {csv_path.name} "
                f"({merged_count} merged pairs)")
-    return result
+    return result, parsed_ok
 
 
 def _parse_protocol_json(json_path: Path, group_name: str) -> list[dict[str, Any]]:
@@ -812,6 +888,116 @@ def _mark_orphaned_settings(db: Session, seen_keys: set[tuple[str, str]]) -> int
                 row.is_orphan = True
                 count += 1
     return count
+
+
+def _reconcile_protocol_file(db: Session, protocol_file: ProtocolFileScan) -> ReconcileOutcome:
+    """
+    Remove the stored register rows of one protocol that its CSV no longer defines.
+
+    ProtocolRegister is a cache of the CSV files and the scanner otherwise only adds and
+    updates rows, so a CSV that loses or moves an address (the usual cause is a
+    ``docker pull`` bringing modified protocol maps while the database volume persists)
+    would leave stale rows behind, shown twice in the editor and written back into the CSV
+    by the next commit.  See protocol_reconcile.py for the full rules.
+
+    Runs only when the file's SHA-256 differs from the one remembered in ProtocolFileState,
+    or none is remembered yet (the first scan after this was introduced).  Does nothing when
+    the file did not parse completely or has no registers.  Runs in a savepoint, so a failure
+    leaves the protocol's rows and its remembered hash untouched and it is retried next scan.
+    """
+    if not protocol_file.is_register_map:
+        return ReconcileOutcome(skipped_reason="not a register map")
+    if not protocol_file.parsed_ok or not protocol_file.registers:
+        msg: str = (
+            f"Scanner: {protocol_file.path.name} was not read completely or has no registers; "
+            f"its stored register rows are left as they are."
+        )
+        _log.warning(msg)
+        return ReconcileOutcome(skipped_reason="unparsed")
+
+    name: str = protocol_file.protocol_name
+    registry_type: str = protocol_file.registry_type
+    state: ProtocolFileState | None = db.query(ProtocolFileState).filter(ProtocolFileState.protocol_name == name).first()
+    if state is not None and state.file_sha256 == protocol_file.sha256:
+        return ReconcileOutcome(skipped_reason="unchanged")
+
+    try:
+        with db.begin_nested():
+            register_rows: list[ProtocolRegister] = (
+                db.query(ProtocolRegister)
+                .filter(ProtocolRegister.protocol_name == name, ProtocolRegister.registry_type == registry_type)
+                .all()
+            )
+            selection_rows: list[DeviceProtocolSelection] = (
+                db.query(DeviceProtocolSelection)
+                .filter(DeviceProtocolSelection.protocol_name == name, DeviceProtocolSelection.registry_type == registry_type)
+                .all()
+            )
+            real_registers: list[ProtocolRegister] = [
+                r
+                for r in register_rows
+                if not (r.is_synthetic or r.is_json_desc or r.register_address.startswith(VIRTUAL_ADDRESS_PREFIX))
+            ]
+            real_selections: list[DeviceProtocolSelection] = [
+                s for s in selection_rows if not s.register_address.startswith(VIRTUAL_ADDRESS_PREFIX)
+            ]
+
+            plan: ReconcilePlan = plan_reconciliation(
+                {str(reg["register_address"]) for reg in protocol_file.registers},
+                [StoredRegister(r.id, r.register_address, r.variable_name, bool(r.is_dirty)) for r in real_registers],
+                [StoredSelection(s.id, s.device_name, s.register_address, bool(s.is_dirty)) for s in real_selections],
+            )
+            outcome: ReconcileOutcome = apply_plan(
+                plan,
+                {r.id: r for r in real_registers},
+                {s.id: s for s in real_selections},
+                db.delete,
+            )
+
+            if state is None:
+                db.add(ProtocolFileState(protocol_name=name, file_sha256=protocol_file.sha256))
+            else:
+                state.file_sha256 = protocol_file.sha256
+                state.reconciled_at = datetime.now().astimezone()
+            db.flush()
+    except Exception as exc:
+        msg = f"Scanner: could not reconcile the stored registers of {name} with its CSV; will retry on the next scan: {exc}"
+        _log.exception(msg)
+        return ReconcileOutcome(skipped_reason="error")
+
+    if outcome.pruned_registers or outcome.dropped_edits:
+        msg = (
+            f"Scanner: {name} changed on disk; removed {outcome.pruned_registers} stale register row(s), "
+            f"carried {outcome.carried_edits} and dropped {outcome.dropped_edits} pending edit(s)."
+        )
+        _log.info(msg)
+    for note in outcome.notes:
+        msg = f"Scanner: {name}: {note}"
+        _log.warning(msg)
+    return outcome
+
+
+def _reconcile_protocol_files(db: Session, protocol_files: list[ProtocolFileScan]) -> int:
+    """
+    Reconcile every scanned register map and return how many stale register rows were removed.
+
+    A protocol name that more than one file claims (two groups holding the same file stem) is
+    skipped: ProtocolRegister rows are keyed by protocol name, registry type and address alone,
+    so the rows of the two files are mixed together and either file would look like it was
+    missing the other's addresses.
+    """
+    claims: Counter[str] = Counter(f.protocol_name for f in protocol_files if f.is_register_map and f.registers)
+    pruned: int = 0
+    for protocol_file in protocol_files:
+        if protocol_file.is_register_map and claims[protocol_file.protocol_name] > 1:
+            msg: str = (
+                f"Scanner: {protocol_file.protocol_name} exists in more than one protocol group; "
+                f"its stored register rows are not reconciled with the CSV files."
+            )
+            _log.warning(msg)
+            continue
+        pruned += _reconcile_protocol_file(db, protocol_file).pruned_registers
+    return pruned
 
 
 def _upsert_protocol_register(db: Session, reg: dict[str, Any]) -> ProtocolRegister | None:
@@ -1224,6 +1410,7 @@ class Scanner:
             "settings_upserted": 0,
             "settings_orphaned": 0,
             "registers_upserted": 0,
+            "registers_pruned": 0,
         }
 
         seen_setting_keys: set[tuple[str, str]] = set()
@@ -1434,17 +1621,23 @@ class Scanner:
             # ----------------------------------------------------------------
             #  Scan protocol CSV/JSON files
             # ----------------------------------------------------------------
-            registers: List[dict[str, Any]] = scan_protocols_dir(self.protocols_dir)
+            protocol_files: list[ProtocolFileScan] = scan_protocol_files(self.protocols_dir)
             skipped = 0
-            for reg in registers:
-                result: ProtocolRegister | None = _upsert_protocol_register(db, reg)
-                if result is not None:
-                    stats["registers_upserted"] += 1
-                else:
-                    skipped += 1
+            for protocol_file in protocol_files:
+                for reg in protocol_file.registers:
+                    result: ProtocolRegister | None = _upsert_protocol_register(db, reg)
+                    if result is not None:
+                        stats["registers_upserted"] += 1
+                    else:
+                        skipped += 1
 
             if skipped:
                 _log.warning(f"Scanner: {skipped} protocol register row(s) skipped due to errors.")
+
+            # Remove rows for addresses a changed CSV no longer defines (for example after a
+            # docker pull replaced the protocol files under a persistent database).  This runs
+            # before the device selections are rebuilt so they never attach to a stale row.
+            stats["registers_pruned"] += _reconcile_protocol_files(db, protocol_files)
 
             _sync_device_protocol_selections(
                 db,
@@ -1475,7 +1668,8 @@ class Scanner:
             _log.info(
                 f"Scanner complete: {stats['settings_upserted']} settings, "
                 f"{stats['settings_orphaned']} orphaned, "
-                f"{stats['registers_upserted']} registers."
+                f"{stats['registers_upserted']} registers, "
+                f"{stats['registers_pruned']} stale registers removed."
             )
         except Exception as exc:
             _log.exception(f"Scanner error: {exc}")

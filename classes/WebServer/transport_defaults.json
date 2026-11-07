@@ -322,5 +322,57 @@
     "$extends": "_serial_base",
     "baud": "9600",
     "unit_id": "0"
+  },
+  "enphase_rest": {
+    "$extends": "_base",
+    "auth_type": "bearer",
+    "ca_cert": "",
+    "enlighten_password": "",
+    "enlighten_username": "",
+    "host": "",
+    "password": "",
+    "port": "443",
+    "request_delay": "0.5",
+    "timeout": "10.0",
+    "token": "",
+    "token_file": "",
+    "token_refresh_days": "14",
+    "use_https": "True",
+    "username": "envoy",
+    "verify_tls": "False"
+  },
+  "fake_bridge": {
+    "host": "localhost"
+  },
+  "fake_scraper": {
+    "bridge": "",
+    "device_model": "",
+    "device_location": "",
+    "log_level": "INFO",
+    "transport": "",
+    "device_serial_number": "",
+    "port": "/dev/ttyUSB0",
+    "write_type": "",
+    "protocol_version": "",
+    "device_manufacturer": "",
+    "max_precision": "2",
+    "device_name": "",
+    "write_enabled": "false",
+    "read_interval": "15"
+  },
+  "helper": {
+    "bridge": "",
+    "device_model": "",
+    "device_location": "",
+    "log_level": "INFO",
+    "transport": "",
+    "device_serial_number": "",
+    "write_type": "",
+    "protocol_version": "",
+    "device_manufacturer": "",
+    "max_precision": "2",
+    "device_name": "",
+    "write_enabled": "false",
+    "read_interval": "15"
   }
 }

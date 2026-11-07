@@ -26,6 +26,7 @@ Tables
 ------
 Setting          — mirrors every key-value pair from config.cfg
 ProtocolRegister — one row per CSV register row per protocol file
+ProtocolFileState — the hash of each protocol CSV when its register rows were last reconciled with it
 ConfigBackup     — timestamped archives of committed config.cfg versions
 AppState         — single-row global flags (dirty, orphan counts, last commit)
 """
@@ -372,6 +373,44 @@ class OrphanedFilterName(Base):
 
     def __repr__(self) -> str:
         return f"<OrphanedFilterName [{self.device_name}] {self.file_type}:{self.name}>"
+
+
+# ---------------------------------------------------------------------------
+# ProtocolFileState
+# ---------------------------------------------------------------------------
+
+class ProtocolFileState(Base):
+    """
+    The SHA-256 of a protocol CSV as of the last time the scanner reconciled
+    that protocol's ProtocolRegister rows with it.
+
+    ProtocolRegister is a cache of the CSV files, and the scanner only adds
+    and updates rows, so a CSV that loses or moves an address leaves stale
+    rows behind.  The usual cause is a ``docker pull``: the database volume
+    survives while the protocols directory is replaced by the new image.  The
+    scanner compares each CSV's current hash with the one stored here and
+    removes the stale rows only for files that changed (see
+    protocol_reconcile.py), so an unchanged protocol library costs nothing.
+
+    Derived, never user-edited.  Losing a row (or the whole table) is safe: the
+    protocol is simply reconciled again on the next scan.
+    """
+    __tablename__: str = "protocol_file_states"
+    __table_args__: tuple[UniqueConstraint, ...] = (
+        UniqueConstraint("protocol_name", name="uq_protocol_file_state_protocol"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    protocol_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    # CSV file stem, same value as ProtocolRegister.protocol_name
+    file_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    reconciled_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False
+    )
+
+    def __repr__(self) -> str:
+        return f"<ProtocolFileState {self.protocol_name} {self.file_sha256[:12]}>"
 
 
 # ---------------------------------------------------------------------------

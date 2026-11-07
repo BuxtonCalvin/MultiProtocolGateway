@@ -18,6 +18,7 @@ A **transport** is MPG's fundamental unit of configuration. Every device you rea
   - [Serial Pylon](#serial-pylon)
   - [Serial Frame](#serial-frame)
   - [CAN Bus](#can-bus)
+  - [Enphase REST](#enphase-rest)
 - [Bridge Transports](#bridge-transports)
   - [MQTT](#mqtt)
   - [TimescaleDB](#timescaledb)
@@ -417,6 +418,64 @@ sudo ip link set can0 up
 **slcan** adapters appear as a serial device. Set `interface = slcan` and `port` to the serial path.
 
 CAN bus support is primarily developed and tested on Linux. USB CAN adapters on Windows require additional driver work; Linux is strongly recommended.
+
+---
+
+### Enphase REST
+
+Reads an Enphase IQ Gateway (Envoy) over its local HTTPS REST API. A single transport polls several JSON endpoints and decodes the fields the protocol map names; see [Enphase](../devices/Enphase.md) for the endpoints, getting a token and known limitations.
+
+```ini
+[transport.enphase]
+transport = enphase_rest
+protocol_version = enphase_iq_gateway_rest
+host = 192.168.1.50
+token = eyJraWQiOi...
+read_interval = 15
+bridge = transport.mqtt
+```
+
+To have MPG fetch and renew the token itself, give it the Enlighten account instead of `token`. The gateway serial number is read from the gateway, or set `device_serial_number`:
+
+```ini
+enlighten_username = me@example.com
+enlighten_password = your-password
+```
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `host` | *(required)* | Gateway hostname or IP address. Use a DHCP reservation or static IP. |
+| `port` | `443` | TCP port. `80` is the default when `use_https = false`. |
+| `use_https` | `true` | Firmware 7.x and later serves HTTPS only. Set `false` for older firmware, which uses plain HTTP. |
+| `verify_tls` | `false` | The gateway has a self-signed certificate, so verification is off by default. |
+| `ca_cert` | *(empty)* | CA bundle or certificate to verify the gateway against; setting it turns verification on. The certificate must match the name or address in `host`. |
+| `auth_type` | `bearer` | `bearer` (JWT, firmware 7.x+), `digest` (older firmware) or `none`. |
+| `token` | *(empty)* | The JWT, valid for a year. |
+| `token_file` | *(empty)* | File holding the JWT, used when `token` is empty. Keeps the secret out of `config.cfg`. |
+| `enlighten_username`, `enlighten_password` | *(empty)* | Enphase account used only to fetch and renew the JWT from Enphase, never sent to the gateway. A token missing or within `token_refresh_days` of expiry is renewed when the transport connects, and again after a `401`. A failed renewal is retried after 15 minutes. The renewed token is held in memory and is not written to `config.cfg`, so a restart fetches a new one. |
+| `token_refresh_days` | `14` | Renew the token this many days before it expires. |
+| `username`, `password` | `envoy`, *(empty)* | Digest authentication only. The password defaults to the last six digits of the gateway serial number. |
+| `timeout` | `10.0` | Seconds to wait for each response. |
+| `request_delay` | `0.5` | Seconds between requests within one cycle. The gateway throttles rapid-fire requests. |
+| `read_interval` | `15` | Seconds between cycles. Do not go below 10. |
+
+**Protocol maps for REST.** The gateway has no registers. A REST protocol is [text-keyed](protocols.md#text-keys-labels-and-obis-codes) and its `register` column is `<endpoint>#<json path>[|<aggregate>]`:
+
+| `register` cell | Reads |
+| --- | --- |
+| `/api/v1/production#wattsNow` | the `wattsNow` field of that endpoint |
+| `/ivp/livedata/status#meters.pv.agg_p_mw` | a nested field; path segments are separated by `.` |
+| `/ivp/meters/readings#0.activePower` | list elements by index (negative counts from the end) |
+| `/api/v1/production/inverters#*.lastReportWatts\|sum` | `*` walks every list element, and the aggregate (`sum`, `avg`, `min`, `max` or `count`) reduces them. A path with `*` needs an aggregate. |
+| `/api/v1/production/inverters#\|count` | the number of elements in the list |
+
+(In a real CSV cell the aggregate is a plain `|`; the backslash above only stops the table breaking.)
+
+Each endpoint is requested once per cycle however many rows read from it, and only when one of its rows is due, so a row with `read_interval` of `300s` keeps a slow endpoint off the gateway most cycles. A value missing from the response (no battery, no consumption meter) is left out and reported once in the log. JSON numbers are decoded through the row's `data_type`, `unit` multiplier and adjustments exactly as Modbus values are: use `float64` for fractional values, since whole-number types round, and note that bit-field types and word-order adjustments do not apply. Strings decode as `string`.
+
+The `enphase_iq_gateway_rest` protocol ships with production, live power flow, battery and microinverter rows. Edit or copy `protocols/enphase/enphase_iq_gateway_rest.registry_map.csv` to add fields. The transport is read-only; `write_enabled` is ignored.
+
+Connection errors mark the transport disconnected and the gateway reconnects on the next cycle. A `401` that renewing the token does not fix does the same, and is logged. HTTP errors such as `503` from a busy gateway skip that endpoint for the cycle, and bridges that require complete cycles will not write that poll.
 
 ---
 

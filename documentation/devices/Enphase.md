@@ -25,6 +25,9 @@
    - 6.4 [Per-Microinverter Data](#64-per-microinverter-data)
 7. [Enphase Enlighten Cloud API](#7-enphase-enlighten-cloud-api)
 8. [MPG Integration Path](#8-mpg-integration-path)
+   - 8.1 [Choosing an Approach](#81-choosing-an-approach)
+   - 8.2 [Modbus TCP with SunSpec](#82-modbus-tcp-with-sunspec)
+   - 8.3 [Local REST API](#83-local-rest-api)
 9. [MQTT Bridge Options](#9-mqtt-bridge-options)
 10. [Known Limitations](#10-known-limitations)
 11. [Troubleshooting](#11-troubleshooting)
@@ -39,8 +42,7 @@
 - **Typical use:** Monitoring production and consumption in third-party systems (Victron VRM, evcc, Home Assistant, MPG). Some integrations also use it to limit PV output.
 - **Reliability:** Users report that a firmware update can leave port 502 closed until Enphase re-enables it.
 
-Once Modbus TCP is enabled, MPG can read the gateway with the `enphase_iq_gateway_sunspec` protocol. Without it, integration is through the IQ Gateway's **local HTTPS REST API** (LAN access) or the **Enphase Enlighten Cloud API**, and a custom MPG protocol module polling the local API would be required.
-> **MPG module note:** A `enphase_iq_gateway_v1` protocol module polling `/ivp/livedata/status` on the local IQ Gateway would provide comprehensive real-time data for all Enphase systems — microinverter production, battery SOC and power, grid import/export, and home consumption — without any additional hardware beyond a LAN connection to the IQ Gateway.
+Once Modbus TCP is enabled, MPG can read the gateway with the `enphase_iq_gateway_sunspec` protocol. Without it, MPG reads the IQ Gateway's **local HTTPS REST API** (LAN access) with the `enphase_rest` transport and the `enphase_iq_gateway_rest` protocol, covering microinverter production, battery state and power, grid import/export and home consumption without any additional hardware beyond a LAN connection to the IQ Gateway. See [Section 8](#8-mpg-integration-path). The **Enphase Enlighten Cloud API** is not supported.
 
 ---
 
@@ -223,37 +225,21 @@ GET /ivp/livedata/status
 
 ``` json
 {
-  "connection": {"mqtt_state": "connected", "prov_state": "configured"},
+  "connection": {"mqtt_state": "connected", "prov_state": "configured", "sc_stream": "enabled"},
   "meters": {
-    "pv": {
-      "agg": {
-        "p": {"avg": 3420.5, "min": 3415.0, "max": 3426.0},
-        "q": {"avg": 82.3},
-        "v": {"avg": 241.3},
-        "i": {"avg": 14.19}
-      }
-    },
-    "storage": {
-      "agg": {
-        "p":   {"avg": -500.0},
-        "soc": {"avg": 85.4}
-      }
-    },
-    "grid": {
-      "agg": {
-        "p": {"avg": -1250.5}
-      }
-    },
-    "load": {
-      "agg": {
-        "p": {"avg": 1670.0}
-      }
-    }
+    "last_update": 1700000000,
+    "soc": 85,
+    "pv":      {"agg_p_mw": 3420500},
+    "storage": {"agg_p_mw": -500000},
+    "grid":    {"agg_p_mw": -1250500},
+    "load":    {"agg_p_mw": 1670000}
   }
 }
 ```
 
-> **Sign convention:** Negative `grid.p` = exporting to grid. Negative `storage.p` = battery discharging.
+> **Field names:** earlier revisions of this page showed a nested `meters.pv.agg.p.avg` shape in watts. Firmware 7.x integrations (for example `pyenphase`, used by Home Assistant) read the flat `agg_p_mw` keys above, which are **milliwatts**, and a top-level `meters.soc`. The shipped protocol map follows the flat shape. Other fields, such as per-phase values, vary with firmware and site configuration; fetch the endpoint with `curl -k` and adjust the map to what your gateway sends.
+> **Sign convention:** the gateway's sign convention for grid and battery power has not been confirmed for this guide. Compare against the Enphase app before building dashboards on the values.
+> **Live stream:** values on this endpoint are only refreshed while the gateway's live-data stream is on (`connection.sc_stream` is `enabled`). MPG does not switch it on; the `live_stream_state` variable shows the state. If it reads `disabled` the power values will be stale or missing.
 
 **Polling frequency:** This endpoint reflects near-real-time conditions. Polling every 10–30 seconds is appropriate.
 
@@ -364,38 +350,100 @@ OAuth 2.0 tokens are obtained via the Enlighten developer portal. API keys are i
 
 ## 8. MPG Integration Path
 
-> **SunSpec map in the protocol library:** `protocols/enphase/enphase_iq_gateway_sunspec` reads the IQ Gateway's SunSpec model chain over Modbus TCP for gateways that have it enabled (see the comments at the top of that map). The inverter, meter (models 201-204) and DER model 704 rows are anchored on the models the gateway reports, so the meter is found wherever it sits and the 704 rows are dropped for a gateway without that model. The 704 register offsets in that map are unverified. See [Dynamic Register Discovery](../architecture/dynamic_register_discovery.md).
+MPG has two ways to read an IQ Gateway. They use different transports and protocols, can be run side by side as separate `[transport.*]` sections, and cover different data.
 
-Since Enphase does not support Modbus, a dedicated HTTP protocol module is required for MPG integration.
+### 8.1 Choosing an Approach
 
-**Proposed module parameters:**
+| | Modbus TCP with SunSpec | Local REST API |
+| --- | --- | --- |
+| Transport | `modbus_tcp` | `enphase_rest` |
+| Protocol | `enphase_iq_gateway_sunspec` | `enphase_iq_gateway_rest` |
+| Port | 502 | 443 (80 on pre-7.x firmware) |
+| Authentication | none | JWT token (7.x+) or digest (older) |
+| Availability | Off by default; must be enabled on the gateway | Always present on the LAN |
+| Site production | Yes, aggregate (SunSpec inverter model 103) | Yes (`/api/v1/production`, `/ivp/livedata/status`) |
+| Grid / consumption | Production CT meter only (SunSpec meter models 201/203) | Grid and load power from `/ivp/livedata/status` |
+| Batteries | No | Yes (`/ivp/ensemble/power`, `/ivp/livedata/status`) |
+| Per-microinverter | No (aggregate only) | Yes, delayed 5-15 minutes (`/api/v1/production/inverters`) |
+| Write / control | Optional PV power limit through DER model 704 (unverified) | None; read-only |
+| Maintenance | None | Token renewal once a year |
+
+**Role of each.** SunSpec Modbus is a standards-based, unauthenticated, read-mostly feed of aggregate production and the production meter, and the only route to power-limit control. Use it where it is enabled and aggregate production is enough. The REST API is the route to anything else the gateway knows: batteries, consumption, per-inverter detail. Use it when Modbus TCP is not enabled or when you need that data. Running both gives SunSpec for the metering and control path and REST for the extras, at the cost of two device records.
+
+### 8.2 Modbus TCP with SunSpec
+
+The IQ Gateway acts as a Modbus TCP **server** (port 502, unit ID 1 by default) and MPG connects to it as the client through the standard `modbus_tcp` transport. Nothing needs installing on the gateway except enabling the service.
+
+**1. Enable Modbus TCP on the gateway.** The service is off by default. The comments in the protocol map say it is enabled from the Installer App under Site Communication; [Section 1](#1-overview--mpg-compatibility-note) reports that it cannot be switched on from the local UI or the app and has to be requested from Enphase Support. Which applies depends on firmware and on installer access, so try the first and fall back to the second. A firmware update can leave port 502 closed until it is re-enabled.
+
+**2. Check the port.** From the machine running MPG, `nc -vz 192.168.1.50 502` should connect. A refused connection means the service is still off.
+
+**3. Add the transport:**
 
 ``` ini
-transport = http
-protocol_version = enphase_iq_gateway_v1
-host = 192.168.1.xxx
-port = 443
-tls = true
-tls_verify = false
-auth_type = bearer
-token = YOUR_JWT_TOKEN
-poll_endpoint = /ivp/livedata/status
-poll_interval = 15
+[transport.enphase_sunspec]
+transport = modbus_tcp
+protocol_version = enphase_iq_gateway_sunspec
+host = 192.168.1.50
+port = 502
+address = 1
+read_interval = 15
+bridge = transport.mqtt
+device_manufacturer = Enphase
+device_model = IQ Gateway
 ```
 
-**Data fields available from `/ivp/livedata/status`:**
+The settings are those of [Modbus TCP](../usage/transports.md#modbus-tcp). `address` is the Modbus unit ID; the map's comments give 1. Use a static IP or DHCP reservation. The number of simultaneous Modbus clients the gateway accepts is not documented here; if another integration (Victron, evcc, Home Assistant) already reads the same gateway and either one drops out, stop one of them.
 
-| Field Path | Description | Unit |
+**What the map reads** (`protocols/enphase/enphase_iq_gateway_sunspec`):
+
+| Block | Variables | Notes |
 | --- | --- | --- |
-| `meters.pv.agg.p.avg` | Solar PV production | W |
-| `meters.grid.agg.p.avg` | Grid power (negative = export) | W |
-| `meters.load.agg.p.avg` | Home consumption | W |
-| `meters.storage.agg.p.avg` | Battery power (negative = discharge) | W |
-| `meters.storage.agg.soc.avg` | Battery state of charge | % |
-| `meters.pv.agg.v.avg` | AC voltage | V |
-| `meters.pv.agg.i.avg` | AC current | A |
+| SunSpec common model (model 1) | `manufacturer`, `model`, `options`, `version`, `serial_number`, `device_address` | Fixed addresses from 40000; `sunspec_id` should read the SunSpec marker, `0x53756E53` ("SunS"). |
+| Inverter model (101 or 103) | `ac_power`, `ac_current_*`, `ac_voltage_*`, `ac_frequency`, `ac_energy_total`, DC values, `inverter_temperature`, `operating_state`, `alarm_1`, `alarm_2` | Aggregate production for the whole site. Scaled by the matching `*_sf` rows. |
+| Meter model (201 or 203) | `meter_ac_power`, `meter_ac_current`, `meter_ac_voltage_*`, `meter_ac_frequency`, `meter_energy_export`, `meter_energy_import` | Production CT. Dropped if the gateway reports no meter model. |
+| DER model 704 | `der_control_did`, `der_power_limit_pct`, `der_power_limit_enabled` | The only writable rows. Dropped if the gateway has no model 704. |
 
-**Token refresh:** The JWT token is valid for one year. Implement a token refresh mechanism that re-authenticates via `https://entrez.enphaseenergy.com/tokens` before expiry.
+The gateway does **not** expose per-microinverter registers or battery data over Modbus; use the REST API for those.
+
+**Discovery.** The inverter, meter and 704 rows are written relative to anchors (`[inverter_1_base+14]`). On connect MPG reads the SunSpec model chain from address 40000 and anchors each block where the gateway says it is, so a meter that does not directly follow the inverter block is still found. If discovery returns nothing, the defaults in the protocol JSON apply (inverter at 40069, meter at 40121, model 704 at 704). See [Dynamic Register Discovery](../architecture/dynamic_register_discovery.md).
+
+**Scale factors.** SunSpec values are integers with a separate scale-factor register, which the map reads as `*_sf` rows. Values with a `×SF` unit are scaled by 10 to the power of that register. Not-implemented points read as `0x8000` (int16), `0xFFFF` (uint16) or `0xFFFFFFFF` (acc32).
+
+**Known gaps in the map.**
+
+- Addresses are the Modbus wire address, one less than the vendor's printed register number. The map's header comments explain the shift and which rows were corrected from the SunSpec standard rather than from Enphase documentation.
+- The DER 704 offsets are unverified against a gateway. Treat power-limit control as experimental and leave `write_enabled` off until you have read the rows on your own gateway and confirmed them. See [Write Safety System](../usage/transports.md#write-safety-system).
+- The map comments mention consumption metering as models 211/213 while the protocol JSON recognizes meter models 201 and 203. If the meter rows are missing on a site with a consumption CT, read the model chain and check which ID the gateway reports.
+
+### 8.3 Local REST API
+
+The REST API is read with the [`enphase_rest`](../usage/transports.md#enphase-rest) transport and the `protocols/enphase/enphase_iq_gateway_rest` protocol:
+
+``` ini
+[transport.enphase]
+transport = enphase_rest
+protocol_version = enphase_iq_gateway_rest
+host = 192.168.1.50
+token = YOUR_JWT_TOKEN
+read_interval = 15
+bridge = transport.mqtt
+```
+
+Port 443, HTTPS, bearer authentication and no certificate verification are the defaults. For pre-7.x firmware use `use_https = false` and `auth_type = digest`. All settings are listed in the [transport reference](../usage/transports.md#enphase-rest).
+
+The protocol is a [text-keyed](../usage/protocols.md#text-keys-labels-and-obis-codes) map: each row's `register` cell is an endpoint and a JSON path, for example `/ivp/livedata/status#meters.pv.agg_p_mw`. The rows shipped are:
+
+| Endpoint | Variables | Poll |
+| --- | --- | --- |
+| `/api/v1/production` | `production_power`, `energy_today`, `energy_seven_days`, `energy_lifetime` | every cycle |
+| `/ivp/livedata/status` | `pv_power`, `grid_power`, `load_power`, `battery_power`, `battery_soc`, `live_stream_state`, `gateway_mqtt_state` | every cycle |
+| `/ivp/ensemble/power` | `battery_count`, `battery_temperature_max`, `battery_capacity` | every cycle |
+| `/api/v1/production/inverters` | `inverter_count`, `inverter_power_total` | every 300 s |
+
+The `agg_p_mw` rows apply a `0.001W` unit so they are delivered in watts. The `/ivp/livedata/status` and `/api/v1/production` rows use field names seen in other integrations for firmware 7.x. The `/ivp/ensemble/power` and inverter rows follow the descriptions in this guide and have not been checked against a gateway: in particular the battery list key is written `devices:` (with a colon) in Section 6.3, and the rows must match what your gateway sends. A row whose field is absent is left out and logged once, so a site without a battery simply has no battery variables. Fields that are not in the map, such as `/ivp/meters/readings`, can be added as rows; meter order in that list depends on the site, so check it before relying on an index.
+
+**Token refresh:** The JWT token is valid for one year. Set `enlighten_username` and `enlighten_password` and `enphase_rest` fetches a token through `https://entrez.enphaseenergy.com/tokens` when none is set, renews it `token_refresh_days` (default 14) before it expires, and renews it once if the gateway answers `401`. The renewed token is kept in memory only, so after a restart a new one is fetched. Without the credentials the token in `token` or `token_file` is used until it expires, and the transport refuses to connect once it has.
 
 ---
 
@@ -448,6 +496,7 @@ print(f"PV: {pv_watts}W  Grid: {grid_watts}W  Battery SOC: {batt_soc}%")
 | HTTPS with self-signed cert | All local API calls require HTTPS (firmware 7.x+) | Use `-k` flag in curl; disable cert verification in integration |
 | Single local session limit | IQ Gateway may throttle or reject rapid-fire connections | Limit polling to one request per 10 seconds |
 | Per-microinverter data delays | Individual panel data lags 5–15 minutes | Use `/ivp/livedata/status` for near-real-time totals |
+| Live-data stream | `/ivp/livedata/status` is only fresh while the gateway's live stream is on | Check `live_stream_state`; MPG does not enable the stream |
 | No local write access to inverter settings | Local API is read-only except for Enpower relay and battery mode | Use Enlighten app or cloud API for settings changes |
 | Cloud API rate limit | 10 req/min, 10,000 req/month on free tier | Use local API for real-time monitoring; cloud API for historical data only |
 
@@ -464,4 +513,5 @@ print(f"PV: {pv_watts}W  Grid: {grid_watts}W  Battery SOC: {batt_soc}%")
 | Data stops updating | IQ Gateway lost LAN connection | Check Ethernet cable; assign static IP; check router DHCP lease |
 | Battery sensors missing from API | Battery not commissioned | Check IQ Gateway web UI for battery enrollment and status |
 | Per-inverter data always stale | Large array; slow PLC polling cycle | Expected — do not poll `/production/inverters` more than once per 5 minutes |
+| Variable missing from the output | The field is not in that gateway's response (no battery, no consumption CT) or the map key does not match | The log reports each missing field once at INFO; compare the row's `register` cell with `curl -k -H "Authorization: Bearer $TOKEN" https://<ip>/<endpoint>` |
 | `wattsNow` returns 0 at night | Normal — no production | Use `wattHoursToday` to confirm data is flowing; 0W production at night is correct |

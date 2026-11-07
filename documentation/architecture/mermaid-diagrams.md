@@ -462,6 +462,14 @@ erDiagram
         boolean is_dirty
     }
 
+    ProtocolFileState {
+        int id PK
+        string protocol_name UK
+        string file_sha256
+        datetime reconciled_at
+    }
+
+    ProtocolFileState ||--o{ ProtocolRegister : "reconciled against (by protocol_name)"
     ProtocolRegister ||--o{ DeviceProtocolSelection : "defines register for"
     Setting }o--|| AppState : "dirty flags tracked in"
     ProtocolRegister }o--|| AppState : "dirty flags tracked in"
@@ -473,6 +481,14 @@ erDiagram
 - **Existing install:** upgraded to the latest revision with Alembic migrations, as before.
 
 If either step fails, startup aborts rather than run against a missing or out-of-date schema. The two routes always produce the same database: `pytests/test_db_schema.py` and `pytests/test_db_bootstrap.py` compare the model-built schema with the migrated one (columns, nullability, defaults, keys, indexes and constraints), so a model change always needs a matching migration.
+
+**Keeping protocol rows in step with the CSV files.** `ProtocolRegister` is a cache of the protocol CSVs, keyed by protocol name, registry type and address. The scanner adds and updates rows, and it also removes the rows for addresses that a changed CSV no longer defines. The usual cause of such a change is a `docker pull`: the database lives in a persistent volume while `protocols/` is replaced by the new image, so the first scan after the new container starts finds CSV files that no longer match the stored rows. Without the clean-up, every variable whose address moved would be listed twice in the protocol editor, and the next commit would write the stale rows back into the CSV.
+
+- **When it runs.** `ProtocolFileState` remembers the SHA-256 of each CSV as of its last reconciliation. A protocol is reconciled only when its file's hash differs, so an unchanged library costs nothing. The first scan after this was introduced has no remembered hashes, so every protocol is reconciled once, which also removes rows that went stale earlier.
+- **What it removes.** Rows whose address is not in the CSV. Synthetic rows, JSON code-description rows and `~` virtual addresses are never touched. If a file cannot be read completely, or has no registers, nothing is removed and the old hash is kept, so the next scan tries again. A protocol name used by two protocol groups is skipped.
+- **What it keeps.** Work that has not been committed is matched by `variable_name`, which is also what the mask, screen and writable files use. A pending edit on a stale row is carried to the row that now holds that variable (it wins over the CSV, as an edit at an unchanged address already does), and staged mask, screen and write choices follow the variable to its new address. When no single, unedited current row has that name, the pending edit is dropped and logged as a warning.
+
+The logic is in `classes/WebServer/protocol_reconcile.py`, with the queries in `scanner.py`, and is covered by `pytests/test_protocol_reconcile.py` and `pytests/test_scanner_reconcile.py`.
 
 ### TimescaleDB Telemetry Schema (created by `timescaledb` bridge)
 
@@ -659,7 +675,7 @@ stateDiagram-v2
     Committing --> Committed: config_writer.commit_all()<br/>writes config.cfg + mask/screen CSVs,<br/>archives ConfigBackup, clears is_dirty,<br/>syncs value_disk = value_staged
 
     Committed --> Rescanning: file_watcher detects<br/>config.cfg / CSV change
-    Rescanning --> Clean: scanner.run()<br/>resyncs Setting/ProtocolRegister<br/>rows against disk truth
+    Rescanning --> Clean: scanner.run()<br/>resyncs Setting/ProtocolRegister<br/>rows against disk truth and<br/>removes register rows for<br/>addresses a changed CSV dropped
 
     Committed --> RollingBack: POST /api/commit/rollback<br/>{backup_id}
     Edited --> RollingBack: rollback discards<br/>any pending edits too

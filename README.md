@@ -123,7 +123,7 @@ The web UI is available at **`http://localhost:1717`** as soon as the gateway st
 
 | Capability | Details |
 | ------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| **Input transports** (scrapers) | Modbus RTU, Modbus TCP, Modbus TLS, Modbus UDP, CAN bus, PACE BMS serial, Pylon serial, EG4 LL-S RS-485 |
+| **Input transports** (scrapers) | Modbus RTU, Modbus TCP, Modbus TLS, Modbus UDP, CAN bus, PACE BMS serial, Pylon serial, EG4 LL-S RS-485, Enphase REST (local HTTPS API) |
 | **Output transports** (bridges) | MQTT, Timescale DB (PostgreSQL hypertable), InfluxDB, InfluxDB3, Prometheus, JSON file |
 | **Web UI** | Full browser-based configuration and live management on port **1717** |
 | **Protocol library** | 29 manufacturers with tested register maps; 74 more with device metadata stubbed in |
@@ -290,7 +290,7 @@ MPG ships with pre-built, tested protocol maps for the following manufacturers. 
 | **APsystems** | APsystems ECU SunSpec gateway (`apsystems_ecu_sunspec` via Modbus ) | **[`View APsystems`](documentation/devices/APsystems.md)** |
 | **Deye Sunsynk** | Hybrid Inverters (`deye_sunsynk` via Modbus), Extended Map (`deye_sunsynk_hybrid` via Modbus) | **[`View Deye Sunsynk`](documentation/devices/Deye_Sunsynk.md)** |
 | **EG4** | 18KPV Inverter (`eg4_18kpv` via Modbus), 3000EHV Inverter (`eg4_3000ehv_v1` via Modbus ), GridBOSS / Related Equipment (`eg4_gridboss_re` via Modbus ), LL-S Battery (`eg4_ll_s` via Modbus ), 6000XP / 12000XP / 18KPV Family (`eg4_v58` via Modbus) | **[`View EG4`](documentation/devices/EG4.md)** |
-| **Enphase** | Enphase IQ Gateway SunSpec (`enphase_iq_gateway_sunspec` via Modbus) | **[`View Enphase`](documentation/devices/Enphase.md)** |
+| **Enphase** | Enphase IQ Gateway SunSpec (`enphase_iq_gateway_sunspec` via Modbus), IQ Gateway local REST API (`enphase_iq_gateway_rest` via Enphase REST) | **[`View Enphase`](documentation/devices/Enphase.md)** |
 | **FoxESS** | H1 LAN / KH / H3-style holding-register map (`foxess_h1_lan` via Modbus ) | **[`View FoxESS`](documentation/devices/FoxESS.md)** |
 | **Fronius** | Fronius SunSpec Inverters (`fronius_sunspec` via Modbus) | **[`View Fronius`](documentation/devices/Fronius.md)** |
 | **GoodWe** | Energy Storage / Hybrid Inverters (`goodwe_energy_storage` via Modbus ) — *partial map, verify against your firmware version* | **[`View GoodWe`](documentation/devices/GoodWe.md)** |

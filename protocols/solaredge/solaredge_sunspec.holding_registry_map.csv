@@ -149,7 +149,7 @@ register,variable_name,documented_name,unit,data_type,values,read_interval,writa
 # Interface B: Modbus RTU RS485; default 115200 baud 8N1 (configurable 9600-115200 bps),,,,,,,,,,,,
 #   Enable: SetApp → Commissioning → Site Communication → RS485-1 → Protocol → SunSpec (Non-SE Logger),,,,,,,,,,,,
 #   Set RS485-1 → Device ID to unique unit ID (1-247),,,,,,,,,,,,
-# IMPORTANT: SolarEdge supports ONE Modbus master at a time — either RTU or TCP,not both,,,,,,,,,,,
+# IMPORTANT: SolarEdge supports ONE Modbus master at a time — either RTU or TCP -- not both,,,,,,,,,,,
 # Protocol: SunSpec integer + scale factor model (IDs 101/102/103),,,,,,,,,,,,
 # Register addressing: the register column is the PDU address (vendor register number minus 1); see the notes at the top,,,,,,,,,,,,
 # All multi-register values: big-endian (high register first); apply SF register as value x 10^SF,,,,,,,,,,,,

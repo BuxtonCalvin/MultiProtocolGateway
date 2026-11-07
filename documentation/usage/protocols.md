@@ -667,6 +667,7 @@ MPG ships with pre-built protocols for the following devices. All protocols are 
 | `eg4_gridboss_re` | EG4 GridBOSS / related equipment | Modbus RTU |
 | `eg4_ll_s` | EG4 LL-S battery | Modbus RTU |
 | `eg4_v58` | EG4 6000XP / 12000XP / 18KPV family | Modbus |
+| `enphase_iq_gateway_rest` | Enphase IQ Gateway local REST API | Enphase REST |
 | `enphase_iq_gateway_sunspec` | Enphase IQ Gateway SunSpec | Modbus TCP |
 | `foxess_h1_lan` | FoxESS H1 LAN / KH / H3-style holding-register map | Modbus TCP |
 | `fronius_sunspec` | Fronius SunSpec inverters | Modbus TCP |

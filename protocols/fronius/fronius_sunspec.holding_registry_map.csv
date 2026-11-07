@@ -122,7 +122,7 @@ register,variable_name,documented_name,unit,data_type,values,read_interval,writa
 # Protocol: SunSpec — two model types selectable via register 216 in the vendor document (address 215):,,,,,,,,,,,,
 #   1 = Float (model IDs 111/112/113): all values are float32; no scale factors needed,,,,,,,,,,,,
 #   2 = Integer + Scale Factor (model IDs 101/102/103): values × 10^SF_register,,,,,,,,,,,,
-# This file covers the FLOAT model (111=single-phase,112=split-phase,113=three-phase),,,,,,,,,,
+# This file covers the FLOAT model (111=single-phase -- 112=split-phase -- 113=three-phase),,,,,,,,,,
 # All float32 values span two consecutive 16-bit registers; big-endian,,,,,,,,,,,,
 # NaN = 0x7FC00000 (float) indicates not applicable for current model/phase,,,,,,,,,,,,
 "# Fronius-specific registers (F_ prefix) start at register 212 in the vendor document, which is address 211 here",,,,,,,,,,,,
