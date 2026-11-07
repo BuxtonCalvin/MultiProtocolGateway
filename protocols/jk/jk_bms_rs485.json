@@ -1,0 +1,30 @@
+{
+  "transport": "serial_jk",
+  "baud": 115200,
+  "send_holding_register": false,
+  "send_input_register": false,
+  "send_coil_register": false,
+  "send_discrete_register": false,
+  "warning_status_codes": {
+    "b0": "low capacity alarm",
+    "b1": "MOS overtemperature alarm",
+    "b2": "charge overvoltage alarm",
+    "b3": "discharge undervoltage alarm",
+    "b4": "battery overtemperature alarm",
+    "b5": "charge overcurrent alarm",
+    "b6": "discharge overcurrent alarm",
+    "b7": "cell voltage difference alarm",
+    "b8": "battery box overtemperature alarm",
+    "b9": "battery low temperature alarm",
+    "b10": "cell overvoltage alarm",
+    "b11": "cell undervoltage alarm",
+    "b12": "309_A protection",
+    "b13": "309_B protection"
+  },
+  "battery_status_codes": {
+    "b0": "charging MOSFET on",
+    "b1": "discharging MOSFET on",
+    "b2": "balancing on",
+    "b3": "battery connected"
+  }
+}

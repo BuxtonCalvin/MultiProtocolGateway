@@ -147,9 +147,27 @@
     "soi": "7E",
     "timeout": "5.0"
   },
+  "serial_jbd": {
+    "$extends": "_serial_base",
+    "timeout": "5.0"
+  },
+  "serial_jk": {
+    "$extends": "_serial_base",
+    "baudrate": "115200",
+    "timeout": "5.0"
+  },
+  "serial_length_transport": {
+    "$extends": "_serial_base",
+    "timeout": "5.0"
+  },
   "serial_pylon": {
     "$extends": "_serial_base",
     "ignore_checksum_errors": "False"
+  },
+  "serial_vedirect": {
+    "$extends": "_serial_base",
+    "baudrate": "19200",
+    "timeout": "5.0"
   },
   "modbus_pace": {
     "$extends": "_modbus_base",

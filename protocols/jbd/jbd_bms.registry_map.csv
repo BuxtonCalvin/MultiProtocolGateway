@@ -1,0 +1,54 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note,ha_device_class,ha_state_class,ha_entity_category
+3.0,total_voltage,Total Voltage,0.01V,USHORT,,,,,"command 0x03 offset 0, units of 10 mV",voltage,measurement,
+3.2,current,Current,0.01A,SHORT,,,,,"units of 10 mA; positive is charging, negative is discharging",current,measurement,
+3.4,residual_capacity,Residual Capacity,0.01Ah,USHORT,,,,,units of 10 mAh,,measurement,
+3.6,nominal_capacity,Nominal Capacity,0.01Ah,USHORT,,,,,units of 10 mAh,,,
+3.8,cycle_count,Cycle Count,,USHORT,,,,,,,total_increasing,
+3.10,production_date_raw,Production Date,,USHORT,,,,,"packed: bits 15-9 year since 2000, bits 8-5 month, bits 4-0 day",,,diagnostic
+3.12,balance_status_1_16,Balance Status Cells 1-16,,_16BIT_FLAGS,,,,,bit n set: cell n+1 is balancing,,,diagnostic
+3.14,balance_status_17_32,Balance Status Cells 17-32,,_16BIT_FLAGS,,,,,bit n set: cell n+17 is balancing,,,diagnostic
+3.16,protection_status,Protection Status,,_16BIT_FLAGS,,,,,,,,diagnostic
+3.18,software_version,Software Version,,BYTE,,,,,0x10 is version 1.0,,,diagnostic
+3.19,state_of_charge,State of Charge,%,BYTE,,,,,,battery,measurement,
+3.b8.20,mosfet_status,MOSFET Status,,_8BIT_FLAGS,,,,,byte 20; flags are b8 and b9 because the loader reads 8-bit flags from the upper half of the word at the byte offset,,,diagnostic
+3.21,cell_count,Cell Count,,BYTE,,,,,,,,diagnostic
+3.22,temperature_sensor_count,Temperature Sensor Count,,BYTE,,,,,,,,diagnostic
+3.23,temperature_1,Temperature 1,C,USHORT,,,,"{""High_Low"": ""x?(0,65535]->(x-2731)/10""}",raw is tenths of a kelvin; rows beyond the sensor count the pack reports are dropped,temperature,measurement,
+3.25,temperature_2,Temperature 2,C,USHORT,,,,"{""High_Low"": ""x?(0,65535]->(x-2731)/10""}",,temperature,measurement,
+3.27,temperature_3,Temperature 3,C,USHORT,,,,"{""High_Low"": ""x?(0,65535]->(x-2731)/10""}",,temperature,measurement,
+3.29,temperature_4,Temperature 4,C,USHORT,,,,"{""High_Low"": ""x?(0,65535]->(x-2731)/10""}",,temperature,measurement,
+3.31,temperature_5,Temperature 5,C,USHORT,,,,"{""High_Low"": ""x?(0,65535]->(x-2731)/10""}",,temperature,measurement,
+3.33,temperature_6,Temperature 6,C,USHORT,,,,"{""High_Low"": ""x?(0,65535]->(x-2731)/10""}",,temperature,measurement,
+4.0,cell_1_voltage,Cell 1 Voltage,0.001V,USHORT,,,,,"command 0x04, millivolts; rows beyond the cell count the pack reports are dropped",voltage,measurement,
+4.2,cell_2_voltage,Cell 2 Voltage,0.001V,USHORT,,,,,,voltage,measurement,
+4.4,cell_3_voltage,Cell 3 Voltage,0.001V,USHORT,,,,,,voltage,measurement,
+4.6,cell_4_voltage,Cell 4 Voltage,0.001V,USHORT,,,,,,voltage,measurement,
+4.8,cell_5_voltage,Cell 5 Voltage,0.001V,USHORT,,,,,,voltage,measurement,
+4.10,cell_6_voltage,Cell 6 Voltage,0.001V,USHORT,,,,,,voltage,measurement,
+4.12,cell_7_voltage,Cell 7 Voltage,0.001V,USHORT,,,,,,voltage,measurement,
+4.14,cell_8_voltage,Cell 8 Voltage,0.001V,USHORT,,,,,,voltage,measurement,
+4.16,cell_9_voltage,Cell 9 Voltage,0.001V,USHORT,,,,,,voltage,measurement,
+4.18,cell_10_voltage,Cell 10 Voltage,0.001V,USHORT,,,,,,voltage,measurement,
+4.20,cell_11_voltage,Cell 11 Voltage,0.001V,USHORT,,,,,,voltage,measurement,
+4.22,cell_12_voltage,Cell 12 Voltage,0.001V,USHORT,,,,,,voltage,measurement,
+4.24,cell_13_voltage,Cell 13 Voltage,0.001V,USHORT,,,,,,voltage,measurement,
+4.26,cell_14_voltage,Cell 14 Voltage,0.001V,USHORT,,,,,,voltage,measurement,
+4.28,cell_15_voltage,Cell 15 Voltage,0.001V,USHORT,,,,,,voltage,measurement,
+4.30,cell_16_voltage,Cell 16 Voltage,0.001V,USHORT,,,,,,voltage,measurement,
+4.32,cell_17_voltage,Cell 17 Voltage,0.001V,USHORT,,,,,,voltage,measurement,
+4.34,cell_18_voltage,Cell 18 Voltage,0.001V,USHORT,,,,,,voltage,measurement,
+4.36,cell_19_voltage,Cell 19 Voltage,0.001V,USHORT,,,,,,voltage,measurement,
+4.38,cell_20_voltage,Cell 20 Voltage,0.001V,USHORT,,,,,,voltage,measurement,
+4.40,cell_21_voltage,Cell 21 Voltage,0.001V,USHORT,,,,,,voltage,measurement,
+4.42,cell_22_voltage,Cell 22 Voltage,0.001V,USHORT,,,,,,voltage,measurement,
+4.44,cell_23_voltage,Cell 23 Voltage,0.001V,USHORT,,,,,,voltage,measurement,
+4.46,cell_24_voltage,Cell 24 Voltage,0.001V,USHORT,,,,,,voltage,measurement,
+4.48,cell_25_voltage,Cell 25 Voltage,0.001V,USHORT,,,,,,voltage,measurement,
+4.50,cell_26_voltage,Cell 26 Voltage,0.001V,USHORT,,,,,,voltage,measurement,
+4.52,cell_27_voltage,Cell 27 Voltage,0.001V,USHORT,,,,,,voltage,measurement,
+4.54,cell_28_voltage,Cell 28 Voltage,0.001V,USHORT,,,,,,voltage,measurement,
+4.56,cell_29_voltage,Cell 29 Voltage,0.001V,USHORT,,,,,,voltage,measurement,
+4.58,cell_30_voltage,Cell 30 Voltage,0.001V,USHORT,,,,,,voltage,measurement,
+4.60,cell_31_voltage,Cell 31 Voltage,0.001V,USHORT,,,,,,voltage,measurement,
+4.62,cell_32_voltage,Cell 32 Voltage,0.001V,USHORT,,,,,,voltage,measurement,
+5.0,hardware_version,Hardware Version,,ASCII.31,,,,,"command 0x05, text",,,diagnostic
