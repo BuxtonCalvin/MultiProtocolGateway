@@ -10,6 +10,8 @@ The decision logic itself is covered without a database in ``test_protocol_recon
 
 from __future__ import annotations
 
+# These tests exercise the scanner's private reconcile and upsert helpers.
+# pyright: reportPrivateUsage=false
 from collections.abc import Generator
 from pathlib import Path
 from unittest.mock import patch

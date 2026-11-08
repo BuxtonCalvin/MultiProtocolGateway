@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import csv
 import logging
+import os
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -46,6 +47,15 @@ from .models import (
     DeviceProtocolSelection,
     ProtocolRegister,
     Setting,
+)
+from .protocol_csv_patch import (
+    PatchError,
+    PatchResult,
+    RowDeletion,
+    RowUpdate,
+    RowValues,
+    encode_for_file,
+    patch_protocol_csv,
 )
 
 _log: logging.Logger = logging.getLogger(__name__)
@@ -378,12 +388,14 @@ def _delete_pending_protocol_registers(db: Session) -> tuple[int, set[str]]:
     per-device selection rows behind forever, referencing a register that
     no longer exists anywhere.
 
-    Runs before _write_protocol_csvs in commit_all() so the CSV rewrite
-    naturally reflects these rows already being gone. Returns the set of
-    protocol_names touched, so the caller can force a CSV rewrite even for
-    a protocol whose ONLY change this commit was a deletion — pending_delete
-    alone doesn't set is_dirty (there's no future value for that row left to
-    write back once it's gone), so it wouldn't otherwise be picked up by
+    Runs before _write_protocol_csvs in commit_all(). Because deleting these
+    rows also deletes the addresses _write_protocol_csvs needs to remove the
+    matching CSV rows, the caller first collects them with
+    _collect_pending_protocol_deletions. Returns the set of protocol_names
+    touched, so the caller can force a CSV update even for a protocol whose
+    ONLY change this commit was a deletion — pending_delete alone doesn't set
+    is_dirty (there's no future value for that row left to write back once
+    it's gone), so it wouldn't otherwise be picked up by
     _write_protocol_csvs's own is_dirty-based query.
     """
     pending: list[ProtocolRegister] = (
@@ -412,94 +424,187 @@ def _delete_pending_protocol_registers(db: Session) -> tuple[int, set[str]]:
     return len(pending), touched_protocols
 
 
-def _write_protocol_csvs(db: Session, protocols_dir: Path, force_protocols: set[str] | None = None) -> int:
-    dirty_protocols: set[str] = {
-        row[0]
-        for row in (
-            db.query(ProtocolRegister.protocol_name)
-            .filter(ProtocolRegister.is_dirty == True)  # noqa: E712
-            .distinct()
-            .all()
-        )
-    }
-    dirty_protocols |= force_protocols or set()
+def _collect_pending_protocol_deletions(db: Session) -> dict[str, list[RowDeletion]]:
+    """
+    The CSV rows to remove for the registers staged for deletion, by protocol name.
 
-    written = 0
-    for protocol_name in dirty_protocols:
+    Must run before _delete_pending_protocol_registers, which deletes those database
+    rows and with them the addresses the CSV patch needs.  Virtual rows (synthetic
+    metrics and JSON code descriptions) have no CSV row and are left out.
+    """
+    deletions: dict[str, list[RowDeletion]] = {}
+    pending: list[ProtocolRegister] = (
+        db.query(ProtocolRegister)
+        .filter(ProtocolRegister.pending_delete == True)  # noqa: E712
+        .all()
+    )
+    for row in pending:
+        if row.is_synthetic or row.is_json_desc:
+            continue
+        deletions.setdefault(row.protocol_name, []).append(RowDeletion(row.register_address))
+    return deletions
+
+
+def _row_values(row: ProtocolRegister) -> RowValues:
+    """The database row's cells in the form the CSV patcher writes."""
+    return RowValues(
+        register=row.register_address,
+        variable_name=row.variable_name,
+        documented_name=row.documented_name or "",
+        unit=row.unit or "",
+        data_type=row.data_type or "",
+        values=row.values_range or "",
+        adjustments=row.adjustments or "",
+        note=row.note or "",
+        write_mode=row.write_mode_protocol or "",
+        read_interval=row.read_interval or "",
+        ha_device_class=row.ha_device_class or "",
+        ha_state_class=row.ha_state_class or "",
+        ha_entity_category=row.ha_entity_category or "",
+    )
+
+
+def _write_file_atomically(path: Path, data: bytes) -> None:
+    """Write ``data`` to ``path`` through a temporary file in the same directory, so a crash cannot leave half a CSV."""
+    temporary: Path = path.with_name(path.name + ".tmp")
+    temporary.write_bytes(data)
+    os.replace(temporary, path)
+
+
+def _write_protocol_csvs(
+    db: Session,
+    protocols_dir: Path,
+    force_protocols: set[str] | None = None,
+    deletions: dict[str, list[RowDeletion]] | None = None,
+) -> int:
+    """
+    Write the protocol editor's committed changes into the protocol CSV files and return how
+    many files were processed.
+
+    The files are PATCHED, not regenerated: only the rows the user edited (is_dirty) are
+    rewritten, rows staged for deletion are removed, and everything else in the file (the ``#``
+    comment rows that document a map, blank lines, column order, delimiter, line endings and
+    every untouched row) is left exactly as it was.  See protocol_csv_patch.py.
+
+    ``force_protocols`` and ``deletions`` cover protocols whose only change is a deletion, which
+    does not set is_dirty on anything.  If a file cannot be patched safely, it falls back to
+    regenerating it from the database (the previous behavior, which loses comment rows) and
+    says so in the log.
+    """
+    dirty_rows: list[ProtocolRegister] = (
+        db.query(ProtocolRegister)
+        .filter(
+            ProtocolRegister.is_dirty == True,  # noqa: E712
+            # is_synthetic / is_json_desc rows are materialized on-demand for the webUI's
+            # selectable synthetic/JSON metrics (see
+            # services.protocol_service.materialize_and_toggle_virtual_metric) - never real
+            # CSV rows, so they must never be written into one.  Their register_address is
+            # a "~"-prefixed virtual token, not a real address.
+            ProtocolRegister.is_synthetic == False,  # noqa: E712
+            ProtocolRegister.is_json_desc == False,  # noqa: E712
+            # pending_delete rows are normally already gone from the DB by the time this
+            # runs (see _delete_pending_protocol_registers); this guards the ordering.
+            ProtocolRegister.pending_delete == False,  # noqa: E712
+        )
+        .all()
+    )
+    updates: dict[str, list[RowUpdate]] = {}
+    for row in sorted(dirty_rows, key=lambda r: r.register_address):
+        updates.setdefault(row.protocol_name, []).append(RowUpdate(row.register_address, _row_values(row)))
+
+    protocol_names: set[str] = set(updates) | (force_protocols or set()) | set(deletions or {})
+
+    written: int = 0
+    for protocol_name in sorted(protocol_names):
         csv_path: Path | None = _find_protocol_csv(protocols_dir, protocol_name)
         if not csv_path:
             continue
 
-        rows: list[ProtocolRegister] = (
-            db.query(ProtocolRegister)
-            .filter(
-                ProtocolRegister.protocol_name == protocol_name,
-                # is_synthetic / is_json_desc rows are materialized on-demand
-                # for the webUI's selectable synthetic/JSON metrics (see
-                # services.protocol_service.materialize_and_toggle_virtual_metric)
-                # — never real CSV rows, so they must never be written back
-                # into one. Their register_address is a "~"-prefixed virtual
-                # token, not a real register address, so writing them out
-                # would corrupt the CSV even if is_dirty tripped for an
-                # unrelated real row in the same protocol.
-                ProtocolRegister.is_synthetic == False,  # noqa: E712
-                ProtocolRegister.is_json_desc == False,  # noqa: E712
-                # Belt-and-suspenders: pending_delete rows are normally
-                # already gone from the DB by the time this runs (see
-                # _delete_pending_protocol_registers, called first in
-                # commit_all) — this guards against ever writing one back
-                # if that ordering changes.
-                ProtocolRegister.pending_delete == False,  # noqa: E712
+        try:
+            original: str = csv_path.read_bytes().decode("latin-1")
+            result: PatchResult = patch_protocol_csv(original, updates.get(protocol_name, []), (deletions or {}).get(protocol_name, []))
+            if result.changed:
+                _write_file_atomically(csv_path, encode_for_file(result.text))
+            msg: str = (
+                f"Protocol CSV patched: {csv_path} ({result.updated} updated, {result.added} added, "
+                f"{result.deleted} removed, columns added: {', '.join(result.columns_added) or 'none'})"
             )
-            .order_by(ProtocolRegister.register_address)
-            .all()
-        )
-
-        with open(csv_path, "w", newline="", encoding="utf-8") as f:
-            writer: csv.DictWriter[str] = csv.DictWriter(
-                f,
-                fieldnames=[
-                    "register",
-                    "variable_name",
-                    "documented_name",
-                    "unit",
-                    "data_type",
-                    "values",
-                    "adjustments",
-                    "note",
-                    "writable",
-                    "read_interval",
-                    # Optional Home Assistant columns. They MUST be written back:
-                    # this function regenerates the whole file from the DB, so any
-                    # column not listed here is silently dropped from the CSV.
-                    "ha_device_class",
-                    "ha_state_class",
-                    "ha_entity_category",
-                ],
-                quoting=csv.QUOTE_MINIMAL,
+            _log.info(msg)
+            for note in result.notes:
+                msg = f"Protocol CSV {csv_path.name}: {note}"
+                _log.warning(msg)
+        except PatchError as exc:
+            msg = (
+                f"Protocol CSV {csv_path} could not be patched in place ({exc}); regenerating it from "
+                f"the database instead. Comment rows in the file are not preserved."
             )
-            writer.writeheader()
-            for row in rows:
-                writer.writerow({
-                    "register": row.register_address,
-                    "variable_name": row.variable_name,
-                    "documented_name": row.documented_name,
-                    "unit": row.unit or "",
-                    "data_type": row.data_type or "",
-                    "values": row.values_range or "",
-                    "adjustments": row.adjustments or "",
-                    "note": row.note or "",
-                    "writable": row.write_mode_protocol or "",
-                    "read_interval": row.read_interval or "",
-                    "ha_device_class": row.ha_device_class or "",
-                    "ha_state_class": row.ha_state_class or "",
-                    "ha_entity_category": row.ha_entity_category or "",
-                })
+            _log.warning(msg)
+            _regenerate_protocol_csv(db, csv_path, protocol_name)
 
         written += 1
-        _log.info(f"Protocol CSV updated: {csv_path}")
 
     return written
+
+
+def _regenerate_protocol_csv(db: Session, csv_path: Path, protocol_name: str) -> None:
+    """
+    Rebuild a protocol CSV entirely from the database rows (header plus every register sorted by
+    address).  The fallback for a file _write_protocol_csvs cannot patch; it discards anything in
+    the file that is not a register, including comment rows.
+    """
+    rows: list[ProtocolRegister] = (
+        db.query(ProtocolRegister)
+        .filter(
+            ProtocolRegister.protocol_name == protocol_name,
+            ProtocolRegister.is_synthetic == False,  # noqa: E712
+            ProtocolRegister.is_json_desc == False,  # noqa: E712
+            ProtocolRegister.pending_delete == False,  # noqa: E712
+        )
+        .order_by(ProtocolRegister.register_address)
+        .all()
+    )
+
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        writer: csv.DictWriter[str] = csv.DictWriter(
+            f,
+            fieldnames=[
+                "register",
+                "variable_name",
+                "documented_name",
+                "unit",
+                "data_type",
+                "values",
+                "adjustments",
+                "note",
+                "writable",
+                "read_interval",
+                # Optional Home Assistant columns.  They MUST be written back: this function
+                # regenerates the whole file from the DB, so any column not listed here is
+                # silently dropped from the CSV.
+                "ha_device_class",
+                "ha_state_class",
+                "ha_entity_category",
+            ],
+            quoting=csv.QUOTE_MINIMAL,
+        )
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({
+                "register": row.register_address,
+                "variable_name": row.variable_name,
+                "documented_name": row.documented_name,
+                "unit": row.unit or "",
+                "data_type": row.data_type or "",
+                "values": row.values_range or "",
+                "adjustments": row.adjustments or "",
+                "note": row.note or "",
+                "writable": row.write_mode_protocol or "",
+                "read_interval": row.read_interval or "",
+                "ha_device_class": row.ha_device_class or "",
+                "ha_state_class": row.ha_state_class or "",
+                "ha_entity_category": row.ha_entity_category or "",
+            })
+    _log.info(f"Protocol CSV regenerated: {csv_path}")
 
 
 # ---------------------------------------------------------------------------
@@ -578,11 +683,16 @@ def commit_all(db: Session, config_path: Path, project_root: Path, protocols_dir
     # rewrite protocol CSVs (force_protocols covers deletion-only commits,
     # which don't otherwise set is_dirty on anything — see
     # _delete_pending_protocol_registers).
+    # The CSV rows to remove are collected first: deleting the database rows below also
+    # deletes the addresses the CSV patch needs.
+    pending_deletions: dict[str, list[RowDeletion]] = _collect_pending_protocol_deletions(db)
     deleted_count: int
     deleted_protocols: set[str]
     deleted_count, deleted_protocols = _delete_pending_protocol_registers(db)
     result["protocol_registers_deleted"] = deleted_count
-    result["protocol_csvs_written"] = _write_protocol_csvs(db, protocols_dir, force_protocols=deleted_protocols)
+    result["protocol_csvs_written"] = _write_protocol_csvs(
+        db, protocols_dir, force_protocols=deleted_protocols, deletions=pending_deletions
+    )
 
     # 6. Reset dirty flags
     _reset_dirty_flags(db)

@@ -43,8 +43,6 @@ from typing import Any, List, Literal
 
 from sqlalchemy.orm import Session
 
-from classes.WebServer.protocol_reconcile import ReconcilePlan
-
 from .database import refresh_app_state, session_scope
 from .models import (
     AppState,
@@ -194,7 +192,7 @@ def _transport_type_from_ast(py_file: Path) -> str:
         if not isinstance(node, ast.ClassDef):
             continue
         for stmt in node.body:
-            target_name = ""
+            target_name:str = ""
             value_node: ast.AST | None = None
             if isinstance(stmt, ast.Assign):
                 for target in stmt.targets:
@@ -506,8 +504,12 @@ def scan_protocols_dir(protocols_dir: Path) -> list[dict[str, Any]]:
     return [reg for scan in scan_protocol_files(protocols_dir) for reg in scan.registers]
 
 
-def _parse_protocol_csv(csv_path: Path, group_name: str) -> list[dict[str, Any]]:
-    """Parse a protocol CSV file into a list of register dicts (see ``_parse_protocol_csv_checked``)."""
+def _parse_protocol_csv(csv_path: Path, group_name: str) -> list[dict[str, Any]]:  # pyright: ignore[reportUnusedFunction]
+    """Parse a protocol CSV file into a list of register dicts (see ``_parse_protocol_csv_checked``).
+
+    The scanner itself uses the checked variant; this list-only form is kept for callers that do not need the
+    parse status (the web UI tests call it).
+    """
     return _parse_protocol_csv_checked(csv_path, group_name)[0]
 
 
@@ -942,7 +944,7 @@ def _reconcile_protocol_file(db: Session, protocol_file: ProtocolFileScan) -> Re
                 s for s in selection_rows if not s.register_address.startswith(VIRTUAL_ADDRESS_PREFIX)
             ]
 
-            plan: ReconcilePlan = plan_reconciliation(
+            plan = plan_reconciliation(
                 {str(reg["register_address"]) for reg in protocol_file.registers},
                 [StoredRegister(r.id, r.register_address, r.variable_name, bool(r.is_dirty)) for r in real_registers],
                 [StoredSelection(s.id, s.device_name, s.register_address, bool(s.is_dirty)) for s in real_selections],

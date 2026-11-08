@@ -168,6 +168,8 @@ A file watcher also monitors `config.cfg` and the `protocols/` directory for cha
 
 See the [Staging / Commit Workflow diagram](documentation/architecture/mermaid-diagrams.md#7-state-diagram--staging--commit-workflow-web-ui) for the full state machine, including the rollback and file-watcher-resync paths.
 
+After a `docker pull` that brings modified protocol CSV files, the staging database (which lives in a persistent volume) is brought back in line automatically on the first scan: register rows for addresses the new CSV no longer defines are removed, and any uncommitted protocol edits or device selections are carried over to the same variable where it can be matched. Nothing needs to be deleted by hand. Committing a protocol edit in the editor patches only the edited rows of the CSV, so the `#` comment rows that document a map, its blank lines and column order are kept. The details are in [the architecture notes](documentation/architecture/mermaid-diagrams.md#4-entity-relationship-er-diagram).
+
 ### Create Scraper
 
 The Create Scraper wizard walks you through creating a scraper device from scratch.
@@ -297,6 +299,7 @@ MPG ships with pre-built, tested protocol maps for the following manufacturers. 
 | **Growatt** | Inverter Protocol v1.24 (`growatt_2020_v1.24` via Modbus ), BMS CAN Bus v1.04 (`growatt_bms_canbus_v1.04` via CAN bus), BMS RS-485 1xSxxP ESS v2.01 (`growatt_bms_rs485_1xsxxp_ess_v2.01` via Modbus ), SPF / Off-Grid Protocol v0.14 (`growatt_v0.14` via Modbus ) | **[`View Growatt`](documentation/devices/Growatt.md)** |
 | **HDHK** | 16-channel AC Power Monitor (`hdhk_16ch_ac_module` via Modbus ) | **[`View HDHK`](documentation/devices/HDHK.md)** |
 | **Huawei** | Huawei SUN2000 Inverters (`huawei_sun2000` via Modbus ) | **[`View Huawei`](documentation/devices/Huawei.md)** |
+| **Kostal** | PLENTICORE / PIKO IQ SunSpec Inverters (`kostal_sunspec` via Modbus TCP) | **[`View Kostal`](documentation/devices/Kostal.md)** |
 | **LuxPower** | 12K Hybrid Inverter (`lxp_12k_hybrid` via Modbus ) | *No dedicated guide yet but should be the same as EG4— [open an issue](https://github.com/BuxtonCalvin/MultiProtocolGateway/issues) if you'd like to write one* |
 | **Next Power** | Next Power Victor NM RE (`next_power_victor_nm_re` via Modbus ) | **[`View Next Power`](documentation/devices/Next_Power.md)** |
 | **PACE BMS** | PACE BMS RS-485 v1.3 (`pace_bms_v1.3` via Modbus ) | **[`View PACE BMS`](documentation/devices/PACE.md)** |
@@ -304,7 +307,7 @@ MPG ships with pre-built, tested protocol maps for the following manufacturers. 
 | **Pylon** | CAN Bus (`pylon_can` via CAN bus), RS-485 v3.3 (`pylon_rs485_v3.3` via Pylon serial) | **[`View Pylon`](documentation/devices/Pylon.md)** |
 | **Sigenergy** | SigenStor Plant Data (`sigenergy_plant` via Modbus ), Sigen Hybrid / SigenStor EC Device Data (`sigenergy_hybrid` via Modbus ) | **[`View Sigenergy`](documentation/devices/Sigenergy.md)** |
 | **Sigineer** | Solar Inverter / Charger v0.11 (`sigineer_v0.11` via Modbus ) | **[`View Sigineer`](documentation/devices/Sigineer.md)** |
-| **SMA** | Energy Meter Speedwire (`sma_energy_meter_speedwire` via Modbus ), CAN / Modbus RTU Map (`sma_modbus_rtu` via CAN bus), Sunny Home Manager (`sma_sunny_home_manager` via Modbus ), Sunny Island (`sma_sunny_island` via Modbus ), Sunny Island v1 (`sma_sunny_island_v1` via Modbus ), Sunny Boy / Tripower (`sma_sunnyboy_tripower` via Modbus ), Tripower Storage Hybrid (`sma_tripower_storage_hybrid` via Modbus ) | **[`View SMA`](documentation/devices/SMA.md)** |
+| **SMA** | Energy Meter Speedwire (`sma_energy_meter_speedwire` via Modbus ), CAN / Modbus RTU Map (`sma_modbus_rtu` via CAN bus), Sunny Home Manager (`sma_sunny_home_manager` via Modbus ), Sunny Island (`sma_sunny_island` via Modbus ), Sunny Island v1 (`sma_sunny_island_v1` via Modbus ), Sunny Boy / Tripower (`sma_sunnyboy_tripower` via Modbus ), Tripower Storage Hybrid (`sma_tripower_storage_hybrid` via Modbus ), SunSpec Inverters (`sma_sunspec` via Modbus TCP) | **[`View SMA`](documentation/devices/SMA.md)** |
 | **SOK** | SOK SK48V100 / PACE BMS (`sok_sk48v100_pace_bms` via Modbus ) | **[`View SOK`](documentation/devices/SOK.md)** |
 | **Solar Edge** | SolarEdge SunSpec Inverters (`solaredge_sunspec` via Modbus) | **[`View Solar Edge`](documentation/devices/SolarEdge.md)** |
 | **SolaX** | X1/X3 Hybrid G4-style Inverters (`solax_hybrid_g4` via Modbus ) | **[`View SolaX`](documentation/devices/SolaX.md)** |
@@ -327,13 +330,13 @@ MPG also supports any generic Modbus RTU or TCP device when given a register map
 
 ## Community Help Wanted: Stub Protocols
 
-Beyond the 29 manufacturers above, MPG has device metadata already stubbed in for **74 more manufacturers** — a JSON descriptor with the transport type and default settings, but no register map yet. These exist because someone requested or started the device but a full map hasn't been built. If you own one of these and can run the [Live Analysis tool](#live-device-analysis) against it, you can generate and commit a working register map directly from the web UI — no CSV editing required, and no need to already know the register layout. New to MPG? [**Analyze.md**](documentation/usage/Analyze.md) walks through this exact scenario (Create Protocol → Create Scraper → Analyze) start to finish for readers with no prior experience.
+Beyond the 30 manufacturers above, MPG has device metadata already stubbed in for **73 more manufacturers** — a JSON descriptor with the transport type and default settings, but no register map yet. These exist because someone requested or started the device but a full map hasn't been built. If you own one of these and can run the [Live Analysis tool](#live-device-analysis) against it, you can generate and commit a working register map directly from the web UI — no CSV editing required, and no need to already know the register layout. New to MPG? [**Analyze.md**](documentation/usage/Analyze.md) walks through this exact scenario (Create Protocol → Create Scraper → Analyze) start to finish for readers with no prior experience.
 
-A few of these already have a wiring/protocol reference guide to jump-start the work, even though the register map itself is still pending: **[Kostal](documentation/devices/Kostal.md)**, **[KSTAR](documentation/devices/KSTAR.md)**, and **[Sofar](documentation/devices/Sofar.md)**.
+A few of these already have a wiring/protocol reference guide to jump-start the work, even though the register map itself is still pending: **[KSTAR](documentation/devices/KSTAR.md)** and **[Sofar](documentation/devices/Sofar.md)**.
 
 ### Full list of stub-protocol manufacturers
 
-A-Tronix, ABB, ABB Fimer, Accuenergy, Acrel, Afore, Algodue, AlphaESS, Ampowr, Anexo, Angile, Autarco, Autel, BMR, Cadis, Carlo Gavazzi, Chint, Chisage, Danfoss, Delta, Diehl AKO, Dornscheidt, Dyness, Dysun, Eastron, Enbrilion, Energreen, Enerlution, Enjoypowers, ESY, Fairland, Fortona, Gotion, Hager, Hypontech, Hyxipower, Inepro, Itho Daalderop, Janitza, Kehua, Kostal, KSTAR, Legrand, LitiOT, Marstek, Mastervolt, Mennekes, Metcom, Midteq, Motoma, Nibe, Pilot, Power-Sonic, Raedian, Regitec, Remeha, Renon, Ritar, SAV, Schneider, Schüco, Siemens, Sinexcel, Socomec, Sofar, Solarmax, SolarWatt, Solplanet, Sunwaytech, Sunwoda, Teltonika, Vacon, Weidmüller, Zetara
+A-Tronix, ABB, ABB Fimer, Accuenergy, Acrel, Afore, Algodue, AlphaESS, Ampowr, Anexo, Angile, Autarco, Autel, BMR, Cadis, Carlo Gavazzi, Chint, Chisage, Danfoss, Delta, Diehl AKO, Dornscheidt, Dyness, Dysun, Eastron, Enbrilion, Energreen, Enerlution, Enjoypowers, ESY, Fairland, Fortona, Gotion, Hager, Hypontech, Hyxipower, Inepro, Itho Daalderop, Janitza, Kehua, KSTAR, Legrand, LitiOT, Marstek, Mastervolt, Mennekes, Metcom, Midteq, Motoma, Nibe, Pilot, Power-Sonic, Raedian, Regitec, Remeha, Renon, Ritar, SAV, Schneider, Schüco, Siemens, Sinexcel, Socomec, Sofar, Solarmax, SolarWatt, Solplanet, Sunwaytech, Sunwoda, Teltonika, Vacon, Weidmüller, Zetara
 
 If you'd rather contribute a hand-built map, protocol CSVs use a standardized column set (`register`, `variable_name`, `documented_name`, `unit`, `data_type`, `values`, `read_interval`, `writable`, `adjustments`, `note`) — see [Protocol Maps & Register Configuration](#protocol-maps--register-configuration) for the full reference. Pull requests adding a register map, wiring notes, or corrections for any of these are welcome.
 

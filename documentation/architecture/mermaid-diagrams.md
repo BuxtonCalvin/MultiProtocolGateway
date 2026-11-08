@@ -490,6 +490,10 @@ If either step fails, startup aborts rather than run against a missing or out-of
 
 The logic is in `classes/WebServer/protocol_reconcile.py`, with the queries in `scanner.py`, and is covered by `pytests/test_protocol_reconcile.py` and `pytests/test_scanner_reconcile.py`.
 
+**Committing protocol edits keeps the CSV's comments.** A protocol CSV carries more than registers: `#` comment rows that document a map (notes, sources, section headings, "not verified" warnings), blank lines, its own column order and delimiter. Commit therefore *patches* the file instead of rebuilding it from the database: only the rows the user edited (`is_dirty`) are rewritten and only the cells that differ from what the scanner reads are replaced, rows staged for deletion are removed, and every other record is copied through exactly as written, including its quoting and line ending. A column the file does not have is added only when an edit puts a value in it. An `_l` / `_h` register pair that the editor presents as one `low_high` row is written back as the single `low_high` row the runtime loader understands, as before. The file is read and written as latin-1, the same way the scanner and the loader read it, so non-ASCII text in untouched rows keeps its bytes. If a file cannot be patched safely (no usable header, or the patched text fails its own check), commit falls back to rebuilding it from the database, which discards the comment rows, and logs a warning saying so.
+
+The logic is in `classes/WebServer/protocol_csv_patch.py`, with the commit wiring in `config_writer.py`, and is covered by `pytests/test_protocol_csv_patch.py` (which also checks that every protocol CSV in the repository survives a no-change commit byte for byte) and `pytests/test_commit_csv_patch.py`.
+
 ### TimescaleDB Telemetry Schema (created by `timescaledb` bridge)
 
 ```mermaid
@@ -672,7 +676,7 @@ stateDiagram-v2
     DiffPreview --> Clean: Discard changes<br/>clears is_dirty flags, no disk write
 
     DiffPreview --> Committing: POST /api/commit<br/>"Commit All Changes"
-    Committing --> Committed: config_writer.commit_all()<br/>writes config.cfg + mask/screen CSVs,<br/>archives ConfigBackup, clears is_dirty,<br/>syncs value_disk = value_staged
+    Committing --> Committed: config_writer.commit_all()<br/>writes config.cfg + mask/screen CSVs,<br/>patches edited protocol CSV rows in place,<br/>archives ConfigBackup, clears is_dirty,<br/>syncs value_disk = value_staged
 
     Committed --> Rescanning: file_watcher detects<br/>config.cfg / CSV change
     Rescanning --> Clean: scanner.run()<br/>resyncs Setting/ProtocolRegister<br/>rows against disk truth and<br/>removes register rows for<br/>addresses a changed CSV dropped

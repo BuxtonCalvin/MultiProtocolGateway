@@ -64,7 +64,7 @@ import hashlib
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 CARRIED_FIELDS: tuple[str, ...] = (
     "documented_name",
@@ -236,24 +236,28 @@ def plan_reconciliation(
 
 
 class RegisterRow(Protocol):
-    """The attributes of a ``ProtocolRegister`` that ``apply_plan`` reads and writes."""
+    """The attributes of a ``ProtocolRegister`` that ``apply_plan`` reads and writes.
 
-    id: int
-    register_address: str
-    variable_name: str
-    is_dirty: bool
-    paired_high_address: str | None
+    Typed ``Any`` because the ORM declares its columns as ``Mapped[...]`` descriptors, which a type checker
+    will not match against plain attribute types in a protocol.  ``CARRIED_FIELDS`` are reached by name.
+    """
+
+    id: Any
+    register_address: Any
+    variable_name: Any
+    is_dirty: Any
+    paired_high_address: Any
 
 
 class SelectionRow(Protocol):
-    """The attributes of a ``DeviceProtocolSelection`` that ``apply_plan`` reads and writes."""
+    """The attributes of a ``DeviceProtocolSelection`` that ``apply_plan`` reads and writes (typed ``Any`` for the same reason)."""
 
-    id: int
-    register_address: str
-    paired_high_address: str | None
-    user_write_enabled: bool
-    mask_enabled: bool
-    screen_enabled: bool
+    id: Any
+    register_address: Any
+    paired_high_address: Any
+    user_write_enabled: Any
+    mask_enabled: Any
+    screen_enabled: Any
 
     def mark_dirty(self) -> None:
         """Recompute ``is_dirty`` from the staged and on-disk flags."""
