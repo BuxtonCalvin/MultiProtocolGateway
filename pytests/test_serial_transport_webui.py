@@ -179,7 +179,7 @@ def test_known_serial_transports() -> None:
     """If this fails you have added a serial transport: good. Add its tests, then update this list."""
     assert serial_pylon in serial_subclasses()
     assert serial_frame_transport in serial_subclasses()
-    assert sorted(c.__name__ for c in serial_subclasses()) == ["serial_frame_transport", "serial_pylon"]
+    assert sorted(c.__name__ for c in serial_subclasses()) == ["serial_frame_transport", "serial_jbd", "serial_jk", "serial_length_transport", "serial_pylon", "serial_vedirect"]
 
 
 def test_serial_frame_transport_defaults_keep_its_own_settings() -> None:
