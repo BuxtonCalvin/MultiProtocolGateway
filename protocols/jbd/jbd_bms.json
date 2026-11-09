@@ -1,0 +1,63 @@
+{
+  "transport": "serial_jbd",
+  "baud": 9600,
+  "send_holding_register": false,
+  "send_input_register": false,
+  "send_coil_register": false,
+  "send_discrete_register": false,
+  "protection_status_codes": {
+    "b0": "cell block over voltage",
+    "b1": "cell block under voltage",
+    "b2": "battery over voltage",
+    "b3": "battery under voltage",
+    "b4": "charging over temperature",
+    "b5": "charging low temperature",
+    "b6": "discharge over temperature",
+    "b7": "discharge low temperature",
+    "b8": "charging over current",
+    "b9": "discharge over current",
+    "b10": "short circuit",
+    "b11": "front detection IC error",
+    "b12": "software lock MOS"
+  },
+  "mosfet_status_codes": {
+    "b8": "charging MOSFET on",
+    "b9": "discharging MOSFET on"
+  },
+  "balance_status_cells_1-16_codes": {
+    "b0": "cell 1 balancing",
+    "b1": "cell 2 balancing",
+    "b2": "cell 3 balancing",
+    "b3": "cell 4 balancing",
+    "b4": "cell 5 balancing",
+    "b5": "cell 6 balancing",
+    "b6": "cell 7 balancing",
+    "b7": "cell 8 balancing",
+    "b8": "cell 9 balancing",
+    "b9": "cell 10 balancing",
+    "b10": "cell 11 balancing",
+    "b11": "cell 12 balancing",
+    "b12": "cell 13 balancing",
+    "b13": "cell 14 balancing",
+    "b14": "cell 15 balancing",
+    "b15": "cell 16 balancing"
+  },
+  "balance_status_cells_17-32_codes": {
+    "b0": "cell 17 balancing",
+    "b1": "cell 18 balancing",
+    "b2": "cell 19 balancing",
+    "b3": "cell 20 balancing",
+    "b4": "cell 21 balancing",
+    "b5": "cell 22 balancing",
+    "b6": "cell 23 balancing",
+    "b7": "cell 24 balancing",
+    "b8": "cell 25 balancing",
+    "b9": "cell 26 balancing",
+    "b10": "cell 27 balancing",
+    "b11": "cell 28 balancing",
+    "b12": "cell 29 balancing",
+    "b13": "cell 30 balancing",
+    "b14": "cell 31 balancing",
+    "b15": "cell 32 balancing"
+  }
+}
