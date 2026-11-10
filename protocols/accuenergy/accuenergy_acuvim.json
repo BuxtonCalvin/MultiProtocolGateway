@@ -1,9 +1,21 @@
 {
   "transport": "modbus_rtu",
-  "baud": "9600",
-  "batch_size": "40",
-  "send_holding_register": "true",
-  "send_input_register": "false",
-  "send_coil_register": "false",
-  "send_discrete_register": "false"
+  "baud": 19200,
+  "byteorder": "big",
+  "batch_size": 40,
+  "send_holding_register": true,
+  "send_input_register": false,
+  "send_coil_register": false,
+  "send_discrete_register": false,
+
+  "context_variables": {
+    "ct_ratio": {
+      "key": "ct2",
+      "cases": { "333,80,100,200": "{ct1}" },
+      "default": "{ct1}/{ct2}"
+    },
+    "voltage_scale": "{basic_parameter_mode}+(1-{basic_parameter_mode})*{pt1}/{pt2}",
+    "current_scale": "{basic_parameter_mode}+(1-{basic_parameter_mode})*{ct_ratio}",
+    "power_scale": "{voltage_scale}*{current_scale}"
+  }
 }

@@ -22,6 +22,7 @@ from classes.protocol_settings import (
     protocol_settings,
     registry_map_entry,
 )
+from classes.WebServer.routers.analysis import Writer
 
 VSN: str = "abb_fimer_vsn300_sunspec"
 REACT2: str = "abb_fimer_react2_sunspec"
@@ -97,7 +98,7 @@ def test_real_vsn300_capture_decodes_to_sensible_values() -> None:
 
 def test_the_two_mppt_inputs_add_up_to_the_dc_power() -> None:
     """A cross-check that needs no reference: 1685 W + 1487 W is the 3172 W the inverter reports."""
-    out = _decode(VSN, CAPTURE, ["mppt1_power", "mppt2_power", "dc_power"])
+    out: dict[str, float | int | str] = _decode(VSN, CAPTURE, ["mppt1_power", "mppt2_power", "dc_power"])
     assert float(out["mppt1_power"]) + float(out["mppt2_power"]) == float(out["dc_power"])
 
 
@@ -184,7 +185,7 @@ def test_react2_decodes_scaled_hybrid_values() -> None:
         entries["battery1_bv"].register: 512, entries["battery_v_sf"].register: _s16(-1),
         entries["meter_w"].register: _s16(-800), entries["meter_w_sf"].register: 1,
     }
-    out = _decode(REACT2, regs, ["inverter_a", "inverter_w", "battery_soc", "battery_w", "battery1_bv", "meter_w"])
+    out: dict[str, float | int | str] = _decode(REACT2, regs, ["inverter_a", "inverter_w", "battery_soc", "battery_w", "battery1_bv", "meter_w"])
     assert math.isclose(float(out["inverter_a"]), 5.3) and out["inverter_w"] == 15000
     assert out["battery_soc"] == 87 and out["battery_w"] == -2300
     assert math.isclose(float(out["battery1_bv"]), 51.2) and out["meter_w"] == -8000
@@ -215,7 +216,7 @@ def test_react2_json_codes_are_valid_json() -> None:
 def _tiny_protocol(tmp_path: Path, rows: list[list[str]]) -> protocol_settings:
     header: list[str] = ["register", "variable_name", "documented_name", "unit", "data_type", "values", "read_interval", "writable", "adjustments", "note"]
     with (tmp_path / "probe.holding_registry_map.csv").open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.writer(handle)
+        writer: Writer = csv.writer(handle)
         writer.writerow(header)
         writer.writerows(rows)
     (tmp_path / "probe.json").write_text(json.dumps({"transport": "modbus_tcp"}), encoding="utf-8")
@@ -231,7 +232,7 @@ def test_row_order_does_not_matter(tmp_path: Path, sf_first: bool) -> None:
     value_row: list[str] = ["1", "val", "val", "", "USHORT", "", "", "R", _CASES, ""]
     sf_row: list[str] = ["2", "sf", "sf", "", "SHORT", "", "", "R", "", ""]
     proto: protocol_settings = _tiny_protocol(tmp_path, [sf_row, value_row] if sf_first else [value_row, sf_row])
-    out = proto.process_registery({1: 1250, 2: _s16(-2)}, proto.registry_map[Registry_Type.HOLDING])
+    out: dict[str, int | float | str] = proto.process_registery({1: 1250, 2: _s16(-2)}, proto.registry_map[Registry_Type.HOLDING])
     assert math.isclose(float(out["val"]), 12.5)
 
 
@@ -244,5 +245,5 @@ def test_value_is_raw_when_the_key_register_was_not_read(tmp_path: Path) -> None
 def test_default_formula_applies_when_no_case_matches(tmp_path: Path) -> None:
     with_default: str = json.dumps({"Context": {"key": "sf", "cases": {"-2": "x/100"}, "default": "x*2"}})
     proto: protocol_settings = _tiny_protocol(tmp_path, [["1", "val", "val", "", "USHORT", "", "", "R", with_default, ""], ["2", "sf", "sf", "", "SHORT", "", "", "R", "", ""]])
-    out = proto.process_registery({1: 10, 2: 7}, proto.registry_map[Registry_Type.HOLDING])
+    out: dict[str, int | float | str] = proto.process_registery({1: 10, 2: 7}, proto.registry_map[Registry_Type.HOLDING])
     assert out["val"] == 20

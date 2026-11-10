@@ -1,4 +1,5 @@
 Brand,Model,Protocol,Transport,ReadMe
+Accuenergy,Acuvim II / IIR / IIE / IIW power meters,accuenergy_acuvim,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Accuenergy.md
 APsystems,ECU SunSpec gateway,apsystems_ecu_sunspec,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/APsystems.md
 Deye / Sunsynk,Hybrid inverter,deye_sunsynk,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Deye_Sunsynk.md
 Deye / Sunsynk,Hybrid inverter extended map,deye_sunsynk_hybrid,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Deye_Sunsynk.md

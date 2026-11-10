@@ -43,7 +43,7 @@ A **protocol** is the map between raw register addresses on a hardware device an
 
 ## Protocol File Structure
 
-Each protocol lives in its own subdirectory under `protocols/` and consists of up to three files:
+Each protocol lives in its own subdirectory under `protocols/` and consists of up to five files:
 
 ``` ini
 protocols/
@@ -58,6 +58,8 @@ protocols/
 | `{name}.json` | Protocol-wide defaults, baud rate, byte order, and enum code definitions |
 | `{name}.input_registry_map.csv` | Read-only (input) registers — polled from the device |
 | `{name}.holding_registry_map.csv` | Read/write (holding) registers — polled and optionally written back |
+| `{name}.coil_registry_map.csv` | Read/write (coil, FC01/FC05) single-bit outputs such as relays — optional |
+| `{name}.discrete_registry_map.csv` | Read-only (discrete input, FC02) single-bit statuses — optional |
 | `{name}.registry_map.csv` | Generic register map for protocols without an input/holding distinction (CAN bus, etc.) |
 
 The four Modbus register types and their properties:
@@ -302,9 +304,44 @@ For SunSpec, use `"range": [-10, 10]` (the range the standard allows) instead of
 76,current_sf,AC Current Scale Factor,,SHORT,,,R,,...
 ```
 
+#### Variables in formulas
+
+A formula may name other decoded variables with `{name}`, which is replaced by that variable's current value (the `variable name` of another row in the same map). This covers scales that depend on a ratio of two settings, such as instrument-transformer ratios:
+
+```json
+{"Context": {"formula": "x*{pt1}/{pt2}"}}
+```
+
+- `key` is optional when the adjustment has a single `formula`, as above. With a `key`, `cases`, `range` and `default` choose the formula as before, and the chosen formula may use `{name}` too.
+- Only numeric variables work. If a named variable was not read in the same polling pass (or is text), the raw value is published unchanged, exactly as for a missing `key`. Give the rows you reference no `read interval` of their own (or the same interval as the rows that use them) so they are present in every pass.
+- Arithmetic is limited to `+ - * / // % **` and parentheses; there are no comparisons. A mode switch can be written arithmetically: `x*({mode}+(1-{mode})*{ratio})` is `x` when `mode` is 1 and `x*ratio` when it is 0. Alternatively use `key`/`cases` for a branch on one variable.
+- Each substituted value is wrapped in parentheses, so negative values keep their sign. A division by zero leaves the raw value and logs a warning.
+- `unit` multipliers are applied before `Context`, so `x` already includes them.
+
+#### Shared expressions: `context_variables`
+
+When many rows need the same long formula, define it once in the protocol's JSON file and refer to it by name. Each entry is an expression string, or a `key`/`cases`/`default` object like a row's Context. An entry may use decoded variables and entries listed above it:
+
+```json
+"context_variables": {
+  "ct_ratio": { "key": "ct2", "cases": { "333,80,100,200": "{ct1}" }, "default": "{ct1}/{ct2}" },
+  "current_scale": "{basic_parameter_mode}+(1-{basic_parameter_mode})*{ct_ratio}"
+}
+```
+
+A row then carries only `{"Context": {"formula": "x*{current_scale}"}}`.
+
+- Entries are evaluated once per polling pass from the decoded values and are not published. If an input was not read in that pass the entry is skipped, and rows that use it publish the raw value.
+- A decoded variable with the same name wins over an entry, so do not reuse a variable name.
+- In `cases`, one key may list several values separated by commas (`"333,80,100,200"`), so a formula is written once instead of once per value.
+
+The Accuenergy Acuvim II map uses this to follow the meter's Primary/Secondary parameter mode and its PT/CT ratios; see [Accuenergy.md](../devices/Accuenergy.md).
+
 `Context` is applied when reading only. It cannot be inverted, so a **writable** row that carries one would send the user's value unscaled. Leave writable SunSpec points raw (no `Context`) and publish their scale-factor register beside them, as the ABB/FIMER SunSpec maps do.
 
 The same mechanism handles a sign or direction register: `{"Context": {"key": "direction", "cases": {"1": "-x", "0": "x"}}}` makes a power value negative while `direction` is 1.
+
+It also covers a scale the meter selects with a setting register. Accuenergy's Acuvim II reports energy as `Rx/10` kWh in Primary energy display mode and `Rx/1000` kWh in Secondary mode, chosen by register `0x1019`, so each energy row carries `{"Context": {"key": "energy_display_mode", "cases": {"0": "x/10", "1": "x/1000"}, "default": "x/10"}}` and the map reads `0x1019` as the `energy_display_mode` row. Those energy registers are writable on the meter, so the map lists them as `R` (see the note on writable rows above).
 
 #### Bit Flag Codes
 
@@ -341,9 +378,9 @@ The `writable` column sets the read/write permission sourced from the manufactur
 | Value | Meaning |
 | --- | --- |
 | `R` | Read-only. Default if omitted. |
-| `RW` | Read and write supported by the device. |
-| `W` | Write-only. |
-| `RD` | Read disabled — register is skipped during polling. |
+| `RW` | Read and write supported by the device. `W` and `YES` are accepted as aliases of `RW` by the loader. |
+| `WO` | Write-only — never polled (for command registers such as "clear energy" whose read-back is meaningless). |
+| `RD` | Read disabled — register is skipped during polling. Use it to document registers that are expensive or optional (per-order harmonics, optional I/O modules) without reading them by default. |
 
 ---
 
@@ -659,6 +696,7 @@ MPG ships with pre-built protocols for the following devices. All protocols are 
 
 | Protocol Name | Device | Transport |
 | --- | --- | --- |
+| `accuenergy_acuvim` | Accuenergy Acuvim II / IIR / IIE / IIW power meters | Modbus RTU |
 | `apsystems_ecu_sunspec` | APsystems ECU SunSpec gateway | Modbus TCP |
 | `deye_sunsynk` | Deye / Sunsynk hybrid inverters | Modbus |
 | `deye_sunsynk_hybrid` | Deye / Sunsynk hybrid inverter extended map | Modbus |

@@ -75,7 +75,7 @@ def test_heartbeat_is_a_holding_register(name: str) -> None:
 # --------------------------------------------------------------------------
 
 def test_worked_examples_50_60() -> None:
-    out = _decode("abb_fimer_trio_50_60", Registry_Type.INPUT, {
+    out: dict[str, float | int | str] = _decode("abb_fimer_trio_50_60", Registry_Type.INPUT, {
         1049: 0x0006,                        # global state 6 = Run
         1071: 0x0002, 1072: 0x55A8,          # total energy 0x000255A8 = 153000 (U32, high register first)
         1093: 0x4000, 1094: 0x469C,          # output power 20000 W: word-swapped float
@@ -89,7 +89,7 @@ def test_worked_examples_50_60() -> None:
 
 def test_ascii_strings_have_one_character_per_register() -> None:
     """ABB sends '123789' as six registers 0x0031 0x0032 ... (character in the low byte)."""
-    out = _decode("abb_fimer_trio_50_60", Registry_Type.INPUT, {
+    out: dict[str, float | int | str] = _decode("abb_fimer_trio_50_60", Registry_Type.INPUT, {
         1008: 0x31, 1009: 0x32, 1010: 0x33, 1011: 0x37, 1012: 0x38, 1013: 0x39,                 # serial number
         1002: 0x2D, 1003: 0x33, 1004: 0x4E, 1005: 0x36, 1006: 0x33, 1007: 0x2D,                 # fixed part number "-3N63-"
         3649: 0x47, 3650: 0x74, 3651: 0x33, 3652: 0x30,                                         # "Gt30"
@@ -100,7 +100,7 @@ def test_ascii_strings_have_one_character_per_register() -> None:
 
 
 def test_state_codes_and_flags() -> None:
-    out = _decode("abb_fimer_trio_50_60", Registry_Type.INPUT, {1050: 38, 1053: 0b11, 1018: 78, 1021: 40, 1019: 101})
+    out: dict[str, float | int | str] = _decode("abb_fimer_trio_50_60", Registry_Type.INPUT, {1050: 38, 1053: 0b11, 1018: 78, 1021: 40, 1019: 101})
     assert out["alarm_state_desc"] == "Riso low (E025)"
     assert out["derating_state"] == "Power curtailment from user setpoint,Grid over-frequency derating"
     assert out["inverter_type_desc"] == "Photovoltaic"

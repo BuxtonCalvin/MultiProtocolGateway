@@ -27,6 +27,7 @@ import re
 import struct
 import sys
 import time
+from collections import ChainMap
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
@@ -565,6 +566,70 @@ class DataAdjustments:
     address, bytes within each word big-endian) which is the most common
     little-endian Modbus convention used by EG4 and many other inverter
     manufacturers.
+
+    Adjustment reference
+    --------------------
+    The CSV ``adjustments`` column holds one JSON object (or a ``Key:value`` shorthand).
+    Four keys are recognized, matched case-insensitively.  Everything else in the object
+    is ignored.  ``unit_mod`` (the numeric prefix of the ``unit`` column, e.g. ``0.1V``) is
+    not an adjustment key but is applied in the same stage, so it is listed for reference.
+
+    ``Register_Endian`` -- stage ``byteorder``
+        Input:    a word-order name or alias as a string, e.g. ``"little_endian-CDAB"``,
+                  ``"little"``, ``"cdab"`` (full list above).
+        Output:   the ``WordOrder`` used to assemble this row's registers before decoding.
+                  Unknown values log a warning and fall back to the protocol default.
+        Use case: a vendor that sends 32/64-bit values low word first while the rest of the
+                  protocol is high word first, or the reverse.  Only affects rows that span
+                  more than one register.
+        Example:  ``{"Register_Endian": "little_endian-CDAB"}``
+
+    ``High_Low`` -- stage ``post_decode``
+        Input:    a string of ``x?(lo,hi]->formula`` blocks, separated by spaces.  A block
+                  matches when ``lo < x <= hi`` (lower bound exclusive, upper inclusive), where
+                  ``x`` is the decoded value.  The first matching block wins.
+        Output:   the matching block's formula evaluated with ``x`` substituted.  If no block
+                  matches (including ``x == 0`` for an ``(0,...`` block) or the formula fails,
+                  the decoded value is returned unchanged.  When present it replaces ``unit_mod``
+                  and ``Offset`` for the row: the formula is the whole transform.
+        Use case: value ranges that decode differently, such as signed values stored in an
+                  unsigned register (``x?(32768,65535]->x-65536``) or an offset scale such as
+                  tenths of a kelvin to Celsius.
+        Example:  ``{"High_Low": "x?(0,65535]->(x-2731)/10"}``
+
+    ``Offset`` -- stage ``post_decode``
+        Input:    a number (JSON number or numeric string).
+        Output:   decoded value * ``unit_mod`` + offset.  Skipped when ``High_Low`` is present.
+                  A non-numeric offset logs a warning and is ignored.
+        Use case: a constant bias in the register, e.g. temperature stored with a fixed -40 shift.
+        Example:  ``{"Offset": -40}`` or the shorthand ``Offset:-40``
+
+    ``Context`` -- stage ``context`` (after every value of the read has been decoded)
+        Input:    an object choosing one formula, which is then evaluated with ``x`` = the row's
+                  value (after ``unit_mod``/``Offset``).  Ways to choose it:
+
+                  * ``{"formula": "x*{a}/{b}"}``: no ``key``; always applies.
+                  * ``{"key": "name", "cases": {"0": "x", "1": "-x"}, "default": "x"}``: the decoded
+                    value of variable ``name`` picks the formula.  A cases key may list several
+                    values (``"333,80,100"``).  ``default`` applies when no case matches.
+                  * ``{"key": "name", "range": [-10, 10]}``: for an integer ``name`` in the range the
+                    formula is ``x*10**n`` (``x/10**n`` for negative n), the SunSpec scale-factor pattern.
+
+                  A formula may contain ``{name}``: the current value of another decoded variable,
+                  or of a protocol ``context_variables`` entry (see ``evaluate_context_variables``).
+                  Arithmetic is ``+ - * / // % **``, parentheses and unary minus; no names or calls.
+        Output:   the formula's result (an ``int`` when it is a whole number).  The raw value is
+                  returned unchanged when no formula applies, the ``key`` or any ``{name}`` was not
+                  read in this pass, the value is not numeric, or evaluation fails (logged).
+        Use case: a scale or sign that depends on another register: SunSpec scale factors, a
+                  direction flag that flips the sign, a meter whose units follow a mode register,
+                  instrument-transformer ratios.
+        Example:  ``{"Context": {"key": "power_direction", "cases": {"1": "-x"}, "default": "x"}}``
+
+    Order within a read: ``Register_Endian`` (decode) -> ``High_Low`` or ``unit_mod`` + ``Offset``
+    -> ``Context``.  Rows are adjusted in registry order and a ``Context`` row sees the already
+    adjusted values of earlier rows, which is why a row used as a ``key`` or ``{name}`` should itself
+    carry no ``Context``.
     """
 
     # Context ``range`` support (see ``context_range_bounds``).  A power of ten beyond +/-50 is never a real scale factor.
@@ -572,7 +637,12 @@ class DataAdjustments:
     _CONTEXT_RANGE_TEXT: ClassVar[re.Pattern[str]] = re.compile(r"^\s*(-?\d+)\s*(?:~|\.\.|,|-)\s*(-?\d+)\s*$")
     _context_range_warned: ClassVar[set[str]] = set()      # invalid ranges already reported, so each is logged once per process
 
-    def __init__(self, log: logging.Logger, default_word_order: WordOrder = _DEFAULT_WORD_ORDER) -> None:
+    def __init__(
+        self,
+        log: logging.Logger,
+        default_word_order: WordOrder = _DEFAULT_WORD_ORDER,
+        context_variables: Mapping[str, object] | None = None,
+    ) -> None:
         """Initialise with a shared logger and the protocol-level default ``WordOrder``.
 
         ``default_word_order`` is resolved from the JSON settings file's
@@ -583,6 +653,9 @@ class DataAdjustments:
         """
         self._log: logging.Logger = log
         self.default_word_order: WordOrder = default_word_order
+        # Protocol-level named expressions (the JSON file's "context_variables" object), usable as
+        # {name} in any Context formula.  See evaluate_context_variables.
+        self.context_variables: dict[str, object] = dict(context_variables) if context_variables else {}
 
     # ------------------------------------------------------------------
     # Parsing
@@ -635,7 +708,13 @@ class DataAdjustments:
         return None
 
     def get_entry_byteorder(self, entry: "registry_map_entry") -> WordOrder:
-        """Return the effective ``WordOrder`` for *entry*.
+        """Return the effective ``WordOrder`` for *entry* (the ``Register_Endian`` adjustment).
+
+        Input:    ``entry.adjustments["Register_Endian"]``, a string (optional).
+        Output:   the matching ``WordOrder``; the protocol default when the key is absent, and the
+                  default plus a logged warning when the value is not a known name or alias.
+        Use case: a row (or protocol) whose multi-register values do not use the default ABCD
+                  order.  Single-register rows are unaffected.
 
         Defaults to ``self.default_word_order`` (set at construction time from
         the protocol-level ``byteorder`` setting).  Can be overridden per-entry
@@ -678,20 +757,29 @@ class DataAdjustments:
     ) -> int | float | str:
         """Central adjustment dispatcher for CSV-driven post-processing.
 
+        Inputs: ``value`` (the decoded or partly adjusted value), the registry ``entry`` whose
+        ``adjustments`` dict drives the transform, the ``stage`` to run and, for ``context``
+        only, ``context`` (the decoded values of this read).  Output: the adjusted value, or
+        ``value`` unchanged when no adjustment of that stage applies.  The full definition of each
+        adjustment key (input, output, use case, example) is in the class docstring.
+
         Stages
         ------
         byteorder
             Determine byte order before raw bytes are decoded.
             Only relevant when the entry carries a ``Register_Endian``
-            adjustment.
+            adjustment.  Handled by ``get_entry_byteorder``; this stage returns ``value`` as is.
         post_decode
             Apply ``unit_mod`` scaling and any numeric adjustments
             (``Offset``, ``High_Low``) after the raw value has been decoded.
             ``unit_mod`` is **always** applied here regardless of whether
-            other adjustments are present.
+            other adjustments are present, except that ``High_Low`` replaces both
+            ``unit_mod`` and ``Offset``.  Non-numeric values pass through.  A whole-number
+            float is returned as ``int``.
         context
             Apply conditional transforms that depend on sibling metric values
-            (e.g. direction-aware sign flipping).
+            (e.g. direction-aware sign flipping, SunSpec scale factors, PT/CT ratios).
+            Only the ``Context`` key is used.  Numeric values only; see the class docstring.
         """
 
         # ------------------------------------------------------------------
@@ -756,38 +844,21 @@ class DataAdjustments:
                 return value
             context_adjustment = cast(dict[str, object], context_adjustment)
 
-            key: str = str(context_adjustment.get("key", "")).strip()
-            if not key or key not in context:
-                self._log.debug(
-                    f"Context adjustment for {entry.variable_name} waiting for key '{key}'"
-                )
+            formula: str = self.select_context_formula(entry.variable_name, context_adjustment, context)
+            if not formula:
                 return value
 
-            cases: object = context_adjustment.get("cases", {})
-            formula: str = ""
-            context_value: int | float | str = context[key]
-            if isinstance(context_value, float) and context_value.is_integer():
-                context_value = int(context_value)            # a scale factor read as 2.0 matches case "2"
-            if isinstance(cases, dict):
-                cases = cast(dict[object, object], cases)
-                formula = str(cases.get(str(context_value), cases.get(context_value, "")))
-            if not formula and "range" in context_adjustment:
-                # "range": [-10, 10] -> 10**k scaling for every integer k in the range (explicit cases win)
-                bounds: tuple[int, int] | None = self.context_range_bounds(context_adjustment["range"])
-                if bounds is None:
-                    bad: str = f"{entry.variable_name}:{context_adjustment['range']!r}"
-                    if bad not in self._context_range_warned:
-                        self._context_range_warned.add(bad)
-                        self._log.warning(
-                            f"Ignoring invalid Context range {context_adjustment['range']!r} for {entry.variable_name} "
-                            f"(use [low, high] or \"low~high\", each within +/-{self.CONTEXT_RANGE_LIMIT})"
-                        )
-                elif isinstance(context_value, int) and bounds[0] <= context_value <= bounds[1]:
-                    formula = self.context_power_of_ten_formula(context_value)
-            if not formula:
-                formula = str(context_adjustment.get("default", ""))
-            if not formula:
-                return value
+            # {name} in a formula stands for the current value of another decoded variable or a
+            # protocol "context_variables" entry (e.g. {pt1}/{pt2}).  If one of them is unavailable
+            # in this pass the raw value is kept.
+            if "{" in formula:
+                substituted: str | None = self.substitute_context_variables(formula, context)
+                if substituted is None:
+                    self._log.debug(
+                        f"Context adjustment for {entry.variable_name} waiting for a variable used in '{formula}'"
+                    )
+                    return value
+                formula = substituted
 
             expression: str = formula.replace("x", str(float(value)))
             try:
@@ -847,11 +918,17 @@ class DataAdjustments:
         return f"x*{10 ** exponent}"
 
     def apply_range_formula(self, raw_value: float, logic: str) -> float:
-        """Apply conditional range formulas based on *raw_value*.
+        """Apply conditional range formulas based on *raw_value* (the ``High_Low`` adjustment).
 
-        Used by the ``High_Low`` adjustment key.  Each block in *logic* takes
-        the form ``x?(lo,hi)->formula`` and the matching block's formula is
-        evaluated with ``x`` substituted by *raw_value*.
+        Input:    ``raw_value`` (the decoded number) and ``logic``, blocks of the form
+                  ``x?(lo,hi)->formula`` (either bracket style).  A block matches when
+                  ``lo < raw_value <= hi``; the first match is used.
+        Output:   the matching formula evaluated with ``x`` = ``raw_value``, as a float.  Returns
+                  ``raw_value`` unchanged when no block matches (note ``0`` never matches a block
+                  that starts at ``(0``) or when evaluation fails (logged as a warning).
+        Use case: ranges that decode differently, e.g. two's-complement from an unsigned register:
+                  ``x?(0,32768]->x x?(32768,65535)->x-65536``; or a unit conversion that also
+                  needs an offset: ``x?(0,65535]->(x-2731)/10``.
         """
         cleaned_logic: str = logic.replace(" ", "")
 
@@ -875,6 +952,139 @@ class DataAdjustments:
                     return raw_value
 
         return raw_value
+
+    @staticmethod
+    def match_context_case(cases: Mapping[object, object], value: int | float | str) -> str:
+        """Return the formula whose ``cases`` key matches ``value``.
+
+        Input:    ``cases`` (a Context ``cases`` object, formula strings by key) and ``value``, the
+                  key variable's decoded value.  A whole-number float is matched as an integer.
+        Output:   the matching formula, or ``""`` when nothing matches.  An exact key wins over a
+                  comma-separated group key.
+        Use case: listing one formula for several values (``"333,80,100,200"``) instead of
+                  repeating it once per value.
+        """
+        if isinstance(value, float) and value.is_integer():
+            value = int(value)                       # a scale factor read as 2.0 matches case "2"
+        exact: object | None = cases.get(str(value), cases.get(value))
+        if exact is not None:
+            return str(exact)
+        wanted: str = str(value)
+        for case_key, case_formula in cases.items():
+            if isinstance(case_key, str) and "," in case_key and wanted in (part.strip() for part in case_key.split(",")):
+                return str(case_formula)
+        return ""
+
+    def select_context_formula(self, label: str, spec: Mapping[str, object], context: Mapping[str, int | float | str]) -> str:
+        """Choose the formula a Context spec yields for ``context``; ``""`` means leave the value alone.
+
+        Input:    ``label`` (variable name, for log messages), ``spec`` (a row's Context object, or one
+                  ``context_variables`` entry) and ``context`` (decoded values of this read).
+        Output:   the selected formula text, still containing any ``{name}`` placeholders, or ``""``
+                  when none applies (no match and no ``default``, or the ``key`` was not read).
+        Use case: the shared choice step of a row's ``Context`` adjustment and of a protocol
+                  ``context_variables`` entry.
+
+        A ``formula`` with no ``key`` always applies.  Otherwise ``key`` names a decoded variable whose
+        value picks a formula from ``cases`` (comma-grouped keys allowed), then ``range`` (powers of ten),
+        then ``default``.
+        """
+        key: str = str(spec.get("key", "")).strip()
+        always_formula: str = str(spec.get("formula", "")).strip()
+        if not key:
+            return always_formula
+        if key not in context:
+            self._log.debug(f"Context adjustment for {label} waiting for key '{key}'")
+            return ""
+        context_value: int | float | str = context[key]
+        if isinstance(context_value, float) and context_value.is_integer():
+            context_value = int(context_value)
+        formula: str = ""
+        cases: object = spec.get("cases", {})
+        if isinstance(cases, dict):
+            formula = self.match_context_case(cast(dict[object, object], cases), context_value)
+        if not formula and "range" in spec:
+            # "range": [-10, 10] -> 10**k scaling for every integer k in the range (explicit cases win)
+            bounds: tuple[int, int] | None = self.context_range_bounds(spec["range"])
+            if bounds is None:
+                bad: str = f"{label}:{spec['range']!r}"
+                if bad not in self._context_range_warned:
+                    self._context_range_warned.add(bad)
+                    self._log.warning(
+                        f"Ignoring invalid Context range {spec['range']!r} for {label} "
+                        f"(use [low, high] or \"low~high\", each within +/-{self.CONTEXT_RANGE_LIMIT})"
+                    )
+            elif isinstance(context_value, int) and bounds[0] <= context_value <= bounds[1]:
+                formula = self.context_power_of_ten_formula(context_value)
+        return formula or str(spec.get("default", ""))
+
+    def evaluate_context_variables(self, context: Mapping[str, int | float | str]) -> dict[str, float]:
+        """Evaluate the protocol's ``context_variables`` against ``context`` (the decoded values).
+
+        Input:    ``context``, the decoded values of this read.  The definitions come from the protocol
+                  JSON's ``context_variables`` object: name -> expression string, or a Context spec
+                  (``key``/``cases``/``default``).  An entry may use ``{name}`` for decoded variables and
+                  for entries defined above it.
+        Output:   a dict of name -> float for every entry that could be evaluated.  An entry whose inputs
+                  were not read in this pass (or that fails to evaluate, logged) is left out, so rows that
+                  use it keep their raw value.  The values are not published as variables.
+        Use case: one long scale formula shared by many rows, such as the Acuvim II primary/secondary
+                  PT/CT scale, written once in the JSON instead of in every CSV row.
+        Example:  ``{"voltage_scale": "{mode}+(1-{mode})*{pt1}/{pt2}"}`` then, in a row,
+                  ``{"Context": {"formula": "x*{voltage_scale}"}}``
+        """
+        derived: dict[str, float] = {}
+        for name, definition in self.context_variables.items():
+            spec: Mapping[str, object]
+            if isinstance(definition, str):
+                spec = {"formula": definition}
+            elif isinstance(definition, dict):
+                spec = cast(dict[str, object], definition)
+            else:
+                continue
+            view: Mapping[str, int | float | str] = ChainMap(cast(dict[str, int | float | str], derived), cast(dict[str, int | float | str], context))
+            formula: str = self.select_context_formula(name, spec, view)
+            if not formula:
+                continue
+            if "{" in formula:
+                substituted: str | None = self.substitute_context_variables(formula, view)
+                if substituted is None:
+                    continue
+                formula = substituted
+            try:
+                derived[name] = float(self.safe_eval_expression(formula))
+            except Exception as exc:
+                self._log.warning(f"Failed context variable '{name}' ({formula}): {exc}")
+        return derived
+
+    _CONTEXT_VARIABLE_RE: ClassVar[re.Pattern[str]] = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+    @classmethod
+    def substitute_context_variables(cls, formula: str, context: Mapping[str, int | float | str]) -> str | None:
+        """Replace each ``{name}`` in ``formula`` with the numeric value of the decoded variable ``name``.
+
+        Input:    ``formula`` text possibly containing ``{name}`` placeholders, and ``context`` (decoded
+                  values and derived ``context_variables``).
+        Output:   the formula with every placeholder replaced by ``(<value>)``, or ``None`` when a named
+                  variable is absent from ``context`` or is not a number (text values and booleans are
+                  rejected), so the caller can leave the raw value alone.
+        Use case: letting a Context formula use another register, e.g. ``x*{pt1}/{pt2}``.
+
+        Values are inserted in parentheses so a negative value cannot change the meaning of the
+        expression.
+        """
+        missing: list[str] = []
+
+        def _replace(match: re.Match[str]) -> str:
+            name: str = match.group(1)
+            found: int | float | str | None = context.get(name)
+            if isinstance(found, bool) or not isinstance(found, (int, float)):
+                missing.append(name)
+                return ""
+            return f"({float(found)!r})"
+
+        result: str = cls._CONTEXT_VARIABLE_RE.sub(_replace, formula)
+        return None if missing else result
 
     def safe_eval_expression(self, expression: str) -> int | float:
         """Safely evaluate arithmetic expressions using AST parsing.
@@ -1072,7 +1282,12 @@ class protocol_settings:
         # DataAdjustments owns all adjustment parsing/application logic.
         # Constructed here, after word_order is resolved, so it captures the
         # correct protocol-level default (nearly always WORD_ORDER_ABCD for Modbus).
-        self._adjustments: DataAdjustments = DataAdjustments(self._log, self.word_order)
+        context_variable_defs: object = self.codes.get("context_variables")
+        self._adjustments: DataAdjustments = DataAdjustments(
+            self._log,
+            self.word_order,
+            cast(dict[str, object], context_variable_defs) if isinstance(context_variable_defs, dict) else None,
+        )
 
         for registry_type in Registry_Type:
             self.load_registry_map(registry_type)
@@ -2802,9 +3017,13 @@ class protocol_settings:
             else:
                 info[entry.variable_name] = value
 
+        # Protocol-level named expressions ("context_variables" in the JSON) are evaluated once from the
+        # decoded values, then offered to every row's Context formula behind the real variables.
+        derived_context: dict[str, float] = self._adjustments.evaluate_context_variables(info)
+        context_view: Mapping[str, int | float | str] = ChainMap(info, cast(dict[str, int | float | str], derived_context))
         for entry in registry_map:
             if entry.variable_name in info:
-                info[entry.variable_name] = self._adjustments.apply_adjustments(info[entry.variable_name], entry, "context", info)
+                info[entry.variable_name] = self._adjustments.apply_adjustments(info[entry.variable_name], entry, "context", context_view)
 
         entries_by_name: dict[str, registry_map_entry] = {entry.variable_name: entry for entry in registry_map}
         for entry in registry_map:

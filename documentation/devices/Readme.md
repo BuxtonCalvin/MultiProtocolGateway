@@ -51,6 +51,12 @@
 | [Sungrow](Sungrow.md) | SG Series, SHxxRT, SG350HX | RS485 / Ethernet | Modbus RTU / TCP | [Sungrow.md](Sungrow.md) |
 | [Victron Energy](Victron.md) | MultiPlus, MultiPlus-II, Quattro, Cerbo GX | Ethernet / VE.Bus / VE.Direct | MQTT native (Venus OS) | [Victron.md](Victron.md) |
 
+### Power / Energy Meters
+
+| Manufacturer | Key Models | Interface | Protocol | Guide |
+| --- | --- | --- | --- | --- |
+| [Accuenergy](Accuenergy.md) | Acuvim II, IIR, IIE, IIW power quality meters | RS485 terminal / AXM-WEB2 Ethernet | Modbus RTU | [Accuenergy.md](Accuenergy.md) |
+
 ### Batteries
 
 | Manufacturer | Key Models | Interface | Protocol | Guide |
@@ -145,6 +151,7 @@ This resolves the majority of "no response" issues and should always be the firs
 
 | Brand | RS485 Direct | Modbus TCP (LAN) | Native MQTT | Local REST API |
 | --- | --- | --- | --- | --- |
+| Accuenergy | ✅ | ❌ (AXM-WEB2 module, not mapped) | ❌ | ❌ |
 | AOLithium | ✅ RS485 + CAN | ❌ | ❌ | ❌ |
 | Deye / Sunsynk | ✅ | ❌ (bridge needed) | ❌ | ❌ |
 | EG4 | ✅ | ❌ | ❌ | ❌ |
