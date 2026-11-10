@@ -114,7 +114,7 @@ def test_protocol_context_variable_is_shared_by_rows(tmp_path: Path) -> None:
         [["1", "a", "USHORT", _SCALE], ["2", "b", "USHORT", _SCALE], ["3", "num", "USHORT", ""], ["4", "den", "USHORT", ""]],
         {"context_variables": {"scale": "{num}/{den}"}},
     )
-    out = _read(proto, {1: 6, 2: 9, 3: 200, 4: 5})
+    out: dict[str, float | int | str] = _read(proto, {1: 6, 2: 9, 3: 200, 4: 5})
     assert out["a"] == 240
     assert out["b"] == 360
     assert "scale" not in out, "derived values are not published"

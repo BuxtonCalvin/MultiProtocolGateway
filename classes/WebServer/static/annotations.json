@@ -339,7 +339,7 @@
       "label_y_percent": 63.6,
       "width_percent": 72.8,
       "height_percent": 76.1,
-      "label": "Protocol register map editor. Each row is a register with editable variable name, documented name, unit, type, range, R/W flag, Home Assistant device class / state class / entity category (dropdowns; blank = inferred from the unit), adjustments, and notes. Changes are staged and committed on demand.",
+      "label": "Protocol register map editor. Each row is a register with editable variable name, documented name, unit, type, range, R/W flag, Home Assistant device class / state class / entity category (dropdowns; blank = inferred from the unit), adjustments (click a cell to open a guided editor that validates and previews them), and notes. Changes are staged and committed on demand.",
       "shape_type": "rect"
     }
   ],

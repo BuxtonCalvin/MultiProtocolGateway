@@ -22,13 +22,14 @@ import csv
 import itertools
 import json
 import logging
+import math
 import os
 import re
 import struct
 import sys
 import time
 from collections import ChainMap
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -528,6 +529,30 @@ _WORD_ORDER_ALIASES: dict[str, WordOrder] = {
 }
 
 
+@dataclass(frozen=True)
+class AdjustmentValidation:
+    """Result of checking an ``adjustments`` cell (see ``DataAdjustments.validate_adjustments``).
+
+    ``errors`` make the value unusable (it would be ignored, or fail, when MPG loads the map);
+    ``warnings`` are legal but probably unintended.  ``normalized`` is the canonical one-line JSON
+    to store (``""`` for an empty cell) and is only meaningful when ``ok``.
+    """
+
+    ok: bool
+    errors: list[str]
+    warnings: list[str]
+    normalized: str
+
+
+@dataclass
+class _PreviewEntry:
+    """The three registry-entry attributes ``apply_adjustments`` reads, for previews without a loaded map."""
+
+    adjustments: dict[str, object]
+    variable_name: str = "preview"
+    unit_mod: float = 1.0
+
+
 class DataAdjustments:
     """Parses, queries, and applies CSV-driven adjustments for registry entries.
 
@@ -636,6 +661,16 @@ class DataAdjustments:
     CONTEXT_RANGE_LIMIT: ClassVar[int] = 50
     _CONTEXT_RANGE_TEXT: ClassVar[re.Pattern[str]] = re.compile(r"^\s*(-?\d+)\s*(?:~|\.\.|,|-)\s*(-?\d+)\s*$")
     _context_range_warned: ClassVar[set[str]] = set()      # invalid ranges already reported, so each is logged once per process
+
+    # Adjustment keys MPG acts on, in the order the editor offers them, and the Context sub-keys it reads.
+    KNOWN_ADJUSTMENTS: ClassVar[tuple[str, ...]] = ("Register_Endian", "High_Low", "Offset", "Context")
+    CONTEXT_KEYS: ClassVar[tuple[str, ...]] = ("formula", "key", "cases", "range", "default")
+    REGISTER_ENDIAN_CHOICES: ClassVar[tuple[str, ...]] = (
+        "big_endian-ABCD", "big_endian_byte_swap-BADC", "little_endian-CDAB", "little_endian_byte_swap-DCBA",
+    )
+    _FORMULA_NAME_RE: ClassVar[re.Pattern[str]] = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
+    _HIGH_LOW_BLOCK_RE: ClassVar[re.Pattern[str]] = re.compile(r"x\?[\(\[]([\-0-9.]+),([\-0-9.]+)[\)\]]->(.+?)(?=x\?|$)")
+    _VARIABLE_NAME_RE: ClassVar[re.Pattern[str]] = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
     def __init__(
         self,
@@ -1085,6 +1120,295 @@ class DataAdjustments:
 
         result: str = cls._CONTEXT_VARIABLE_RE.sub(_replace, formula)
         return None if missing else result
+
+    # ------------------------------------------------------------------
+    # Validation and preview (used by the protocol editor's adjustments popup)
+    # ------------------------------------------------------------------
+
+    def check_formula(self, formula: str, *, allow_names: bool) -> tuple[str, list[str]]:
+        """Check one formula the way the loader will read it.
+
+        Input:    ``formula`` text and whether ``{name}`` placeholders are allowed (``High_Low`` formulas
+                  cannot use them; ``Context`` formulas can).
+        Output:   ``(error, names)``: ``error`` is ``""`` when the formula is valid, otherwise a message
+                  for the user; ``names`` lists the ``{name}`` placeholders found.
+        Use case: rejecting a typo (unbalanced bracket, unsupported operator, ``2x`` instead of ``2*x``)
+                  before it is saved, instead of finding it as a runtime warning.
+
+        Placeholders and ``x`` are replaced by ``1`` and the result is parsed with ``safe_eval_expression``,
+        so exactly the operators MPG supports are accepted.  A division by zero in the probe is not an error.
+        """
+        if not formula.strip():
+            return "the formula is empty", []
+        names: list[str] = self._FORMULA_NAME_RE.findall(formula)
+        if names and not allow_names:
+            return "{name} variables cannot be used here", names
+        probe: str = self._FORMULA_NAME_RE.sub("1", formula)
+        if "{" in probe or "}" in probe:
+            return "unmatched { or } (a variable is written {name} with letters, digits and underscores)", names
+        if re.search(r"[0-9.)]\s*x|x\s*[0-9.(]|x\s*x", probe):
+            return "put an operator next to x (for example 2*x, not 2x)", names
+        try:
+            self.safe_eval_expression(probe.replace("x", "1"))
+        except ZeroDivisionError:
+            pass
+        except (SyntaxError, ValueError, TypeError) as exc:
+            return f"not a valid arithmetic expression ({exc}); allowed: numbers, x, {{name}}, + - * / // % ** and parentheses", names
+        return "", names
+
+    def validate_adjustments(
+        self,
+        text: str | None,
+        known_variables: Collection[str] = (),
+        context_variables: Collection[str] = (),
+    ) -> AdjustmentValidation:
+        """Check an ``adjustments`` cell and return its canonical form.
+
+        Input:    ``text`` (the cell: a JSON object, or the ``Key:value`` shorthand, or empty), the variable
+                  names of the protocol (``known_variables``) and its ``context_variables`` entries.  The two
+                  collections only drive "unknown variable" warnings and may be empty.
+        Output:   an ``AdjustmentValidation``.  Errors: invalid JSON, duplicate keys, a recognized key with a
+                  value MPG cannot use, an invalid formula.  Warnings: a key MPG does not use (it is kept), a
+                  ``{name}`` or ``key`` that is not a known variable, overlapping ``High_Low`` ranges, a
+                  setting that another one overrides.  ``normalized`` is one-line JSON with recognized key
+                  names in canonical case.
+        Use case: guided editing without narrowing it too far: the four recognized adjustments are checked
+                  strictly, anything else is allowed but flagged.
+        """
+        errors: list[str] = []
+        warnings: list[str] = []
+        stripped: str = (text or "").strip()
+        if not stripped:
+            return AdjustmentValidation(True, [], [], "")  # noqa: FBT003
+
+        parsed: object
+        if stripped.startswith("{"):
+            def _no_duplicates(pairs: list[tuple[str, object]]) -> dict[str, object]:
+                seen: dict[str, object] = {}
+                for key, value in pairs:
+                    if key in seen:
+                        msg: str = f"duplicate key '{key}'"
+                        raise ValueError(msg)
+                    seen[key] = value
+                return seen
+
+            try:
+                parsed = json.loads(stripped, object_pairs_hook=_no_duplicates)
+            except ValueError as exc:
+                return AdjustmentValidation(False, [f"Invalid JSON: {exc}"], [], stripped)  # noqa: FBT003
+        else:
+            key_part, separator, value_part = stripped.partition(":")
+            if not separator or not key_part.strip():
+                return AdjustmentValidation(False, ["Expected a JSON object such as {\"Offset\": -40} or the shorthand Offset:-40"], [], stripped)  # noqa: FBT003
+            try:
+                parsed = {key_part.strip(): json.loads(value_part.strip())}
+            except json.JSONDecodeError:
+                parsed = {key_part.strip(): value_part.strip()}
+        if not isinstance(parsed, dict):
+            return AdjustmentValidation(False, ["The adjustments must be a JSON object ({...})"], [], stripped)  # noqa: FBT003
+
+        canonical: dict[str, object] = {}
+        lowered: dict[str, str] = {name.lower(): name for name in self.KNOWN_ADJUSTMENTS}
+        for raw_key, value in cast(dict[str, object], parsed).items():
+            name: str = lowered.get(raw_key.strip().lower(), raw_key.strip())
+            if not name:
+                errors.append("A key name is empty")
+                continue
+            if name in canonical:
+                errors.append(f"'{name}' is given twice (key names are not case-sensitive)")
+                continue
+            canonical[name] = value
+
+        known: set[str] = set(known_variables) | set(context_variables)
+        for name, value in canonical.items():
+            if name == "Register_Endian":
+                canonical[name] = self._check_register_endian(value, errors)
+            elif name == "Offset":
+                canonical[name] = self._check_offset(value, errors)
+            elif name == "High_Low":
+                self._check_high_low(value, errors, warnings)
+            elif name == "Context":
+                self._check_context(value, known, bool(known_variables or context_variables), errors, warnings)
+            else:
+                warnings.append(f"'{name}' is not an adjustment MPG uses; it is kept as is but has no effect")
+        if "High_Low" in canonical and "Offset" in canonical:
+            warnings.append("Offset is ignored when High_Low is present (High_Low is the whole transform)")
+
+        normalized: str = json.dumps(canonical, ensure_ascii=False)
+        return AdjustmentValidation(not errors, errors, warnings, normalized)
+
+    def _check_register_endian(self, value: object, errors: list[str]) -> object:
+        """Validate ``Register_Endian``; returns the value to store."""
+        if not isinstance(value, str) or value.strip().lower() not in _WORD_ORDER_ALIASES:
+            errors.append(
+                f"Register_Endian must be one of {', '.join(self.REGISTER_ENDIAN_CHOICES)} (or an alias such as little, cdab)"
+            )
+            return value
+        return value.strip()
+
+    def _check_offset(self, value: object, errors: list[str]) -> object:
+        """Validate ``Offset``; returns the number to store (a numeric string becomes a number)."""
+        if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+            errors.append("Offset must be a number")
+            return value
+        try:
+            number: float = float(value)
+        except ValueError:
+            errors.append(f"Offset must be a number, not '{value}'")
+            return value
+        if not math.isfinite(number):
+            errors.append("Offset must be a finite number")
+            return value
+        return int(number) if number.is_integer() and not isinstance(value, float) else number
+
+    def _check_high_low(self, value: object, errors: list[str], warnings: list[str]) -> None:
+        """Validate ``High_Low``: blocks of ``x?(lo,hi]->formula`` with ``lo < x <= hi`` semantics."""
+        if not isinstance(value, str):
+            errors.append("High_Low must be text such as x?(0,32768]->x x?(32768,65535]->x-65536")
+            return
+        cleaned: str = value.replace(" ", "")
+        blocks: list[re.Match[str]] = list(self._HIGH_LOW_BLOCK_RE.finditer(cleaned))
+        if not blocks:
+            errors.append("High_Low needs at least one block of the form x?(lower,upper]->formula")
+            return
+        if "".join(block.group(0) for block in blocks) != cleaned:
+            errors.append("High_Low has text outside its x?(lower,upper]->formula blocks")
+        spans: list[tuple[float, float]] = []
+        for number, block in enumerate(blocks, start=1):
+            try:
+                lower: float = float(block.group(1))
+                upper: float = float(block.group(2))
+            except ValueError:
+                errors.append(f"High_Low block {number}: the bounds must be numbers")
+                continue
+            if lower >= upper:
+                errors.append(f"High_Low block {number}: the lower bound ({block.group(1)}) must be below the upper bound ({block.group(2)})")
+            else:
+                spans.append((lower, upper))
+            problem, _names = self.check_formula(block.group(3), allow_names=False)
+            if problem:
+                errors.append(f"High_Low block {number}: {problem}")
+        ordered: list[tuple[float, float]] = sorted(spans)
+        if any(later[0] < earlier[1] for earlier, later in zip(ordered, ordered[1:])):
+            warnings.append("High_Low ranges overlap; the first matching block wins")
+
+    def _check_context(
+        self,
+        value: object,
+        known: set[str],
+        have_known: bool,
+        errors: list[str],
+        warnings: list[str],
+    ) -> None:
+        """Validate a ``Context`` object (``formula`` | ``key`` with ``cases``/``range``/``default``)."""
+        if not isinstance(value, dict):
+            errors.append("Context must be an object such as {\"formula\": \"x*{scale}\"}")
+            return
+        spec: dict[str, object] = cast(dict[str, object], value)
+        for unused in sorted(set(spec) - set(self.CONTEXT_KEYS)):
+            warnings.append(f"Context key '{unused}' is not used by MPG (expected {', '.join(self.CONTEXT_KEYS)})")
+
+        used_names: list[str] = []
+
+        def _formula(label: str, candidate: object) -> None:
+            if not isinstance(candidate, str):
+                errors.append(f"Context {label} must be text")
+                return
+            problem, names = self.check_formula(candidate, allow_names=True)
+            if problem:
+                errors.append(f"Context {label}: {problem}")
+            used_names.extend(names)
+            if "x" not in self._FORMULA_NAME_RE.sub("", candidate):
+                warnings.append(f"Context {label} does not use x, so the row's own value is ignored")
+
+        key: object = spec.get("key", "")
+        has_key: bool = isinstance(key, str) and bool(key.strip())
+        if "key" in spec and not has_key:
+            errors.append("Context key must be the name of another variable")
+        if has_key:
+            key_text: str = cast(str, key).strip()
+            # "{i}" is the per-meter/per-block placeholder of template rows (expanded when the map loads).
+            if not self._VARIABLE_NAME_RE.match(key_text.replace("{i}", "1")):
+                errors.append(f"Context key '{key_text}' is not a valid variable name (letters, digits and underscores)")
+            elif have_known and "{i}" not in key_text and key_text not in known:
+                warnings.append(f"Context key '{key_text}' is not a variable of this protocol")
+            if "formula" in spec:
+                warnings.append("Context formula is ignored when key is set (use cases or default)")
+            cases: object = spec.get("cases")
+            if cases is not None:
+                if not isinstance(cases, dict) or not cases:
+                    errors.append("Context cases must be an object of value -> formula, for example {\"0\": \"x\", \"1\": \"-x\"}")
+                else:
+                    for case_key, case_formula in cast(dict[str, object], cases).items():
+                        if not str(case_key).strip():
+                            errors.append("A Context cases value is empty")
+                        _formula(f"case '{case_key}'", case_formula)
+            if "range" in spec and self.context_range_bounds(spec["range"]) is None:
+                errors.append(
+                    f"Context range must be [low, high] or \"low~high\" with whole numbers within +/-{self.CONTEXT_RANGE_LIMIT}"
+                )
+            if "default" in spec:
+                _formula("default", spec["default"])
+            if not any(item in spec for item in ("cases", "range", "default")):
+                errors.append("Context with a key needs cases, range or default to choose a formula")
+        elif "formula" in spec:
+            _formula("formula", spec["formula"])
+            for orphan in ("cases", "range", "default"):
+                if orphan in spec:
+                    warnings.append(f"Context {orphan} is ignored without a key")
+        else:
+            errors.append("Context needs a formula, or a key with cases, range or default")
+
+        if have_known:
+            unknown: list[str] = sorted({name for name in used_names if name != "i" and name not in known})
+            if unknown:
+                warnings.append(
+                    "Not a variable of this protocol or one of its context_variables: " + ", ".join("{" + name + "}" for name in unknown)
+                    + " (fine if another row supplies it)"
+                )
+
+    def preview_adjustments(
+        self,
+        text: str,
+        value: float,
+        unit_mod: float = 1.0,
+        variables: Mapping[str, int | float] | None = None,
+        context_variable_defs: Mapping[str, object] | None = None,
+    ) -> dict[str, object]:
+        """Run an ``adjustments`` cell on a sample value, through the same code the gateway uses.
+
+        Input:    the cell ``text``, a sample decoded ``value`` (``x``), the row's ``unit_mod`` and sample values
+                  for the other variables a ``Context`` formula reads; optionally the protocol's
+                  ``context_variables`` definitions.
+        Output:   a dict: ``ok``, ``errors``, ``warnings``, ``post_decode`` (after ``High_Low`` or ``unit_mod``
+                  and ``Offset``), ``final`` (after ``Context``), ``formula`` (the Context formula chosen, with
+                  values substituted) and ``waiting_for`` (names it needs that were not supplied).  When a
+                  Context input is missing the gateway publishes the post-decode value, so ``final`` equals it.
+        Use case: letting the editor show what a formula does before it is saved.
+        """
+        check: AdjustmentValidation = self.validate_adjustments(text)
+        result: dict[str, object] = {
+            "ok": check.ok, "errors": check.errors, "warnings": check.warnings,
+            "post_decode": None, "final": None, "formula": "", "waiting_for": [],
+        }
+        if not check.ok:
+            return result
+        entry: registry_map_entry = cast("registry_map_entry", _PreviewEntry(self.parse_adjustments(check.normalized), "preview", unit_mod))
+        post: int | float | str = self.apply_adjustments(value, entry, "post_decode")
+        result["post_decode"] = post
+
+        supplied: dict[str, int | float | str] = dict(variables or {})
+        engine: DataAdjustments = DataAdjustments(self._log, self.default_word_order, context_variable_defs)
+        derived: dict[str, float] = engine.evaluate_context_variables(supplied)
+        view: Mapping[str, int | float | str] = ChainMap(supplied, cast(dict[str, int | float | str], derived))
+        context_spec: object | None = self.get_adjustment(entry, "Context")
+        if isinstance(context_spec, dict):
+            formula: str = engine.select_context_formula("preview", cast(dict[str, object], context_spec), view)
+            result["waiting_for"] = sorted({name for name in self._FORMULA_NAME_RE.findall(formula) if name not in view})
+            if formula and not result["waiting_for"]:
+                result["formula"] = engine.substitute_context_variables(formula, view) or formula
+        result["final"] = engine.apply_adjustments(post, entry, "context", view)
+        return result
 
     def safe_eval_expression(self, expression: str) -> int | float:
         """Safely evaluate arithmetic expressions using AST parsing.

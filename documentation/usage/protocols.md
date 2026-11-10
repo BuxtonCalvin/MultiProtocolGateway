@@ -371,6 +371,28 @@ Multiple adjustment directives can be combined in a single JSON object:
 
 ---
 
+#### Editing adjustments in the web UI
+
+In the protocol editor, click an **Adjustments** cell (or focus it and press Enter) to open the adjustments popup. The cell itself is read-only, so every change goes through the popup's checks.
+
+The popup is guided without being closed:
+
+- **The four adjustments MPG uses** each get typed controls and are checked strictly: `Register_Endian` (a list of the four standard orders), `Offset` (a number), `High_Low` (a table of ranges and formulas) and `Context` (either one formula, or "pick the formula from another variable" with a cases table, an optional scale-factor range and a default). Variable names in the protocol are offered when you pick a `key` or insert `{name}`, including the protocol's [`context_variables`](#shared-expressions-context_variables).
+- **Custom keys** let you add any other key with a JSON value. MPG does not use it today, so it is flagged as a warning and kept exactly as written.
+- **Raw JSON** shows the whole object, and can be edited and applied back to the form, for cases the form does not cover.
+- **Try it on a sample value** runs the current adjustments through the same code the gateway uses, with sample values for `x` and for any variables the formulas read, and shows the result and the formula chosen.
+
+Every change is checked by the server, which uses the same rules MPG applies when it loads the map, so the popup cannot accept something the gateway would not understand:
+
+| Result | Examples | Effect |
+| --- | --- | --- |
+| Error | invalid JSON, duplicate keys, an unknown `Register_Endian`, a non-numeric `Offset`, an unbalanced or unsupported formula (`2x`, `sqrt(x)`), a `High_Low` range whose lower bound is not below its upper bound, a `Context` key with nothing to choose from | **Apply** stays disabled. |
+| Warning | a key MPG does not use, a `{name}` or `key` that is not a variable of this protocol, overlapping `High_Low` ranges, an `Offset` next to a `High_Low` (ignored), a `Context` formula that never uses `x` | The value can still be applied. |
+
+**Apply** writes the checked, one-line JSON into the cell and the existing save runs as before: the edit is staged and committed to the override CSV like any other field. The save endpoint (`PATCH /api/protocols/{id}/field`) applies the same check, so a value sent directly to the API is rejected with `422` if it is invalid.
+
+The popup uses three endpoints under `/api/protocols/adjustments/`: `GET options` (the protocol's variable names, `context_variables` and fixed choices), `POST validate` and `POST preview`.
+
 ### Write Mode
 
 The `writable` column sets the read/write permission sourced from the manufacturer's specification. This is immutable from the protocol CSV — user write-back is enabled separately through the web UI (see [Managing Write-Back](#managing-write-back-via-the-web-ui)).

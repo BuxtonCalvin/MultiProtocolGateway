@@ -290,11 +290,17 @@
             {% if device_name %}
             <span class="reg-clip reg-clip--adjustments">{{ row.adjustments | string if row.adjustments else '' }}</span>
             {% else %}
-            <input type="text"
-                   class="w-full bg-mpg-200 border border-mpg-400 rounded px-1 py-0.5 surface-title font-mono dark:bg-mpg-700/75 dark:border-mpg-500 dark:text-mpg-50"
+            <input type="text" readonly
+                   class="w-full bg-mpg-200 border border-mpg-400 rounded px-1 py-0.5 surface-title font-mono cursor-pointer dark:bg-mpg-700/75 dark:border-mpg-500 dark:text-mpg-50"
                    value="{{ row.adjustments | string if row.adjustments else '' }}"
-                   placeholder='e.g. {"Register_Endian": "little_endian-CDAB"}'
-                   title="JSON adjustment spec for this 32-bit register pair"
+                   placeholder="Click to add adjustments"
+                   title="Click to edit adjustments{{ ': ' ~ row.adjustments if row.adjustments else '' }}"
+                   aria-label="Edit adjustments for {{ row.variable_name }}"
+                   aria-haspopup="dialog"
+                   data-adjustments-editor="1"
+                   data-protocol="{{ row.protocol_name }}"
+                   data-variable="{{ row.variable_name }}"
+                   data-address="{{ row.register_address }}"
                    hx-patch="/api/protocols/{{ row.id }}/field"
                    hx-on:htmx:config-request="event.detail.parameters = {field: 'adjustments', value: this.value}"
                    hx-swap="none"
@@ -643,9 +649,17 @@
             {% if device_name %}
             <span class="reg-clip reg-clip--adjustments">{{ row.adjustments | string if row.adjustments else '' }}</span>
             {% else %}
-            <input type="text"
-                   class="w-full bg-mpg-200 border border-mpg-400 rounded px-1 py-0.5 surface-title dark:bg-mpg-700/75 dark:border-mpg-500 dark:text-mpg-50"
+            <input type="text" readonly
+                   class="w-full bg-mpg-200 border border-mpg-400 rounded px-1 py-0.5 surface-title font-mono cursor-pointer dark:bg-mpg-700/75 dark:border-mpg-500 dark:text-mpg-50"
                    value="{{ row.adjustments | string if row.adjustments else '' }}"
+                   placeholder="Click to add adjustments"
+                   title="Click to edit adjustments{{ ': ' ~ row.adjustments if row.adjustments else '' }}"
+                   aria-label="Edit adjustments for {{ row.variable_name }}"
+                   aria-haspopup="dialog"
+                   data-adjustments-editor="1"
+                   data-protocol="{{ row.protocol_name }}"
+                   data-variable="{{ row.variable_name }}"
+                   data-address="{{ row.register_address }}"
                    hx-patch="/api/protocols/{{ row.id }}/field"
                    hx-on:htmx:config-request="event.detail.parameters = {field: 'adjustments', value: this.value}"
                    hx-swap="none"

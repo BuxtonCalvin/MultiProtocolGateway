@@ -33,7 +33,12 @@ from sqlalchemy.engine.row import Row
 from sqlalchemy.orm import Query, Session
 
 from ...ha_metadata import HA_COLUMNS, validate_ha_value
-from ...protocol_settings import Registry_Type, registry_map_entry
+from ...protocol_settings import (
+    AdjustmentValidation,
+    DataAdjustments,
+    Registry_Type,
+    registry_map_entry,
+)
 from ...transports.transport_base import transport_base
 from ..database import refresh_app_state
 from ..models import DeviceProtocolSelection, ProtocolRegister
@@ -1029,12 +1034,64 @@ def update_protocol_register_field(db: Session, register_id: int, field: str, va
         value = validate_ha_value(
             field, value, registry_type=row.registry_type, current=getattr(row, field)
         )
+    elif field == "adjustments":
+        # The popup editor validates first, but this endpoint is also reachable directly, and an
+        # unusable adjustment written to the CSV is only noticed when the gateway loads the map.
+        check: AdjustmentValidation = ADJUSTMENT_CHECKER.validate_adjustments(value)
+        if not check.ok:
+            raise ValueError("Invalid adjustments: " + "; ".join(check.errors))
+        value = check.normalized
 
     setattr(row, field, value)
     row.is_dirty = True
     db.flush()
     refresh_app_state(db)
     return row
+
+
+# Pure validator/previewer for the adjustments popup.  DataAdjustments owns the adjustment rules,
+# so the editor can never accept something the gateway would not understand.
+ADJUSTMENT_CHECKER: DataAdjustments = DataAdjustments(logging.getLogger(__name__))
+
+
+def adjustment_editor_options(
+    db: Session,
+    protocols_dir: Path,
+    config_dir: Path | None,
+    protocol_name: str | None,
+) -> dict[str, list[str] | dict[str, object]]:
+    """Everything the adjustments popup needs to guide an edit of one protocol's rows.
+
+    Returns the protocol's variable names (for the Context ``key`` list and "unknown variable"
+    warnings), the names and definitions of its JSON ``context_variables``, and the fixed choices
+    the editor offers (recognized adjustment keys and ``Register_Endian`` values).
+    """
+    variables: list[str] = []
+    context_names: list[str] = []
+    context_defs: dict[str, object] = {}
+    if protocol_name:
+        found: list[tuple[str, str]] = [
+            (group, variable)
+            for group, variable in db.execute(
+                select(ProtocolRegister.protocol_group, ProtocolRegister.variable_name)
+                .where(ProtocolRegister.protocol_name == protocol_name)
+            ).all()
+        ]
+        variables = sorted({variable for _group, variable in found if variable})
+        if found:
+            data, _is_override = get_protocol_json(protocols_dir, found[0][0], protocol_name, config_dir=config_dir)
+            raw: object = data.get("context_variables") if data else None
+            if isinstance(raw, dict):
+                context_defs = {str(name): definition for name, definition in raw.items()}
+                context_names = list(context_defs)
+    return {
+        "variables": variables,
+        "context_variables": context_names,
+        "context_variable_definitions": context_defs,
+        "known_keys": list(DataAdjustments.KNOWN_ADJUSTMENTS),
+        "context_keys": list(DataAdjustments.CONTEXT_KEYS),
+        "register_endian": list(DataAdjustments.REGISTER_ENDIAN_CHOICES),
+    }
 
 
 # A generic JSON value — used for get_protocol_json()'s return type below.

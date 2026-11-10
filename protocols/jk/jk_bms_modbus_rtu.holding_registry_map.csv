@@ -2,7 +2,7 @@ register,variable_name,documented_name,unit,data_type,values,read_interval,writa
 # PROTOCOL: jk_bms_modbus_rtu - JK BMS RS485 Modbus RTU (JK 'RS485 Modbus Universal Protocol V1.1'). Choose this when the BMS UART port is set to protocol 001 (115200 baud) or 013 (9600 baud).,,,,,,,,,,,,
 "# NOT THIS PROTOCOL: UART protocol 000 ('4G-GPS' / GPS Remote Module Common Protocol, the 4E 57 binary protocol) is jk_bms_4g_gps_serial, which uses the serial_jk transport. Bluetooth (BLE) is a third, separate JK interface and is not supported.",,,,,,,,,,,,
 # SOURCE: JK RS485 Modbus Universal Protocol V1.1 register table as reproduced in phinix-org/Multiple-JK-BMS-by-Modbus-RS485; JK-PB addresses cross-checked against syssi/esphome-jk-bms (esp8266-jk-pb-modbus-example.yaml). Not tested against hardware by the author of this map.,,,,,,,,,,,,
-"# ADDRESSING: JK offsets are byte offsets (16-bit values step by 2, 32-bit values by 4). Each row is therefore read on its own (batch_size 2); block reads would misalign. The register column holds the JK address in decimal, the note shows it in hex.",,,,,,,,,,,,
+"# ADDRESSING: JK offsets are byte offsets (16-bit values step by 2, 32-bit values by 4). Each row is therefore read on its own (batch_size 2); block reads would misalign. Every register in this file is the JK address in decimal (the note shows it in hex). Do not change batch_size.",,,,,,,,,,,,
 "# WORD ORDER: 32-bit values are standard big-endian (high word first), the app default, as in ESPHome's U_DWORD. Packed byte pairs: the first field listed by JK is the HIGH byte (.b8), the second is the LOW byte (.b0).",,,,,,,,,,,,
 "# READ ONLY: every row is read-only on purpose. JK supports Modbus function codes 03 and 16 only, and several settings share one register as two bytes. The 0x1600 control block (calibration, shutdown, chemistry presets, bulk-frame download) is not mapped.",,,,,,,,,,,,
 "# NOT COVERED: per-cell connection-line resistance settings (0x1088-0x1104), alarm/temperature-sensor presence byte (0x12D0), battery voltage correction float (0x12DC), data-field-enable, dry-node and buzzer settings (0x14E4+), Bluetooth name, PIN, password and user-data registers (deliberately omitted).",,,,,,,,,,,,
@@ -117,51 +117,51 @@ register,variable_name,documented_name,unit,data_type,values,read_interval,writa
 4864,rtc_counter,RTC Counter,s,uint,,,R,,0x1300 RTCTicks; seconds since 2020-01-01,,,diagnostic
 4872,time_to_sleep,Sleep Time,s,uint,,,R,,0x1308 TimeEnterSleep,duration,,diagnostic
 4876.b8,parallel_current_limit_module_status,Parallel Current Limiting Module Status,,8bit,0-1,,R,,0x130C PCLModuleSta (high byte),,,diagnostic
-4096,smart_sleep_voltage,Smart Sleep Voltage,0.001V,uint,,daily,R,,0x1000 VolSmartSleep; mV,,,config
-4100,cell_undervoltage_protection,Cell Undervoltage Protection,0.001V,uint,,daily,R,,0x1004 VolCellUV; mV,,,config
-4104,cell_undervoltage_recovery,Cell Undervoltage Recovery,0.001V,uint,,daily,R,,0x1008 VolCellUVPR; mV,,,config
-4108,cell_overvoltage_protection,Cell Overvoltage Protection,0.001V,uint,,daily,R,,0x100C VolCellOV; mV,,,config
-4112,cell_overvoltage_recovery,Cell Overvoltage Recovery,0.001V,uint,,daily,R,,0x1010 VolCellOVPR; mV,,,config
-4116,balance_trigger_voltage_difference,Balance Trigger Voltage Difference,0.001V,uint,,daily,R,,0x1014 VolBalanTrig; mV,,,config
-4120,soc_100_voltage,SOC 100% Voltage,0.001V,uint,,daily,R,,0x1018 VolSOC100%; mV,,,config
-4124,soc_0_voltage,SOC 0% Voltage,0.001V,uint,,daily,R,,0x101C VolSOC0%; mV,,,config
-4128,recommended_charge_voltage,Recommended Charge Voltage,0.001V,uint,,daily,R,,0x1020 VolCellRCV; mV,,,config
-4132,float_charge_voltage,Float Charge Voltage,0.001V,uint,,daily,R,,0x1024 VolCellRFV; mV,,,config
-4136,auto_shutdown_voltage,Automatic Shutdown Voltage,0.001V,uint,,daily,R,,0x1028 VolSysPwrOff; mV,,,config
-4140,continuous_charge_current,Continuous Charge Current,0.001A,uint,,daily,R,,0x102C CurBatCOC; mA,,,config
-4144,charge_overcurrent_delay,Charge Overcurrent Protection Delay,s,uint,,daily,R,,0x1030 TIMBatCOCPDly; s,,,config
-4148,charge_overcurrent_release,Charge Overcurrent Protection Release,s,uint,,daily,R,,0x1034 TIMBatCOCPRDly; s,,,config
-4152,continuous_discharge_current,Continuous Discharge Current,0.001A,uint,,daily,R,,0x1038 CurBatDcOC; mA,,,config
-4156,discharge_overcurrent_delay,Discharge Overcurrent Protection Delay,s,uint,,daily,R,,0x103C TIMBatDcOCPDly; s,,,config
-4160,discharge_overcurrent_release,Discharge Overcurrent Protection Release,s,uint,,daily,R,,0x1040 TIMBatDcOCPRDly; s,,,config
-4164,short_circuit_release,Short Circuit Protection Release,s,uint,,daily,R,,0x1044 TIMBatSCPRDly; s,,,config
-4168,max_balance_current,Maximum Balancing Current,0.001A,uint,,daily,R,,0x1048 CurBalanMax; mA,,,config
-4172,charge_overtemperature_protection,Charge Over-Temperature Protection,0.1C,int,,daily,R,,0x104C TMPBatCOT; signed,,,config
-4176,charge_overtemperature_recovery,Charge Over-Temperature Recovery,0.1C,int,,daily,R,,0x1050 TMPBatCOTPR; signed,,,config
-4180,discharge_overtemperature_protection,Discharge Over-Temperature Protection,0.1C,int,,daily,R,,0x1054 TMPBatDcOT; signed,,,config
-4184,discharge_overtemperature_recovery,Discharge Over-Temperature Recovery,0.1C,int,,daily,R,,0x1058 TMPBatDcOTPR; signed,,,config
-4188,charge_undertemperature_protection,Charge Low-Temperature Protection,0.1C,int,,daily,R,,0x105C TMPBatCUT; signed,,,config
-4192,charge_undertemperature_recovery,Charge Low-Temperature Recovery,0.1C,int,,daily,R,,0x1060 TMPBatCUTPR; signed,,,config
-4196,mosfet_overtemperature_protection,MOSFET Over-Temperature Protection,0.1C,int,,daily,R,,0x1064 TMPMosOT; signed,,,config
-4200,mosfet_overtemperature_recovery,MOSFET Over-Temperature Recovery,0.1C,int,,daily,R,,0x1068 TMPMosOTPR; signed,,,config
-4204,cell_count,Cell Count,,uint,,daily,R,,0x106C CellCount; number of series cells set in the BMS,,,config
-4208,charge_switch,Charge Switch,,uint,0-1,daily,R,,"0x1070 BatChargeEN; 1 = open, 0 = closed",,,config
-4212,discharge_switch,Discharge Switch,,uint,0-1,daily,R,,"0x1074 BatDisChargeEN; 1 = open, 0 = closed",,,config
-4216,balance_switch,Balance Switch,,uint,0-1,daily,R,,"0x1078 BalanEN; 1 = open, 0 = closed",,,config
-4220,design_capacity,Battery Design Capacity,0.001Ah,uint,,daily,R,,0x107C CapBatCell; mAh,,,config
-4224,short_circuit_delay,Short Circuit Protection Delay,,uint,,daily,R,,0x1080 SCPDelay; microseconds,,,config
-4228,balance_start_voltage,Balance Start Voltage,0.001V,uint,,daily,R,,0x1084 VolStartBalan; mV,,,config
-4360,device_address,Device Address,,uint,,daily,R,,0x1108 DevAddr; Modbus slave address; also set by the DIP switches,,,config
-4364,precharge_time,Discharge Precharge Time,s,uint,,daily,R,,0x110C TIMProdischarge; s,,,config
-4372,function_flags,Function Flags,,16BIT_FLAGS,,daily,R,,0x1114 switch bits BIT0-BIT9,,,config
-4376.b8,smart_sleep_time,Smart Sleep Time,h,8bit,,daily,R,,0x1118 TIMSmartSleep (high byte),,,config
-5120,device_model,Device Model,,ASCII.16,,daily,R,,0x1400 ManufacturerDeviceID,,,diagnostic
-5136,hardware_version,Hardware Version,,ASCII.8,,daily,R,,0x1410 HardwareVersion,,,diagnostic
-5144,software_version,Software Version,,ASCII.8,,daily,R,,0x1418 SoftwareVersion,,,diagnostic
-5152,accumulated_runtime,Accumulated Runtime,s,uint,,daily,R,,0x1420 ODDRunTime,duration,total_increasing,diagnostic
-5156,power_on_count,Power-On Count,,uint,,daily,R,,0x1424 PWROnTimes,,total_increasing,diagnostic
-5192,first_on_date,First Power-On Date,,ASCII.8,,daily,R,,0x1448 FirstOnDate; unofficial (not in the JK document),,,diagnostic
-5200,serial_number,Serial Number,,ASCII.16,,daily,R,,0x1450 SerialNo; unofficial (not in the JK document),,,diagnostic
-5298.b8,uart1_protocol,UART1 Protocol Number,,8bit,0-15,daily,R,,0x14B2 UART1MPRTOLNbr (high byte),,,diagnostic
-5298.b0,can_protocol,CAN Protocol Number,,8bit,0-14,daily,R,,0x14B2 CANMPRTOLNbr (low byte),,,diagnostic
-5332.b8,uart2_protocol,UART2 Protocol Number,,8bit,0-15,daily,R,,0x14D4 UART2MPRTOLNbr (high byte),,,diagnostic
+4096,smart_sleep_voltage,Smart Sleep Voltage,0.001V,uint,,86400s,R,,0x1000 VolSmartSleep; mV,,,config
+4100,cell_undervoltage_protection,Cell Undervoltage Protection,0.001V,uint,,86400s,R,,0x1004 VolCellUV; mV,,,config
+4104,cell_undervoltage_recovery,Cell Undervoltage Recovery,0.001V,uint,,86400s,R,,0x1008 VolCellUVPR; mV,,,config
+4108,cell_overvoltage_protection,Cell Overvoltage Protection,0.001V,uint,,86400s,R,,0x100C VolCellOV; mV,,,config
+4112,cell_overvoltage_recovery,Cell Overvoltage Recovery,0.001V,uint,,86400s,R,,0x1010 VolCellOVPR; mV,,,config
+4116,balance_trigger_voltage_difference,Balance Trigger Voltage Difference,0.001V,uint,,86400s,R,,0x1014 VolBalanTrig; mV,,,config
+4120,soc_100_voltage,SOC 100% Voltage,0.001V,uint,,86400s,R,,0x1018 VolSOC100%; mV,,,config
+4124,soc_0_voltage,SOC 0% Voltage,0.001V,uint,,86400s,R,,0x101C VolSOC0%; mV,,,config
+4128,recommended_charge_voltage,Recommended Charge Voltage,0.001V,uint,,86400s,R,,0x1020 VolCellRCV; mV,,,config
+4132,float_charge_voltage,Float Charge Voltage,0.001V,uint,,86400s,R,,0x1024 VolCellRFV; mV,,,config
+4136,auto_shutdown_voltage,Automatic Shutdown Voltage,0.001V,uint,,86400s,R,,0x1028 VolSysPwrOff; mV,,,config
+4140,continuous_charge_current,Continuous Charge Current,0.001A,uint,,86400s,R,,0x102C CurBatCOC; mA,,,config
+4144,charge_overcurrent_delay,Charge Overcurrent Protection Delay,s,uint,,86400s,R,,0x1030 TIMBatCOCPDly; s,,,config
+4148,charge_overcurrent_release,Charge Overcurrent Protection Release,s,uint,,86400s,R,,0x1034 TIMBatCOCPRDly; s,,,config
+4152,continuous_discharge_current,Continuous Discharge Current,0.001A,uint,,86400s,R,,0x1038 CurBatDcOC; mA,,,config
+4156,discharge_overcurrent_delay,Discharge Overcurrent Protection Delay,s,uint,,86400s,R,,0x103C TIMBatDcOCPDly; s,,,config
+4160,discharge_overcurrent_release,Discharge Overcurrent Protection Release,s,uint,,86400s,R,,0x1040 TIMBatDcOCPRDly; s,,,config
+4164,short_circuit_release,Short Circuit Protection Release,s,uint,,86400s,R,,0x1044 TIMBatSCPRDly; s,,,config
+4168,max_balance_current,Maximum Balancing Current,0.001A,uint,,86400s,R,,0x1048 CurBalanMax; mA,,,config
+4172,charge_overtemperature_protection,Charge Over-Temperature Protection,0.1C,int,,86400s,R,,0x104C TMPBatCOT; signed,,,config
+4176,charge_overtemperature_recovery,Charge Over-Temperature Recovery,0.1C,int,,86400s,R,,0x1050 TMPBatCOTPR; signed,,,config
+4180,discharge_overtemperature_protection,Discharge Over-Temperature Protection,0.1C,int,,86400s,R,,0x1054 TMPBatDcOT; signed,,,config
+4184,discharge_overtemperature_recovery,Discharge Over-Temperature Recovery,0.1C,int,,86400s,R,,0x1058 TMPBatDcOTPR; signed,,,config
+4188,charge_undertemperature_protection,Charge Low-Temperature Protection,0.1C,int,,86400s,R,,0x105C TMPBatCUT; signed,,,config
+4192,charge_undertemperature_recovery,Charge Low-Temperature Recovery,0.1C,int,,86400s,R,,0x1060 TMPBatCUTPR; signed,,,config
+4196,mosfet_overtemperature_protection,MOSFET Over-Temperature Protection,0.1C,int,,86400s,R,,0x1064 TMPMosOT; signed,,,config
+4200,mosfet_overtemperature_recovery,MOSFET Over-Temperature Recovery,0.1C,int,,86400s,R,,0x1068 TMPMosOTPR; signed,,,config
+4204,cell_count,Cell Count,,uint,,86400s,R,,0x106C CellCount; number of series cells set in the BMS,,,config
+4208,charge_switch,Charge Switch,,uint,0-1,86400s,R,,"0x1070 BatChargeEN; 1 = open, 0 = closed",,,config
+4212,discharge_switch,Discharge Switch,,uint,0-1,86400s,R,,"0x1074 BatDisChargeEN; 1 = open, 0 = closed",,,config
+4216,balance_switch,Balance Switch,,uint,0-1,86400s,R,,"0x1078 BalanEN; 1 = open, 0 = closed",,,config
+4220,design_capacity,Battery Design Capacity,0.001Ah,uint,,86400s,R,,0x107C CapBatCell; mAh,,,config
+4224,short_circuit_delay,Short Circuit Protection Delay,,uint,,86400s,R,,0x1080 SCPDelay; microseconds,,,config
+4228,balance_start_voltage,Balance Start Voltage,0.001V,uint,,86400s,R,,0x1084 VolStartBalan; mV,,,config
+4360,device_address,Device Address,,uint,,86400s,R,,0x1108 DevAddr; Modbus slave address; also set by the DIP switches,,,config
+4364,precharge_time,Discharge Precharge Time,s,uint,,86400s,R,,0x110C TIMProdischarge; s,,,config
+4372,function_flags,Function Flags,,16BIT_FLAGS,,86400s,R,,0x1114 switch bits BIT0-BIT9,,,config
+4376.b8,smart_sleep_time,Smart Sleep Time,h,8bit,,86400s,R,,0x1118 TIMSmartSleep (high byte),,,config
+5120,device_model,Device Model,,ASCII.16,,86400s,R,,0x1400 ManufacturerDeviceID,,,diagnostic
+5136,hardware_version,Hardware Version,,ASCII.8,,86400s,R,,0x1410 HardwareVersion,,,diagnostic
+5144,software_version,Software Version,,ASCII.8,,86400s,R,,0x1418 SoftwareVersion,,,diagnostic
+5152,accumulated_runtime,Accumulated Runtime,s,uint,,86400s,R,,0x1420 ODDRunTime,duration,total_increasing,diagnostic
+5156,power_on_count,Power-On Count,,uint,,86400s,R,,0x1424 PWROnTimes,,total_increasing,diagnostic
+5192,first_on_date,First Power-On Date,,ASCII.8,,86400s,R,,0x1448 FirstOnDate; unofficial (not in the JK document),,,diagnostic
+5200,serial_number,Serial Number,,ASCII.16,,86400s,R,,0x1450 SerialNo; unofficial (not in the JK document),,,diagnostic
+5298.b8,uart1_protocol,UART1 Protocol Number,,8bit,0-15,86400s,R,,0x14B2 UART1MPRTOLNbr (high byte),,,diagnostic
+5298.b0,can_protocol,CAN Protocol Number,,8bit,0-14,86400s,R,,0x14B2 CANMPRTOLNbr (low byte),,,diagnostic
+5332.b8,uart2_protocol,UART2 Protocol Number,,8bit,0-15,86400s,R,,0x14D4 UART2MPRTOLNbr (high byte),,,diagnostic

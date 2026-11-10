@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, List, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import Row
 from sqlalchemy.orm import Session
 
@@ -39,6 +39,7 @@ from ...ha_metadata import (
     HA_COLUMNS,
     ha_dropdown_options,
 )
+from ...protocol_settings import AdjustmentValidation
 from ...transports.transport_base import transport_base
 from ..database import get_session, session_scope
 
@@ -49,10 +50,12 @@ else:
     from typing_extensions import TypedDict
 
 from ..services.protocol_service import (
+    ADJUSTMENT_CHECKER,
     DeviceMetricSummary,
     DeviceRegisterView,
     ProtocolTab,
     RegistersPage,
+    adjustment_editor_options,
     build_json_desc_rows,
     build_synthetic_rows,
     device_mask_in_use,
@@ -297,6 +300,54 @@ def toggle_delete_register(register_id: int, payload: DeleteToggleRequest, db: S
         )
     db.commit()
     return {"id": result.id, "pending_delete": result.pending_delete}
+
+
+# ---------------------------------------------------------------------------
+# Adjustments popup support.  Registered before the /{register_id}/... routes so the
+# literal "adjustments" segment is never read as a register id.
+# ---------------------------------------------------------------------------
+
+class AdjustmentCheckRequest(BaseModel):
+    value: str
+    protocol_name: str | None = None
+
+
+class AdjustmentPreviewRequest(BaseModel):
+    value: str
+    x: float = 1.0
+    unit_mod: float = 1.0
+    variables: dict[str, float] = Field(default_factory=dict)
+    protocol_name: str | None = None
+
+
+@router.get("/adjustments/options")
+def adjustment_options(
+    request: Request, protocol_name: str | None = None, db: Session = Depends(get_session),
+) -> dict[str, list[str] | dict[str, object]]:
+    config_dir: Path | None = getattr(request.app.state, "config_dir", None)
+    return adjustment_editor_options(db, request.app.state.protocols_dir, config_dir, protocol_name)
+
+
+@router.post("/adjustments/validate")
+def validate_adjustments_value(
+    payload: AdjustmentCheckRequest, request: Request, db: Session = Depends(get_session),
+) -> dict[str, bool | list[str] | str]:
+    options = adjustment_options(request, payload.protocol_name, db)
+    check: AdjustmentValidation = ADJUSTMENT_CHECKER.validate_adjustments(
+        payload.value, cast("list[str]", options["variables"]), cast("list[str]", options["context_variables"]),
+    )
+    return {"ok": check.ok, "errors": check.errors, "warnings": check.warnings, "normalized": check.normalized}
+
+
+@router.post("/adjustments/preview")
+def preview_adjustments_value(
+    payload: AdjustmentPreviewRequest, request: Request, db: Session = Depends(get_session),
+) -> dict[str, object]:
+    options = adjustment_options(request, payload.protocol_name, db)
+    return ADJUSTMENT_CHECKER.preview_adjustments(
+        payload.value, payload.x, payload.unit_mod, payload.variables,
+        cast("dict[str, object]", options["context_variable_definitions"]),
+    )
 
 
 @router.patch("/{register_id}/field")

@@ -115,20 +115,20 @@ def test_register_addresses(variable: str, address: int) -> None:
 
 def test_frequency_example_is_high_word_first() -> None:
     """The Acuvim II manual's float example: 0x42480000 is 50 Hz."""
-    values = _decode(_load(), {"frequency": bytes.fromhex("42480000")})
+    values: dict[str, float | int | str] = _decode(_load(), {"frequency": bytes.fromhex("42480000")})
     assert isinstance(values["frequency"], (int, float)) and math.isclose(float(values["frequency"]), 50.0, abs_tol=1e-6)
 
 
 @pytest.mark.parametrize(("watts", "kilowatts"), [(1500.0, 1.5), (-2500.0, -2.5)])
 def test_power_is_published_in_kw(watts: float, kilowatts: float) -> None:
     """Primary mode power is Rx/1000 kW, signed (negative = export)."""
-    values = _decode(_load(), {"power_total": _float(watts)})
+    values: dict[str, float | int | str] = _decode(_load(), {"power_total": _float(watts)})
     assert isinstance(values["power_total"], (int, float)) and math.isclose(float(values["power_total"]), kilowatts, abs_tol=1e-6)
 
 
 def test_unbalance_is_percent() -> None:
     """Unbalance is documented as Rx*100 %, with Rx a 0-1 ratio."""
-    values = _decode(_load(), {"voltage_unbalance": _float(0.02)})
+    values: dict[str, float | int | str] = _decode(_load(), {"voltage_unbalance": _float(0.02)})
     assert isinstance(values["voltage_unbalance"], (int, float)) and math.isclose(float(values["voltage_unbalance"]), 2.0, abs_tol=1e-4)
 
 
@@ -141,7 +141,7 @@ def test_unbalance_is_percent() -> None:
 )
 def test_energy_follows_energy_display_mode(mode: int, raw: int, expected: float) -> None:
     """Energy is Rx/10 in Primary mode and Rx/1000 in Secondary mode (register 0x1019)."""
-    values = _decode(
+    values: dict[str, float | int | str] = _decode(
         _load(),
         {"energy_display_mode": mode.to_bytes(2, "big"), "energy_import": raw.to_bytes(4, "big")},
     )
@@ -150,7 +150,7 @@ def test_energy_follows_energy_display_mode(mode: int, raw: int, expected: float
 
 def test_net_energy_is_signed() -> None:
     """Ep_net is documented as +/-999999999, so it decodes as a signed 32-bit integer."""
-    values = _decode(
+    values: dict[str, float | int | str] = _decode(
         _load(),
         {"energy_display_mode": (0).to_bytes(2, "big"), "energy_net": (-500).to_bytes(4, "big", signed=True)},
     )
@@ -159,7 +159,7 @@ def test_net_energy_is_signed() -> None:
 
 def test_run_time_is_hundredths_of_an_hour() -> None:
     """Run time T=Rx/100 hours, 32-bit high word first (0x1034 high, 0x1035 low)."""
-    values = _decode(_load(), {"run_time": (1234).to_bytes(4, "big")})
+    values: dict[str, float | int | str] = _decode(_load(), {"run_time": (1234).to_bytes(4, "big")})
     assert isinstance(values["run_time"], (int, float)) and math.isclose(float(values["run_time"]), 12.34, abs_tol=1e-6)
 
 
@@ -190,7 +190,7 @@ def _scaled(raw: dict[str, bytes], **settings: int) -> dict[str, float | int | s
 
 def test_primary_mode_values_are_not_rescaled() -> None:
     """Basic Parameter Mode 1 (Primary): voltage, current and power are published as read."""
-    out = _scaled(
+    out: dict[str, float | int | str] = _scaled(
         {"voltage_l1": _float(230.0), "current_l1": _float(12.5), "power_total": _float(3000.0)},
         basic_parameter_mode=1, pt1=4160, pt2=120, ct1=200, ct2=5,
     )
@@ -201,7 +201,7 @@ def test_primary_mode_values_are_not_rescaled() -> None:
 
 def test_secondary_mode_applies_pt_and_ct_ratios() -> None:
     """Basic Parameter Mode 0 (Secondary): U=Rx*(PT1/PT2), I=Rx*(CT1/CT2), P=Rx*(PT1/PT2)*(CT1/CT2)/1000 kW."""
-    out = _scaled(
+    out: dict[str, float | int | str] = _scaled(
         {"voltage_l1": _float(120.0), "current_l1": _float(2.5), "power_total": _float(1000.0)},
         basic_parameter_mode=0, pt1=4160, pt2=120, ct1=200, ct2=5,
     )
@@ -213,13 +213,13 @@ def test_secondary_mode_applies_pt_and_ct_ratios() -> None:
 @pytest.mark.parametrize("ct2", [333, 80, 100, 200])
 def test_millivolt_and_milliamp_inputs_take_ct2_as_one(ct2: int) -> None:
     """For 333mV and mA CT inputs the manufacturer takes CT2 as 1, so the current ratio is just CT1."""
-    out = _scaled({"current_l1": _float(0.5)}, basic_parameter_mode=0, ct1=1000, ct2=ct2)
+    out: dict[str, float | int | str] = _scaled({"current_l1": _float(0.5)}, basic_parameter_mode=0, ct1=1000, ct2=ct2)
     assert math.isclose(float(out["current_l1"]), 500.0, rel_tol=1e-6)
 
 
 def test_values_stay_raw_when_the_ratio_rows_were_not_read() -> None:
     """Without the mode/ratio rows in the pass the raw (Primary-mode) value is published."""
-    out = _scaled({"voltage_l1": _float(120.0)})
+    out: dict[str, float | int | str] = _scaled({"voltage_l1": _float(120.0)})
     assert math.isclose(float(out["voltage_l1"]), 120.0, abs_tol=1e-3)
 
 
