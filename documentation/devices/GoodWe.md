@@ -46,6 +46,6 @@ protocol_version = goodwe_energy_storage
 ## Sources
 
 - Eniris GoodWe device page: <https://docs.eniris.io/en/Controller/Devices/PV-hybrid-and-battery-inverters/GoodWe>
-- GoodWe Modbus Hybrid protocol (April 2024): community PDF mirror linked from `Pending_Inverter_Register_Sources.md`
+- GoodWe Modbus Hybrid protocol (April 2024): community PDF mirror (source link not yet recorded)
 - `protocols/goodwe/goodwe_energy_storage.json`
 - `protocols/goodwe/goodwe_energy_storage.holding_registry_map.csv`

@@ -22,7 +22,6 @@ from classes.protocol_settings import (
     protocol_settings,
     registry_map_entry,
 )
-from classes.WebServer.routers.analysis import Writer
 
 VSN: str = "abb_fimer_vsn300_sunspec"
 REACT2: str = "abb_fimer_react2_sunspec"
@@ -216,7 +215,7 @@ def test_react2_json_codes_are_valid_json() -> None:
 def _tiny_protocol(tmp_path: Path, rows: list[list[str]]) -> protocol_settings:
     header: list[str] = ["register", "variable_name", "documented_name", "unit", "data_type", "values", "read_interval", "writable", "adjustments", "note"]
     with (tmp_path / "probe.holding_registry_map.csv").open("w", newline="", encoding="utf-8") as handle:
-        writer: Writer = csv.writer(handle)
+        writer = csv.writer(handle)
         writer.writerow(header)
         writer.writerows(rows)
     (tmp_path / "probe.json").write_text(json.dumps({"transport": "modbus_tcp"}), encoding="utf-8")

@@ -30,8 +30,6 @@ protocol_version = kstar_blue_series
 
 ## Register map status
 
-Insufficient public register detail was captured in this pass. See [Pending_Inverter_Register_Sources.md](Pending_Inverter_Register_Sources.md).
-
 ## Sources
 
 - Eniris KSTAR device pages under PV/Hybrid Inverters

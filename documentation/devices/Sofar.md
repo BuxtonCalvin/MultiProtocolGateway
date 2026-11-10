@@ -31,7 +31,7 @@ Adjust `unit_id` and baud per your inverter menu — Sofar documentation varies 
 
 ## Register map status
 
-Public Sofar Modbus PDFs exist but are often mirrored, gated, or split by ARM firmware. See [Pending_Inverter_Register_Sources.md](Pending_Inverter_Register_Sources.md).
+Public Sofar Modbus PDFs exist but are often mirrored, gated, or split by ARM firmware.
 
 ## Sources
 

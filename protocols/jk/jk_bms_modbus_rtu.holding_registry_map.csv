@@ -1,0 +1,167 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note,ha_device_class,ha_state_class,ha_entity_category
+# PROTOCOL: jk_bms_modbus_rtu - JK BMS RS485 Modbus RTU (JK 'RS485 Modbus Universal Protocol V1.1'). Choose this when the BMS UART port is set to protocol 001 (115200 baud) or 013 (9600 baud).,,,,,,,,,,,,
+"# NOT THIS PROTOCOL: UART protocol 000 ('4G-GPS' / GPS Remote Module Common Protocol, the 4E 57 binary protocol) is jk_bms_4g_gps_serial, which uses the serial_jk transport. Bluetooth (BLE) is a third, separate JK interface and is not supported.",,,,,,,,,,,,
+# SOURCE: JK RS485 Modbus Universal Protocol V1.1 register table as reproduced in phinix-org/Multiple-JK-BMS-by-Modbus-RS485; JK-PB addresses cross-checked against syssi/esphome-jk-bms (esp8266-jk-pb-modbus-example.yaml). Not tested against hardware by the author of this map.,,,,,,,,,,,,
+"# ADDRESSING: JK offsets are byte offsets (16-bit values step by 2, 32-bit values by 4). Each row is therefore read on its own (batch_size 2); block reads would misalign. The register column holds the JK address in decimal, the note shows it in hex.",,,,,,,,,,,,
+"# WORD ORDER: 32-bit values are standard big-endian (high word first), the app default, as in ESPHome's U_DWORD. Packed byte pairs: the first field listed by JK is the HIGH byte (.b8), the second is the LOW byte (.b0).",,,,,,,,,,,,
+"# READ ONLY: every row is read-only on purpose. JK supports Modbus function codes 03 and 16 only, and several settings share one register as two bytes. The 0x1600 control block (calibration, shutdown, chemistry presets, bulk-frame download) is not mapped.",,,,,,,,,,,,
+"# NOT COVERED: per-cell connection-line resistance settings (0x1088-0x1104), alarm/temperature-sensor presence byte (0x12D0), battery voltage correction float (0x12DC), data-field-enable, dry-node and buzzer settings (0x14E4+), Bluetooth name, PIN, password and user-data registers (deliberately omitted).",,,,,,,,,,,,
+4608,cell_1_voltage,Cell 1 Voltage,0.001V,ushort,,,R,,0x1200 CellVol0; mV,voltage,measurement,
+4610,cell_2_voltage,Cell 2 Voltage,0.001V,ushort,,,R,,0x1202 CellVol1; mV,voltage,measurement,
+4612,cell_3_voltage,Cell 3 Voltage,0.001V,ushort,,,R,,0x1204 CellVol2; mV,voltage,measurement,
+4614,cell_4_voltage,Cell 4 Voltage,0.001V,ushort,,,R,,0x1206 CellVol3; mV,voltage,measurement,
+4616,cell_5_voltage,Cell 5 Voltage,0.001V,ushort,,,R,,0x1208 CellVol4; mV,voltage,measurement,
+4618,cell_6_voltage,Cell 6 Voltage,0.001V,ushort,,,R,,0x120A CellVol5; mV,voltage,measurement,
+4620,cell_7_voltage,Cell 7 Voltage,0.001V,ushort,,,R,,0x120C CellVol6; mV,voltage,measurement,
+4622,cell_8_voltage,Cell 8 Voltage,0.001V,ushort,,,R,,0x120E CellVol7; mV,voltage,measurement,
+4624,cell_9_voltage,Cell 9 Voltage,0.001V,ushort,,,R,,0x1210 CellVol8; mV,voltage,measurement,
+4626,cell_10_voltage,Cell 10 Voltage,0.001V,ushort,,,R,,0x1212 CellVol9; mV,voltage,measurement,
+4628,cell_11_voltage,Cell 11 Voltage,0.001V,ushort,,,R,,0x1214 CellVol10; mV,voltage,measurement,
+4630,cell_12_voltage,Cell 12 Voltage,0.001V,ushort,,,R,,0x1216 CellVol11; mV,voltage,measurement,
+4632,cell_13_voltage,Cell 13 Voltage,0.001V,ushort,,,R,,0x1218 CellVol12; mV,voltage,measurement,
+4634,cell_14_voltage,Cell 14 Voltage,0.001V,ushort,,,R,,0x121A CellVol13; mV,voltage,measurement,
+4636,cell_15_voltage,Cell 15 Voltage,0.001V,ushort,,,R,,0x121C CellVol14; mV,voltage,measurement,
+4638,cell_16_voltage,Cell 16 Voltage,0.001V,ushort,,,R,,0x121E CellVol15; mV,voltage,measurement,
+4640,cell_17_voltage,Cell 17 Voltage,0.001V,ushort,,,R,,0x1220 CellVol16; mV,voltage,measurement,
+4642,cell_18_voltage,Cell 18 Voltage,0.001V,ushort,,,R,,0x1222 CellVol17; mV,voltage,measurement,
+4644,cell_19_voltage,Cell 19 Voltage,0.001V,ushort,,,R,,0x1224 CellVol18; mV,voltage,measurement,
+4646,cell_20_voltage,Cell 20 Voltage,0.001V,ushort,,,R,,0x1226 CellVol19; mV,voltage,measurement,
+4648,cell_21_voltage,Cell 21 Voltage,0.001V,ushort,,,R,,0x1228 CellVol20; mV,voltage,measurement,
+4650,cell_22_voltage,Cell 22 Voltage,0.001V,ushort,,,R,,0x122A CellVol21; mV,voltage,measurement,
+4652,cell_23_voltage,Cell 23 Voltage,0.001V,ushort,,,R,,0x122C CellVol22; mV,voltage,measurement,
+4654,cell_24_voltage,Cell 24 Voltage,0.001V,ushort,,,R,,0x122E CellVol23; mV,voltage,measurement,
+4656,cell_25_voltage,Cell 25 Voltage,0.001V,ushort,,,R,,0x1230 CellVol24; mV,voltage,measurement,
+4658,cell_26_voltage,Cell 26 Voltage,0.001V,ushort,,,R,,0x1232 CellVol25; mV,voltage,measurement,
+4660,cell_27_voltage,Cell 27 Voltage,0.001V,ushort,,,R,,0x1234 CellVol26; mV,voltage,measurement,
+4662,cell_28_voltage,Cell 28 Voltage,0.001V,ushort,,,R,,0x1236 CellVol27; mV,voltage,measurement,
+4664,cell_29_voltage,Cell 29 Voltage,0.001V,ushort,,,R,,0x1238 CellVol28; mV,voltage,measurement,
+4666,cell_30_voltage,Cell 30 Voltage,0.001V,ushort,,,R,,0x123A CellVol29; mV,voltage,measurement,
+4668,cell_31_voltage,Cell 31 Voltage,0.001V,ushort,,,R,,0x123C CellVol30; mV,voltage,measurement,
+4670,cell_32_voltage,Cell 32 Voltage,0.001V,ushort,,,R,,0x123E CellVol31; mV,voltage,measurement,
+4672,cell_presence_status,Cell Presence Status,,32BIT_FLAGS,,,R,,0x1240 CellSta; bit n set = cell n+1 exists,,,diagnostic
+4676,cell_average_voltage,Cell Average Voltage,0.001V,ushort,,,R,,0x1244 CellVolAve; mV,voltage,measurement,
+4678,cell_voltage_difference,Cell Voltage Difference,0.001V,ushort,,,R,,0x1246 CellVdifMax; mV,voltage,measurement,
+4680.b8,max_voltage_cell_number,Max Voltage Cell Number,,8bit,,,R,,0x1248 MaxVolCellNbr (first-listed byte = high byte). Cell numbering base (0 or 1) not stated by JK; verify,,,diagnostic
+4680.b0,min_voltage_cell_number,Min Voltage Cell Number,,8bit,,,R,,0x1248 MinVolCellNbr (low byte),,,diagnostic
+4682,balance_line_resistance_1,Balance Line Resistance 1,0.001ohm,ushort,,3600s,R,,0x124A CellWireRes0; mOhm,,measurement,diagnostic
+4684,balance_line_resistance_2,Balance Line Resistance 2,0.001ohm,ushort,,3600s,R,,0x124C CellWireRes1; mOhm,,measurement,diagnostic
+4686,balance_line_resistance_3,Balance Line Resistance 3,0.001ohm,ushort,,3600s,R,,0x124E CellWireRes2; mOhm,,measurement,diagnostic
+4688,balance_line_resistance_4,Balance Line Resistance 4,0.001ohm,ushort,,3600s,R,,0x1250 CellWireRes3; mOhm,,measurement,diagnostic
+4690,balance_line_resistance_5,Balance Line Resistance 5,0.001ohm,ushort,,3600s,R,,0x1252 CellWireRes4; mOhm,,measurement,diagnostic
+4692,balance_line_resistance_6,Balance Line Resistance 6,0.001ohm,ushort,,3600s,R,,0x1254 CellWireRes5; mOhm,,measurement,diagnostic
+4694,balance_line_resistance_7,Balance Line Resistance 7,0.001ohm,ushort,,3600s,R,,0x1256 CellWireRes6; mOhm,,measurement,diagnostic
+4696,balance_line_resistance_8,Balance Line Resistance 8,0.001ohm,ushort,,3600s,R,,0x1258 CellWireRes7; mOhm,,measurement,diagnostic
+4698,balance_line_resistance_9,Balance Line Resistance 9,0.001ohm,ushort,,3600s,R,,0x125A CellWireRes8; mOhm,,measurement,diagnostic
+4700,balance_line_resistance_10,Balance Line Resistance 10,0.001ohm,ushort,,3600s,R,,0x125C CellWireRes9; mOhm,,measurement,diagnostic
+4702,balance_line_resistance_11,Balance Line Resistance 11,0.001ohm,ushort,,3600s,R,,0x125E CellWireRes10; mOhm,,measurement,diagnostic
+4704,balance_line_resistance_12,Balance Line Resistance 12,0.001ohm,ushort,,3600s,R,,0x1260 CellWireRes11; mOhm,,measurement,diagnostic
+4706,balance_line_resistance_13,Balance Line Resistance 13,0.001ohm,ushort,,3600s,R,,0x1262 CellWireRes12; mOhm,,measurement,diagnostic
+4708,balance_line_resistance_14,Balance Line Resistance 14,0.001ohm,ushort,,3600s,R,,0x1264 CellWireRes13; mOhm,,measurement,diagnostic
+4710,balance_line_resistance_15,Balance Line Resistance 15,0.001ohm,ushort,,3600s,R,,0x1266 CellWireRes14; mOhm,,measurement,diagnostic
+4712,balance_line_resistance_16,Balance Line Resistance 16,0.001ohm,ushort,,3600s,R,,0x1268 CellWireRes15; mOhm,,measurement,diagnostic
+4714,balance_line_resistance_17,Balance Line Resistance 17,0.001ohm,ushort,,3600s,R,,0x126A CellWireRes16; mOhm,,measurement,diagnostic
+4716,balance_line_resistance_18,Balance Line Resistance 18,0.001ohm,ushort,,3600s,R,,0x126C CellWireRes17; mOhm,,measurement,diagnostic
+4718,balance_line_resistance_19,Balance Line Resistance 19,0.001ohm,ushort,,3600s,R,,0x126E CellWireRes18; mOhm,,measurement,diagnostic
+4720,balance_line_resistance_20,Balance Line Resistance 20,0.001ohm,ushort,,3600s,R,,0x1270 CellWireRes19; mOhm,,measurement,diagnostic
+4722,balance_line_resistance_21,Balance Line Resistance 21,0.001ohm,ushort,,3600s,R,,0x1272 CellWireRes20; mOhm,,measurement,diagnostic
+4724,balance_line_resistance_22,Balance Line Resistance 22,0.001ohm,ushort,,3600s,R,,0x1274 CellWireRes21; mOhm,,measurement,diagnostic
+4726,balance_line_resistance_23,Balance Line Resistance 23,0.001ohm,ushort,,3600s,R,,0x1276 CellWireRes22; mOhm,,measurement,diagnostic
+4728,balance_line_resistance_24,Balance Line Resistance 24,0.001ohm,ushort,,3600s,R,,0x1278 CellWireRes23; mOhm,,measurement,diagnostic
+4730,balance_line_resistance_25,Balance Line Resistance 25,0.001ohm,ushort,,3600s,R,,0x127A CellWireRes24; mOhm,,measurement,diagnostic
+4732,balance_line_resistance_26,Balance Line Resistance 26,0.001ohm,ushort,,3600s,R,,0x127C CellWireRes25; mOhm,,measurement,diagnostic
+4734,balance_line_resistance_27,Balance Line Resistance 27,0.001ohm,ushort,,3600s,R,,0x127E CellWireRes26; mOhm,,measurement,diagnostic
+4736,balance_line_resistance_28,Balance Line Resistance 28,0.001ohm,ushort,,3600s,R,,0x1280 CellWireRes27; mOhm,,measurement,diagnostic
+4738,balance_line_resistance_29,Balance Line Resistance 29,0.001ohm,ushort,,3600s,R,,0x1282 CellWireRes28; mOhm,,measurement,diagnostic
+4740,balance_line_resistance_30,Balance Line Resistance 30,0.001ohm,ushort,,3600s,R,,0x1284 CellWireRes29; mOhm,,measurement,diagnostic
+4742,balance_line_resistance_31,Balance Line Resistance 31,0.001ohm,ushort,,3600s,R,,0x1286 CellWireRes30; mOhm,,measurement,diagnostic
+4744,balance_line_resistance_32,Balance Line Resistance 32,0.001ohm,ushort,,3600s,R,,0x1288 CellWireRes31; mOhm,,measurement,diagnostic
+4746,mosfet_temperature,MOSFET Temperature,0.1C,short,,,R,,0x128A TempMos; power board temperature,temperature,measurement,
+4748,balance_line_alarm_status,Balance Line Alarm Status,,32BIT_FLAGS,,,R,,0x128C CellWireResSta; bit n set = balance line alarm on cell n+1,,,diagnostic
+4752,total_voltage,Total Voltage,0.001V,uint,,,R,,"0x1290 BatVol; mV, 32-bit",voltage,measurement,
+4756,power,Power,0.001W,uint,,,R,,0x1294 BatWatt; mW. JK lists it unsigned: take the direction from the sign of current,power,measurement,
+4760,current,Current,0.001A,int,,,R,,"0x1298 BatCurrent; mA, signed",current,measurement,
+4764,battery_temperature_1,Battery Temperature 1,0.1C,short,,,R,,0x129C TempBat1,temperature,measurement,
+4766,battery_temperature_2,Battery Temperature 2,0.1C,short,,,R,,0x129E TempBat2,temperature,measurement,
+4856,battery_temperature_3,Battery Temperature 3,0.1C,short,,,R,,0x12F8 TempBat3,temperature,measurement,
+4858,battery_temperature_4,Battery Temperature 4,0.1C,short,,,R,,0x12FA TempBat4,temperature,measurement,
+4860,battery_temperature_5,Battery Temperature 5,0.1C,short,,,R,,0x12FC TempBat5,temperature,measurement,
+4768,alarm_status,Alarm Status,,32BIT_FLAGS,,,R,,0x12A0 alarm bitmask; names in the protocol JSON. Bits 22 and 23 are numbered by their order in the JK table,,,diagnostic
+4772,balancing_current,Balancing Current,0.001A,short,,,R,,"0x12A4 BalanCurrent; mA, signed",current,measurement,
+4774.b8,balancing_state,Balancing State,,8bit,0-2,,R,,0x12A6 BalanSta (high byte),,,diagnostic
+4774.b0,state_of_charge,State of Charge,%,8bit,0-100,,R,,0x12A6 SOCStateOfcharge (low byte),battery,measurement,
+4776,remaining_capacity,Remaining Capacity,0.001Ah,int,,,R,,0x12A8 SOCCapRemain; mAh,,measurement,
+4780,full_charge_capacity,Full Charge Capacity,0.001Ah,uint,,,R,,"0x12AC SOCFullChargeCap; actual capacity, mAh",,measurement,
+4784,cycle_count,Cycle Count,,uint,,,R,,0x12B0 SOCCycleCount,,total_increasing,
+4788,total_cycle_capacity,Total Cycle Capacity,0.001Ah,uint,,,R,,0x12B4 SOCCycleCap; mAh,,total_increasing,
+4792.b8,state_of_health,State of Health,%,8bit,0-100,,R,,0x12B8 SOCSOH (high byte),,measurement,
+4792.b0,precharge_status,Precharge Status,,8bit,0-1,,R,,0x12B8 Precharge (low byte),,,diagnostic
+4794,user_alarm_1,User Alarm 1,,16BIT_FLAGS,,,R,,0x12BA UserAlarm; bit meanings are not published by JK,,,diagnostic
+4796,runtime,Runtime,s,uint,,,R,,0x12BC Runtime,duration,total_increasing,diagnostic
+4800.b8,charge_status,Charge Status,,8bit,0-1,,R,,0x12C0 Charge (high byte),,,diagnostic
+4800.b0,discharge_status,Discharge Status,,8bit,0-1,,R,,0x12C0 Discharge (low byte),,,diagnostic
+4802,user_alarm_2,User Alarm 2,,16BIT_FLAGS,,,R,,0x12C2 UserAlarm2; bit meanings are not published by JK,,,diagnostic
+4804,discharge_overcurrent_release_time,Discharge Overcurrent Protection Release Time,s,ushort,,,R,,0x12C4 TimeDcOCPR,duration,,diagnostic
+4806,discharge_short_circuit_release_time,Discharge Short Circuit Protection Release Time,s,ushort,,,R,,0x12C6 TimeDcSCPR,duration,,diagnostic
+4808,charge_overcurrent_release_time,Charge Overcurrent Protection Release Time,s,ushort,,,R,,0x12C8 TimeCOCPR,duration,,diagnostic
+4810,charge_short_circuit_release_time,Charge Short Circuit Protection Release Time,s,ushort,,,R,,0x12CA TimeCSCPR,duration,,diagnostic
+4812,cell_undervoltage_release_time,Cell Undervoltage Protection Release Time,s,ushort,,,R,,0x12CC TimeUVPR,duration,,diagnostic
+4814,cell_overvoltage_release_time,Cell Overvoltage Protection Release Time,s,ushort,,,R,,0x12CE TimeOVPR,duration,,diagnostic
+4820,emergency_switch_time,Emergency Switch Time,s,ushort,,,R,,0x12D4 TimeEmergency,,,diagnostic
+4822,discharge_current_correction_factor,Discharge Current Correction Factor,,ushort,,,R,,0x12D6 BatDisCurCorrect,,,diagnostic
+4824,charge_current_sensor_voltage,Charge Current Sensor Voltage,0.001V,ushort,,,R,,0x12D8 VolChargCur; mV,voltage,measurement,diagnostic
+4826,discharge_current_sensor_voltage,Discharge Current Sensor Voltage,0.001V,ushort,,,R,,0x12DA VolDischargCur; mV,voltage,measurement,diagnostic
+4836,total_voltage_2,Total Voltage (0.01 V resolution),0.01V,ushort,,,R,,"0x12E4 BatVol; second, lower-resolution pack voltage",voltage,measurement,diagnostic
+4838,heating_current,Heating Current,0.001A,short,,,R,,0x12E6 HeatCurrent; mA,current,measurement,diagnostic
+4846.b0,charger_plugged,Charger Plugged,,8bit,0-1,,R,,0x12EE ChargerPlugged (low byte; the high byte is reserved),,,diagnostic
+4848,system_beat,System Beat,0.1s,uint,,,R,,0x12F0 SysRunTicks,,total_increasing,diagnostic
+4864,rtc_counter,RTC Counter,s,uint,,,R,,0x1300 RTCTicks; seconds since 2020-01-01,,,diagnostic
+4872,time_to_sleep,Sleep Time,s,uint,,,R,,0x1308 TimeEnterSleep,duration,,diagnostic
+4876.b8,parallel_current_limit_module_status,Parallel Current Limiting Module Status,,8bit,0-1,,R,,0x130C PCLModuleSta (high byte),,,diagnostic
+4096,smart_sleep_voltage,Smart Sleep Voltage,0.001V,uint,,daily,R,,0x1000 VolSmartSleep; mV,,,config
+4100,cell_undervoltage_protection,Cell Undervoltage Protection,0.001V,uint,,daily,R,,0x1004 VolCellUV; mV,,,config
+4104,cell_undervoltage_recovery,Cell Undervoltage Recovery,0.001V,uint,,daily,R,,0x1008 VolCellUVPR; mV,,,config
+4108,cell_overvoltage_protection,Cell Overvoltage Protection,0.001V,uint,,daily,R,,0x100C VolCellOV; mV,,,config
+4112,cell_overvoltage_recovery,Cell Overvoltage Recovery,0.001V,uint,,daily,R,,0x1010 VolCellOVPR; mV,,,config
+4116,balance_trigger_voltage_difference,Balance Trigger Voltage Difference,0.001V,uint,,daily,R,,0x1014 VolBalanTrig; mV,,,config
+4120,soc_100_voltage,SOC 100% Voltage,0.001V,uint,,daily,R,,0x1018 VolSOC100%; mV,,,config
+4124,soc_0_voltage,SOC 0% Voltage,0.001V,uint,,daily,R,,0x101C VolSOC0%; mV,,,config
+4128,recommended_charge_voltage,Recommended Charge Voltage,0.001V,uint,,daily,R,,0x1020 VolCellRCV; mV,,,config
+4132,float_charge_voltage,Float Charge Voltage,0.001V,uint,,daily,R,,0x1024 VolCellRFV; mV,,,config
+4136,auto_shutdown_voltage,Automatic Shutdown Voltage,0.001V,uint,,daily,R,,0x1028 VolSysPwrOff; mV,,,config
+4140,continuous_charge_current,Continuous Charge Current,0.001A,uint,,daily,R,,0x102C CurBatCOC; mA,,,config
+4144,charge_overcurrent_delay,Charge Overcurrent Protection Delay,s,uint,,daily,R,,0x1030 TIMBatCOCPDly; s,,,config
+4148,charge_overcurrent_release,Charge Overcurrent Protection Release,s,uint,,daily,R,,0x1034 TIMBatCOCPRDly; s,,,config
+4152,continuous_discharge_current,Continuous Discharge Current,0.001A,uint,,daily,R,,0x1038 CurBatDcOC; mA,,,config
+4156,discharge_overcurrent_delay,Discharge Overcurrent Protection Delay,s,uint,,daily,R,,0x103C TIMBatDcOCPDly; s,,,config
+4160,discharge_overcurrent_release,Discharge Overcurrent Protection Release,s,uint,,daily,R,,0x1040 TIMBatDcOCPRDly; s,,,config
+4164,short_circuit_release,Short Circuit Protection Release,s,uint,,daily,R,,0x1044 TIMBatSCPRDly; s,,,config
+4168,max_balance_current,Maximum Balancing Current,0.001A,uint,,daily,R,,0x1048 CurBalanMax; mA,,,config
+4172,charge_overtemperature_protection,Charge Over-Temperature Protection,0.1C,int,,daily,R,,0x104C TMPBatCOT; signed,,,config
+4176,charge_overtemperature_recovery,Charge Over-Temperature Recovery,0.1C,int,,daily,R,,0x1050 TMPBatCOTPR; signed,,,config
+4180,discharge_overtemperature_protection,Discharge Over-Temperature Protection,0.1C,int,,daily,R,,0x1054 TMPBatDcOT; signed,,,config
+4184,discharge_overtemperature_recovery,Discharge Over-Temperature Recovery,0.1C,int,,daily,R,,0x1058 TMPBatDcOTPR; signed,,,config
+4188,charge_undertemperature_protection,Charge Low-Temperature Protection,0.1C,int,,daily,R,,0x105C TMPBatCUT; signed,,,config
+4192,charge_undertemperature_recovery,Charge Low-Temperature Recovery,0.1C,int,,daily,R,,0x1060 TMPBatCUTPR; signed,,,config
+4196,mosfet_overtemperature_protection,MOSFET Over-Temperature Protection,0.1C,int,,daily,R,,0x1064 TMPMosOT; signed,,,config
+4200,mosfet_overtemperature_recovery,MOSFET Over-Temperature Recovery,0.1C,int,,daily,R,,0x1068 TMPMosOTPR; signed,,,config
+4204,cell_count,Cell Count,,uint,,daily,R,,0x106C CellCount; number of series cells set in the BMS,,,config
+4208,charge_switch,Charge Switch,,uint,0-1,daily,R,,"0x1070 BatChargeEN; 1 = open, 0 = closed",,,config
+4212,discharge_switch,Discharge Switch,,uint,0-1,daily,R,,"0x1074 BatDisChargeEN; 1 = open, 0 = closed",,,config
+4216,balance_switch,Balance Switch,,uint,0-1,daily,R,,"0x1078 BalanEN; 1 = open, 0 = closed",,,config
+4220,design_capacity,Battery Design Capacity,0.001Ah,uint,,daily,R,,0x107C CapBatCell; mAh,,,config
+4224,short_circuit_delay,Short Circuit Protection Delay,,uint,,daily,R,,0x1080 SCPDelay; microseconds,,,config
+4228,balance_start_voltage,Balance Start Voltage,0.001V,uint,,daily,R,,0x1084 VolStartBalan; mV,,,config
+4360,device_address,Device Address,,uint,,daily,R,,0x1108 DevAddr; Modbus slave address; also set by the DIP switches,,,config
+4364,precharge_time,Discharge Precharge Time,s,uint,,daily,R,,0x110C TIMProdischarge; s,,,config
+4372,function_flags,Function Flags,,16BIT_FLAGS,,daily,R,,0x1114 switch bits BIT0-BIT9,,,config
+4376.b8,smart_sleep_time,Smart Sleep Time,h,8bit,,daily,R,,0x1118 TIMSmartSleep (high byte),,,config
+5120,device_model,Device Model,,ASCII.16,,daily,R,,0x1400 ManufacturerDeviceID,,,diagnostic
+5136,hardware_version,Hardware Version,,ASCII.8,,daily,R,,0x1410 HardwareVersion,,,diagnostic
+5144,software_version,Software Version,,ASCII.8,,daily,R,,0x1418 SoftwareVersion,,,diagnostic
+5152,accumulated_runtime,Accumulated Runtime,s,uint,,daily,R,,0x1420 ODDRunTime,duration,total_increasing,diagnostic
+5156,power_on_count,Power-On Count,,uint,,daily,R,,0x1424 PWROnTimes,,total_increasing,diagnostic
+5192,first_on_date,First Power-On Date,,ASCII.8,,daily,R,,0x1448 FirstOnDate; unofficial (not in the JK document),,,diagnostic
+5200,serial_number,Serial Number,,ASCII.16,,daily,R,,0x1450 SerialNo; unofficial (not in the JK document),,,diagnostic
+5298.b8,uart1_protocol,UART1 Protocol Number,,8bit,0-15,daily,R,,0x14B2 UART1MPRTOLNbr (high byte),,,diagnostic
+5298.b0,can_protocol,CAN Protocol Number,,8bit,0-14,daily,R,,0x14B2 CANMPRTOLNbr (low byte),,,diagnostic
+5332.b8,uart2_protocol,UART2 Protocol Number,,8bit,0-15,daily,R,,0x14D4 UART2MPRTOLNbr (high byte),,,diagnostic
