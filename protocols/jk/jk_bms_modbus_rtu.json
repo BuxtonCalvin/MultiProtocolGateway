@@ -1,7 +1,8 @@
 {
   "transport": "modbus_rtu",
   "baud": 115200,
-  "batch_size": 2,
+  "batch_size": 128,
+  "register_address_step": 2,
   "send_holding_register": true,
   "send_input_register": false,
   "send_coil_register": false,

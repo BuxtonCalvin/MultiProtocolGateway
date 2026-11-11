@@ -294,6 +294,19 @@ def _to_exact_int(value: str | int | float) -> int:
         return int(float(value))
 
 
+def _address_step(protocol: object) -> int:
+    """Address distance between consecutive words of a read (``register_address_step``, default 1).
+
+    Reads the setting from the protocol object defensively so partial or mock protocol objects
+    simply mean the normal consecutive layout.
+    """
+    try:
+        step: int = int(getattr(protocol, "register_address_step", 1))
+    except (ValueError, TypeError):
+        return 1
+    return step if step >= 1 else 1
+
+
 class modbus_base(transport_base):
     """Scheduling path: All (Sequential, Concurrent, Interleaved) — base class for every Modbus transport regardless of read_mode."""
 
@@ -685,6 +698,10 @@ class modbus_base(transport_base):
             words.reverse()
         return words
 
+    def _register_step(self) -> int:
+        """Address distance between consecutive words of a read (``register_address_step``, default 1)."""
+        return _address_step(self._protocol)
+
     def _entry_word_count(self, entry: registry_map_entry) -> int:
         """Scheduling path: All (Sequential, Concurrent, Interleaved)."""
         return self._protocol.entry_word_count(entry)
@@ -725,8 +742,9 @@ class modbus_base(transport_base):
             registers: list[int] | None = getattr(response, "registers", None)
             if registers is None:
                 return None
+            step: int = _address_step(self._protocol)
             return {
-                start_addr + i: int(registers[i])
+                start_addr + i * step: int(registers[i])
                 for i in range(min(count, len(registers)))
             }
 
@@ -1042,7 +1060,7 @@ class modbus_base(transport_base):
         start: int
         count: int
         start, count = register_range
-        end: int = start + count  # exclusive
+        end: int = start + count * _address_step(self._protocol)  # exclusive
         if entries is None:
             try:
                 entries = self._protocol.registry_map.get(registry_type, [])
@@ -1229,7 +1247,8 @@ class modbus_base(transport_base):
         values: dict[int, int] | None = self._extract_response_values(response, registry_type, (start, count))
         if values is None or len(values) < count:
             return None
-        return [values[start + offset] for offset in range(count)]
+        step: int = _address_step(self._protocol)
+        return [values[start + offset * step] for offset in range(count)]
 
     def discover_register_structure(self) -> bool:
         """Scheduling path: N/A — setup, runs once per connect/reconnect regardless of read_mode.
@@ -2616,17 +2635,17 @@ class modbus_base(transport_base):
         word_count: int = self._entry_word_count(entry)
         registry: dict[int, int] = self.read_modbus_registers(
             start=entry.register,
-            end=entry.register + word_count - 1,
+            end=entry.register + (word_count - 1) * _address_step(self._protocol),
             registry_type=registry_type,
         )
         info: dict[str, int | float | str] = self._protocol.process_registery(registry, temp_map)
 
         raw_registers: list[int] = []
         for offset in range(word_count):
-            raw_word: int | None = registry.get(entry.register + offset)
+            raw_word: int | None = registry.get(entry.register + offset * _address_step(self._protocol))
             if raw_word is None:
                 self._log.error(
-                    f"WRITE_ERROR: Register {entry.register + offset} not found in registry "
+                    f"WRITE_ERROR: Register {entry.register + offset * _address_step(self._protocol)} not found in registry "
                     f"for '{entry.variable_name}'. Unsafe to write."
                 )
                 return
@@ -2990,6 +3009,7 @@ class modbus_base(transport_base):
                     count: int = batch_size
                     if start + batch_size > end:
                         count = end - start + 1
+                    count = -(-count // _address_step(self._protocol))  # words, not addresses
                     ranges.append((start, count)) ##APPEND TUPLE
 
         registry: dict[int, int] = {}

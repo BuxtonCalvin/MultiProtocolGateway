@@ -43,7 +43,7 @@ A **protocol** is the map between raw register addresses on a hardware device an
 
 ## Protocol File Structure
 
-Each protocol lives in its own subdirectory under `protocols/` and consists of up to five files:
+Each protocol lives in its own subdirectory under `protocols/` and consists of up to three files:
 
 ``` ini
 protocols/
@@ -58,8 +58,6 @@ protocols/
 | `{name}.json` | Protocol-wide defaults, baud rate, byte order, and enum code definitions |
 | `{name}.input_registry_map.csv` | Read-only (input) registers — polled from the device |
 | `{name}.holding_registry_map.csv` | Read/write (holding) registers — polled and optionally written back |
-| `{name}.coil_registry_map.csv` | Read/write (coil, FC01/FC05) single-bit outputs such as relays — optional |
-| `{name}.discrete_registry_map.csv` | Read-only (discrete input, FC02) single-bit statuses — optional |
 | `{name}.registry_map.csv` | Generic register map for protocols without an input/holding distinction (CAN bus, etc.) |
 
 The four Modbus register types and their properties:
@@ -106,6 +104,8 @@ The `.json` file sets protocol-wide defaults that apply to all registers in the 
 | `baud` | Default baud rate for RTU connections. |
 | `byteorder` | Default byte order for all registers: `big` (most common) or `little`. Individual registers override this via the `adjustments` column. |
 | `read_interval` | Default polling interval in seconds. Overridden by the transport's `read_interval` setting. |
+| `batch_size` | Size, in register addresses, of the windows MPG splits the address space into. Each window with due registers becomes one read from its first to its last register. Default 40. |
+| `register_address_step` | Distance between consecutive 16-bit words of a read. Default `1`. Set `2` for the rare device whose registers are numbered by byte offset (JK BMS Modbus); see [Byte-Addressed Devices](#byte-addressed-devices-register_address_step). |
 | `register_key_type` | How the `register` column is read: `numeric` (default) for register numbers, or `text` when the protocol is addressed by labels or codes instead of numbers (VE.Direct `SOC`, OBIS `0:1.8.0`). See [Text Keys](#text-keys-labels-and-obis-codes). |
 | `discovery` | Name of a discovery provider to run on every connect (currently `sunspec`) for protocols whose register layout depends on the attached equipment. Omit it for ordinary static protocols. See [Template Rows](#template-rows-dynamic-register-maps). |
 | `discovery_defaults` | Object of anchor name to value used to resolve [template rows](#template-rows-dynamic-register-maps) before (or without) a device. |
@@ -193,14 +193,12 @@ A bit offset selects one or more bits within a 16-bit register:
 0x2C.b4       bit 4 of hex register 0x2C
 ```
 
-A byte offset selects one byte of the register as received. Byte 0 is the first byte on the wire, which for a normal big-endian Modbus register is the **high** byte:
+A byte offset selects one byte:
 
 ``` ini
-5.0           byte 0 of register 5: the high byte (first on the wire)
-5.1           byte 1 of register 5: the low byte
+5.0           byte 0 (low byte) of register 5
+5.1           byte 1 (high byte) of register 5
 ```
-
-For example, a register holding `0x0102` with the address in its high byte and a baud-rate code in its low byte is read as `0x3F.0` (address 1) and `0x3F.1` (code 2).
 
 #### Multi-Register (32-bit and 64-bit) Values
 
@@ -241,6 +239,18 @@ In a range, each register is decoded on its own and the pieces are joined. NUL b
 Range notation implies consecutive ascending addresses and is intended for `ASCII` and `HEX` types. For numeric multi-word values, always use the explicit underscore format instead.
 
 ---
+
+#### Byte-Addressed Devices (`register_address_step`)
+
+Almost every Modbus device numbers its registers consecutively: a read of 3 words at address 100 returns addresses 100, 101 and 102. A few devices, such as the JK BMS Modbus protocol, number registers by **byte offset**, so consecutive 16-bit values are 2 apart (`0x1200`, `0x1202`, `0x1204`) and 32-bit values are 4 apart. A read of *n* words at address *a* still returns *n* words, but word *i* belongs to address `a + 2*i`.
+
+Set `"register_address_step": 2` in the protocol JSON for such a device. Keep the register column in the device's own addresses; MPG then:
+
+- turns the span of a block into a word count (`(last - first) / step + 1`) when it builds read ranges,
+- stores word *i* of each response under `first + i * step`, and
+- finds the words of 32-bit and text values `step` addresses apart.
+
+`batch_size` stays in address units, so with a step of 2 a `batch_size` of 128 reads up to 64 words per request. Every address must differ from the others in its block by a multiple of the step (for JK all addresses are even). Protocols that do not set the option are unaffected.
 
 ### Byte and Word Order
 
@@ -306,44 +316,9 @@ For SunSpec, use `"range": [-10, 10]` (the range the standard allows) instead of
 76,current_sf,AC Current Scale Factor,,SHORT,,,R,,...
 ```
 
-#### Variables in formulas
-
-A formula may name other decoded variables with `{name}`, which is replaced by that variable's current value (the `variable name` of another row in the same map). This covers scales that depend on a ratio of two settings, such as instrument-transformer ratios:
-
-```json
-{"Context": {"formula": "x*{pt1}/{pt2}"}}
-```
-
-- `key` is optional when the adjustment has a single `formula`, as above. With a `key`, `cases`, `range` and `default` choose the formula as before, and the chosen formula may use `{name}` too.
-- Only numeric variables work. If a named variable was not read in the same polling pass (or is text), the raw value is published unchanged, exactly as for a missing `key`. Give the rows you reference no `read interval` of their own (or the same interval as the rows that use them) so they are present in every pass.
-- Arithmetic is limited to `+ - * / // % **` and parentheses; there are no comparisons. A mode switch can be written arithmetically: `x*({mode}+(1-{mode})*{ratio})` is `x` when `mode` is 1 and `x*ratio` when it is 0. Alternatively use `key`/`cases` for a branch on one variable.
-- Each substituted value is wrapped in parentheses, so negative values keep their sign. A division by zero leaves the raw value and logs a warning.
-- `unit` multipliers are applied before `Context`, so `x` already includes them.
-
-#### Shared expressions: `context_variables`
-
-When many rows need the same long formula, define it once in the protocol's JSON file and refer to it by name. Each entry is an expression string, or a `key`/`cases`/`default` object like a row's Context. An entry may use decoded variables and entries listed above it:
-
-```json
-"context_variables": {
-  "ct_ratio": { "key": "ct2", "cases": { "333,80,100,200": "{ct1}" }, "default": "{ct1}/{ct2}" },
-  "current_scale": "{basic_parameter_mode}+(1-{basic_parameter_mode})*{ct_ratio}"
-}
-```
-
-A row then carries only `{"Context": {"formula": "x*{current_scale}"}}`.
-
-- Entries are evaluated once per polling pass from the decoded values and are not published. If an input was not read in that pass the entry is skipped, and rows that use it publish the raw value.
-- A decoded variable with the same name wins over an entry, so do not reuse a variable name.
-- In `cases`, one key may list several values separated by commas (`"333,80,100,200"`), so a formula is written once instead of once per value.
-
-The Accuenergy Acuvim II map uses this to follow the meter's Primary/Secondary parameter mode and its PT/CT ratios; see [Accuenergy.md](../devices/Accuenergy.md).
-
 `Context` is applied when reading only. It cannot be inverted, so a **writable** row that carries one would send the user's value unscaled. Leave writable SunSpec points raw (no `Context`) and publish their scale-factor register beside them, as the ABB/FIMER SunSpec maps do.
 
 The same mechanism handles a sign or direction register: `{"Context": {"key": "direction", "cases": {"1": "-x", "0": "x"}}}` makes a power value negative while `direction` is 1.
-
-It also covers a scale the meter selects with a setting register. Accuenergy's Acuvim II reports energy as `Rx/10` kWh in Primary energy display mode and `Rx/1000` kWh in Secondary mode, chosen by register `0x1019`, so each energy row carries `{"Context": {"key": "energy_display_mode", "cases": {"0": "x/10", "1": "x/1000"}, "default": "x/10"}}` and the map reads `0x1019` as the `energy_display_mode` row. Those energy registers are writable on the meter, so the map lists them as `R` (see the note on writable rows above).
 
 #### Bit Flag Codes
 
@@ -373,28 +348,6 @@ Multiple adjustment directives can be combined in a single JSON object:
 
 ---
 
-#### Editing adjustments in the web UI
-
-In the protocol editor, click an **Adjustments** cell (or focus it and press Enter) to open the adjustments popup. The cell itself is read-only, so every change goes through the popup's checks.
-
-The popup is guided without being closed:
-
-- **The four adjustments MPG uses** each get typed controls and are checked strictly: `Register_Endian` (a list of the four standard orders), `Offset` (a number), `High_Low` (a table of ranges and formulas) and `Context` (either one formula, or "pick the formula from another variable" with a cases table, an optional scale-factor range and a default). Variable names in the protocol are offered when you pick a `key` or insert `{name}`, including the protocol's [`context_variables`](#shared-expressions-context_variables).
-- **Custom keys** let you add any other key with a JSON value. MPG does not use it today, so it is flagged as a warning and kept exactly as written.
-- **Raw JSON** shows the whole object, and can be edited and applied back to the form, for cases the form does not cover.
-- **Try it on a sample value** runs the current adjustments through the same code the gateway uses, with sample values for `x` and for any variables the formulas read, and shows the result and the formula chosen.
-
-Every change is checked by the server, which uses the same rules MPG applies when it loads the map, so the popup cannot accept something the gateway would not understand:
-
-| Result | Examples | Effect |
-| --- | --- | --- |
-| Error | invalid JSON, duplicate keys, an unknown `Register_Endian`, a non-numeric `Offset`, an unbalanced or unsupported formula (`2x`, `sqrt(x)`), a `High_Low` range whose lower bound is not below its upper bound, a `Context` key with nothing to choose from | **Apply** stays disabled. |
-| Warning | a key MPG does not use, a `{name}` or `key` that is not a variable of this protocol, overlapping `High_Low` ranges, an `Offset` next to a `High_Low` (ignored), a `Context` formula that never uses `x` | The value can still be applied. |
-
-**Apply** writes the checked, one-line JSON into the cell and the existing save runs as before: the edit is staged and committed to the override CSV like any other field. The save endpoint (`PATCH /api/protocols/{id}/field`) applies the same check, so a value sent directly to the API is rejected with `422` if it is invalid.
-
-The popup uses three endpoints under `/api/protocols/adjustments/`: `GET options` (the protocol's variable names, `context_variables` and fixed choices), `POST validate` and `POST preview`.
-
 ### Write Mode
 
 The `writable` column sets the read/write permission sourced from the manufacturer's specification. This is immutable from the protocol CSV — user write-back is enabled separately through the web UI (see [Managing Write-Back](#managing-write-back-via-the-web-ui)).
@@ -402,9 +355,9 @@ The `writable` column sets the read/write permission sourced from the manufactur
 | Value | Meaning |
 | --- | --- |
 | `R` | Read-only. Default if omitted. |
-| `RW` | Read and write supported by the device. `W` and `YES` are accepted as aliases of `RW` by the loader. |
-| `WO` | Write-only — never polled (for command registers such as "clear energy" whose read-back is meaningless). |
-| `RD` | Read disabled — register is skipped during polling. Use it to document registers that are expensive or optional (per-order harmonics, optional I/O modules) without reading them by default. |
+| `RW` | Read and write supported by the device. |
+| `W` | Write-only. |
+| `RD` | Read disabled — register is skipped during polling. |
 
 ---
 
@@ -720,9 +673,6 @@ MPG ships with pre-built protocols for the following devices. All protocols are 
 
 | Protocol Name | Device | Transport |
 | --- | --- | --- |
-| `abb_fimer` | React2 / Sunspec / Trio / VSN300 | Modbus RTU |
-| `accuenergy_acuvim` | Accuenergy Acuvim II / IIR / IIE / IIW power meters | Modbus RTU |
-| `acrel_dtsd1352_c` | Acrel DTSD1352-C three-phase DIN-rail energy meter | Modbus RTU |
 | `apsystems_ecu_sunspec` | APsystems ECU SunSpec gateway | Modbus TCP |
 | `deye_sunsynk` | Deye / Sunsynk hybrid inverters | Modbus |
 | `deye_sunsynk_hybrid` | Deye / Sunsynk hybrid inverter extended map | Modbus |
