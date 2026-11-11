@@ -9,6 +9,7 @@ ABB / FIMER,Legacy SunSpec inverters,abb_fimer_sunspec,ModBus,https://github.com
 ABB / FIMER,REACT2 SunSpec,abb_fimer_react2_sunspec,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/ABB_Fimer.md
 ABB / FIMER,VSN300 / VSN700 SunSpec,abb_fimer_vsn300_sunspec,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/ABB_Fimer.md
 Accuenergy,Acuvim II / IIR / IIE / IIW power meters,accuenergy_acuvim,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Accuenergy.md
+Acrel,DTSD1352-C three-phase DIN-rail energy meter,acrel_dtsd1352_c,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Acrel.md
 APsystems,ECU SunSpec gateway,apsystems_ecu_sunspec,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/APsystems.md
 Deye / Sunsynk,Hybrid inverter,deye_sunsynk,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Deye_Sunsynk.md
 Deye / Sunsynk,Hybrid inverter extended map,deye_sunsynk_hybrid,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Deye_Sunsynk.md

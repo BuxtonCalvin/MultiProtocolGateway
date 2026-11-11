@@ -193,12 +193,14 @@ A bit offset selects one or more bits within a 16-bit register:
 0x2C.b4       bit 4 of hex register 0x2C
 ```
 
-A byte offset selects one byte:
+A byte offset selects one byte of the register as received. Byte 0 is the first byte on the wire, which for a normal big-endian Modbus register is the **high** byte:
 
 ``` ini
-5.0           byte 0 (low byte) of register 5
-5.1           byte 1 (high byte) of register 5
+5.0           byte 0 of register 5: the high byte (first on the wire)
+5.1           byte 1 of register 5: the low byte
 ```
+
+For example, a register holding `0x0102` with the address in its high byte and a baud-rate code in its low byte is read as `0x3F.0` (address 1) and `0x3F.1` (code 2).
 
 #### Multi-Register (32-bit and 64-bit) Values
 
@@ -718,7 +720,9 @@ MPG ships with pre-built protocols for the following devices. All protocols are 
 
 | Protocol Name | Device | Transport |
 | --- | --- | --- |
+| `abb_fimer` | React2 / Sunspec / Trio / VSN300 | Modbus RTU |
 | `accuenergy_acuvim` | Accuenergy Acuvim II / IIR / IIE / IIW power meters | Modbus RTU |
+| `acrel_dtsd1352_c` | Acrel DTSD1352-C three-phase DIN-rail energy meter | Modbus RTU |
 | `apsystems_ecu_sunspec` | APsystems ECU SunSpec gateway | Modbus TCP |
 | `deye_sunsynk` | Deye / Sunsynk hybrid inverters | Modbus |
 | `deye_sunsynk_hybrid` | Deye / Sunsynk hybrid inverter extended map | Modbus |

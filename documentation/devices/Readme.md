@@ -56,6 +56,7 @@
 | Manufacturer | Key Models | Interface | Protocol | Guide |
 | --- | --- | --- | --- | --- |
 | [Accuenergy](Accuenergy.md) | Acuvim II, IIR, IIE, IIW power quality meters | RS485 terminal / AXM-WEB2 Ethernet | Modbus RTU | [Accuenergy.md](Accuenergy.md) |
+| [Acrel](Acrel.md) | DTSD1352-C three-phase DIN-rail energy meter | RS485 terminal | Modbus RTU | [Acrel.md](Acrel.md) |
 
 ### Batteries
 
@@ -152,6 +153,7 @@ This resolves the majority of "no response" issues and should always be the firs
 | Brand | RS485 Direct | Modbus TCP (LAN) | Native MQTT | Local REST API |
 | --- | --- | --- | --- | --- |
 | Accuenergy | ✅ | ❌ (AXM-WEB2 module, not mapped) | ❌ | ❌ |
+| Acrel | ✅ | ❌ | ❌ | ❌ |
 | AOLithium | ✅ RS485 + CAN | ❌ | ❌ | ❌ |
 | Deye / Sunsynk | ✅ | ❌ (bridge needed) | ❌ | ❌ |
 | EG4 | ✅ | ❌ | ❌ | ❌ |

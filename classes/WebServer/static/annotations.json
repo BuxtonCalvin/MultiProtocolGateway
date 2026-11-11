@@ -1347,7 +1347,91 @@
       "label_y_percent": 69.2
     }
   ],
+  "adjustments": [
+    {
+      "id": "adjustments-dot-register-name",
+      "x_percent": 30,
+      "y_percent": 6.7,
+      "label": "",
+      "shape_type": "dot",
+      "label_x_percent": 36.2,
+      "label_y_percent": 4.6
+    },
+    {
+      "id": "adjustments-dot-context",
+      "x_percent": 21.5,
+      "y_percent": 22.5,
+      "label": "",
+      "shape_type": "dot",
+      "label_x_percent": 44.2,
+      "label_y_percent": 20.8
+    },
+    {
+      "id": "adjustments-dot-1794363164122",
+      "x_percent": 23.56667722521381,
+      "y_percent": 34.31299480659376,
+      "label": "",
+      "shape_type": "dot",
+      "label_x_percent": 31.480836236933794,
+      "label_y_percent": 31.40608730768303
+    },
+    {
+      "id": "adjustments-dot-1794363167961",
+      "x_percent": 15.964523281596442,
+      "y_percent": 42.36908923944622,
+      "label": "",
+      "shape_type": "dot",
+      "label_x_percent": 21.85144124168514,
+      "label_y_percent": 39.61136867447719
+    },
+    {
+      "id": "adjustments-dot-1794363179199",
+      "x_percent": 27.874564459930312,
+      "y_percent": 49.231688200764964,
+      "label": "",
+      "shape_type": "dot",
+      "label_x_percent": 33.76148242001901,
+      "label_y_percent": 47.070715371562805
+    },
+    {
+      "id": "adjustments-dot-1794363234048",
+      "x_percent": 12.543554006968641,
+      "y_percent": 63.10607305734418,
+      "label": "",
+      "shape_type": "dot",
+      "label_x_percent": 22.484954070319922,
+      "label_y_percent": 61.09428716208373
+    },
+    {
+      "id": "adjustments-dot-1794363242818",
+      "x_percent": 24.4535951853025,
+      "y_percent": 72.35566296173032,
+      "label": "",
+      "shape_type": "dot",
+      "label_x_percent": 30.46721571111815,
+      "label_y_percent": 70.19469013252814
+    },
+    {
+      "id": "adjustments-dot-1794363257674",
+      "x_percent": 26.35413367120684,
+      "y_percent": 82.35118753582503,
+      "label": "",
+      "shape_type": "dot",
+      "label_x_percent": 32.87456445993031,
+      "label_y_percent": 81.08533631027314
+    },
+    {
+      "id": "adjustments-dot-1794363264329",
+      "x_percent": 25.6,
+      "y_percent": 89.5,
+      "label": "",
+      "shape_type": "dot",
+      "label_x_percent": 30,
+      "label_y_percent": 87.2
+    }
+  ],
   "_aliases": {
+    "adjust*": "adjustments_editor",
     "device__device_help": "device__device_help",
     "device__eg4_ll_s_1": "device__scraper_read_generic",
     "device__eg4_ll_s_2": "device__scraper_read_generic",
