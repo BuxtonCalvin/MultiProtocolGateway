@@ -534,14 +534,16 @@ class AdjustmentValidation:
     """Result of checking an ``adjustments`` cell (see ``DataAdjustments.validate_adjustments``).
 
     ``errors`` make the value unusable (it would be ignored, or fail, when MPG loads the map);
-    ``warnings`` are legal but probably unintended.  ``normalized`` is the canonical one-line JSON
-    to store (``""`` for an empty cell) and is only meaningful when ``ok``.
+    ``warnings`` are legal but probably unintended; ``notes`` are information only (for example which
+    JSON file defines a context variable the formula uses).  ``normalized`` is the canonical one-line
+    JSON to store (``""`` for an empty cell) and is only meaningful when ``ok``.
     """
 
     ok: bool
     errors: list[str]
     warnings: list[str]
     normalized: str
+    notes: list[str] = field(default_factory=lambda: [])
 
 
 @dataclass
@@ -1161,17 +1163,22 @@ class DataAdjustments:
         text: str | None,
         known_variables: Collection[str] = (),
         context_variables: Collection[str] = (),
+        context_definitions: Mapping[str, object] | None = None,
+        context_source: str = "",
     ) -> AdjustmentValidation:
         """Check an ``adjustments`` cell and return its canonical form.
 
         Input:    ``text`` (the cell: a JSON object, or the ``Key:value`` shorthand, or empty), the variable
                   names of the protocol (``known_variables``) and its ``context_variables`` entries.  The two
-                  collections only drive "unknown variable" warnings and may be empty.
+                  collections only drive "unknown variable" warnings and may be empty.  ``context_definitions``
+                  (name -> definition) and ``context_source`` (a label for the JSON file that holds them) let the
+                  result explain where a context variable used by the cell comes from.
         Output:   an ``AdjustmentValidation``.  Errors: invalid JSON, duplicate keys, a recognized key with a
                   value MPG cannot use, an invalid formula.  Warnings: a key MPG does not use (it is kept), a
                   ``{name}`` or ``key`` that is not a known variable, overlapping ``High_Low`` ranges, a
-                  setting that another one overrides.  ``normalized`` is one-line JSON with recognized key
-                  names in canonical case.
+                  setting that another one overrides.  Notes: each context variable the cell uses, with the
+                  JSON file that defines it and its definition.  ``normalized`` is one-line JSON with
+                  recognized key names in canonical case.
         Use case: guided editing without narrowing it too far: the four recognized adjustments are checked
                   strictly, anything else is allowed but flagged.
         """
@@ -1220,6 +1227,7 @@ class DataAdjustments:
             canonical[name] = value
 
         known: set[str] = set(known_variables) | set(context_variables)
+        notes: list[str] = []
         for name, value in canonical.items():
             if name == "Register_Endian":
                 canonical[name] = self._check_register_endian(value, errors)
@@ -1228,14 +1236,17 @@ class DataAdjustments:
             elif name == "High_Low":
                 self._check_high_low(value, errors, warnings)
             elif name == "Context":
-                self._check_context(value, known, bool(known_variables or context_variables), errors, warnings)
+                self._check_context(
+                    value, known, bool(known_variables or context_variables), errors, warnings,
+                    notes, set(known_variables), dict(context_definitions or {}), context_source,
+                )
             else:
                 warnings.append(f"'{name}' is not an adjustment MPG uses; it is kept as is but has no effect")
         if "High_Low" in canonical and "Offset" in canonical:
             warnings.append("Offset is ignored when High_Low is present (High_Low is the whole transform)")
 
         normalized: str = json.dumps(canonical, ensure_ascii=False)
-        return AdjustmentValidation(not errors, errors, warnings, normalized)
+        return AdjustmentValidation(not errors, errors, warnings, normalized, notes)
 
     def _check_register_endian(self, value: object, errors: list[str]) -> object:
         """Validate ``Register_Endian``; returns the value to store."""
@@ -1299,8 +1310,17 @@ class DataAdjustments:
         have_known: bool,
         errors: list[str],
         warnings: list[str],
+        notes: list[str] | None = None,
+        real_variables: set[str] | None = None,
+        definitions: Mapping[str, object] | None = None,
+        source: str = "",
     ) -> None:
-        """Validate a ``Context`` object (``formula`` | ``key`` with ``cases``/``range``/``default``)."""
+        """Validate a ``Context`` object (``formula`` | ``key`` with ``cases``/``range``/``default``).
+
+        ``notes`` receives one line per context variable the object uses (from ``definitions``, defined
+        in the file described by ``source``); ``real_variables`` are the protocol's own variables, which
+        take precedence over a context variable of the same name.
+        """
         if not isinstance(value, dict):
             errors.append("Context must be an object such as {\"formula\": \"x*{scale}\"}")
             return
@@ -1359,13 +1379,37 @@ class DataAdjustments:
         else:
             errors.append("Context needs a formula, or a key with cases, range or default")
 
+        defs: Mapping[str, object] = definitions or {}
+        where: str = f"defined in {source}" if source else "defined in the protocol's JSON file"
         if have_known:
             unknown: list[str] = sorted({name for name in used_names if name != "i" and name not in known})
             if unknown:
+                hint: str = (
+                    f" Context variables {where} (under context_variables) that you can use: " + ", ".join(sorted(defs)) + "."
+                    if defs else ""
+                )
                 warnings.append(
                     "Not a variable of this protocol or one of its context_variables: " + ", ".join("{" + name + "}" for name in unknown)
-                    + " (fine if another row supplies it)"
+                    + " (fine if another row supplies it)." + hint
                 )
+        if notes is not None and defs:
+            reals: set[str] = real_variables or set()
+            used: list[tuple[str, str]] = []                        # (how it is written, name)
+            if has_key:
+                used.append((f"'{cast(str, key).strip()}'", cast(str, key).strip()))
+            used.extend((f"{{{name}}}", name) for name in used_names)
+            for written, name in dict.fromkeys(used):
+                if name not in defs:
+                    continue
+                definition: object = defs[name]
+                shown: str = definition if isinstance(definition, str) else json.dumps(definition, ensure_ascii=False)
+                if name in reals:
+                    notes.append(
+                        f"{written} is also the name of a context variable {where} (context_variables), "
+                        "but a row with that name exists and its value is used instead."
+                    )
+                else:
+                    notes.append(f"{written} is a context variable {where} (under context_variables): {shown}")
 
     def preview_adjustments(
         self,
