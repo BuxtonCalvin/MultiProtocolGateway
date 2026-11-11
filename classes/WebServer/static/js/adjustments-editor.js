@@ -206,10 +206,32 @@
     return { data, errors };
   }
 
-  /** Variables a preview needs values for: every {name} in the Context formulas plus the Context key. */
-  function previewVariables(cards) {
+  /** Names a context-variable definition reads: an expression string, or a key/cases/default object. */
+  function definitionNames(def) {
+    if (typeof def === 'string') return formulaNames(def);
+    if (!isPlainObject(def)) return [];
+    const out = [];
+    if (typeof def.key === 'string' && def.key && !def.key.includes('{')) out.push(def.key);
+    const texts = [def.formula, def.default].concat(isPlainObject(def.cases) ? Object.values(def.cases) : []);
+    for (const t of texts) if (typeof t === 'string') formulaNames(t).forEach((n) => { if (!out.includes(n)) out.push(n); });
+    return out;
+  }
+
+  /**
+   * Variables a preview needs sample values for: every {name} in the Context formulas plus the Context key.
+   * A name that is a protocol context variable (`defs`, from the protocol JSON) is replaced by the inputs
+   * of its definition, because the gateway computes it from those.
+   */
+  function previewVariables(cards, defs) {
+    const known = defs || {};
     const names = [];
-    const add = (n) => { if (n && !names.includes(n) && !n.includes('{')) names.push(n); };
+    const seen = new Set();
+    const add = (n) => {
+      if (!n || n.includes('{') || seen.has(n)) return;
+      seen.add(n);
+      if (Object.prototype.hasOwnProperty.call(known, n)) definitionNames(known[n]).forEach(add);
+      else names.push(n);
+    };
     for (const card of cards) {
       if (card.type !== 'Context' || card.form.invalid !== undefined) continue;
       const f = card.form;
@@ -221,7 +243,7 @@
 
   const api = {
     KNOWN_KEYS, CONTEXT_KEYS, ENDIAN_CHOICES, parseText, canonicalKey, highLowParse, highLowBuild, formulaNames,
-    contextToForm, formToContext, modelFromData, modelToData, previewVariables,
+    contextToForm, formToContext, modelFromData, modelToData, previewVariables, definitionNames,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.MPGAdjustments = api;
@@ -263,7 +285,7 @@
 
   function loadOptions(protocol) {
     if (OPTIONS_CACHE[protocol]) return Promise.resolve(OPTIONS_CACHE[protocol]);
-    const fallback = { variables: [], context_variables: [], register_endian: ENDIAN_CHOICES, known_keys: KNOWN_KEYS };
+    const fallback = { variables: [], context_variables: [], context_variable_definitions: {}, context_variable_source: '', register_endian: ENDIAN_CHOICES, known_keys: KNOWN_KEYS };
     return api_('/api/protocols/adjustments/options?protocol_name=' + encodeURIComponent(protocol))
       .then((r) => (r.ok ? (OPTIONS_CACHE[protocol] = r.json) : fallback))
       .catch(() => fallback);
@@ -276,7 +298,7 @@
       protocol: input.dataset.protocol || '',
       variable: input.dataset.variable || '',
       address: input.dataset.address || '',
-      options: { variables: [], context_variables: [], register_endian: ENDIAN_CHOICES, known_keys: KNOWN_KEYS },
+      options: { variables: [], context_variables: [], context_variable_definitions: {}, context_variable_source: '', register_endian: ENDIAN_CHOICES, known_keys: KNOWN_KEYS },
       cards: [],
       initialError: '',
       check: null,          // last server answer {ok, errors, warnings, normalized}
@@ -439,23 +461,35 @@
 
   function renderContext(editor, card, head) {
     const f = card.form;
-    const variables = (editor.options.variables || []).concat(editor.options.context_variables || []);
+    const ctxDefs = editor.options.context_variable_definitions || {};
+    const ctxNames = Object.keys(ctxDefs);
+    const source = editor.options.context_variable_source || "the protocol's JSON file";
+    const variables = (editor.options.variables || []).filter((v) => !ctxNames.includes(v));
+    const allNames = ctxNames.concat(variables);
     if (f.invalid !== undefined) {
       return h('section', { class: 'adj-card' }, head('Context', 'Depends on another register.'),
         h('p', { class: 'adj-hint', text: 'This Context value is not an object. Remove it, or fix it in the raw JSON below.' }));
     }
     const listId = 'adj-vars-' + Math.random().toString(36).slice(2, 8);
-    const datalist = h('datalist', { id: listId }, ...variables.map((v) => h('option', { value: v })));
+    const datalist = h('datalist', { id: listId }, ...allNames.map((v) => h('option', { value: v })));
     const mode = h('div', { class: 'adj-modes', role: 'radiogroup', 'aria-label': 'Context mode' },
       ['formula', 'key'].map((m) => h('label', { class: 'adj-mode' },
         h('input', { type: 'radio', name: 'adj-mode-' + listId, checked: f.mode === m, onchange: () => { f.mode = m; render(editor); changed(editor); } }),
         m === 'formula' ? ' Always apply a formula' : ' Pick the formula from another variable')));
-    const chips = (apply) => h('div', { class: 'adj-chips' }, ...variables.slice(0, 40).map((v) => h('button', { class: 'adj-chip', type: 'button', title: 'Insert {' + v + '}', text: '{' + v + '}', onclick: () => apply('{' + v + '}') })));
+    const defText = (n) => (typeof ctxDefs[n] === 'string' ? ctxDefs[n] : JSON.stringify(ctxDefs[n]));
+    // Context variables first (few, and the user may not know the JSON file defines them), then the protocol's own variables.
+    const chips = (pick, braces) => h('div', { class: 'adj-varbox' },
+      ctxNames.length ? h('div', {},
+        h('p', { class: 'adj-hint', text: 'Context variables, defined once in ' + source + ' (under "context_variables"). Click one to use it:' }),
+        h('div', { class: 'adj-chips' }, ...ctxNames.map((n) => h('button', { class: 'adj-chip adj-chip-ctx', type: 'button', title: 'Context variable from ' + source + ': ' + defText(n), text: braces ? '{' + n + '}' : n, onclick: () => pick(n) })))) : null,
+      variables.length ? h('div', {},
+        h('p', { class: 'adj-hint', text: 'Variables in this protocol:' }),
+        h('div', { class: 'adj-chips' }, ...variables.slice(0, 30).map((v) => h('button', { class: 'adj-chip', type: 'button', title: 'Variable of this protocol', text: braces ? '{' + v + '}' : v, onclick: () => pick(v) })))) : null);
     let body;
     if (f.mode === 'formula') {
       const input = textInput(f.formula, (v) => { f.formula = v; changed(editor); }, { placeholder: 'x*{pt1}/{pt2}' });
       body = [field('Formula', input, 'x is this row\u2019s value. Use {name} for another variable. Operators: + - * / // % ** and ( ).'),
-        variables.length ? chips((t) => { input.value += t; f.formula = input.value; input.focus(); changed(editor); }) : null];
+        allNames.length ? chips((n) => { input.value += '{' + n + '}'; f.formula = input.value; input.focus(); changed(editor); }, true) : null];
     } else {
       const keyInput = textInput(f.key, (v) => { f.key = v; changed(editor); }, { placeholder: 'variable_name', list: listId });
       const caseRows = f.cases.map((c, i) => h('div', { class: 'adj-row adj-row-case' },
@@ -473,7 +507,7 @@
           textInput(f.hi, (v) => { f.hi = v; f.rangeRaw = null; changed(editor); }, { 'aria-label': 'Range to', placeholder: '10' })),
         h('p', { class: 'adj-hint', text: 'For a whole-number variable in this range the value is multiplied by 10 to the power of that number (the SunSpec scale-factor pattern).' }),
         field('Default formula (optional)', textInput(f.dflt, (v) => { f.dflt = v; changed(editor); }, { placeholder: 'x' }), 'Used when no case matches.'),
-        variables.length ? h('p', { class: 'adj-hint', text: 'Variables in this protocol: ' + variables.slice(0, 12).join(', ') + (variables.length > 12 ? ', \u2026' : '') }) : null];
+        allNames.length ? chips((n) => { keyInput.value = n; f.key = n; changed(editor); }, false) : null];
     }
     return h('section', { class: 'adj-card' }, head('Context', 'A scale or sign that depends on another register, mode or ratio.'), mode, datalist, ...body,
       Object.keys(f.extra).length ? h('p', { class: 'adj-hint', text: 'Also kept as written: ' + Object.keys(f.extra).join(', ') }) : null);
@@ -513,7 +547,7 @@
         renderMessages(editor);
         editor.els.apply.disabled = !canApply(editor);
         renderRaw(editor);
-        if (previewVariables(editor.cards).join('|') !== editor.previewNames) renderPreview(editor);   // a {name} was added or removed
+        if (previewVariables(editor.cards, editor.options.context_variable_definitions).join('|') !== editor.previewNames) renderPreview(editor);   // a {name} was added or removed
       });
   }
 
@@ -525,20 +559,21 @@
   function renderMessages(editor) {
     const els = editor.els;
     const items = [];
+    const check = editor.check;
     if (editor.initialError) items.push(h('p', { class: 'adj-msg adj-err', text: 'The current value could not be read as adjustments (' + editor.initialError + '). Fix it in the raw JSON below, or clear it.' }));
     for (const e of editor.localErrors) items.push(h('p', { class: 'adj-msg adj-err', text: e }));
-    if (editor.check) {
-      for (const e of editor.check.errors) items.push(h('p', { class: 'adj-msg adj-err', text: e }));
-      for (const w of editor.check.warnings) items.push(h('p', { class: 'adj-msg adj-warn', text: w }));
-    }
+    if (check) for (const e of check.errors) items.push(h('p', { class: 'adj-msg adj-err', text: e }));
+    if (check) for (const w of check.warnings) items.push(h('p', { class: 'adj-msg adj-warn', text: w }));
     if (editor.pending) items.push(h('p', { class: 'adj-msg adj-muted', text: 'Checking\u2026' }));
-    else if (editor.check && editor.check.ok && !editor.localErrors.length && !items.length) items.push(h('p', { class: 'adj-msg adj-ok', text: 'Valid.' }));
+    else if (check && check.ok && !items.length) items.push(h('p', { class: 'adj-msg adj-ok', text: 'Valid.' }));
+    // Notes are information, not problems: e.g. which JSON file defines a context variable the formulas use.
+    if (check && check.notes) for (const n of check.notes) items.push(h('p', { class: 'adj-msg adj-info', text: n }));
     els.messages.replaceChildren(...items);
   }
 
   // ── preview ─────────────────────────────────────────────────────────
   function renderPreview(editor) {
-    const names = previewVariables(editor.cards);
+    const names = previewVariables(editor.cards, editor.options.context_variable_definitions);
     editor.previewNames = names.join('|');
     const hasContext = editor.cards.some((c) => c.type === 'Context');
     const varRows = names.map((n) => h('label', { class: 'adj-field adj-field-inline' }, h('span', { class: 'adj-label adj-mono', text: n }),
@@ -567,7 +602,7 @@
   function runPreview(editor) {
     const built = modelToData(editor.cards);
     const variables = {};
-    for (const n of previewVariables(editor.cards)) {
+    for (const n of previewVariables(editor.cards, editor.options.context_variable_definitions)) {
       const v = editor.previewValues[n] === undefined ? 1 : Number(editor.previewValues[n]);
       variables[n] = Number.isFinite(v) ? v : 1;
     }

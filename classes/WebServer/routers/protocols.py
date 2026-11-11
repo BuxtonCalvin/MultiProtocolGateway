@@ -323,7 +323,7 @@ class AdjustmentPreviewRequest(BaseModel):
 @router.get("/adjustments/options")
 def adjustment_options(
     request: Request, protocol_name: str | None = None, db: Session = Depends(get_session),
-) -> dict[str, list[str] | dict[str, object]]:
+) -> dict[str, list[str] | dict[str, object] | str]:
     config_dir: Path | None = getattr(request.app.state, "config_dir", None)
     return adjustment_editor_options(db, request.app.state.protocols_dir, config_dir, protocol_name)
 
@@ -332,18 +332,22 @@ def adjustment_options(
 def validate_adjustments_value(
     payload: AdjustmentCheckRequest, request: Request, db: Session = Depends(get_session),
 ) -> dict[str, bool | list[str] | str]:
-    options = adjustment_options(request, payload.protocol_name, db)
+    options: dict[str, List[str] | dict[str, object] | str] = adjustment_options(request, payload.protocol_name, db)
     check: AdjustmentValidation = ADJUSTMENT_CHECKER.validate_adjustments(
-        payload.value, cast("list[str]", options["variables"]), cast("list[str]", options["context_variables"]),
+        payload.value,
+        cast("list[str]", options["variables"]),
+        cast("list[str]", options["context_variables"]),
+        cast("dict[str, object]", options["context_variable_definitions"]),
+        cast("str", options["context_variable_source"]),
     )
-    return {"ok": check.ok, "errors": check.errors, "warnings": check.warnings, "normalized": check.normalized}
+    return {"ok": check.ok, "errors": check.errors, "warnings": check.warnings, "notes": check.notes, "normalized": check.normalized}
 
 
 @router.post("/adjustments/preview")
 def preview_adjustments_value(
     payload: AdjustmentPreviewRequest, request: Request, db: Session = Depends(get_session),
 ) -> dict[str, object]:
-    options = adjustment_options(request, payload.protocol_name, db)
+    options: dict[str, List[str] | dict[str, object] | str] = adjustment_options(request, payload.protocol_name, db)
     return ADJUSTMENT_CHECKER.preview_adjustments(
         payload.value, payload.x, payload.unit_mod, payload.variables,
         cast("dict[str, object]", options["context_variable_definitions"]),

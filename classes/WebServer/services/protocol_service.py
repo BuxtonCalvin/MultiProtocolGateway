@@ -1059,16 +1059,17 @@ def adjustment_editor_options(
     protocols_dir: Path,
     config_dir: Path | None,
     protocol_name: str | None,
-) -> dict[str, list[str] | dict[str, object]]:
+) -> dict[str, list[str] | dict[str, object] | str]:
     """Everything the adjustments popup needs to guide an edit of one protocol's rows.
 
     Returns the protocol's variable names (for the Context ``key`` list and "unknown variable"
-    warnings), the names and definitions of its JSON ``context_variables``, and the fixed choices
+    warnings), the names and definitions of its JSON ``context_variables`` and the file they come from, and the fixed choices
     the editor offers (recognized adjustment keys and ``Register_Endian`` values).
     """
     variables: list[str] = []
     context_names: list[str] = []
     context_defs: dict[str, object] = {}
+    context_source: str = ""
     if protocol_name:
         found: list[tuple[str, str]] = [
             (group, variable)
@@ -1079,15 +1080,21 @@ def adjustment_editor_options(
         ]
         variables = sorted({variable for _group, variable in found if variable})
         if found:
-            data, _is_override = get_protocol_json(protocols_dir, found[0][0], protocol_name, config_dir=config_dir)
+            data, is_override = get_protocol_json(protocols_dir, found[0][0], protocol_name, config_dir=config_dir)
             raw: object = data.get("context_variables") if data else None
             if isinstance(raw, dict):
                 context_defs = {str(name): definition for name, definition in raw.items()}
                 context_names = list(context_defs)
+                # Users may not know the protocol JSON exists, so say which file it is.
+                context_source = (
+                    f"{protocol_name}.json in the config folder (your edited copy of the protocol JSON)"
+                    if is_override else f"the protocol JSON file {found[0][0]}/{protocol_name}.json"
+                )
     return {
         "variables": variables,
         "context_variables": context_names,
         "context_variable_definitions": context_defs,
+        "context_variable_source": context_source,
         "known_keys": list(DataAdjustments.KNOWN_ADJUSTMENTS),
         "context_keys": list(DataAdjustments.CONTEXT_KEYS),
         "register_endian": list(DataAdjustments.REGISTER_ENDIAN_CHOICES),
