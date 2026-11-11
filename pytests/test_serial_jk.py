@@ -1,4 +1,4 @@
-# Description: Unit tests for the JK BMS transport (serial_jk) and its jk_bms_rs485 protocol definition.
+# Description: Unit tests for the JK BMS transport (serial_jk) and its jk_bms_4g_gps_serial protocol definition.
 # File: test_serial_jk.py
 #
 # Copyright 2026 Kevin Burke
@@ -94,7 +94,7 @@ def assert_values(out: dict[str, Any], expected: dict[str, float]) -> None:
 
 def make(monkeypatch: pytest.MonkeyPatch, port: FakePort | None = None, **values: Any) -> Any:
     install_serial_layer(monkeypatch, port)
-    merged: dict[str, Any] = {"port": "/dev/ttyUSB0", "protocol_version": "jk_bms_rs485", "timeout": "0.05", **values}
+    merged: dict[str, Any] = {"port": "/dev/ttyUSB0", "protocol_version": "jk_bms_4g_gps_serial", "timeout": "0.05", **values}
     transport: serial_jk = serial_jk(DummySettings(**merged))  # type: ignore[arg-type]
     transport._log = MagicMock()
     return transport
@@ -254,7 +254,7 @@ def test_other_items_pass_through_normalization_unchanged(monkeypatch: pytest.Mo
 # --------------------------------------------------------------------------- #
 
 def test_the_protocol_loads_and_names_its_transport() -> None:
-    settings = protocol_settings("jk_bms_rs485")
+    settings = protocol_settings("jk_bms_4g_gps_serial")
     assert settings.settings["transport"] == "serial_jk"
     assert int(settings.settings["baud"]) == serial_jk.DEFAULT_BAUDRATE
     registry_type = next(iter(settings.registry_map))
@@ -391,9 +391,9 @@ def test_it_is_a_scraper_on_the_length_family(monkeypatch: pytest.MonkeyPatch) -
 
 
 def test_the_protocol_files_are_consistent() -> None:
-    meta: dict[str, Any] = json.loads((REPO / "protocols/jk/jk_bms_rs485.json").read_text(encoding="utf-8"))
+    meta: dict[str, Any] = json.loads((REPO / "protocols/jk/jk_bms_4g_gps_serial.json").read_text(encoding="utf-8"))
     assert meta["transport"] == "serial_jk"
-    rows: list[dict[str, str]] = list(csv.DictReader((REPO / "protocols/jk/jk_bms_rs485.registry_map.csv").open(newline="", encoding="utf-8")))
+    rows: list[dict[str, str]] = list(csv.DictReader((REPO / "protocols/jk/jk_bms_4g_gps_serial.registry_map.csv").open(newline="", encoding="utf-8")))
     identifiers: set[int] = {int(row["register"].split(".")[0]) for row in rows}
     known: set[int] = {serial_jk.CELL_VOLTAGES, *serial_jk.ITEM_SIZES}
     assert identifiers <= known, f"the map reads identifiers the transport cannot parse: {sorted(identifiers - known)}"

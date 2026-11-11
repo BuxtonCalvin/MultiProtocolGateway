@@ -1347,12 +1347,12 @@
       "label_y_percent": 69.2
     }
   ],
-  "adjustments": [
+  "adjustments_editor": [
     {
       "id": "adjustments-dot-register-name",
       "x_percent": 30,
       "y_percent": 6.7,
-      "label": "",
+      "label": "The row being edited: its variable name and register address. Everything in this window applies to this row only. Close with the ×, Cancel or Esc to leave the row unchanged.",
       "shape_type": "dot",
       "label_x_percent": 36.2,
       "label_y_percent": 4.6
@@ -1361,73 +1361,82 @@
       "id": "adjustments-dot-context",
       "x_percent": 21.5,
       "y_percent": 22.5,
-      "label": "",
+      "label": "One card per adjustment on the row; this one is Context, a scale or sign that depends on another register, mode or ratio. Choose between always applying one formula and picking the formula from another variable. The × removes the card. A row can also carry Register_Endian, High_Low and Offset cards.",
       "shape_type": "dot",
       "label_x_percent": 44.2,
       "label_y_percent": 20.8
     },
     {
-      "id": "adjustments-dot-1794363164122",
+      "id": "adjustments-dot-variable-to-read",
       "x_percent": 23.56667722521381,
       "y_percent": 34.31299480659376,
-      "label": "",
+      "label": "Variable to read: the name of another variable whose value decides which formula applies (here the SunSpec scale factor inverter_a_sf). Variables of this protocol are suggested as you type, and so are any context variables defined in the protocol's JSON file (shown in amber).",
       "shape_type": "dot",
       "label_x_percent": 31.480836236933794,
       "label_y_percent": 31.40608730768303
     },
     {
-      "id": "adjustments-dot-1794363167961",
+      "id": "adjustments-dot-cases",
       "x_percent": 15.964523281596442,
       "y_percent": 42.36908923944622,
-      "label": "",
+      "label": "Cases: a formula for specific values of the variable above. In a formula x is this row's own value. Put several values in one case with commas (for example 333,80,100). Use + Add case for each additional value.",
       "shape_type": "dot",
       "label_x_percent": 21.85144124168514,
       "label_y_percent": 39.61136867447719
     },
     {
-      "id": "adjustments-dot-1794363179199",
+      "id": "adjustments-dot-scale-factor-range",
       "x_percent": 27.874564459930312,
       "y_percent": 49.231688200764964,
-      "label": "",
+      "label": "Scale-factor range (optional): when the variable is a whole number between these two limits, the row's value is multiplied by 10 to the power of that number. This is the SunSpec scale-factor pattern. Leave both boxes empty if you are not using it.",
       "shape_type": "dot",
       "label_x_percent": 33.76148242001901,
       "label_y_percent": 47.070715371562805
     },
     {
-      "id": "adjustments-dot-1794363234048",
+      "id": "adjustments-dot-default-formula",
       "x_percent": 12.543554006968641,
       "y_percent": 63.10607305734418,
-      "label": "",
+      "label": "Default formula (optional): used when no case or range matches. If it is empty and nothing matches, the value is published unchanged.",
       "shape_type": "dot",
       "label_x_percent": 22.484954070319922,
       "label_y_percent": 61.09428716208373
     },
     {
-      "id": "adjustments-dot-1794363242818",
+      "id": "adjustments-dot-add-adjustment",
       "x_percent": 24.4535951853025,
       "y_percent": 72.35566296173032,
-      "label": "",
+      "label": "Add another adjustment to this row: Register_Endian, High_Low, Offset, Context, or a custom key. Adjustments already on the row are not offered again.",
       "shape_type": "dot",
       "label_x_percent": 30.46721571111815,
       "label_y_percent": 70.19469013252814
     },
     {
-      "id": "adjustments-dot-1794363257674",
+      "id": "adjustments-dot-sample-value",
       "x_percent": 26.35413367120684,
       "y_percent": 82.35118753582503,
-      "label": "",
+      "label": "Try it on a sample value: enter a value for x and for any variables the formulas read, then press Run. The result comes from the same code the gateway uses, and shows the formula chosen and the published value.",
       "shape_type": "dot",
       "label_x_percent": 32.87456445993031,
       "label_y_percent": 81.08533631027314
     },
     {
-      "id": "adjustments-dot-1794363264329",
+      "id": "adjustments-dot-raw-json",
       "x_percent": 25.6,
       "y_percent": 89.5,
-      "label": "",
+      "label": "Show raw JSON: see and edit the whole adjustments object as JSON, including keys the form does not cover (kept as custom entries). Use Apply raw JSON to the form before pressing Apply.",
       "shape_type": "dot",
       "label_x_percent": 30,
       "label_y_percent": 87.2
+    },
+    {
+      "id": "adjustments-dot-validation",
+      "x_percent": "60",
+      "y_percent": "77",
+      "label": "Validation message, updated as you type. Valid. means Apply is enabled. Errors (red) must be fixed first and keep Apply disabled; warnings (amber) are allowed. Notes (blue) are information only, for example which JSON file defines a context variable used in a formula, since the protocol JSON is not shown on this screen.",
+      "shape_type": "dot",
+      "label_x_percent": "58",
+      "label_y_percent": "80.5"
     }
   ],
   "_aliases": {

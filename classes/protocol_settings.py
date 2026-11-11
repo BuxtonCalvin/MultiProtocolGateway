@@ -2523,6 +2523,24 @@ class protocol_settings:
 
         registry_map.extend(additions)
 
+    @property
+    def register_address_step(self) -> int:
+        """Address distance between consecutive 16-bit words of a multi-word read (default 1).
+
+        Almost every Modbus device numbers its registers consecutively, so a read of ``n``
+        words starting at address ``a`` returns the words for addresses ``a, a+1, ...``.  A few
+        devices (for example the JK BMS Modbus map) number registers by *byte offset*, so
+        consecutive 16-bit words are 2 addresses apart.  Setting ``register_address_step`` in
+        the protocol JSON tells MPG that word ``i`` of a read starting at ``a`` belongs to address
+        ``a + i * step``.  The map itself keeps the device's own addresses.  ``batch_size`` and
+        every register address stay in address units; only the word counts are divided by the step.
+        """
+        try:
+            step: int = int(self.settings.get("register_address_step", 1))
+        except (ValueError, TypeError, AttributeError):
+            return 1
+        return step if step >= 1 else 1
+
     def calculate_registry_ranges(self, registry_map: list[registry_map_entry], max_register: int, init: bool = False, timestamp: float = 0.0) -> list[tuple[int, int]]:
         """Return the minimal set of ``(start, count)`` register ranges needed for one poll cycle.
 
@@ -2548,6 +2566,7 @@ class protocol_settings:
 
         timestamp_ms: float = timestamp * 1000 if timestamp > 0 else float(time.time() * 1000)
         ranges: list[tuple[int, int]] = []
+        step: int = self.register_address_step
 
         for start in range(0, max_register + 1, max_batch_size):
             end: int = start + max_batch_size
@@ -2570,7 +2589,7 @@ class protocol_settings:
                         if register.register_list:
                             register_end: int = max(register.register_list)
                         else:
-                            register_end: int = register.register + self.entry_word_count(register) - 1
+                            register_end: int = register.register + (self.entry_word_count(register) - 1) * step
 
                         if window_min is None or register.register < window_min:
                             window_min: int | None = register.register
@@ -2578,7 +2597,7 @@ class protocol_settings:
                             window_max: int | None = register_end
 
             if window_min is not None and window_max is not None:
-                ranges.append((window_min, window_max - window_min + 1))
+                ranges.append((window_min, (window_max - window_min) // step + 1))
 
         return ranges
 
@@ -2642,7 +2661,7 @@ class protocol_settings:
             if item.register_list:
                 item_end_register: int = max(item.register_list)
             else:
-                item_end_register = item.register + self.entry_word_count(item) - 1
+                item_end_register = item.register + (self.entry_word_count(item) - 1) * self.register_address_step
             if item_end_register > size:
                 size = item_end_register
 
@@ -3009,7 +3028,7 @@ class protocol_settings:
             if register_addresses and offset < len(register_addresses):
                 register_num: int = register_addresses[offset]
             else:
-                register_num = start_register + offset
+                register_num = start_register + offset * self.register_address_step
             if register_num not in registry:
                 return None
             words.append(registry[register_num] & 0xFFFF)
