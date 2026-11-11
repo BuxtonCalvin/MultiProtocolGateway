@@ -1055,43 +1055,74 @@ class DataAdjustments:
                 formula = self.context_power_of_ten_formula(context_value)
         return formula or str(spec.get("default", ""))
 
+    def _evaluate_context_variable(
+        self,
+        name: str,
+        definition: object,
+        context: Mapping[str, int | float | str],
+        derived: dict[str, float],
+    ) -> tuple[float | None, bool]:
+        """Evaluate one ``context_variables`` entry.  Returns ``(value, failed)``.
+
+        ``value`` is ``None`` while the entry cannot be computed yet (its ``key`` or a ``{name}`` is not
+        available, possibly because it depends on an entry that has not been evaluated yet).  ``failed``
+        is ``True`` when the entry is malformed or raised, so it will never succeed and is not retried.
+        """
+        spec: Mapping[str, object]
+        if isinstance(definition, str):
+            spec = {"formula": definition}
+        elif isinstance(definition, dict):
+            spec = cast(dict[str, object], definition)
+        else:
+            return None, True
+        view: Mapping[str, int | float | str] = ChainMap(cast(dict[str, int | float | str], derived), cast(dict[str, int | float | str], context))
+        formula: str = self.select_context_formula(name, spec, view)
+        if not formula:
+            return None, False
+        if "{" in formula:
+            substituted: str | None = self.substitute_context_variables(formula, view)
+            if substituted is None:
+                return None, False
+            formula = substituted
+        try:
+            return float(self.safe_eval_expression(formula)), False
+        except Exception as exc:
+            self._log.warning(f"Failed context variable '{name}' ({formula}): {exc}")
+            return None, True
+
     def evaluate_context_variables(self, context: Mapping[str, int | float | str]) -> dict[str, float]:
         """Evaluate the protocol's ``context_variables`` against ``context`` (the decoded values).
 
         Input:    ``context``, the decoded values of this read.  The definitions come from the protocol
                   JSON's ``context_variables`` object: name -> expression string, or a Context spec
                   (``key``/``cases``/``default``).  An entry may use ``{name}`` for decoded variables and
-                  for entries defined above it.
+                  for other entries, **in any order**: the JSON editor lists object keys alphabetically, so
+                  an entry may well be written before the entries it depends on.
         Output:   a dict of name -> float for every entry that could be evaluated.  An entry whose inputs
-                  were not read in this pass (or that fails to evaluate, logged) is left out, so rows that
-                  use it keep their raw value.  The values are not published as variables.
+                  were not read in this pass, that is part of a circular definition, or that fails to
+                  evaluate (logged) is left out, so rows that use it keep their raw value.  The values are
+                  not published as variables.
         Use case: one long scale formula shared by many rows, such as the Acuvim II primary/secondary
                   PT/CT scale, written once in the JSON instead of in every CSV row.
         Example:  ``{"voltage_scale": "{mode}+(1-{mode})*{pt1}/{pt2}"}`` then, in a row,
                   ``{"Context": {"formula": "x*{voltage_scale}"}}``
+
+        Entries are evaluated repeatedly until a pass resolves nothing new, so dependencies are found
+        wherever they are written.
         """
         derived: dict[str, float] = {}
-        for name, definition in self.context_variables.items():
-            spec: Mapping[str, object]
-            if isinstance(definition, str):
-                spec = {"formula": definition}
-            elif isinstance(definition, dict):
-                spec = cast(dict[str, object], definition)
-            else:
-                continue
-            view: Mapping[str, int | float | str] = ChainMap(cast(dict[str, int | float | str], derived), cast(dict[str, int | float | str], context))
-            formula: str = self.select_context_formula(name, spec, view)
-            if not formula:
-                continue
-            if "{" in formula:
-                substituted: str | None = self.substitute_context_variables(formula, view)
-                if substituted is None:
-                    continue
-                formula = substituted
-            try:
-                derived[name] = float(self.safe_eval_expression(formula))
-            except Exception as exc:
-                self._log.warning(f"Failed context variable '{name}' ({formula}): {exc}")
+        pending: dict[str, object] = dict(self.context_variables)
+        progress: bool = True
+        while pending and progress:
+            progress = False
+            for name in list(pending):
+                value, failed = self._evaluate_context_variable(name, pending[name], context, derived)
+                if value is not None:
+                    derived[name] = value
+                    del pending[name]
+                    progress = True
+                elif failed:
+                    del pending[name]
         return derived
 
     _CONTEXT_VARIABLE_RE: ClassVar[re.Pattern[str]] = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
