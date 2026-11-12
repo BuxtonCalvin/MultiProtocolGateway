@@ -416,6 +416,8 @@ A `{name}` that is neither a variable nor a context variable is flagged as a war
 
 The popup uses three endpoints under `/api/protocols/adjustments/`: `GET options` (the protocol's variable names, its `context_variables` with their definitions and source file, and the fixed choices), `POST validate` (returns `errors`, `warnings`, `notes` and the normalized value) and `POST preview`.
 
+The ? button in the popup’s header opens this screen’s annotated help page in a new tab (the same page as Help → This Screen, which the popup covers), so you can read it without losing unapplied edits.
+
 ### Write Mode
 
 The `writable` column sets the read/write permission sourced from the manufacturer's specification. This is immutable from the protocol CSV — user write-back is enabled separately through the web UI (see [Managing Write-Back](#managing-write-back-via-the-web-ui)).

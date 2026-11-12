@@ -263,3 +263,33 @@ test('a wrong answer from the options request is reported instead of silently of
   assert.equal(byText(overlay(), 'button', 'Apply').disabled, false, 'editing still works');
   byText(overlay(), 'button', 'Cancel').dispatchEvent({ type: 'click' });
 });
+
+test('the header has a help link to the annotated screen, next to the close button, opening in a new tab', async () => {
+  const input = makeInput('{"Offset": 1}');
+  await open(input);
+  const help = findAll(overlay(), (n) => n.tag === 'a' && n.className.includes('adj-help-btn'))[0];
+  assert.ok(help, 'a help link is present');
+  assert.equal(help.attrs.href, '/pages/help/screen/adjustments_editor', 'the same page Help > This Screen shows for this screen');
+  assert.equal(help.attrs.target, '_blank', 'a new tab, so the popup and its unapplied edits are untouched');
+  assert.ok(help.attrs.rel.includes('noopener'));
+  assert.ok(help.attrs['aria-label'].toLowerCase().includes('help'), 'it has an accessible name');
+  assert.equal(help.textContent, '?');
+  const actions = help.parent;
+  assert.ok(actions.className.includes('adj-header-actions'));
+  const close = findAll(actions, (n) => n.tag === 'button' && n.attrs['aria-label'] === 'Close')[0];
+  assert.ok(close, 'the close button is in the same group');
+  assert.ok(actions.children.indexOf(help) < actions.children.indexOf(close), 'help sits to the left of the close button');
+  byText(overlay(), 'button', 'Cancel').dispatchEvent({ type: 'click' });
+});
+
+test('clicking the help link does not close the popup or touch the cell', async () => {
+  const input = makeInput('{"Offset": 1}');
+  await open(input);
+  const help = findAll(overlay(), (n) => n.tag === 'a' && n.className.includes('adj-help-btn'))[0];
+  fire('click', { target: help, preventDefault() {} });     // the page-level click handler sees it too
+  help.dispatchEvent({ type: 'click' });
+  assert.ok(overlay(), 'the popup is still open');
+  assert.equal(input.changes, 0);
+  assert.equal(input.value, '{"Offset": 1}');
+  byText(overlay(), 'button', 'Cancel').dispatchEvent({ type: 'click' });
+});

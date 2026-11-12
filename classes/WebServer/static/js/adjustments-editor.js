@@ -256,6 +256,11 @@
   if (root.__mpgAdjustmentsEditorLoaded) return;
   root.__mpgAdjustmentsEditorLoaded = true;
 
+  // Annotated help screenshot for this popup: static/screenshots/adjustments_editor.png, annotations under the
+  // "adjustments_editor" key in static/annotations.json.  This is the page Help > This Screen would show,
+  // but the popup covers the main menu, so it is offered from the popup's own header.
+  const HELP_SCREEN_URL = '/pages/help/screen/adjustments_editor';
+
   const OPTIONS_CACHE = {};
   let active = null;   // the open editor, if any
 
@@ -363,7 +368,10 @@
         h('div', {},
           h('h2', { class: 'adj-title', text: 'Edit adjustments' }),
           h('p', { class: 'adj-sub' }, h('span', { class: 'adj-mono', text: editor.variable || 'row' }), editor.address ? '  at ' + editor.address : '')),
-        h('button', { class: 'modal-close-btn-dark', type: 'button', 'aria-label': 'Close', text: '\u00d7', onclick: () => closeEditor(editor) })),
+        h('div', { class: 'adj-header-actions' },
+          // a real link opened in a new tab, so the popup and any unapplied edits stay exactly as they are
+          h('a', { class: 'modal-close-btn-dark adj-help-btn', href: HELP_SCREEN_URL, target: '_blank', rel: 'noopener', title: 'Help for this screen (opens in a new tab)', 'aria-label': 'Help for this screen (opens in a new tab)', text: '?' }),
+          h('button', { class: 'modal-close-btn-dark', type: 'button', 'aria-label': 'Close', text: '\u00d7', onclick: () => closeEditor(editor) }))),
       h('div', { class: 'adj-body' },
         h('p', { class: 'adj-help', text: 'Adjustments change how a register value is decoded or scaled before it is published. Pick the adjustments this row needs; MPG ignores anything it does not recognize.' }),
         els.cards, els.addRow, els.messages, els.preview, els.raw),
@@ -709,4 +717,5 @@
   });
 
   api.openEditor = openEditor;   // exposed for tests and for other pages that want the popup
+  api.HELP_SCREEN_URL = HELP_SCREEN_URL;
 })(typeof window !== 'undefined' ? window : globalThis);
