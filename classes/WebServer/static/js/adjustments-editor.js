@@ -283,11 +283,20 @@
     }).then((r) => r.json().then((j) => ({ ok: r.ok, json: j })));
   }
 
+  /**
+   * Fetch the protocol's variables, context variables and fixed choices.  Only a well-formed answer is accepted
+   * (and cached): any other response, such as a different route answering the same URL, falls back to empty
+   * options with `load_error` set, so the popup says so instead of silently offering nothing.
+   */
   function loadOptions(protocol) {
     if (OPTIONS_CACHE[protocol]) return Promise.resolve(OPTIONS_CACHE[protocol]);
-    const fallback = { variables: [], context_variables: [], context_variable_definitions: {}, context_variable_source: '', register_endian: ENDIAN_CHOICES, known_keys: KNOWN_KEYS };
+    const fallback = { variables: [], context_variables: [], context_variable_definitions: {}, context_variable_source: '', register_endian: ENDIAN_CHOICES, known_keys: KNOWN_KEYS, load_error: true };
     return api_('/api/protocols/adjustments/options?protocol_name=' + encodeURIComponent(protocol))
-      .then((r) => (r.ok ? (OPTIONS_CACHE[protocol] = r.json) : fallback))
+      .then((r) => {
+        const good = r.ok && isPlainObject(r.json) && Array.isArray(r.json.variables) && Array.isArray(r.json.context_variables);
+        if (!good) return fallback;
+        return (OPTIONS_CACHE[protocol] = r.json);
+      })
       .catch(() => fallback);
   }
 
@@ -560,12 +569,13 @@
     const els = editor.els;
     const items = [];
     const check = editor.check;
+    if (editor.options.load_error) items.push(h('p', { class: 'adj-msg adj-warn', text: "Could not load this protocol's variables and context variables from the server, so none are suggested here. The checks below still run on the server." }));
     if (editor.initialError) items.push(h('p', { class: 'adj-msg adj-err', text: 'The current value could not be read as adjustments (' + editor.initialError + '). Fix it in the raw JSON below, or clear it.' }));
     for (const e of editor.localErrors) items.push(h('p', { class: 'adj-msg adj-err', text: e }));
     if (check) for (const e of check.errors) items.push(h('p', { class: 'adj-msg adj-err', text: e }));
     if (check) for (const w of check.warnings) items.push(h('p', { class: 'adj-msg adj-warn', text: w }));
     if (editor.pending) items.push(h('p', { class: 'adj-msg adj-muted', text: 'Checking\u2026' }));
-    else if (check && check.ok && !items.length) items.push(h('p', { class: 'adj-msg adj-ok', text: 'Valid.' }));
+    else if (check && check.ok && !items.some((i) => i.className.includes('adj-err') || (i.className.includes('adj-warn') && !i.textContent.startsWith('Could not load')))) items.push(h('p', { class: 'adj-msg adj-ok', text: 'Valid.' }));
     // Notes are information, not problems: e.g. which JSON file defines a context variable the formulas use.
     if (check && check.notes) for (const n of check.notes) items.push(h('p', { class: 'adj-msg adj-info', text: n }));
     els.messages.replaceChildren(...items);

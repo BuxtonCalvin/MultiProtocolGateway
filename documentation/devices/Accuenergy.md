@@ -126,7 +126,7 @@ The vendor PDF contains typos; MPG follows the hex address, which is consistent 
 | Rows `0x4044` / `0x4046` have the S/Q formula letters and units swapped | Row names followed (Q kvar, S kVA) |
 | Max/Min frequency `Rx/1000`; older scaling page says `Rx/100` | Mapped per the map; verify on your meter |
 | Crest/K factor `Rx/100`; older scaling page says `Rx/10` | Mapped per the map |
-| Min table rows labelled "Max of ..." (`0x4232`, `0x4240`, `0x424E`, `0x4255`) | Named `min_*` |
+| Min table rows labeled "Max of ..." (`0x4232`, `0x4240`, `0x424E`, `0x4255`) | Named `min_*` |
 | `7363H-7363H` for Prior Month Total Es | Not mapped as a separate address (`0x7362`) |
 
 ## 8. Not Yet Mapped

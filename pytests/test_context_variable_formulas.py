@@ -71,7 +71,7 @@ def test_cases_and_default_may_use_variables(tmp_path: Path) -> None:
 
 
 def test_negative_variable_keeps_its_sign(tmp_path: Path) -> None:
-    """Values are parenthesised, so ``x - {n}`` with n = -4 is ``x - (-4)``."""
+    """Values are parenthesized, so ``x - {n}`` with n = -4 is ``x - (-4)``."""
     adjustment: str = json.dumps({"Context": {"formula": "x-{n}"}})
     proto: protocol_settings = _protocol(tmp_path, [["1", "val", "USHORT", adjustment], ["2", "n", "SHORT", ""]])
     assert _read(proto, {1: 10, 2: 0xFFFC})["val"] == 14
@@ -160,3 +160,49 @@ def test_real_variable_wins_over_a_context_variable_of_the_same_name(tmp_path: P
 def test_match_context_case_groups_values(value: int | float | str, expected: str) -> None:
     """``"333, 80"`` style keys match any listed value; unlisted values match nothing."""
     assert DataAdjustments.match_context_case({"333, 80": "grouped"}, value) == expected
+
+
+# ---------------------------------------------------------------- definitions may be written in any order
+def _evaluate(definitions: dict[str, object], values: dict[str, int | float]) -> dict[str, float]:
+    engine = DataAdjustments(logging.getLogger("test_context_variable_formulas"), context_variables=definitions)
+    return engine.evaluate_context_variables(values)
+
+
+def test_an_entry_may_be_written_before_the_entries_it_uses() -> None:
+    """The JSON editor lists keys alphabetically, so ``power_scale`` lands ahead of ``voltage_scale``."""
+    definitions: dict[str, object] = {
+        "current_scale": "{mode}+(1-{mode})*{ct}",
+        "power_scale": "{voltage_scale}*{current_scale}",          # uses two entries written below it
+        "voltage_scale": "{mode}+(1-{mode})*{pt}",
+    }
+    out: dict[str, float] = _evaluate(definitions, {"mode": 0, "pt": 10, "ct": 4})
+    assert out == {"voltage_scale": 10.0, "current_scale": 4.0, "power_scale": 40.0}
+
+
+def test_every_order_of_a_chain_gives_the_same_result() -> None:
+    import itertools
+
+    chain: dict[str, object] = {"a": "{x}+1", "b": "{a}*2", "c": "{b}-3"}
+    for order in itertools.permutations(chain):
+        out: dict[str, float] = _evaluate({name: chain[name] for name in order}, {"x": 4})
+        assert out == {"a": 5.0, "b": 10.0, "c": 7.0}, order
+
+
+def test_a_key_cases_entry_can_use_an_entry_written_after_it() -> None:
+    definitions: dict[str, object] = {
+        "ct_ratio": {"key": "ct2", "cases": {"333,80": "{ct1}"}, "default": "{ct1}/{ct2}"},
+        "current_scale": "{ct_ratio}*2",
+    }
+    reordered: dict[str, object] = dict(reversed(list(definitions.items())))
+    assert _evaluate(reordered, {"ct2": 5, "ct1": 200}) == _evaluate(definitions, {"ct2": 5, "ct1": 200})
+    assert _evaluate(reordered, {"ct2": 333, "ct1": 200})["current_scale"] == 400.0
+
+
+def test_circular_and_unsatisfiable_entries_are_left_out_without_looping() -> None:
+    out: dict[str, float] = _evaluate({"a": "{b}+1", "b": "{a}+1", "ok": "{x}*2", "needs_missing": "{nope}+1"}, {"x": 3})
+    assert out == {"ok": 6.0}
+
+
+def test_a_failing_entry_is_dropped_but_does_not_block_the_others() -> None:
+    out: dict[str, float] = _evaluate({"bad": "1/0", "uses_bad": "{bad}+1", "fine": "{x}+1"}, {"x": 1})
+    assert out == {"fine": 2.0}

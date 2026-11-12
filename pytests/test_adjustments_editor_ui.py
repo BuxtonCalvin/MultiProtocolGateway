@@ -8,13 +8,12 @@ installed.  The server rules it relies on are tested in ``test_adjustments_valid
 from __future__ import annotations
 
 import re
-
-# import shutil
-# import subprocess
+import shutil
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
-# import pytest
+import pytest
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 REPO: Path = Path(__file__).resolve().parent.parent
@@ -82,16 +81,16 @@ def test_editor_page_loads_the_popup_script_and_styles() -> None:
     assert (WEBSERVER_DIR / "static" / "js" / "adjustments-editor.js").is_file()
 
 
-# NODE: str | None = shutil.which("node")
+NODE: str | None = shutil.which("node")
 
 
-# @pytest.mark.skipif(NODE is None, reason="Node.js is not installed")
-# def test_javascript_tests_pass() -> None:
-#     assert NODE is not None
-#     tests: list[str] = sorted(str(path) for path in (REPO / "pytests" / "js").glob("*.test.js"))
-#     assert tests
-#     # NODE is the resolved absolute path of the node binary and the arguments are repo test files, not user input.
-#     result: subprocess.CompletedProcess[str] = subprocess.run(  # noqa: S603
-#         [NODE, "--test", *tests], cwd=REPO, capture_output=True, text=True, timeout=120, check=False,
-#     )
-#     assert result.returncode == 0, result.stdout[-4000:] + result.stderr[-2000:]
+@pytest.mark.skipif(NODE is None, reason="Node.js is not installed")
+def test_javascript_tests_pass() -> None:
+    assert NODE is not None
+    tests: list[str] = sorted(str(path) for path in (REPO / "pytests" / "js").glob("*.test.js"))
+    assert tests
+    # NODE is the resolved absolute path of the node binary and the arguments are repo test files, not user input.
+    result: subprocess.CompletedProcess[str] = subprocess.run(  # noqa: S603
+        [NODE, "--test", *tests], cwd=REPO, capture_output=True, text=True, timeout=120, check=False,
+    )
+    assert result.returncode == 0, result.stdout[-4000:] + result.stderr[-2000:]

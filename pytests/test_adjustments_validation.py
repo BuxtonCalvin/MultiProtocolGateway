@@ -30,7 +30,7 @@ def _check(text: str, known: tuple[str, ...] = (), context_vars: tuple[str, ...]
 
 # ---------------------------------------------------------------- structure
 def test_empty_cell_is_valid_and_stays_empty() -> None:
-    assert _check("") == AdjustmentValidation(True, [], [], "")  # noqa: FBT003
+    assert _check("") == AdjustmentValidation(ok=True, errors=[], warnings=[], normalized="")
     assert _check("   ").normalized == ""
 
 
@@ -148,8 +148,8 @@ def test_context_must_be_an_object() -> None:
 
 
 def test_context_warnings() -> None:
-    unused: AdjustmentValidation = _check('{"Context": {"formula": "x", "colour": "red"}}')
-    assert unused.ok and any("colour" in w for w in unused.warnings)
+    unused: AdjustmentValidation = _check('{"Context": {"formula": "x", "color": "red"}}')
+    assert unused.ok and any("color" in w for w in unused.warnings)
     ignored: AdjustmentValidation = _check('{"Context": {"key": "mode", "formula": "x", "default": "x"}}')
     assert ignored.ok and any("ignored when key is set" in w for w in ignored.warnings)
     constant: AdjustmentValidation = _check('{"Context": {"formula": "100"}}')
@@ -232,3 +232,69 @@ def test_preview_uses_protocol_context_variables() -> None:
 def test_preview_refuses_an_invalid_cell() -> None:
     out: dict[str, object] = _adjustments().preview_adjustments('{"Offset": "abc"}', 1.0)
     assert out["ok"] is False and out["errors"] and out["final"] is None
+
+
+# ---------------------------------------------------------------- notes: where a context variable comes from
+SOURCE: str = "the protocol JSON file acrel/acrel_dtsd1352_c.json"
+DEFS: dict[str, object] = {
+    "power_scale": "{pt_ratio}*{ct_ratio}",
+    "ct_ratio_eff": {"key": "ct2", "cases": {"333,80": "{ct1}"}, "default": "{ct1}/{ct2}"},
+}
+
+
+def _check_with_defs(text: str, known: tuple[str, ...] = ("pt_ratio", "ct_ratio")) -> AdjustmentValidation:
+    return _adjustments().validate_adjustments(text, known, tuple(DEFS), DEFS, SOURCE)
+
+
+def test_note_names_the_json_file_and_definition_of_a_context_variable() -> None:
+    result: AdjustmentValidation = _check_with_defs('{"Context": {"formula": "x*{power_scale}"}}')
+    assert result.ok and not result.warnings
+    assert len(result.notes) == 1
+    note: str = result.notes[0]
+    assert "{power_scale}" in note
+    assert "context variable" in note
+    assert SOURCE in note, "the user is told which file defines it"
+    assert "context_variables" in note
+    assert "{pt_ratio}*{ct_ratio}" in note, "and what it is"
+
+
+def test_note_for_a_context_variable_used_as_the_key() -> None:
+    result: AdjustmentValidation = _check_with_defs('{"Context": {"key": "ct_ratio_eff", "cases": {"1": "x"}}}')
+    assert result.ok
+    assert any("'ct_ratio_eff'" in n and SOURCE in n for n in result.notes)
+    assert any("ct2" in n for n in result.notes), "an object definition is shown too"
+
+
+def test_no_note_for_ordinary_variables_or_without_definitions() -> None:
+    assert _check_with_defs('{"Context": {"formula": "x*{pt_ratio}"}}').notes == []
+    assert _check('{"Context": {"formula": "x*{power_scale}"}}', known=("pt_ratio",), context_vars=("power_scale",)).notes == []
+    assert _check("").notes == []
+
+
+def test_each_context_variable_is_noted_once() -> None:
+    result: AdjustmentValidation = _check_with_defs('{"Context": {"key": "mode", "cases": {"0": "x*{power_scale}", "1": "-x*{power_scale}"}}}', known=("mode", "pt_ratio"))
+    assert len([n for n in result.notes if "{power_scale}" in n]) == 1
+
+
+def test_a_row_with_the_same_name_wins_and_the_note_says_so() -> None:
+    result: AdjustmentValidation = _check_with_defs('{"Context": {"formula": "x*{power_scale}"}}', known=("power_scale",))
+    assert any("a row with that name exists" in n for n in result.notes)
+    assert not any("is a context variable defined" in n or "is a context variable the" in n for n in result.notes)
+
+
+def test_unknown_variable_warning_lists_the_available_context_variables_and_their_file() -> None:
+    result: AdjustmentValidation = _check_with_defs('{"Context": {"formula": "x*{typo}"}}')
+    assert result.ok
+    warning: str = " ".join(result.warnings)
+    assert "{typo}" in warning
+    assert "power_scale" in warning and SOURCE in warning
+
+
+def test_notes_do_not_affect_validity_or_normalization() -> None:
+    result: AdjustmentValidation = _check_with_defs('{"context": {"formula": "x*{power_scale}"}}')
+    assert result.ok
+    assert json.loads(result.normalized) == {"Context": {"formula": "x*{power_scale}"}}
+
+
+def test_existing_positional_construction_still_works() -> None:
+    assert AdjustmentValidation(ok=True, errors=[], warnings=[], normalized="").notes == []

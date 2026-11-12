@@ -10,9 +10,13 @@ addresses where the manufacturer's PDF has typos (the hex address is authoritati
 
 from __future__ import annotations
 
+import json
 import logging
 import math
+import shutil
 import struct
+from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -23,6 +27,7 @@ from classes.protocol_settings import (
 )
 
 PROTOCOL: str = "accuenergy_acuvim"
+PROTOCOLS_DIR: Path = Path(__file__).resolve().parent.parent / "protocols"
 
 
 def _load() -> protocol_settings:
@@ -229,3 +234,37 @@ def test_scaling_rows_are_read_every_cycle() -> None:
     for name in ("basic_parameter_mode", "energy_display_mode", "pt1", "pt2", "ct1", "ct2"):
         assert entries[name].read_interval == entries["frequency"].read_interval, name
         assert entries[name].write_mode.name != "READDISABLED", name
+
+
+def test_context_variables_work_in_the_alphabetical_order_the_json_editor_writes(tmp_path: Path) -> None:
+    """The web JSON editor lists nested keys alphabetically, which puts power_scale before voltage_scale."""
+    raw: dict[str, bytes] = {"voltage_l1": _float(120.0), "current_l1": _float(2.5), "power_total": _float(1000.0)}
+    settings: dict[str, int] = {"basic_parameter_mode": 0, "pt1": 4160, "pt2": 120, "ct1": 200, "ct2": 5}
+    shipped: dict[str, float | int | str] = _scaled(dict(raw), **settings)
+
+    # A copy of the protocol whose JSON has its context_variables saved in alphabetical order.
+    for source in (PROTOCOLS_DIR / "accuenergy").glob(f"{PROTOCOL}.*"):
+        shutil.copy(source, tmp_path / source.name)
+    json_path: Path = tmp_path / f"{PROTOCOL}.json"
+    protocol_json: dict[str, object] = json.loads(json_path.read_text(encoding="utf-8"))
+    definitions: dict[str, object] = cast("dict[str, object]", protocol_json["context_variables"])
+    assert list(definitions) != sorted(definitions), "the shipped file is deliberately not alphabetical"
+    protocol_json["context_variables"] = dict(sorted(definitions.items()))
+    json_path.write_text(json.dumps(protocol_json), encoding="utf-8")
+
+    logging.disable(logging.CRITICAL)
+    try:
+        reordered_protocol: protocol_settings = protocol_settings(PROTOCOL, settings_dir=str(tmp_path))
+    finally:
+        logging.disable(logging.NOTSET)
+    saved_definitions: dict[str, object] = cast("dict[str, object]", reordered_protocol.codes["context_variables"])
+    assert list(saved_definitions) == sorted(definitions)
+
+    values: dict[str, bytes] = dict(raw)
+    for name, number in settings.items():
+        values[name] = number.to_bytes(4 if name == "pt1" else 2, "big")
+    reordered: dict[str, float | int | str] = _decode(reordered_protocol, values)
+    for name in raw:
+        assert math.isclose(float(reordered[name]), float(shipped[name]), rel_tol=1e-9), name
+    assert math.isclose(float(reordered["power_total"]), 1.0 * (4160 / 120) * (200 / 5), rel_tol=1e-6)
+

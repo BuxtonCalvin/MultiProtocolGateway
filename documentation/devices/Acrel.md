@@ -81,7 +81,7 @@ Read Disabled rows (`RD` in the `writable` column) stay in the map but are not p
 | Temperature | 0.1 °C | unit `0.1°C` |
 
   `power_scale` (`{pt_ratio}*{ct_ratio}`) is defined once under `context_variables` in `acrel_dtsd1352_c.json`, so the PT×CT product is written in one place.
-  
+
 - **Byte-packed registers.** Several settings share one register: register `0x003F` holds the address in its high byte and the baud code in its low byte; `0x0095` holds parity (high) and stop bits (low); `0x0091` holds two running-state bytes; the clock is three registers of two bytes. These use byte offsets in the register column (`0x003F.0` is the high byte, `0x003F.1` the low byte).
 
 ## 6. MPG Configuration
@@ -99,7 +99,7 @@ protocol_version = acrel_dtsd1352_c
 | Manual (V3.2) | Used |
 | --- | --- |
 | Min apparent power of phase C listed at `027EH`; the total follows at `0280H` and every other record has a 4-register pitch | `0x027C` |
-| Line voltages labelled "A-B", "C-B", "A-C" in that order | `voltage_l1_l2`, `voltage_l2_l3` (labelled C-B), `voltage_l3_l1` (labelled A-C) |
+| Line voltages labeled "A-B", "C-B", "A-C" in that order | `voltage_l1_l2`, `voltage_l2_l3` (labeled C-B), `voltage_l3_l1` (labeled A-C) |
 | "Spike" energy | Named `sharp`, matching the tariff rate list ("1: sharp") |
 | Baud code table has no code for 19200 | Not mapped as a code; the value is published as the raw code |
 | `0x019B`-`0x01FF` listed as Reserved while `0x019B` is also a demand row | `0x019B` mapped as reverse reactive demand |

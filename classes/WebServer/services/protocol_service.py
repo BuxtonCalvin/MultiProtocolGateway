@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -1054,6 +1055,33 @@ def update_protocol_register_field(db: Session, register_id: int, field: str, va
 ADJUSTMENT_CHECKER: DataAdjustments = DataAdjustments(logging.getLogger(__name__))
 
 
+# A protocol is a JSON file plus one CSV per registry type in one manufacturer folder:
+#   protocols/accuenergy/accuenergy_acuvim.json
+#   protocols/accuenergy/accuenergy_acuvim.holding_registry_map.csv
+# The editor's database rows are keyed by the CSV stem ("accuenergy_acuvim.holding_registry_map"),
+# while the JSON file is named after the protocol ("accuenergy_acuvim").
+_CSV_SUFFIX: re.Pattern[str] = re.compile(r"\.(?:coil|discrete|input|holding)_registry_map$|\.registry_map$")
+
+
+def protocol_base_name(protocol_name: str) -> str:
+    """Return the protocol's own name: the CSV stem without its ``.<type>_registry_map`` suffix.
+
+    ``accuenergy_acuvim.holding_registry_map`` -> ``accuenergy_acuvim``.  A name that is already a
+    protocol name is returned unchanged.
+    """
+    return _CSV_SUFFIX.sub("", protocol_name)
+
+
+def json_name_candidates(protocol_name: str) -> list[str]:
+    """Names to try, in order, when looking for a protocol's JSON file.
+
+    The base name comes first (that is what the file is called); the name as given follows, in case a
+    JSON file really is named after the stem, for example one saved from the editor under that name.
+    """
+    base: str = protocol_base_name(protocol_name)
+    return [base] if base == protocol_name else [base, protocol_name]
+
+
 def adjustment_editor_options(
     db: Session,
     protocols_dir: Path,
@@ -1080,15 +1108,24 @@ def adjustment_editor_options(
         ]
         variables = sorted({variable for _group, variable in found if variable})
         if found:
-            data, is_override = get_protocol_json(protocols_dir, found[0][0], protocol_name, config_dir=config_dir)
+            # The editor's rows are keyed by the CSV stem ("accuenergy_acuvim.holding_registry_map") but the
+            # JSON file is named after the protocol ("accuenergy_acuvim"), so try the base name first.
+            data: dict[str, JSONValue] | None = None
+            is_override: bool = False
+            json_name: str = protocol_name
+            for candidate in json_name_candidates(protocol_name):
+                data, is_override = get_protocol_json(protocols_dir, found[0][0], candidate, config_dir=config_dir)
+                if data is not None:
+                    json_name = candidate
+                    break
             raw: object = data.get("context_variables") if data else None
             if isinstance(raw, dict):
                 context_defs = {str(name): definition for name, definition in raw.items()}
                 context_names = list(context_defs)
                 # Users may not know the protocol JSON exists, so say which file it is.
                 context_source = (
-                    f"{protocol_name}.json in the config folder (your edited copy of the protocol JSON)"
-                    if is_override else f"the protocol JSON file {found[0][0]}/{protocol_name}.json"
+                    f"{json_name}.json in the config folder (your edited copy of the protocol JSON)"
+                    if is_override else f"the protocol JSON file {found[0][0]}/{json_name}.json"
                 )
     return {
         "variables": variables,

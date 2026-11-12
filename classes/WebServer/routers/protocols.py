@@ -89,6 +89,63 @@ router = APIRouter(prefix="/api/protocols", tags=["protocols"])
 JSONValue = dict[str, "JSONValue"] | list["JSONValue"] | str | int | float | bool | None
 
 
+# ---------------------------------------------------------------------------
+# Adjustments popup support.
+#
+# These routes MUST stay above ``GET /{protocol_name}/{registry_type}`` (list_registers): FastAPI
+# matches routes in registration order, so a later "/adjustments/options" would be answered by
+# list_registers as protocol "adjustments", registry type "options" (an empty list), and the popup
+# would silently get no variables or context variables.  pytests/test_adjustments_routes.py checks the
+# order.
+# ---------------------------------------------------------------------------
+
+class AdjustmentCheckRequest(BaseModel):
+    value: str
+    protocol_name: str | None = None
+
+
+class AdjustmentPreviewRequest(BaseModel):
+    value: str
+    x: float = 1.0
+    unit_mod: float = 1.0
+    variables: dict[str, float] = Field(default_factory=dict)
+    protocol_name: str | None = None
+
+
+@router.get("/adjustments/options")
+def adjustment_options(
+    request: Request, protocol_name: str | None = None, db: Session = Depends(get_session),
+) -> dict[str, list[str] | dict[str, object] | str]:
+    config_dir: Path | None = getattr(request.app.state, "config_dir", None)
+    return adjustment_editor_options(db, request.app.state.protocols_dir, config_dir, protocol_name)
+
+
+@router.post("/adjustments/validate")
+def validate_adjustments_value(
+    payload: AdjustmentCheckRequest, request: Request, db: Session = Depends(get_session),
+) -> dict[str, bool | list[str] | str]:
+    options = adjustment_options(request, payload.protocol_name, db)
+    check: AdjustmentValidation = ADJUSTMENT_CHECKER.validate_adjustments(
+        payload.value,
+        cast("list[str]", options["variables"]),
+        cast("list[str]", options["context_variables"]),
+        cast("dict[str, object]", options["context_variable_definitions"]),
+        cast("str", options["context_variable_source"]),
+    )
+    return {"ok": check.ok, "errors": check.errors, "warnings": check.warnings, "notes": check.notes, "normalized": check.normalized}
+
+
+@router.post("/adjustments/preview")
+def preview_adjustments_value(
+    payload: AdjustmentPreviewRequest, request: Request, db: Session = Depends(get_session),
+) -> dict[str, object]:
+    options: dict[str, List[str] | dict[str, object] | str] = adjustment_options(request, payload.protocol_name, db)
+    return ADJUSTMENT_CHECKER.preview_adjustments(
+        payload.value, payload.x, payload.unit_mod, payload.variables,
+        cast("dict[str, object]", options["context_variable_definitions"]),
+    )
+
+
 @router.get("/{protocol_name}/{registry_type}")
 def list_registers(
     protocol_name: str,
@@ -300,58 +357,6 @@ def toggle_delete_register(register_id: int, payload: DeleteToggleRequest, db: S
         )
     db.commit()
     return {"id": result.id, "pending_delete": result.pending_delete}
-
-
-# ---------------------------------------------------------------------------
-# Adjustments popup support.  Registered before the /{register_id}/... routes so the
-# literal "adjustments" segment is never read as a register id.
-# ---------------------------------------------------------------------------
-
-class AdjustmentCheckRequest(BaseModel):
-    value: str
-    protocol_name: str | None = None
-
-
-class AdjustmentPreviewRequest(BaseModel):
-    value: str
-    x: float = 1.0
-    unit_mod: float = 1.0
-    variables: dict[str, float] = Field(default_factory=dict)
-    protocol_name: str | None = None
-
-
-@router.get("/adjustments/options")
-def adjustment_options(
-    request: Request, protocol_name: str | None = None, db: Session = Depends(get_session),
-) -> dict[str, list[str] | dict[str, object] | str]:
-    config_dir: Path | None = getattr(request.app.state, "config_dir", None)
-    return adjustment_editor_options(db, request.app.state.protocols_dir, config_dir, protocol_name)
-
-
-@router.post("/adjustments/validate")
-def validate_adjustments_value(
-    payload: AdjustmentCheckRequest, request: Request, db: Session = Depends(get_session),
-) -> dict[str, bool | list[str] | str]:
-    options: dict[str, List[str] | dict[str, object] | str] = adjustment_options(request, payload.protocol_name, db)
-    check: AdjustmentValidation = ADJUSTMENT_CHECKER.validate_adjustments(
-        payload.value,
-        cast("list[str]", options["variables"]),
-        cast("list[str]", options["context_variables"]),
-        cast("dict[str, object]", options["context_variable_definitions"]),
-        cast("str", options["context_variable_source"]),
-    )
-    return {"ok": check.ok, "errors": check.errors, "warnings": check.warnings, "notes": check.notes, "normalized": check.normalized}
-
-
-@router.post("/adjustments/preview")
-def preview_adjustments_value(
-    payload: AdjustmentPreviewRequest, request: Request, db: Session = Depends(get_session),
-) -> dict[str, object]:
-    options: dict[str, List[str] | dict[str, object] | str] = adjustment_options(request, payload.protocol_name, db)
-    return ADJUSTMENT_CHECKER.preview_adjustments(
-        payload.value, payload.x, payload.unit_mod, payload.variables,
-        cast("dict[str, object]", options["context_variable_definitions"]),
-    )
 
 
 @router.patch("/{register_id}/field")
