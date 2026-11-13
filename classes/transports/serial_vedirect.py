@@ -276,7 +276,7 @@ class serial_vedirect(serial_base):
 
         values: dict[int, bytes] = {}
         for entry in entries:
-            if not entry.register_key:
+            if entry.description_source or not entry.register_key:
                 continue
             text: str | None = records.get(entry.register_key.upper())
             if text is None:

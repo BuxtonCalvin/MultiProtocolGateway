@@ -31,7 +31,7 @@ from __future__ import annotations
 import json
 import math
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -303,8 +303,7 @@ def test_a_charger_block_decodes_its_state_through_the_code_tables(monkeypatch: 
     out: dict[str, Any] = transport._process_raw({0: records_of(make_block(records))})
 
     assert_values(out, {"battery_voltage": 13250, "battery_current": 4100, "charge_state": 5, "mppt_mode": 2, "error_code": 0})
-    codes: dict[str, str] = cast(dict[str, str], protocol_settings("victron_vedirect_serial").codes["charge_state_codes"])
-
+    codes: dict[str, str] = protocol_settings("victron_vedirect_serial").get_code_dict("charge_state_codes")
     assert out["charge_state_desc"] == codes["5"], "the numeric state is described from the protocol's own table"
 
 
@@ -337,7 +336,7 @@ def test_nothing_is_decoded_without_a_block_or_a_protocol(monkeypatch: pytest.Mo
 # --------------------------------------------------------------------------- #
 
 def test_a_full_poll_of_a_simulated_device(monkeypatch: pytest.MonkeyPatch) -> None:
-    port: FakePort = FakePort(chunks=[BMV_700_BLOCK])
+    port: FakePort = FakePort(arrives_after_reset=BMV_700_BLOCK)
     transport: Any = make(monkeypatch, port)
 
     out: dict[str, Any] = transport.read_data()
@@ -348,12 +347,12 @@ def test_a_full_poll_of_a_simulated_device(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_a_hex_message_after_the_block_does_not_disturb_the_poll(monkeypatch: pytest.MonkeyPatch) -> None:
-    transport: Any = make(monkeypatch, FakePort(chunks=[BMV_700_BLOCK + HEX_MESSAGE]))
+    transport: Any = make(monkeypatch, FakePort(arrives_after_reset=BMV_700_BLOCK + HEX_MESSAGE))
     assert_values(transport.read_data(), {"battery_voltage": 26201})
 
 
 def test_two_polls_in_a_row_each_get_a_fresh_block(monkeypatch: pytest.MonkeyPatch) -> None:
-    port: FakePort = FakePort(chunks=[BMV_700_BLOCK, BMV_700_BLOCK])
+    port: FakePort = FakePort(arrives_after_reset=BMV_700_BLOCK)
     transport: Any = make(monkeypatch, port)
     assert_values(transport.read_data(), {"battery_voltage": 26201})
     assert_values(transport.read_data(), {"battery_voltage": 26201})
@@ -370,17 +369,17 @@ def test_a_silent_device_gives_an_empty_incomplete_poll(monkeypatch: pytest.Monk
 def test_a_corrupted_block_is_dropped_not_decoded(monkeypatch: pytest.MonkeyPatch) -> None:
     damaged: bytearray = bytearray(BMV_700_BLOCK)
     damaged[20] ^= 0x01
-    assert make(monkeypatch, FakePort(chunks=[bytes(damaged)])).read_data() == {}
+    assert make(monkeypatch, FakePort(arrives_after_reset=bytes(damaged))).read_data() == {}
 
 
 def test_the_interleaved_read_takes_a_single_step(monkeypatch: pytest.MonkeyPatch) -> None:
-    transport: Any = make(monkeypatch, FakePort(chunks=[BMV_700_BLOCK]))
+    transport: Any = make(monkeypatch, FakePort(arrives_after_reset=BMV_700_BLOCK))
     assert list(transport.read_data_iter()) == [True]
     assert transport.get_partial_data()["battery_voltage"] == 26201
 
 
 def test_a_port_that_is_not_there_yet_returns_nothing_instead_of_raising(monkeypatch: pytest.MonkeyPatch) -> None:
-    transport: Any = make(monkeypatch, FakePort(chunks=[BMV_700_BLOCK]))
+    transport: Any = make(monkeypatch, FakePort(arrives_after_reset=BMV_700_BLOCK))
     unplug(monkeypatch)
     assert transport.read_data() == {}
 

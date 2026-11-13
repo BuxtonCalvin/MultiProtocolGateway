@@ -34,12 +34,17 @@ class FakePort:
     Stands in for serial.Serial. Bytes arrive from `chunks`, and a `responder` can queue a reply
     whenever the transport writes a request, so a device can be simulated end to end.
     """
-
-    def __init__(self, responder: Callable[[bytes], bytes | None] | None = None, chunks: list[bytes] | None = None,
-                 chunk_size: int | None = None) -> None:
+    def __init__(
+        self,
+        responder: Callable[[bytes], bytes | None] | None = None,
+        chunks: list[bytes] | None = None,
+        chunk_size: int | None = None,
+        arrives_after_reset: bytes | None = None,
+    ) -> None:
         self.responder: Callable[[bytes], bytes | None] | None = responder
         self.chunks: list[bytes] = list(chunks or [])
         self.chunk_size: int | None = chunk_size
+        self.arrives_after_reset: bytes | None = arrives_after_reset
         self.written: list[bytes] = []
         self.is_open: bool = True
         self.close_calls: int = 0
@@ -80,6 +85,8 @@ class FakePort:
     def reset_input_buffer(self) -> None:
         self.input_resets += 1
         self.chunks.clear()
+        if self.arrives_after_reset is not None:
+            self.queue(self.arrives_after_reset)
 
     def close(self) -> None:
         self.close_calls += 1
