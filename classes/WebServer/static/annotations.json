@@ -1368,17 +1368,17 @@
     },
     {
       "id": "adjustments-dot-variable-to-read",
-      "x_percent": 21.66613873930947,
-      "y_percent": 34.16380787265204,
+      "x_percent": 21.7,
+      "y_percent": 34.2,
       "label": "Variable to read: the name of another variable whose value decides which formula applies (here the SunSpec scale factor inverter_a_sf). Variables of this protocol are suggested as you type, and so are any context variables defined in the protocol's JSON file (shown in amber).",
       "shape_type": "dot",
-      "label_x_percent": 58.72188786822933,
-      "label_y_percent": 19.76950646022949
+      "label_x_percent": 64.6,
+      "label_y_percent": 12.4
     },
     {
       "id": "adjustments-dot-cases",
-      "x_percent": 14.317389927146015,
-      "y_percent": 44.6068932485719,
+      "x_percent": 14.69863276701425,
+      "y_percent": 42.212758834049566,
       "label": "Cases: a formula for specific values of the variable above. In a formula x is this row's own value. Put several values in one case with commas (for example 333,80,100). Use + Add case for each additional value.",
       "shape_type": "dot",
       "label_x_percent": 30.593918276845105,
@@ -1390,13 +1390,13 @@
       "y_percent": 49.82843593653182,
       "label": "Scale-factor range (optional): when the variable is a whole number between these two limits, the row's value is multiplied by 10 to the power of that number. This is the SunSpec scale-factor pattern. Leave both boxes empty if you are not using it.",
       "shape_type": "dot",
-      "label_x_percent": 58.97529299968324,
-      "label_y_percent": 47.070715371562805
+      "label_x_percent": 64.56685465108401,
+      "label_y_percent": 40.03794552890346
     },
     {
       "id": "adjustments-dot-default-formula",
-      "x_percent": 16.598036110231234,
-      "y_percent": 63.10607305734418,
+      "x_percent": 15.073064750758297,
+      "y_percent": 63.70460666097476,
       "label": "Default formula (optional): used when no case or range matches. If it is empty and nothing matches, the value is published unchanged.",
       "shape_type": "dot",
       "label_x_percent": 30.3405131453912,
@@ -1404,17 +1404,17 @@
     },
     {
       "id": "adjustments-dot-add-adjustment",
-      "x_percent": 24.4535951853025,
-      "y_percent": 72.35566296173032,
+      "x_percent": 22.59378580065883,
+      "y_percent": 72.25036659909236,
       "label": "Add another adjustment to this row: Register_Endian, High_Low, Offset, Context, or a custom key. Adjustments already on the row are not offered again.",
       "shape_type": "dot",
-      "label_x_percent": 58.848590433956296,
-      "label_y_percent": 68.70282079311102
+      "label_x_percent": 64.8,
+      "label_y_percent": 63.3
     },
     {
       "id": "adjustments-dot-sample-value",
-      "x_percent": 26.4,
-      "y_percent": 82.4,
+      "x_percent": 24.112542960790595,
+      "y_percent": 81.50219959455413,
       "label": "Try it on a sample value: enter a value for x and for any variables the formulas read, then press Run. The result comes from the same code the gateway uses, and shows the formula chosen and the published value.",
       "shape_type": "dot",
       "label_x_percent": 29.8,
@@ -1422,12 +1422,12 @@
     },
     {
       "id": "adjustments-dot-raw-json",
-      "x_percent": 25.6,
-      "y_percent": 89.5,
+      "x_percent": 21.152166868203935,
+      "y_percent": 87.70439918910824,
       "label": "Show raw JSON: see and edit the whole adjustments object as JSON, including keys the form does not cover (kept as custom entries). Use Apply raw JSON to the form before pressing Apply.",
       "shape_type": "dot",
-      "label_x_percent": 58.5,
-      "label_y_percent": 84.8
+      "label_x_percent": 64.72696638451451,
+      "label_y_percent": 80.31099797277062
     },
     {
       "id": "adjustments-dot-validation",
@@ -1435,8 +1435,8 @@
       "y_percent": 94.6,
       "label": "Validation message, updated as you type. Valid. means Apply is enabled. Errors (red) must be fixed first and keep Apply disabled; warnings (amber) are allowed. Notes (blue) are information only, for example which JSON file defines a context variable used in a formula, since the protocol JSON is not shown on this screen.",
       "shape_type": "dot",
-      "label_x_percent": 89.2,
-      "label_y_percent": 73.6
+      "label_x_percent": 4.1,
+      "label_y_percent": 92.8
     }
   ],
   "_aliases": {
