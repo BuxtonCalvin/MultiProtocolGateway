@@ -40,7 +40,7 @@ import pytest
 from conftest import DummySettings
 from serial_support import FakePort, install_serial_layer, unplug
 
-from classes.protocol_settings import protocol_settings
+from classes.protocol_settings import Registry_Type, protocol_settings
 from classes.transports.serial_jk import serial_jk
 from classes.transports.serial_length_transport import serial_length_transport
 
@@ -257,7 +257,7 @@ def test_the_protocol_loads_and_names_its_transport() -> None:
     settings = protocol_settings("jk_bms_4g_gps_serial")
     assert settings.settings["transport"] == "serial_jk"
     assert int(settings.settings["baud"]) == serial_jk.DEFAULT_BAUDRATE
-    registry_type = next(iter(settings.registry_map))
+    registry_type: Registry_Type = next(iter(settings.registry_map))
     names: list[str] = [entry.variable_name for entry in settings.get_registry_map(registry_type)]
     assert len(names) == len(set(names)), "variable names must be unique"
 
