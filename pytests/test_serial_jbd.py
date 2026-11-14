@@ -35,7 +35,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
-from conftest import DummySettings
+from conftest import DummySettings, approx
 from serial_support import FakePort, install_serial_layer, unplug
 
 from classes.protocol_settings import protocol_settings
@@ -165,18 +165,19 @@ def test_it_polls_the_three_read_commands(monkeypatch: pytest.MonkeyPatch) -> No
 def test_the_documents_narrative_example_decodes_to_its_stated_values(monkeypatch: pytest.MonkeyPatch) -> None:
     out: dict[str, Any] = make(monkeypatch)._process_raw({3: payload_of(NARRATIVE_03), 4: payload_of(NARRATIVE_04), 5: payload_of(RESPONSE_05_VERSION)})
 
-    assert out["total_voltage"] == pytest.approx(66.23)
-    assert out["current"] == pytest.approx(-20.12)
-    assert out["residual_capacity"] == pytest.approx(34.93)
-    assert out["nominal_capacity"] == pytest.approx(40.0)
+    assert out["total_voltage"] == approx(66.23)
+    assert out["current"] == approx(-20.12)
+    assert out["residual_capacity"] == approx(34.93)
+    assert out["nominal_capacity"] == approx(40.0)
     assert out["cycle_count"] == 2
     assert out["state_of_charge"] == 87
     assert out["cell_count"] == 17
     assert out["temperature_sensor_count"] == 4
-    assert [out[f"temperature_{i}"] for i in (1, 2, 3, 4)] == pytest.approx([23.7, 25.4, 23.5, 23.6])
-    assert out["cell_1_voltage"] == pytest.approx(3.784)
-    assert out["cell_4_voltage"] == pytest.approx(3.791)
-    assert out["cell_17_voltage"] == pytest.approx(3.785)
+    for i, expected in enumerate([23.7, 25.4, 23.5, 23.6], start=1):
+        assert out[f"temperature_{i}"] == approx(expected)
+    assert out["cell_1_voltage"] == approx(3.784)
+    assert out["cell_4_voltage"] == approx(3.791)
+    assert out["cell_17_voltage"] == approx(3.785)
     assert out["mosfet_status"] == "charging MOSFET on,discharging MOSFET on"
     assert out["hardware_version"] == "0123456789"
 
@@ -226,7 +227,7 @@ def test_each_mosfet_is_reported_on_its_own(monkeypatch: pytest.MonkeyPatch, fla
 def test_a_charging_pack_reports_a_positive_current(monkeypatch: pytest.MonkeyPatch) -> None:
     data: bytearray = bytearray(payload_of(NARRATIVE_03))
     data[2:4] = (1500).to_bytes(2, "big")
-    assert make(monkeypatch)._process_raw({3: bytes(data)})["current"] == pytest.approx(15.0)
+    assert make(monkeypatch)._process_raw({3: bytes(data)})["current"] == approx(15.0)
 
 
 def test_a_command_that_did_not_answer_leaves_its_variables_out(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -247,8 +248,8 @@ def test_a_full_poll_of_a_simulated_pack(monkeypatch: pytest.MonkeyPatch) -> Non
     out: dict[str, Any] = transport.read_data()
 
     assert port.written == [REQUEST_03, REQUEST_04, REQUEST_05]
-    assert out["total_voltage"] == pytest.approx(66.23)
-    assert out["cell_17_voltage"] == pytest.approx(3.785)
+    assert out["total_voltage"] == approx(66.23)
+    assert out["cell_17_voltage"] == approx(3.785)
     assert out["hardware_version"] == "0123456789"
 
 

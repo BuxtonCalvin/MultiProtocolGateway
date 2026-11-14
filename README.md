@@ -278,7 +278,7 @@ Here are overviews of two database bridges:
 Here are the overviews of the MQTT, Prometheus and JSON bridges:
 
 - MQTT [![Mosquitto](https://img.shields.io/badge/Eclipse-FE7A16?logo=Eclipse&logoColor=white)](https://mosquitto.org) — Readme: [`MQTT`](documentation/bridges/MQTT/MQTT_bridge.md)
-- Prometheus [![Prometheus](https://img.shields.io/badge/Prometheus-E6522C?style=for-the-badge&logo=prometheus&logoColor=white)](https://prometheus.io/) — Readme: [`Prometheus`](documentation/bridges/prometheus/prometheus.md)
+- Prometheus [![Prometheus](https://img.shields.io/badge/Prometheus-E6522C?style=for-the-badge&logo=prometheus&logoColor=white)](https://prometheus.io/) — Readme: [`Prometheus`](documentation/bridges/Prometheus/prometheus.md)
 - JSON — Readme: [`JSON`](documentation/bridges/JSON/json_out_example.md)
 
 ---
