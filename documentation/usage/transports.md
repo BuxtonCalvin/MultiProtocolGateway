@@ -403,6 +403,17 @@ bridge = transport.mqtt
 | `interface` | `socketcan` | CAN adapter mode. `socketcan` for candlelight/gs_usb adapters; `slcan` for serial CAN adapters. |
 | `baudrate` | `500000` | CAN bus bitrate. Common values: `250000`, `500000`. Overridden by protocol defaults if set in the protocol JSON. |
 | `cache_timeout` | `120` | Seconds to retain a CAN message in cache before expiring it. |
+| `serial_number` | *(autodetect)* | Device serial number. Leave unset and MPG picks the frame that looks most like a serial number and logs its CAN ID. |
+| `serial_number_can_id` | *(autodetect)* | CAN ID known to carry the serial number (decimal or hex). Skips the autodetect. |
+| `write_enabled` / `write_type` | off | Allow MPG to transmit. See [Writing to a CAN device](#writing-to-a-can-device). |
+
+#### Writing to a CAN device
+
+CAN is passive by default. With `write_enabled = true` (or `write_type = relaxed` / `unsafe`) MPG can transmit a frame for each protocol row marked `W` or `WO` in the `writable` column. **None of the shipped CAN protocols mark a row writable**, so nothing is sent unless you add such a row yourself; transmitting to a battery or inverter can change its behavior, so test carefully.
+
+- On startup MPG refuses to enable writing unless the CAN interface is open, at least one row is writable and frames are being received. `write_type = relaxed` waives the traffic check; `write_type = unsafe` skips validation and the per-value range check.
+- A value is converted with the row's unit multiplier and placed at the row's byte offset in the frame, big-endian unless the row sets another byte order. Supported types: `BYTE`, `USHORT`, `SHORT`, `UINT`, `INT`. Bytes outside the field come from the last frame MPG sent with that ID, else the last frame seen on the bus, else zeros.
+- IDs above `0x7FF` are sent as extended (29-bit) frames. A frame carries at most 8 bytes.
 
 #### CAN Bus Adapter Setup
 

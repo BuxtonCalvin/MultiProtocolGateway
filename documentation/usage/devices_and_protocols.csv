@@ -23,6 +23,7 @@ Enphase,IQ Gateway SunSpec,enphase_iq_gateway_sunspec,ModBus,https://github.com/
 Enphase,IQ Gateway local REST API,enphase_iq_gateway_rest,HTTPS REST,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Enphase.md
 FoxESS,H1 LAN / KH / H3-style holding-register map,foxess_h1_lan,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/FoxESS.md
 Fronius,SunSpec inverter,fronius_sunspec,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Fronius.md
+GoodWe,Energy storage / hybrid inverter,goodwe_energy_storage,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/GoodWe.md
 Growatt,Inverter protocol v1.24,growatt_2020_v1.24,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Growatt.md
 Growatt,BMS CAN bus v1.04,growatt_bms_canbus_v1.04,CanBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Growatt.md
 Growatt,BMS RS-485 1xSxxP ESS v2.01,growatt_bms_rs485_1xsxxp_ess_v2.01,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Growatt.md
@@ -32,6 +33,7 @@ Huawei,SUN2000 inverter,huawei_sun2000,ModBus,https://github.com/BuxtonCalvin/Mu
 JBD / Xiaoxiang / Overkill Solar,Smart BMS,jbd_bms,Serial,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/JBD.md
 JK (Jikong),"JK-PB / JK-B / JK-BD BMS (RS485 Modbus RTU, UART protocol 001/013)",jk_bms_modbus_rtu,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/JK.md
 JK (Jikong),"JK-B / JK-BD / JK-PB BMS (4G-GPS serial, UART protocol 000)",jk_bms_4g_gps_serial,Serial,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/JK.md
+Kostal,PIKO IQ / PLENTICORE SunSpec inverter (Modbus TCP),kostal_sunspec,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Kostal.md
 LuxPower,12K hybrid inverter,lxp_12k_hybrid,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/LuxPower.md
 Next Power,Victor NM RE,next_power_victor_nm_re,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Next_Power.md
 PACE,BMS RS-485 v1.3,pace_bms_v1.3,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/PACE.md
@@ -53,6 +55,7 @@ SolarEdge,SunSpec inverter,solaredge_sunspec,ModBus,https://github.com/BuxtonCal
 SolaX,X1/X3 Hybrid G4-style inverter,solax_hybrid_g4,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/SolaX.md
 Sol-Ark,Hybrid inverter,solark_hybrid,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/SolArk.md
 Sol-Ark,Modbus v1.1,solark_v1.1,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/SolArk.md
+Solinteg,INTEG MHT 25-50K,solinteg_integ_mht_25_50_k,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Solinteg.md
 Solis / Ginlong,Hybrid inverter,solis_hybrid,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Solis.md
 Solis / Ginlong,String inverter,solis_string,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Solis.md
 SRNE,Energy-storage inverter v1.96,srne_2021_v1.96,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/SRNE.md

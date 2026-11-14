@@ -126,7 +126,7 @@ The web UI is available at **`http://localhost:1717`** as soon as the gateway st
 | **Input transports** (scrapers) | Modbus RTU, Modbus TCP, Modbus TLS, Modbus UDP, CAN bus, PACE BMS serial, Pylon serial, EG4 LL-S RS-485, Enphase REST (local HTTPS API) |
 | **Output transports** (bridges) | MQTT, Timescale DB (PostgreSQL hypertable), InfluxDB, InfluxDB3, Prometheus, JSON file |
 | **Web UI** | Full browser-based configuration and live management on port **1717** |
-| **Protocol library** | 29 manufacturers with tested register maps; 74 more with device metadata stubbed in |
+| **Protocol library** | 38 manufacturers with register maps; 67 more with device metadata stubbed in |
 | **Config management** | SQLite staging database; changes are previewed and committed — no raw file editing required. |
 | **Python versions** | 3.11 – 3.14 |
 | **Deployment** | Script, systemd service, Docker container, Home Assistant add-on |
@@ -209,7 +209,7 @@ Protocols whose register layout depends on the attached equipment (SunSpec) can 
 
 ### Live Device Analysis
 
-The **Analyze** page is the tool for working with new or undocumented hardware — including any of the 74 [stub protocols](#community-help-wanted-stub-protocols) that don't have a register map yet. For a plain-language, no-prior-experience walkthrough of this whole workflow, see [**Analyze.md**](documentation/usage/Analyze.md).
+The **Analyze** page is the tool for working with new or undocumented hardware — including any of the 81 [stub protocols](#community-help-wanted-stub-protocols) that don't have a register map yet. For a plain-language, no-prior-experience walkthrough of this whole workflow, see [**Analyze.md**](documentation/usage/Analyze.md).
 
 Select a physical device from the scraper page. Then in the analysis page, select one or more reference protocol maps, then click **Run Analysis**. MPG then:
 
@@ -290,6 +290,7 @@ MPG ships with pre-built, tested protocol maps for the following manufacturers. 
 | Manufacturer | Models / Protocols | Link |
 | --- | --- | --- |
 | **Accuenergy** | Acuvim II / IIR / IIE / IIW power meters (`accuenergy_acuvim` via Modbus RTU) | **[`View Accuenergy`](documentation/devices/Accuenergy.md)** |
+| **Acrel** | DTSD1352-C three-phase DIN-rail energy meter (`acrel_dtsd1352_c` via Modbus RTU) | **[`View Acrel`](documentation/devices/Acrel.md)** |
 | **A-Tronix** | AX / AX Plus (rebranded FoxESS H3 Smart, use `foxess_h1_lan`), AX2 Gen3 Solinteg-layout map (`a_tronix` via Modbus ) | **[`View A-Tronix`](documentation/devices/A_Tronix.md)** |
 | **ABB** | B21 / B23 / B24 Energy Meter (`abb_b21` via Modbus ) | **[`View ABB`](documentation/devices/ABB.md)** |
 | **ABB / FIMER** | TRIO-5.8/8.5 (`abb_fimer_trio_5_8_8_5`), TRIO-20.0/27.6 (`abb_fimer_trio_20_27`), TRIO-50.0/60.0 (`abb_fimer_trio_50_60`), TRIO-TM-50/60 (`abb_fimer_trio_tm_50_60`), legacy SunSpec (`abb_fimer_sunspec`), REACT2 SunSpec (`abb_fimer_react2_sunspec`), VSN300 SunSpec (`abb_fimer_vsn300_sunspec`), all via Modbus | **[`View ABB / FIMER`](documentation/devices/ABB_Fimer.md)** |
@@ -337,13 +338,13 @@ MPG also supports any generic Modbus RTU or TCP device when given a register map
 
 ## Community Help Wanted: Stub Protocols
 
-Beyond the 37 manufacturers above, MPG has device metadata already stubbed in for **68 more manufacturers** — a JSON descriptor with the transport type and default settings, but no register map yet. These exist because someone requested or started the device but a full map hasn't been built. If you own one of these and can run the [Live Analysis tool](#live-device-analysis) against it, you can generate and commit a working register map directly from the web UI — no CSV editing required, and no need to already know the register layout. New to MPG? [**Analyze.md**](documentation/usage/Analyze.md) walks through this exact scenario (Create Protocol → Create Scraper → Analyze) start to finish for readers with no prior experience.
+Beyond the 38 manufacturers above, MPG has device metadata already stubbed in for **67 more manufacturers** — a JSON descriptor with the transport type and default settings, but no register map yet. These exist because someone requested or started the device but a full map hasn't been built. If you own one of these and can run the [Live Analysis tool](#live-device-analysis) against it, you can generate and commit a working register map directly from the web UI — no CSV editing required, and no need to already know the register layout. New to MPG? [**Analyze.md**](documentation/usage/Analyze.md) walks through this exact scenario (Create Protocol → Create Scraper → Analyze) start to finish for readers with no prior experience.
 
 A few of these already have a wiring/protocol reference guide to jump-start the work, even though the register map itself is still pending: **[KSTAR](documentation/devices/KSTAR.md)** and **[Sofar](documentation/devices/Sofar.md)**.
 
 ### Full list of stub-protocol manufacturers
 
-A-Tronix, ABB, ABB Fimer, Accuenergy, Acrel, Afore, Algodue, AlphaESS, Ampowr, Anexo, Angile, Autarco, Autel, BMR, Cadis, Carlo Gavazzi, Chint, Chisage, Danfoss, Delta, Diehl AKO, Dornscheidt, Dyness, Dysun, Eastron Enbrilion, Energreen, Enerlution, Enjoypowers, ESY, Fairland, Fortona, Gotion, Hager, Hypontech, Hyxipower, Inepro, Itho Daalderop, Janitza, Kehua, KSTAR, Legrand, LitiOT, Marstek, Mastervolt, Mennekes, Metcom, Midteq, Motoma, Nibe, Pilot, Power-Sonic, Raedian, Regitec, Remeha, Renon, Ritar, SAV, Schneider, Schüco, Siemens, Sinexcel, Socomec, Sofar, Solarmax, SolarWatt, Solplanet, Sunwaytech, Sunwoda, Teltonika, Vacon, Weidmüller, Zetara
+Afore, Algodue, AlphaESS, Ampowr, Anexo, Angile, Autarco, Autel, BMR, Cadis, Carlo Gavazzi, Chint, Chisage, Danfoss, Delta, Diehl AKO, Dornscheidt, Dyness, Dysun, Enbrilion, Energreen, Enerlution, Enjoypowers, ESY, Fairland, Fortona, Gotion, Hager, Hypontech, Hyxipower, Inepro, Itho Daalderop, Janitza, Kehua, KSTAR, Legrand, LitiOT, Marstek, Mastervolt, Mennekes, Metcom, Midteq, Motoma, Nibe, Pilot, Power-Sonic, Raedian, Regitec, Remeha, Renon, Ritar, SAV, Schneider, Schüco, Siemens, Sinexcel, Socomec, Sofar, Solarmax, SolarWatt, Solplanet, Sunwaytech, Sunwoda, Teltonika, Vacon, Weidmüller, Zetara
 
 If you'd rather contribute a hand-built map, protocol CSVs use a standardized column set (`register`, `variable_name`, `documented_name`, `unit`, `data_type`, `values`, `read_interval`, `writable`, `adjustments`, `note`) — see [Protocol Maps & Register Configuration](#protocol-maps--register-configuration) for the full reference. Pull requests adding a register map, wiring notes, or corrections for any of these are welcome.
 

@@ -23,6 +23,7 @@ A **protocol** is the map between raw register addresses on a hardware device an
     - [Bit Flag Codes](#bit-flag-codes)
   - [Write Mode](#write-mode)
   - [Value Ranges and Codes](#value-ranges-and-codes)
+    - [Where Code Tables Live, and Which One Wins](#where-code-tables-live-and-which-one-wins)
   - [Per-Register Read Intervals](#per-register-read-intervals)
   - [Unit Multipliers](#unit-multipliers)
 - [How MPG Decodes a Register](#how-mpg-decodes-a-register)
@@ -116,7 +117,7 @@ The `.json` file sets protocol-wide defaults that apply to all registers in the 
 | `discovery_defaults` | Object of anchor name to value used to resolve [template rows](#template-rows-dynamic-register-maps) before (or without) a device. |
 | `discovery_probes` | List of firmware/model string probes that set anchors, for protocols that ship two layouts. See [Dynamic Register Discovery](../architecture/dynamic_register_discovery.md#discovery-probes). |
 | `sunspec_base_address`, `sunspec_registry_type` | Options of the `sunspec` provider: the wire address of the `SunS` marker (default: try 40000, 0, 50000) and `holding` (default) or `input`. |
-| `{documented_name}_codes` | Enum code mappings for flag registers. The key must match a `documented name` column value with `_codes` appended (e.g. `battery_status_codes`). |
+| `{documented_name}_codes` | Enum or flag code mappings. The key must match a `documented name` column value with `_codes` appended (e.g. `battery_status_codes`). The preferred place for code tables, and it takes precedence over an inline `values` table of the same name; see [Where Code Tables Live](#where-code-tables-live-and-which-one-wins). |
 
 ---
 
@@ -467,6 +468,27 @@ When no range is given, the valid range defaults to the full range of the `data 
 ```
 
 Codes can also be defined in the JSON descriptor as `{documented_name}_codes`, which is useful when the code table is large or shared across registers.
+
+#### Where Code Tables Live, and Which One Wins
+
+A code table can come from two places, and both feed the **same store**:
+
+| Source | Where | Stored as |
+| --- | --- | --- |
+| **Protocol JSON** (preferred) | `{documented_name}_codes` key in the protocol's `.json` file | `{documented_name}_codes` |
+| Inline | A JSON object in a row's `values` column | `{documented name}_codes`, built from the row's `documented name` |
+
+The `documented name` is normalized (trimmed, lower case, spaces to underscores) before `_codes` is appended, so the row "Alarm Flags" and the JSON key `alarm_flags_codes` are the same name. When MPG looks up the table for a row it tries the row's documented name first and then its variable name.
+
+**If both sources define a table with the same name, the JSON table wins and the inline table is silently ignored.** MPG reads the JSON first and registers an inline table only when no table of that name exists yet. No warning is logged. A stale JSON table therefore overrides a correct inline one, which is easy to miss because the CSV still looks right. If a row's labels do not match its `values` cell, check the JSON for a table of the same name.
+
+Define code tables in the JSON descriptor. The protocol editor in the web UI can edit them, and having one source avoids the override above. Use the inline form for a short table that belongs to one row and that you will not edit in the UI.
+
+What a table produces does not depend on where it was defined:
+
+- **Enum rows** (numeric keys such as `{"0": "Idle", "1": "Charging"}`) publish the raw number under the variable name and the label under a companion `<variable_name>_desc` variable.
+- **Flag rows** (`8BIT_FLAGS`, `16BIT_FLAGS` and the other flag types, with `bN` keys) publish the names of the set bits, comma separated, as the variable's value. Bits with no name in the table are ignored. A companion `_desc` entry exists for these rows but no text is published for it.
+- A `_desc` entry is added for every row that has a table, unless a variable of that name already exists or is hidden by the variable screen.
 
 ---
 

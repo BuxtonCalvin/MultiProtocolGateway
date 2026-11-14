@@ -2554,9 +2554,8 @@ class modbus_base(transport_base):
                             "note": entry.note or "",
                         })
 
-                # TODO
-                # Include out_of_range so the UI can warn when a newly
-                # discovered register's raw value is already outside the
+                # Each addable entry carries out_of_range so the UI can warn when a
+                # newly discovered register's raw value is already outside the
                 # default documented range.
                 addable: list[_AddableEntry] = []
                 default_range_str = "0-65535"
@@ -3070,18 +3069,10 @@ class modbus_base(transport_base):
             try:
                 register: ModbusResponseLike | bytes | None = self.read_registers(register_range[0], register_range[1], registry_type=registry_type)
 
-                """  TODO to handle dynamic registers
-                        # Pass 1 — read base registers to get device configuration
-                        base_info = self._protocol.process_registery(base_registry, base_map)
-
-                        # Pass 2 — resolve dynamic registers using values from pass 1
-                        for entry in dynamic_entries:
-                            resolved_addresses = self._protocol.evaluate_expressions(
-                                entry.register_expression,
-                                base_info   # live values used as variables
-                            )
-                        # read the resolved addresses...
-                        # """
+                # Dynamic register layouts are not resolved here. Template rows are
+                # resolved when the transport connects (discover_register_structure),
+                # so every block read below already uses concrete addresses. See
+                # documentation/architecture/dynamic_register_discovery.md.
 
             except ModbusIOException as e:
                 self._log.error(f"ModbusIOException for {self.transport_name}: " + str(e))

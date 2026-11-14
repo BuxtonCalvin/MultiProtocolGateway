@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -97,3 +97,6 @@ def dummy_settings() -> type[DummySettings]:
     """Return the reusable TransportSettings test double class."""
     return DummySettings
 
+def approx(expected: float, rel: float | None = None, abs: float | None = None) -> float:
+    """Typed wrapper around pytest.approx for strict type checker."""
+    return cast(float, pytest.approx(expected, rel=rel, abs=abs))  # pyright: ignore[reportUnknownMemberType]

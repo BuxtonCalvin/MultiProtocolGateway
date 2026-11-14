@@ -2960,7 +2960,9 @@ class protocol_settings:
         elif entry.data_type.value > 200:  # unsigned bit types
             bit_size = Data_Type.getSize(entry.data_type)
             bit_mask = (1 << bit_size) - 1
-            bit_index = entry.register_bit
+            # a row that gives only a byte/register address (no ".bN" suffix) has register_bit == -1;
+            # read it from bit 0 instead of raising "negative shift count"
+            bit_index = entry.register_bit if entry.register_bit >= 0 else 0
             reg_bytes = register[:2]
             if word_order.bytes_reversed:
                 reg_bytes = bytes([reg_bytes[1], reg_bytes[0]])

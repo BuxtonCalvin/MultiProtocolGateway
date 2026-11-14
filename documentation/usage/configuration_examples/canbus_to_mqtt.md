@@ -23,8 +23,13 @@ bridge = transport.1
 
 manufacturer = {{Your device's manufacturer here}}
 model = {{Your device's model number here}}
-#optional; leave blank to autofetch serial from device. on the todo to autofetch serial for canbus
+#optional; leave blank (or omit) to autodetect the serial number from the frames the device broadcasts.
+#MPG listens briefly, picks the frame that looks most like a serial number and logs its CAN ID.
 serial_number = {{random numbers here}}
+
+#optional; once the log shows which CAN ID carried the serial number, pin it here so startup
+#skips the guesswork (accepts decimal or hex, ie: 0x35E)
+#serial_number_can_id = {{CAN ID}}
 
 # canbus is a passive protocol, this is how often information is sent to mqtt. actual data interval is dependant on device
 read_interval = 10 

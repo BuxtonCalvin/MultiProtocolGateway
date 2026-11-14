@@ -1,18 +1,24 @@
 register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note,ha_device_class,ha_state_class,ha_entity_category
-314.2,Full Charge Capacity,Gauge FCC,0.01AH,USHORT,,,,,,,measurement,
-314.4,Cell Voltage Difference,Delta V,1mV,USHORT,,,,,,voltage,measurement,
-314.6,,Cycle Count,,,,,,,,,,
+x314.2,Full Charge Capacity,Gauge FCC,0.01AH,USHORT,,,,,,,measurement,
+x314.4,Cell Voltage Difference,Delta V,1mV,USHORT,,,,,,voltage,measurement,
+x314.6,,Cycle Count,,USHORT,,,,,cycle count,,,
 x311,,Battery charge voltage,0.1V,USHORT,41~63,,,,,voltage,measurement,
 X311.2,,Charge current limit,0.1A,USHORT,,,,,,current,measurement,
 X311.4,,Discharge current limit,0.1A,USHORT,,,,,,current,measurement,
-X311.6,,Status,,2BIT,"{""b0"": ""charging"", ""b1"" : ""stand by"", ""b0&b1"" : ""discharging""}",,,,todo bit flags; they are a bit weird,,,
-x312,,Protection Flags,,16BIT_FLAGS,"{""b15"": ""OTD (Over Temperature Discharge) protection"", ""b14"": ""OTC (Over Temperature Charge) protection"", ""b13"": ""UTD (Under Temperature Discharge) protection"", ""b12"": ""UTC (Under Temperature Charge) protection"", ""b11"": ""System error"", ""b10"": ""Delta V Fail"", ""b7"": ""DisCharge over current"", ""b6"": ""Charge over current"", ""b5"": ""SCD (Short Circuit Discharge) protection"", ""b4"": ""Cell over voltage"", ""b3"": ""Cell under voltage"", ""b2"": ""Module over voltage"", ""b1"": ""Module under voltage"", ""b0"": ""Soft start fail""}",,,,,,,
-X312.2,,Alarm Flags,,16BIT_FLAGS,"{""b7"": ""DisCharge over current"", ""b6"": ""Charge over current"", ""b5"": ""Cell over voltage"", ""b4"": ""Cell under voltage"", ""b3"": ""Module over voltage"", ""b2"": ""Module under voltage"", ""b1"": """", ""b0"": """", ""b15"": ""OTD (Over Temperature Discharge) protection"", ""b14"": ""OTC (Over Temperature Charge) protection"", ""b13"": ""UTD (Under Temperature Discharge) protection"", ""b12"": ""UTC (Under Temperature Charge) protection"", ""b11"": ""Delta V Fail"", ""b10"": ""Pack before turn off"", ""b9"": ""Internal communication fail"", ""b8"": """"}",,,,,,,
+X311.b0.6,,Status,,2BIT,,,,,"Status word (bytes 6-7, big-endian) bits 0-1; Growatt CAN protocol table 1",,,
+X311.6,,Status Flags,,16BIT_FLAGS,,,,,Status word bits 2-7 (low byte is byte 7); bit 3 balanced / bit 7 open when set,,,
+X311.b8.6,,Master Box Operation Mode,,2BIT,,,,,Status word bits 8-9 (byte 6),,,
+X311.b10.6,,SP Status,,2BIT,,,,,Status word bits 10-11 (byte 6): inverter state as seen by the battery,,,
+x312,,Protection Flags,,16BIT_FLAGS,,,,"{""Register_Endian"": ""big_endian_byte_swap-BADC""}","byte 0 = table 1 (bits 0-7), byte 1 = table 2 (bits 8-15)",,,
+X312.2,,Alarm Flags,,16BIT_FLAGS,,,,"{""Register_Endian"": ""big_endian_byte_swap-BADC""}","byte 2 = table 3 (bits 0-7), byte 3 = table 4 (bits 8-15); table 4 alignment inferred from the PDF layout",,,
+X312.4,,Pack Number,,BYTE,,,,,number of packs in parallel (1-254),,,
+X312.7,,Total Cell Number,,BYTE,,,,,total cell count (1-254),,,
 x313,Battery Voltage,Average module voltage of system,0.01V,SHORT,,,,,,voltage,measurement,
 X313.2,,Total current of system,0.1A,SHORT,,,,,,current,measurement,
-X313.4,,Maximum cell temperature,0.1A,SHORT,,,,,,current,measurement,
+X313.4,,Maximum cell temperature,0.1C,SHORT,,,,,,temperature,measurement,
 X313.6,,Average State of Charge of System,%,BYTE,,,,,,battery,measurement,
-X313.7,,State of Health Flags,,8BIT_FLAGS,,,,,,,,
+X313.b0-6.7,,State of Health,%,BYTE,,,,,byte 7 bits 0-6,battery,measurement,
+X313.b7.7,,State of Health Flag,,BYTE,,,,,byte 7 bit 7; meaning not described in the spec,,,diagnostic
 x314,Remaining Capacity,Gauge RM,0.01AH,USHORT,,,,,,,measurement,
 x315,,Cell Voltage 1,1mV,USHORT,,,,,,voltage,measurement,
 X315.2,,Cell Voltage 2,1mV,USHORT,,,,,,voltage,measurement,
@@ -30,20 +36,23 @@ x318,,Cell Voltage 13,1mV,USHORT,,,,,,voltage,measurement,
 x318.2,,Cell Voltage 14,1mV,USHORT,,,,,,voltage,measurement,
 x318.4,,Cell Voltage 15,1mV,USHORT,,,,,,voltage,measurement,
 x318.6,,Cell Voltage 16,1mV,USHORT,,,,,,voltage,measurement,
-x319,,Request And Battery Type,,8BIT_FLAGS,"{""b7"": ""Charge enable"", ""b6"": ""Discharge enable"", ""b5"": ""Request force charge I* (Strong charge mark 1)"", ""b4"": ""Request force charge II* (Strong charge mark 2)"", ""b3"": ""00: Lithium Iron Phosphate (LiFePO4) battery"", ""b2"": ""01: Nickel Cobalt Manganese (NCM) battery"", ""b1"": ""10: Lithium Titanate (LTO) battery"", ""b0"": ""11: Reserved""}",,,,,,,
+x319,,Request Flags,,8BIT_FLAGS,,,,"{""Register_Endian"": ""big_endian_byte_swap-BADC""}",byte 0 bits 4-7; spec table 5. A Battery-Emulator contributor reports a real GBLI pack does not follow the spec reading of the enable bits,,,
+x319.b0,,Battery Type,,2BIT,,,,"{""Register_Endian"": ""big_endian_byte_swap-BADC""}",byte 0 bits 0-1 (added in spec V1.02),,,
 X319.1,,Maximum cell voltage,1mV,USHORT,,,,,,voltage,measurement,
 X319.3,,Minimum cell voltage,1mV,USHORT,,,,,,voltage,measurement,
 X319.5,,Maximum cell voltage number,,BYTE,,,,,,,,
 X319.6,,Minimum cell voltage number,,BYTE,,,,,,,,
 X319.7,,Protect pack ID,,BYTE,,,,,,,,
 x320,,Manufacturer Name,,ASCII.2,,,,,,,,diagnostic
-X320.2,,Hardware version,,ASCII.1,,,,,,,,diagnostic
-X320.3,,Software version,,ASCII.1,,,,,,,,diagnostic
-X320.4,,Date and Time 1,,,,,,,"todo bit flags, another weird setup",,,
-X320.5,,Date and Time 2,,,,,,,,,,
-X320.6,,Date and Time 3,,,,,,,,,,
-X320.7,,Date and Time 4,,,,,,,,,,
-x321,,Update status,,8BIT_FLAGS,,,,,,,,
+X320.2,,Hardware version,,BYTE,,,,,range 1-9,,,diagnostic
+X320.3,,Software version,,BYTE,,,,,range 1-9,,,diagnostic
+X320.b0-5.4,,Date Time Second,s,UINT,,,,,bytes 4-7 as one big-endian 32-bit word; bit range from the spec date/time table,,,diagnostic
+X320.b6-11.4,,Date Time Minute,min,UINT,,,,,bytes 4-7 as one big-endian 32-bit word; bit range from the spec date/time table,,,diagnostic
+X320.b12-16.4,,Date Time Hour,h,UINT,,,,,bytes 4-7 as one big-endian 32-bit word; bit range from the spec date/time table,,,diagnostic
+X320.b17-21.4,,Date Time Day,,UINT,,,,,bytes 4-7 as one big-endian 32-bit word; bit range from the spec date/time table,,,diagnostic
+X320.b22-25.4,,Date Time Month,,UINT,,,,,bytes 4-7 as one big-endian 32-bit word; bit range from the spec date/time table,,,diagnostic
+X320.b26-31.4,,Date Time Year Since 2000,y,UINT,,,,,bits 26-31: years since 2000 (the spec range is 2000-2063); add 2000 for the calendar year,,,diagnostic
+x321,,Update status,,BYTE,,,,,byte 0; spec table 6 (bit 0 = programming); the 2-bit master/slave groups are ambiguous in the PDF so the raw byte is published,,,
 X321.1,,Update schedule of single pack,,BYTE,0~100,,,,,,,
 X321.2,,programming ID of pack,,BYTE,,,,,,,,
 X321.3,,Update Successful count,,BYTE,,,,,,,,

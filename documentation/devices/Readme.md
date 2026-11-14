@@ -26,6 +26,8 @@
 | Manufacturer | Key Models | Interface | Protocol | Guide |
 | --- | --- | --- | --- | --- |
 | [Deye / Sunsynk](Deye_Sunsynk.md) | SUN-xK-SG04LP3, SG05LP3, Sunsynk 5–16kW | RS485 RJ45 / Solarman TCP 8899 | Modbus RTU | [Deye_Sunsynk.md](Deye_Sunsynk.md) |
+| [A-Tronix](A_Tronix.md) | Hybridpower AX2 Gen3, AX / AX Plus hybrids | RS485 / Modbus TCP | Modbus RTU / TCP | [A_Tronix.md](A_Tronix.md) |
+| [ABB / FIMER](ABB_Fimer.md) | TRIO, REACT2, VSN300 / VSN700, legacy PVI / UNO | RS485 / Ethernet | Modbus RTU / TCP (SunSpec) | [ABB_Fimer.md](ABB_Fimer.md) |
 | [APsystems](APsystems.md) | ECU-R, ECU-C gateways | Ethernet / RS485 | SunSpec Modbus | [APsystems.md](APsystems.md) |
 | [EG4](EG4.md) | 6000XP, 12000XP, 18KPV, 3000EHV | RS485 RJ45 | Modbus RTU | [EG4.md](EG4.md) |
 | [Enphase](Enphase.md) | IQ7/IQ8 Microinverters, IQ Battery, IQ Gateway | Ethernet (LAN REST API) | HTTP JSON API | [Enphase.md](Enphase.md) |
@@ -33,14 +35,17 @@
 | [Fronius](Fronius.md) | Primo GEN24, Symo GEN24, Symo, Primo | Ethernet / RS485 (GEN24) | Modbus TCP / JSON API | [Fronius.md](Fronius.md) |
 | [GoodWe](GoodWe.md) | Energy storage / hybrid (Eniris RS485) | RS485 EMS | Modbus RTU | [GoodWe.md](GoodWe.md) |
 | [Growatt](Growatt.md) | SPF 5000, 6000, 12000T DVM-US MPV | USB / RS485 | Modbus RTU | [Growatt.md](Growatt.md) |
-| [Kostal](Kostal.md) | Pico / PIKO series | RS485 COM1 / TCP | Modbus RTU | [Kostal.md](Kostal.md) |
+| [Kostal](Kostal.md) | PIKO IQ, PLENTICORE plus / G3 / BI | Ethernet (port 1502) | Modbus TCP (SunSpec) | [Kostal.md](Kostal.md) |
 | [KSTAR](KSTAR.md) | BluePulse, BluE-S, BlueSpark, KSG | RS485 / TCP | Modbus RTU (stub) | [KSTAR.md](KSTAR.md) |
 | [HDHK](HDHK.md) | 16-channel AC current/frequency module | RS485 terminal | Modbus RTU | [HDHK.md](HDHK.md) |
 | [Huawei](Huawei.md) | SUN2000 residential/commercial inverters | Ethernet / RS485 | Modbus TCP / RTU | [Huawei.md](Huawei.md) |
+| [LuxPower](LuxPower.md) | LXP-LB 12K and related hybrids | RS485 RJ45 | Modbus RTU | [LuxPower.md](LuxPower.md) |
 | [Next Power](Next_Power.md) | Victor NM-ECO-LV 3.6KW/6.2KW Plus | RS485 communication port | Modbus RTU | [Next_Power.md](Next_Power.md) |
+| [PowMr](PowMr.md) | POW-SunSmart and SRNE-platform hybrids | RS485 RJ45 | Modbus RTU | [PowMr.md](PowMr.md) |
 | [Sigenergy](Sigenergy.md) | SigenStor EC, Sigen Hybrid, Sigen PV Max | Ethernet / RS485 | Modbus TCP / RTU | [Sigenergy.md](Sigenergy.md) |
 | [Sigineer](Sigineer.md) | Sigineer inverter/charger series | USB | Modbus RTU | [Sigineer.md](Sigineer.md) |
 | [SMA](SMA.md) | Sunny Boy, Sunny Tripower, Sunny Island | Ethernet / RS485 (add-on) | Modbus TCP | [SMA.md](SMA.md) |
+| [Sunmart](Sunmart.md) | VMII, MKSII, Max, MPS, PS, VII (SRNE platform) | RS485 RJ45 | Modbus RTU | [Sunmart.md](Sunmart.md) |
 | [Sol-Ark](SolArk.md) | 5K, 8K, 12K, 15K-2P | RS485 RJ45 / terminal block | Modbus RTU | [SolArk.md](SolArk.md) |
 | [SolarEdge](SolarEdge.md) | HD-Wave SE series, StorEdge, Home Hub | Ethernet / RS485 terminal block | Modbus TCP / RTU (SunSpec) | [SolarEdge.md](SolarEdge.md) |
 | [Sofar](Sofar.md) | G3, HYD 3000–6000-ES | RS485 | Modbus RTU (stub) | [Sofar.md](Sofar.md) |
@@ -55,14 +60,18 @@
 
 | Manufacturer | Key Models | Interface | Protocol | Guide |
 | --- | --- | --- | --- | --- |
+| [ABB B-series](ABB.md) | B21, B23, B24 energy meters | RS485 terminal | Modbus RTU | [ABB.md](ABB.md) |
 | [Accuenergy](Accuenergy.md) | Acuvim II, IIR, IIE, IIW power quality meters | RS485 terminal / AXM-WEB2 Ethernet | Modbus RTU | [Accuenergy.md](Accuenergy.md) |
 | [Acrel](Acrel.md) | DTSD1352-C three-phase DIN-rail energy meter | RS485 terminal | Modbus RTU | [Acrel.md](Acrel.md) |
+| [Eastron](Eastron.md) | SDM120M single-phase energy meter | RS485 terminal | Modbus RTU | [Eastron.md](Eastron.md) |
 
 ### Batteries
 
 | Manufacturer | Key Models | Interface | Protocol | Guide |
 | --- | --- | --- | --- | --- |
 | [AOLithium](AOLithium.md) | AOLithium 48V rack batteries | RS485A RJ45 / CAN RJ45 | Voltronic RS485 / Victron CAN | [AOLithium.md](AOLithium.md) |
+| [JBD / Xiaoxiang / Overkill](JBD.md) | JBD smart BMS (UART / RS232 / RS485) | UART / RS485 | JBD serial protocol (read-only) | [JBD.md](JBD.md) |
+| [JK (Jikong) BMS](JK.md) | JK-B / JK-BD / JK-PB | UART1 / RS485 | Modbus RTU / JK 4G-GPS serial | [JK.md](JK.md) |
 | [PACE BMS](PACE.md) | PACE RS485 v1.3 compatible batteries | RS485 | PACE BMS Modbus RTU | [PACE.md](PACE.md) |
 | [Pylon / Pylontech](Pylon.md) | Low-voltage Pylontech batteries | RS485 / CAN | Pylon serial / CAN | [Pylon.md](Pylon.md) |
 | [SOK / PACE BMS](SOK.md) | SOK 48V 100AH, Jakiper 48V 100AH | RS485A RJ45 | PACE BMS Modbus RTU | [SOK.md](SOK.md) |
@@ -154,15 +163,23 @@ This resolves the majority of "no response" issues and should always be the firs
 | --- | --- | --- | --- | --- |
 | Accuenergy | ✅ | ❌ (AXM-WEB2 module, not mapped) | ❌ | ❌ |
 | Acrel | ✅ | ❌ | ❌ | ❌ |
+| A-Tronix | ✅ | ✅ (via bridge or inverter Ethernet) | ❌ | ❌ |
+| ABB B-series meter | ✅ | ❌ | ❌ | ❌ |
 | AOLithium | ✅ RS485 + CAN | ❌ | ❌ | ❌ |
 | Deye / Sunsynk | ✅ | ❌ (bridge needed) | ❌ | ❌ |
+| Eastron | ✅ | ❌ | ❌ | ❌ |
 | EG4 | ✅ | ❌ | ❌ | ❌ |
 | Enphase | ❌ | ❌ | ❌ | ✅ JSON (IQ Gateway) |
 | Fronius | ✅ (GEN24 only) | ✅ | ❌ | ✅ Solar API |
 | Growatt | ✅ USB + RS485 | ❌ | ❌ | ❌ |
+| JBD BMS | ✅ UART / RS485 | ❌ | ❌ | ❌ |
+| Kostal | ❌ | ✅ (port 1502) | ❌ | ❌ |
+| LuxPower | ✅ | ❌ | ❌ | ❌ |
+| PowMr | ✅ | ❌ | ❌ | ❌ |
 | Sigineer | ✅ USB | ❌ | ❌ | ❌ |
 | SMA | ❌ (add-on only) | ✅ | ❌ | ❌ |
 | Sol-Ark | ✅ | ❌ | ❌ | ❌ |
+| Sunmart | ✅ | ❌ | ❌ | ❌ |
 | SolarEdge | ✅ | ✅ (port 1502) | ❌ | ❌ |
 | SOK / PACE BMS | ✅ | ❌ | ❌ | ❌ |
 | Victron | ❌ (MK3-USB required) | ✅ (via GX) | ✅ Venus OS | ✅ VRM API |

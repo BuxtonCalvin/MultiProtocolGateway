@@ -61,16 +61,16 @@ x204,,Fault Code 1,,,,,R,,,,,
 x205,,Fault Code 2,,,,,R,,,,,
 x206,,Fault Code 3,,,,,R,,,,,
 x207,,Fault Code 4,,,,,R,,,,,
-x20C,,Current Time Year,,BYTE,,,RW,,,,,
-x20C.b8,,Current Time Month,,BYTE,,,RW,,,,,
+x20C.b8,,Current Time Year,,8BIT,,,R,,0x020C-0x020E current time; high byte: year 0-99 (years since 2000),,,
+x20C.b0,,Current Time Month,,8BIT,,,R,,0x020C-0x020E current time; low byte,,,
+x20D.b8,,Current Time Day,,8BIT,,,R,,0x020C-0x020E current time; high byte,,,
+x20D.b0,,Current Time Hour,,8BIT,,,R,,0x020C-0x020E current time; low byte,,,
+x20E.b8,,Current Time Minute,,8BIT,,,R,,0x020C-0x020E current time; high byte,,,
+x20E.b0,,Current Time Second,,8BIT,,,R,,0x020C-0x020E current time; low byte,,,
 x211,,Password protection status mark,,,"{""0"":""No password entered by the user"",""1"":""User password has been entered"",""4"":""Manufacturer password has been entered""}",,R,,,,,
 x21A,,Load PF,0.01,,,,R,,,power_factor,measurement,
-x21D,,Current Time Day,,BYTE,,,RW,,,,,
 x21D,,Inverter DC Component,1mV,,,,R,,,voltage,measurement,
-x21D.b8,,Current Time Hour,,BYTE,,,RW,,,,,
-x21E,,Current Time Minute,,BYTE,,,RW,,,,,
 x21E,,Mains charge current,0.1A,,,,R,,,current,measurement,
-x21E.b8,,Current Time Second,,BYTE,,,RW,,,,,
 x220,,DC_DC heat sink temperature,0.1C,,,,R,,,temperature,measurement,
 x221,,DC_AC heat sink temperature,0.1C,,,,R,,,temperature,measurement,
 x222,,Translator heat sink temperature,0.1C,,,,R,,,temperature,measurement,
@@ -223,8 +223,18 @@ x21~x34,,software compilation time,,ASCII,,,R,,,,,
 xF034~xF035,,Accumulated battery charge AH,AH,UINT,,,R,,,,measurement,
 xF036~xF037,,Accumulated battery discharge AH,AH,UINT,,,R,,,,measurement,
 xF038~xF039,,Accumulated PV power generation,0.1kWh,UINT,,,R,,,energy,total_increasing,
-xF040~xF041,,Power on time,,UINT,,,R,,UINT48 – TODO,,,
-xF043~xF044,,Last equalizing charge completion time,,UINT,,,R,,UINT48 – TODO,,,
+xF040.b8,,Power On Time Year,,8BIT,,,R,,0xF040-F042 time stamp in the current-time register format; high byte: year 0-99 (years since 2000),,,diagnostic
+xF040.b0,,Power On Time Month,,8BIT,,,R,,0xF040-F042 time stamp in the current-time register format; low byte,,,diagnostic
+xF041.b8,,Power On Time Day,,8BIT,,,R,,0xF040-F042 time stamp in the current-time register format; high byte,,,diagnostic
+xF041.b0,,Power On Time Hour,,8BIT,,,R,,0xF040-F042 time stamp in the current-time register format; low byte,,,diagnostic
+xF042.b8,,Power On Time Minute,,8BIT,,,R,,0xF040-F042 time stamp in the current-time register format; high byte,,,diagnostic
+xF042.b0,,Power On Time Second,,8BIT,,,R,,0xF040-F042 time stamp in the current-time register format; low byte,,,diagnostic
+xF043.b8,,Last Equalizing Charge Completion Time Year,,8BIT,,,R,,0xF043-F045 time stamp in the current-time register format; high byte: year 0-99 (years since 2000),,,diagnostic
+xF043.b0,,Last Equalizing Charge Completion Time Month,,8BIT,,,R,,0xF043-F045 time stamp in the current-time register format; low byte,,,diagnostic
+xF044.b8,,Last Equalizing Charge Completion Time Day,,8BIT,,,R,,0xF043-F045 time stamp in the current-time register format; high byte,,,diagnostic
+xF044.b0,,Last Equalizing Charge Completion Time Hour,,8BIT,,,R,,0xF043-F045 time stamp in the current-time register format; low byte,,,diagnostic
+xF045.b8,,Last Equalizing Charge Completion Time Minute,,8BIT,,,R,,0xF043-F045 time stamp in the current-time register format; high byte,,,diagnostic
+xF045.b0,,Last Equalizing Charge Completion Time Second,,8BIT,,,R,,0xF043-F045 time stamp in the current-time register format; low byte,,,diagnostic
 xF046~xF047,,Accumulated charge level by mains,0.1kWh,UINT,,,R,,,energy,total_increasing,
 xF048~xF048,,Accumulated power consumption by load from mains,0.1kWh,UINT,,,R,,,energy,total_increasing,
 xF800~xF80F,,FaultHistoryRecord00,,ASCII,,,,,,,,

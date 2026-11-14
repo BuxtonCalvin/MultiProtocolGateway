@@ -28,19 +28,29 @@ import threading
 import time
 from collections import OrderedDict
 from threading import Lock
+from typing import ClassVar
 
 import can
 
 from defs.common import TransportSettings, strtoint_safe
 
-from ..protocol_settings import Registry_Type, protocol_settings, registry_map_entry
-from .transport_base import transport_base
+from ..protocol_settings import (
+    Data_Type,
+    Registry_Type,
+    WriteMode,
+    protocol_settings,
+    registry_map_entry,
+)
+from .transport_base import TransportWriteMode, transport_base
 
 
 class canbus(transport_base):
 
     transport_type = "scraper"
-    ''' canbus is a more passive protocol; todo to include active commands to trigger canbus responses '''
+    ''' canbus is mostly passive: frames are cached from the bus and decoded for the protocol.
+    It can also transmit. write_data() sends a frame for each registry row marked W / WO, and
+    send_frame() can transmit any frame (for example to trigger a response from a device).
+    Transmitting is opt-in and requires write_enabled (see enable_write). '''
 
     interface: str = "socketcan"
     ''' bustype / interface for canbus device '''
@@ -80,6 +90,21 @@ class canbus(transport_base):
 
     serial_number_can_id: int | None = None
     ''' CAN ID known to carry the serial number; read from settings, or discovered by sniffing. '''
+
+    _tx_lock: Lock | None = None
+    ''' serializes transmit so frames shared by several variables are built one at a time '''
+
+    _tx_frames: dict[int, bytes]
+    ''' last payload transmitted per CAN ID; the base for the next write to the same frame '''
+
+    # Data types write_data can encode into a frame: (size in bytes, signed)
+    _TX_INT_TYPES: ClassVar[dict[Data_Type, tuple[int, bool]]] = {
+        Data_Type.BYTE: (1, False),
+        Data_Type.USHORT: (2, False),
+        Data_Type.SHORT: (2, True),
+        Data_Type.UINT: (4, False),
+        Data_Type.INT: (4, True),
+    }
 
     def __init__(self, settings: TransportSettings, protocolSettings: protocol_settings | None = None) -> None:
         # Annotations are postponed for Python 3.11+ compatibility, so the
@@ -130,6 +155,10 @@ class canbus(transport_base):
         self.lock = threading.Lock()
         with self.lock:
             self.cache = OrderedDict()
+
+        # transmit state; must exist before init_after_connect() can enable writes
+        self._tx_lock = threading.Lock()
+        self._tx_frames = {}
 
         #  Assign the thread to self.thread so the instance holds a reference
         # and the thread is not silently lost. Previously, the local variable `thread` shadowed
@@ -417,13 +446,212 @@ class canbus(transport_base):
 
         return 0.0, ""
 
+    @property
+    def _tx_write_mode(self) -> TransportWriteMode:
+        ''' write_type from the settings; the base class only defines write_mode when it was configured '''
+        return getattr(self, "write_mode", TransportWriteMode.WRITE if self.write_enabled else TransportWriteMode.READ)
+
+    @_tx_write_mode.setter
+    def _tx_write_mode(self, value: TransportWriteMode) -> None:
+        self.write_mode = value
+
+    def _registry_map(self) -> list[registry_map_entry]:
+        '''
+        The protocol's registry map. A custom-bus map (<protocol>.registry_map.csv) wins; otherwise
+        the HOLDING map (<protocol>.holding_registry_map.csv), which is how the pylon_can and
+        victron_gx_generic_canbus files are named. Asking only for the custom-bus map left those
+        protocols with nothing to decode.
+        '''
+        if self.protocolSettings is None:
+            return []
+        return self.protocolSettings.get_registry_map(Registry_Type.CUSTOM_BUS) or self.protocolSettings.get_registry_map(Registry_Type.HOLDING)
+
+    def _writable_entries(self) -> list[registry_map_entry]:
+        ''' registry rows that may be transmitted: marked W (read/write) or WO (write only) '''
+        return [entry for entry in self._registry_map() if entry.write_mode in (WriteMode.WRITE, WriteMode.WRITEONLY)]
+
+    def _bus_has_traffic(self) -> bool:
+        ''' True if any frame arrives within the settling window; proves something is on the bus '''
+        deadline: float = time.monotonic() + self._SN_SETTLE_SECS
+        while time.monotonic() < deadline:
+            if self._sn_cache_snapshot():
+                return True
+            time.sleep(0.1)
+        return False
+
     def enable_write(self) -> None:
-        self.write_enabled = True
-        self._log.warning("enable write - validation on the todo")
+        '''
+        Validate that transmitting is possible before allowing it. Writes stay disabled unless:
+
+          1. the CAN interface is open,
+          2. the protocol has at least one row marked W or WO, and
+          3. frames are being received (a device is actually on the bus).
+
+        ``write_type = relaxed`` waives check 3 (a device that only listens until commanded);
+        ``write_type = unsafe`` skips validation entirely. Mirrors the Modbus transport.
+        '''
+        if self.write_enabled and self._tx_write_mode == TransportWriteMode.UNSAFE:
+            self._log.warning("enable write - WARNING - UNSAFE MODE - validation SKIPPED")
+            return
+
+        self._log.info("Validating Protocol for Writing")
+        self.write_enabled = False
+
+        if self.bus is None:
+            self._log.error("enable write FAILED - CAN interface is not open - WRITE DISABLED")
+            return
+
+        writable: list[registry_map_entry] = self._writable_entries()
+        if not writable:
+            self._log.error(
+                "enable write FAILED - no registry rows are marked W or WO in this protocol - WRITE DISABLED"
+            )
+            return
+
+        if self._bus_has_traffic():
+            self.write_enabled = True
+            self._log.info(f"enable write - validation passed ({len(writable)} writable rows)")
+        elif self._tx_write_mode == TransportWriteMode.RELAXED:
+            self.write_enabled = True
+            self._log.warning(
+                f"enable write - WARNING - RELAXED MODE - no frames seen on the bus ({len(writable)} writable rows)"
+            )
+        else:
+            self._log.error("enable write FAILED - no frames seen on the bus - WRITE DISABLED")
+
+    def send_frame(self, can_id: int, data: bytes | bytearray = b"", remote: bool = False, dlc: int = 0) -> bool:
+        '''
+        Transmit one frame. Use it for active commands, for example a remote-transmission
+        request that makes a device answer. Requires write_enabled. Returns True if the
+        frame was handed to the bus. IDs above 0x7FF are sent as extended (29-bit) frames.
+        '''
+        if not self.write_enabled:
+            self._log.warning(f"send_frame: write is not enabled; frame 0x{can_id:X} not sent")
+            return False
+        if self.bus is None:
+            self._log.error(f"send_frame: CAN interface is not open; frame 0x{can_id:X} not sent")
+            return False
+        if len(data) > 8 or dlc > 8:
+            self._log.error(f"send_frame: a CAN frame carries at most 8 bytes; frame 0x{can_id:X} not sent")
+            return False
+
+        message: can.Message = can.Message(
+            arbitration_id=can_id,
+            data=None if remote else bytes(data),
+            dlc=dlc if remote else None,
+            is_extended_id=can_id > 0x7FF,
+            is_remote_frame=remote,
+        )
+        try:
+            self.bus.send(message)
+        except can.CanError as e:
+            self._log.error(f"send_frame: failed to send 0x{can_id:X}: {e}")
+            return False
+        return True
+
+    def _encode_tx_value(self, entry: registry_map_entry, value: int | float | str) -> bytes | None:
+        ''' convert a value into the bytes of ``entry``'s field; None (after logging) if it can't be sent safely '''
+        if self.protocolSettings is None:
+            return None
+
+        spec: tuple[int, bool] | None = self._TX_INT_TYPES.get(entry.data_type)
+        if spec is None:
+            self._log.error(
+                f"WRITE_ERROR: data type {entry.data_type.name} of '{entry.variable_name}' cannot be sent over CAN"
+            )
+            return None
+        size, signed = spec
+
+        if isinstance(value, str):
+            value = value.strip().lower()
+            value = self.protocolSettings.get_code_by_value(entry, value, fallback=value)
+
+        if self._tx_write_mode != TransportWriteMode.UNSAFE and not self.protocolSettings.validate_registry_entry(entry, value):
+            self._log.error(f"WRITE_ERROR: Invalid new value, '{value}'. Unsafe to write.")
+            return None
+
+        try:
+            number: float = float(value)
+            if entry.unit_mod != 1:
+                number = number / entry.unit_mod
+            raw: int = int(round(number))
+        except (TypeError, ValueError):
+            self._log.error(f"WRITE_ERROR: Cannot convert '{value}' for '{entry.variable_name}'. Unsafe to write.")
+            return None
+
+        bits: int = size * 8
+        low: int = -(1 << (bits - 1)) if signed else 0
+        high: int = (1 << (bits - 1)) - 1 if signed else (1 << bits) - 1
+        if raw < low or raw > high:
+            self._log.error(
+                f"WRITE_ERROR: Value {raw} is outside the {entry.data_type.name} range for '{entry.variable_name}'."
+            )
+            return None
+
+        encoded: bytes = raw.to_bytes(size, byteorder="big", signed=signed)
+
+        # Inverse of process_register_bytes: decoding reverses the words and then swaps bytes within
+        # each word, so encoding swaps bytes first and then reverses the words.
+        word_order = self.protocolSettings.get_entry_byteorder(entry)
+        if size > 1 and word_order.bytes_reversed:
+            swapped: bytearray = bytearray(encoded)
+            for i in range(0, len(swapped) - 1, 2):
+                swapped[i], swapped[i + 1] = swapped[i + 1], swapped[i]
+            encoded = bytes(swapped)
+        if size > 2 and word_order.word_reversed:
+            words: list[bytes] = [encoded[i:i + 2] for i in range(0, len(encoded), 2)]
+            encoded = b"".join(reversed(words))
+        return encoded
+
+    def _build_tx_frame(self, entry: registry_map_entry, field: bytes) -> bytes | None:
+        '''
+        Place ``field`` at the entry's byte offset inside its frame. Bytes outside the field come from
+        the last frame we sent with this ID, else the last frame seen on the bus, else zeros.
+        '''
+        can_id: int = entry.register
+        base: bytes | None = self._tx_frames.get(can_id)
+        if base is None and self.lock is not None:
+            with self.lock:
+                if self.cache is not None and can_id in self.cache:
+                    base = self.cache[can_id][0]
+
+        end: int = entry.register_byte + len(field)
+        if end > 8:
+            self._log.error(
+                f"WRITE_ERROR: '{entry.variable_name}' ends at byte {end}; a CAN frame carries at most 8 bytes."
+            )
+            return None
+
+        frame: bytearray = bytearray(base or b"")
+        if len(frame) < end:
+            frame.extend(b"\x00" * (end - len(frame)))
+        frame[entry.register_byte:end] = field
+        return bytes(frame)
 
     def write_data(self, data: dict[str, int | float | str], from_transport: transport_base) -> None:
-        if not self.write_enabled:
+        ''' send a frame for each variable that matches a writable (W / WO) row; others are ignored '''
+        if not self.write_enabled or self.protocolSettings is None or self._tx_lock is None:
             return
+
+        writable: dict[str, registry_map_entry] = {entry.variable_name: entry for entry in self._writable_entries()}
+
+        with self._tx_lock:
+            for variable_name, value in data.items():
+                entry: registry_map_entry | None = writable.get(variable_name)
+                if entry is None:
+                    continue
+
+                field: bytes | None = self._encode_tx_value(entry, value)
+                if field is None:
+                    continue
+
+                frame: bytes | None = self._build_tx_frame(entry, field)
+                if frame is None:
+                    continue
+
+                if self.send_frame(entry.register, frame):
+                    self._tx_frames[entry.register] = frame
+                    self._log.info(f"WRITE CAN: {variable_name} => {value} in frame 0x{entry.register:X} data={frame.hex()}")
 
     def read_data(self) -> dict[str, int | float | str]:
         ''' because canbus is passive / broadcast, we just read from the cache '''
@@ -436,7 +664,7 @@ class canbus(transport_base):
 
                     new_info: dict[str, int | float | str] = self.protocolSettings.process_registery(
                         registry,
-                        self.protocolSettings.get_registry_map(Registry_Type.CUSTOM_BUS)
+                        self._registry_map()
                     )
                     info.update(new_info)
                     currentTime: float = time.time()
@@ -451,7 +679,9 @@ class canbus(transport_base):
                     else:
                         self.emptyTime = currentTime
 
-                    self.clean_cache()
+        # clean_cache() takes self.lock itself; calling it while the lock is held deadlocks,
+        # because threading.Lock is not re-entrant.
+        self.clean_cache()
 
         return info
 
