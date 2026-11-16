@@ -621,7 +621,7 @@ class canbus(transport_base):
                 logging.getLogger(__name__).warning(msg)
                 continue
             if not 0 <= can_id < 1 << 29 or len(payload) > 8:
-                msg = f"poll_frames: {item!r} is not a valid CAN frame; skipped"
+                msg: str = f"poll_frames: {item!r} is not a valid CAN frame; skipped"
                 logging.getLogger(__name__).warning(msg)
                 continue
             frames.append((can_id, payload))
