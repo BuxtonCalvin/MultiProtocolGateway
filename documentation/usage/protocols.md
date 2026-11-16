@@ -108,6 +108,9 @@ The `.json` file sets protocol-wide defaults that apply to all registers in the 
 | --- | --- |
 | `transport` | Default transport class for this protocol. Overridden in `config.cfg`. |
 | `baud` | Default baud rate for RTU connections. |
+| `poll_frames` | CAN bus only. Request frames the CAN transport sends so a device answers, as `ID:HEXDATA` separated by semicolons (for example `0x4200:0000000000000000`). Off unless set; a transport section can replace it, or turn it off with `none`. |
+| `poll_interval` | CAN bus only. Seconds between `poll_frames` transmissions (default 5). |
+| `can_id_address_max` | CAN bus only. Set by a protocol whose devices are numbered by adding an address to every CAN ID (for example `15`). The transport's `address` setting is then added to each row's register, and refused if above this value. Without this key a non-zero `address` is ignored with a warning. |
 | `byteorder` | Default byte order for all registers: `big` (most common) or `little`. Individual registers override this via the `adjustments` column. |
 | `read_interval` | Default polling interval in seconds. Overridden by the transport's `read_interval` setting. |
 | `batch_size` | Size, in register addresses, of the windows MPG splits the address space into. Each window with due registers becomes one read from its first to its last register. Default 40. |
@@ -199,14 +202,33 @@ A bit offset selects one or more bits within a 16-bit register:
 0x2C.b4       bit 4 of hex register 0x2C
 ```
 
-A byte offset selects one byte of the register as received. Byte 0 is the first byte on the wire, which for a normal big-endian Modbus register is the **high** byte:
+A byte offset selects one byte of the register or frame as received. Byte 0 is the first byte on the wire, which for a normal big-endian Modbus register is the **high** byte. The same numbering is used for a Modbus register, a CAN frame and a serial frame, so a row reads the same way on every transport:
 
 ``` ini
 5.0           byte 0 of register 5: the high byte (first on the wire)
 5.1           byte 1 of register 5: the low byte
+X311.6        byte 6 of CAN frame 0x311
 ```
 
 For example, a register holding `0x0102` with the address in its high byte and a baud-rate code in its low byte is read as `0x3F.0` (address 1) and `0x3F.1` (code 2).
+
+#### **How the data type uses the offset**
+
+| Data type | What is decoded |
+| --- | --- |
+| `BYTE`, `8BIT_FLAGS`, and bit fields of 8 bits or fewer (`1BIT` to `8BIT`, and the signed forms) | The **single byte** at the offset. `.bN` offsets count from that byte's least significant bit (0-7). |
+| `16BIT_FLAGS`, `USHORT`, `SHORT`, `UINT` and the other wider types | Start at the offset byte and read on from there, big-endian unless an [endian adjustment](#endian-order) says otherwise. |
+| Bit fields wider than 8 bits (`9BIT` to `16BIT`) | The 16-bit word that starts at the offset; `.bN` counts from that word's least significant bit. |
+
+A byte offset names the physical byte as received. It is not changed by a `BADC` byte-swap adjustment on a one-byte type; on a 16-bit flag word the swap still applies, which is how a pair of separate bytes (table 1 in byte 0, table 2 in byte 1) can be read as one word with byte 0 in the low half.
+
+To pick out bits that straddle bytes, or to cut a field out of a wider value, read the wider type and add a bit range: `X320.b26-31.4` with `UINT` takes bits 26-31 of the 32-bit word that starts at byte 4.
+
+#### **Differences to be aware of**
+
+- **Modbus registers have two bytes.** For a one-byte type only `.0` and `.1` are valid on a Modbus register; any other offset skips the row with a warning. Earlier versions ignored a byte offset on a Modbus register and returned the low byte for both `.0` and `.1`. Byte offsets on wider types (for example the `ASCII` serial-number rows in the LuxPower and EG4 maps) are still ignored on Modbus registers.
+- **`BYTE` without an offset.** On a Modbus register it reads the **low** byte (the long-standing behavior); in a CAN or serial frame it reads byte 0. Always write the offset (`.0` or `.1`) when the choice matters.
+- **Bit offsets on one-byte types.** In a CAN or serial frame a one-byte type decodes only the byte at the offset, so its `.bN` must be 0-7. Maps used to write `.b8` on an `8BIT_FLAGS` row (JBD `mosfet_status`) to reach the byte; write the byte offset instead. On a Modbus register **without** a byte offset the bit offset still counts across the whole 16-bit register, so `.b8` on an `8BIT_FLAGS` or `8BIT` row is the high byte; use `.0` instead for the same result.
 
 #### Multi-Register (32-bit and 64-bit) Values
 
@@ -371,11 +393,19 @@ Inline flag definitions as an alternative to defining them in the JSON descripto
 {"b0": "StandBy", "b1": "On", "b2": "Fault"}
 ```
 
-Multi-bit flags:
+Multi-bit flags. A key that joins bits with `&` matches when **all** the named bits are set, and its label **replaces** the labels of those single bits:
 
 ```json
 {"b0": "StandBy", "b0&b1": "Operational", "b1": "Error"}
 ```
+
+| Bits set | Published |
+| --- | --- |
+| `b0` | `StandBy` |
+| `b1` | `Error` |
+| `b0` and `b1` | `Operational` (not `StandBy,Error`) |
+
+Other set bits are still listed, so `b0`, `b1` and `b2` with a `"b2": "Hot"` entry gives `Hot,Operational`. If one combination contains another (`b0&b1` and `b0&b1&b2`), only the larger one is published. Combinations work in the JSON descriptor and inline, on every transport.
 
 Numeric value mappings (for `USHORT` or similar types):
 

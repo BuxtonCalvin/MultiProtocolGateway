@@ -33,6 +33,7 @@ import pytest
 import serial
 from conftest import DummySettings
 
+from classes.protocol_settings import Data_Type, Registry_Type
 from classes.transports import serial_base as serial_base_module
 from classes.transports.serial_base import SerialClient, serial_base
 from protocol_gateway import Protocol_Gateway, ScrapeGroup
@@ -730,3 +731,212 @@ def test_gateway_stop_cleans_up_serial_transports_so_a_reload_reopens_the_port()
 
     replacement = make(address=2)
     assert replacement.client is not shared, "the replacement gateway must open the port afresh"
+
+
+# --------------------------------------------------------------------------- #
+# the registry map: custom bus first, then HOLDING (how the shipped serial files are named)
+# --------------------------------------------------------------------------- #
+
+def mapped_protocol(custom: list[Any], holding: list[Any]) -> MagicMock:
+    """A protocol whose maps live under different registry types."""
+    def get_registry_map(registry_type: Registry_Type = Registry_Type.CUSTOM_BUS) -> list[Any]:
+        return {Registry_Type.CUSTOM_BUS: custom, Registry_Type.HOLDING: holding}.get(registry_type, [])
+
+    protocol: MagicMock = MagicMock()
+    protocol.get_registry_map.side_effect = get_registry_map
+    return protocol
+
+
+def row(register: int, byte: int = 0, data_type: Data_Type = Data_Type.USHORT) -> Any:
+    return SimpleNamespace(register=register, register_byte=byte, data_type=data_type, variable_name=f"v{register}_{byte}")
+
+
+def test_a_custom_bus_map_wins_over_a_holding_map() -> None:
+    transport: Any = make()
+    custom, holding = [row(1)], [row(2)]
+    transport.protocolSettings = mapped_protocol(custom, holding)
+    assert transport._registry_map() == custom
+
+
+def test_the_holding_map_is_used_when_there_is_no_custom_bus_map() -> None:
+    """The shipped serial and CAN protocols are named *.holding_registry_map.csv, so this is the usual case."""
+    transport: Any = make()
+    holding: list[Any] = [row(0x4642), row(0x4644)]
+    transport.protocolSettings = mapped_protocol([], holding)
+    assert transport._registry_map() == holding
+    assert transport._poll_commands() == [0x4642, 0x4644]
+
+
+def test_there_is_no_map_without_a_protocol() -> None:
+    transport: Any = make()
+    transport.protocolSettings = None
+    assert transport._registry_map() == []
+
+
+# --------------------------------------------------------------------------- #
+# the default baud rate                                                       #
+# --------------------------------------------------------------------------- #
+
+def construct(cls: type[serial_base], **values: Any) -> Any:
+    """Construct without passing a baud rate, so the default is what is tested."""
+    with (
+        patch(f"{BASE_MODULE}.find_usb_serial_port", side_effect=_same_port),
+        patch(f"{BASE_MODULE}.get_usb_serial_port_info", return_value="mock"),
+    ):
+        return cls(DummySettings(**{"port": "/dev/ttyUSB0", "address": 2, **values}))  # type: ignore[arg-type]
+
+
+def test_the_baud_rate_defaults_to_9600() -> None:
+    assert construct(FakeSerial).baudrate == 9600
+
+
+def test_a_protocol_can_set_its_devices_usual_baud_rate() -> None:
+    class Fast(FakeSerial):
+        DEFAULT_BAUDRATE: int = 115200
+
+    assert construct(Fast).baudrate == 115200
+
+
+def test_the_config_overrides_the_protocols_default_baud_rate() -> None:
+    class Fast(FakeSerial):
+        DEFAULT_BAUDRATE: int = 115200
+
+    assert construct(Fast, baudrate=9600).baudrate == 9600
+    assert construct(Fast, baud=38400).baudrate == 38400, "baud is still accepted as the older name"
+
+
+# --------------------------------------------------------------------------- #
+# rows beyond a short payload                                                  #
+# --------------------------------------------------------------------------- #
+
+@pytest.mark.parametrize(
+    ("byte", "data_type", "payload_size", "kept"),
+    [
+        (2, Data_Type.USHORT, 4, True),    # bytes 2 and 3 are the last two
+        (3, Data_Type.USHORT, 4, False),   # would need byte 4
+        (3, Data_Type.BYTE, 4, True),
+        (4, Data_Type.BYTE, 4, False),
+        (0, Data_Type.UINT, 4, True),
+        (1, Data_Type.UINT, 4, False),
+        (0, Data_Type.INT, 3, False),
+        (2, Data_Type.ASCII, 5, True),     # text only has to start inside the payload
+        (5, Data_Type.ASCII, 5, False),
+        (4, Data_Type.STRING, 5, True),
+        (0, Data_Type.HEX, 1, True),
+        (0, Data_Type.BIT16_FLAGS, 2, True),
+        (0, Data_Type.BIT16_FLAGS, 1, False),
+        (0, Data_Type.BIT8_FLAGS, 1, True),
+    ],
+)
+def test_a_row_is_kept_only_if_its_bytes_are_in_the_payload(byte: int, data_type: Data_Type, payload_size: int, kept: bool) -> None:
+    entry: Any = row(3, byte, data_type)
+    assert (make()._entries_within({3: bytes(payload_size)}, [entry]) == [entry]) is kept
+
+
+def test_a_row_whose_command_did_not_answer_is_dropped() -> None:
+    kept: list[Any] = make()._entries_within({3: b"\x00\x01"}, [row(3), row(4)])
+    assert [entry.register for entry in kept] == [3]
+
+
+class Pruning(FakeSerial):
+    PRUNE_SHORT_PAYLOADS: bool = True
+
+
+def recording_protocol(entries: list[Any]) -> MagicMock:
+    protocol: MagicMock = MagicMock()
+    protocol.get_registry_map.return_value = entries
+    protocol.process_registery.return_value = {}
+    return protocol
+
+
+def test_pruning_is_off_by_default_so_existing_transports_are_unchanged() -> None:
+    assert serial_base.PRUNE_SHORT_PAYLOADS is False
+    transport: Any = make()
+    entries: list[Any] = [row(3, 0), row(3, 40)]
+    transport.protocolSettings = recording_protocol(entries)
+    transport._process_raw({3: b"\x00\x01"})
+    assert transport.protocolSettings.process_registery.call_args.kwargs["registry_map"] == entries
+
+
+def test_with_pruning_on_only_rows_inside_the_payload_are_decoded() -> None:
+    transport: Any = make(Pruning)
+    inside, beyond = row(3, 0), row(3, 40)
+    transport.protocolSettings = recording_protocol([inside, beyond])
+    transport._process_raw({3: b"\x00\x01"})
+    assert transport.protocolSettings.process_registery.call_args.kwargs["registry_map"] == [inside]
+
+
+# --------------------------------------------------------------------------- #
+# listening, and connecting on demand                                         #
+# --------------------------------------------------------------------------- #
+
+def test_listen_returns_the_message_and_connects_first_if_it_must(serial_layer: None) -> None:
+    transport: Any = build(LazySerial)
+    assert transport._client is None
+    transport.connect()
+    transport.client.last_written = b"\x01\x02"
+    assert transport._listen() == b"\x01\x02"
+
+
+def test_listen_opens_the_port_itself_when_the_transport_is_not_connected(serial_layer: None) -> None:
+    transport: Any = build(LazySerial)
+    assert transport._listen() is None, "connected, but nothing has been said yet"
+    assert transport.connected is True and transport._client is not None
+
+
+def test_listen_gives_nothing_when_the_port_cannot_be_opened(serial_layer: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(serial_base_module, "find_usb_serial_port", _no_port)
+    transport: Any = build(LazySerial)
+    assert transport._listen() is None
+
+
+def test_a_read_error_disconnects_so_the_next_cycle_reopens(serial_layer: None) -> None:
+    transport: Any = build(LazySerial)
+    transport.connect()
+    transport.client.read = MagicMock(side_effect=OSError("unplugged"))
+    assert transport._listen() is None
+    assert transport.connected is False
+
+
+@pytest.mark.parametrize("message", [b"", [b"a", b"b"]], ids=["empty", "a list"])
+def test_listen_ignores_an_empty_or_multi_part_read(serial_layer: None, message: Any) -> None:
+    transport: Any = build(LazySerial)
+    transport.connect()
+    transport.client.read = MagicMock(return_value=message)
+    assert transport._listen() is None
+
+
+def test_listen_holds_the_port_lock_while_it_reads(serial_layer: None) -> None:
+    transport: Any = build(LazySerial)
+    transport.connect()
+    free_for_others: list[bool] = []
+
+    def probe(reset_buffer: bool = True, frames: int = 1) -> bytes:
+        def try_lock() -> None:
+            lock: threading.RLock = transport._get_port_lock()
+            acquired: bool = lock.acquire(blocking=False)
+            free_for_others.append(acquired)
+            if acquired:
+                lock.release()
+
+        worker: threading.Thread = threading.Thread(target=try_lock)
+        worker.start()
+        worker.join()
+        return b"\x01"
+
+    transport.client.read = probe
+    assert transport._listen() == b"\x01"
+    assert free_for_others == [False]
+
+
+def test_an_exchange_connects_on_demand(serial_layer: None) -> None:
+    """A transport that opens its port on connect works on its first read, without anyone connecting it first."""
+    transport: Any = build(LazySerial)
+    assert transport._client is None
+    assert transport._exchange(3) == b"0203"
+    assert transport._client is not None
+
+
+def test_an_exchange_with_the_adapter_unplugged_returns_nothing_instead_of_raising(serial_layer: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(serial_base_module, "find_usb_serial_port", _no_port)
+    assert build(LazySerial)._exchange(3) is None

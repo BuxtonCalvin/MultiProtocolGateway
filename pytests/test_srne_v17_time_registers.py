@@ -44,7 +44,7 @@ def _stamp(year: int, month: int, day: int, hour: int, minute: int, second: int)
 def test_current_time_decodes_all_six_fields() -> None:
     first, second, third = _stamp(24, 11, 12, 13, 45, 30)
 
-    info = _decode({0x20C: first, 0x20D: second, 0x20E: third})
+    info: dict[str, int | float | str] = _decode({0x20C: first, 0x20D: second, 0x20E: third})
 
     assert [info[f"current_time_{name}"] for name in ("year", "month", "day", "hour", "minute", "second")] == [24, 11, 12, 13, 45, 30]
 
@@ -53,7 +53,7 @@ def test_current_time_does_not_overwrite_the_registers_it_used_to_overlap() -> N
     """Day..second used to be mapped onto 0x21D / 0x21E, which are the inverter DC component and mains charge current."""
     first, second, third = _stamp(24, 11, 12, 13, 45, 30)
 
-    info = _decode({0x20C: first, 0x20D: second, 0x20E: third, 0x21D: 1234, 0x21E: 567})
+    info: dict[str, int | float | str] = _decode({0x20C: first, 0x20D: second, 0x20E: third, 0x21D: 1234, 0x21E: 567})
 
     assert info["inverter_dc_component"] == 1234
     assert info["mains_charge_current"] == 56.7
@@ -62,7 +62,7 @@ def test_current_time_does_not_overwrite_the_registers_it_used_to_overlap() -> N
 def test_power_on_time_is_three_registers() -> None:
     first, second, third = _stamp(23, 2, 28, 9, 5, 59)
 
-    info = _decode({0xF040: first, 0xF041: second, 0xF042: third})
+    info: dict[str, int | float | str] = _decode({0xF040: first, 0xF041: second, 0xF042: third})
 
     assert [info[f"power_on_time_{name}"] for name in ("year", "month", "day", "hour", "minute", "second")] == [23, 2, 28, 9, 5, 59]
 
@@ -70,7 +70,7 @@ def test_power_on_time_is_three_registers() -> None:
 def test_last_equalizing_charge_time_starts_at_f043_and_does_not_touch_f046() -> None:
     first, second, third = _stamp(24, 10, 3, 17, 21, 8)
 
-    info = _decode({0xF043: first, 0xF044: second, 0xF045: third, 0xF046: 7})
+    info: dict[str, int | float | str] = _decode({0xF043: first, 0xF044: second, 0xF045: third, 0xF046: 7})
 
     prefix = "last_equalizing_charge_completion_time_"
     assert [info[prefix + name] for name in ("year", "month", "day", "hour", "minute", "second")] == [24, 10, 3, 17, 21, 8]

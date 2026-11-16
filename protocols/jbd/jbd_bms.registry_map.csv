@@ -10,7 +10,7 @@ register,variable_name,documented_name,unit,data_type,values,read_interval,writa
 3.16,protection_status,Protection Status,,_16BIT_FLAGS,,,,,,,,diagnostic
 3.18,software_version,Software Version,,BYTE,,,,,0x10 is version 1.0,,,diagnostic
 3.19,state_of_charge,State of Charge,%,BYTE,,,,,,battery,measurement,
-3.b8.20,mosfet_status,MOSFET Status,,_8BIT_FLAGS,,,,,byte 20; flags are b8 and b9 because the loader reads 8-bit flags from the upper half of the word at the byte offset,,,diagnostic
+3.20,mosfet_status,MOSFET Status,,_8BIT_FLAGS,,,,,"byte 20: b0 = charging MOSFET, b1 = discharging MOSFET (an 8-bit flag row decodes the byte at the offset)",,,diagnostic
 3.21,cell_count,Cell Count,,BYTE,,,,,,,,diagnostic
 3.22,temperature_sensor_count,Temperature Sensor Count,,BYTE,,,,,,,,diagnostic
 3.23,temperature_1,Temperature 1,C,USHORT,,,,"{""High_Low"": ""x?(0,65535]->(x-2731)/10""}",raw is tenths of a kelvin; rows beyond the sensor count the pack reports are dropped,temperature,measurement,

@@ -84,8 +84,11 @@
     "baudrate": "500000",
     "bitrate": "500000",
     "bustype": "socketcan",
+    "address": "0",
     "cacheTimeout": "120",
     "channel": "",
+    "poll_frames": "",
+    "poll_interval": "",
     "interface": "socketcan",
     "max_precision": "2",
     "port": "",
@@ -162,7 +165,8 @@
   },
   "serial_pylon": {
     "$extends": "_serial_base",
-    "ignore_checksum_errors": "False"
+    "ignore_checksum_errors": "False",
+    "command_info": ""
   },
   "serial_vedirect": {
     "$extends": "_serial_base",

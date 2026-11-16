@@ -1,0 +1,49 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note,ha_device_class,ha_state_class,ha_entity_category
+x4210,,Battery Pile Total Voltage,0.1V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",Pylon HV CAN V1.17 0x4210 bytes 0-1,voltage,measurement,
+x4210.2,,Battery Pile Current,0.1A,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA"", ""Offset"": -3000}","Pylon HV CAN V1.17 0x4210 bytes 2-3; the wire value has an offset of -3000 A, so 30000 is 0 A; positive is charge",current,measurement,
+x4210.4,,BMS Temperature,0.1C,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA"", ""Offset"": -100}",Pylon HV CAN V1.17 0x4210 bytes 4-5; offset -100 C,temperature,measurement,
+x4210.6,,SOC,1%,BYTE,,,,,Pylon HV CAN V1.17 0x4210 byte 6,battery,measurement,
+x4210.7,,SOH,1%,BYTE,,,,,Pylon HV CAN V1.17 0x4210 byte 7,,measurement,
+x4220,,Charge Cutoff Voltage,0.1V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",Pylon HV CAN V1.17 0x4220 bytes 0-1,voltage,measurement,
+x4220.2,,Discharge Cutoff Voltage,0.1V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",Pylon HV CAN V1.17 0x4220 bytes 2-3,voltage,measurement,
+x4220.4,,Max Charge Current,0.1A,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA"", ""Offset"": -3000}",Pylon HV CAN V1.17 0x4220 bytes 4-5; offset -3000 A,current,measurement,
+x4220.6,,Max Discharge Current,0.1A,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA"", ""Offset"": -3000}",Pylon HV CAN V1.17 0x4220 bytes 6-7; offset -3000 A,current,measurement,
+x4230,,Max Cell Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",Pylon HV CAN V1.17 0x4230 bytes 0-1,voltage,measurement,
+x4230.2,,Min Cell Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",Pylon HV CAN V1.17 0x4230 bytes 2-3,voltage,measurement,
+x4230.4,,Max Cell Voltage Number,,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",Pylon HV CAN V1.17 0x4230 bytes 4-5,,,diagnostic
+x4230.6,,Min Cell Voltage Number,,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",Pylon HV CAN V1.17 0x4230 bytes 6-7,,,diagnostic
+x4240,,Max Cell Temperature,0.1C,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA"", ""Offset"": -100}",Pylon HV CAN V1.17 0x4240 bytes 0-1; offset -100 C,temperature,measurement,
+x4240.2,,Min Cell Temperature,0.1C,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA"", ""Offset"": -100}",Pylon HV CAN V1.17 0x4240 bytes 2-3; offset -100 C,temperature,measurement,
+x4240.4,,Max Cell Temperature Number,,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",Pylon HV CAN V1.17 0x4240 bytes 4-5,,,diagnostic
+x4240.6,,Min Cell Temperature Number,,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",Pylon HV CAN V1.17 0x4240 bytes 6-7,,,diagnostic
+x4250.b0,,Battery State,,3BIT,,,,,"Pylon HV CAN V1.17 0x4250 byte 0 bits 0-2, table 1",,,
+x4250,,Basic Status Flags,,8BIT_FLAGS,,,,,"Pylon HV CAN V1.17 0x4250 byte 0, table 1 bits 3 and 4",,,
+x4250.1,,Cycle Period,,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",Pylon HV CAN V1.17 0x4250 bytes 1-2,,,diagnostic
+x4250.3,,Fault,,8BIT_FLAGS,,,,,"Pylon HV CAN V1.17 0x4250 byte 3, table 2",,,
+x4250.4,,Alarm,,16BIT_FLAGS,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}","Pylon HV CAN V1.17 0x4250 bytes 4-5, table 3",,,
+x4250.6,,Protection,,16BIT_FLAGS,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}","Pylon HV CAN V1.17 0x4250 bytes 6-7, table 4",,,
+x4260,,Module Max Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",Pylon HV CAN V1.17 0x4260 bytes 0-1,voltage,measurement,
+x4260.2,,Module Min Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",Pylon HV CAN V1.17 0x4260 bytes 2-3,voltage,measurement,
+x4260.4,,Module Max Voltage Number,,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",Pylon HV CAN V1.17 0x4260 bytes 4-5,,,diagnostic
+x4260.6,,Module Min Voltage Number,,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",Pylon HV CAN V1.17 0x4260 bytes 6-7,,,diagnostic
+x4270,,Module Max Temperature,0.1C,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA"", ""Offset"": -100}",Pylon HV CAN V1.17 0x4270 bytes 0-1; offset -100 C,temperature,measurement,
+x4270.2,,Module Min Temperature,0.1C,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA"", ""Offset"": -100}",Pylon HV CAN V1.17 0x4270 bytes 2-3; offset -100 C,temperature,measurement,
+x4270.4,,Module Max Temperature Number,,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",Pylon HV CAN V1.17 0x4270 bytes 4-5,,,diagnostic
+x4270.6,,Module Min Temperature Number,,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",Pylon HV CAN V1.17 0x4270 bytes 6-7,,,diagnostic
+x4280,,Charge Forbidden Mark,,BYTE,,,,,"Pylon HV CAN V1.17 0x4280 byte 0; 0xAA (170) means charging is forbidden, any other value means it is not",,,
+x4280.1,,Discharge Forbidden Mark,,BYTE,,,,,Pylon HV CAN V1.17 0x4280 byte 1; 0xAA (170) means discharging is forbidden,,,
+x4290,,Fault Extension,,8BIT_FLAGS,,,,,"Pylon HV CAN V1.17 0x4290 byte 0, table 5; applies when the ""other error"" fault bit is set",,,
+x42E0,,Serial Number,,ASCII,,,,,"Pylon HV CAN V1.17 0x42E0, 8 ASCII characters",,,diagnostic
+x42F0,,Manufacturer Name,,ASCII,,,,,"Pylon HV CAN V1.17 0x42F0, 8 ASCII characters",,,diagnostic
+x7310,,Hardware Version Letter,,BYTE,,,,,Pylon HV CAN V1.17 system equipment information (answers the 0x4200 request with byte 0 = 2): 0x7310 byte 0,,,diagnostic
+x7310.2,,Hardware Version V,,BYTE,,,,,Pylon HV CAN V1.17 system equipment information (answers the 0x4200 request with byte 0 = 2): 0x7310 byte 2,,,diagnostic
+x7310.3,,Hardware Version R,,BYTE,,,,,Pylon HV CAN V1.17 system equipment information (answers the 0x4200 request with byte 0 = 2): 0x7310 byte 3,,,diagnostic
+x7310.4,,Software Version Major,,BYTE,,,,,Pylon HV CAN V1.17 system equipment information (answers the 0x4200 request with byte 0 = 2): 0x7310 byte 4,,,diagnostic
+x7310.5,,Software Version Minor,,BYTE,,,,,Pylon HV CAN V1.17 system equipment information (answers the 0x4200 request with byte 0 = 2): 0x7310 byte 5,,,diagnostic
+x7310.6,,Software Development Major,,BYTE,,,,,Pylon HV CAN V1.17 system equipment information (answers the 0x4200 request with byte 0 = 2): 0x7310 byte 6,,,diagnostic
+x7310.7,,Software Development Minor,,BYTE,,,,,Pylon HV CAN V1.17 system equipment information (answers the 0x4200 request with byte 0 = 2): 0x7310 byte 7,,,diagnostic
+x7320,,Battery Module Quantity,,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",Pylon HV CAN V1.17 system equipment information (answers the 0x4200 request with byte 0 = 2): 0x7320 bytes 0-1,,,diagnostic
+x7320.2,,Battery Modules In Series,,BYTE,,,,,Pylon HV CAN V1.17 system equipment information (answers the 0x4200 request with byte 0 = 2): 0x7320 byte 2,,,diagnostic
+x7320.3,,Cells Per Battery Module,,BYTE,,,,,Pylon HV CAN V1.17 system equipment information (answers the 0x4200 request with byte 0 = 2): 0x7320 byte 3,,,diagnostic
+x7320.4,,Voltage Level,1V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",Pylon HV CAN V1.17 system equipment information (answers the 0x4200 request with byte 0 = 2): 0x7320 bytes 4-5,,,diagnostic
+x7320.6,,Battery Capacity,1Ah,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",Pylon HV CAN V1.17 system equipment information (answers the 0x4200 request with byte 0 = 2): 0x7320 bytes 6-7,,,diagnostic

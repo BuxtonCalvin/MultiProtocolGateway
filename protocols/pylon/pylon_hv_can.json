@@ -1,0 +1,76 @@
+{
+  "transport": "canbus",
+  "baud": 500000,
+  "send_holding_register": true,
+  "send_input_register": false,
+  "send_coil_register": false,
+  "send_discrete_register": false,
+  "poll_frames": "0x4200:0000000000000000;0x4200:0200000000000000",
+  "poll_interval": "5",
+  "can_id_address_max": "15",
+  "battery_state_codes": {
+    "0": "sleep",
+    "1": "charge",
+    "2": "discharge",
+    "3": "idle"
+  },
+  "basic_status_flags_codes": {
+    "b3": "forced charge request",
+    "b4": "balance charge request"
+  },
+  "fault_codes": {
+    "b0": "voltage sensor error",
+    "b1": "temperature sensor error",
+    "b2": "internal communication error",
+    "b3": "input over voltage",
+    "b4": "input reverse connection",
+    "b5": "relay check error",
+    "b6": "battery cell error",
+    "b7": "other error (see fault extension)"
+  },
+  "alarm_codes": {
+    "b0": "BLV: single cell low voltage",
+    "b1": "BHV: single cell high voltage",
+    "b2": "PLV: discharge system low voltage",
+    "b3": "PHV: charge system high voltage",
+    "b4": "CLT: charge cell low temperature",
+    "b5": "CHT: charge cell high temperature",
+    "b6": "DLT: discharge cell low temperature",
+    "b7": "DHT: discharge cell high temperature",
+    "b8": "COCA: charge over current",
+    "b9": "DOCA: discharge over current",
+    "b10": "MLV: module low voltage",
+    "b11": "MHV: module high voltage"
+  },
+  "protection_codes": {
+    "b0": "BUV: single cell under voltage",
+    "b1": "BOV: single cell over voltage",
+    "b2": "PUV: discharge system under voltage",
+    "b3": "POV: charge system over voltage",
+    "b4": "CUT: charge cell under temperature",
+    "b5": "COT: charge cell over temperature",
+    "b6": "DUT: discharge cell under temperature",
+    "b7": "DOT: discharge cell over temperature",
+    "b8": "COC: charge over current",
+    "b9": "DOC: discharge over current",
+    "b10": "MUV: module under voltage",
+    "b11": "MOV: module over voltage"
+  },
+  "fault_extension_codes": {
+    "b0": "shutdown circuit error",
+    "b1": "BMIC error",
+    "b2": "internal bus error",
+    "b3": "self-test error"
+  },
+  "charge_forbidden_mark_codes": {
+    "170": "charge forbidden"
+  },
+  "discharge_forbidden_mark_codes": {
+    "170": "discharge forbidden"
+  },
+  "hardware_version_letter_codes": {
+    "0": "none",
+    "1": "A",
+    "2": "B"
+  }
+}

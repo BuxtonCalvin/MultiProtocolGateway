@@ -312,7 +312,7 @@ MPG ships with pre-built, tested protocol maps for the following manufacturers. 
 | **Next Power** | Next Power Victor NM RE (`next_power_victor_nm_re` via Modbus ) | **[`View Next Power`](documentation/devices/Next_Power.md)** |
 | **PACE BMS** | PACE BMS RS-485 v1.3 (`pace_bms_v1.3` via Modbus ) | **[`View PACE BMS`](documentation/devices/PACE.md)** |
 | **PowMr** | Off-Grid / Hybrid Inverter (`powmr` via Modbus ) | **[`View PowMr`](documentation/devices/PowMr.md)** |
-| **Pylon** | CAN Bus (`pylon_can` via CAN bus), RS-485 v3.3 (`pylon_rs485_v3.3` via Pylon serial) | **[`View Pylon`](documentation/devices/Pylon.md)** |
+| **Pylon** | CAN Bus (`pylon_can` via CAN bus), high-voltage CAN (`pylon_hv_can` via CAN bus), RS-485 v3.3 (`pylon_rs485_v3.3` via Pylon serial) | **[`View Pylon`](documentation/devices/Pylon.md)** |
 | **Sigenergy** | SigenStor Plant Data (`sigenergy_plant` via Modbus ), Sigen Hybrid / SigenStor EC Device Data (`sigenergy_hybrid` via Modbus ) | **[`View Sigenergy`](documentation/devices/Sigenergy.md)** |
 | **Sigineer** | Solar Inverter / Charger v0.11 (`sigineer_v0.11` via Modbus ) | **[`View Sigineer`](documentation/devices/Sigineer.md)** |
 | **SMA** | Energy Meter Speedwire (`sma_energy_meter_speedwire` via Modbus ), CAN / Modbus RTU Map (`sma_modbus_rtu` via CAN bus), Sunny Home Manager (`sma_sunny_home_manager` via Modbus ), Sunny Island (`sma_sunny_island` via Modbus ), Sunny Island v1 (`sma_sunny_island_v1` via Modbus ), Sunny Boy / Tripower (`sma_sunnyboy_tripower` via Modbus ), Tripower Storage Hybrid (`sma_tripower_storage_hybrid` via Modbus ), SunSpec Inverters (`sma_sunspec` via Modbus TCP) | **[`View SMA`](documentation/devices/SMA.md)** |

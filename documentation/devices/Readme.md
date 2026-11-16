@@ -73,7 +73,7 @@
 | [JBD / Xiaoxiang / Overkill](JBD.md) | JBD smart BMS (UART / RS232 / RS485) | UART / RS485 | JBD serial protocol (read-only) | [JBD.md](JBD.md) |
 | [JK (Jikong) BMS](JK.md) | JK-B / JK-BD / JK-PB | UART1 / RS485 | Modbus RTU / JK 4G-GPS serial | [JK.md](JK.md) |
 | [PACE BMS](PACE.md) | PACE RS485 v1.3 compatible batteries | RS485 | PACE BMS Modbus RTU | [PACE.md](PACE.md) |
-| [Pylon / Pylontech](Pylon.md) | Low-voltage Pylontech batteries | RS485 / CAN | Pylon serial / CAN | [Pylon.md](Pylon.md) |
+| [Pylon / Pylontech](Pylon.md) | Low-voltage (US2000 / US3000 / US5000) and high-voltage (Force H, Dyness) batteries | RS485 / CAN | Pylon serial / CAN | [Pylon.md](Pylon.md) |
 | [SOK / PACE BMS](SOK.md) | SOK 48V 100AH, Jakiper 48V 100AH | RS485A RJ45 | PACE BMS Modbus RTU | [SOK.md](SOK.md) |
 | [Voltronic](Voltronic.md) | Axpert, Infinisolar, VM II/III/IV compatible BMS | RS485 | Voltronic BMS Modbus RTU | [Voltronic.md](Voltronic.md) |
 

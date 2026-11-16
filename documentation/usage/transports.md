@@ -349,6 +349,7 @@ bridge = transport.mqtt
 | `baudrate` | `9600` | Baud rate. Must match the battery's DIP setting (`9600` or `115200`). Also accepted as `baud`. |
 | `address` | `0` | Battery address, 0-255 (Pylon batteries usually start at 2). Also accepted as `unit_id`. |
 | `ignore_checksum_errors` | `false` | Decode responses that fail the Pylon checksum instead of discarding them. Leave off unless the firmware is known to send bad checksums. |
+| `command_info` | *(the address)* | The INFO byte, in hex, sent with the commands that take a battery number (analog, alarm, charge/discharge management, serial number, software version). `ff` asks for the totals of the whole battery stack. |
 | `timeout` | `5.0` | Seconds to wait for each response. Accepted in the config, but not offered in the web UI. |
 
 The port is opened when the gateway starts, so a missing adapter stops it early. Several batteries can share one port: add one section per address with the same `port` and `baudrate`. Each section is a separate device. On connect MPG asks the battery for its protocol version and uses it in later requests. Commands that get no valid response are skipped for that cycle, and bridges that require complete cycles will not write that poll.
@@ -405,6 +406,9 @@ bridge = transport.mqtt
 | `cache_timeout` | `120` | Seconds to retain a CAN message in cache before expiring it. |
 | `serial_number` | *(autodetect)* | Device serial number. Leave unset and MPG picks the frame that looks most like a serial number and logs its CAN ID. |
 | `serial_number_can_id` | *(autodetect)* | CAN ID known to carry the serial number (decimal or hex). Skips the autodetect. |
+| `address` | `0` | Device address added to the CAN ID of every row, for protocols that number their devices that way (the Pylontech high-voltage protocol: 0-15). One section per device, all on the same `channel`. Ignored with a warning by every other protocol, and refused if outside the protocol's range. |
+| `poll_frames` | *(the protocol's)* | Request frames to transmit so a device answers, as `ID:HEXDATA` separated by semicolons (for example `0x4200:0000000000000000;0x4200:0200000000000000`). A value here replaces the protocol's own; `none` turns them off. IDs above `0x7FF` are sent as extended frames. Only the Pylontech high-voltage protocol asks for any by default. |
+| `poll_interval` | `5` | Seconds between transmissions of the `poll_frames`. |
 | `write_enabled` / `write_type` | off | Allow MPG to transmit. See [Writing to a CAN device](#writing-to-a-can-device). |
 
 #### Writing to a CAN device

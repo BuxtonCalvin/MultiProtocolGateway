@@ -36,6 +36,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from conftest import DummySettings
 
+from classes.protocol_settings import Data_Type
 from classes.transports.serial_base import serial_base
 from classes.transports.serial_frame_transport import (
     serial_frame_client,
@@ -211,19 +212,23 @@ def test_decode_frame_rejects_truncated_frame() -> None:
 
 def fake_protocol(registers: list[int]) -> MagicMock:
     protocol = MagicMock()
-    protocol.get_registry_map.return_value = [SimpleNamespace(register=r, variable_name=f"v{r}") for r in registers]
+    # data_type ASCII: payload pruning only needs such a row to start inside the payload
+    protocol.get_registry_map.return_value = [
+        SimpleNamespace(register=r, variable_name=f"v{r}", data_type=Data_Type.ASCII, register_byte=0) for r in registers
+    ]
     protocol.process_registery.side_effect = _process_registery
     return protocol
 
 
 def test_read_data_skips_corrupt_frames_and_keeps_good_ones() -> None:
     transport: serial_pylon = make_transport()
-    transport.protocolSettings = fake_protocol([0x4642, 0x4644])
-    good: bytes = transport.build_frame(0x4642, b"\x01\x02")
-    bad: bytes = transport.build_frame(0x4644, b"\x01\x02")
+    # 0x4651 / 0x4692 payloads pass through untouched; analog (0x4642) and alarm (0x4644) responses are split into blocks
+    transport.protocolSettings = fake_protocol([0x4651, 0x4692])
+    good: bytes = transport.build_frame(0x4651, b"\x01\x02")
+    bad: bytes = transport.build_frame(0x4692, b"\x01\x02")
     bad = bad[:-1] + (b"0" if bad[-1:] != b"0" else b"1")
     transport._exchange = MagicMock(side_effect=[good, bad])  # type: ignore[method-assign]
-    assert transport.read_data() == {"v17986": "0102"}
+    assert transport.read_data() == {"v18001": "0102"}
 
 
 def test_adr_byte_follows_address_setting() -> None:

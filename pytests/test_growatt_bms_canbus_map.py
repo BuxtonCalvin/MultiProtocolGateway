@@ -76,6 +76,7 @@ def test_0x311_limits_and_enable_bits_match_the_verified_capture(bus: tuple[canb
     assert info["battery_charge_voltage"] == approx(57.6)
     assert info["charge_current_limit"] == approx(100.0)
     assert info["discharge_current_limit"] == approx(100.0)
+    assert info["status_flags"] == "Output discharge enabled,Output charge enabled"
 
 
 @pytest.mark.parametrize(

@@ -20,6 +20,8 @@ from __future__ import annotations
 # Scraper for canbus data; because canbus is passive, we read the bus and store results in a cache,
 # then process the cache to return values for the protocol. This allows us to read the bus as fast
 # as possible, and process the data at a more reasonable rate for the protocol.
+import dataclasses
+import logging
 import platform
 import re
 import subprocess
@@ -97,6 +99,18 @@ class canbus(transport_base):
     _tx_frames: dict[int, bytes]
     ''' last payload transmitted per CAN ID; the base for the next write to the same frame '''
 
+    address: int = 0
+    ''' device address added to the CAN ID of every row, for protocols that declare can_id_address_max '''
+
+    _addressed_map: list[registry_map_entry] | None = None
+    ''' the registry map with ``address`` added to each ID, built once; None when no shift applies '''
+
+    _poll_frames: list[tuple[int, bytes]]
+    ''' request frames sent every poll_interval seconds to make a device answer; see _parse_poll_frames '''
+
+    _poll_interval: float = 5.0
+    _last_poll: float = 0.0
+
     # Data types write_data can encode into a frame: (size in bytes, signed)
     _TX_INT_TYPES: ClassVar[dict[Data_Type, tuple[int, bool]]] = {
         Data_Type.BYTE: (1, False),
@@ -159,6 +173,23 @@ class canbus(transport_base):
         # transmit state; must exist before init_after_connect() can enable writes
         self._tx_lock = threading.Lock()
         self._tx_frames = {}
+
+        self.address = self._read_address(settings)
+
+        # Request frames for devices that only answer when asked (for example the Pylontech high-voltage
+        # protocol).  Off unless the protocol JSON or the transport sets poll_frames.  A value in the
+        # transport section replaces the protocol's; "none" turns the protocol's default off; an empty
+        # value (as a pre-filled settings form would leave) means "use the protocol's".
+        raw_poll: str = settings.get(["poll_frames"], "").strip() if "poll_frames" in settings else ""
+        if not raw_poll and self.protocolSettings is not None:
+            raw_poll = str(self.protocolSettings.settings.get("poll_frames", "")).strip()
+        self._poll_frames = [] if raw_poll.lower() in ("none", "off", "false", "disabled") else self._parse_poll_frames(raw_poll)
+
+        raw_interval: str = str(self.protocolSettings.settings.get("poll_interval", "")) if self.protocolSettings is not None else ""
+        try:
+            self._poll_interval = float(settings.get(["poll_interval"], raw_interval) or self._poll_interval)
+        except ValueError:
+            self._log.warning("poll_interval is not a number; using 5 seconds")
 
         #  Assign the thread to self.thread so the instance holds a reference
         # and the thread is not silently lost. Previously, the local variable `thread` shadowed
@@ -273,6 +304,10 @@ class canbus(transport_base):
         '''
         if self.write_enabled:
             self.enable_write()
+
+        if self._poll_frames:
+            self._log.info(f"canbus: sending {len(self._poll_frames)} request frame(s) every {self._poll_interval:g}s")
+            self._send_poll_frames()
 
         if not self.device_serial_number:
             self.device_serial_number = self.read_serial_number()
@@ -455,16 +490,52 @@ class canbus(transport_base):
     def _tx_write_mode(self, value: TransportWriteMode) -> None:
         self.write_mode = value
 
+    def _read_address(self, settings: TransportSettings) -> int:
+        '''
+        The ``address`` setting, for a protocol that numbers its devices by adding the address to every CAN ID
+        (the Pylontech high-voltage protocol: 0x4210 for address 0, 0x4211 for address 1, ...).  The protocol
+        opts in with ``can_id_address_max`` in its JSON; for any other protocol a non-zero address is ignored
+        with a warning, so a stray setting cannot move a map onto the wrong IDs.
+        '''
+        if "address" not in settings:
+            return 0
+        try:
+            requested: int = int(str(settings.get(["address"], "0")).strip() or "0", 0)
+        except ValueError:
+            self._log.error("canbus: address is not a number; using 0")
+            return 0
+
+        raw_max: str = str(self.protocolSettings.settings.get("can_id_address_max", "")).strip() if self.protocolSettings is not None else ""
+        if not raw_max:
+            if requested != 0:
+                self._log.warning(f"canbus: address = {requested} is ignored; protocol '{self.protocolSettings.protocol if self.protocolSettings else ''}' does not number its devices by CAN ID")
+            return 0
+
+        highest: int = int(raw_max, 0)
+        if not 0 <= requested <= highest:
+            self._log.error(f"canbus: address {requested} is outside 0-{highest} for this protocol; using 0")
+            return 0
+        return requested
+
     def _registry_map(self) -> list[registry_map_entry]:
         '''
-        The protocol's registry map. A custom-bus map (<protocol>.registry_map.csv) wins; otherwise
+        The protocol's registry map, with ``address`` added to each CAN ID when the protocol numbers its devices
+        that way (see _read_address).  A custom-bus map (<protocol>.registry_map.csv) wins; otherwise
         the HOLDING map (<protocol>.holding_registry_map.csv), which is how the pylon_can and
         victron_gx_generic_canbus files are named. Asking only for the custom-bus map left those
         protocols with nothing to decode.
         '''
         if self.protocolSettings is None:
             return []
-        return self.protocolSettings.get_registry_map(Registry_Type.CUSTOM_BUS) or self.protocolSettings.get_registry_map(Registry_Type.HOLDING)
+        entries: list[registry_map_entry] = (
+            self.protocolSettings.get_registry_map(Registry_Type.CUSTOM_BUS) or self.protocolSettings.get_registry_map(Registry_Type.HOLDING)
+        )
+        if self.address == 0:
+            return entries
+        if self._addressed_map is None:
+            # copies, so the shared protocol object (and any other transport using it) keeps the base IDs
+            self._addressed_map = [dataclasses.replace(entry, register=entry.register + self.address) for entry in entries]
+        return self._addressed_map
 
     def _writable_entries(self) -> list[registry_map_entry]:
         ''' registry rows that may be transmitted: marked W (read/write) or WO (write only) '''
@@ -528,6 +599,45 @@ class canbus(transport_base):
         if not self.write_enabled:
             self._log.warning(f"send_frame: write is not enabled; frame 0x{can_id:X} not sent")
             return False
+        return self._transmit(can_id, data, remote, dlc)
+
+    @staticmethod
+    def _parse_poll_frames(raw: str) -> list[tuple[int, bytes]]:
+        '''
+        ``"0x4200:00;0x4200:02"`` -> [(0x4200, b"\\x00"), (0x4200, b"\\x02")].  Frames are separated by ``;``,
+        the ID (decimal or ``0x`` hex) is separated from the data (hex, up to 8 bytes, may be empty) by ``:``.
+        A frame that cannot be parsed is skipped with a warning.
+        '''
+        frames: list[tuple[int, bytes]] = []
+        for item in (part.strip() for part in raw.split(";")):
+            if not item:
+                continue
+            identifier, _, data = item.partition(":")
+            try:
+                can_id: int = int(identifier.strip(), 0)
+                payload: bytes = bytes.fromhex(data.replace(" ", ""))
+            except ValueError:
+                msg: str = f"poll_frames: cannot parse {item!r}; skipped"
+                logging.getLogger(__name__).warning(msg)
+                continue
+            if not 0 <= can_id < 1 << 29 or len(payload) > 8:
+                msg = f"poll_frames: {item!r} is not a valid CAN frame; skipped"
+                logging.getLogger(__name__).warning(msg)
+                continue
+            frames.append((can_id, payload))
+        return frames
+
+    def _send_poll_frames(self) -> None:
+        '''
+        Send the configured request frames.  They ask a device to report and change nothing, so they are
+        not held back by write_enabled; they are only sent because the protocol or the config asked for them.
+        '''
+        self._last_poll = time.monotonic()
+        for can_id, payload in self._poll_frames:
+            self._transmit(can_id, payload)
+
+    def _transmit(self, can_id: int, data: bytes | bytearray = b"", remote: bool = False, dlc: int = 0) -> bool:
+        ''' put one frame on the bus, without any write-mode check; send_frame and the poll frames call this '''
         if self.bus is None:
             self._log.error(f"send_frame: CAN interface is not open; frame 0x{can_id:X} not sent")
             return False
@@ -657,6 +767,9 @@ class canbus(transport_base):
         ''' because canbus is passive / broadcast, we just read from the cache '''
         info: dict[str, int | float | str] = {}
 
+        if self._poll_frames and time.monotonic() - self._last_poll >= self._poll_interval:
+            self._send_poll_frames()
+
         if self.lock is not None:
             with self.lock:
                 if self.cache is not None and self.protocolSettings is not None:
@@ -696,7 +809,8 @@ class canbus(transport_base):
             if entry is None:
                 for e in registry_map:
                     if e.variable_name == variable_name:
-                        entry = e
+                        # found in the protocol's own map, so apply this device's address like _registry_map does
+                        entry = dataclasses.replace(e, register=e.register + self.address) if self.address else e
                         break
 
             if entry:

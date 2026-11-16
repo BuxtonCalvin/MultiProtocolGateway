@@ -5,24 +5,59 @@
   "send_input_register": false,
   "send_coil_register": false,
   "send_discrete_register": false,
-
-  "protection_codes": {
-    "b1":  "cell or module over voltage",
-    "b2":  "cell or module under voltage",
-    "b3":  "cell over temperature",
-    "b4":  "cell under temperature",
-    "b7":  "discharge over current",
-    "b8":  "charge over current",
-    "b11": "system error"
+  "charge_discharge_status_codes": {
+    "b7": "Charge enable",
+    "b6": "Discharge enable",
+    "b5": "Charge immediately 1",
+    "b4": "Charge immediately 2",
+    "b3": "Full charge request"
   },
-
-  "alarm_codes": {
-    "b1":  "cell or module high voltage",
-    "b2":  "cell or module low voltage",
-    "b3":  "cell high temperature",
-    "b4":  "cell low temperature",
-    "b7":  "discharge high current",
-    "b8":  "charge high current",
-    "b11": "Internal communication fail"
+  "alarm_status_1_codes": {
+    "b7": "Module under voltage",
+    "b6": "Charge over temperature",
+    "b5": "Discharge over temperature",
+    "b4": "Discharge over current",
+    "b2": "Charge over current",
+    "b1": "Cell under voltage",
+    "b0": "Module over voltage"
+  },
+  "alarm_status_2_codes": {
+    "b3": "Using battery module power",
+    "b2": "Discharge MOSFET on",
+    "b1": "Charge MOSFET on",
+    "b0": "Pre MOSFET on"
+  },
+  "alarm_status_3_codes": {
+    "b7": "Effective charge current",
+    "b6": "Effective discharge current",
+    "b5": "Heater on",
+    "b3": "Fully charged",
+    "b0": "Buzzer on"
+  },
+  "alarm_status_4_codes": {
+    "b0": "Cell 1 voltage error",
+    "b1": "Cell 2 voltage error",
+    "b2": "Cell 3 voltage error",
+    "b3": "Cell 4 voltage error",
+    "b4": "Cell 5 voltage error",
+    "b5": "Cell 6 voltage error",
+    "b6": "Cell 7 voltage error",
+    "b7": "Cell 8 voltage error"
+  },
+  "alarm_status_5_codes": {
+    "b0": "Cell 9 voltage error",
+    "b1": "Cell 10 voltage error",
+    "b2": "Cell 11 voltage error",
+    "b3": "Cell 12 voltage error",
+    "b4": "Cell 13 voltage error",
+    "b5": "Cell 14 voltage error",
+    "b6": "Cell 15 voltage error",
+    "b7": "Cell 16 voltage error"
+  },
+  "alarm_state_codes": {
+    "0": "normal",
+    "1": "below lower limit",
+    "2": "above higher limit",
+    "240": "other error"
   }
 }

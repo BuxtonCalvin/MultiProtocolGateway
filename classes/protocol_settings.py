@@ -410,6 +410,11 @@ class registry_map_entry:
     ha_entity_category: str = ""
     ''' optional Home Assistant entity_category ("ha entity category" CSV column): config or diagnostic '''
 
+    register_byte_explicit: bool = False
+    ''' True when the register column carried a ".N" byte offset (including ".0"). register_byte is 0 both for
+    "no offset" and for an explicit ".0", so this is what lets a plain Modbus register tell ".0" (the high
+    byte) from "no offset" (the whole register, or the low byte for BYTE). '''
+
     dynamic: bool = False
     ''' True when the register address was resolved from a template row (``[anchor+offset]`` and/or ``{i}`` in
     the CSV register cell) rather than written literally.  Runtime-only: it is never read from or written to a CSV,
@@ -2167,6 +2172,7 @@ class protocol_settings:
             register_bit: int = -1
             register_bit_end: int = -1
             register_byte: int = -1
+            register_byte_explicit: bool = False
 
             register_key: str = row["register"].strip() if text_keys else ""
             row["register"] = row["register"].lower()
@@ -2236,6 +2242,7 @@ class protocol_settings:
 
                         byte_str: str | None = reg_match.group("byte")
                         register_byte = strtoint_safe(byte_str, context="register byte") if byte_str else 0
+                        register_byte_explicit = byte_str is not None
 
                     except ValueError as e:
                         self._log.warning(f"Skipping malformed register definition '{row['register']}': {e}")
@@ -2300,6 +2307,7 @@ class protocol_settings:
                     register_bit=register_bit,
                     register_bit_end=register_bit_end,
                     register_byte=register_byte,
+                    register_byte_explicit=register_byte_explicit,
                     register_list=register_list,
                     register_key=register_key,
                     variable_name=variable_name,
@@ -2572,6 +2580,7 @@ class protocol_settings:
                     register_bit=entry.register_bit,
                     register_bit_end=entry.register_bit_end,
                     register_byte=entry.register_byte,
+                    register_byte_explicit=entry.register_byte_explicit,
                     register_key=entry.register_key,
                     variable_name=desc_name,
                     documented_name=f"{entry.documented_name}_desc",
@@ -2744,6 +2753,45 @@ class protocol_settings:
         self._log.debug(f"load_registry_map: {registry_type.name} - loaded {len(self.registry_map[registry_type])} entries, max_register={size}")
         self.registry_map_ranges[registry_type] = self.calculate_registry_ranges(self.registry_map[registry_type], self.registry_map_size[registry_type], init=True)
 
+    @staticmethod
+    def _flag_labels(code_dict: dict[str, str], set_indexes: list[str]) -> list[str]:
+        """Names for the set bits of a flag word, honouring multi-bit keys such as ``"b0&b1"``.
+
+        ``set_indexes`` are the set bits as ``"b<N>"`` in ascending order.  A key joining bits with ``&``
+        matches when every bit it names is set; its label then replaces the single-bit labels of those
+        bits (``{"b0": "StandBy", "b1": "Error", "b0&b1": "Operational"}`` gives ``Operational`` when both
+        are set, not ``StandBy,Error``).  When one multi-bit key covers another, only the larger one is kept.
+        """
+        set_bits: set[str] = set(set_indexes)
+        matched: list[tuple[frozenset[str], str]] = []
+        for key, label in code_dict.items():
+            if "&" not in key:
+                continue
+            bits: frozenset[str] = frozenset(part.strip() for part in key.split("&"))
+            if bits and all(bit in set_bits for bit in bits):
+                matched.append((bits, label))
+
+        kept: list[tuple[frozenset[str], str]] = [
+            (bits, label) for bits, label in matched
+            if not any(bits < other for other, _ in matched)
+        ]
+        consumed: set[str] = set[str]().union(*(bits for bits, _ in kept)) if kept else set()
+
+        labels: list[str] = [code_dict[index] for index in set_indexes if index in code_dict and index not in consumed]
+        labels.extend(label for _, label in kept)
+        return labels
+
+    @staticmethod
+    def _is_single_byte_type(entry: registry_map_entry) -> bool:
+        """True for types that are one byte or narrower: 8-bit flags and bit fields of 8 bits or fewer.
+
+        These decode from the single byte at the entry's byte offset, and their ``.bN`` offsets count from
+        that byte's least significant bit.  Wider types start at the offset byte and read on from there.
+        """
+        if entry.data_type == Data_Type.BIT8_FLAGS:
+            return True
+        return entry.data_type.value > 200 and Data_Type.getSize(entry.data_type) <= 8
+
     def process_register_bytes(self, registry: Mapping[int, bytes | tuple[bytes, float]], entry: registry_map_entry) -> int | float | str | None:
         """Process a bytes-oriented registry entry into a typed value.
 
@@ -2883,7 +2931,7 @@ class protocol_settings:
         elif entry.data_type in (Data_Type.BIT16_FLAGS, Data_Type.BIT8_FLAGS, Data_Type.BIT32_FLAGS):
             flag_size: int = Data_Type.getSize(entry.data_type)
             flag_word_count: int = max(1, flag_size // 16)
-            flag_bytes: bytes = register[:flag_word_count * 2]
+            flag_bytes: bytes = register[:1] if flag_size <= 8 else register[:flag_word_count * 2]
             if flag_word_count > 1 and word_order.word_reversed:
                 flag_bytes = _reverse_words(flag_bytes, flag_word_count)
             if word_order.bytes_reversed:
@@ -2896,24 +2944,10 @@ class protocol_settings:
             if entry.documented_name + "_codes" in self.codes:
                 code_dict: dict[str, str] = self.get_code_dict(entry.documented_name + "_codes")
                 flags: list[str] = []
-                flag_indexes: list[str] = []
 
                 if code_dict:
-                    for i in range(start_bit, end_bit):
-                        if (val >> i) & 1:
-                            flag_index: str = "b" + str(i)
-                            flag_indexes.append(flag_index)
-                            if flag_index in code_dict:
-                                flags.append(code_dict[flag_index])
-
-                multibit_flags: list[str] = [key for key in self.codes if "&" in key]
-                if multibit_flags:
-                    flag_indexes_set: set[str] = set(flag_indexes)
-                    for multibit_flag in multibit_flags:
-                        bits: list[str] = multibit_flag.split("&")
-                        if all(bit in flag_indexes_set for bit in bits):
-                            if multibit_flag in code_dict:
-                                flags.append(code_dict[multibit_flag])
+                    flag_indexes: list[str] = ["b" + str(i) for i in range(start_bit, end_bit) if (val >> i) & 1]
+                    flags = self._flag_labels(code_dict, flag_indexes)
 
                 value = ",".join(flags)
             else:
@@ -2926,8 +2960,8 @@ class protocol_settings:
             bit_size: int = Data_Type.getSize(entry.data_type)
             bit_mask: int = (1 << bit_size) - 1
             bit_index: int = entry.register_bit
-            reg_bytes: bytes = register[:2]
-            if word_order.bytes_reversed:
+            reg_bytes: bytes = register[:1] if bit_size <= 8 else register[:2]
+            if len(reg_bytes) == 2 and word_order.bytes_reversed:
                 reg_bytes = bytes([reg_bytes[1], reg_bytes[0]])
             register_int: int = int.from_bytes(reg_bytes, byteorder="big")
             if (register_int >> bit_index) & 1:
@@ -2940,8 +2974,8 @@ class protocol_settings:
             bit_size = Data_Type.getSize(entry.data_type)
             bit_mask = (1 << bit_size) - 1
             bit_index = entry.register_bit
-            reg_bytes = register[:2]
-            if word_order.bytes_reversed:
+            reg_bytes = register[:1] if bit_size <= 8 else register[:2]
+            if len(reg_bytes) == 2 and word_order.bytes_reversed:
                 reg_bytes = bytes([reg_bytes[1], reg_bytes[0]])
             register_int = int.from_bytes(reg_bytes, byteorder="big")
             if (register_int >> (bit_index + bit_size - 1)) & 1:
@@ -2951,9 +2985,10 @@ class protocol_settings:
                 value = (register_int >> bit_index) & bit_mask
 
         elif entry.data_type == Data_Type.BYTE:
-            # Single register — bytes_reversed only.
+            # Single register — bytes_reversed only.  An explicit ".N" offset names the physical byte N
+            # as received, so it is not subject to the byte-order adjustment.
             reg_bytes = register[:2]
-            if word_order.bytes_reversed:
+            if word_order.bytes_reversed and not entry.register_byte_explicit:
                 reg_bytes = bytes([reg_bytes[1], reg_bytes[0]])
             value = reg_bytes[0]
 
@@ -2963,8 +2998,8 @@ class protocol_settings:
             # a row that gives only a byte/register address (no ".bN" suffix) has register_bit == -1;
             # read it from bit 0 instead of raising "negative shift count"
             bit_index = entry.register_bit if entry.register_bit >= 0 else 0
-            reg_bytes = register[:2]
-            if word_order.bytes_reversed:
+            reg_bytes = register[:1] if bit_size <= 8 else register[:2]
+            if len(reg_bytes) == 2 and word_order.bytes_reversed:
                 reg_bytes = bytes([reg_bytes[1], reg_bytes[0]])
             register_int = int.from_bytes(reg_bytes, byteorder="big")
             value = (register_int >> bit_index) & bit_mask
@@ -3181,6 +3216,17 @@ class protocol_settings:
         """
         word_order: WordOrder = self._adjustments.get_entry_byteorder(entry)
 
+        # An explicit ".N" byte offset on a one-byte type names byte N of the register as received: byte 0
+        # is the high byte, byte 1 the low byte (the same numbering as a CAN or serial frame).  Present that
+        # byte to the branches below as the register's low byte; they then swap it back when a byte-order
+        # adjustment is configured.  Without an offset a BYTE row still reads the low byte, as it always has.
+        if entry.register_byte_explicit and entry.register in registry and (entry.data_type == Data_Type.BYTE or self._is_single_byte_type(entry)):
+            if entry.register_byte > 1:
+                self._log.warning(f"'{entry.variable_name}': byte offset {entry.register_byte} is outside a 16-bit register (use .0 or .1); skipping")
+                return None
+            selected: int = ((registry[entry.register] & 0xFFFF) >> (8 * (1 - entry.register_byte))) & 0xFF
+            registry = {entry.register: (selected << 8) if word_order.bytes_reversed else selected}
+
         if entry.data_type == Data_Type.UINT:
             register_bytes: bytes | None = self._register_words_to_bytes(registry, entry.register, 2, word_order, entry.register_list or None)
             if register_bytes is None:
@@ -3264,19 +3310,11 @@ class protocol_settings:
 
             code_dict: dict[str, str] = self.get_code_dict(entry.documented_name + "_codes")
 
-            flags: list[str] = []
-            for i in range(start_bit, end_bit):
-                if (val >> i) & 1:
-                    if code_dict:
-                        flag_index: str = "b" + str(i)
-                        if flag_index in code_dict:
-                            flags.append(code_dict[flag_index])
-                    else:
-                        flags.append("1")
-                elif not code_dict:
-                    flags.append("0")
-
-            value = ",".join(flags) if code_dict else "".join(flags)
+            if code_dict:
+                set_indexes: list[str] = ["b" + str(i) for i in range(start_bit, end_bit) if (val >> i) & 1]
+                value = ",".join(self._flag_labels(code_dict, set_indexes))
+            else:
+                value = "".join("1" if (val >> i) & 1 else "0" for i in range(start_bit, end_bit))
 
         elif entry.data_type.value > 400:  # signed-magnitude bit types
             bit_size = Data_Type.getSize(entry.data_type)

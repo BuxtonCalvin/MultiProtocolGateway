@@ -1,24 +1,86 @@
 register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note,ha_device_class,ha_state_class,ha_entity_category
-x4642,,Battery 1 number of cells,,BYTE,,,,,read command: 0x01; todo,,,
-X4642.4,,cell under voltage limit,0.01v,USHORT,,,,,,voltage,measurement,
-X4642.6,,charge high temperature limit,K,USHORT,,,,,,,,
-X4642.8,,charge low temperature limit,K,USHORT,,,,,,,,
-X4642.10,,charge current limit,0.01A,USHORT,,,,,,current,measurement,
-X4642.12,,module high voltage limit,0.01v,USHORT,,,,,,voltage,measurement,
-X4642.14,,module low voltage limit,0.01v,USHORT,,,,,,voltage,measurement,
-X4642.16,,module under voltage limit,0.01v,USHORT,,,,,,voltage,measurement,
-X4642.18,,discharge high temperature limit,K,USHORT,,,,,,,,
-X4642.20,,discharge low temperature limit,K,USHORT,,,,,,,,
-X4642.22,,discharge current limit,0.01A,USHORT,,,,,,current,measurement,
-x4644,,Battery 1 alarm,,ASCII,,,,,read command: 0x01; todo,,,
-x4647,,cell high voltage limit,0.01v,USHORT,,,,,,voltage,measurement,
-x4647.2,,cell low voltage limit,0.01v,USHORT,,,,,,voltage,measurement,
 x464F,,version,,BYTE,0~255,,,,protocol version,,,diagnostic
-x4651,,battery name,,ASCII.10,,,,,,,,
-x4651.10,,software version,,USHORT,,,,,,,,diagnostic
-x4651.12,,manufacturer name,,ASCII.20,,,,,,,,diagnostic
-x4692,,Battery 1 charge info,,,,,,,todo,,,
-x4693,,Battery 1 Serial Number,,,,,,,todo,,,diagnostic
-x4694,,Battery 1 charge settings,,,,,,,todo,,,
-x4695,,Battery 1 Turn Off,,,,,RD,,todo,,,
-x4696,,Battery 1 Software Info,,,,,,,todo,,,
+x4651,,battery name,,ASCII.10,,,,,"V3.3 3.2: device name, 10 ASCII characters",,,
+x4651.10,,software version,,USHORT,,,,,2 bytes,,,diagnostic
+x4651.12,,manufacturer name,,ASCII.20,,,,,20 ASCII characters,,,diagnostic
+x4642.1,,battery number,,BYTE,,,,,analog summary (0x4642): the command value; for a system request (command_info = ff) it is the number of batteries,,,diagnostic
+x4642.2,,number of cells,,BYTE,,,,,analog summary (0x4642): M,,,diagnostic
+x4642.3,,number of temperatures,,BYTE,,,,,analog summary (0x4642): N,,,diagnostic
+x4642.4,,current,0.1A,SHORT,,,,,"analog summary (0x4642): positive is charge, negative is discharge; the wire value is in units of 100 mA",current,measurement,
+x4642.6,,module voltage,0.001V,USHORT,,,,,analog summary (0x4642): mV,voltage,measurement,
+x4642.8,,remaining capacity,0.001Ah,UINT,,,,,"analog summary (0x4642): mAh. Batteries over 65 Ah send it in the 3-byte ""remain capacity 2"" field; MPG uses that one when it is present",,measurement,
+x4642.12,,total capacity,0.001Ah,UINT,,,,,"analog summary (0x4642): mAh; ""module total capacity 2"" for batteries over 65 Ah",,,diagnostic
+x4642.16,,cycle count,,USHORT,,,,,analog summary (0x4642): cycle number,,total_increasing,
+x4642.18,,state of charge,0.1%,USHORT,,,,,analog summary (0x4642): derived by MPG as remaining / total capacity; the battery does not send it,battery,measurement,
+x46F1,,cell 1 voltage,0.001V,SHORT,,,,,analog cell voltages (0x46F1 block): mV,voltage,measurement,
+x46F1.2,,cell 2 voltage,0.001V,SHORT,,,,,analog cell voltages (0x46F1 block): mV,voltage,measurement,
+x46F1.4,,cell 3 voltage,0.001V,SHORT,,,,,analog cell voltages (0x46F1 block): mV,voltage,measurement,
+x46F1.6,,cell 4 voltage,0.001V,SHORT,,,,,analog cell voltages (0x46F1 block): mV,voltage,measurement,
+x46F1.8,,cell 5 voltage,0.001V,SHORT,,,,,analog cell voltages (0x46F1 block): mV,voltage,measurement,
+x46F1.10,,cell 6 voltage,0.001V,SHORT,,,,,analog cell voltages (0x46F1 block): mV,voltage,measurement,
+x46F1.12,,cell 7 voltage,0.001V,SHORT,,,,,analog cell voltages (0x46F1 block): mV,voltage,measurement,
+x46F1.14,,cell 8 voltage,0.001V,SHORT,,,,,analog cell voltages (0x46F1 block): mV,voltage,measurement,
+x46F1.16,,cell 9 voltage,0.001V,SHORT,,,,,analog cell voltages (0x46F1 block): mV,voltage,measurement,
+x46F1.18,,cell 10 voltage,0.001V,SHORT,,,,,analog cell voltages (0x46F1 block): mV,voltage,measurement,
+x46F1.20,,cell 11 voltage,0.001V,SHORT,,,,,analog cell voltages (0x46F1 block): mV,voltage,measurement,
+x46F1.22,,cell 12 voltage,0.001V,SHORT,,,,,analog cell voltages (0x46F1 block): mV,voltage,measurement,
+x46F1.24,,cell 13 voltage,0.001V,SHORT,,,,,analog cell voltages (0x46F1 block): mV,voltage,measurement,
+x46F1.26,,cell 14 voltage,0.001V,SHORT,,,,,analog cell voltages (0x46F1 block): mV,voltage,measurement,
+x46F1.28,,cell 15 voltage,0.001V,SHORT,,,,,analog cell voltages (0x46F1 block): mV,voltage,measurement,
+x46F1.30,,cell 16 voltage,0.001V,SHORT,,,,,analog cell voltages (0x46F1 block): mV; present only on batteries with 16 cells,voltage,measurement,
+x46F2,,bms temperature,C,USHORT,,,,"{""High_Low"": ""x?(0,65535]->(x-2731)/10""}",analog temperatures (0x46F2 block): temperature 1: BMS board; the wire value is in 0.1 K,temperature,measurement,
+x46F2.2,,cell temperature 1 4,C,USHORT,,,,"{""High_Low"": ""x?(0,65535]->(x-2731)/10""}",analog temperatures (0x46F2 block): temperature 2: average of cells 1-4; the wire value is in 0.1 K,temperature,measurement,
+x46F2.4,,cell temperature 5 8,C,USHORT,,,,"{""High_Low"": ""x?(0,65535]->(x-2731)/10""}",analog temperatures (0x46F2 block): temperature 3: average of cells 5-8; the wire value is in 0.1 K,temperature,measurement,
+x46F2.6,,cell temperature 9 12,C,USHORT,,,,"{""High_Low"": ""x?(0,65535]->(x-2731)/10""}",analog temperatures (0x46F2 block): temperature 4: average of cells 9-12; the wire value is in 0.1 K,temperature,measurement,
+x46F2.8,,cell temperature 13 15,C,USHORT,,,,"{""High_Low"": ""x?(0,65535]->(x-2731)/10""}",analog temperatures (0x46F2 block): temperature 5: average of cells 13-15 (13-16 on 16-cell batteries); the wire value is in 0.1 K,temperature,measurement,
+x46F2.10,,mosfet temperature,C,USHORT,,,,"{""High_Low"": ""x?(0,65535]->(x-2731)/10""}","analog temperatures (0x46F2 block): temperature 6: MOSFET (US3000B only, per the alarm table); the wire value is in 0.1 K",temperature,measurement,
+x4692.1,,charge voltage limit,0.001V,USHORT,,,,,"charge/discharge management (0x4692): recommended upper limit, mV",voltage,measurement,
+x4692.3,,discharge voltage limit,0.001V,USHORT,,,,,"charge/discharge management (0x4692): recommended lower limit, mV",voltage,measurement,
+x4692.5,,charge current limit,0.1A,SHORT,,,,,charge/discharge management (0x4692): maximum charge current,current,measurement,
+x4692.7,,discharge current limit,0.1A,SHORT,,,,,"charge/discharge management (0x4692): maximum discharge current; signed, so real batteries report it as a negative number",current,measurement,
+x4692.9,,charge discharge status,,8BIT_FLAGS,,,,,charge/discharge management (0x4692): status byte; bits are named in charge_discharge_status_codes,,,
+x4647.1,,cell high voltage limit,0.001V,USHORT,,,,,"system parameters (0x4647): alarm threshold, mV",,,diagnostic
+x4647.3,,cell low voltage limit,0.001V,USHORT,,,,,"system parameters (0x4647): alarm threshold, mV",,,diagnostic
+x4647.5,,cell under voltage limit,0.001V,USHORT,,,,,"system parameters (0x4647): protection threshold, mV",,,diagnostic
+x4647.7,,charge high temperature limit,C,USHORT,,,,"{""High_Low"": ""x?(0,65535]->(x-2731)/10""}",system parameters (0x4647): 0.1 K on the wire,,,diagnostic
+x4647.9,,charge low temperature limit,C,USHORT,,,,"{""High_Low"": ""x?(0,65535]->(x-2731)/10""}",system parameters (0x4647): 0.1 K on the wire,,,diagnostic
+x4647.11,,system charge current limit,0.1A,SHORT,,,,,"system parameters (0x4647): signed, units of 100 mA",,,diagnostic
+x4647.13,,module high voltage limit,0.001V,USHORT,,,,,system parameters (0x4647): mV,,,diagnostic
+x4647.15,,module low voltage limit,0.001V,USHORT,,,,,"system parameters (0x4647): alarm threshold, mV",,,diagnostic
+x4647.17,,module under voltage limit,0.001V,USHORT,,,,,"system parameters (0x4647): protection threshold, mV",,,diagnostic
+x4647.19,,discharge high temperature limit,C,USHORT,,,,"{""High_Low"": ""x?(0,65535]->(x-2731)/10""}",system parameters (0x4647): 0.1 K on the wire,,,diagnostic
+x4647.21,,discharge low temperature limit,C,USHORT,,,,"{""High_Low"": ""x?(0,65535]->(x-2731)/10""}",system parameters (0x4647): 0.1 K on the wire,,,diagnostic
+x4647.23,,system discharge current limit,0.1A,SHORT,,,,,"system parameters (0x4647): signed, units of 100 mA",,,diagnostic
+x4644.4,charge_current_alarm,alarm state,,BYTE,,,,,"alarm info (0x4644): 0 normal, 1 below lower limit, 2 above higher limit, 240 other error",,,
+x4644.5,module_voltage_alarm,alarm state,,BYTE,,,,,alarm info (0x4644): same states,,,
+x4644.6,discharge_current_alarm,alarm state,,BYTE,,,,,alarm info (0x4644): same states,,,
+x4644.7,,alarm status 1,,8BIT_FLAGS,,,,,alarm info (0x4644): status 1; bits are named in alarm_status_1_codes,,,
+x4644.8,,alarm status 2,,8BIT_FLAGS,,,,,alarm info (0x4644): status 2; bits are named in alarm_status_2_codes,,,
+x4644.9,,alarm status 3,,8BIT_FLAGS,,,,,alarm info (0x4644): status 3; bits are named in alarm_status_3_codes,,,
+x4644.10,,alarm status 4,,8BIT_FLAGS,,,,,alarm info (0x4644): status 4: error flags for cell voltages 1-8,,,diagnostic
+x4644.11,,alarm status 5,,8BIT_FLAGS,,,,,alarm info (0x4644): status 5: error flags for cell voltages 9-16,,,diagnostic
+x46F3,cell_1_alarm_state,alarm state,,BYTE,,,,,"alarm cell states (0x46F3 block): 0 normal, 1 below lower limit, 2 above higher limit, 240 other error",,,diagnostic
+x46F3.1,cell_2_alarm_state,alarm state,,BYTE,,,,,"alarm cell states (0x46F3 block): 0 normal, 1 below lower limit, 2 above higher limit, 240 other error",,,diagnostic
+x46F3.2,cell_3_alarm_state,alarm state,,BYTE,,,,,"alarm cell states (0x46F3 block): 0 normal, 1 below lower limit, 2 above higher limit, 240 other error",,,diagnostic
+x46F3.3,cell_4_alarm_state,alarm state,,BYTE,,,,,"alarm cell states (0x46F3 block): 0 normal, 1 below lower limit, 2 above higher limit, 240 other error",,,diagnostic
+x46F3.4,cell_5_alarm_state,alarm state,,BYTE,,,,,"alarm cell states (0x46F3 block): 0 normal, 1 below lower limit, 2 above higher limit, 240 other error",,,diagnostic
+x46F3.5,cell_6_alarm_state,alarm state,,BYTE,,,,,"alarm cell states (0x46F3 block): 0 normal, 1 below lower limit, 2 above higher limit, 240 other error",,,diagnostic
+x46F3.6,cell_7_alarm_state,alarm state,,BYTE,,,,,"alarm cell states (0x46F3 block): 0 normal, 1 below lower limit, 2 above higher limit, 240 other error",,,diagnostic
+x46F3.7,cell_8_alarm_state,alarm state,,BYTE,,,,,"alarm cell states (0x46F3 block): 0 normal, 1 below lower limit, 2 above higher limit, 240 other error",,,diagnostic
+x46F3.8,cell_9_alarm_state,alarm state,,BYTE,,,,,"alarm cell states (0x46F3 block): 0 normal, 1 below lower limit, 2 above higher limit, 240 other error",,,diagnostic
+x46F3.9,cell_10_alarm_state,alarm state,,BYTE,,,,,"alarm cell states (0x46F3 block): 0 normal, 1 below lower limit, 2 above higher limit, 240 other error",,,diagnostic
+x46F3.10,cell_11_alarm_state,alarm state,,BYTE,,,,,"alarm cell states (0x46F3 block): 0 normal, 1 below lower limit, 2 above higher limit, 240 other error",,,diagnostic
+x46F3.11,cell_12_alarm_state,alarm state,,BYTE,,,,,"alarm cell states (0x46F3 block): 0 normal, 1 below lower limit, 2 above higher limit, 240 other error",,,diagnostic
+x46F3.12,cell_13_alarm_state,alarm state,,BYTE,,,,,"alarm cell states (0x46F3 block): 0 normal, 1 below lower limit, 2 above higher limit, 240 other error",,,diagnostic
+x46F3.13,cell_14_alarm_state,alarm state,,BYTE,,,,,"alarm cell states (0x46F3 block): 0 normal, 1 below lower limit, 2 above higher limit, 240 other error",,,diagnostic
+x46F3.14,cell_15_alarm_state,alarm state,,BYTE,,,,,"alarm cell states (0x46F3 block): 0 normal, 1 below lower limit, 2 above higher limit, 240 other error",,,diagnostic
+x46F3.15,cell_16_alarm_state,alarm state,,BYTE,,,,,"alarm cell states (0x46F3 block): 0 normal, 1 below lower limit, 2 above higher limit, 240 other error",,,diagnostic
+x46F4,bms_temperature_alarm_state,alarm state,,BYTE,,,,,alarm temperature states (0x46F4 block): same states,,,diagnostic
+x46F4.1,cell_temperature_1_4_alarm_state,alarm state,,BYTE,,,,,alarm temperature states (0x46F4 block): same states,,,diagnostic
+x46F4.2,cell_temperature_5_8_alarm_state,alarm state,,BYTE,,,,,alarm temperature states (0x46F4 block): same states,,,diagnostic
+x46F4.3,cell_temperature_9_12_alarm_state,alarm state,,BYTE,,,,,alarm temperature states (0x46F4 block): same states,,,diagnostic
+x46F4.4,cell_temperature_13_15_alarm_state,alarm state,,BYTE,,,,,alarm temperature states (0x46F4 block): same states,,,diagnostic
+x46F4.5,mosfet_temperature_alarm_state,alarm state,,BYTE,,,,,alarm temperature states (0x46F4 block): same states,,,diagnostic
+x4693.1,,serial number,,ASCII.16,,,,,"V3.3 3.7: module serial number, 16 ASCII characters",,,diagnostic
+x4696.1,,manufacturer software version,,HEX.2,,,,,V3.3 3.10: 2 bytes,,,diagnostic
+x4696.3,,main line software version,,HEX.3,,,,,V3.3 3.10: 3 bytes,,,diagnostic
