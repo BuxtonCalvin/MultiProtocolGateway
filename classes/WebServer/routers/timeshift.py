@@ -85,6 +85,7 @@ import io
 import json
 import logging
 import re
+import time
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, cast
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -115,6 +116,7 @@ from ..services.timeshift_service import (
     FieldMappingRow,
     InfluxPointDict,
     ParsedSpreadsheet,
+    RetentionPolicyConflictError,
     SourceKind,
     TagOptions,
     TimescalePointDict,
@@ -122,6 +124,7 @@ from ..services.timeshift_service import (
     TimeshiftUpload,
     build_points,
     build_points_timescale,
+    check_influx_retention,
     compute_time_delta,
     discard_upload,
     earliest_timestamp,
@@ -133,6 +136,7 @@ from ..services.timeshift_service import (
     load_influx_field_types,
     load_tag_options,
     load_timescale_field_types,
+    log_type_mismatch_summary,
     machine_timezone_for,
     measurements_for,
     parse_upload,
@@ -683,11 +687,18 @@ async def timeshift_preview(payload: TimeshiftRunRequest, request: Request) -> H
         allow_float_coercion=payload.allow_float_coercion,
     )
 
+    # Same pre-flight the real Import runs, so the admin finds out here -- not after a failed write -- that the range
+    # is outside the retention policy.
+    gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
+    retention_conflict: RetentionPolicyConflictError | None = check_influx_retention(gateway, payload.version, points)
+    if retention_conflict is not None:
+        result.blocking_errors.append(str(retention_conflict))
+
     sample: list[InfluxPointDict] = points[:10]
     return request.app.state.templates.TemplateResponse(
         request=request,
         name="partials/timeshift_preview.html",
-        context={"points_to_write": len(points), "sample": sample, "result": result},
+        context={"points_to_write": len(points), "sample": sample, "result": result, "table_kind": None},
     )
 
 
@@ -732,7 +743,7 @@ def _render_timescale_preview(
     return request.app.state.templates.TemplateResponse(
         request=request,
         name="partials/timeshift_preview.html",
-        context={"points_to_write": len(points), "sample": sample, "result": result},
+        context={"points_to_write": len(points), "sample": sample, "result": result, "table_kind": payload.table_kind},
     )
 
 
@@ -767,21 +778,40 @@ async def timeshift_import(payload: TimeshiftRunRequest, request: Request) -> HT
         raise HTTPException(status_code=400, detail="Nothing to write -- every row was skipped (see the preview for why).")
 
     gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
+    first_time: str = min(p.time_iso for p in points)
+    last_time: str = max(p.time_iso for p in points)
+    _log.info(
+        f"[Timeshift] InfluxDB v{payload.version} import starting: measurement '{payload.measurement}', "
+        f"{len(points)} point(s), {first_time} to {last_time} (UTC)."
+    )
+    log_type_mismatch_summary(result, f"InfluxDB v{payload.version}")
+
+    # Refuse up front -- before any batch is written -- if the range is outside the retention policy.
+    retention_conflict: RetentionPolicyConflictError | None = check_influx_retention(gateway, payload.version, points)
+    if retention_conflict is not None:
+        _log.warning(f"[Timeshift] InfluxDB import refused: {retention_conflict}")
+        raise HTTPException(status_code=409, detail=str(retention_conflict))
+
     written: int
+    started: float = time.perf_counter()
     try:
         if payload.version == "1":
             written = write_points_v1(gateway, points, payload.allow_float_coercion)
         else:
             written = write_points_v3(gateway, points)
+    except RetentionPolicyConflictError as exc:
+        _log.error(f"[Timeshift] InfluxDB import rejected by retention policy (partial write possible: {exc.may_have_partial_write}): {exc}")
+        raise HTTPException(status_code=409, detail=str(exc))
     except Exception as exc:
         _log.exception("[Timeshift] Import failed")
         raise HTTPException(status_code=500, detail=f"Import failed: {exc}")
 
+    _log.info(f"[Timeshift] InfluxDB v{payload.version} import finished: {written} point(s) written in {time.perf_counter() - started:.1f}s.")
     result.points_written = written
     return request.app.state.templates.TemplateResponse(
         request=request,
         name="partials/timeshift_result.html",
-        context={"result": result, "action": "import", "destination": "InfluxDB"},
+        context={"result": result, "action": "import", "destination": "InfluxDB", "table_kind": None},
     )
 
 
@@ -806,6 +836,12 @@ def _run_timescale_import(
     gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
     table_kind: str = payload.table_kind or "narrow"
     device_info_id: int = payload.device_info_id if payload.device_info_id is not None else -1
+    _log.info(
+        f"[Timeshift] TimescaleDB import starting: table '{resolved_table_name}' ({table_kind}), device_info_id {device_info_id}, "
+        f"{len(points)} point(s), {min(p.time_iso for p in points)} to {max(p.time_iso for p in points)} (UTC); "
+        f"{sum(len(p.fields) for p in points)} value(s) to write{' (to the wide table and mirrored to device_metrics_narrow)' if table_kind == 'wide' else ''}."
+    )
+    log_type_mismatch_summary(result, "TimescaleDB")
     try:
         # resolved_table_name -- never payload.measurement -- see
         # _resolve_timescale_table_name's SECURITY note.
@@ -820,7 +856,7 @@ def _run_timescale_import(
     return request.app.state.templates.TemplateResponse(
         request=request,
         name="partials/timeshift_result.html",
-        context={"result": result, "action": "import", "destination": "TimescaleDB"},
+        context={"result": result, "action": "import", "destination": "TimescaleDB", "table_kind": table_kind},
     )
 
 

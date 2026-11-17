@@ -87,6 +87,7 @@ import logging
 import math
 import re
 import threading
+import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -782,13 +783,66 @@ class InfluxPointDict:
 
 
 @dataclass
+class TypeMismatchStat:
+    """
+    Per-destination-field roll-up of every value dropped for a type conflict
+    -- what the Preview/Result panels and the log show instead of one
+    anonymous total, so an admin can see WHICH column was rejected, against
+    what declared type, and why.
+    """
+    count: int = 0
+    declared_type: str | None = None   # wide column's Postgres type / the InfluxDB field's type bucket; None = unknown
+    example_value: str = ""            # first rejected value, repr()'d
+    example_time: str = ""             # that value's (time-shifted) row time
+    reason: str = ""                   # the first rejection's own reason text
+
+
+@dataclass
 class TimeshiftImportResult:
     points_written: int = 0
     rows_skipped_no_fields: int = 0
     rows_skipped_bad_time: int = 0
     unmapped_columns: set[str] = field(default_factory=set[str])
     type_mismatches: list[str] = field(default_factory=list[str])
+    type_mismatch_summary: dict[str, TypeMismatchStat] = field(default_factory=dict[str, TypeMismatchStat])
     warnings: list[str] = field(default_factory=list[str])
+    blocking_errors: list[str] = field(default_factory=list[str])   # Preview only: problems that will make the real Import refuse/fail (e.g. retention policy)
+
+
+def record_type_mismatch(
+    result: TimeshiftImportResult, target: str, value: Any, new_time: str, declared_type: str | None, reason: str,
+    ) -> None:
+    """Appends to result.type_mismatches (legacy flat list) AND rolls the same conflict into result.type_mismatch_summary[target]."""
+    result.type_mismatches.append(f"{target}={value!r} (row time {new_time}): {reason}" if reason else f"{target}={value!r} (row time {new_time})")
+    stat: TypeMismatchStat = result.type_mismatch_summary.setdefault(target, TypeMismatchStat(declared_type=declared_type))
+    if stat.count == 0:
+        stat.example_value, stat.example_time, stat.reason = repr(value), new_time, reason
+    stat.count += 1
+
+
+def log_type_mismatch_summary(result: TimeshiftImportResult, destination: str) -> None:
+    """One WARNING per rejected field -- without this, a type-conflict skip left nothing in the log at all."""
+    for target, stat in sorted(result.type_mismatch_summary.items(), key=lambda kv: -kv[1].count):
+        _log.warning(
+            f"[Timeshift] {destination}: skipped {stat.count} value(s) for '{target}' (declared type "
+            f"{stat.declared_type or 'unknown'}); first was {stat.example_value} at {stat.example_time}: {stat.reason or 'type conflict'}"
+        )
+
+
+class RetentionPolicyConflictError(RuntimeError):
+    """
+    The import's (time-shifted) date range falls, wholly or partly, outside the
+    InfluxDB retention policy the write lands in, so InfluxDB drops those
+    points. str(exc) is the complete, user-facing explanation (what's wrong
+    and the two ways out) -- routers/timeshift.py shows it verbatim.
+
+    `may_have_partial_write` is True when raised from a failed write rather
+    than the pre-flight check: InfluxDB v1 writes in batches of 1000, so
+    batches before the offending one are already stored.
+    """
+    def __init__(self, message: str, *, may_have_partial_write: bool = False) -> None:
+        super().__init__(message)
+        self.may_have_partial_write: bool = may_have_partial_write
 
 
 def compute_time_delta(source_start: datetime, target_start: datetime) -> timedelta:
@@ -876,7 +930,11 @@ def build_points(
             if val is None:
                 continue
             if not check_field_type(target_field, val, influx_field_types):
-                result.type_mismatches.append(f"{target_field}={val!r} (row time {new_time.isoformat()})")
+                expected_type: str | None = influx_field_types.get(target_field)
+                record_type_mismatch(
+                    result, target_field, val, new_time.isoformat(), expected_type,
+                    f"{type(val).__name__} value doesn't match the existing field type '{expected_type}'.",
+                )
                 continue
             fields[target_field] = val
 
@@ -887,6 +945,90 @@ def build_points(
         points.append(InfluxPointDict(measurement=measurement, time_iso=new_time.isoformat(), fields=fields, tags=tags))
 
     return points, result
+
+
+# ---------------------------------------------------------------------------
+# InfluxDB retention-policy guard
+#
+# InfluxDB v1 silently drops (and then reports as a 400 "partial write: points
+# beyond retention policy dropped=N") any point older than now - the default
+# retention policy's duration. A Timeshift import commonly lands on an old date
+# range, so this is checked BEFORE anything is written (preview + import), and
+# the same error is trapped at write time as a backstop.
+# ---------------------------------------------------------------------------
+
+_INFLUX_DURATION_PART: re.Pattern[str] = re.compile(r"(\d+)([hms])")
+
+
+def parse_influx_duration(text: str | None) -> timedelta | None:
+    """'168h0m0s' -> 7 days; '0s' / '' / unparsable -> None (InfluxDB's own \"keep forever\")."""
+    if not text:
+        return None
+    seconds: int = sum(int(n) * {"h": 3600, "m": 60, "s": 1}[u] for n, u in _INFLUX_DURATION_PART.findall(text))
+    return timedelta(seconds=seconds) if seconds > 0 else None
+
+
+def _fmt_utc(dt: datetime) -> str:
+    return dt.strftime("%Y-%m-%d %H:%M UTC")
+
+
+def _fmt_span(delta: timedelta) -> str:
+    days: int = delta.days
+    hours: int = delta.seconds // 3600
+    if days and hours:
+        return f"{days} day(s) {hours} hour(s)"
+    return f"{days} day(s)" if days else f"{max(hours, 1)} hour(s)"
+
+
+def check_influx_retention(
+    gateway: "Protocol_Gateway | None", version: str, points: list[InfluxPointDict],
+    ) -> RetentionPolicyConflictError | None:
+    """
+    Pre-flight for an InfluxDB v1 import: returns a RetentionPolicyConflictError (NOT raised -- the caller decides
+    whether to show it in Preview or refuse the Import) when any point is older than the database's default
+    retention policy allows, else None.
+
+    Best-effort and v1-only: v3 has no equivalent per-write RP lookup here, a v1 bridge that can't be queried
+    returns None (the write-time trap in write_points_v1 is the backstop), and an infinite policy never conflicts.
+    """
+    if version != "1" or not points:
+        return None
+    bridge: influxdb_out | None = get_influxdb1_bridge(gateway)
+    client: Any = bridge.client if bridge is not None else None
+    if bridge is None or client is None:
+        return None
+    try:
+        policies: list[dict[str, Any]] = client.get_list_retention_policies(bridge.database)
+    except Exception as exc:
+        _log.warning(f"[Timeshift] Could not read retention policies for '{bridge.database}' -- skipping the retention pre-check: {exc}")
+        return None
+
+    default: dict[str, Any] | None = next((p for p in policies if p.get("default")), None)
+    keep: timedelta | None = parse_influx_duration(default.get("duration")) if default else None
+    if default is None or keep is None:
+        return None
+
+    times: list[datetime] = [datetime.fromisoformat(p.time_iso) for p in points]   # naive UTC, see build_points
+    cutoff: datetime = datetime.now(timezone.utc).replace(tzinfo=None) - keep
+    outside: int = sum(1 for t in times if t < cutoff)
+    if outside == 0:
+        return None
+
+    rp_name: str = str(default.get("name"))
+    message: str = (
+        f'InfluxDB retention policy "{rp_name}" on database "{bridge.database}" only keeps {_fmt_span(keep)} of data '
+        f"(oldest accepted timestamp right now: {_fmt_utc(cutoff)}), but {outside} of {len(points)} points in this import are older than that "
+        f"(the import spans {_fmt_utc(min(times))} to {_fmt_utc(max(times))}). InfluxDB would discard them. "
+        f'To proceed, either extend the retention policy (e.g. ALTER RETENTION POLICY "{rp_name}" ON "{bridge.database}" DURATION <longer> or INF), '
+        f"or change Target Start so the whole imported range is newer than {_fmt_utc(cutoff)}. Nothing has been written."
+    )
+    return RetentionPolicyConflictError(message)
+
+
+def _is_retention_error(text: str) -> bool:
+    lowered: str = text.lower()
+    # "retention policy not found: autogen" is a different problem (the RP itself is missing) -- let that one surface as-is.
+    return "retention" in lowered and "not found" not in lowered
 
 
 def write_points_v1(gateway: "Protocol_Gateway | None", points: list[InfluxPointDict], allow_float_coercion: bool) -> int:
@@ -928,6 +1070,15 @@ def write_points_v1(gateway: "Protocol_Gateway | None", points: list[InfluxPoint
                         if isinstance(val, (int, float)) and not isinstance(val, bool):
                             pt["fields"][offending_field] = float(val)
                     continue
+            content: str = str(getattr(e, "content", "") or e)
+            if getattr(e, "code", None) == 400 and _is_retention_error(content):
+                retention_msg: str = (
+                    "InfluxDB rejected the import because some points fall outside the database's retention policy "
+                    f"(InfluxDB said: {content}). Either extend the retention policy or change Target Start so the imported "
+                    "range is within it. Points in batches before the rejected one may already have been written -- "
+                    "re-running the import after fixing the cause is safe (same timestamps overwrite)."
+                )
+                raise RetentionPolicyConflictError(retention_msg, may_have_partial_write=True) from e
             raise
 
 
@@ -955,7 +1106,16 @@ def write_points_v3(gateway: "Protocol_Gateway | None", points: list[InfluxPoint
         pt = pt.time(pd.Timestamp(p.time_iso).value)  # type: ignore[reportUnknownMemberType]
         influx_points.append(pt)
 
-    client.write(record=influx_points, database=bridge.database)  # type: ignore[reportUnknownMemberType]
+    try:
+        client.write(record=influx_points, database=bridge.database)  # type: ignore[reportUnknownMemberType]
+    except Exception as exc:
+        if _is_retention_error(str(exc)):
+            retention_msg: str = (
+                f"InfluxDB rejected the import and mentioned the retention period ({exc}). Either extend the database's "
+                "retention period or change Target Start so the imported range is within it."
+            )
+            raise RetentionPolicyConflictError(retention_msg) from exc
+        raise
     return len(influx_points)
 
 
@@ -1563,7 +1723,7 @@ def build_points_timescale(
                 try:
                     val = _coerce_value_for_data_type(val, wide_field_types.get(target))
                 except ValueError as exc:
-                    result.type_mismatches.append(f"{target}={val!r} (row time {new_time.isoformat()}): {exc}")
+                    record_type_mismatch(result, target, val, new_time.isoformat(), wide_field_types.get(target), str(exc))
                     continue
             fields[target] = val
 
@@ -1694,6 +1854,7 @@ def write_points_timescale(
     # "device_metrics_narrow" already for a narrow-only write, so this is a
     # single-element set in that case).
     tables_to_prepare: set[str] = {table_name, "device_metrics_narrow"}
+    t_start: float = time.perf_counter()
     hypertable_mgr: Any | None = getattr(bridge, "hypertable_mgr", None)
     paused_job_ids_by_table: dict[str, list[int]] = {}
     if hypertable_mgr is not None:
@@ -1714,6 +1875,11 @@ def write_points_timescale(
                 # whatever the connected server does with a compressed chunk.
                 _log.warning(f"[Timeshift] Could not prepare compressed chunks for '{t}' in [{range_start}, {range_end}]: {e}")
 
+    t_prepared: float = time.perf_counter()
+    _log.info(
+        f"[Timeshift] TimescaleDB import: prepared {sorted(tables_to_prepare)} (paused/decompressed for "
+        f"{range_start:%Y-%m-%d %H:%M} to {range_end:%Y-%m-%d %H:%M} UTC) in {t_prepared - t_start:.1f}s; writing {len(points)} point(s)."
+    )
     narrow_rows: list[dict[str, Any]] = []
     rows_written = 0
 
@@ -1754,6 +1920,10 @@ def write_points_timescale(
                 except Exception as e:
                     _log.warning(f"[Timeshift] Could not resume compression job(s) {job_ids} for '{t}': {e}")
 
+    _log.info(
+        f"[Timeshift] TimescaleDB import: wrote {rows_written} point(s) / {len(narrow_rows)} narrow row(s) in "
+        f"{time.perf_counter() - t_prepared:.1f}s (total {time.perf_counter() - t_start:.1f}s)."
+    )
     return rows_written, len(narrow_rows)
 
 

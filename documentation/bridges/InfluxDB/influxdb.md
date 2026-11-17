@@ -1362,3 +1362,15 @@ Deleting rows requires InfluxDB 3 **Enterprise** with the upgraded storage engin
 #### Import reports type mismatches
 
 - The value being written conflicts with the field's already-recorded type on the destination (checked against `SHOW FIELD KEYS` for v1, `information_schema.columns` for v3). Turn on **Allow float coercion** to have compatible values nudged into the expected type automatically, or fix the source data.
+- Preview and the result panel list each affected field with its skip count, existing type, first rejected value and reason, and each is logged as a warning.
+
+#### Import is refused: "retention policy ... only keeps ..."
+
+- InfluxDB v1 silently discards any point older than the database's **default retention policy** allows (the log otherwise shows only `partial write: points beyond retention policy dropped=N`). Preview and Import now check this first and, if any point falls outside, stop before writing anything and name the policy, how far back it keeps data, and how many points are too old.
+- Fix it either by extending the retention policy on the InfluxDB server (for example `ALTER RETENTION POLICY "autogen" ON "<database>" DURATION INF`), or by changing **Target Start** so the whole imported range is newer than the cutoff shown.
+- If the check could not run (for example the policy list couldn't be read) and InfluxDB rejects the write anyway, the same explanation is shown. In that case earlier batches of 1,000 points may already be stored; re-running after fixing the cause is safe because the same timestamps are overwritten.
+- `retention policy not found` is a different problem (the policy named in the bridge's settings doesn't exist on the server) and is reported as InfluxDB's own error.
+
+#### Import takes a long time
+
+- The import page shows a "this can take several minutes" banner with a live clock while it runs, and remembers how long the previous import took to estimate the next. Points are written in batches of 1,000, and a long or old date range makes InfluxDB create and compact storage for every time range it lands in.
