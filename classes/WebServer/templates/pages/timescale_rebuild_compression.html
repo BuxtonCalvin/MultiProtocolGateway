@@ -214,7 +214,7 @@
             }
 
             if (event.type === 'progress') {
-              updateCompressionProgress(event.bytes_processed, event.bytes_total);
+              updateCompressionProgress(event.bytes_processed, event.bytes_total, event.chunks_done, event.chunks_total);
             } else if (event.type === 'done') {
               payload = event.result;
               ok = true;
@@ -259,6 +259,20 @@
   // several times its own raw table's chunk count for the same
   // wall-clock span — a chunk-count-based bar would visibly race through
   // one and stall on the other.
+  let compressionStartedAt = 0;
+
+  function formatElapsed(ms) {
+    const s = Math.max(0, Math.round(ms / 1000));
+    return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+  }
+
+  function setCompressionText(text) {
+    const el = document.getElementById('compression-progress-text');
+    if (!el) { return; }
+    el.textContent = text;
+    el.classList.remove('hidden');
+  }
+
   function showCompressionProgress() {
     const track = document.getElementById('compression-progress-track');
     const fill = document.getElementById('compression-progress-fill');
@@ -267,13 +281,22 @@
     fill.classList.add('bg-accent');
     fill.style.width = '0%';
     track.classList.remove('hidden');
+    compressionStartedAt = Date.now();
+    // The server plans the run and then rewrites the first chunk before its first progress event, so say so
+    // rather than leaving an empty bar that looks stuck.
+    setCompressionText('Planning… the first chunk can take a while');
   }
 
-  function updateCompressionProgress(bytesProcessed, bytesTotal) {
+  // chunksDone/chunksTotal are plain counts (the bar itself is weighted by bytes, so one chunk is often well
+  // under a pixel). Older servers don't send them -- then only the percentage and elapsed time are shown.
+  function updateCompressionProgress(bytesProcessed, bytesTotal, chunksDone, chunksTotal) {
     const fill = document.getElementById('compression-progress-fill');
     if (!fill) { return; }
     const pct = bytesTotal > 0 ? Math.min(100, (bytesProcessed / bytesTotal) * 100) : 100;
     fill.style.width = pct + '%';
+    const pctText = (pct < 10 ? pct.toFixed(1) : String(Math.round(pct))) + '%';
+    const counts = (chunksTotal > 0) ? (chunksDone + ' of ' + chunksTotal + ' chunks · ') : '';
+    setCompressionText(counts + pctText + ' · ' + formatElapsed(Date.now() - compressionStartedAt));
   }
 
   function hideCompressionProgress(success) {
@@ -287,11 +310,15 @@
 
     // Let the "complete" fill be visible for a beat before resetting,
     // rather than snapping straight back to hidden/0%.
+    setCompressionText((success ? 'Done' : 'Stopped with errors') + ' · ' + formatElapsed(Date.now() - compressionStartedAt));
+
     setTimeout(function () {
       track.classList.add('hidden');
       fill.classList.remove('bg-danger');
       fill.classList.add('bg-accent');
       fill.style.width = '0%';
+      const text = document.getElementById('compression-progress-text');
+      if (text) { text.classList.add('hidden'); text.textContent = ''; }
     }, 500);
   }
 

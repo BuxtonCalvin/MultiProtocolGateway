@@ -3863,12 +3863,16 @@ class CompressionRebuildResult(TypedDict):
 
 class CompressionRebuildProgress(TypedDict):
     """Streamed after every chunk (success or failure). bytes_processed is
-    weighted by table size, not chunk count."""
+    weighted by table size, not chunk count (it drives the thermometer);
+    chunks_done/chunks_total are plain counts across the whole run, for the
+    "N of M chunks" readout beside it."""
     type: Literal["progress"]
     protocol_name: str
     table_name: str
     bytes_processed: int
     bytes_total: int
+    chunks_done: int
+    chunks_total: int
 
 
 class CompressionRebuildDone(TypedDict):
@@ -5098,7 +5102,7 @@ class HyperTableManager:
 
         Yields:
             {"type": "progress", "protocol_name", "table_name",
-             "bytes_processed", "bytes_total"} once per chunk (success or
+             "bytes_processed", "bytes_total", "chunks_done", "chunks_total"} once per chunk (success or
              failure) -- bytes_total is fixed for the whole run, computed
              during the planning pass below from the pre-rebuild size of
              every table that actually has compressed chunks to touch
@@ -5263,6 +5267,13 @@ class HyperTableManager:
         touched_table_names: list[str] = [item["table_name"] for item in plan]
         bytes_total: int = sum(old_total_sizes.get(t, 0) for t in touched_table_names)
         bytes_processed: float = 0.0
+        chunks_total: int = sum(len(item["chunk_names"]) for item in plan)
+        chunks_done: int = 0
+        run_started: float = time.perf_counter()
+        self._log.info(
+            "rebuild_compression: starting -- %d chunk(s) across %d table(s), %.1f MB compressed before the rebuild.",
+            chunks_total, len(plan), bytes_total / (1024 * 1024),
+        )
 
         # -------- Per-group accumulators for the eventual "done" event,
         # seeded for every group up front so a selected group that ends
@@ -5301,6 +5312,8 @@ class HyperTableManager:
                     else:
                         qualified_chunk = chunk_name
 
+                    chunk_started: float = time.perf_counter()
+                    chunk_ok: bool = True
                     try:
                         with self.SessionFactory() as session:
                             with session.begin():
@@ -5324,6 +5337,7 @@ class HyperTableManager:
                             "ok": True, "error": None,
                         })
                     except Exception as e:
+                        chunk_ok = False
                         acc["chunks_failed"] += 1
                         table_chunks_failed += 1
                         self._log.error(
@@ -5335,12 +5349,21 @@ class HyperTableManager:
                         })
 
                     bytes_processed += per_chunk_weight
+                    chunks_done += 1
+                    percent: float = min(100.0, bytes_processed / bytes_total * 100.0) if bytes_total > 0 else 100.0
+                    self._log.info(
+                        "rebuild_compression: [%d/%d, %.1f%%] '%s' chunk '%s' %s in %.1fs (run so far %.0fs).",
+                        chunks_done, chunks_total, percent, table_name, chunk_name,
+                        "rewritten" if chunk_ok else "FAILED", time.perf_counter() - chunk_started, time.perf_counter() - run_started,
+                    )
                     yield {
                         "type": "progress",
                         "protocol_name": protocol_name,
                         "table_name": table_name,
                         "bytes_processed": int(min(bytes_processed, bytes_total)),
                         "bytes_total": bytes_total,
+                        "chunks_done": chunks_done,
+                        "chunks_total": chunks_total,
                     }
             finally:
                 if paused_job_ids:
@@ -5416,7 +5439,8 @@ class HyperTableManager:
         ok_count: int = sum(1 for g in group_results if g["ok"] and not g["skipped"])
         attempted_count: int = sum(1 for g in group_results if not g["skipped"])
         self._log.info(
-            "rebuild_compression: %d/%d selected group(s) fully ok.", ok_count, attempted_count,
+            "rebuild_compression: finished in %.0fs -- %d/%d selected group(s) fully ok.",
+            time.perf_counter() - run_started, ok_count, attempted_count,
         )
 
         yield {"type": "done", "result": {"groups": group_results}}
