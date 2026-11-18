@@ -163,6 +163,11 @@
           A protocol only appears as a wide table here once it has one; writing to a wide table also
           writes the same data to the narrow table. Pick the narrow table directly for anything else.
         </p>
+        <p id="ts-wide-note" role="note" class="hidden text-xs rounded border border-accent/40 bg-accent/10 text-accent p-2 mt-2">
+          <strong>Heads-up:</strong> importing into a wide table writes every value to that table
+          <strong>and</strong> mirrors it into the shared narrow table (device_metrics_narrow) — one narrow row per value,
+          so the narrow table grows much faster than the wide one, and the import takes correspondingly longer.
+        </p>
         {% else %}
         <label for="ts-measurement" class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">
           Measurement
@@ -237,6 +242,15 @@
         Allow float coercion on type value conflicts
         {% if version == 'timescale' %}<span class="italic surface-subtle">(TimescaleDB: values are always coerced to each column's declared type)</span>{% endif %}
       </label>
+      {% if version == 'timescale' %}
+      <label id="ts-round-wrap" class="hidden col-span-3 text-xs mb-1.5">
+        <span class="flex items-center gap-1.5">
+          <input type="checkbox" id="ts-round-integer">
+          Round decimal values to whole numbers for integer columns
+          <span class="italic surface-subtle">(wide tables: otherwise a value like 175.4 in a BIGINT/INTEGER/SMALLINT column is skipped; rounding is lossy)</span>
+        </span>
+      </label>
+      {% endif %}
       <label id="ts-delete-existing-wrap" class="flex items-center gap-1.5 text-xs mb-1.5">
         <input type="checkbox" id="ts-delete-existing" {% if version in ('3', 'timescale') %}disabled{% endif %}>
         Delete existing points in target range first
@@ -331,6 +345,9 @@
     </div>
 
     <div id="ts-import-status"></div>
+    {#- Same "this can take several minutes" banner the Commit flow shows for slow TimescaleDB work (base.html: MpgSlowOp). -#}
+    <div id="ts-slow-banner" role="status" aria-live="polite"
+         class="hidden px-4 py-2 text-sm rounded border bg-accent/10 border-accent/40 text-accent"></div>
     <div id="ts-preview-container"></div>
     <div id="ts-result-container"></div>
   </div>
@@ -622,7 +639,15 @@
   // Mirrors onMeasurementChange() below: a fresh table invalidates any already-scanned mapping and
   // the Device list (a device with rows in one table may have none in another -- see
   // timescale_devices_for's own docstring).
+  function updateWideNote() {
+    const note = document.getElementById('ts-wide-note');
+    if (note) { note.classList.toggle('hidden', getTableKind() !== 'wide'); }
+    const round = document.getElementById('ts-round-wrap');
+    if (round) { round.classList.toggle('hidden', getTableKind() !== 'wide'); }
+  }
+
   function onTableChange() {
+    updateWideNote();
     updateMeasurementGate();
     document.getElementById('ts-mapping-container').innerHTML = '';
     document.getElementById('ts-import-actions').classList.add('hidden');
@@ -667,7 +692,7 @@
     });
   }
 
-  if (isTimescale()) { refreshDeviceOptions(); }
+  if (isTimescale()) { refreshDeviceOptions(); updateWideNote(); }
 
   // ---- Measurement gate ----
   // Everything under .ts-gate (Timezone, Tags, the confidence/coercion/delete-existing row, and both
@@ -992,6 +1017,7 @@
       payload.table_kind = getTableKind();
       payload.protocol_name = getProtocolName();
       payload.device_info_id = getDeviceInfoId();
+      payload.round_to_integer = getTableKind() === 'wide' && document.getElementById('ts-round-integer').checked;
     } else {
       payload.tags_json = collectTagsJson();
     }
@@ -1023,16 +1049,49 @@
     }
   }
 
+  // Text for the "this will be slow" warning -- shown in the confirm dialog and, once confirmed, in the live banner.
+  function slowImportWarning(payload) {
+    if (isTimescale()) {
+      return {
+        headline: 'Importing into TimescaleDB — this can take several minutes.',
+        detail: 'TimescaleDB first decompresses any already-compressed chunks covering the imported date range (the compression job is ' +
+                'paused meanwhile), then writes every value' +
+                (payload.table_kind === 'wide' ? ' to the wide table and mirrors it into the narrow table' : ' to the narrow table') +
+                '. Compression and the rollup views then catch up in the background afterwards.',
+      };
+    }
+    return {
+      headline: 'Importing into InfluxDB — this can take several minutes for a large file.',
+      detail: 'Points are written in batches of 1,000, and InfluxDB has to create and compact storage for every time range they land in; ' +
+              'a long or old date range is much slower than live data.',
+    };
+  }
+
+  function setImportBusy(busy) {
+    document.querySelectorAll('#ts-import-buttons button').forEach(function (b) { b.disabled = busy; });
+  }
+
   async function runImport() {
     const payload = buildRunPayload();
     if (!payload) { return; }
+    const slow = slowImportWarning(payload);
+    const mirrorNote = (isTimescale() && payload.table_kind === 'wide')
+      ? '\n\nThis is a wide table: every value is ALSO written to the shared narrow table (device_metrics_narrow).' : '';
     const proceed = window.confirm(
-      'Import into ' + (isTimescale() ? 'table' : 'measurement') + ' "' + payload.measurement + '" (' + destinationLabel() + ')?\n\n' +
+      'Import into ' + (isTimescale() ? 'table' : 'measurement') + ' "' + payload.measurement + '" (' + destinationLabel() + ')?' + mirrorNote + '\n\n' +
+      slow.headline + ' ' + slow.detail + '\n\n' +
       'This writes points to ' + destinationLabel() + ' immediately — this is NOT part of the staged "Commit All Changes" flow. Continue?'
     );
     if (!proceed) { return; }
 
     document.getElementById('ts-import-status').innerHTML = '';
+    document.getElementById('ts-result-container').innerHTML = '';
+    setImportBusy(true);
+    MpgSlowOp.start('ts-slow-banner', {
+      key: 'mpg-ts-import-' + (isTimescale() ? 'timescale' : 'influx') + '-secs',
+      headline: slow.headline,
+      detail: slow.detail,
+    });
 
     let resp, html;
     try {
@@ -1041,9 +1100,13 @@
       });
       html = await resp.text();
     } catch (e) {
+      MpgSlowOp.stop(false);
+      setImportBusy(false);
       showStatus('ts-import-status', 'Import request failed — see the browser console.', true);
       return;
     }
+    MpgSlowOp.stop(resp.ok);
+    setImportBusy(false);
     if (resp.ok) {
       document.getElementById('ts-result-container').innerHTML = html;
     } else {

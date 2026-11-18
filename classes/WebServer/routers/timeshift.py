@@ -85,6 +85,7 @@ import io
 import json
 import logging
 import re
+import time
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, cast
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -115,6 +116,7 @@ from ..services.timeshift_service import (
     FieldMappingRow,
     InfluxPointDict,
     ParsedSpreadsheet,
+    RetentionPolicyConflictError,
     SourceKind,
     TagOptions,
     TimescalePointDict,
@@ -122,17 +124,21 @@ from ..services.timeshift_service import (
     TimeshiftUpload,
     build_points,
     build_points_timescale,
+    check_influx_retention,
     compute_time_delta,
     discard_upload,
+    duplicate_targets_message,
     earliest_timestamp,
     export_range_rows,
     export_range_rows_timescale,
+    find_duplicate_targets,
     find_time_column,
     get_upload,
     is_eg4_protocol_in_use,
     load_influx_field_types,
     load_tag_options,
     load_timescale_field_types,
+    log_type_mismatch_summary,
     machine_timezone_for,
     measurements_for,
     parse_upload,
@@ -242,6 +248,20 @@ def _parse_mapping_json(mapping_json: str) -> dict[str, str]:
         mapping_json, "Field mapping must be a JSON object of {source_column: influx_field}.",
     )
     return {k: str(v) for k, v in parsed.items()}
+
+
+def _duplicate_target_error(mapping: dict[str, str]) -> str | None:
+    """The user-facing explanation when two source columns map to one destination field, else None."""
+    duplicates: dict[str, list[str]] = find_duplicate_targets(mapping)
+    return duplicate_targets_message(duplicates) if duplicates else None
+
+
+def _require_unique_targets(mapping: dict[str, str]) -> None:
+    """Import guard: refuse (HTTP 400, before anything is written) a mapping that sends two columns to one field."""
+    message: str | None = _duplicate_target_error(mapping)
+    if message is not None:
+        _log.warning(f"[Timeshift] Import refused: {message}")
+        raise HTTPException(status_code=400, detail=message)
 
 
 def cast_source_kind(value: str) -> SourceKind:
@@ -535,6 +555,7 @@ class TimeshiftRunRequest(BaseModel):
     source_start: str            # <input type="datetime-local">
     target_start: str
     allow_float_coercion: bool = True
+    round_to_integer: bool = False      # TimescaleDB wide tables only: round fractional values to whole numbers for integer columns instead of skipping them
     table_kind: str | None = None       # "narrow" | "wide" -- required when version="timescale"
     protocol_name: str | None = None    # required when version="timescale" and table_kind="wide"
     device_info_id: int | None = None   # required when version="timescale"
@@ -683,11 +704,22 @@ async def timeshift_preview(payload: TimeshiftRunRequest, request: Request) -> H
         allow_float_coercion=payload.allow_float_coercion,
     )
 
+    duplicate_error: str | None = _duplicate_target_error(mapping)
+    if duplicate_error is not None:
+        result.blocking_errors.append(duplicate_error)
+
+    # Same pre-flight the real Import runs, so the admin finds out here -- not after a failed write -- that the range
+    # is outside the retention policy.
+    gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
+    retention_conflict: RetentionPolicyConflictError | None = check_influx_retention(gateway, payload.version, points)
+    if retention_conflict is not None:
+        result.blocking_errors.append(str(retention_conflict))
+
     sample: list[InfluxPointDict] = points[:10]
     return request.app.state.templates.TemplateResponse(
         request=request,
         name="partials/timeshift_preview.html",
-        context={"points_to_write": len(points), "sample": sample, "result": result},
+        context={"points_to_write": len(points), "sample": sample, "result": result, "table_kind": None},
     )
 
 
@@ -712,6 +744,7 @@ def _build_timescale_points(
         time_delta=time_delta,
         wide_field_types=wide_field_types,
         existing_wide_columns=existing_wide_columns,
+        round_to_integer=payload.round_to_integer,
     )
 
 
@@ -728,11 +761,14 @@ def _render_timescale_preview(
     points: list[TimescalePointDict]
     result: TimeshiftImportResult
     points, result = _build_timescale_points(payload, upload, mapping, wide_field_types, existing_wide_columns)
+    duplicate_error: str | None = _duplicate_target_error(mapping)
+    if duplicate_error is not None:
+        result.blocking_errors.append(duplicate_error)
     sample: list[TimescalePointDict] = points[:10]
     return request.app.state.templates.TemplateResponse(
         request=request,
         name="partials/timeshift_preview.html",
-        context={"points_to_write": len(points), "sample": sample, "result": result},
+        context={"points_to_write": len(points), "sample": sample, "result": result, "table_kind": payload.table_kind},
     )
 
 
@@ -743,6 +779,7 @@ async def timeshift_import(payload: TimeshiftRunRequest, request: Request) -> HT
         return _run_timescale_import(*_run_common_timescale(payload, request), payload=payload, request=request)
 
     _bridge, upload, tags, mapping, influx_field_types = _run_common(payload, request)
+    _require_unique_targets(mapping)
 
     source_start: datetime = _parse_local_datetime(payload.source_start, payload.local_timezone)
     target_start: datetime = _parse_local_datetime(payload.target_start, payload.local_timezone)
@@ -767,21 +804,40 @@ async def timeshift_import(payload: TimeshiftRunRequest, request: Request) -> HT
         raise HTTPException(status_code=400, detail="Nothing to write -- every row was skipped (see the preview for why).")
 
     gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
+    first_time: str = min(p.time_iso for p in points)
+    last_time: str = max(p.time_iso for p in points)
+    _log.info(
+        f"[Timeshift] InfluxDB v{payload.version} import starting: measurement '{payload.measurement}', "
+        f"{len(points)} point(s), {first_time} to {last_time} (UTC)."
+    )
+    log_type_mismatch_summary(result, f"InfluxDB v{payload.version}")
+
+    # Refuse up front -- before any batch is written -- if the range is outside the retention policy.
+    retention_conflict: RetentionPolicyConflictError | None = check_influx_retention(gateway, payload.version, points)
+    if retention_conflict is not None:
+        _log.warning(f"[Timeshift] InfluxDB import refused: {retention_conflict}")
+        raise HTTPException(status_code=409, detail=str(retention_conflict))
+
     written: int
+    started: float = time.perf_counter()
     try:
         if payload.version == "1":
             written = write_points_v1(gateway, points, payload.allow_float_coercion)
         else:
             written = write_points_v3(gateway, points)
+    except RetentionPolicyConflictError as exc:
+        _log.error(f"[Timeshift] InfluxDB import rejected by retention policy (partial write possible: {exc.may_have_partial_write}): {exc}")
+        raise HTTPException(status_code=409, detail=str(exc))
     except Exception as exc:
         _log.exception("[Timeshift] Import failed")
         raise HTTPException(status_code=500, detail=f"Import failed: {exc}")
 
+    _log.info(f"[Timeshift] InfluxDB v{payload.version} import finished: {written} point(s) written in {time.perf_counter() - started:.1f}s.")
     result.points_written = written
     return request.app.state.templates.TemplateResponse(
         request=request,
         name="partials/timeshift_result.html",
-        context={"result": result, "action": "import", "destination": "InfluxDB"},
+        context={"result": result, "action": "import", "destination": "InfluxDB", "table_kind": None},
     )
 
 
@@ -796,6 +852,7 @@ def _run_timescale_import(
     request: Request,
     ) -> HTMLResponse:
     """TimescaleDB counterpart of the InfluxDB import branch above -- builds points then calls write_points_timescale() for the dual (or narrow-only) write."""
+    _require_unique_targets(mapping)
     points: list[TimescalePointDict]
     result: TimeshiftImportResult
     points, result = _build_timescale_points(payload, upload, mapping, wide_field_types, existing_wide_columns)
@@ -806,6 +863,12 @@ def _run_timescale_import(
     gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
     table_kind: str = payload.table_kind or "narrow"
     device_info_id: int = payload.device_info_id if payload.device_info_id is not None else -1
+    _log.info(
+        f"[Timeshift] TimescaleDB import starting: table '{resolved_table_name}' ({table_kind}), device_info_id {device_info_id}, "
+        f"{len(points)} point(s), {min(p.time_iso for p in points)} to {max(p.time_iso for p in points)} (UTC); "
+        f"{sum(len(p.fields) for p in points)} value(s) to write{' (to the wide table and mirrored to device_metrics_narrow)' if table_kind == 'wide' else ''}."
+    )
+    log_type_mismatch_summary(result, "TimescaleDB")
     try:
         # resolved_table_name -- never payload.measurement -- see
         # _resolve_timescale_table_name's SECURITY note.
@@ -820,7 +883,7 @@ def _run_timescale_import(
     return request.app.state.templates.TemplateResponse(
         request=request,
         name="partials/timeshift_result.html",
-        context={"result": result, "action": "import", "destination": "TimescaleDB"},
+        context={"result": result, "action": "import", "destination": "TimescaleDB", "table_kind": table_kind},
     )
 
 

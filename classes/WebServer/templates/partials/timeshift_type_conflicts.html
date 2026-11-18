@@ -1,0 +1,43 @@
+{#
+  partials/timeshift_type_conflicts.html
+  Included by timeshift_preview.html and timeshift_result.html. Context: result — TimeshiftImportResult.
+  Shows WHICH destination field each skipped value belonged to (count, the field's existing type, the first
+  rejected value and why) instead of one anonymous total. The same per-field lines are written to the log as
+  WARNINGs (services.timeshift_service.log_type_mismatch_summary).
+#}
+{% if result.type_mismatch_summary %}
+<div class="mt-1">
+  <p class="text-xs font-semibold">
+    {{ result.type_mismatches|length }} value(s) skipped for a type conflict with the existing field
+    ({{ result.type_mismatch_summary|length }} field{{ 's' if result.type_mismatch_summary|length != 1 }}).
+    Those values were not written; every other value in the same rows was.
+  </p>
+  {% if result.suggest_rounding %}
+  <p class="text-xs mt-1">Some were decimals bound for whole-number columns — tick <strong>Round decimal values to whole numbers for integer columns</strong> to import them rounded instead.</p>
+  {% endif %}
+  <div class="overflow-x-auto max-h-56 overflow-y-auto mt-1">
+    <table class="w-auto text-xs border-collapse">
+      <thead>
+        <tr class="mini-table-header uppercase tracking-wide">
+          <th class="px-2 py-1 text-left font-semibold whitespace-nowrap">Field</th>
+          <th class="px-2 py-1 text-right font-semibold whitespace-nowrap">Skipped</th>
+          <th class="px-2 py-1 text-left font-semibold whitespace-nowrap">Existing type</th>
+          <th class="px-2 py-1 text-left font-semibold whitespace-nowrap">First rejected value</th>
+          <th class="px-2 py-1 text-left font-semibold">Why</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for name, stat in result.type_mismatch_summary.items()|sort(attribute='1.count', reverse=true) %}
+        <tr class="border-t border-mpg-700/50">
+          <td class="px-2 py-1 font-mono mini-table-value whitespace-nowrap">{{ name }}</td>
+          <td class="px-2 py-1 mini-table-value text-right tabular-nums">{{ stat.count }}</td>
+          <td class="px-2 py-1 mini-table-value whitespace-nowrap">{{ stat.declared_type or 'unknown' }}</td>
+          <td class="px-2 py-1 font-mono mini-table-value whitespace-nowrap">{{ stat.example_value }}</td>
+          <td class="px-2 py-1 mini-table-value">{{ stat.reason }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}

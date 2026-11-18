@@ -4,12 +4,30 @@
   written to InfluxDB. Context: points_to_write — int; sample —
   list[InfluxPointDict] (up to 10); result — TimeshiftImportResult, whose
   skip/warning counters are shown so the admin can catch a wrong Time
-  Column or an unmapped field before running the real import.
+  Column or an unmapped field before running the real import; its
+  blocking_errors (e.g. an InfluxDB retention-policy conflict) are shown in
+  red because the real Import would refuse; table_kind — "wide" | "narrow" |
+  None (InfluxDB), a wide table gets the "also mirrored into the narrow table"
+  notice.
 #}
 <div class="rounded border border-mpg-700 p-3 mt-2">
   <h3 class="surface-title text-xs font-semibold uppercase tracking-widest mb-2">
     Preview — {{ points_to_write }} point{{ 's' if points_to_write != 1 }} would be written
   </h3>
+
+  {% if result.blocking_errors %}
+  <div role="alert" class="rounded border border-danger/40 bg-danger/10 text-danger text-xs p-2 mb-2 space-y-1">
+    <p class="font-semibold">This import will not succeed as configured:</p>
+    {% for err in result.blocking_errors %}<p>{{ err }}</p>{% endfor %}
+  </div>
+  {% endif %}
+
+  {% if table_kind == 'wide' %}
+  <p class="text-xs rounded border border-accent/40 bg-accent/10 text-accent p-2 mb-2">
+    This is a wide table: every value will be written to it <strong>and</strong> mirrored into the shared narrow table
+    (device_metrics_narrow), so the narrow table receives one row per value.
+  </p>
+  {% endif %}
 
   {% if result.rows_skipped_no_fields or result.rows_skipped_bad_time or result.unmapped_columns or result.type_mismatches %}
   <ul class="text-xs text-danger space-y-0.5 mb-2">
@@ -22,10 +40,8 @@
     {% if result.unmapped_columns %}
     <li>Unmapped column(s) ignored: {{ result.unmapped_columns|join(', ') }}</li>
     {% endif %}
-    {% if result.type_mismatches %}
-    <li>{{ result.type_mismatches|length }} value(s) skipped for a type conflict with the existing field, e.g. {{ result.type_mismatches[0] }}</li>
-    {% endif %}
   </ul>
+  {% include "partials/timeshift_type_conflicts.html" %}
   {% endif %}
 
   {% if sample %}
