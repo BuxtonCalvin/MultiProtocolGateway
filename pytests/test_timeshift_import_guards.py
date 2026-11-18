@@ -86,7 +86,7 @@ class TestParseInfluxDuration:
 class TestCheckInfluxRetention:
     def test_points_older_than_retention_are_reported(self) -> None:
         with patch.object(ts, "get_influxdb1_bridge", return_value=_v1_bridge(RP_7D)):
-            err: ts_router.RetentionPolicyConflictError | None = ts.check_influx_retention(None, "1", _influx_points(1, 2, 30, 40))
+            err = ts.check_influx_retention(None, "1", _influx_points(1, 2, 30, 40))
         assert err is not None
         text: str = str(err)
         assert '"autogen"' in text and '"openLuup"' in text
@@ -131,7 +131,7 @@ class TestWriteTrapsRetention:
         return SimpleNamespace(client=client, database="openLuup")
 
     def test_v1_beyond_retention_becomes_friendly_error(self) -> None:
-        bridge: SimpleNamespace = self._bridge_raising('{"error":"partial write: points beyond retention policy dropped=1000"}')
+        bridge = self._bridge_raising('{"error":"partial write: points beyond retention policy dropped=1000"}')
         with patch.object(ts, "get_influxdb1_bridge", return_value=bridge):
             with pytest.raises(ts.RetentionPolicyConflictError) as exc:
                 ts.write_points_v1(None, _influx_points(1), allow_float_coercion=True)
@@ -140,7 +140,7 @@ class TestWriteTrapsRetention:
 
     def test_v1_missing_retention_policy_is_not_mislabelled(self) -> None:
         # "retention policy not found" is a different failure (seen in the live log) -- must surface as the raw client error.
-        bridge: SimpleNamespace = self._bridge_raising('{"error":"retention policy not found: autogen"}')
+        bridge = self._bridge_raising('{"error":"retention policy not found: autogen"}')
         with patch.object(ts, "get_influxdb1_bridge", return_value=bridge):
             with pytest.raises(InfluxDBClientError):
                 ts.write_points_v1(None, _influx_points(1), allow_float_coercion=True)
@@ -174,7 +174,7 @@ class TestTypeMismatchSummary:
     def test_summary_groups_by_field_with_example_and_reason(self) -> None:
         _points, result = self._build()
         assert list(result.type_mismatch_summary) == ["kwh"]
-        stat: ts.TypeMismatchStat = result.type_mismatch_summary["kwh"]
+        stat = result.type_mismatch_summary["kwh"]
         assert stat.count == 2 and stat.declared_type == "INTEGER"
         assert stat.example_value == "1.5" and "whole number" in stat.reason
         assert len(result.type_mismatches) == 2   # legacy flat list still populated
@@ -184,6 +184,118 @@ class TestTypeMismatchSummary:
         with caplog.at_level(logging.WARNING, logger=ts.__name__):
             ts.log_type_mismatch_summary(result, "TimescaleDB")
         assert any("skipped 2 value(s) for 'kwh'" in r.getMessage() and "INTEGER" in r.getMessage() for r in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# One-to-one, deterministic field matching + duplicate-target guard
+# ---------------------------------------------------------------------------
+
+class TestUniqueMatching:
+    def _suggest(self, columns: list[str], fields: list[str]) -> dict[str, str]:
+        rows = ts.suggest_field_mapping(columns, fields, set(), "eg4")
+        return {r.source_column: ("" if r.default_ignored else r.suggested_field) for r in rows}
+
+    def test_no_destination_field_is_suggested_twice(self) -> None:
+        # Your table has epv1_* only: ePv2*/ePv3* used to be suggested the same field as ePv1* and overwrite it.
+        mapping = self._suggest(["ePv1All", "ePv2All", "ePv3All", "ePv1Day", "ePv2Day"], ["epv1_all", "epv1_day"])
+        assert mapping["ePv1All"] == "epv1_all" and mapping["ePv1Day"] == "epv1_day"
+        assert mapping["ePv2All"] == mapping["ePv3All"] == mapping["ePv2Day"] == ""
+        assert not ts.find_duplicate_targets({k: v for k, v in mapping.items() if v})
+
+    def test_runner_up_falls_back_to_a_free_matching_field(self) -> None:
+        mapping = self._suggest(["ePv1All", "ePv2All"], ["epv1_all", "epv2_all"])
+        assert mapping == {"ePv1All": "epv1_all", "ePv2All": "epv2_all"}
+
+    def test_result_does_not_depend_on_set_iteration_order(self) -> None:
+        columns: list[str] = ["tradiator1", "tradiator2", "tradiator3"]
+        fields: list[str] = ["tradiator1", "tradiator2"]
+        expected: dict[str, str] = {"tradiator1": "tradiator1", "tradiator2": "tradiator2", "tradiator3": ""}
+        for ordering in (fields, fields[::-1]):
+            assert self._suggest(columns, ordering) == expected
+        assert ts.rank_mappings("tradiator3", {"tradiator2", "tradiator1"}) == ts.rank_mappings("tradiator3", ["tradiator1", "tradiator2"])
+
+    def test_find_duplicate_targets_ignores_blank_targets(self) -> None:
+        dups = ts.find_duplicate_targets({"a": "x", "b": "x", "c": "", "d": "", "e": "y"})
+        assert dups == {"x": ["a", "b"]}
+        assert '"x" <- a, b' in ts.duplicate_targets_message(dups)
+
+
+class TestDuplicateTargetEndpoints:
+    def _client(self, templates: Jinja2Templates) -> TestClient:
+        return TestInfluxImportEndpoint()._client(templates)  # pyright: ignore[reportPrivateUsage]
+
+    def _payload(self) -> dict[str, Any]:
+        payload = TestInfluxImportEndpoint()._payload()  # pyright: ignore[reportPrivateUsage]
+        payload["mapping_json"] = json.dumps({"a": "v", "b": "v"})   # two columns -> one field
+        return payload
+
+    def _upload(self) -> SimpleNamespace:
+        df = pd.DataFrame({"Time": ["2020-01-01 00:00:00"], "a": [1.0], "b": [2.0]})
+        return SimpleNamespace(dataframe=df, columns=["Time", "a", "b"])
+
+    def _patches(self) -> Any:
+        from contextlib import ExitStack
+        stack = ExitStack()
+        stack.enter_context(patch.object(ts_router, "_require_bridge", return_value=MagicMock()))
+        stack.enter_context(patch.object(ts_router, "get_upload", return_value=self._upload()))
+        stack.enter_context(patch.object(ts_router, "load_influx_field_types", return_value={}))
+        stack.enter_context(patch.object(ts, "get_influxdb1_bridge", return_value=None))
+        return stack
+
+    def test_preview_flags_duplicate_targets(self, templates: Jinja2Templates) -> None:
+        with self._patches():
+            resp = self._client(templates).post("/api/timeshift/preview", json=self._payload())
+        assert resp.status_code == 200
+        assert "will not succeed" in resp.text and "same destination field" in resp.text
+
+    def test_import_refuses_duplicate_targets_before_writing(self, templates: Jinja2Templates) -> None:
+        with self._patches(), patch.object(ts_router, "write_points_v1") as write:
+            resp = self._client(templates).post("/api/timeshift/import", json=self._payload())
+        assert resp.status_code == 400 and "same destination field" in resp.json()["detail"]
+        write.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Round-to-integer option (TimescaleDB wide tables)
+# ---------------------------------------------------------------------------
+
+class TestRoundToInteger:
+    def _build(self, *, round_to_integer: bool) -> tuple[list[ts.TimescalePointDict], ts.TimeshiftImportResult]:
+        df = pd.DataFrame({
+            "Time": ["2025-06-01 00:00:00", "2025-06-01 00:05:00", "2025-06-01 00:10:00"],
+            "etotal": [175.4, 175.5, 176.0],   # BIGINT total
+            "pf": ["1", "[0]", "1"],           # INTEGER column with a text value
+            "vbat": [52.5, 52.4, 52.6],        # DOUBLE PRECISION: never rounded
+        })
+        return ts.build_points_timescale(
+            df, table_kind="wide", mapping={"etotal": "etotal", "pf": "pf", "vbat": "vbat"}, time_column="Time",
+            source_is_local=True, local_tz="UTC", time_delta=timedelta(0),
+            wide_field_types={"etotal": "bigint", "pf": "integer", "vbat": "double precision"},
+            existing_wide_columns={"etotal", "pf", "vbat"}, round_to_integer=round_to_integer,
+        )
+
+    def test_off_by_default_skips_decimals_and_hints_at_the_checkbox(self) -> None:
+        points, result = self._build(round_to_integer=False)
+        assert result.type_mismatch_summary["etotal"].count == 2
+        assert result.suggest_rounding is True and not result.rounded_counts
+        assert [p.fields.get("etotal") for p in points] == [None, None, 176.0]
+
+    def test_on_rounds_half_up_only_integer_columns(self) -> None:
+        points, result = self._build(round_to_integer=True)
+        assert [p.fields["etotal"] for p in points] == [175.0, 176.0, 176.0]   # 175.4 -> 175, 175.5 -> 176 (not banker's)
+        assert [p.fields["vbat"] for p in points] == [52.5, 52.4, 52.6]        # float column untouched
+        assert result.rounded_counts == {"etotal": 2}
+        assert any("Rounded 2 fractional value(s)" in w for w in result.warnings)
+
+    def test_text_is_still_reported_when_rounding(self) -> None:
+        _points, result = self._build(round_to_integer=True)
+        assert list(result.type_mismatch_summary) == ["pf"]
+        assert result.type_mismatch_summary["pf"].example_value == "'[0]'"
+        assert result.suggest_rounding is False   # rounding wouldn't help a text value
+
+    @pytest.mark.parametrize(("value", "expected"), [(175.5, 176), (-2.5, -3), (2.4, 2), ("12.6", 13), (float("nan"), None), ("[0]", None), (True, None)])
+    def test_round_half_up(self, value: Any, expected: int | None) -> None:
+        assert ts.round_half_up(value) == expected
 
 
 # ---------------------------------------------------------------------------

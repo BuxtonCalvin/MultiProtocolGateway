@@ -1371,6 +1371,10 @@ Deleting rows requires InfluxDB 3 **Enterprise** with the upgraded storage engin
 - If the check could not run (for example the policy list couldn't be read) and InfluxDB rejects the write anyway, the same explanation is shown. In that case earlier batches of 1,000 points may already be stored; re-running after fixing the cause is safe because the same timestamps are overwritten.
 - `retention policy not found` is a different problem (the policy named in the bridge's settings doesn't exist on the server) and is reported as InfluxDB's own error.
 
+#### Import is refused: "More than one source column is matched to the same destination field"
+
+- Field Matchup never pre-fills one InfluxDB field for two source columns, and its suggestions are stable from run to run. If two columns are given the same field by hand, Preview shows a red error and Import refuses, because within each row the later column would silently overwrite the earlier one. Give each field to one column and tick **Ignore** on the other (or pick a different field).
+
 #### Import takes a long time
 
 - The import page shows a "this can take several minutes" banner with a live clock while it runs, and remembers how long the previous import took to estimate the next. Points are written in batches of 1,000, and a long or old date range makes InfluxDB create and compact storage for every time range it lands in.

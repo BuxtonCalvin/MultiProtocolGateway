@@ -127,9 +127,11 @@ from ..services.timeshift_service import (
     check_influx_retention,
     compute_time_delta,
     discard_upload,
+    duplicate_targets_message,
     earliest_timestamp,
     export_range_rows,
     export_range_rows_timescale,
+    find_duplicate_targets,
     find_time_column,
     get_upload,
     is_eg4_protocol_in_use,
@@ -246,6 +248,20 @@ def _parse_mapping_json(mapping_json: str) -> dict[str, str]:
         mapping_json, "Field mapping must be a JSON object of {source_column: influx_field}.",
     )
     return {k: str(v) for k, v in parsed.items()}
+
+
+def _duplicate_target_error(mapping: dict[str, str]) -> str | None:
+    """The user-facing explanation when two source columns map to one destination field, else None."""
+    duplicates: dict[str, list[str]] = find_duplicate_targets(mapping)
+    return duplicate_targets_message(duplicates) if duplicates else None
+
+
+def _require_unique_targets(mapping: dict[str, str]) -> None:
+    """Import guard: refuse (HTTP 400, before anything is written) a mapping that sends two columns to one field."""
+    message: str | None = _duplicate_target_error(mapping)
+    if message is not None:
+        _log.warning(f"[Timeshift] Import refused: {message}")
+        raise HTTPException(status_code=400, detail=message)
 
 
 def cast_source_kind(value: str) -> SourceKind:
@@ -539,6 +555,7 @@ class TimeshiftRunRequest(BaseModel):
     source_start: str            # <input type="datetime-local">
     target_start: str
     allow_float_coercion: bool = True
+    round_to_integer: bool = False      # TimescaleDB wide tables only: round fractional values to whole numbers for integer columns instead of skipping them
     table_kind: str | None = None       # "narrow" | "wide" -- required when version="timescale"
     protocol_name: str | None = None    # required when version="timescale" and table_kind="wide"
     device_info_id: int | None = None   # required when version="timescale"
@@ -687,6 +704,10 @@ async def timeshift_preview(payload: TimeshiftRunRequest, request: Request) -> H
         allow_float_coercion=payload.allow_float_coercion,
     )
 
+    duplicate_error: str | None = _duplicate_target_error(mapping)
+    if duplicate_error is not None:
+        result.blocking_errors.append(duplicate_error)
+
     # Same pre-flight the real Import runs, so the admin finds out here -- not after a failed write -- that the range
     # is outside the retention policy.
     gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
@@ -723,6 +744,7 @@ def _build_timescale_points(
         time_delta=time_delta,
         wide_field_types=wide_field_types,
         existing_wide_columns=existing_wide_columns,
+        round_to_integer=payload.round_to_integer,
     )
 
 
@@ -739,6 +761,9 @@ def _render_timescale_preview(
     points: list[TimescalePointDict]
     result: TimeshiftImportResult
     points, result = _build_timescale_points(payload, upload, mapping, wide_field_types, existing_wide_columns)
+    duplicate_error: str | None = _duplicate_target_error(mapping)
+    if duplicate_error is not None:
+        result.blocking_errors.append(duplicate_error)
     sample: list[TimescalePointDict] = points[:10]
     return request.app.state.templates.TemplateResponse(
         request=request,
@@ -754,6 +779,7 @@ async def timeshift_import(payload: TimeshiftRunRequest, request: Request) -> HT
         return _run_timescale_import(*_run_common_timescale(payload, request), payload=payload, request=request)
 
     _bridge, upload, tags, mapping, influx_field_types = _run_common(payload, request)
+    _require_unique_targets(mapping)
 
     source_start: datetime = _parse_local_datetime(payload.source_start, payload.local_timezone)
     target_start: datetime = _parse_local_datetime(payload.target_start, payload.local_timezone)
@@ -826,6 +852,7 @@ def _run_timescale_import(
     request: Request,
     ) -> HTMLResponse:
     """TimescaleDB counterpart of the InfluxDB import branch above -- builds points then calls write_points_timescale() for the dual (or narrow-only) write."""
+    _require_unique_targets(mapping)
     points: list[TimescalePointDict]
     result: TimeshiftImportResult
     points, result = _build_timescale_points(payload, upload, mapping, wide_field_types, existing_wide_columns)

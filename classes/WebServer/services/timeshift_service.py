@@ -91,6 +91,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from difflib import SequenceMatcher
 from typing import TYPE_CHECKING, Any, Callable, Generator, Iterable, Literal, cast
 from zoneinfo import ZoneInfo, available_timezones
@@ -260,30 +261,64 @@ def normalize_metric_name(name: str) -> str:
     return name.lower().strip("_")
 
 
+def rank_mappings(csv_field: str, influx_candidates: set[str] | list[str]) -> list[tuple[str, float]]:
+    """
+    EVERY destination field that scores at or above the fuzzy cutoff for `csv_field`, best first, as
+    (name, confidence). Fully deterministic: candidates are walked in sorted order and equal scores are ordered
+    by name, so the same file and schema always give the same answer. (The previous best-only loop walked a
+    `set` in hash order and kept the first of any tie, so ties -- e.g. tradiator3 against tradiator1/tradiator2 --
+    resolved differently from one run to the next.)
+    """
+    normalized_csv: str = normalize_metric_name(csv_field)
+    normalized_map: dict[str, str] = {}
+    for name in sorted(influx_candidates):
+        normalized_map.setdefault(normalize_metric_name(name), name)   # two names that normalize alike: the first (sorted) wins
+
+    ranked: list[tuple[str, float]] = []
+    matcher: SequenceMatcher[str] = SequenceMatcher(None, b=normalized_csv)
+    tokens_csv: set[str] = set(normalized_csv.split("_"))
+
+    for normalized_candidate, original in normalized_map.items():
+        matcher.set_seq1(normalized_candidate)
+        if matcher.quick_ratio() >= _FUZZY_CUTOFF:
+            score: float = matcher.ratio() + 0.1 * len(tokens_csv & set(normalized_candidate.split("_")))
+            if score >= _FUZZY_CUTOFF:
+                ranked.append((original, round(score, 3)))
+
+    ranked.sort(key=lambda m: (-m[1], m[0] != csv_field, m[0]))
+    return ranked
+
+
 def guess_mapping(csv_field: str, influx_candidates: set[str]) -> tuple[str, float]:
     """
     Finds the best InfluxDB field-name match and returns (name, confidence).
     Returns ("", 0.0) if no match meets the cutoff.
     """
-    normalized_csv: str = normalize_metric_name(csv_field)
-    normalized_map: dict[str, str] = {normalize_metric_name(name): name for name in influx_candidates}
+    ranked: list[tuple[str, float]] = rank_mappings(csv_field, influx_candidates)
+    return ranked[0] if ranked else ("", 0.0)
 
-    best_match = ""
-    best_score = 0.0
-    matcher: SequenceMatcher[str] = SequenceMatcher(None, b=normalized_csv)
 
-    for normalized_candidate in normalized_map:
-        matcher.set_seq1(normalized_candidate)
-        if matcher.quick_ratio() >= _FUZZY_CUTOFF:
-            score: float = matcher.ratio()
-            tokens_csv: set[str] = set(normalized_csv.split("_"))
-            tokens_cand: set[str] = set(normalized_candidate.split("_"))
-            score += 0.1 * len(tokens_csv & tokens_cand)
-            if score >= _FUZZY_CUTOFF and score > best_score:
-                best_score: float = score
-                best_match: str = normalized_map[normalized_candidate]
+def find_duplicate_targets(mapping: dict[str, str]) -> dict[str, list[str]]:
+    """
+    {destination field: [source columns...]} for every destination that MORE THAN ONE source column maps to
+    (blank targets = ignored columns are skipped). Two columns into one field would silently overwrite each other
+    within each row -- the last one wins -- so Preview flags this and Import refuses it.
+    """
+    by_target: dict[str, list[str]] = {}
+    for source, target in mapping.items():
+        if target.strip():
+            by_target.setdefault(target, []).append(source)
+    return {target: sources for target, sources in by_target.items() if len(sources) > 1}
 
-    return best_match, round(best_score, 3)
+
+def duplicate_targets_message(duplicates: dict[str, list[str]]) -> str:
+    """User-facing explanation for find_duplicate_targets()'s result (both Preview and Import show it verbatim)."""
+    lines: str = "; ".join(f'"{target}" <- {", ".join(sources)}' for target, sources in sorted(duplicates.items()))
+    return (
+        f"More than one source column is matched to the same destination field: {lines}. "
+        "Their values would overwrite each other row by row, so only one of them would be kept. "
+        "In Field Matchup, give each destination field to a single source column and tick Ignore on (or pick a different field for) the others."
+    )
 
 
 @dataclass
@@ -327,6 +362,9 @@ def suggest_field_mapping(
     pre-ignored on that basis -- otherwise every column would start
     ignored and the whole file would be dropped by default.
 
+    No destination field is ever suggested for more than one column (see the one-to-one assignment below), and the
+    result is deterministic. The Preview and Import endpoints also refuse a hand-made duplicate (find_duplicate_targets).
+
     Columns in `tag_keys` (whatever the admin typed into the Tags panel)
     or RESERVED_COLUMN_NAMES are pre-checked "Ignore this column" by
     default, but still shown -- the admin can un-ignore and map them as an
@@ -334,6 +372,25 @@ def suggest_field_mapping(
     """
     influx_field_set: set[str] = set(influx_fields)
     rows: list[FieldMappingRow] = []
+
+    # EG4: assign destination fields to columns as a one-to-one matching, best score first (ties: column order, then
+    # name), so no two columns are ever pre-filled with the same field. A column whose best match was claimed by a
+    # better-scoring column falls back to its next-best free field if that still clears the threshold, else is left
+    # unmatched. Without this, ePv1All/ePv2All/ePv3All would all be suggested "epv1_all".
+    assigned: dict[str, tuple[str, float]] = {}
+    if source_kind == "eg4":
+        claims: list[tuple[float, int, str]] = []
+        for index, col in enumerate(source_columns):
+            if col in tag_keys or col.strip().lower() in RESERVED_COLUMN_NAMES:
+                continue
+            claims.extend((score, index, name) for name, score in rank_mappings(col, influx_field_set) if score >= confidence_threshold)
+        claims.sort(key=lambda c: (-c[0], c[1], c[2]))
+        taken: set[str] = set()
+        for score, index, name in claims:
+            col = source_columns[index]
+            if col not in assigned and name not in taken:
+                assigned[col] = (name, score)
+                taken.add(name)
 
     for col in source_columns:
         default_ignored: bool = col in tag_keys or col.strip().lower() in RESERVED_COLUMN_NAMES
@@ -349,12 +406,13 @@ def suggest_field_mapping(
             rows.append(FieldMappingRow(col, "", 0.0, True))  # noqa: FBT003
             continue
 
-        guess, score = guess_mapping(col, influx_field_set)
-        if score >= confidence_threshold:
+        if col in assigned:
+            guess, score = assigned[col]
             rows.append(FieldMappingRow(col, guess, score, False))  # noqa: FBT003
         else:
-            # Unmatched EG4 metric -> Ignore pre-checked (see docstring), unless there is no schema to match against.
-            rows.append(FieldMappingRow(col, "", score, bool(influx_field_set)))
+            # Unmatched EG4 metric (or its match went to a better-scoring column) -> Ignore pre-checked (see docstring),
+            # unless there is no schema to match against.
+            rows.append(FieldMappingRow(col, "", 0.0, bool(influx_field_set)))
 
     return rows
 
@@ -806,6 +864,8 @@ class TimeshiftImportResult:
     type_mismatches: list[str] = field(default_factory=list[str])
     type_mismatch_summary: dict[str, TypeMismatchStat] = field(default_factory=dict[str, TypeMismatchStat])
     warnings: list[str] = field(default_factory=list[str])
+    suggest_rounding: bool = False                                  # TimescaleDB: a fractional value hit a whole-number column -- the panels hint at the rounding checkbox
+    rounded_counts: dict[str, int] = field(default_factory=dict[str, int])   # TimescaleDB: target column -> values rounded to a whole number (round_to_integer)
     blocking_errors: list[str] = field(default_factory=list[str])   # Preview only: problems that will make the real Import refuse/fail (e.g. retention policy)
 
 
@@ -818,6 +878,21 @@ def record_type_mismatch(
     if stat.count == 0:
         stat.example_value, stat.example_time, stat.reason = repr(value), new_time, reason
     stat.count += 1
+
+
+def round_half_up(value: Any) -> int | None:
+    """
+    `value` (int/float/numeric str) rounded to the nearest whole number, halves away from zero (175.5 -> 176),
+    or None when it isn't a finite number at all (text like '[0]', NaN) -- the caller then leaves the value
+    alone so the normal type-conflict path reports it.
+    """
+    if isinstance(value, bool):
+        return None
+    try:
+        dec: Decimal = Decimal(str(value).strip())
+        return int(dec.quantize(Decimal(1), rounding=ROUND_HALF_UP)) if dec.is_finite() else None
+    except (InvalidOperation, ValueError):
+        return None
 
 
 def log_type_mismatch_summary(result: TimeshiftImportResult, destination: str) -> None:
@@ -1628,6 +1703,7 @@ def build_points_timescale(
     time_delta: timedelta,
     wide_field_types: dict[str, str],  # column_name -> declared Postgres type; {} for a narrow target (see load_timescale_field_types)
     existing_wide_columns: set[str] | None = None,  # required (non-None) when table_kind == "wide" -- see SECURITY note below
+    round_to_integer: bool = False,    # wide only: round a fractional value to the nearest whole number when its column is SMALLINT/INTEGER/BIGINT, instead of skipping it
     ) -> tuple[list[TimescalePointDict], TimeshiftImportResult]:
     """
     TimescaleDB counterpart of build_points() -- same row-by-row time-shift
@@ -1661,7 +1737,11 @@ def build_points_timescale(
     a fractional value into an INTEGER column, or out of an integer type's
     range) is recorded in result.type_mismatches and dropped from that row,
     the same "skip and report, don't fail the whole import" behavior
-    check_field_type() gives build_points() for InfluxDB. A narrow-table
+    check_field_type() gives build_points() for InfluxDB. With round_to_integer=True a
+    fractional value bound for an integer-typed wide column is instead rounded to the nearest whole number
+    (halves away from zero) and counted in result.rounded_counts -- opt-in because it's lossy (e.g. EG4's 0.1 kWh
+    energy totals into a whole-kWh column); text and out-of-range values are still skipped and reported.
+    A narrow-table
     value is never rejected this way -- there is no declared type to
     conflict with; normalize_value() is all it gets, and write_points_
     timescale() sorts it into metric_value/metric_ascii by its Python type
@@ -1669,6 +1749,7 @@ def build_points_timescale(
     does for live data.
     """
     from ...transports.timescaledb import (  # noqa: PLC0415 -- local: see write_points_timescale's note on deferring this transport's imports
+        _METRIC_EDIT_INTEGER_TYPES,  # pyright: ignore[reportPrivateUsage] -- same integer-type list the coercion below checks against
         _coerce_value_for_data_type,  # pyright: ignore[reportPrivateUsage] -- reused deliberately, see this function's own docstring
     )
 
@@ -1720,10 +1801,18 @@ def build_points_timescale(
                 if target not in (existing_wide_columns or set()):
                     result.unmapped_columns.add(col)
                     continue
+                declared: str | None = wide_field_types.get(target)
+                if round_to_integer and declared and declared.upper() in _METRIC_EDIT_INTEGER_TYPES:
+                    whole: int | None = round_half_up(val)
+                    if whole is not None and whole != val:
+                        val = whole
+                        result.rounded_counts[target] = result.rounded_counts.get(target, 0) + 1
                 try:
-                    val = _coerce_value_for_data_type(val, wide_field_types.get(target))
+                    val = _coerce_value_for_data_type(val, declared)
                 except ValueError as exc:
-                    record_type_mismatch(result, target, val, new_time.isoformat(), wide_field_types.get(target), str(exc))
+                    if "not a whole number" in str(exc):
+                        result.suggest_rounding = True
+                    record_type_mismatch(result, target, val, new_time.isoformat(), declared, str(exc))
                     continue
             fields[target] = val
 
@@ -1732,6 +1821,12 @@ def build_points_timescale(
             continue
 
         points.append(TimescalePointDict(time_iso=new_time.isoformat(), fields=fields))
+
+    if result.rounded_counts:
+        detail: str = ", ".join(f"{col} ({n})" for col, n in sorted(result.rounded_counts.items(), key=lambda kv: -kv[1]))
+        total: int = sum(result.rounded_counts.values())
+        result.warnings.append(f"Rounded {total} fractional value(s) to whole numbers for integer columns: {detail}. (The same rounded values go to the narrow table.)")
+        _log.info(f"[Timeshift] TimescaleDB import: rounded {total} fractional value(s) to whole numbers: {detail}")
 
     return points, result
 

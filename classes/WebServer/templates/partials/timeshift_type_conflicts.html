@@ -12,6 +12,9 @@
     ({{ result.type_mismatch_summary|length }} field{{ 's' if result.type_mismatch_summary|length != 1 }}).
     Those values were not written; every other value in the same rows was.
   </p>
+  {% if result.suggest_rounding %}
+  <p class="text-xs mt-1">Some were decimals bound for whole-number columns — tick <strong>Round decimal values to whole numbers for integer columns</strong> to import them rounded instead.</p>
+  {% endif %}
   <div class="overflow-x-auto max-h-56 overflow-y-auto mt-1">
     <table class="w-auto text-xs border-collapse">
       <thead>
