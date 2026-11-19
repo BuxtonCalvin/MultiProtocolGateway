@@ -58,8 +58,10 @@
                      one's choosing").
     - "eg4"        : upload a spreadsheet exported from the EG4 website;
                      only enabled when eg4_available.
-    - "influx_csv" : re-import a CSV this same screen (or InfluxDateConv
-                     erter.py) previously exported, optionally hand-edited.
+    - "influx_csv" : re-import a CSV this screen (on either the InfluxDB or
+                     the TimescaleDB version -- that is how a range is copied
+                     between the two) or InfluxDateConverter.py previously
+                     exported, optionally hand-edited.
 
   For TimescaleDB (version="timescale"): Measurement becomes a Table
   <select> (timescale_tables) and the Tags panel becomes a Device
@@ -91,7 +93,9 @@
       <h1 class="surface-title text-lg font-semibold">Timeshift Data</h1>
       <p class="surface-subtle text-xs mt-1">
         Export a date range of data to CSV, or import an EG4 spreadsheet export / a previously
-        exported CSV back in.
+        exported CSV back in. A CSV exported from InfluxDB can be imported into TimescaleDB and
+        vice versa, which copies a date range between the two (leave Target Start equal to Source
+        Start on both screens for an unshifted copy).
       </p>
     </div>
     <div class="flex items-center gap-1 text-xs shrink-0">
@@ -164,7 +168,7 @@
           writes the same data to the narrow table. Pick the narrow table directly for anything else.
         </p>
         <p id="ts-wide-note" role="note" class="hidden text-xs rounded border border-accent/40 bg-accent/10 text-accent p-2 mt-2">
-          <strong>Note:</strong> importing into a wide table writes every value to that table
+          <strong>Heads-up:</strong> importing into a wide table writes every value to that table
           <strong>and</strong> mirrors it into the shared narrow table (device_metrics_narrow) — one narrow row per value,
           so the narrow table grows much faster than the wide one, and the import takes correspondingly longer.
         </p>

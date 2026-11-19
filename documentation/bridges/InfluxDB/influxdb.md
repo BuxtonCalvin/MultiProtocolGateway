@@ -823,7 +823,7 @@ Three radio options at the top of the page choose what you're doing:
 
 1. **Export InfluxDB range to CSV** — pick a date range on the connected bridge and download a time-shifted CSV.
 2. **Import EG4 spreadsheet** — upload a spreadsheet exported from the EG4 monitoring website. Only selectable when at least one `eg4_*` protocol is configured on this gateway.
-3. **Re-import an exported/edited CSV** — re-import a CSV this same screen previously exported, optionally hand-edited first (e.g. in Excel, to fix a bad sensor reading or remove bad rows).
+3. **Re-import an exported/edited CSV** — re-import a CSV that this screen, or the TimescaleDB Timeshift Data screen, previously exported, optionally hand-edited first (e.g. in Excel, to fix a bad sensor reading or remove bad rows). Importing a file exported from the other database is how a date range is copied between InfluxDB and TimescaleDB (see *Copying a Date Range Between InfluxDB and TimescaleDB* below).
 
 ### Common Settings
 
@@ -863,7 +863,7 @@ With **Import EG4 spreadsheet** or **Re-import an exported/edited CSV** selected
 
 Each source column gets one row in the Field Matchup table:
 
-- **Re-imported CSV**: column names already match InfluxDB field names (they came from this screen's own Export), so the mapping shown is the identity mapping — shown for review/override rather than guessed.
+- **Re-imported CSV**: column names are taken to be the destination's field names (they came from an Export), so the mapping shown is the identity mapping — shown for review/override rather than guessed. A column from a file exported from TimescaleDB whose name isn't an existing field gets no pre-filled field and is reported as unmapped in Preview.
 - **EG4 spreadsheet**: column names rarely match the schema (`pv1Voltage`, `AC Voltage (V)`, `GridFrequencyHz`, ...), so each column is fuzzy-matched against the measurement/table's existing field names. A match scoring at or above the Confidence Threshold is pre-filled; a column that doesn't reach the threshold starts with **Ignore this column** pre-checked, since an EG4 export typically carries many columns MPG never records — the row is still shown, so you can un-check Ignore and either pick an existing field or **+ New field…** for it. (**+ New field…** isn't offered when importing into a TimescaleDB wide table, since that would require an `ALTER TABLE` this screen doesn't perform; it's offered normally for the narrow table.)
 - A column whose name matches a tag key (or is `time`/`measurement`) is pre-checked **Ignore this column** by default, but can still be un-ignored and mapped as an ordinary field if that's genuinely wanted.
 - Uploading a brand-new measurement/table with no existing schema leaves nothing pre-ignored on the matching basis above, since there's nothing yet to match against.
@@ -887,6 +887,23 @@ If **Allow float coercion** is on, a value is then nudged toward the field's alr
 - rows skipped for having no mapped fields, or an unparseable/missing timestamp
 - columns left unmapped
 - any type mismatches that were skipped rather than written
+
+### Copying a Date Range Between InfluxDB and TimescaleDB
+
+A date range can be copied from one database to the other — **InfluxDB → TimescaleDB** or **TimescaleDB → InfluxDB** — with this screen's own export and re-import. It takes two steps with a CSV file in between. Both databases' Export writes the same file shape (a `time` column followed by one column per field or metric), so the file needs no conversion. The TimescaleDB side of the same procedure is described in its own guide, under *Copying a Date Range Between TimescaleDB and InfluxDB*.
+
+1. **Export from InfluxDB.** Open **Timeshift Data** for InfluxDB and choose **Export InfluxDB range to CSV**. Pick the measurement or table (and the device), enter the **Source Start** and **Source End** of the range, and leave **Target Start equal to Source Start** so the timestamps are not shifted. Click **Export to CSV** and save the file. The export only reads; nothing in InfluxDB changes.
+2. **Re-import into TimescaleDB.** (To copy the other way, export from TimescaleDB and re-import into InfluxDB, where you pick the **Measurement** and fill in the **Tags** panel, including the `device_identifier` tag.) Open **Timeshift Data** for TimescaleDB (use the version toggle at the top of the page) and choose **Re-import an exported/edited CSV**. Pick the destination, which for TimescaleDB is a **Table** (wide or narrow) and a **Device**. Upload the file, keep **Source Start equal to Target Start** (the file already holds the timestamps you want, so shifting again would move the data a second time), confirm the **Time Column** and the **Field Matchup**, click **Preview**, then **Import**.
+
+**What carries over, and what to check:**
+
+- **Timestamps** are written to the file in UTC and read back as UTC, so a copy lands on exactly the same instants. TimescaleDB stores microsecond precision, so an InfluxDB timestamp finer than a microsecond is truncated.
+- **Tags and device identity are not in the file.** Choose the TimescaleDB device, or fill in the InfluxDB Tags panel (including `device_identifier`), yourself on the import side.
+- **Field names are matched one-to-one.** A column whose name is not a field in the destination gets no pre-filled field. Preview lists it as unmapped, and it is not written unless you pick a field for it. A TimescaleDB **wide** table cannot gain a column from this screen; import into the **narrow** table to keep every metric, which accepts any metric name. An InfluxDB destination offers **+ New field…** for a new field name.
+- **Types can differ.** InfluxDB stores most numbers as floats, so decimals can arrive for a TimescaleDB wide column that is a whole-number type (`SMALLINT`, `INTEGER`, `BIGINT`). Such a value is skipped and listed in Preview and the result panel, or rounded if you tick **Round decimal values to whole numbers for integer columns**. Going the other way, a whole number bound for an existing InfluxDB float field is converted when **Allow float coercion** is ticked (the default).
+- **Existing data at the same timestamps is overwritten.** Rows or points that match on timestamp (and device or tags) take the imported values.
+- **Destination limits still apply.** An InfluxDB destination refuses a range older than its retention policy (Preview shows the error before anything is written), and a TimescaleDB import can take several minutes while compressed chunks in the range are decompressed.
+- **Large ranges.** The export builds the whole range in memory before the download starts, so copy a very large range in pieces (for example a week at a time) rather than all at once.
 
 ### Bridge Connection and Scope
 
