@@ -3,60 +3,291 @@
   "send_holding_register": true,
   "send_input_register": false,
   "send_coil_register": false,
-  "send_discrete_register": false,  
-
-  "vebus_error_codes": {
+  "send_discrete_register": false,
+  "active_input_codes": {
+    "0": "AC Input 1",
+    "1": "AC Input 2",
+    "240": "Disconnected"
+  },
+  "ve.bus_state_codes": {
+    "0": "Off",
+    "1": "Low Power",
+    "2": "Fault",
+    "3": "Bulk",
+    "4": "Absorption",
+    "5": "Float",
+    "6": "Storage",
+    "7": "Equalize",
+    "8": "Passthru",
+    "9": "Inverting",
+    "10": "Power assist",
+    "11": "Power supply",
+    "244": "Sustain",
+    "252": "External control"
+  },
+  "ve.bus_error_codes": {
     "0": "No error",
-    "1": "Device switched off because one of the other phases switched off",
-    "2": "New and old type MK2 protocol mixed in the system",
-    "3": "Not all, or more than, the expected devices were found",
-    "4": "No other device found",
-    "5": "Overvoltage on AC out",
-    "6": "Error in DDC Program",
-    "7": "External device connected, assistant required",
-    "8": "Ground relay test failed",
-    "10": "System time synchronisation problem",
-    "11": "Relay Test Fault",
-    "12": "Config mismatch with 2nd MCU",
-    "14": "Device cannot transmit data",
-    "15": "VE.Bus combination error",
-    "16": "VE.Bus dongle is missing",
-    "17": "Phase master missing",
-    "18": "AC Over-voltage on output of slave while switched off",
-    "19": "Slave does not have AC input",
-    "20": "Configuration mismatch",
-    "22": "Device cannot function as slave",
-    "24": "Switch-over system protection initiated",
-    "25": "Incompatible VE.Bus configuration",
-    "26": "Internal error",
-    "128": "Connect prevented by failing relay test"
+    "1": "VE.Bus Error 1: Device is switched off because one of the other phases in the system has switched off",
+    "2": "VE.Bus Error 2: New and old types MK2 are mixed in the system",
+    "3": "VE.Bus Error 3: Not all- or more than- the expected devices were found in the system",
+    "4": "VE.Bus Error 4: No other device whatsoever detected",
+    "5": "VE.Bus Error 5: Overvoltage on AC-out",
+    "6": "VE.Bus Error 6: Error in DDC Program",
+    "7": "VE.Bus BMS connected- which requires an Assistant- but no assistant found",
+    "10": "VE.Bus Error 10: System time synchronization problem occurred",
+    "14": "VE.Bus Error 14: Device cannot transmit data",
+    "16": "VE.Bus Error 16: Dongle missing",
+    "17": "VE.Bus Error 17: One of the devices assumed master status because the original master failed",
+    "18": "VE.Bus Error 18: AC Overvoltage on the output of a slave has occurred while already switched off",
+    "22": "VE.Bus Error 22: This device cannot function as slave",
+    "24": "VE.Bus Error 24: Switch-over system protection initiated",
+    "25": "VE.Bus Error 25: Firmware incompatibility. The firmware of one of the connected device is not sufficiently up to date to operate in conjunction with this device",
+    "26": "VE.Bus Error 26: Internal error"
   },
-
-  "vebus_state_codes": {
-    "0": "off",
-    "1": "low power",
-    "2": "fault",
-    "3": "bulk",
-    "4": "absorption",
-    "5": "float",
-    "6": "storage",
-    "7": "equalize",
-    "8": "passthru",
-    "9": "inverting",
-    "10": "power assist",
-    "11": "power supply mode"
+  "switch_position_codes": {
+    "1": "Charger Only",
+    "2": "Inverter Only",
+    "3": "On",
+    "4": "Off"
   },
-
-  "switch_mode_codes": {
-    "1": "charger only",
-    "2": "inverter only",
-    "3": "on",
-    "4": "off"
+  "temperature_alarm_codes": {
+    "0": "Ok",
+    "1": "Warning",
+    "2": "Alarm"
   },
-
-  "active_ac_input_codes": {
-    "1": "AC input 1",
-    "2": "AC input 2",
-    "240": "none"
+  "low_battery_alarm_codes": {
+    "0": "Ok",
+    "1": "Warning",
+    "2": "Alarm"
+  },
+  "overload_alarm_codes": {
+    "0": "Ok",
+    "1": "Warning",
+    "2": "Alarm"
+  },
+  "ess_disable_charge_flag_phase_codes": {
+    "0": "Charge allowed",
+    "1": "Charge disabled"
+  },
+  "ess_disable_feedback_flag_phase_codes": {
+    "0": "Feed in allowed",
+    "1": "Feed in disabled"
+  },
+  "temperature_sensor_alarm_codes": {
+    "0": "Ok",
+    "1": "Warning",
+    "2": "Alarm"
+  },
+  "voltage_sensor_alarm_codes": {
+    "0": "Ok",
+    "1": "Warning",
+    "2": "Alarm"
+  },
+  "temperature_alarm_l1_codes": {
+    "0": "Ok",
+    "1": "Warning",
+    "2": "Alarm"
+  },
+  "low_battery_alarm_l1_codes": {
+    "0": "Ok",
+    "1": "Warning",
+    "2": "Alarm"
+  },
+  "overload_alarm_l1_codes": {
+    "0": "Ok",
+    "1": "Warning",
+    "2": "Alarm"
+  },
+  "ripple_alarm_l1_codes": {
+    "0": "Ok",
+    "1": "Warning",
+    "2": "Alarm"
+  },
+  "temperature_alarm_l2_codes": {
+    "0": "Ok",
+    "1": "Warning",
+    "2": "Alarm"
+  },
+  "low_battery_alarm_l2_codes": {
+    "0": "Ok",
+    "1": "Warning",
+    "2": "Alarm"
+  },
+  "overload_alarm_l2_codes": {
+    "0": "Ok",
+    "1": "Warning",
+    "2": "Alarm"
+  },
+  "ripple_alarm_l2_codes": {
+    "0": "Ok",
+    "1": "Warning",
+    "2": "Alarm"
+  },
+  "temperature_alarm_l3_codes": {
+    "0": "Ok",
+    "1": "Warning",
+    "2": "Alarm"
+  },
+  "low_battery_alarm_l3_codes": {
+    "0": "Ok",
+    "1": "Warning",
+    "2": "Alarm"
+  },
+  "overload_alarm_l3_codes": {
+    "0": "Ok",
+    "1": "Warning",
+    "2": "Alarm"
+  },
+  "ripple_alarm_l3_codes": {
+    "0": "Ok",
+    "1": "Warning",
+    "2": "Alarm"
+  },
+  "disable_pv_inverter_codes": {
+    "0": "PV enabled",
+    "1": "PV disabled"
+  },
+  "ve.bus_bms_allows_battery_to_be_charged_codes": {
+    "0": "No",
+    "1": "Yes"
+  },
+  "ve.bus_bms_allows_battery_to_be_discharged_codes": {
+    "0": "No",
+    "1": "Yes"
+  },
+  "ve.bus_bms_is_expected_codes": {
+    "0": "No",
+    "1": "Yes"
+  },
+  "ve.bus_bms_error_codes": {
+    "0": "No",
+    "1": "Yes"
+  },
+  "ve.bus_reset_codes": {
+    "1": "VE.Bus reset"
+  },
+  "phase_rotation_warning_codes": {
+    "0": "Ok",
+    "1": "Warning"
+  },
+  "grid_lost_alarm_codes": {
+    "0": "Ok",
+    "2": "Alarm"
+  },
+  "feed_dc_overvoltage_into_grid_codes": {
+    "0": "Feed in overvoltage",
+    "1": "Do not feed in overvoltage"
+  },
+  "ac_input_1_ignored_codes": {
+    "0": "AC input not ignored",
+    "1": "AC input ignored"
+  },
+  "ac_input_2_ignored_codes": {
+    "0": "AC input not ignored",
+    "1": "AC input ignored"
+  },
+  "acpowersetpoint_acts_as_feed-in_limit_codes": {
+    "0": "AcPowerSetpoint interpreted normally",
+    "1": "AcPowerSetpoint is OvervoltageFeedIn limit"
+  },
+  "solar_offset_voltage_codes": {
+    "0": "OvervoltageFeedIn uses 1V offset",
+    "1": "OvervoltageFeedIn uses 0.1V offset"
+  },
+  "sustain_active_codes": {
+    "0": "Sustain inactive",
+    "1": "Sustain active"
+  },
+  "low_cell_voltage_imminent_codes": {
+    "0": "OK",
+    "1": "Warning"
+  },
+  "charge_state_codes": {
+    "0": "Initializing",
+    "1": "Bulk",
+    "2": "Absorption",
+    "3": "Float",
+    "4": "Storage",
+    "5": "Absorb repeat",
+    "6": "Forced absorb",
+    "7": "Equalize",
+    "8": "Bulk stopped",
+    "9": "Unknown"
+  },
+  "prefer_renewable_energy_codes": {
+    "0": "Renewable energy not preferred",
+    "1": "Renewable energy preferred"
+  },
+  "select_remote_generator_codes": {
+    "0": "Generator not selected",
+    "1": "Generator selected"
+  },
+  "remote_generator_selected_codes": {
+    "0": "Generator not selected",
+    "1": "Generator selected"
+  },
+  "redetect_ve.bus_system_codes": {
+    "0": "No action",
+    "1": "Redetect system"
+  },
+  "powerassist_enabled_unit_1_codes": {
+    "0": "Disabled",
+    "1": "Enabled"
+  },
+  "powerassist_enabled_unit_2_codes": {
+    "0": "Disabled",
+    "1": "Enabled"
+  },
+  "powerassist_enabled_unit_3_codes": {
+    "0": "Disabled",
+    "1": "Enabled"
+  },
+  "powerassist_enabled_unit_4_codes": {
+    "0": "Disabled",
+    "1": "Enabled"
+  },
+  "powerassist_enabled_unit_5_codes": {
+    "0": "Disabled",
+    "1": "Enabled"
+  },
+  "powerassist_enabled_unit_6_codes": {
+    "0": "Disabled",
+    "1": "Enabled"
+  },
+  "powerassist_enabled_unit_7_codes": {
+    "0": "Disabled",
+    "1": "Enabled"
+  },
+  "powerassist_enabled_unit_8_codes": {
+    "0": "Disabled",
+    "1": "Enabled"
+  },
+  "powerassist_enabled_unit_9_codes": {
+    "0": "Disabled",
+    "1": "Enabled"
+  },
+  "powerassist_enabled_unit_10_codes": {
+    "0": "Disabled",
+    "1": "Enabled"
+  },
+  "powerassist_enabled_unit_11_codes": {
+    "0": "Disabled",
+    "1": "Enabled"
+  },
+  "powerassist_enabled_unit_12_codes": {
+    "0": "Disabled",
+    "1": "Enabled"
+  },
+  "ups_function_l1_codes": {
+    "0": "Disabled",
+    "1": "Enabled"
+  },
+  "ups_function_l2_codes": {
+    "0": "Disabled",
+    "1": "Enabled"
+  },
+  "ups_function_l3_codes": {
+    "0": "Disabled",
+    "1": "Enabled"
   }
 }

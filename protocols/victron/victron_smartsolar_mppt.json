@@ -4,74 +4,90 @@
   "send_input_register": false,
   "send_coil_register": false,
   "send_discrete_register": false,
-
-  "charger_error_codes": {
+  "charger_on/off_codes": {
+    "1": "On",
+    "4": "Off"
+  },
+  "charge_state_codes": {
+    "0": "Off",
+    "2": "Fault",
+    "3": "Bulk",
+    "4": "Absorption",
+    "5": "Float",
+    "6": "Storage",
+    "7": "Equalize",
+    "11": "Other (Hub-1)",
+    "252": "External control"
+  },
+  "equalization_pending_codes": {
+    "0": "No",
+    "1": "Yes",
+    "2": "Error",
+    "3": "Unavailable- Unknown"
+  },
+  "relay_on_the_charger_codes": {
+    "0": "Open",
+    "1": "Closed"
+  },
+  "/alarms/alarm_codes": {
+    "0": "No alarm",
+    "2": "Alarm"
+  },
+  "low_batt._voltage_alarm_codes": {
+    "0": "No alarm",
+    "2": "Alarm"
+  },
+  "high_batt._voltage_alarm_codes": {
+    "0": "No alarm",
+    "2": "Alarm"
+  },
+  "error_code_codes": {
     "0": "No error",
     "1": "Battery temperature too high",
     "2": "Battery voltage too high",
-    "3": "Remote temperature sensor failure",
-    "4": "Remote temperature sensor failure",
-    "5": "Remote temperature sensor failure (connection lost)",
-    "6": "Remote battery voltage sense failure",
-    "7": "Remote battery voltage sense failure",
-    "8": "Remote battery voltage sense failure (connection lost)",
-    "11": "Battery high ripple voltage",
-    "14": "Battery low temperature",
-    "17": "Controller overheated despite reduced output current",
-    "18": "Controller over-current",
-    "20": "Maximum Bulk-time exceeded",
-    "21": "Current sensor issue",
-    "22": "Internal temperature sensor failure",
-    "23": "Internal temperature sensor failure",
-    "24": "Fan failure",
-    "26": "Terminal overheated",
-    "27": "Charger short circuit",
-    "28": "Power stage issue",
-    "29": "Over-Charge protection",
-    "33": "PV over-voltage",
-    "34": "PV over-current",
-    "35": "PV over-power",
-    "38": "PV Input shutdown",
-    "39": "PV Input shutdown",
-    "40": "PV Input failed to shutdown",
-    "41": "Inverter shutdown (PV isolation)",
-    "42": "Inverter shutdown (PV isolation)",
-    "43": "Inverter shutdown (Ground Fault)",
-    "50": "Inverter overload",
-    "51": "Inverter temperature too high",
-    "52": "Inverter peak current",
-    "53": "Inverter output voltage",
-    "54": "Inverter output voltage",
-    "55": "Inverter self test failed",
-    "56": "Inverter self test failed",
-    "57": "Inverter AC voltage on output",
-    "58": "Inverter self test failed",
-    "59": "ACIN1 relay test fault",
-    "65": "Communication warning",
-    "66": "Incompatible device",
-    "67": "BMS Connection lost",
-    "68": "Network misconfigured",
-    "69": "Network misconfigured",
-    "70": "Network misconfigured",
-    "71": "Network misconfigured",
-    "72": "Phase rotation",
-    "73": "Multiple AC inputs"
+    "3": "Battery temperature sensor miswired (+)",
+    "4": "Battery temperature sensor miswired (-)",
+    "5": "Battery temperature sensor disconnected",
+    "6": "Battery voltage sense miswired (+)",
+    "7": "Battery voltage sense miswired (-)",
+    "8": "Battery voltage sense disconnected",
+    "9": "Battery voltage wire losses too high",
+    "17": "Charger temperature too high",
+    "18": "Charger over-current",
+    "19": "Charger current polarity reversed",
+    "20": "Bulk time limit reached",
+    "22": "Charger temperature sensor miswired",
+    "23": "Charger temperature sensor disconnected",
+    "34": "Input current too high"
   },
-
-  "charger_state_codes": {
-    "0": "off",
-    "2": "fault",
-    "3": "bulk",
-    "4": "absorption",
-    "5": "float",
-    "6": "storage",
-    "7": "equalize",
-    "11": "power supply mode"
+  "mpp_operation_mode_codes": {
+    "0": "Off",
+    "1": "Voltage/current limited",
+    "2": "MPPT active",
+    "255": "Not available"
   },
-
-  "tracker_mode_codes": {
-    "0": "off",
-    "1": "voltage or current limited",
-    "2": "MPPT active"
+  "mpp_operation_mode_tracker_1_codes": {
+    "0": "Off",
+    "1": "Voltage/current limited",
+    "2": "MPPT active",
+    "255": "Not available"
+  },
+  "mpp_operation_mode_tracker_2_codes": {
+    "0": "Off",
+    "1": "Voltage/current limited",
+    "2": "MPPT active",
+    "255": "Not available"
+  },
+  "mpp_operation_mode_tracker_3_codes": {
+    "0": "Off",
+    "1": "Voltage/current limited",
+    "2": "MPPT active",
+    "255": "Not available"
+  },
+  "mpp_operation_mode_tracker_4_codes": {
+    "0": "Off",
+    "1": "Voltage/current limited",
+    "2": "MPPT active",
+    "255": "Not available"
   }
 }

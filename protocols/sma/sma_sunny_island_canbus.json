@@ -1,0 +1,80 @@
+{
+  "transport": "canbus",
+  "baud": 500000,
+  "send_holding_register": true,
+  "send_input_register": false,
+  "send_coil_register": false,
+  "send_discrete_register": false,
+  "status_condition_codes": {
+    "295": "OK",
+    "303": "off",
+    "1392": "warning",
+    "1793": "error"
+  },
+  "grid_relay_status_codes": {
+    "51": "open",
+    "311": "closed"
+  },
+  "backup_mode_active_codes": {
+    "51": "grid connected",
+    "1779": "island mode",
+    "1780": "transition"
+  },
+  "generator_request_codes": {
+    "51": "no request",
+    "1069": "request active"
+  },
+  "operating_mode_codes": {
+    "1749": "autonomous",
+    "1750": "grid tied",
+    "1769": "stop"
+  },
+  "operating_state_codes": {
+    "0": "",
+    "1": "Operating",
+    "3": "Warning",
+    "4": "Failure"
+  },
+  "external_alarm_1_codes": {
+    "b0": "General alarm",
+    "b2": "Battery high voltage alarm",
+    "b4": "Battery low voltage alarm",
+    "b6": "Battery high temperature alarm"
+  },
+  "external_warning_1_codes": {
+    "b0": "General warning",
+    "b2": "Battery high voltage warning",
+    "b4": "Battery low voltage warning",
+    "b6": "Battery high temperature warning"
+  },
+  "external_alarm_2_codes": {
+    "b0": "Battery low temperature alarm",
+    "b2": "Battery high temperature charge alarm",
+    "b4": "Battery low temperature charge alarm",
+    "b6": "Battery high current alarm"
+  },
+  "external_warning_2_codes": {
+    "b0": "Battery low temperature warning",
+    "b2": "Battery high temperature charge warning",
+    "b4": "Battery low temperature charge warning",
+    "b6": "Battery high current warning"
+  },
+  "external_alarm_3_codes": {
+    "b0": "Battery high current charge alarm",
+    "b2": "Contactor alarm",
+    "b4": "Short circuit alarm",
+    "b6": "BMS internal alarm"
+  },
+  "external_warning_3_codes": {
+    "b0": "Battery high current charge warning",
+    "b2": "Contactor warning",
+    "b4": "Short circuit warning",
+    "b6": "BMS internal warning"
+  },
+  "external_alarm_4_codes": {
+    "b0": "Cell imbalance alarm"
+  },
+  "external_warning_4_codes": {
+    "b0": "Cell imbalance warning"
+  }
+}

@@ -100,7 +100,10 @@ class canbus(transport_base):
     ''' last payload transmitted per CAN ID; the base for the next write to the same frame '''
 
     address: int = 0
-    ''' device address added to the CAN ID of every row, for protocols that declare can_id_address_max '''
+    ''' device address; shifts the CAN ID of every row by address * address_stride, for protocols that declare can_id_address_max '''
+
+    address_stride: int = 1
+    ''' how far one address moves an ID: 1 for the Pylontech high-voltage protocol (0x4210, 0x4211, ...), 0x1000 for Pylontech low-voltage V1.3 '''
 
     _addressed_map: list[registry_map_entry] | None = None
     ''' the registry map with ``address`` added to each ID, built once; None when no shift applies '''
@@ -175,6 +178,7 @@ class canbus(transport_base):
         self._tx_frames = {}
 
         self.address = self._read_address(settings)
+        self.address_stride = self._read_address_stride()
 
         # Request frames for devices that only answer when asked (for example the Pylontech high-voltage
         # protocol).  Off unless the protocol JSON or the transport sets poll_frames.  A value in the
@@ -517,6 +521,37 @@ class canbus(transport_base):
             return 0
         return requested
 
+    @property
+    def scrape_target(self) -> str:
+        '''
+        Scheduling path: All (Sequential, Concurrent, Interleaved).
+
+        Identifies the device this transport reads: CAN interface, channel, protocol and address. The gateway
+        only schedules transports with a non-empty scrape_target (an empty one is a bridge), so without this
+        a CAN transport was never polled. Sections that read the same device (same interface, channel,
+        protocol and address) are consolidated into one group; sections with different addresses on one
+        channel, such as several towers of a battery stack, stay separate groups.
+        '''
+        protocol: str = str(getattr(self, "protocol_version", "") or "")
+        return f"{self.interface}:{self.port}:{protocol}:{self.address}"
+
+    def _read_address_stride(self) -> int:
+        ''' ``can_id_address_stride`` from the protocol JSON (decimal or 0x hex); 1 unless the protocol says otherwise '''
+        raw: str = str(self.protocolSettings.settings.get("can_id_address_stride", "")).strip() if self.protocolSettings is not None else ""
+        if not raw:
+            return 1
+        try:
+            stride: int = int(raw, 0)
+        except ValueError:
+            self._log.error(f"canbus: can_id_address_stride '{raw}' is not a number; using 1")
+            return 1
+        return stride if stride > 0 else 1
+
+    @property
+    def _id_shift(self) -> int:
+        ''' what is added to every CAN ID of the protocol's map for this device '''
+        return self.address * self.address_stride
+
     def _registry_map(self) -> list[registry_map_entry]:
         '''
         The protocol's registry map, with ``address`` added to each CAN ID when the protocol numbers its devices
@@ -530,11 +565,11 @@ class canbus(transport_base):
         entries: list[registry_map_entry] = (
             self.protocolSettings.get_registry_map(Registry_Type.CUSTOM_BUS) or self.protocolSettings.get_registry_map(Registry_Type.HOLDING)
         )
-        if self.address == 0:
+        if self._id_shift == 0:
             return entries
         if self._addressed_map is None:
             # copies, so the shared protocol object (and any other transport using it) keeps the base IDs
-            self._addressed_map = [dataclasses.replace(entry, register=entry.register + self.address) for entry in entries]
+            self._addressed_map = [dataclasses.replace(entry, register=entry.register + self._id_shift) for entry in entries]
         return self._addressed_map
 
     def _writable_entries(self) -> list[registry_map_entry]:
@@ -810,7 +845,7 @@ class canbus(transport_base):
                 for e in registry_map:
                     if e.variable_name == variable_name:
                         # found in the protocol's own map, so apply this device's address like _registry_map does
-                        entry = dataclasses.replace(e, register=e.register + self.address) if self.address else e
+                        entry = dataclasses.replace(e, register=e.register + self._id_shift) if self._id_shift else e
                         break
 
             if entry:

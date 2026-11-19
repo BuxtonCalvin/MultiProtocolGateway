@@ -278,7 +278,7 @@ Here are overviews of two database bridges:
 Here are the overviews of the MQTT, Prometheus and JSON bridges:
 
 - MQTT [![Mosquitto](https://img.shields.io/badge/Eclipse-FE7A16?logo=Eclipse&logoColor=white)](https://mosquitto.org) — Readme: [`MQTT`](documentation/bridges/MQTT/MQTT_bridge.md)
-- Prometheus [![Prometheus](https://img.shields.io/badge/Prometheus-E6522C?style=for-the-badge&logo=prometheus&logoColor=white)](https://prometheus.io/) — Readme: [`Prometheus`](documentation/bridges/Prometheus/prometheus.md)
+- Prometheus [![Prometheus](https://img.shields.io/badge/Prometheus-E6522C?style=for-the-badge&logo=prometheus&logoColor=white)](https://prometheus.io/) — Readme: [`Prometheus`](documentation/bridges/prometheus/prometheus.md)
 - JSON — Readme: [`JSON`](documentation/bridges/JSON/json_out_example.md)
 
 ---
@@ -312,10 +312,10 @@ MPG ships with pre-built, tested protocol maps for the following manufacturers. 
 | **Next Power** | Next Power Victor NM RE (`next_power_victor_nm_re` via Modbus ) | **[`View Next Power`](documentation/devices/Next_Power.md)** |
 | **PACE BMS** | PACE BMS RS-485 v1.3 (`pace_bms_v1.3` via Modbus ) | **[`View PACE BMS`](documentation/devices/PACE.md)** |
 | **PowMr** | Off-Grid / Hybrid Inverter (`powmr` via Modbus ) | **[`View PowMr`](documentation/devices/PowMr.md)** |
-| **Pylon** | CAN Bus (`pylon_can` via CAN bus), high-voltage CAN (`pylon_hv_can` via CAN bus), RS-485 v3.3 (`pylon_rs485_v3.3` via Pylon serial) | **[`View Pylon`](documentation/devices/Pylon.md)** |
+| **Pylon** | CAN Bus v1.2 / v1.3 (`pylon_can` via CAN bus), high-voltage CAN (`pylon_hv_can` via CAN bus), RS-485 v3.3 (`pylon_rs485_v3.3` via Pylon serial) | **[`View Pylon`](documentation/devices/Pylon.md)** |
 | **Sigenergy** | SigenStor Plant Data (`sigenergy_plant` via Modbus ), Sigen Hybrid / SigenStor EC Device Data (`sigenergy_hybrid` via Modbus ) | **[`View Sigenergy`](documentation/devices/Sigenergy.md)** |
 | **Sigineer** | Solar Inverter / Charger v0.11 (`sigineer_v0.11` via Modbus ) | **[`View Sigineer`](documentation/devices/Sigineer.md)** |
-| **SMA** | Energy Meter Speedwire (`sma_energy_meter_speedwire` via Modbus ), CAN / Modbus RTU Map (`sma_modbus_rtu` via CAN bus), Sunny Home Manager (`sma_sunny_home_manager` via Modbus ), Sunny Island (`sma_sunny_island` via Modbus ), Sunny Island v1 (`sma_sunny_island_v1` via Modbus ), Sunny Boy / Tripower (`sma_sunnyboy_tripower` via Modbus ), Tripower Storage Hybrid (`sma_tripower_storage_hybrid` via Modbus ), SunSpec Inverters (`sma_sunspec` via Modbus TCP) | **[`View SMA`](documentation/devices/SMA.md)** |
+| **SMA** | Energy Meter Speedwire (`sma_energy_meter_speedwire` via Modbus ), Modbus RTU Map (`sma_modbus_rtu` via Modbus ), Sunny Home Manager (`sma_sunny_home_manager` via Modbus ), Sunny Island (`sma_sunny_island` via Modbus ), Sunny Island external-BMS CAN (`sma_sunny_island_canbus` via CAN bus), Sunny Boy / Tripower (`sma_sunnyboy_tripower` via Modbus ), Tripower Storage Hybrid (`sma_tripower_storage_hybrid` via Modbus ), SunSpec Inverters (`sma_sunspec` via Modbus TCP) | **[`View SMA`](documentation/devices/SMA.md)** |
 | **SOK** | SOK SK48V100 / PACE BMS (`sok_sk48v100_pace_bms` via Modbus ) | **[`View SOK`](documentation/devices/SOK.md)** |
 | **Solar Edge** | SolarEdge SunSpec Inverters (`solaredge_sunspec` via Modbus) | **[`View Solar Edge`](documentation/devices/SolarEdge.md)** |
 | **SolaX** | X1/X3 Hybrid G4-style Inverters (`solax_hybrid_g4` via Modbus ) | **[`View SolaX`](documentation/devices/SolaX.md)** |
@@ -325,7 +325,7 @@ MPG ships with pre-built, tested protocol maps for the following manufacturers. 
 | **SRNE** | Energy-Storage Inverter v1.96 (`srne_2021_v1.96` via Modbus ), Energy-Storage Inverter v1.7 (`srne_v1.7` via Modbus ), Controller / Inverter v3.9 (`srne_v3.9` via Modbus ) | **[`View SRNE`](documentation/devices/SRNE.md)** |
 | **Sungrow** | SH / RS / RT Hybrid Inverters (`sungrow_hybrid` via Modbus ), SG-series String Inverters (`sungrow_sg` via Modbus ) | **[`View Sungrow`](documentation/devices/Sungrow.md)** |
 | **Sunmart** | Off-Grid Inverter (`sunmart` via Modbus ) — same register map as PowMr | **[`View Sunmart`](documentation/devices/Sunmart.md)** |
-| **Victron** | BMV Battery Monitor (`victron_bmv_battery_monitor` via Modbus ), GX Generic CAN Bus (`victron_gx_generic_canbus` via CAN bus), GX v3.3 (`victron_gx_v3.3` via Modbus ), MK3-USB VE.Bus (`victron_mk3usb_vebus` via Modbus ), MultiPlus / Quattro (`victron_multiplus_quattro` via Modbus ), Phoenix Inverter (`victron_phoenix_inverter` via Modbus ), SmartSolar MPPT (`victron_smartsolar_mppt` via Modbus ), VE.Direct Serial Devices (`victron_vedirect_serial` via VE.Direct serial), Venus GX System (`victron_venus_gx_system` via Modbus ) | **[`View Victron`](documentation/devices/Victron.md)** |
+| **Victron** | BMV Battery Monitor (`victron_bmv_battery_monitor` via Modbus ), GX Generic CAN Bus (`victron_gx_generic_canbus` via CAN bus), GX v3.3 (`victron_gx_v3.3` via Modbus ), MK3-USB VE.Bus (`victron_mk3usb_vebus`, placeholder: no transport yet), MultiPlus / Quattro (`victron_multiplus_quattro` via Modbus ), Phoenix Inverter (`victron_phoenix_inverter` via Modbus ), SmartSolar MPPT (`victron_smartsolar_mppt` via Modbus ), VE.Direct Serial Devices (`victron_vedirect_serial` via VE.Direct serial), Venus GX System (`victron_venus_gx_system` via Modbus ) | **[`View Victron`](documentation/devices/Victron.md)** |
 | **Voltronic** | BMS 2020-03-25 (`voltronic_bms_2020_03_25` via Modbus ), BMS v1.1 (`voltronic_bms_v1.1` via Modbus ) | **[`View Voltronic`](documentation/devices/Voltronic.md)** |
 
 Battery packs that speak an existing protocol are also covered even without their own folder — e.g. **AOLithium** 48V server-rack batteries work over the Voltronic RS485, Victron GX CAN, or SMA Sunny Island CAN maps depending on DIP-switch mode; see **[`View AOLithium`](documentation/devices/AOLithium.md)**.

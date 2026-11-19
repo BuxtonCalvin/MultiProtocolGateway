@@ -3,42 +3,85 @@
   "send_holding_register": true,
   "send_input_register": false,
   "send_coil_register": false,
-  "send_discrete_register": false,  
-
-  "device_state_codes": {
-    "0": "off",
-    "1": "low power",
-    "2": "fault",
-    "9": "inverting"
+  "send_discrete_register": false,
+  "high_temperature_alarm_codes": {
+    "0": "No alarm",
+    "1": "Warning",
+    "2": "Alarm"
   },
-
-  "alarm_low_battery_codes": {
-    "0": "ok",
-    "1": "alarm"
+  "high_battery_voltage_alarm_codes": {
+    "0": "No alarm",
+    "1": "Warning",
+    "2": "Alarm"
   },
-
-  "alarm_high_temp_codes": {
-    "0": "ok",
-    "1": "alarm"
+  "high_ac-out_voltage_alarm_codes": {
+    "0": "No alarm",
+    "1": "Warning",
+    "2": "Alarm"
   },
-
-  "alarm_overload_codes": {
-    "0": "ok",
-    "1": "alarm"
+  "low_temperature_alarm_codes": {
+    "0": "No alarm",
+    "1": "Warning",
+    "2": "Alarm"
   },
-
-  "alarm_short_circuit_codes": {
-    "0": "ok",
-    "1": "alarm"
+  "low_battery_voltage_alarm_codes": {
+    "0": "No alarm",
+    "1": "Warning",
+    "2": "Alarm"
   },
-
-  "relay_state_codes": {
-    "0": "open",
-    "1": "closed"
+  "low_ac-out_voltage_alarm_codes": {
+    "0": "No alarm",
+    "1": "Warning",
+    "2": "Alarm"
   },
-
-  "alarm_ripple_codes": {
-    "0": "ok",
-    "1": "alarm"
+  "overload_alarm_codes": {
+    "0": "No alarm",
+    "1": "Warning",
+    "2": "Alarm"
+  },
+  "ripple_alarm_codes": {
+    "0": "No alarm",
+    "1": "Warning",
+    "2": "Alarm"
+  },
+  "inverter_on/off/eco_codes": {
+    "2": "On",
+    "4": "Off",
+    "5": "Eco"
+  },
+  "inverter_state_codes": {
+    "0": "Off",
+    "1": "Low power mode (search mode)",
+    "2": "Fault",
+    "9": "Inverting (on)"
+  },
+  "low_soc_alarm_codes": {
+    "0": "No alarm",
+    "1": "Warning",
+    "2": "Alarm"
+  },
+  "mpp_operation_mode_tracker_1_codes": {
+    "0": "Off",
+    "1": "Voltage/current limited",
+    "2": "MPPT active",
+    "255": "Not available"
+  },
+  "mpp_operation_mode_tracker_2_codes": {
+    "0": "Off",
+    "1": "Voltage/current limited",
+    "2": "MPPT active",
+    "255": "Not available"
+  },
+  "mpp_operation_mode_tracker_3_codes": {
+    "0": "Off",
+    "1": "Voltage/current limited",
+    "2": "MPPT active",
+    "255": "Not available"
+  },
+  "mpp_operation_mode_tracker_4_codes": {
+    "0": "Off",
+    "1": "Voltage/current limited",
+    "2": "MPPT active",
+    "255": "Not available"
   }
 }

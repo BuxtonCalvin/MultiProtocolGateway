@@ -38,17 +38,17 @@ LuxPower,12K hybrid inverter,lxp_12k_hybrid,ModBus,https://github.com/BuxtonCalv
 Next Power,Victor NM RE,next_power_victor_nm_re,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Next_Power.md
 PACE,BMS RS-485 v1.3,pace_bms_v1.3,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/PACE.md
 PowMr,Off-grid / hybrid inverter,powmr,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/PowMr.md
-Pylon / Pylontech,Low-voltage CAN bus,pylon_can,CanBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Pylon.md
+Pylon / Pylontech,Low-voltage CAN bus v1.2 / v1.3,pylon_can,CanBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Pylon.md
 Pylon / Pylontech,Low-voltage RS-485 v3.3 (V2.8 compatible),pylon_rs485_v3.3,Serial,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Pylon.md
 Pylon / Pylontech,High-voltage CAN bus v1.17 (Force H / Dyness),pylon_hv_can,CanBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Pylon.md
 Sigenergy,Sigen Hybrid / SigenStor EC individual inverter,sigenergy_hybrid,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Sigenergy.md
 Sigenergy,SigenStor plant-level data (unit 247),sigenergy_plant,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Sigenergy.md
 Sigineer,Solar inverter / charger v0.11,sigineer_v0.11,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Sigineer.md
 SMA,Energy Meter Speedwire,sma_energy_meter_speedwire,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/SMA.md
-SMA,CAN / Modbus RTU map,sma_modbus_rtu,CanBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/SMA.md
+SMA,Modbus RTU map,sma_modbus_rtu,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/SMA.md
 SMA,Sunny Home Manager,sma_sunny_home_manager,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/SMA.md
 SMA,Sunny Island,sma_sunny_island,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/SMA.md
-SMA,Sunny Island v1,sma_sunny_island_v1,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/SMA.md
+SMA,Sunny Island external-BMS CAN,sma_sunny_island_canbus,CanBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/SMA.md
 SMA,Sunny Boy / Tripower,sma_sunnyboy_tripower,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/SMA.md
 SMA,Tripower Storage Hybrid,sma_tripower_storage_hybrid,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/SMA.md
 SOK,SK48V100 / PACE BMS,sok_sk48v100_pace_bms,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/SOK.md
@@ -68,7 +68,7 @@ Sunmart,Off-grid inverter,sunmart,ModBus,https://github.com/BuxtonCalvin/MultiPr
 Victron,BMV battery monitor,victron_bmv_battery_monitor,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Victron.md
 Victron,GX generic CAN bus,victron_gx_generic_canbus,CanBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Victron.md
 Victron,GX v3.3,victron_gx_v3.3,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Victron.md
-Victron,MK3-USB VE.Bus,victron_mk3usb_vebus,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Victron.md
+Victron,MK3-USB VE.Bus (placeholder),victron_mk3usb_vebus,Serial,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Victron.md
 Victron,MultiPlus / Quattro,victron_multiplus_quattro,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Victron.md
 Victron,Phoenix inverter,victron_phoenix_inverter,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Victron.md
 Victron,SmartSolar MPPT,victron_smartsolar_mppt,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Victron.md

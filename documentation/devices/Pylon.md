@@ -1,6 +1,6 @@
 # Pylon / Pylontech Battery - MQTT Integration Guide
 
-> **Supported Models:** Pylontech low-voltage batteries (US2000, US3000, US5000 and compatibles) on Pylon RS485 v2.8 / v3.3 or Pylon CAN v1.2, and Pylontech high-voltage systems (Force H1 / H2 and compatibles such as Dyness) on Pylon HV CAN v1.17
+> **Supported Models:** Pylontech low-voltage batteries (US2000, US3000, US5000 and compatibles) on Pylon RS485 v2.8 / v3.3 or Pylon CAN v1.2 / v1.3, and Pylontech high-voltage systems (Force H1 / H2 and compatibles such as Dyness) on Pylon HV CAN v1.17
 > **Protocol:** Pylon RS485 serial protocol or Pylon CAN bus
 > **Interface:** RS485 console/link port or CAN port
 > **Status:** Protocols available in MPG. Verified against the vendor documents and their worked examples; not yet run on every battery model
@@ -28,7 +28,7 @@ Pylontech batteries publish battery state through RS485 and CAN bus, depending o
 | Protocol | For | Style |
 | --- | --- | --- |
 | `pylon_rs485_v3.3` | Low-voltage batteries (also V2.8 firmware) | MPG asks, the battery answers (master / slave) |
-| `pylon_can` | Low-voltage batteries, CAN V1.2 | The battery broadcasts once a second; MPG listens |
+| `pylon_can` | Low-voltage batteries, CAN V1.2 and V1.3 | The battery broadcasts once a second; MPG listens |
 | `pylon_hv_can` | High-voltage systems, CAN V1.17 | The battery answers only when asked; MPG sends two request frames |
 
 Use CAN when you want the aggregate values an inverter would consume: charge voltage, current limits, SOC, SOH, pack voltage and current, alarms, protections and request flags. Use RS485 when you need the per-cell voltages, per-sensor temperatures, capacities, cycle count and serial number that only the serial protocol reports.
@@ -40,10 +40,10 @@ Use CAN when you want the aggregate values an inverter would consume: charge vol
 | Battery Family | Protocol Version | Transport | Baud |
 | --- | --- | --- | --- |
 | Pylon low-voltage RS485 v3.3 (V2.8 compatible) | `pylon_rs485_v3.3` | `serial_pylon` | set `baudrate` to match the battery (MPG default 9600) |
-| Pylon low-voltage CAN v1.2 | `pylon_can` | `canbus` | 500000 |
+| Pylon low-voltage CAN v1.2 / v1.3 | `pylon_can` | `canbus` | 500000 |
 | Pylon high-voltage CAN v1.17 | `pylon_hv_can` | `canbus` | 500000 |
 
-RS485 V2.8 and V3.3 use the same commands and layouts; V3.3 adds three-byte capacities for batteries over 65 Ah, and MPG handles both. A Pylon CAN V1.3 variant exists (frames 0x35A and 0x35F) but is not mapped: the only descriptions found are community reverse-engineering notes that disagree on the alarm bit layout, and no vendor document.
+RS485 V2.8 and V3.3 use the same commands and layouts; V3.3 adds three-byte capacities for batteries over 65 Ah, and MPG handles both. Pylon CAN V1.3 kept the V1.2 frames and added a few things, so one map (`pylon_can`) covers both: V1.3 defines the discharge voltage in `0x351` bytes 6-7 (blank in V1.2), adds the `0x35A` alarm / warning frame and the `0x35F` battery information frame (the same set SMA's Sunny Island and Victron's CAN-bus BMS use), and numbers batteries on a hub by adding `0x1000 x address` to every CAN ID. The V1.3 document describes the address offset; the `0x35A` bit layout is taken from SMA's document, which defines the same frame. A battery sends whichever of `0x359` / `0x35C` and `0x35A` / `0x35F` its firmware supports; frames it does not send simply produce no variables.
 
 The RS485 protocol document notes DIP-selectable RS485 speeds of 9600 and 115200. The `serial_pylon` transport uses 9600 unless `baudrate` is set in the config (the protocol definition file lists 115200), so set `baudrate` explicitly to match the battery's DIP setting.
 
@@ -130,9 +130,11 @@ All 16-bit values are **little endian** (low byte first). The `pylon_can` map re
 | `0x351` | Charge voltage, charge current limit, discharge current limit, and discharge voltage limit (bytes 6-7; blank in the V1.2 document, sent by US2000 / US3000) |
 | `0x355` | SOC and SOH |
 | `0x356` | Voltage, current, average cell temperature |
-| `0x359` | Protection and alarm flags, module count |
+| `0x359` | Protection and alarm flags, module count (V1.2; V1.3 packs may also send it) |
+| `0x35A` | Alarms and warnings (V1.3): each condition is a pair of bits, "raised" (even bit) and "cleared" (odd bit); only raised conditions are listed |
 | `0x35C` | Charge/discharge enable and force/full charge requests |
 | `0x35E` | Manufacturer name |
+| `0x35F` | Battery type, BMS version, battery capacity and manufacturer ID (V1.3). The capacity unit is not stated in the sources reviewed |
 | `0x372`, `0x373`, `0x379` | Extension frames from the Victron / SMA CAN-bus BMS spec: module status counts, min/max cell voltage and temperature (kelvin), installed capacity |
 
 ``` ini
@@ -150,6 +152,8 @@ poll_interval = 1
 ```
 
 Do not set this when an inverter is connected; it already sends the frame.
+
+**Several strings on a V1.3 hub:** the document adds `0x1000 x address` to every ID (address 0 is the default IDs; the fourth string's SOC and SOH are on `0x4355`). Add one section per string with the same `channel` and its own `address`, as for the high-voltage protocol below. The protocol allows addresses 0 to 15; the V1.3 document's own limit was not available, so the range is a safe bound.
 
 ### High-voltage CAN (`pylon_hv_can`)
 
@@ -191,7 +195,7 @@ poll_frames = none
 ```
 
   With several sections on one interface, set `poll_frames = none` on all but one so the requests are not sent repeatedly.
-
+  
 - Request frames are sent only because the protocol asks for them, and they change nothing on the battery. To stop them (an inverter or BMS is already polling), set `poll_frames = none` in the transport section. Replace them with your own as `poll_frames = 0x4200:0000000000000000`, and change the rate with `poll_interval` (seconds).
 - The control commands (sleep / wake `0x8200`, charge / discharge `0x8210`, mask communication error `0x8240`) are not mapped. The vendor document warns that improper use is a serious safety risk.
 

@@ -1,0 +1,34 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note,ha_device_class,ha_state_class,ha_entity_category
+x305.0,Battery Voltage Inverter,Battery Voltage Inverter,0.1V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",Battery voltage measured by Sunny Island,voltage,measurement,
+X305.2,Battery Current Inverter,Battery Current Inverter,0.1A,SHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}","Battery current measured by Sunny Island, (negative while charging)",current,measurement,
+X305.4,Battery Temperature Inverter,Battery Temperature Inverter,0.1C,SHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",Battery temperature measured by Battery/ Sunny Island,temperature,measurement,
+X305.6,SOC Battery,SOC Battery,0.10%,SHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",State of charge of the battery received from the external BMS,battery,measurement,
+x306.0,SOH Battery,SOH Battery,1.00%,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",State of health of the battery received from the external BMS,,measurement,
+X306.2,Charging procedure,Charging procedure,,BYTE,,,,,Charging mode of the SunnyIsland internal Battery Management. If external BMS is selected displayed value is 10,,,
+X306.3,Operating state,Operating state,,BYTE,"{""0"" : """", ""1"" : ""Operating"", ""3"" : ""Warning"", ""4"" : ""Failure""}",,,,Operating state of the inverter --- (0); Operating (1); Warning (3); Failure (4) Valid only for SI6.0H-11; FW Release 2.1,,,
+X306.4,Error Messages,Error Messages,,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",Number of the error message,,,
+X306.6,Battery charging voltage,Battery charging voltage,0.1V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",Current set point of charging voltage,voltage,measurement,
+x307,Relay state,Relay state,,16BIT_FLAGS,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",state of the relay bitcoded,,,
+x351.0,Battery charge voltage,Battery charge voltage,0.1V,USHORT,41~63,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",Set point for battery charge voltage,voltage,measurement,
+x351.2,DC charge current limitation,DC charge current limitation,0.1A,SHORT,0~1200,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",DC charge current limitation,current,measurement,
+x351.4,DC discharge current limitation,DC discharge current limitation,0.1A,SHORT,0~1200,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",DC discharge current limitation,current,measurement,
+x351.6,Battery discharge voltage,Battery discharge voltage,0.1V,USHORT,41~48,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",Voltage discharge limit,voltage,measurement,
+x355.0,State of Charge,State of Charge,%,USHORT,0~100,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",State of Charge (SOC) value from an external BMS,battery,measurement,
+x355.2,State of Health,State of Health,%,USHORT,0~100,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",State of Health (SOH) value from external Battery Management,,measurement,
+x355.4,High Res State of Charge,High Res State of Charge,0.01%,USHORT,0~100,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",High resolution SOC value: It allows more sophisticated protection of the battery,battery,measurement,
+x356.0,Battery Voltage,Battery Voltage,0.01V,SHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",Measured actual Battery Voltage value from external BMS,voltage,measurement,
+x356.2,Battery Current,Battery Current,0.1A,SHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",Measured actual Battery Current value from external BMS,current,measurement,
+X356.4,Battery Temperature,Battery Temperature,0.1C,SHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",Measured actual Battery Temperature value from external BMS,temperature,measurement,
+x35A,,External Alarm 1,,8BIT_FLAGS,,,,,"SMA external-BMS CAN spec 0x35A: byte 0; each condition is a pair of bits, ""arrive"" (even bit) and ""leave"" (odd bit). Only conditions that have arrived are listed",,,
+x35A.1,,External Alarm 2,,8BIT_FLAGS,,,,,"SMA external-BMS CAN spec 0x35A: byte 1; each condition is a pair of bits, ""arrive"" (even bit) and ""leave"" (odd bit). Only conditions that have arrived are listed",,,
+x35A.2,,External Alarm 3,,8BIT_FLAGS,,,,,"SMA external-BMS CAN spec 0x35A: byte 2; each condition is a pair of bits, ""arrive"" (even bit) and ""leave"" (odd bit). Only conditions that have arrived are listed",,,
+x35A.3,,External Alarm 4,,8BIT_FLAGS,,,,,"SMA external-BMS CAN spec 0x35A: byte 3; each condition is a pair of bits, ""arrive"" (even bit) and ""leave"" (odd bit). Only conditions that have arrived are listed",,,
+x35A.4,,External Warning 1,,8BIT_FLAGS,,,,,"SMA external-BMS CAN spec 0x35A: byte 4, same layout as the alarms",,,
+x35A.5,,External Warning 2,,8BIT_FLAGS,,,,,"SMA external-BMS CAN spec 0x35A: byte 5, same layout as the alarms",,,
+x35A.6,,External Warning 3,,8BIT_FLAGS,,,,,"SMA external-BMS CAN spec 0x35A: byte 6, same layout as the alarms",,,
+x35A.7,,External Warning 4,,8BIT_FLAGS,,,,,"SMA external-BMS CAN spec 0x35A: byte 7, same layout as the alarms",,,
+x35E,,Manufacturer Name,,ASCII,,,,,"SMA external-BMS CAN spec 0x35E, 8 ASCII characters",,,diagnostic
+x35F,,Battery Type,,ASCII.2,,,,,0x35F bytes 0-1,,,diagnostic
+x35F.2,,BMS Version,,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",0x35F bytes 2-3,,,diagnostic
+x35F.4,,Battery Capacity,,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",0x35F bytes 4-5; the unit is not stated in the sources reviewed,,,diagnostic
+x35F.6,,Manufacturer ID,,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",0x35F bytes 6-7,,,diagnostic

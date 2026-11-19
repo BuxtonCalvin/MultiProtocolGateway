@@ -422,32 +422,40 @@ Extract `.value` when processing in Node-RED, Home Assistant, or a custom script
 The GX device exposes all connected Victron hardware via **Modbus TCP on port 502**. This provides
 a conventional polling-based access path that an MPG module can use directly.
 
-| Device | Unit ID |
-| --- | --- |
-| System overview (aggregated) | 100 |
-| MultiPlus / Quattro | 246 |
-| BMV Battery Monitor | 245 |
-| SmartSolar MPPT (first VE.Direct slot) | 229 |
-| SmartSolar MPPT (second VE.Direct slot) | 230 |
-| SmartSolar MPPT (third VE.Direct slot) | 231 |
-| Grid meter | 210 |
+Unit IDs are assigned by **device instance**, so they differ between installations. The system overview
+is always unit ID 100; every other device (MultiPlus, battery monitor, solar charger, meter) has the
+unit ID shown in the GX device under **Settings > Services > Modbus-TCP > Available services**. Use that
+value for `address` in the MPG configuration.
 
-**Key registers (unit ID 246 — MultiPlus):**
+**Key registers** (Victron CCGX Modbus-TCP register list 3.30; the register is divided by the scale factor):
 
-| Register | Description | Scale |
-| --- | --- | --- |
-| 3 | AC input voltage L1 (V) | ÷10 |
-| 6 | AC output voltage L1 (V) | ÷10 |
-| 9 | AC output current L1 (A) | ÷10 |
-| 12 | AC output power L1 (W) | ÷1 |
-| 843 | Battery voltage (V) | ÷100 |
-| 844 | Battery current (A) | ÷10 |
-| 845 | Battery SOC (%) | ÷10 |
+| Service | Register | Description | Scale |
+| --- | --- | --- | --- |
+| VE.Bus (MultiPlus / Quattro) | 3 | AC input voltage L1 (V) | divide by 10 |
+| VE.Bus | 6 | AC input current L1 (A) | divide by 10 |
+| VE.Bus | 9 | AC input frequency L1 (Hz) | divide by 100 |
+| VE.Bus | 15 | AC output voltage L1 (V) | divide by 10 |
+| VE.Bus | 18 | AC output current L1 (A) | divide by 10 |
+| VE.Bus | 23 | AC output power L1 (VA or W) | multiply by 10 |
+| System (unit ID 100) | 840 | Battery voltage (V) | divide by 10 |
+| System | 841 | Battery current (A) | divide by 10 |
+| System | 842 | Battery power (W) | 1 |
+| System | 843 | Battery state of charge (%) | 1 |
 
 Full register maps are provided in the CSV files described in Section 15.
 
 Full Modbus TCP register map (official Victron documentation):
 <https://www.victronenergy.com/live/ccgx:modbustcp_faq>
+
+---
+
+### CAN-bus BMS batteries (`victron_gx_generic_canbus`)
+
+Batteries that talk to a GX device over its **BMS-Can** port send a fixed set of CAN frames at **500 kbit/s**, little endian: `0x351` charge and discharge limits, `0x355` SOC and SOH, `0x356` voltage, current and temperature, `0x35A` alarms and warnings, `0x35E` manufacturer, `0x35F` battery information, and `0x370` to `0x381` names, module status, cell extremes, energy and capacity. The map is for the **battery's output**, which is the same set Pylontech V1.3 and SMA's Sunny Island use (see [Pylon.md](Pylon.md) and [SMA.md](SMA.md)).
+
+Victron does not publish this protocol (its staff cite an NDA). The frame layouts come from SMA's *Connecting batteries with external BMS to Sunny Island* document, the Pylontech documents and open implementations such as SimpBMS, which agree. Earlier versions of the map read 16-bit values big endian (a SOC of 87 came out as 22272), declared 250 kbit/s, and included the Sunny Island's own frames (`0x305` to `0x307`) that a battery never sends; those are in `sma_sunny_island_canbus`.
+
+`0x35A` carries each alarm or warning as a pair of bits, "arrive" (even bit) and "leave" (odd bit), and the variables list only the conditions that have arrived. `0x373` temperatures are in kelvin and `0x378` energies in units of 100 Wh; both are converted.
 
 ---
 
@@ -567,14 +575,16 @@ protocol_version = victron_vedirect_text_v1
 | `ERR` | ✓ | ✓ | ✓ | Error code |
 | `MPPT` | ✓ | — | — | MPPT tracker mode |
 | `H20` | ✓ | — | — | Yield today (0.01 kWh) |
-| `H19` | ✓ | — | — | Yield yesterday (0.01 kWh) |
+| `H22` | ✓ | — | — | Yield yesterday (0.01 kWh) |
+| `H19` | ✓ | — | — | Yield total, a user-resettable counter (0.01 kWh) |
+| `H9` | — | ✓ | — | Seconds since the last full charge |
 | `SOC` | — | ✓ | — | State of charge (0.1%) |
 | `TTG` | — | ✓ | — | Time to go (minutes) |
 | `CE` | — | ✓ | — | Consumed energy (mAh) |
 | `Alarm` | ✓ | ✓ | ✓ | Alarm active (ON/OFF) |
 | `Relay` | ✓ | ✓ | — | Relay state (ON/OFF) |
 
-All fields are documented in `victron_vedirect_serial_text_protocol_fields.csv`.
+All fields are in `victron_vedirect_serial.holding_registry_map.csv`. In an earlier version `H9` was labelled "days since last full" and `H17` to `H23` were assigned to the wrong quantities; they now follow the VE.Direct protocol 3.34 table.
 
 ---
 
@@ -726,26 +736,34 @@ The following CSV files provide complete holding register and serial field maps 
 product in the MPG column format
 (`register, variable_name, documented_name, unit, data_type, values, read_interval, writable, note`).
 
-| File | Device | Interface | Protocol |
-| --- | --- | --- | --- |
-| `victron_multiplus_quattro_holding_registers.csv` | MultiPlus / MultiPlus-II / Quattro | Modbus TCP (unit ID 246) | Modbus TCP via GX |
-| `victron_smartsolar_mppt_holding_registers.csv` | SmartSolar / BlueSolar MPPT | Modbus TCP (unit IDs 229–231) | Modbus TCP via GX |
-| `victron_bmv_battery_monitor_holding_registers.csv` | BMV-700 / 702 / 712 | Modbus TCP (unit ID 245) | Modbus TCP via GX |
-| `victron_venus_gx_system_overview_registers.csv` | Venus OS system overview | Modbus TCP (unit ID 100) | Modbus TCP via GX |
-| `victron_phoenix_inverter_holding_registers.csv` | Phoenix Inverter (Smart) | Modbus TCP (unit ID varies) | Modbus TCP via GX |
-| `victron_mk3usb_vebus_serial_fields.csv` | MultiPlus / Quattro | MK3-USB → USB serial | VE.Bus binary (MK3) |
-| `victron_vedirect_serial_text_protocol_fields.csv` | MPPT / BMV / Phoenix | VE.Direct → USB serial | VE.Direct ASCII text |
+| File (in `protocols/victron/`) | Device | Source |
+| --- | --- | --- |
+| `victron_gx_v3.3.holding_registry_map.csv` | System and VE.Bus summary registers | CCGX Modbus-TCP list |
+| `victron_venus_gx_system.holding_registry_map.csv` | Venus OS system overview (unit ID 100) | CCGX list, `com.victronenergy.system` |
+| `victron_multiplus_quattro.holding_registry_map.csv` | MultiPlus / MultiPlus-II / Quattro | CCGX list, `com.victronenergy.vebus` |
+| `victron_bmv_battery_monitor.holding_registry_map.csv` | BMV-700 / 702 / 712 and other battery monitors | CCGX list, `com.victronenergy.battery` |
+| `victron_smartsolar_mppt.holding_registry_map.csv` | SmartSolar / BlueSolar MPPT | CCGX list, `com.victronenergy.solarcharger` |
+| `victron_phoenix_inverter.holding_registry_map.csv` | Phoenix inverters (VE.Direct) | CCGX list, `com.victronenergy.inverter` |
+| `victron_gx_generic_canbus.holding_registry_map.csv` | CAN-bus BMS batteries | CAN frames, see below |
+| `victron_vedirect_serial.holding_registry_map.csv` | MPPT / BMV / Phoenix over VE.Direct | VE.Direct protocol 3.34 |
+| `victron_mk3usb_vebus.holding_registry_map.csv` | MultiPlus / Quattro over MK3-USB | Placeholder, see below |
 
 ### Notes on CSV Usage
 
-- Modbus TCP register numbers match the official Victron Modbus TCP register map. Verify against
-  <https://www.victronenergy.com/live/ccgx:modbustcp_faq> for firmware-specific additions.
+- The Modbus register maps are generated from Victron's *CCGX Modbus-TCP register list* (3.30, kept in
+  `documentation/3rdparty/protocols`), one service per file, and are read-only. Victron's scale factors
+  mean **divide the register by the factor** (battery voltage, factor 100: 5123 is 51.23 V; consumed Ah,
+  factor -10, is negative). The vendor marks some registers writable (modes, limits, relays); the generated maps
+  publish them read-only. Earlier versions of these maps used register numbers that belonged to different
+  quantities in the vendor list (the system battery voltage was read from 800, which is the serial number),
+  `victron_gx_v3.3` applied the factors as multipliers (230.1 V published as 23010), and
+  `victron_bmv_battery_monitor` loaded no registers at all because its file was misnamed.
 - VE.Direct field labels (`V`, `PPV`, `CS`, etc.) are ASCII text labels, not numeric register
   addresses. The `register` column in those CSVs carries the label string.
-- MK3-USB field identifiers (`F_AC_IN_V_L1`, etc.) are logical names assigned for MPG mapping;
-  the actual binary protocol uses frame IDs defined in the Victron MK2 protocol specification.
-- All scaling factors (divide-by values) are documented in the `note` column of each CSV.
-- Writable registers are marked `R/W` in the `writable` column; read-only registers are marked `R`.
+- The MK3-USB identifiers (`F_AC_IN_V_L1`, etc.) are placeholder names that do not appear in Victron's MK2
+  protocol document, which addresses RAM variables by ID. There is no `serial_vebus` transport yet, so this
+  protocol cannot run.
+- Scale factors are in the `unit` column as the multiplier MPG applies (`0.1V` for a register that is divided by 10).
 
 ---
 

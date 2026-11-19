@@ -4,25 +4,60 @@
   "send_input_register": false,
   "send_coil_register": false,
   "send_discrete_register": false,
-
   "alarm_codes": {
-    "0": "no alarm",
-    "1": "alarm"
+    "0": "No alarm",
+    "2": "Alarm"
   },
-
-  "relay_state_codes": {
-    "0": "open",
-    "1": "closed"
+  "low_voltage_alarm_codes": {
+    "0": "No alarm",
+    "2": "Alarm"
   },
-
-  "alarm_reason_codes": {
-    "b1":  "low SOC",
-    "b2":  "low voltage",
-    "b4":  "high voltage",
-    "b8":  "low starter voltage",
-    "b16": "high starter voltage",
-    "b32": "low temperature",
-    "b64": "high temperature",
-    "b256": "mid voltage"
+  "high_voltage_alarm_codes": {
+    "0": "No alarm",
+    "2": "Alarm"
+  },
+  "low_starter-voltage_alarm_codes": {
+    "0": "No alarm",
+    "2": "Alarm"
+  },
+  "high_starter-voltage_alarm_codes": {
+    "0": "No alarm",
+    "2": "Alarm"
+  },
+  "low_state-of-charge_alarm_codes": {
+    "0": "No alarm",
+    "2": "Alarm"
+  },
+  "low_temperature_alarm_codes": {
+    "0": "No alarm",
+    "2": "Alarm"
+  },
+  "high_temperature_alarm_codes": {
+    "0": "No alarm",
+    "2": "Alarm"
+  },
+  "mid-voltage_alarm_codes": {
+    "0": "No alarm",
+    "2": "Alarm"
+  },
+  "low_fused-voltage_alarm_codes": {
+    "0": "No alarm",
+    "2": "Alarm"
+  },
+  "high_fused-voltage_alarm_codes": {
+    "0": "No alarm",
+    "2": "Alarm"
+  },
+  "fuse_blown_alarm_codes": {
+    "0": "No alarm",
+    "2": "Alarm"
+  },
+  "high_internal-temperature_alarm_codes": {
+    "0": "No alarm",
+    "2": "Alarm"
+  },
+  "relay_status_codes": {
+    "0": "Open",
+    "1": "Closed"
   }
 }

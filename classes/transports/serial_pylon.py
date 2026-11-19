@@ -26,7 +26,7 @@ from __future__ import annotations
 import struct
 from enum import Enum
 from types import SimpleNamespace
-from typing import Any, Callable
+from typing import Any
 
 from classes.protocol_settings import (
     registry_map_entry,
@@ -270,7 +270,7 @@ class serial_pylon(serial_frame_transport):
         if payload is None or command not in (self.CMD_ANALOG, self.CMD_ALARM):
             return payload
 
-        splitter: Callable[..., dict[int, bytes] | None] = self._split_analog if command == self.CMD_ANALOG else self._split_alarm
+        splitter = self._split_analog if command == self.CMD_ANALOG else self._split_alarm
         blocks: dict[int, bytes] | None = splitter(payload)
         if blocks is None:
             self._log.warning(f"Serial Pylon response to 0x{command:04X} is malformed ({len(payload)} bytes); discarded")

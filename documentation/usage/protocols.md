@@ -824,10 +824,10 @@ MPG ships with pre-built protocols for the following devices. All protocols are 
 | `sigenergy_plant` | Sigenergy SigenStor plant-level data (unit 247) | Modbus TCP |
 | `sigineer_v0.11` | Sigineer solar inverter / charger v0.11 | Modbus RTU |
 | `sma_energy_meter_speedwire` | SMA Energy Meter Speedwire | Modbus RTU |
-| `sma_modbus_rtu` | SMA CAN / Modbus RTU map | CAN bus |
+| `sma_modbus_rtu` | SMA Modbus RTU map | Modbus RTU |
 | `sma_sunny_home_manager` | SMA Sunny Home Manager | Modbus RTU |
 | `sma_sunny_island` | SMA Sunny Island | Modbus RTU |
-| `sma_sunny_island_v1` | SMA Sunny Island v1 | Modbus RTU |
+| `sma_sunny_island_canbus` | SMA Sunny Island external-BMS CAN | CAN bus |
 | `sma_sunnyboy_tripower` | SMA Sunny Boy / Tripower | Modbus RTU |
 | `sma_sunspec` | SMA Sunny Boy / Tripower / Highpower SunSpec inverters | Modbus TCP |
 | `sma_tripower_storage_hybrid` | SMA Tripower Storage Hybrid | Modbus RTU |
@@ -844,9 +844,9 @@ MPG ships with pre-built protocols for the following devices. All protocols are 
 | `sungrow_hybrid` | Sungrow SH / RS / RT hybrid inverters | Modbus TCP |
 | `sungrow_sg` | Sungrow SG-series string inverters | Modbus TCP |
 | `victron_bmv_battery_monitor` | Victron BMV battery monitor | Modbus RTU |
-| `victron_gx_generic_canbus` | Victron GX generic CAN bus | CAN bus |
+| `victron_gx_generic_canbus` | CAN-bus BMS batteries (Victron GX, SMA, Pylontech V1.3 frame set) | CAN bus |
 | `victron_gx_v3.3` | Victron GX v3.3 | Modbus RTU |
-| `victron_mk3usb_vebus` | Victron MK3-USB VE.Bus | Modbus RTU |
+| `victron_mk3usb_vebus` | Victron MK3-USB VE.Bus (placeholder) | VE.Bus serial, no transport yet |
 | `victron_multiplus_quattro` | Victron MultiPlus / Quattro | Modbus RTU |
 | `victron_phoenix_inverter` | Victron Phoenix inverter | Modbus RTU |
 | `victron_smartsolar_mppt` | Victron SmartSolar MPPT | Modbus RTU |

@@ -30,6 +30,7 @@ import itertools
 import threading
 import time
 from collections.abc import Iterator
+from types import SimpleNamespace
 from typing import Any
 
 import can
@@ -353,3 +354,52 @@ def test_send_frame_rejects_more_than_eight_bytes(pair: tuple[canbus, can.BusABC
 def test_registry_type_enum_is_unchanged() -> None:
     """The transport relies on CUSTOM_BUS and HOLDING being distinct registry types."""
     assert Registry_Type.CUSTOM_BUS != Registry_Type.HOLDING
+
+
+# --- scheduling ------------------------------------------------------------------------------------------------
+
+
+def test_a_can_transport_has_a_scrape_target_so_the_gateway_polls_it() -> None:
+    """The gateway skips transports whose scrape_target is empty (it takes them for bridges), so canbus was never polled."""
+    transport, peer = _make()
+    try:
+        assert transport.scrape_target
+        assert "growatt_bms_canbus_v1.04" in transport.scrape_target
+    finally:
+        _close(transport, peer)
+
+
+def test_sections_for_different_addresses_on_one_channel_are_separate_scrape_targets() -> None:
+    channel: str = f"pytest_can_{next(_channel_counter)}"
+    values: dict[str, Any] = {"protocol_version": "pylon_hv_can", "port": channel, "interface": "virtual", "baudrate": 500000, "serial_number": "T", "bridge": "x", "poll_frames": "none"}
+    towers: list[canbus] = [canbus(DummySettings(**values, address=n)) for n in (0, 1)]
+    twin = canbus(DummySettings(**values, address=1))  # a second section reading the same tower consolidates with the first
+    try:
+        assert towers[0].scrape_target != towers[1].scrape_target
+        assert towers[1].scrape_target == twin.scrape_target
+    finally:
+        for transport in (*towers, twin):
+            if transport.bus is not None:
+                transport.bus.shutdown()
+
+
+def test_the_gateway_schedules_can_sections_one_group_per_tower() -> None:
+    """Through the gateway's own grouping: a CAN section is a scraper, a section with no scrape_target is a bridge."""
+    from protocol_gateway import Protocol_Gateway, ScrapeGroup
+
+    channel: str = f"pytest_can_{next(_channel_counter)}"
+    values: dict[str, Any] = {"protocol_version": "pylon_hv_can", "port": channel, "interface": "virtual", "baudrate": 500000, "serial_number": "T", "bridge": "x", "poll_frames": "none"}
+    tower0, tower1, tower1_again = (canbus(DummySettings(**values, address=n)) for n in (0, 1, 1))
+    bridge: Any = SimpleNamespace(scrape_target="")  # what a bridge (MQTT, Home Assistant) reports
+
+    gateway: Protocol_Gateway = Protocol_Gateway.__new__(Protocol_Gateway)
+    gateway._Protocol_Gateway__transports = [tower0, tower1, tower1_again, bridge]  # type: ignore[attr-defined]
+    try:
+        groups: list[ScrapeGroup] = gateway._build_scrape_groups()
+
+        assert len(groups) == 2  # tower 0, and tower 1 read once for both of its sections
+        assert sorted(len(group.members) for group in groups) == [1, 2]
+    finally:
+        for transport in (tower0, tower1, tower1_again):
+            if transport.bus is not None:
+                transport.bus.shutdown()
