@@ -38,6 +38,7 @@ import re
 from ..protocol_settings import protocol_settings
 from .base import DiscoveryProvider, DiscoveryReader, DiscoveryResult
 from .probes import ProbeSpec, decode_ascii, parse_probes, run_probes
+from .startup import StartupCache, StartupResult, read_startup_values
 from .sunspec import SunSpecProvider
 
 __all__: list[str] = [
@@ -45,10 +46,13 @@ __all__: list[str] = [
     "DiscoveryReader",
     "DiscoveryResult",
     "ProbeSpec",
+    "StartupCache",
+    "StartupResult",
     "SunSpecProvider",
     "decode_ascii",
     "get_discovery_provider",
     "parse_probes",
+    "read_startup_values",
     "run_discovery",
     "run_probes",
 ]

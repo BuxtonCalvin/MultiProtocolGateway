@@ -7,8 +7,51 @@
   "send_input_register": false,
   "send_coil_register": false,
   "send_discrete_register": false,
-
   "context_variables": {
     "power_scale": "{pt_ratio}*{ct_ratio}"
+  },
+  "record_blocks": {
+    "history_month": {
+      "registry": "holding",
+      "address": "0x1001",
+      "records": 48,
+      "words": 60,
+      "address_step": 1
+    },
+    "history_day": {
+      "registry": "holding",
+      "address": "0x1101",
+      "records": 90,
+      "words": 60,
+      "address_step": 1
+    },
+    "event": {
+      "registry": "holding",
+      "address": "0x3001",
+      "records": 100,
+      "words": 6,
+      "address_step": 1
+    }
+  },
+  "unreadable_registers": {
+    "holding": [
+      "0x0067-0x0076",
+      "0x0090",
+      "0x0098-0x00B1",
+      "0x00C4-0x0120",
+      "0x0123-0x0163",
+      "0x019C-0x01FF",
+      "0x0285-0x05DC",
+      "0x06B3-0x06FF",
+      "0x072A-0x1FFF"
+    ]
+  },
+  "event_numbers": {
+    "256": "Power on",
+    "257": "Power off",
+    "512": "Clear",
+    "768": "DO action",
+    "1024": "UI record",
+    "1792": "Time calibration"
   }
 }

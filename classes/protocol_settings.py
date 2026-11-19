@@ -337,6 +337,52 @@ class Registry_Type(Enum):
     INPUT = 0x04
 
 
+VIRTUAL_REGISTER_BASE: int = 0x1000000
+""" Register numbers at or above this are not wire addresses.  They are the in-memory addresses of the fields of
+a *record block* (see ``RecordBlock``), so that one record can be decoded through the normal register machinery
+without colliding with real registers.  Entries there are never polled and never part of the register map size. """
+
+RECORD_BLOCK_SPAN: int = 0x10000
+""" Virtual addresses reserved per record block (so at most 256 records of up to 256 words each). """
+
+RECORD_WORD_SPAN: int = 0x100
+""" Virtual addresses reserved per record. """
+
+
+@dataclass(frozen=True)
+class RecordBlock:
+    """A block of records a device returns whole, declared under ``record_blocks`` in the protocol JSON.
+
+    Some meters expose history and event logs as numbered *records*: reading ``words`` registers at the record's
+    address returns the whole record, and the same fields repeat in every record.  Record ``k`` (1-based) is read
+    at ``address + (k - 1) * address_step``.  The fields are described once, in template rows of the CSV that use
+    ``{i}`` and ``[<name>_{i}_base+<word offset>]`` (the offset is a word offset inside the record).
+    """
+
+    name: str
+    registry_type: Registry_Type
+    address: int
+    records: int
+    words: int
+    address_step: int
+    index: int
+
+    def handle(self, record: int) -> int:
+        """Wire address to read for ``record`` (1-based)."""
+        return self.address + (record - 1) * self.address_step
+
+    def virtual_base(self, record: int) -> int:
+        """In-memory base address of ``record``'s fields (an anchor value for the template rows)."""
+        return VIRTUAL_REGISTER_BASE + self.index * RECORD_BLOCK_SPAN + (record - 1) * RECORD_WORD_SPAN
+
+    def record_of(self, virtual_register: int) -> int | None:
+        """Record number (1-based) a virtual register belongs to, or None if it is not in this block."""
+        relative: int = virtual_register - VIRTUAL_REGISTER_BASE - self.index * RECORD_BLOCK_SPAN
+        if relative < 0 or relative >= self.records * RECORD_WORD_SPAN:
+            return None
+        return relative // RECORD_WORD_SPAN + 1
+
+
 @dataclass
 class registry_map_entry:
     registry_type: Registry_Type
@@ -420,6 +466,11 @@ class registry_map_entry:
     the CSV register cell) rather than written literally.  Runtime-only: it is never read from or written to a CSV,
     so discovered rows cannot be committed back and analysis tools can tell them apart from static rows.  Always
     False for static protocol maps. '''
+
+    read_at_startup: bool = False
+    ''' True when the "read interval" cell is ``startup``: the register is read once per connection by the startup
+    routine (``classes/discovery/startup.py``), not polled.  The decoded value is cached in
+    ``protocol_settings.static_values`` and published with every poll cycle.  Always True for record block fields. '''
 
     def __str__(self) -> str:
         """Return the entry's ``variable_name`` as its string representation."""
@@ -1624,6 +1675,14 @@ class protocol_settings:
         self.dynamic_registry_types: set[Registry_Type] = set()
         ''' registry types whose CSV contains template rows and so must be reloaded when the anchors change '''
         self.codes: dict[str, object] = {}
+        self.static_values: dict[str, int | float | str] = {}
+        ''' decoded values of the ``startup`` rows (and record block rows), filled by the startup routine on connect.
+        Context formulas can use them, and the transport adds them to every poll cycle's data. '''
+        self.unreadable_registers: dict[Registry_Type, list[tuple[int, int]]] = {}
+        ''' inclusive (first, last) register ranges the manufacturer documents as reserved/unreadable (JSON
+        ``unreadable_registers``); a read request never spans one. '''
+        self.record_blocks: dict[str, RecordBlock] = {}
+        ''' record blocks declared under ``record_blocks`` in the protocol JSON, by name '''
         self.settings: dict[str, str] = {}
         self.variable_mask: list[str] = []
         self.mask_file_name: str = ""
@@ -1664,6 +1723,8 @@ class protocol_settings:
 
         self.load__json()
         self._init_discovery_settings()
+        self._init_record_blocks()
+        self._init_unreadable_registers()
 
         if "transport" in self.settings:
             self.transport = self.settings["transport"]
@@ -1997,8 +2058,12 @@ class protocol_settings:
             row["documented name"] = row["documented name"].strip().lower().replace(" ", "_")
 
             # region read_interval
+            read_at_startup: bool = False
             if "read interval" in row:
                 row["read interval"] = row["read interval"].lower()
+                if row["read interval"].strip() in ("startup", "once"):
+                    # read once per connection by the startup routine, never polled
+                    read_at_startup = True
                 match: re.Match[str] | None = read_interval_regex.search(row["read interval"])
                 if match:
                     unit: str | None = match.group("unit")
@@ -2119,6 +2184,18 @@ class protocol_settings:
             value_min, value_max = Data_Type.getDefaultRange(data_type)
             value_regex: str = ""
             value_is_json: bool = False
+
+            if row["values"].startswith("@"):
+                # "@name" names a code table defined once in the protocol JSON (a key "name" holding an object), so
+                # many rows, including every record of a template row, can share it instead of repeating it.
+                shared_table: object = self.codes.get(row["values"][1:].strip())
+                if isinstance(shared_table, dict):
+                    value_is_json = True
+                    shared_name: str = row["documented name"] + "_codes"
+                    if shared_name not in self.codes:
+                        self.codes[shared_name] = shared_table
+                else:
+                    self._log.warning(f"[{self.protocol}] values '{row['values']}' names no code table in the protocol JSON")
 
             if "{" in row["values"]:
                 try:
@@ -2326,6 +2403,7 @@ class protocol_settings:
                     value_regex=value_regex,
                     read_command=read_command,
                     read_interval=read_interval,
+                    read_at_startup=read_at_startup or register >= VIRTUAL_REGISTER_BASE,
                     write_mode=writeMode,
                     has_enum_mapping=value_is_json,
                     ha_device_class=(row.get("ha device class") or "").strip().lower(),
@@ -2651,14 +2729,20 @@ class protocol_settings:
         timestamp_ms: float = timestamp * 1000 if timestamp > 0 else float(time.time() * 1000)
         ranges: list[tuple[int, int]] = []
         step: int = self.register_address_step
+        # Startup rows and record block fields are never polled.  Filter them out once instead of scanning them
+        # again in every window (a protocol with record blocks has thousands of such entries).
+        polled_entries: list[registry_map_entry] = [
+            item for item in registry_map if item.register < VIRTUAL_REGISTER_BASE and not item.read_at_startup
+        ]
 
         for start in range(0, max_register + 1, max_batch_size):
             end: int = start + max_batch_size
 
             window_min = None
             window_max = None
+            window_spans: list[tuple[int, int]] = []
 
-            for register in registry_map:
+            for register in polled_entries:
                 if start <= register.register < end:
                     if register.write_mode in (WriteMode.READDISABLED, WriteMode.WRITEONLY):
                         continue
@@ -2679,9 +2763,13 @@ class protocol_settings:
                             window_min: int | None = register.register
                         if window_max is None or register_end > window_max:
                             window_max: int | None = register_end
+                        window_spans.append((register.register, register_end))
 
             if window_min is not None and window_max is not None:
-                ranges.append((window_min, (window_max - window_min) // step + 1))
+                if getattr(self, "unreadable_registers", None) and registry_map:
+                    ranges.extend(self.merge_readable_spans(registry_map[0].registry_type, window_spans))
+                else:
+                    ranges.append((window_min, (window_max - window_min) // step + 1))
 
         return ranges
 
@@ -2742,6 +2830,8 @@ class protocol_settings:
 
         size: int = 0
         for item in self.registry_map[registry_type]:
+            if item.register >= VIRTUAL_REGISTER_BASE:
+                continue            # record block field: not a wire address, never polled
             if item.register_list:
                 item_end_register: int = max(item.register_list)
             else:
@@ -3477,8 +3567,11 @@ class protocol_settings:
 
         # Protocol-level named expressions ("context_variables" in the JSON) are evaluated once from the
         # decoded values, then offered to every row's Context formula behind the real variables.
-        derived_context: dict[str, float] = self._adjustments.evaluate_context_variables(info)
-        context_view: Mapping[str, int | float | str] = ChainMap(info, cast(dict[str, int | float | str], derived_context))
+        # Values read once at startup (pt_ratio and the like) are not in a poll pass's registry, but Context
+        # formulas may still need them, so they sit behind the values decoded in this pass.
+        static_context: dict[str, int | float | str] = getattr(self, "static_values", {})
+        derived_context: dict[str, float] = self._adjustments.evaluate_context_variables(ChainMap(info, static_context) if static_context else info)
+        context_view: Mapping[str, int | float | str] = ChainMap(info, cast(dict[str, int | float | str], derived_context), static_context)
         for entry in registry_map:
             if entry.variable_name in info:
                 info[entry.variable_name] = self._adjustments.apply_adjustments(info[entry.variable_name], entry, "context", context_view)
@@ -3588,6 +3681,148 @@ class protocol_settings:
         Static protocols (the great majority) return False, and the transport skips discovery entirely.
         """
         return bool(self.discovery_provider) or "discovery_probes" in self.codes
+
+    # ------------------------------------------------------------------
+    # Startup rows, record blocks and unreadable registers
+    # ------------------------------------------------------------------
+
+    def _init_record_blocks(self) -> None:
+        """Read ``record_blocks`` from the protocol JSON and seed the template anchors for their records.
+
+        Each block describes numbered records the device returns whole (history, event logs).  For a block named
+        ``history_month`` the anchors ``history_month_count`` (the number of records) and ``history_month_<k>_base``
+        (the in-memory address of record ``k``) are defined, so one template row such as
+        ``[history_month_{i}_base+2]`` becomes one entry per record.  See ``RecordBlock``.
+        """
+        raw: object = self.codes.get("record_blocks")
+        if raw is None:
+            return
+        if not isinstance(raw, dict):
+            self._log.warning(f"[{self.protocol}] ignoring record_blocks: expected a JSON object")
+            return
+        index: int = 0
+        for name, spec in cast("dict[str, object]", raw).items():
+            if not isinstance(spec, dict):
+                self._log.warning(f"[{self.protocol}] ignoring record block '{name}': expected an object")
+                continue
+            fields: dict[str, object] = cast("dict[str, object]", spec)
+            try:
+                registry_name: str = str(fields.get("registry", "holding")).strip().lower()
+                registry_type: Registry_Type = Registry_Type[registry_name.upper()]
+                address: int = self._parse_register_number(fields["address"])
+                records: int = int(cast("int | str", fields["records"]))
+                words: int = int(cast("int | str", fields["words"]))
+                step: int = int(cast("int | str", fields.get("address_step", 1)))
+            except (KeyError, ValueError, TypeError):
+                self._log.warning(f"[{self.protocol}] ignoring record block '{name}': needs registry, address, records and words")
+                continue
+            if not (1 <= records <= RECORD_BLOCK_SPAN // RECORD_WORD_SPAN) or not (1 <= words * self.register_address_step <= RECORD_WORD_SPAN) or step < 1:
+                self._log.warning(f"[{self.protocol}] ignoring record block '{name}': records 1-256, words 1-256 (counted in address units), address_step >= 1")
+                continue
+            block = RecordBlock(str(name), registry_type, address, records, words, step, index)
+            index += 1
+            self.record_blocks[block.name] = block
+            self.anchor_defaults[f"{block.name}_count"] = records
+            for record in range(1, records + 1):
+                self.anchor_defaults[f"{block.name}_{record}_base"] = block.virtual_base(record)
+        self.anchors = dict(self.anchor_defaults)
+
+    @staticmethod
+    def _parse_register_number(value: object) -> int:
+        """Parse a register number written as an int, ``"0x1001"`` or a decimal string (leading zeros allowed)."""
+        if isinstance(value, bool) or not isinstance(value, (int, str)):
+            raise TypeError("register number must be an int or a string")
+        if isinstance(value, int):
+            return value
+        text: str = value.strip()
+        return int(text, 16) if text.lower().startswith("0x") else int(text, 10)
+
+    def _init_unreadable_registers(self) -> None:
+        """Read ``unreadable_registers`` from the protocol JSON.
+
+        An object of registry type (``holding``, ``input``, ``coil``, ``discrete``) to a list of addresses or
+        inclusive ranges (``"0x0067-0x0076"``, ``"0x0090"``, or numbers).  These are registers the manufacturer
+        documents as reserved or not readable; a meter may refuse a whole request that touches one, so read
+        ranges are split around them (see ``merge_readable_spans``).
+        """
+        raw: object = self.codes.get("unreadable_registers")
+        if raw is None:
+            return
+        if not isinstance(raw, dict):
+            self._log.warning(f"[{self.protocol}] ignoring unreadable_registers: expected a JSON object")
+            return
+        for registry_name, items in cast("dict[str, object]", raw).items():
+            try:
+                registry_type: Registry_Type = Registry_Type[str(registry_name).strip().upper()]
+            except KeyError:
+                self._log.warning(f"[{self.protocol}] ignoring unreadable_registers for unknown registry type '{registry_name}'")
+                continue
+            if not isinstance(items, list):
+                self._log.warning(f"[{self.protocol}] ignoring unreadable_registers.{registry_name}: expected a list")
+                continue
+            spans: list[tuple[int, int]] = []
+            for item in cast("list[object]", items):
+                try:
+                    if isinstance(item, str) and "-" in item:
+                        first_text, last_text = item.split("-", 1)
+                        first: int = self._parse_register_number(first_text)
+                        last: int = self._parse_register_number(last_text)
+                    else:
+                        first = last = self._parse_register_number(item)
+                except (ValueError, TypeError):
+                    self._log.warning(f"[{self.protocol}] ignoring unreadable_registers entry {item!r}")
+                    continue
+                if first > last:
+                    first, last = last, first
+                spans.append((first, last))
+            self.unreadable_registers[registry_type] = sorted(spans)
+
+    def is_unreadable(self, registry_type: Registry_Type, first: int, last: int | None = None) -> bool:
+        """True when any register from ``first`` to ``last`` (inclusive) is documented as unreadable."""
+        end: int = first if last is None else last
+        unreadable: dict[Registry_Type, list[tuple[int, int]]] = getattr(self, "unreadable_registers", {})
+        return any(low <= end and first <= high for low, high in unreadable.get(registry_type, ()))
+
+    def merge_readable_spans(self, registry_type: Registry_Type, spans: list[tuple[int, int]]) -> list[tuple[int, int]]:
+        """Merge ``(first, last)`` register spans into ``(start, count)`` read ranges that never cross an unreadable register.
+
+        Two spans share a request only when no unreadable register lies between them; with no unreadable
+        registers this returns the single tightest range, exactly as before.  A span that itself touches an
+        unreadable register is dropped (logged once per read) because the meter would refuse it.
+        """
+        usable: list[tuple[int, int]] = []
+        for first, last in sorted(spans):
+            if self.is_unreadable(registry_type, first, last):
+                self._log.warning(f"[{self.protocol}] skipping registers {first}-{last}: the manufacturer documents them as unreadable")
+                continue
+            usable.append((first, last))
+        ranges: list[tuple[int, int]] = []
+        step: int = self.register_address_step
+        current_first: int | None = None
+        current_last: int = 0
+        for first, last in usable:
+            if current_first is None:
+                current_first, current_last = first, last
+                continue
+            gap_first: int = current_last + 1
+            gap_last: int = first - 1
+            if gap_first > gap_last or not self.is_unreadable(registry_type, gap_first, gap_last):
+                current_last = max(current_last, last)           # adjacent, overlapping, or nothing unreadable between
+            else:
+                ranges.append((current_first, (current_last - current_first) // step + 1))
+                current_first, current_last = first, last
+        if current_first is not None:
+            ranges.append((current_first, (current_last - current_first) // step + 1))
+        return ranges
+
+    @property
+    def has_startup_registers(self) -> bool:
+        """True when any readable row is read by the startup routine (a ``startup`` row or a record block field)."""
+        return any(
+            entry.read_at_startup and entry.write_mode not in (WriteMode.READDISABLED, WriteMode.WRITEONLY)
+            for entries in self.registry_map.values()
+            for entry in entries
+        )
 
     def _expand_template_row(self, row: dict[str, str], registry_type: Registry_Type) -> list[dict[str, str]]:
         """Expand one CSV row that uses anchors into the concrete row(s) the normal parser can read.

@@ -36,7 +36,7 @@ from pymodbus.pdu import ModbusPDU
 from defs.common import TransportSettings, strtobool
 
 from .. import eg4_metadata
-from ..discovery import DiscoveryResult, run_discovery
+from ..discovery import DiscoveryResult, StartupCache, run_discovery
 from ..protocol_settings import (
     Data_Type,
     Registry_Type,
@@ -333,6 +333,9 @@ class modbus_base(transport_base):
     baudrate: int = 0       # Serial only — 0 means not applicable
 
 
+    _startup_cache: StartupCache | None = None
+    """ values of the protocol's ``startup`` rows and record blocks, read once per connection (see classes/discovery/startup.py) """
+
     def __init__(self, settings : TransportSettings) -> None:
         """Scheduling path: N/A — setup, runs once regardless of read_mode."""
         super().__init__(settings)
@@ -553,6 +556,11 @@ class modbus_base(transport_base):
                     f"Transport {self.transport_name} failed computing EG4 synthetic "
                     f"post-process fields — continuing without them this cycle."
                 )
+        # Rows read once at connect (read interval "startup", record blocks) are not polled, so add their cached
+        # values to each cycle here.  They have registry entries, so unlike the synthetic fields above they stay
+        # selectable, maskable and screenable in the web UI.
+        if self._startup_cache is not None:
+            self._startup_cache.merge_into(info)
         return info
 
     @property
@@ -1288,6 +1296,42 @@ class modbus_base(transport_base):
             changed = False
         return changed
 
+    def startup_cache(self) -> StartupCache:
+        """Return this transport's startup cache, creating it on first use."""
+        if self._startup_cache is None:
+            self._startup_cache = StartupCache(self._protocol, self._log)
+        return self._startup_cache
+
+    def read_startup_registers(self) -> None:
+        """Scheduling path: N/A — setup, runs once per connect/reconnect regardless of read_mode.
+
+        Read the protocol's ``startup`` rows and record blocks (see ``classes.discovery.startup``) and cache the
+        decoded values for ``post_process_data`` and for Context formulas.  A protocol without such rows is not
+        touched.  Never raises: a fault here must not stop the connection coming up.
+        """
+        cache: StartupCache = self.startup_cache()
+        if not cache.enabled:
+            return
+        try:
+            cache.reset()
+            cache.refresh(self, time.time())
+        except Exception:
+            self._log.exception(f"[{self.transport_name}] startup read failed — continuing without the startup values.")
+
+    def _start_cycle_tracking(self) -> None:
+        """Scheduling path: All (Sequential, Concurrent, Interleaved).
+
+        Besides the base behavior, retry an incomplete startup read (the device was slow to answer after
+        connecting) at the start of a cycle, a limited number of times, a minute apart.
+        """
+        super()._start_cycle_tracking()
+        cache: StartupCache | None = self._startup_cache
+        if cache is not None and cache.retry_due(time.time()):
+            try:
+                cache.refresh(self, time.time())
+            except Exception:
+                self._log.exception(f"[{self.transport_name}] startup read retry failed.")
+
     def init_after_connect(self) -> None:
         """Scheduling path: N/A — setup, runs once per connect/reconnect regardless of read_mode."""
         # Use transport lock to prevent concurrent access during initialization
@@ -1301,6 +1345,10 @@ class modbus_base(transport_base):
             # the map (identification below included).  A no-op for static protocols; runs on every
             # connect so a reconnect picks up equipment that was added or removed while we were away.
             self.discover_register_structure()
+
+            # Rows whose "read interval" is "startup" (and record blocks such as a meter's history and event log)
+            # are read once now instead of being polled every cycle.  Never raises.
+            self.read_startup_registers()
 
             # Device identification (serial number, and for EG4 protocols,
             # hardware-kind + extended metadata) — runs exactly ONCE per

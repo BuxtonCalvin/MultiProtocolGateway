@@ -24,7 +24,11 @@ A **protocol** is the map between raw register addresses on a hardware device an
   - [Write Mode](#write-mode)
   - [Value Ranges and Codes](#value-ranges-and-codes)
     - [Where Code Tables Live, and Which One Wins](#where-code-tables-live-and-which-one-wins)
+    - [Shared Code Tables](#shared-code-tables)
   - [Per-Register Read Intervals](#per-register-read-intervals)
+    - [Startup Rows (read once per connection)](#startup-rows-read-once-per-connection)
+    - [Record Blocks (history and event logs)](#record-blocks-history-and-event-logs)
+    - [Reserved Registers](#reserved-registers-unreadable_registers)
   - [Unit Multipliers](#unit-multipliers)
 - [How MPG Decodes a Register](#how-mpg-decodes-a-register)
   - [Single 16-bit Register](#single-16-bit-register)
@@ -120,7 +124,10 @@ The `.json` file sets protocol-wide defaults that apply to all registers in the 
 | `discovery_defaults` | Object of anchor name to value used to resolve [template rows](#template-rows-dynamic-register-maps) before (or without) a device. |
 | `discovery_probes` | List of firmware/model string probes that set anchors, for protocols that ship two layouts. See [Dynamic Register Discovery](../architecture/dynamic_register_discovery.md#discovery-probes). |
 | `sunspec_base_address`, `sunspec_registry_type` | Options of the `sunspec` provider: the wire address of the `SunS` marker (default: try 40000, 0, 50000) and `holding` (default) or `input`. |
+| `record_blocks` | Numbered records the device returns whole (history, event logs). See [Record Blocks](#record-blocks-history-and-event-logs). |
+| `unreadable_registers` | Registers the manufacturer documents as reserved or unreadable; reads never span them. See [Reserved Registers](#reserved-registers-unreadable_registers). |
 | `{documented_name}_codes` | Enum or flag code mappings. The key must match a `documented name` column value with `_codes` appended (e.g. `battery_status_codes`). The preferred place for code tables, and it takes precedence over an inline `values` table of the same name; see [Where Code Tables Live](#where-code-tables-live-and-which-one-wins). |
+| any other key holding an object | A named code table that rows share with `values` = `@name`. See [Shared Code Tables](#shared-code-tables). |
 
 ---
 
@@ -210,7 +217,14 @@ A byte offset selects one byte of the register or frame as received. Byte 0 is t
 X311.6        byte 6 of CAN frame 0x311
 ```
 
-For example, a register holding `0x0102` with the address in its high byte and a baud-rate code in its low byte is read as `0x3F.0` (address 1) and `0x3F.1` (code 2).
+A **Modbus** transport delivers every register as an integer word, and byte offsets are not applied to it. To read one byte of a Modbus register, use a bit offset on a `BIT8` row: `.b8` is the high byte and `.b0` the low byte. Both decode identically on every transport:
+
+``` ini
+0x3F.b8       high byte of register 0x3F    (data type BIT8)
+0x3F.b0       low byte of register 0x3F     (data type BIT8)
+```
+
+For example, a register holding `0x0102` with an address in its high byte and a baud-rate code in its low byte reads as `0x3F.b8` (address 1) and `0x3F.b0` (code 2).
 
 #### **How the data type uses the offset**
 
@@ -497,7 +511,7 @@ When no range is given, the valid range defaults to the full range of the `data 
 {"0": "Idle", "1": "Charging", "2": "Discharging", "3": "Fault"}
 ```
 
-Codes can also be defined in the JSON descriptor as `{documented_name}_codes`, which is useful when the code table is large or shared across registers.
+Codes can also be defined in the JSON descriptor as `{documented_name}_codes`, which is useful when the code table is large.
 
 #### Where Code Tables Live, and Which One Wins
 
@@ -519,6 +533,23 @@ What a table produces does not depend on where it was defined:
 - **Enum rows** (numeric keys such as `{"0": "Idle", "1": "Charging"}`) publish the raw number under the variable name and the label under a companion `<variable_name>_desc` variable.
 - **Flag rows** (`8BIT_FLAGS`, `16BIT_FLAGS` and the other flag types, with `bN` keys) publish the names of the set bits, comma separated, as the variable's value. Bits with no name in the table are ignored. A companion `_desc` entry exists for these rows but no text is published for it.
 - A `_desc` entry is added for every row that has a table, unless a variable of that name already exists or is hidden by the variable screen.
+
+#### Shared Code Tables
+
+A table that many rows share, such as the event numbers of a meter's event log, is defined once in the JSON descriptor under any name and referenced from the `values` column with `@name`:
+
+``` json
+{ "event_numbers": { "256": "Power on", "257": "Power off", "512": "Clear" } }
+```
+
+``` ini
+register,variable name,documented name,data type,values
+[event_{i}_base+3],event_{i}_number,Event {i} number,USHORT,@event_numbers
+```
+
+Every row that names the table, including every record of a [template row](#template-rows-dynamic-register-maps), gets the same table (shared, not copied) and the usual `_desc` companion with the text. A name that is not an object in the JSON is ignored with a warning.
+
+As with a table named after a documented name, a JSON table wins over an inline one, and the same table is used wherever it is referenced.
 
 ---
 
@@ -562,8 +593,79 @@ The `read interval` column overrides the transport's default polling interval fo
 | `#x` | Transport interval × # | `3x` with `read_interval=5` → 15s |
 | `#s` | Fixed seconds | `30s` → every 30 seconds |
 | `#ms` | Fixed milliseconds | `500ms` → every 500ms |
+| `startup` | Once per connection, not polled | See [Startup Rows](#startup-rows-read-once-per-connection) |
 
 A value shorter than the transport interval is silently clamped to the transport interval.
+
+#### Startup Rows (read once per connection)
+
+Configuration that rarely changes (transformer ratios, communication settings, pulse constants) and logs (history, events) do not need polling. A row whose `read interval` is `startup` (`once` is accepted too) is read once when the transport connects, and again after a reconnect, by the startup routine in `classes/discovery/startup.py`.
+
+The row is otherwise an ordinary row: it is listed in the register map, can be selected, masked or screened in the web UI, keeps its data type, unit, code table and adjustments, and is skipped when it is marked `RD` or `WO`.
+
+``` ini
+register,variable name,documented name,unit,data type,read interval,writable
+0x008D,pt_ratio,Voltage transfer(PT),,USHORT,startup,RW
+```
+
+- The decoded values are cached and added to **every** poll cycle's data, so bridges and the web UI see them like any other value.
+- Context formulas can use the cached values (`x*{pt_ratio}` in a polled row works although `pt_ratio` is not read in that pass).
+- If the first read is incomplete (the device was slow to answer after connecting), it is retried at the start of a poll cycle, up to three more times, a minute apart. After that the cached values stay as they are until the next connection.
+- A change made at the device is picked up at the next connection, not before.
+- Requests follow the protocol's `batch_size` and never span a [reserved register](#reserved-registers-unreadable_registers).
+
+#### Record Blocks (history and event logs)
+
+Some meters return history and event logs as numbered **records**. Reading `words` registers at a record's address returns the whole record, every record has the same layout, and the meter answers only a whole-record read at exactly that address. A normal read range cannot express this (it would merge neighboring records), so the protocol JSON declares the block:
+
+``` json
+{
+  "record_blocks": {
+    "history_month": { "registry": "holding", "address": "0x1001", "records": 48, "words": 60, "address_step": 1 },
+    "event":         { "registry": "holding", "address": "0x3001", "records": 100, "words": 6 }
+  }
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `registry` | `holding` (default), `input`, `coil` or `discrete`: which map the fields belong to and which function code reads them. |
+| `address` | Address of record 1 (a number or `"0x..."`). |
+| `records` | Number of records (1-256). |
+| `words` | Registers per record (1-256), requested exactly. |
+| `address_step` | Address distance between records. Default `1`. |
+
+Record `k` (1-based) is read at `address + (k - 1) * address_step`. The fields are described **once**, in [template rows](#template-rows-dynamic-register-maps) that use `{i}` for the record number and `[<block name>_{i}_base+<word offset>]` for the position inside the record (the offset counts words from the start of the record, not addresses):
+
+``` ini
+register,variable name,documented name,unit,data type,values,read interval,writable
+[history_month_{i}_base+0].0,history_month_{i}_year,Month {i} year,,BYTE,,startup,RD
+[history_month_{i}_base+2],history_month_{i}_forward_active_energy,Month {i} forward active energy,0.01kWh,UINT,,startup,RD
+[event_{i}_base+3],event_{i}_number,Event {i} number,,USHORT,@event_numbers,startup,RD
+```
+
+- The block name is the stem of the anchors: MPG defines `<name>_count` and `<name>_<k>_base` from the JSON, so the template rows need no other setup.
+- Record fields are always read at startup. They are decoded like any row, including units, code tables and Context formulas.
+- A record is requested only if at least one of its rows is enabled, so shipping the fields `RD` (read disabled) costs nothing until you enable some in the protocol editor.
+- A record that does not answer is skipped. After three unanswered records in a row the block is abandoned (a meter with less history than the block allows is normal), and a device that answered none of its ordinary startup rows is not asked for records at all.
+- In memory the fields have addresses far above any real register (`0x1000000` and up), so they never collide with wire addresses, are never polled, and do not enlarge the register map.
+
+#### Reserved Registers (`unreadable_registers`)
+
+A manufacturer's table often lists reserved ranges between the documented registers, and a meter may refuse a whole read request that touches one. Declare them in the JSON, per registry type, as addresses or inclusive ranges:
+
+``` json
+{
+  "unreadable_registers": {
+    "holding": ["0x0067-0x0076", "0x0090", "0x00C4-0x0120"]
+  }
+}
+```
+
+- A polling window or startup request is split so it never includes one of these registers: two registers share a request only when nothing unreadable lies between them.
+- A row that itself sits on an unreadable register is skipped with a warning.
+- With no `unreadable_registers`, requests are built exactly as before.
+- Where the manual documents a register inside a range it also lists as reserved (an overlap in the manufacturer's table), leave that register out of the list.
 
 ---
 
@@ -610,7 +712,7 @@ For a multi-register entry (e.g. `40_41` with `data type = UINT`):
 
 #### Text Keys (labels and OBIS codes)
 
-Some devices are not addressed by register number at all. VE.Direct sends labelled lines (`V`, `I`, `SOC`), VE.Bus uses named fields (`F_AC_IN_V_L1`), and SMA Speedwire uses OBIS codes (`0:1.8.0`). For these, set `"register_key_type": "text"` in the protocol's JSON:
+Some devices are not addressed by register number at all. VE.Direct sends labeled lines (`V`, `I`, `SOC`), VE.Bus uses named fields (`F_AC_IN_V_L1`), and SMA Speedwire uses OBIS codes (`0:1.8.0`). For these, set `"register_key_type": "text"` in the protocol's JSON:
 
 ``` json
 {
