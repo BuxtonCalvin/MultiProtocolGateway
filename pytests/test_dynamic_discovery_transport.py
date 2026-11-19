@@ -72,6 +72,9 @@ class FakeModbus:
     def update_identifier(self) -> None:
         """Nothing to refresh on the fake."""
 
+    def read_startup_registers(self) -> None:
+        """Nothing to read at startup on the fake."""
+
 
 def test_a_static_protocol_never_touches_the_device() -> None:
     fake: FakeModbus = FakeModbus(load("eastron_eastron_sdm120m"))
