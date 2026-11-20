@@ -421,21 +421,47 @@ class TimescaleDBConnectionManager:
             "keepalives_count": 3,
         }
 
-    def _preflight_update_extensions(self) -> None:
+    # Longest a STARTUP preflight waits, in total across every database/extension pair, for a server that is down or still
+    # starting (both containers restarting together). Shared, not per pair, so an unreachable server delays startup by this
+    # much and not by minutes. Reconnect attempts do not wait: the reconnect worker has its own retry schedule.
+    PREFLIGHT_TIMEOUT_SECONDS: ClassVar[float] = 30.0
+
+    def _preflight_update_extensions(self, wait: bool = True) -> bool:
         """
         Bring timescaledb / timescaledb_toolkit up to the server's version BEFORE any SQLAlchemy connection exists.
         The first session in a database whose extension is older than the image loads the old (now missing) library
         and fails; ALTER EXTENSION ... UPDATE must be the very first statement of a fresh session.
         Covers 'postgres' and 'template1' too, since the Timescale image installs the extension there and new
         databases are copied from template1.
+
+        Args:
+            wait: True (startup) keeps retrying a server that is down or starting, up to PREFLIGHT_TIMEOUT_SECONDS in
+                total; False (reconnect worker) makes one attempt per database/extension and gives up at once.
+
+        Returns:
+            True when the server answered (whatever the outcome for each extension), False when it never did, in which
+            case the remaining databases are skipped because they would only wait out the same deadline.
         """
         if not self.auto_update_extensions:
-            return
+            return True
+        deadline: float = time.monotonic() + (self.PREFLIGHT_TIMEOUT_SECONDS if wait else 0.0)
         for dbname in dict.fromkeys(["postgres", "template1", self.database]):
             for ext_name in ("timescaledb", "timescaledb_toolkit"):
-                self._alter_extension_update_raw(dbname, ext_name)
+                if not self._alter_extension_update_raw(dbname, ext_name, deadline=deadline):
+                    return False
+        return True
 
-    def _alter_extension_update_raw(self, dbname: str, ext_name: str, attempts: int = 30, delay: float = 2.0) -> None:
+    def _alter_extension_update_raw(
+        self, dbname: str, ext_name: str, attempts: int = 30, delay: float = 2.0, deadline: float | None = None
+    ) -> bool:
+        """
+        Run ALTER EXTENSION <ext_name> UPDATE as the first statement of a fresh autocommit session on `dbname`.
+
+        Returns True when the server answered (updated, already current, extension or database absent, or refused for lack of
+        privilege, which is logged), False when it never answered before `attempts` or `deadline` ran out.
+        """
+        if deadline is None:
+            deadline = time.monotonic() + self.PREFLIGHT_TIMEOUT_SECONDS
         for attempt in range(1, attempts + 1):
             raw: psycopg2.extensions.connection | None = None
             try:
@@ -450,21 +476,25 @@ class TimescaleDBConnectionManager:
             except psycopg2.OperationalError as e:
                 msg: str = str(e).lower()
                 if "database" in msg and "does not exist" in msg:
-                    return  # target DB not created yet; _create_database_if_missing will make it
+                    return True  # target DB not created yet; _create_database_if_missing will make it
                 # server down, "starting up", or sessions terminated by a concurrent update: wait and retry
                 self._log.warning(f"preflight: {dbname}/{ext_name} attempt {attempt}/{attempts}: {e}")
-                time.sleep(delay)
+                remaining: float = deadline - time.monotonic()
+                if remaining <= 0:
+                    self._log.warning(f"preflight: '{ext_name}' in '{dbname}': server not answering; not waiting any longer")
+                    return False
+                time.sleep(min(delay, remaining))
             except psycopg2.Error as e:
                 if getattr(e, "pgcode", None) == "42704":  # extension not installed here yet; CREATE happens later
-                    return
+                    return True
                 self._log.error(
                     f"preflight: could not update '{ext_name}' in '{dbname}': {e}. The database user must own the extension "
                     f"(normally a superuser); otherwise run 'ALTER EXTENSION {ext_name} UPDATE;' manually."
                 )
-                return
+                return True
             else:
                 self._log.info(f"preflight: '{ext_name}' in '{dbname}' is current")
-                return
+                return True
             finally:
                 if raw is not None:
                     try:
@@ -472,46 +502,74 @@ class TimescaleDBConnectionManager:
                     except Exception:  # noqa: S110
                         pass
         self._log.error(f"preflight: gave up on '{ext_name}' in '{dbname}' after {attempts} attempts")
+        return False
 
     # -------------------------
     # Connection lifecycle
     # -------------------------
 
+    def _build_engine(self) -> Engine:
+        """Create the shared engine. create_engine is lazy: it opens no connection, so this succeeds with the database down."""
+        url: str = (
+            f"postgresql+psycopg2://{self.username}:{self.password}"
+            f"@{self.host}:{self.port}/{self.database}"
+        )
+        return create_engine(
+            url,
+            pool_pre_ping=True,
+            future=True,
+            pool_recycle=self.pool_recycle,
+            pool_size=self.pool_size,
+            max_overflow=self.max_overflow,
+            connect_args=self._connect_args(),
+        )
+
     def connect(self) -> None:
         """
-        Create the shared engine and verify the connection.
-        Safe to call multiple times — only creates the engine once.
+        Create the shared engine and try to get the database ready.
+        Safe to call multiple times: only the first call does anything.
+
+        NEVER raises because the database is down, restarting or not ready. The engine always exists afterwards, so every
+        protocol instance can finish building (session factory, flush thread, backlog) and queue data to disk while the
+        database is away; the transport's reconnect worker then calls ensure_ready() until the database answers.
         """
         with self._lock:
             if self._engine is not None:
                 return
+            self._engine = self._build_engine()
+            self.ensure_ready(wait=True)
+
+    def ensure_ready(self, wait: bool = False) -> bool:
+        """
+        Do what must happen before the first real connection, then verify with SELECT 1: update the TimescaleDB extensions
+        (see _preflight_update_extensions), create the database if it is missing, connect.
+
+        Runs on every call, not just once, so a database that was upgraded while the gateway kept running (its extension is
+        now older than the server image) is repaired by the next reconnect attempt too.
+
+        Never raises. Returns True when the database answered, False otherwise (the reason is logged).
+        """
+        with self._lock:
+            if self._engine is None:
+                self._engine = self._build_engine()
             try:
-                # Preflight: update extensions before any SQLAlchemy connection exists,
-                # so the first session sees the new library.
-                self._preflight_update_extensions()
+                if not self._preflight_update_extensions(wait=wait):
+                    msg: str = f"database server at {self.host}:{self.port} is not answering"
+                    raise ConnectionError(msg)  # noqa: TRY301
                 self._create_database_if_missing()
-                url: str = (
-                    f"postgresql+psycopg2://{self.username}:{self.password}"
-                    f"@{self.host}:{self.port}/{self.database}"
-                )
-                self._engine = create_engine(
-                    url,
-                    pool_pre_ping=True,
-                    future=True,
-                    pool_recycle=self.pool_recycle,
-                    pool_size=self.pool_size,
-                    max_overflow=self.max_overflow,
-                    connect_args=self._connect_args(),
-                )
                 with self._engine.connect() as conn:
                     conn.execute(text("SELECT 1"))
-                self._connected = True
-                self._log.info(f"ConnectionManager: connected to '{self.database}'")
-            except OperationalError as e:
+            except Exception as e:
                 self._connected = False
-                self._log.error(f"ConnectionManager: failed to connect: {e}")
-                self._log.error(f"❌ [COMMUNICATION LOST] --- Name: {self.database} ---")
-                raise
+                if wait:  # startup: the one place this is reported as a lost connection
+                    self._log.error(f"ConnectionManager: failed to connect: {e}")
+                    self._log.error(f"❌ [COMMUNICATION LOST] --- Name: {self.database} ---")
+                else:  # reconnect worker: it reports each failed attempt itself
+                    self._log.warning(f"ConnectionManager: database not ready yet: {e}")
+                return False
+            self._connected = True
+            self._log.info(f"ConnectionManager: connected to '{self.database}'")
+            return True
 
     def dispose(self) -> None:
         """
@@ -932,6 +990,19 @@ class timescaledb(transport_base):
         self._verified_devices: set[str] = set()
         # transport_name -> device_info_id cache to minimize DB lookups for device_info_id during batch writes
         self._device_cache: dict[str, int] = {}
+        # True once connect_tsdb has run to the end (extensions checked, tables created, flush worker started). Stays False
+        # when the database was unreachable at startup; the reconnect worker then runs connect_tsdb once the database answers.
+        self._startup_complete: bool = False
+        # transport_name -> the scraper transport object, remembered by write_data so the flush worker can complete a
+        # device_info row later for a point that was captured while the database was unreachable.
+        self._source_transports: dict[str, transport_base] = {}
+        # Transport names whose cached device_info_id was confirmed against the database by a lookup this session
+        # (_verified_devices means the stronger "metadata upserted this session").
+        self._ids_checked: set[str] = set()
+        # Transport names already reported as "queued without a device id yet", so the notice is logged once each.
+        self._deferred_noted: set[str] = set()
+        # transport_name -> device_info_id kept in the backlog's own SQLite file; created once the backlog path is known.
+        self._device_id_store: DeviceIdStore | None = None
 
         # end user settings
         #*********************************
@@ -1059,13 +1130,25 @@ class timescaledb(transport_base):
 
         if self.enable_persistent_storage:
             self.backlog.load_from_disk()
+            # Device ids issued by the database in earlier runs. They let points get their real device_info_id even when this
+            # run starts while the database is unreachable. Loaded into _device_cache only (NOT _verified_devices), so the first
+            # point flushed after the database returns still re-resolves the id against the database.
+            self._device_id_store = DeviceIdStore(self.backlog_file_path, self._log)
+            self._device_cache.update(self._device_id_store.load())
 
-        # attempt tsdb connection now
+        # attempt tsdb connection now. An unreachable database must never stop the gateway from starting: scrapers keep
+        # running, points are queued in the backlog, and the reconnect worker (triggered at the end of __init__) finishes
+        # the startup work when the database answers.
         try:
             self.connect_tsdb()
         except Exception as e:
             self._log.error(f"Initial connect failed: {e}")
             self._set_tsdb_connected(conn_value = False, conn_reason = "Initial TSDB connect was not successful")
+        # connect_tsdb starts the flush worker only on success; it must run either way or queued points never reach the backlog.
+        try:
+            self._start_flush_thread()
+        except Exception as e:
+            self._log.error(f"Flush thread start failed: {e}")
         """
             Attribute:
             request_upstream_reconnect (Callable[[str], None] | None):  (called with the stale transport's id)
@@ -1078,6 +1161,10 @@ class timescaledb(transport_base):
             data source connection.
         """
         self.request_upstream_reconnect: Callable[[str], None] | None = None
+
+        # Everything the reconnect worker touches now exists, so it is safe to start it.
+        if not self._startup_complete:
+            self._trigger_reconnect()
 
     @staticmethod
     def parse_extension_version(version: str) -> tuple[int, int, int]:
@@ -1282,6 +1369,8 @@ class timescaledb(transport_base):
             except Exception as e:
                 self._log.error(f"thread start failed: {e}")
 
+            self._startup_complete = True
+
         except Exception as e:
             self._set_tsdb_connected(conn_value = False, conn_reason ="Connect unsuccessful at startup")
             self._log.error(f"connect() failed: {e}")
@@ -1343,8 +1432,11 @@ class timescaledb(transport_base):
 
                 try:
                     # Attempt to re-establish DB connection.
-                    with self.engine.connect() as conn:
-                        conn.execute(text("SELECT 1"))
+                    self._verify_database()
+                    if not getattr(self, "_startup_complete", True):
+                        # The database was unreachable at startup, so connect_tsdb never finished: extensions, tables and
+                        # the rest of the startup work are still to do. Raises (attempt fails, will retry) if it cannot.
+                        self.connect_tsdb()
                     self._set_tsdb_connected(conn_value = True, conn_reason = f"Reconnect attempt {attempt_no} successful")
                     self._log.info(f"Reconnect attempt {attempt_no} successful.")
                 except Exception as e:
@@ -1415,6 +1507,23 @@ class timescaledb(transport_base):
                 self._reconnect_thread_running = False
             self._log.debug("Auto-reconnect thread exiting.")
 
+
+    def _verify_database(self) -> None:
+        """
+        Raise unless the database answers. A plain SELECT 1 first, so a routine reconnect costs nothing extra. If that fails and a
+        connection manager is present, let it run its preflight (ALTER EXTENSION ... UPDATE, create the database if missing) and
+        try again: that repairs a database whose container was upgraded while the gateway kept running, and a startup that
+        happened while the database was down.
+        """
+        try:
+            with self.engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+        except Exception as first_failure:
+            manager: TimescaleDBConnectionManager | None = getattr(self, "_connection_manager", None)
+            if manager is None:
+                raise
+            if not manager.ensure_ready(wait=False):
+                raise first_failure from None
 
     def _trigger_reconnect(self) -> None:
         """Prevent concurrent reconnect threads from being spawned """
@@ -1585,6 +1694,73 @@ class timescaledb(transport_base):
     #  4. Write device information metadata
     # -------------------------
 
+    def _remember_device_id(self, transport_name: str, device_info_id: int) -> None:
+        """Keep the id the database issued for this transport in the backlog's SQLite file (never raises)."""
+        store: DeviceIdStore | None = getattr(self, "_device_id_store", None)
+        if store is not None:
+            store.save(transport_name, device_info_id)
+
+    def _lookup_device_id(self, transport_name: str) -> int:
+        """The device_info_id the database holds for this transport name, or 0 when there is none or it cannot be reached."""
+        try:
+            with self.SessionFactory() as session:
+                found: object = session.execute(
+                    text("SELECT device_info_id FROM device_info WHERE transport = :t"), {"t": transport_name}
+                ).scalar()
+        except Exception as e:
+            self._log.warning(f"Device id lookup for '{transport_name}' failed: {e}")
+            return 0
+        return int(found) if isinstance(found, int) and not isinstance(found, bool) else 0
+
+    def _resolve_device_id(self, transport_name: str, metric_count: int) -> int:
+        """
+        The real device_info_id for a transport, resolved against the database, or 0 when that is not possible yet.
+        Prefers the full upsert (needs the scraper transport object, which write_data remembers); falls back to a lookup by
+        transport name for a point restored from the backlog before its transport has written anything this run.
+        """
+        source: transport_base | None = self._source_transports.get(transport_name)
+        if source is not None:
+            device_id: int = self._get_or_create_device(source, metric_count=metric_count)
+            return device_id if transport_name in self._verified_devices else 0
+        looked_up: int = self._lookup_device_id(transport_name)
+        if looked_up:
+            self._device_cache[transport_name] = looked_up
+            self._ids_checked.add(transport_name)
+            self._remember_device_id(transport_name, looked_up)
+        return looked_up
+
+    def _needs_identity(self, data_in: FlushPayload) -> bool:
+        """True for a point whose device_info_id has not been confirmed against the database this session, or whose protocol's
+        schema is still waiting to be registered (so its wide table name cannot be known yet)."""
+        if not hasattr(self, "_verified_devices"):
+            return False  # an instance built without __init__ (as unit tests do) has no device tracking to complete
+        name: str = data_in["transport_name"]
+        confirmed: bool = name in self._verified_devices or name in self._ids_checked
+        return (not confirmed) or data_in["protocol"] in self._failed_registrations
+
+    def _complete_identity(self, data_in: FlushPayload) -> bool:
+        """
+        Give a point captured during an outage its real device_info_id and wide table name, in place. Returns False when that
+        is not possible yet (database still down, device not resolvable, protocol schema not registered); the caller then keeps
+        the point in the backlog and the next replay tries again. Never touches the database while it is known to be down.
+        """
+        name: str = data_in["transport_name"]
+        protocol: str = data_in["protocol"]
+        with self._reconnect_lock:
+            connected: bool = self.tsdb_connected
+        if not connected or protocol in self._failed_registrations:
+            return False
+        if name not in self._verified_devices and name not in self._ids_checked:
+            if not self._resolve_device_id(name, len(data_in["metrics"])):
+                return False
+        device_id: int = self._device_cache.get(name, 0)
+        if not device_id:
+            return False
+        data_in["device_info_id"] = device_id  # authoritative: replaces 0 or an id remembered from an earlier run
+        if data_in["wide_table_name"] is None:
+            data_in["wide_table_name"] = self._protocol_wide_table_map.get(protocol)
+        return True
+
     def _get_or_create_device(self, from_transport: transport_base, metric_count: int = 0) -> int:
         """
         Upserts a row into device_info for the given transport and returns
@@ -1695,6 +1871,7 @@ class timescaledb(transport_base):
                 else:
                     self._device_cache[t_name] = db_id
                     self._verified_devices.add(t_name)
+                    self._remember_device_id(t_name, db_id)
 
                     # Tell RollupManager real data now exists for this
                     # transport, in case a dynamic-sizing retune is
@@ -2584,11 +2761,27 @@ class timescaledb(transport_base):
             return
 
         protocol: str = from_transport.protocol_name
-        device_id: int = self._get_or_create_device(from_transport, metric_count=len(data))
+        t_name: str = from_transport.transport_name
+        # Remembered so the flush worker can complete this transport's device_info row if it has to be done later.
+        self._source_transports[t_name] = from_transport
 
-        if not device_id:
-            self._log.error("Could not resolve Device ID. Dropping packet.")
-            return
+        with self._reconnect_lock:
+            database_down: bool = not self.tsdb_connected
+        if database_down and t_name not in self._verified_devices:
+            # Known outage and nothing verified this session: the upsert would only block this scraper's thread for a connect
+            # timeout on every cycle. Use the id remembered from an earlier run, or 0 ("not known yet").
+            device_id: int = self._device_cache.get(t_name, 0)
+        else:
+            device_id = self._get_or_create_device(from_transport, metric_count=len(data))
+
+        if not device_id and t_name not in self._deferred_noted:
+            self._deferred_noted.add(t_name)
+            self._log.warning(
+                f"[{t_name}] database unreachable and this device has no id yet: its points are queued and get their "
+                "device id (looked up or created by transport name) when the database is back."
+            )
+        # device_id may still be 0 here. The point is KEPT, not dropped: the payload carries transport_name, and the flush
+        # worker replaces the 0 with the real id (_complete_identity) before it writes, or keeps the point until it can.
 
         # Look up the wide table for this transport's protocol
         wide_table_name: str | None = self._protocol_wide_table_map.get(protocol)
@@ -2703,6 +2896,13 @@ class timescaledb(transport_base):
             if self._stop_event.is_set():
                 break
             time.sleep(0.25)
+
+        # A point captured while the database was unreachable may not know its real device_info_id or wide table yet (see
+        # write_data). Complete it now, or keep it in the backlog until that is possible. A point whose device was resolved this
+        # session is not affected, so the normal path costs one set lookup.
+        if self._needs_identity(data_in) and not self._complete_identity(data_in):
+            self._keep_unwritten(data_in)
+            return False
 
         # 2. Extract the metadata from data_in
         device_info_id: int = data_in["device_info_id"]
@@ -3424,6 +3624,76 @@ def _flush_payload_from_json(payload_str: str, m_time: datetime) -> FlushPayload
         "protocol": protocol,
         "wide_table_name": wide_table_name,
     }
+class DeviceIdStore:
+    """
+    transport_name -> device_info_id, kept in a small table of the backlog's own SQLite file.
+
+    The ids are issued by the database, so they can only be remembered, not invented. Remembering them lets a gateway that
+    restarts while the database is unreachable still give each point its real id. The file is the one the backlog already owns,
+    so there is no start-up ordering or schema-migration dependency on any other store.
+
+    Every method swallows its errors (logged as warnings): losing the cache costs only the convenience, never data or startup.
+    """
+
+    def __init__(self, path: Path, log: logging.Logger) -> None:
+        self._path: Path = path
+        self._log: logging.Logger = log
+        self._lock: threading.Lock = threading.Lock()
+        self._saved: dict[str, int] = {}  # what is already on disk, to skip repeat writes
+
+    def _connect(self) -> sqlite3.Connection:
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        con: sqlite3.Connection = sqlite3.connect(str(self._path), timeout=5.0)
+        con.execute(
+            """CREATE TABLE IF NOT EXISTS device_id_cache (
+                transport_name  TEXT PRIMARY KEY,
+                device_info_id  INTEGER NOT NULL,
+                updated_at      TEXT NOT NULL
+            )"""
+        )
+        return con
+
+    def load(self) -> dict[str, int]:
+        """All remembered ids; empty if there is nothing yet or the file cannot be read."""
+        with self._lock:
+            try:
+                con: sqlite3.Connection = self._connect()
+                try:
+                    rows: list[tuple[str, int]] = con.execute("SELECT transport_name, device_info_id FROM device_id_cache").fetchall()
+                finally:
+                    con.close()
+            except (sqlite3.Error, OSError) as e:
+                self._log.warning(f"Could not read the device id cache from '{self._path}': {e}")
+                return {}
+            self._saved = {name: int(device_id) for name, device_id in rows}
+            return dict(self._saved)
+
+    def save(self, transport_name: str, device_info_id: int) -> None:
+        """Remember an id the database issued. A no-op when the same id is already stored."""
+        if not device_info_id:
+            return
+        with self._lock:
+            if self._saved.get(transport_name) == device_info_id:
+                return
+            try:
+                con: sqlite3.Connection = self._connect()
+                try:
+                    with con:
+                        con.execute(
+                            """INSERT INTO device_id_cache (transport_name, device_info_id, updated_at)
+                               VALUES (?, ?, ?)
+                               ON CONFLICT(transport_name) DO UPDATE SET
+                                   device_info_id = excluded.device_info_id, updated_at = excluded.updated_at""",
+                            (transport_name, device_info_id, _now_tz().isoformat()),
+                        )
+                finally:
+                    con.close()
+            except (sqlite3.Error, OSError) as e:
+                self._log.warning(f"Could not save the device id for '{transport_name}' to '{self._path}': {e}")
+                return
+            self._saved[transport_name] = device_info_id
+
+
 class BacklogManager:
     """
     Manages persistent backlog storage and replay for TimescaleDB writes.

@@ -63,6 +63,12 @@ def bridge() -> Any:
     b._flush_queue = queue.Queue[Any]()
     b._registered_protocols = set()
     b._failed_registrations = {}
+    b._reconnect_lock = threading.RLock()
+    b.tsdb_connected = False
+    b._source_transports = {}
+    b._ids_checked = set()
+    b._deferred_noted = set()
+    b._device_id_store = None
     return b
 
 
@@ -81,9 +87,131 @@ def test_a_device_that_cannot_be_resolved_gets_id_zero_not_a_plausible_one(bridg
     assert bridge._get_or_create_device(_transport(), metric_count=3) == 0
 
 
-def test_write_data_drops_a_packet_for_an_unresolved_device(bridge: Any) -> None:
+def test_write_data_keeps_a_packet_for_a_device_whose_id_is_not_known_yet(bridge: Any) -> None:
+    """First-ever start with the database down: nothing is cached, but the payload carries transport_name, so the flush worker
+    can resolve the real id later. The point is queued with the placeholder 0, not dropped."""
     bridge.write_data({"battery_soc": 87}, _transport())
-    assert bridge._flush_queue.empty()
+    payload: Any = bridge._flush_queue.get_nowait()
+    assert payload["device_info_id"] == 0
+    assert payload["transport_name"] == "inverter_1"
+    assert bridge._source_transports["inverter_1"].transport_name == "inverter_1"
+
+
+class _ForbiddenSession:
+    """Fails the test if anything opens a database session."""
+
+    def __init__(self) -> None:
+        pytest.fail("the database must not be touched while it is known to be down")
+
+
+def test_write_data_does_not_touch_the_database_during_a_known_outage(bridge: Any) -> None:
+    bridge.SessionFactory = _ForbiddenSession
+    bridge.write_data({"battery_soc": 87}, _transport())
+    assert bridge._flush_queue.qsize() == 1
+
+
+def test_write_data_uses_the_id_remembered_from_an_earlier_run_during_an_outage(bridge: Any) -> None:
+    bridge._device_cache["inverter_1"] = 7  # loaded from the backlog file at startup, not yet verified this session
+    bridge.SessionFactory = _ForbiddenSession
+    bridge.write_data({"battery_soc": 87}, _transport())
+    assert bridge._flush_queue.get_nowait()["device_info_id"] == 7
+
+
+# ---------------------------------------------------------------------------
+# completing a point's identity at flush time
+# ---------------------------------------------------------------------------
+
+def _payload(device_info_id: int = 0, wide_table_name: str | None = None) -> Any:
+    return {
+        "device_info_id": device_info_id, "metrics": {"battery_soc": 87}, "m_time": None,
+        "transport_name": "inverter_1", "protocol": "eg4_18kpv", "wide_table_name": wide_table_name,
+    }
+
+
+def test_a_point_whose_device_is_verified_needs_nothing_completed(bridge: Any) -> None:
+    bridge._verified_devices.add("inverter_1")
+    assert bridge._needs_identity(_payload(7)) is False
+
+
+def test_a_point_whose_device_is_not_verified_this_session_needs_completing(bridge: Any) -> None:
+    assert bridge._needs_identity(_payload(7)) is True
+
+
+def test_a_point_whose_protocol_registration_is_pending_needs_completing(bridge: Any) -> None:
+    bridge._verified_devices.add("inverter_1")
+    bridge._failed_registrations = _pending_registration("eg4_18kpv")
+    assert bridge._needs_identity(_payload(7)) is True
+
+
+def test_nothing_is_completed_while_the_database_is_down(bridge: Any) -> None:
+    bridge.SessionFactory = _ForbiddenSession
+    payload: Any = _payload()
+    assert bridge._complete_identity(payload) is False
+    assert payload["device_info_id"] == 0
+
+
+def _lookup_returning_5(_name: str) -> int:
+    return 5
+
+
+def _lookup_returning_nothing(_name: str) -> int:
+    return 0
+
+
+def test_the_device_is_resolved_through_its_transport_once_the_database_is_back(bridge: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    bridge.tsdb_connected = True
+    bridge._source_transports["inverter_1"] = _transport()
+    bridge._protocol_wide_table_map = {"eg4_18kpv": "device_metrics_wide__eg4_18kpv"}
+
+    def upsert(from_transport: Any, metric_count: int = 0) -> int:
+        bridge._device_cache[from_transport.transport_name] = 11
+        bridge._verified_devices.add(from_transport.transport_name)
+        return 11
+
+    monkeypatch.setattr(bridge, "_get_or_create_device", upsert)
+    payload: Any = _payload(device_info_id=7)  # 7 = a stale id remembered from an earlier run
+    assert bridge._complete_identity(payload) is True
+    assert payload["device_info_id"] == 11  # the database's answer wins over the remembered id
+    assert payload["wide_table_name"] == "device_metrics_wide__eg4_18kpv"
+
+
+def test_a_point_from_the_backlog_is_resolved_by_transport_name_when_its_transport_has_not_written_yet(
+    bridge: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bridge.tsdb_connected = True
+    monkeypatch.setattr(bridge, "_lookup_device_id", _lookup_returning_5)
+    payload: Any = _payload()
+    assert bridge._complete_identity(payload) is True
+    assert payload["device_info_id"] == 5
+    assert "inverter_1" in bridge._ids_checked
+    assert "inverter_1" not in bridge._verified_devices  # the metadata upsert still happens on the transport's own first write
+
+
+def test_a_point_stays_queued_when_its_device_cannot_be_resolved(bridge: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    bridge.tsdb_connected = True
+    monkeypatch.setattr(bridge, "_lookup_device_id", _lookup_returning_nothing)
+    payload: Any = _payload()
+    assert bridge._complete_identity(payload) is False
+    assert payload["device_info_id"] == 0
+
+
+def test_a_point_waits_for_its_protocol_schema_to_be_registered(bridge: Any) -> None:
+    bridge.tsdb_connected = True
+    bridge._verified_devices.add("inverter_1")
+    bridge._device_cache["inverter_1"] = 11
+    bridge._failed_registrations = _pending_registration("eg4_18kpv")
+    assert bridge._complete_identity(_payload()) is False
+
+
+def test_the_flush_worker_keeps_a_deferred_point_instead_of_writing_it_while_the_database_is_down(
+    bridge: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bridge.migration_in_progress = threading.Event()
+    kept: list[Any] = []
+    monkeypatch.setattr(bridge, "_keep_unwritten", kept.append)
+    payload: Any = _payload()
+    assert bridge._flush_one_inner(payload, None) is False
+    assert kept == [payload]
 
 
 def test_a_device_resolved_earlier_keeps_its_id_while_the_database_is_down(bridge: Any) -> None:
