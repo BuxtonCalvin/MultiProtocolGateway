@@ -87,6 +87,7 @@ from typing import (
     cast,
 )
 
+import psycopg2
 from sqlalchemy import (
     Boolean,
     Connection,
@@ -366,6 +367,7 @@ class TimescaleDBConnectionManager:
         pool_recycle: int = 3600,
         log: logging.Logger | None = None,
         connection_timeout: int = 10,
+        auto_update_extensions: bool = True,
     ) -> None:
 
         self.host: str = host
@@ -380,6 +382,7 @@ class TimescaleDBConnectionManager:
         # (about two minutes), stalling the flush worker and each reconnect attempt, and a half-open connection can hang
         # a write for far longer.
         self.connection_timeout: int = connection_timeout
+        self.auto_update_extensions: bool = auto_update_extensions
         self._log: logging.Logger = log or logging.getLogger(__name__)
 
         self._engine: Engine | None = None
@@ -405,6 +408,7 @@ class TimescaleDBConnectionManager:
             pool_recycle=settings.getint("pool_recycle", fallback=3600),
             log=log,
             connection_timeout=settings.getint("connection_timeout", fallback=10),
+            auto_update_extensions=settings.getboolean("auto_update_extensions", fallback=True),
         )
 
     def _connect_args(self) -> dict[str, int]:
@@ -416,6 +420,58 @@ class TimescaleDBConnectionManager:
             "keepalives_interval": 10,
             "keepalives_count": 3,
         }
+
+    def _preflight_update_extensions(self) -> None:
+        """
+        Bring timescaledb / timescaledb_toolkit up to the server's version BEFORE any SQLAlchemy connection exists.
+        The first session in a database whose extension is older than the image loads the old (now missing) library
+        and fails; ALTER EXTENSION ... UPDATE must be the very first statement of a fresh session.
+        Covers 'postgres' and 'template1' too, since the Timescale image installs the extension there and new
+        databases are copied from template1.
+        """
+        if not self.auto_update_extensions:
+            return
+        for dbname in dict.fromkeys(["postgres", "template1", self.database]):
+            for ext_name in ("timescaledb", "timescaledb_toolkit"):
+                self._alter_extension_update_raw(dbname, ext_name)
+
+    def _alter_extension_update_raw(self, dbname: str, ext_name: str, attempts: int = 30, delay: float = 2.0) -> None:
+        for attempt in range(1, attempts + 1):
+            raw: psycopg2.extensions.connection | None = None
+            try:
+                raw = psycopg2.connect(
+                    host=self.host, port=self.port, dbname=dbname,
+                    user=self.username, password=self.password,
+                    connect_timeout=self.connection_timeout,
+                )
+                raw.autocommit = True  # before any statement, or psycopg2 sends BEGIN first
+                with raw.cursor() as cur:
+                    cur.execute(f"ALTER EXTENSION {ext_name} UPDATE")  # ext_name is from a fixed tuple
+            except psycopg2.OperationalError as e:
+                msg: str = str(e).lower()
+                if "database" in msg and "does not exist" in msg:
+                    return  # target DB not created yet; _create_database_if_missing will make it
+                # server down, "starting up", or sessions terminated by a concurrent update: wait and retry
+                self._log.warning(f"preflight: {dbname}/{ext_name} attempt {attempt}/{attempts}: {e}")
+                time.sleep(delay)
+            except psycopg2.Error as e:
+                if getattr(e, "pgcode", None) == "42704":  # extension not installed here yet; CREATE happens later
+                    return
+                self._log.error(
+                    f"preflight: could not update '{ext_name}' in '{dbname}': {e}. The database user must own the extension "
+                    f"(normally a superuser); otherwise run 'ALTER EXTENSION {ext_name} UPDATE;' manually."
+                )
+                return
+            else:
+                self._log.info(f"preflight: '{ext_name}' in '{dbname}' is current")
+                return
+            finally:
+                if raw is not None:
+                    try:
+                        raw.close()
+                    except Exception:  # noqa: S110
+                        pass
+        self._log.error(f"preflight: gave up on '{ext_name}' in '{dbname}' after {attempts} attempts")
 
     # -------------------------
     # Connection lifecycle
@@ -430,6 +486,9 @@ class TimescaleDBConnectionManager:
             if self._engine is not None:
                 return
             try:
+                # Preflight: update extensions before any SQLAlchemy connection exists,
+                # so the first session sees the new library.
+                self._preflight_update_extensions()
                 self._create_database_if_missing()
                 url: str = (
                     f"postgresql+psycopg2://{self.username}:{self.password}"
