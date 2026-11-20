@@ -947,6 +947,17 @@ class timescaledb(transport_base):
         self._wide_columns_cache: dict[str, set[str]] = {}
         self.device_info_id: int | None = None  # will be set after data scrape, per transport batch.
 
+        # HyperTableManager and RollupManager are initialized after the
+        # database connection is established, since they need the session
+        # factory and engine to set up the schema and policies. Declared
+        # here (as None) so we don't AttributeError if init raises early.
+        # HyperTableManager is constructed first -- it's the lower-level
+        # primitive RollupManager is built on top of -- then RollupManager
+        # is constructed with a reference to it. See
+        # _init_or_update_rollup_manager.
+        self.hypertable_mgr: "HyperTableManager | None" = None
+        self.rollup_mgr: "RollupManager | None" = None
+
         # SQLAlchemy init runtime
         # If a shared manager is provided, use it.
         # Otherwise create an instance-scoped one.
@@ -1045,16 +1056,6 @@ class timescaledb(transport_base):
             backlog_lock=self._backlog_lock,
             log=self._log
         )
-        # HyperTableManager and RollupManager are initialized after the
-        # database connection is established, since they need the session
-        # factory and engine to set up the schema and policies. Declared
-        # here (as None) so we don't AttributeError if init raises early.
-        # HyperTableManager is constructed first -- it's the lower-level
-        # primitive RollupManager is built on top of -- then RollupManager
-        # is constructed with a reference to it. See
-        # _init_or_update_rollup_manager.
-        self.hypertable_mgr: "HyperTableManager | None" = None
-        self.rollup_mgr: "RollupManager | None" = None
 
         if self.enable_persistent_storage:
             self.backlog.load_from_disk()
