@@ -296,8 +296,9 @@
              class="theme-input w-full text-xs rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-accent" style="max-width: 260px;">
       <p class="surface-subtle text-xs mt-1">Leave equal to Source Start to export with no shift.</p>
     </div>
-    <div>
-      <button type="button" class="btn-tertiary text-xs" onclick="doExport()">Export to CSV</button>
+    <div class="flex items-center gap-3 flex-wrap">
+      <button type="button" class="btn-tertiary text-xs" onclick="doExport()">Export&hellip;</button>
+      <span id="ts-export-hint" class="surface-subtle text-xs"></span>
     </div>
     <div id="ts-export-status"></div>
   </div>
@@ -788,18 +789,20 @@
   }
 
   // ---- Export ----
-  function doExport() {
+  // Validates the Export panel and returns the request parameters shared by both export buttons, or null (after
+  // showing the reason) when something is missing.
+  function buildExportParams() {
     const measurement = getMeasurement();
     // MpgDateTime.read(): "YYYY-MM-DD HH:MM:SS", "" when the box is empty, null when it holds something unparseable.
     const start = MpgDateTime.read('ts-export-start');
     const end = MpgDateTime.read('ts-export-end');
     const targetRaw = MpgDateTime.read('ts-export-target');
     const target = targetRaw || start;
-    if (!measurement) { showStatus('ts-export-status', 'Pick a ' + (isTimescale() ? 'table' : 'measurement') + '.', true); return; }
-    if (isTimescale() && getDeviceInfoId() === null) { showStatus('ts-export-status', 'Pick a device.', true); return; }
-    if (!start || !end) { showStatus('ts-export-status', 'Enter a source start and end as YYYY-MM-DD  HH:MM:SS (or pick them from the calendar).', true); return; }
-    if (targetRaw === null) { showStatus('ts-export-status', 'Target Start is not a valid date/time (use YYYY-MM-DD  HH:MM:SS).', true); return; }
-    if (end < start) { showStatus('ts-export-status', 'Source End must not be before Source Start.', true); return; }
+    if (!measurement) { showStatus('ts-export-status', 'Pick a ' + (isTimescale() ? 'table' : 'measurement') + '.', true); return null; }
+    if (isTimescale() && getDeviceInfoId() === null) { showStatus('ts-export-status', 'Pick a device.', true); return null; }
+    if (!start || !end) { showStatus('ts-export-status', 'Enter a source start and end as YYYY-MM-DD  HH:MM:SS (or pick them from the calendar).', true); return null; }
+    if (targetRaw === null) { showStatus('ts-export-status', 'Target Start is not a valid date/time (use YYYY-MM-DD  HH:MM:SS).', true); return null; }
+    if (end < start) { showStatus('ts-export-status', 'Source End must not be before Source Start.', true); return null; }
 
     const params = new URLSearchParams({
       version: TimeshiftState.version,
@@ -818,10 +821,90 @@
       const device = document.getElementById('ts-export-device').value.trim();
       if (device) { params.set('device_identifier', device); }
     }
-
-    document.getElementById('ts-export-status').innerHTML = '';
-    window.location.href = '/api/timeshift/export.csv?' + params.toString();
+    return params;
   }
+
+  // The Export button asks the browser for a destination folder (File System Access API: Chrome, Edge, Opera, Brave --
+  // on HTTPS or localhost only) and writes the CSV straight into it. Any folder the browser lets the user pick is fine,
+  // on the computer the browser is running on. Elsewhere (Firefox, Safari, plain http) it falls back to a normal browser
+  // download, so the button always works.
+  function folderPickerSupported() {
+    return typeof window.showDirectoryPicker === 'function' && window.isSecureContext;
+  }
+
+  function initExportHint() {
+    const hint = document.getElementById('ts-export-hint');
+    if (folderPickerSupported()) {
+      hint.textContent = 'You will be asked which folder to save the CSV in.';
+    } else if (typeof window.showDirectoryPicker !== 'function') {
+      hint.textContent = 'This browser cannot choose a folder (Chrome, Edge and Opera can), so the CSV goes to your browser\u2019s download location.';
+    } else {
+      hint.textContent = 'Choosing a folder needs this page on HTTPS or localhost, so the CSV goes to your browser\u2019s download location.';
+    }
+  }
+
+  // Returns a file name in `dir` that does not exist yet: name, then name_1, name_2, ...
+  async function uniqueFileName(dir, name) {
+    const dot = name.lastIndexOf('.');
+    const stem = dot > 0 ? name.slice(0, dot) : name;
+    const ext = dot > 0 ? name.slice(dot) : '';
+    let candidate = name;
+    for (let n = 1; ; n++) {
+      try { await dir.getFileHandle(candidate); } catch (e) { return candidate; }   // NotFoundError: the name is free
+      candidate = stem + '_' + n + ext;
+    }
+  }
+
+  async function doExport() {
+    const params = buildExportParams();
+    if (params === null) { return; }
+    document.getElementById('ts-export-status').innerHTML = '';
+
+    if (!folderPickerSupported()) {
+      window.location.href = '/api/timeshift/export.csv?' + params.toString();
+      showStatus('ts-export-status', 'Export sent to your browser\u2019s download location.', false);
+      return;
+    }
+
+    // The picker must be opened straight from the click (before any slow work), so it comes before the export itself.
+    let dir;
+    try {
+      dir = await window.showDirectoryPicker({ id: 'mpg-timeshift-export', mode: 'readwrite' });
+    } catch (e) {
+      if (e && e.name === 'AbortError') { return; }   // the user closed the picker: nothing to do
+      showStatus('ts-export-status', 'Could not open that folder: ' + e + ' (some system folders cannot be chosen; try a sub-folder).', true);
+      return;
+    }
+
+    showStatus('ts-export-status', 'Exporting... a long date range can take a few minutes.', false);
+    let resp;
+    try {
+      resp = await fetch('/api/timeshift/export.csv?' + params.toString());
+    } catch (e) {
+      showStatus('ts-export-status', 'Export failed: ' + e, true);
+      return;
+    }
+    if (!resp.ok) {
+      let detail = resp.statusText;
+      try { detail = (await resp.json()).detail || detail; } catch (e) { /* non-JSON error body */ }
+      showStatus('ts-export-status', 'Export failed: ' + detail, true);
+      return;
+    }
+    const match = /filename="([^"]+)"/.exec(resp.headers.get('Content-Disposition') || '');
+    try {
+      const blob = await resp.blob();
+      const fileName = await uniqueFileName(dir, match ? match[1] : 'timeshift_export.csv');
+      const fileHandle = await dir.getFileHandle(fileName, { create: true });
+      const writable = await fileHandle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+      showStatus('ts-export-status', 'Saved ' + fileName + ' (' + blob.size + ' bytes) to the "' + dir.name + '" folder.', false);
+    } catch (e) {
+      showStatus('ts-export-status', 'Could not write the file: ' + e, true);
+    }
+  }
+
+  initExportHint();
 
   // ---- Upload & mapping ----
   async function uploadAndScan() {

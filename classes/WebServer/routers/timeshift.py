@@ -41,13 +41,9 @@ Flow:
   5. POST /api/timeshift/import                        -- runs the import
      for real, using the same mapping/tags/time settings.
   6. GET  /api/timeshift/export.csv                    -- streams a
-     time-shifted CSV download of an InfluxDB date range (the "or export a
-     date range ... to a folder of one's choosing" path) -- the browser's
-     own Save dialog is the "folder of one's choosing" picker; a server
-     process has no meaningful notion of "the user's folder" in a browser-
-     based admin UI, so this deliberately mirrors the existing CSV-download
-     convention already used by /api/protocols/.../export.csv rather than
-     inventing a server-side file-path field.
+     time-shifted CSV of an InfluxDB/TimescaleDB date range. The page
+     either saves it into a folder the user picks in the browser or, in
+     browsers that cannot pick a folder, lets the browser download it.
   7. DELETE /api/timeshift/upload/{upload_id}           -- discards a
      server-side upload the admin no longer needs (e.g. switched files).
   8. GET  /api/timeshift/tag-values                    -- JSON: existing tag
@@ -891,39 +887,33 @@ def _run_timescale_import(
 # Export (InfluxDB/TimescaleDB date range -> CSV download)
 # ---------------------------------------------------------------------------
 
-@router.get("/api/timeshift/export.csv")
-def timeshift_export_csv(
+def _safe_filename_part(value: str) -> str:
+    """`value` reduced to characters that are safe in a file name (no path separators, quotes or control characters)."""
+    cleaned: str = re.sub(r"[^A-Za-z0-9._-]+", "_", value).strip("._")
+    return cleaned or "export"
+
+
+def _build_export_csv(
     request: Request,
     version: str,
-    measurement: str,             # for version="timescale": unused for the query itself (see SECURITY note below) -- kept only for the download filename
+    measurement: str,
     start_time: str,
     end_time: str,
     target_start: str,
     local_timezone: str,
-    device_identifier: str | None = None,   # InfluxDB only
-    tags_json: str = "{}",                  # InfluxDB only
-    table_kind: str | None = None,          # "narrow" | "wide" -- required when version="timescale"
-    protocol_name: str | None = None,       # required when version="timescale" and table_kind="wide"
-    device_info_id: int | None = None,      # required when version="timescale"
-) -> StreamingResponse:
+    device_identifier: str | None,
+    tags_json: str,
+    table_kind: str | None,
+    protocol_name: str | None,
+    device_info_id: int | None,
+) -> tuple[str, str, int]:
     """
-    Streams a time-shifted CSV download of `measurement` between start_time
-    and end_time -- the "export a date range of data and save it to a
-    folder of one's choosing" path. The browser's own Save/Save-As dialog
-    IS the folder picker here (see this module's docstring for why a
-    server-side path field isn't offered); this mirrors the existing
-    /api/protocols/.../export.csv download convention exactly.
+    Runs the export and returns (file_name, csv_text, row_count). Shared by the browser-download endpoint and the
+    save-to-folder endpoint so both produce identical files.
 
-    For version="timescale" a narrow table's (m_time, metric_name) rows
-    are pivoted into the same wide-shaped CSV a wide-table export produces
-    (see services.timeshift_service.export_range_rows_timescale).
-
-    SECURITY: for version="timescale" the actual table queried is resolved
-    server-side from table_kind/protocol_name via
-    _resolve_timescale_table_name() -- `measurement` (a client-supplied
-    query parameter) is used only to name the downloaded file, never
-    passed to export_range_rows_timescale(), which splices its table_name
-    argument directly into a SQL identifier.
+    SECURITY: for version="timescale" the actual table queried is resolved server-side from table_kind/protocol_name
+    via _resolve_timescale_table_name() -- `measurement` (a client-supplied value) is used only to name the file,
+    never passed to export_range_rows_timescale(), which splices its table_name argument directly into a SQL identifier.
     """
     _require_bridge(request, version)
     gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
@@ -940,8 +930,6 @@ def timeshift_export_csv(
         if version == "timescale":
             resolved_table_kind: str = table_kind if table_kind is not None else "narrow"  # narrowed for the type checker -- the guard above already ensured it's set
             resolved_device_id: int = device_info_id if device_info_id is not None else -1  # same
-            # Resolved server-side, never `measurement` (a client-supplied query
-            # param) directly -- see _resolve_timescale_table_name's SECURITY note.
             resolved_table_name: str = _resolve_timescale_table_name(gateway, resolved_table_kind, protocol_name)
             header, rows = export_range_rows_timescale(
                 gateway, resolved_table_kind, resolved_table_name, protocol_name, resolved_device_id, start_dt, end_dt, target_dt,
@@ -956,15 +944,42 @@ def timeshift_export_csv(
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
-    buf: io.StringIO = io.StringIO()
+    buf: io.StringIO = io.StringIO(newline="")
     writer: "csv.DictWriter[str]" = csv.DictWriter(buf, fieldnames=header)
     writer.writeheader()
     writer.writerows(rows)
-    buf.seek(0)
 
-    filename: str = f"{measurement}_{start_dt.strftime('%Y%m%d')}_{end_dt.strftime('%Y%m%d')}_v{version}.csv"
+    filename: str = f"{_safe_filename_part(measurement)}_{start_dt.strftime('%Y%m%d')}_{end_dt.strftime('%Y%m%d')}_v{version}.csv"
+    return filename, buf.getvalue(), len(rows)
+
+
+@router.get("/api/timeshift/export.csv")
+def timeshift_export_csv(
+    request: Request,
+    version: str,
+    measurement: str,             # for version="timescale": unused for the query itself (see _build_export_csv) -- kept only for the download filename
+    start_time: str,
+    end_time: str,
+    target_start: str,
+    local_timezone: str,
+    device_identifier: str | None = None,   # InfluxDB only
+    tags_json: str = "{}",                  # InfluxDB only
+    table_kind: str | None = None,          # "narrow" | "wide" -- required when version="timescale"
+    protocol_name: str | None = None,       # required when version="timescale" and table_kind="wide"
+    device_info_id: int | None = None,      # required when version="timescale"
+) -> StreamingResponse:
+    """
+    Streams a time-shifted CSV download of `measurement` between start_time and end_time through the browser's own
+    Save dialog -- the same download convention as /api/protocols/.../export.csv. For version="timescale" a narrow
+    table's (m_time, metric_name) rows are pivoted into the same wide-shaped CSV a wide-table export produces (see
+    services.timeshift_service.export_range_rows_timescale).
+    """
+    filename, csv_text, _row_count = _build_export_csv(
+        request, version, measurement, start_time, end_time, target_start, local_timezone,
+        device_identifier, tags_json, table_kind, protocol_name, device_info_id,
+    )
     return StreamingResponse(
-        iter([buf.getvalue()]),
+        iter([csv_text]),
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

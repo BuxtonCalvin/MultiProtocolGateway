@@ -113,7 +113,6 @@ from .influxdb_service import (
 
 if TYPE_CHECKING:
     from influxdb.resultset import ResultSet  # type: ignore[import-untyped]
-    from influxdb_client_3 import InfluxDBClient3  # type: ignore[import-untyped]
 
     from protocol_gateway import Protocol_Gateway
 
@@ -1106,6 +1105,95 @@ def _is_retention_error(text: str) -> bool:
     return "retention" in lowered and "not found" not in lowered
 
 
+# ---------------------------------------------------------------------------
+# Dynamic timeouts for Timeshift export/import
+#
+# The influxdb_out/influxdb3_out bridges are built with connection_timeout (10 s
+# by default), which is the right budget for the gateway's small live writes but
+# far too short for a multi-month SELECT or a bulk import. Timeshift therefore
+# opens its own short-lived client per operation, with a timeout scaled to the
+# size of the job, and leaves the bridge's long-lived client untouched.
+# ---------------------------------------------------------------------------
+
+EXPORT_TIMEOUT_FLOOR_S: float = 30.0       # never less than this, however short the range
+EXPORT_TIMEOUT_PER_DAY_S: float = 10.0     # extra seconds allowed per day of the queried range
+EXPORT_TIMEOUT_CAP_S: float = 3600.0       # never wait longer than this for one query
+V1_WRITE_TIMEOUT_S: float = 120.0          # per HTTP request; v1 writes go out in batches of 1000 points, each its own request
+V3_WRITE_TIMEOUT_FLOOR_S: float = 30.0     # v3 sends the whole import as ONE write, so this one scales with the point count
+V3_WRITE_TIMEOUT_PER_1K_POINTS_S: float = 2.0
+V3_WRITE_TIMEOUT_CAP_S: float = 3600.0
+
+
+def export_timeout_seconds(start_time: datetime, end_time: datetime) -> float:
+    """Query timeout (seconds) for exporting [start_time, end_time]: floor + per-day allowance, capped."""
+    days: float = max((end_time - start_time).total_seconds(), 0.0) / 86400.0
+    return min(EXPORT_TIMEOUT_CAP_S, EXPORT_TIMEOUT_FLOOR_S + EXPORT_TIMEOUT_PER_DAY_S * days)
+
+
+def v3_write_timeout_seconds(point_count: int) -> float:
+    """Write timeout (seconds) for one InfluxDB v3 write of `point_count` points: floor + per-1000-points allowance, capped."""
+    return min(V3_WRITE_TIMEOUT_CAP_S, V3_WRITE_TIMEOUT_FLOOR_S + V3_WRITE_TIMEOUT_PER_1K_POINTS_S * (point_count / 1000.0))
+
+
+# TimescaleDB: statement_timeout is applied per SQL STATEMENT (SET LOCAL, so it ends with the transaction and never
+# leaks back into the bridge's pooled connections). The import is a long run of short statements, so this is a
+# generous per-statement ceiling that grows with the import, mostly there to cover the chunk-decompression step.
+TS_IMPORT_TIMEOUT_FLOOR_S: float = 60.0
+TS_IMPORT_TIMEOUT_PER_1K_POINTS_S: float = 5.0
+TS_IMPORT_TIMEOUT_CAP_S: float = 3600.0
+
+# InfluxDB v1 exports are read one window at a time instead of as a single huge SELECT.
+V1_EXPORT_WINDOW: timedelta = timedelta(days=7)
+
+
+def timescale_import_timeout_seconds(point_count: int) -> float:
+    """statement_timeout (seconds) for a TimescaleDB import of `point_count` points: floor + per-1000-points allowance, capped."""
+    return min(TS_IMPORT_TIMEOUT_CAP_S, TS_IMPORT_TIMEOUT_FLOOR_S + TS_IMPORT_TIMEOUT_PER_1K_POINTS_S * (point_count / 1000.0))
+
+
+def _set_local_statement_timeout(session: Any, seconds: float) -> None:
+    """
+    Limits every statement the session runs in its CURRENT transaction to `seconds` (0 would mean "no limit").
+
+    set_config(..., true) is SET LOCAL as a function call: it is transaction-scoped, and unlike a literal
+    "SET LOCAL statement_timeout = N" it accepts a bound parameter. The caller must already be inside the
+    transaction the limit is meant for (inside `session.begin()`, or on a session that has not yet committed).
+    """
+    from sqlalchemy import text as _sql_text  # noqa: PLC0415 -- same local-import convention as the rest of this file's Timescale code
+
+    session.execute(_sql_text("SELECT set_config('statement_timeout', :ms, true)"), {"ms": str(int(seconds * 1000))})
+
+
+def _open_v1_client(bridge: Any, timeout_s: float) -> Any:
+    """A throwaway InfluxDBClient (v1) with the bridge's connection details and the given timeout. Caller must close() it.
+
+    retries=0: a query that already ran for its full (long) timeout should fail and surface, not silently run again.
+    """
+    from influxdb import InfluxDBClient  # type: ignore[import-untyped]  # noqa: PLC0415 -- same deferral as the other v1 imports in this file
+
+    return InfluxDBClient(
+        host=bridge.host,
+        port=bridge.port,
+        username=bridge.username if bridge.username else "",
+        password=bridge.password if bridge.password else "",
+        database=bridge.database,
+        timeout=timeout_s,
+        retries=0,
+    )
+
+
+def _open_v3_client(bridge: Any, *, query_timeout_s: float | None = None, write_timeout_s: float | None = None) -> Any:
+    """A throwaway InfluxDBClient3 with the bridge's connection details and the given timeouts (the client takes milliseconds). Caller must close() it."""
+    from influxdb_client_3 import InfluxDBClient3  # type: ignore[import-untyped]  # noqa: PLC0415
+
+    kwargs: dict[str, Any] = dict(bridge._build_client_kwargs())  # pyright: ignore[reportPrivateUsage] -- same connection details the bridge itself uses
+    if query_timeout_s is not None:
+        kwargs["query_timeout"] = int(query_timeout_s * 1000)
+    if write_timeout_s is not None:
+        kwargs["write_timeout"] = int(write_timeout_s * 1000)
+    return InfluxDBClient3(**kwargs)
+
+
 def write_points_v1(gateway: "Protocol_Gateway | None", points: list[InfluxPointDict], allow_float_coercion: bool) -> int:
     """
     Writes points to a live influxdb_out (v1) bridge via its own
@@ -1115,13 +1203,10 @@ def write_points_v1(gateway: "Protocol_Gateway | None", points: list[InfluxPoint
     Raises:
         RuntimeError: no v1 bridge attached, or not connected.
     """
-    from influxdb.exceptions import InfluxDBClientError  # type: ignore[import-untyped]
-
     bridge: influxdb_out | None = get_influxdb1_bridge(gateway)
     if bridge is None:
         raise RuntimeError("No InfluxDB v1 bridge is attached to this gateway.")
-    client = bridge.client
-    if client is None:
+    if bridge.client is None:
         raise RuntimeError("InfluxDB v1 bridge is not connected.")
 
     payload: list[dict[str, Any]] = [
@@ -1129,6 +1214,18 @@ def write_points_v1(gateway: "Protocol_Gateway | None", points: list[InfluxPoint
     ]
     if not payload:
         return 0
+
+    # Own client with a longer timeout than the bridge's (10 s) -- see "Dynamic timeouts" above.
+    client = _open_v1_client(bridge, V1_WRITE_TIMEOUT_S)
+    try:
+        return _write_points_v1_with_client(client, payload, allow_float_coercion)
+    finally:
+        client.close()
+
+
+def _write_points_v1_with_client(client: Any, payload: list[dict[str, Any]], allow_float_coercion: bool) -> int:
+    """The retry-on-type-conflict write loop of write_points_v1(), against an already-open client."""
+    from influxdb.exceptions import InfluxDBClientError  # type: ignore[import-untyped]  # noqa: PLC0415
 
     while True:
         try:
@@ -1164,8 +1261,7 @@ def write_points_v3(gateway: "Protocol_Gateway | None", points: list[InfluxPoint
     bridge: influxdb3_out | None = get_influxdb3_bridge(gateway)
     if bridge is None:
         raise RuntimeError("No InfluxDB v3 bridge is attached to this gateway.")
-    client: InfluxDBClient3 | None = bridge.client
-    if client is None:
+    if bridge.client is None:
         raise RuntimeError("InfluxDB v3 bridge is not connected.")
 
     if not points:
@@ -1181,6 +1277,8 @@ def write_points_v3(gateway: "Protocol_Gateway | None", points: list[InfluxPoint
         pt = pt.time(pd.Timestamp(p.time_iso).value)  # type: ignore[reportUnknownMemberType]
         influx_points.append(pt)
 
+    # v3 sends everything in one write, so its timeout scales with the point count (the client default is 10 s).
+    client: Any = _open_v3_client(bridge, write_timeout_s=v3_write_timeout_seconds(len(influx_points)))
     try:
         client.write(record=influx_points, database=bridge.database)  # type: ignore[reportUnknownMemberType]
     except Exception as exc:
@@ -1191,6 +1289,8 @@ def write_points_v3(gateway: "Protocol_Gateway | None", points: list[InfluxPoint
             )
             raise RetentionPolicyConflictError(retention_msg) from exc
         raise
+    finally:
+        client.close()
     return len(influx_points)
 
 
@@ -1492,41 +1592,57 @@ def export_range_rows(
 
 
         quoted_measurement: str = quote_ident(measurement)
-        where: str = (
-            f"time >= {_influxql_quote_literal(start_time.astimezone(ZoneInfo('UTC')).strftime('%Y-%m-%dT%H:%M:%SZ'))} "
-            f"AND time <= {_influxql_quote_literal(end_time.astimezone(ZoneInfo('UTC')).strftime('%Y-%m-%dT%H:%M:%SZ'))}"
-        )
-        if device_identifier:
-            where += f" AND device_identifier = {_influxql_quote_literal(device_identifier)}"
-        query: str = f"SELECT * FROM {quoted_measurement} WHERE {where}"  # noqa: S608
-        # InfluxDBClient.query() can return a single ResultSet, a
-        # list[ResultSet] (only if the query string held multiple
-        # ';'-separated statements), or a Generator[ResultSet, Any, None]
-        # (only when chunked=True, which we never pass) -- all three are
-        # part of its real signature, even though `query` above is always
-        # exactly one SELECT with no chunking, so only the plain-ResultSet
-        # case should ever actually occur here. The other two are still
-        # checked explicitly rather than assumed away, since calling
-        # .get_points() on a list or a bare generator would otherwise fail
-        # with a confusing AttributeError instead of this clear error.
-        query_result: Generator[ResultSet, Any, None] | ResultSet | list[ResultSet] = bridge.client.query(query, database=bridge.database, epoch="ns")  # type: ignore[reportUnknownMemberType]
-        if not isinstance(query_result, ResultSet):
-            msg: str = (f"Expected a single, non-chunked result set for measurement '{measurement}', "
-                f"got {type(query_result).__name__}.")
-            _log.error(msg)
-            raise ValueError(msg)
-        points: list[dict[str, Any]] = cast(list[dict[str, Any]], list(query_result.get_points()))  # type: ignore[reportUnknownMemberType]  -- influxdb client's ResultSet.get_points() has no precise element type in its stubs
+        utc: ZoneInfo = ZoneInfo("UTC")
 
-        for point in points:
-            time_ns: Any = point.get("time")
-            ts = pd.Timestamp(int(time_ns), unit="ns", tz="UTC")
-            new_time: pd.Timestamp = (ts + time_delta).tz_localize(None)
-            new_row: dict[str, Any] = {"time": new_time.isoformat()}
-            for k, v in point.items():
-                if k in tag_keys or k in ("time",):
-                    continue
-                new_row[k] = v
-            rows.append(new_row)
+        def _v1_window_query(window_start: datetime, window_end: datetime, end_inclusive: bool) -> str:
+            end_op: str = "<=" if end_inclusive else "<"
+            window_where: str = (
+                f"time >= {_influxql_quote_literal(window_start.astimezone(utc).strftime('%Y-%m-%dT%H:%M:%S.%fZ'))} "
+                f"AND time {end_op} {_influxql_quote_literal(window_end.astimezone(utc).strftime('%Y-%m-%dT%H:%M:%S.%fZ'))}"
+            )
+            if device_identifier:
+                window_where += f" AND device_identifier = {_influxql_quote_literal(device_identifier)}"
+            return f"SELECT * FROM {quoted_measurement} WHERE {window_where}"  # noqa: S608
+
+        # Read the range one V1_EXPORT_WINDOW (a week) at a time rather than as one huge SELECT: each request stays small
+        # for the server, and the timeout only has to cover one window, however long the whole range is. Windows are
+        # half-open except the last, so a point exactly on a boundary is returned once. One client serves every window
+        # (timeout sized for a full window) and is closed when the loop ends.
+        export_client: Any = _open_v1_client(bridge, export_timeout_seconds(start_time, start_time + V1_EXPORT_WINDOW))
+        try:
+            window_start: datetime = start_time
+            while True:
+                window_end: datetime = min(window_start + V1_EXPORT_WINDOW, end_time)
+                is_last: bool = window_end >= end_time
+                query: str = _v1_window_query(window_start, window_end, is_last)
+                # InfluxDBClient.query() can return a single ResultSet, a list[ResultSet] (only if the query string held
+                # multiple ';'-separated statements), or a Generator[ResultSet, Any, None] (only when chunked=True) -- all
+                # part of its real signature. Only the plain-ResultSet case should ever occur for one un-chunked SELECT;
+                # the others are checked explicitly so a surprise fails with a clear error, not an AttributeError.
+                query_result: Generator[ResultSet, Any, None] | ResultSet | list[ResultSet] = export_client.query(query, database=bridge.database, epoch="ns")  # type: ignore[reportUnknownMemberType]
+                if not isinstance(query_result, ResultSet):
+                    msg: str = (f"Expected a single, non-chunked result set for measurement '{measurement}', "
+                        f"got {type(query_result).__name__}.")
+                    _log.error(msg)
+                    raise ValueError(msg)  # noqa: TRY004 -- callers (the export endpoint) turn ValueError into a 400 with this message
+                points: list[dict[str, Any]] = cast(list[dict[str, Any]], list(query_result.get_points()))  # type: ignore[reportUnknownMemberType]  -- influxdb client's ResultSet.get_points() has no precise element type in its stubs
+
+                for point in points:
+                    time_ns: Any = point.get("time")
+                    ts = pd.Timestamp(int(time_ns), unit="ns", tz="UTC")
+                    new_time: pd.Timestamp = (ts + time_delta).tz_localize(None)
+                    new_row: dict[str, Any] = {"time": new_time.isoformat()}
+                    for k, v in point.items():
+                        if k in tag_keys or k in ("time",):
+                            continue
+                        new_row[k] = v
+                    rows.append(new_row)
+
+                if is_last:
+                    break
+                window_start = window_end
+        finally:
+            export_client.close()
 
     else:
         bridge = get_influxdb3_bridge(gateway)
@@ -1558,10 +1674,17 @@ def export_range_rows(
             # pyright can't introspect -- annotating it "Table" wouldn't add
             # real checking, only the appearance of it (confirmed: pyright
             # resolves pyarrow.Table itself to Unknown even when imported).
-            slice_table: Any = v3_bridge.client.query(slice_sql, database=v3_bridge.database, language="sql")  # type: ignore[reportUnknownMemberType]
+            slice_table: Any = export_client.query(slice_sql, database=v3_bridge.database, language="sql")  # type: ignore[reportUnknownMemberType]
             return [cast(dict[str, Any], r) for r in slice_table.to_pylist()]  # type: ignore[reportUnknownMemberType]  -- pyarrow.Table ships no py.typed marker, so pyright can't resolve its methods even through an Any-typed reference
 
-        for record_map in _query_v3_time_slices(_fetch_v3_slice, start_time, end_time):
+        # Own client whose per-query timeout scales with the date range (the client's default is 5 minutes).
+        export_client: Any = _open_v3_client(v3_bridge, query_timeout_s=export_timeout_seconds(start_time, end_time))
+        try:
+            v3_records: list[dict[str, Any]] = list(_query_v3_time_slices(_fetch_v3_slice, start_time, end_time))
+        finally:
+            export_client.close()
+
+        for record_map in v3_records:
             time_value: Any = record_map.get("time")
             if time_value is None:
                 continue  # a record with no time value can't be placed on the timeline -- skip it
@@ -1949,6 +2072,7 @@ def write_points_timescale(
     # "device_metrics_narrow" already for a narrow-only write, so this is a
     # single-element set in that case).
     tables_to_prepare: set[str] = {table_name, "device_metrics_narrow"}
+    import_timeout_s: float = timescale_import_timeout_seconds(len(points))
     t_start: float = time.perf_counter()
     hypertable_mgr: Any | None = getattr(bridge, "hypertable_mgr", None)
     paused_job_ids_by_table: dict[str, list[int]] = {}
@@ -1961,6 +2085,7 @@ def write_points_timescale(
                 if paused:
                     paused_job_ids_by_table[t] = paused
                 with bridge.SessionFactory() as session:
+                    _set_local_statement_timeout(session, import_timeout_s)
                     hypertable_mgr.decompress_chunks_in_range(session, t, range_start, range_end)
                     session.commit()
             except Exception as e:
@@ -1981,6 +2106,7 @@ def write_points_timescale(
     try:
         with bridge.SessionFactory() as session:
             with session.begin():
+                _set_local_statement_timeout(session, import_timeout_s)
                 for p, m_time in zip(points, times):
                     # p.time_iso is a naive-UTC ISO string (see TimescalePointDict/build_points_timescale,
                     # and InfluxPointDict's identical convention). Explicitly re-attaching UTC here, rather
@@ -2069,10 +2195,12 @@ def export_range_rows_timescale(
     def shift(raw_time: Any) -> str:
         ts = pd.Timestamp(raw_time)
         if ts.tzinfo is None:
-            ts = ts.tz_localize("UTC")
+            ts: pd.Timestamp = ts.tz_localize("UTC")
         return (ts.tz_convert("UTC") + time_delta).tz_localize(None).isoformat()
 
     with bridge.SessionFactory() as session:
+        # Ends with this (never-committed) transaction, so the pooled connection goes back unchanged.
+        _set_local_statement_timeout(session, export_timeout_seconds(start_time, end_time))
         if table_kind == "narrow":
             result: Any = session.execute(
                 _sql_text(

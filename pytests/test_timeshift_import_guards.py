@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import logging
+from contextlib import ExitStack
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -34,10 +35,24 @@ import pytest
 from fastapi import FastAPI
 from fastapi.templating import Jinja2Templates
 from fastapi.testclient import TestClient
+from httpx import Response
 from influxdb.exceptions import InfluxDBClientError  # type: ignore[import-untyped]
 
 from classes.WebServer.routers import timeshift as ts_router
 from classes.WebServer.services import timeshift_service as ts
+
+
+def _bridge_client(bridge: Any, *_args: Any, **_kwargs: Any) -> Any:
+    """Stand-in for _open_v1_client/_open_v3_client: the bridge's own (mocked) client."""
+    return bridge.client
+
+
+@pytest.fixture(autouse=True)
+def _reuse_bridge_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Timeshift opens its own short-lived InfluxDB clients (dynamic timeouts); these tests mock `bridge.client`, so hand that back."""
+    monkeypatch.setattr(ts, "_open_v1_client", _bridge_client)
+    monkeypatch.setattr(ts, "_open_v3_client", _bridge_client)
+
 
 TEMPLATES_DIR: Path = Path(__file__).resolve().parent.parent / "classes" / "WebServer" / "templates"
 
@@ -140,7 +155,7 @@ class TestWriteTrapsRetention:
 
     def test_v1_missing_retention_policy_is_not_mislabelled(self) -> None:
         # "retention policy not found" is a different failure (seen in the live log) -- must surface as the raw client error.
-        bridge = self._bridge_raising('{"error":"retention policy not found: autogen"}')
+        bridge: SimpleNamespace = self._bridge_raising('{"error":"retention policy not found: autogen"}')
         with patch.object(ts, "get_influxdb1_bridge", return_value=bridge):
             with pytest.raises(InfluxDBClientError):
                 ts.write_points_v1(None, _influx_points(1), allow_float_coercion=True)
@@ -174,7 +189,7 @@ class TestTypeMismatchSummary:
     def test_summary_groups_by_field_with_example_and_reason(self) -> None:
         _points, result = self._build()
         assert list(result.type_mismatch_summary) == ["kwh"]
-        stat = result.type_mismatch_summary["kwh"]
+        stat: ts.TypeMismatchStat = result.type_mismatch_summary["kwh"]
         assert stat.count == 2 and stat.declared_type == "INTEGER"
         assert stat.example_value == "1.5" and "whole number" in stat.reason
         assert len(result.type_mismatches) == 2   # legacy flat list still populated
@@ -192,18 +207,18 @@ class TestTypeMismatchSummary:
 
 class TestUniqueMatching:
     def _suggest(self, columns: list[str], fields: list[str]) -> dict[str, str]:
-        rows = ts.suggest_field_mapping(columns, fields, set(), "eg4")
+        rows: list[ts_router.FieldMappingRow] = ts.suggest_field_mapping(columns, fields, set(), "eg4")
         return {r.source_column: ("" if r.default_ignored else r.suggested_field) for r in rows}
 
     def test_no_destination_field_is_suggested_twice(self) -> None:
         # Your table has epv1_* only: ePv2*/ePv3* used to be suggested the same field as ePv1* and overwrite it.
-        mapping = self._suggest(["ePv1All", "ePv2All", "ePv3All", "ePv1Day", "ePv2Day"], ["epv1_all", "epv1_day"])
+        mapping: dict[str, str] = self._suggest(["ePv1All", "ePv2All", "ePv3All", "ePv1Day", "ePv2Day"], ["epv1_all", "epv1_day"])
         assert mapping["ePv1All"] == "epv1_all" and mapping["ePv1Day"] == "epv1_day"
         assert mapping["ePv2All"] == mapping["ePv3All"] == mapping["ePv2Day"] == ""
         assert not ts.find_duplicate_targets({k: v for k, v in mapping.items() if v})
 
     def test_runner_up_falls_back_to_a_free_matching_field(self) -> None:
-        mapping = self._suggest(["ePv1All", "ePv2All"], ["epv1_all", "epv2_all"])
+        mapping: dict[str, str] = self._suggest(["ePv1All", "ePv2All"], ["epv1_all", "epv2_all"])
         assert mapping == {"ePv1All": "epv1_all", "ePv2All": "epv2_all"}
 
     def test_result_does_not_depend_on_set_iteration_order(self) -> None:
@@ -215,7 +230,7 @@ class TestUniqueMatching:
         assert ts.rank_mappings("tradiator3", {"tradiator2", "tradiator1"}) == ts.rank_mappings("tradiator3", ["tradiator1", "tradiator2"])
 
     def test_find_duplicate_targets_ignores_blank_targets(self) -> None:
-        dups = ts.find_duplicate_targets({"a": "x", "b": "x", "c": "", "d": "", "e": "y"})
+        dups: dict[str, list[str]] = ts.find_duplicate_targets({"a": "x", "b": "x", "c": "", "d": "", "e": "y"})
         assert dups == {"x": ["a", "b"]}
         assert '"x" <- a, b' in ts.duplicate_targets_message(dups)
 
@@ -225,7 +240,7 @@ class TestDuplicateTargetEndpoints:
         return TestInfluxImportEndpoint()._client(templates)  # pyright: ignore[reportPrivateUsage]
 
     def _payload(self) -> dict[str, Any]:
-        payload = TestInfluxImportEndpoint()._payload()  # pyright: ignore[reportPrivateUsage]
+        payload: dict[str, Any] = TestInfluxImportEndpoint()._payload()  # pyright: ignore[reportPrivateUsage]
         payload["mapping_json"] = json.dumps({"a": "v", "b": "v"})   # two columns -> one field
         return payload
 
@@ -235,7 +250,7 @@ class TestDuplicateTargetEndpoints:
 
     def _patches(self) -> Any:
         from contextlib import ExitStack
-        stack = ExitStack()
+        stack: ExitStack = ExitStack()
         stack.enter_context(patch.object(ts_router, "_require_bridge", return_value=MagicMock()))
         stack.enter_context(patch.object(ts_router, "get_upload", return_value=self._upload()))
         stack.enter_context(patch.object(ts_router, "load_influx_field_types", return_value={}))
@@ -244,13 +259,13 @@ class TestDuplicateTargetEndpoints:
 
     def test_preview_flags_duplicate_targets(self, templates: Jinja2Templates) -> None:
         with self._patches():
-            resp = self._client(templates).post("/api/timeshift/preview", json=self._payload())
+            resp: Response = self._client(templates).post("/api/timeshift/preview", json=self._payload())
         assert resp.status_code == 200
         assert "will not succeed" in resp.text and "same destination field" in resp.text
 
     def test_import_refuses_duplicate_targets_before_writing(self, templates: Jinja2Templates) -> None:
         with self._patches(), patch.object(ts_router, "write_points_v1") as write:
-            resp = self._client(templates).post("/api/timeshift/import", json=self._payload())
+            resp: Response = self._client(templates).post("/api/timeshift/import", json=self._payload())
         assert resp.status_code == 400 and "same destination field" in resp.json()["detail"]
         write.assert_not_called()
 
@@ -367,7 +382,7 @@ class TestInfluxImportEndpoint:
             patch.object(ts, "get_influxdb1_bridge", return_value=_v1_bridge(RP_7D)),
             patch.object(ts_router, "write_points_v1") as write,
         ):
-            resp = self._client(templates).post("/api/timeshift/import", json=self._payload())
+            resp: Response = self._client(templates).post("/api/timeshift/import", json=self._payload())
         assert resp.status_code == 409
         assert "retention policy" in resp.json()["detail"] and "Target Start" in resp.json()["detail"]
         write.assert_not_called()
@@ -379,6 +394,6 @@ class TestInfluxImportEndpoint:
             patch.object(ts_router, "load_influx_field_types", return_value={}),
             patch.object(ts, "get_influxdb1_bridge", return_value=_v1_bridge(RP_7D)),
         ):
-            resp = self._client(templates).post("/api/timeshift/preview", json=self._payload())
+            resp: Response = self._client(templates).post("/api/timeshift/preview", json=self._payload())
         assert resp.status_code == 200
         assert "will not succeed" in resp.text and "autogen" in resp.text

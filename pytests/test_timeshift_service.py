@@ -34,6 +34,19 @@ import pytest
 
 from classes.WebServer.services import timeshift_service as ts
 
+
+def _bridge_client(bridge: Any, *_args: Any, **_kwargs: Any) -> Any:
+    """Stand-in for _open_v1_client/_open_v3_client: the bridge's own (mocked) client."""
+    return bridge.client
+
+
+@pytest.fixture(autouse=True)
+def _reuse_bridge_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Timeshift opens its own short-lived InfluxDB clients (dynamic timeouts); these tests mock `bridge.client`, so hand that back."""
+    monkeypatch.setattr(ts, "_open_v1_client", _bridge_client)
+    monkeypatch.setattr(ts, "_open_v3_client", _bridge_client)
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -600,7 +613,7 @@ class TestBuildPointsTimescale:
         # fix: previously any client-supplied target string was accepted
         # here as long as it type-checked against wide_field_types.get(target)
         # (None for an unknown name, treated as a permissive pass-through).
-        df = self._df(Time=["2025-06-01 00:00:00"], evil=["1); DROP TABLE device_metrics_narrow; --"])
+        df: pd.DataFrame = self._df(Time=["2025-06-01 00:00:00"], evil=["1); DROP TABLE device_metrics_narrow; --"])
         points, result = ts.build_points_timescale(
             df, table_kind="wide", mapping={"evil": "col; DROP TABLE x; --"}, time_column="Time",
             source_is_local=True, local_tz="UTC", time_delta=timedelta(0),
@@ -660,6 +673,11 @@ class TestBuildPointsTimescale:
 
 
 class TestWritePointsTimescale:
+    @pytest.fixture(autouse=True)
+    def _no_timeout_statement(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """These tests count the SQL the import writes; the statement_timeout call has its own tests (test_timeshift_dynamic_timeouts.py)."""
+        monkeypatch.setattr(ts, "_set_local_statement_timeout", MagicMock())
+
     def _bridge(self) -> tuple[SimpleNamespace, MagicMock]:
         session = MagicMock()
         session.__enter__ = MagicMock(return_value=session)
@@ -946,7 +964,7 @@ class TestQueryV3TimeSlices:
         accepted_widths: list[timedelta] = []
 
         def run(start: datetime, end: datetime, end_inclusive: bool) -> list[dict[str, Any]]:
-            width = end - start
+            width: timedelta = end - start
             if width > timedelta(minutes=20):
                 raise _file_limit_error()
             accepted_widths.append(width)
