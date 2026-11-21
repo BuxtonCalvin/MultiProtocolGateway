@@ -56,7 +56,7 @@ The module:
 
 1. The gateway reads `config.cfg` and builds every `[transport.*]` section. A scraper names its bridge with `bridge = transport.<section>`.
 2. The TimescaleDB bridge reads its settings, fixes the timestamp mode (see section 6.5), and sizes its connection pool automatically (see *Connection pool* below).
-3. It connects, creating the target database if it does not exist, and makes sure the `timescaledb` and `timescaledb_toolkit` extensions exist in it, running `CREATE EXTENSION IF NOT EXISTS` for any that are missing, and checks the installed TimescaleDB version (see the note below). It clears out any idle connections that a crashed earlier client left holding locks, creates the shared tables, and starts the flush worker thread.
+3. It first checks that the database's add-ons are up to date (see *Upgrading the database* below), waiting up to about 30 seconds if the database is still starting. It then connects, creating the target database if it does not exist, and makes sure the `timescaledb` and `timescaledb_toolkit` extensions exist in it, running `CREATE EXTENSION IF NOT EXISTS` for any that are missing, and checks the installed TimescaleDB version (see the note below). It clears out any idle connections that a crashed earlier client left holding locks, creates the shared tables, and starts the flush worker thread. If the database cannot be reached at all, MPG does **not** stop: it carries on without it and finishes this step later (see *Starting when the database is not ready* below).
 4. For each scraper, the gateway calls the bridge's `init_bridge()`. The first time the bridge sees a protocol it registers the protocol in `protocol_registry`, records the protocol's metrics in `metric_catalog`, creates that protocol's wide table and its columns (if it has fewer than 160 metrics), and then sets up the hypertables, compression and retention policies, and the rollup views. It also records the scraper's `read_interval`, which the dynamic chunk sizing uses (see *Hypertables, Compression and Retention*).
 
 > **Extensions:** the bridge checks `pg_extension` at startup and runs `CREATE EXTENSION IF NOT EXISTS timescaledb;` and `CREATE EXTENSION IF NOT EXISTS timescaledb_toolkit;` for any that are missing, so a TimescaleDB image needs no extra setup. An extension that is already installed is left alone. Creating one requires a database user allowed to create extensions (typically a superuser) and a server with TimescaleDB installed; a plain PostgreSQL server does not have it. If creation fails, the log gives the reason and the bridge does not start. In that case, create the extension once as a superuser in the target database.
@@ -73,7 +73,7 @@ With `write_requires_complete_cycle = true` (the default) the gateway forwards a
 
 For each forwarded reading, `write_data()`:
 
-1. Finds or creates the device's row in `device_info` (unique per scraper transport section name) and caches its ID
+1. Finds or creates the device's row in `device_info` (unique per scraper transport section name) and caches its ID, also remembering it in the backlog file so it is still known after a restart (see *Starting when the database is not ready*)
 2. Stamps one `m_time` on the whole reading, using the **bridge's clock at the moment of receipt** (local timezone, or UTC if `use_utc_timestamp = true`), not a timestamp from the device
 3. Puts the reading on an in-memory queue and returns immediately, so a slow database never stalls scraping
 
@@ -133,7 +133,7 @@ The bridge keeps working through database outages.
 1. It waits `reconnect_delay` **seconds**, then tries to connect.
 2. With `use_exponential_backoff = true`, the delay doubles after each failure, up to `max_reconnect_delay` **seconds**. Otherwise the delay stays fixed.
 3. `reconnect_attempts` limits the tries; `0` means no limit. If all attempts fail, the next failed write starts another reconnect cycle.
-4. On success, the bridge rebuilds its in-memory view of the registered protocols and rollup views, then replays the backlog.
+4. On success, the bridge rebuilds its in-memory view of the registered protocols and rollup views, then replays the backlog. If MPG started while the database was down, it first finishes the start-up work it had to skip (add-ons, tables, device numbers).
 
 | Setting | Default | Unit | Description |
 | --- | --- | --- | --- |
@@ -148,6 +148,61 @@ The bridge keeps working through database outages.
 | `max_reconnect_delay` | `300` | seconds | Upper limit on the wait (5 minutes). |
 
 **Connection pool.** The pool size is calculated automatically as the larger of 2 and *(number of scrapers + 3)*, which leaves room for the flush worker, the rollup refresh thread, schema work and the reconnect thread. It is not a user setting. `pool_size`, `max_overflow` and `pool_recycle` do not appear in the configuration and are ignored if present.
+
+### Starting when the database is not ready
+
+This section explains what MPG does if the database is not available when MPG starts. A typical cause for this scenario is when you update the MPG and TimescaleDB Docker containers at the same time: MPG is ready in seconds, while the database may need longer, or may be restarting.
+
+#### **What you can expect**
+
+1. **MPG waits briefly.** It tries the database about every 2 seconds for up to about 30 seconds, which is normally enough for a database that is just starting.
+2. **MPG starts anyway if the database is still not there.**  Your inverters and other devices are read as usual.
+3. **Readings are saved to a file instead.** Every reading is stored in the backlog file on disk (the same file used for any other outage; see *Backlog* above), so nothing is lost while the Timescale database is down.
+4. **MPG keeps trying in the background.** It uses the reconnect settings above (`reconnect_delay`, `use_exponential_backoff` and so on).
+5. **When the database answers, MPG finishes getting ready.** It sets up the tables and add-ons it had to skip, then sends all the saved readings to the database, oldest first.
+
+You will see lines such as *Initial connect failed* and *database unreachable* in the log. They are warnings that MPG is saving readings for later, not signs of a crash.
+
+**How MPG knows which device a saved reading belongs to.** The database gives every device a number, and each reading must carry that number when it is stored. While the database is down, MPG cannot ask for it, so it:
+
+- **remembers the numbers.** Each time the database hands out a device number, MPG writes it down in the backlog file. After a restart it reads the numbers back, so readings are labelled correctly even if the database is still unavailable.
+- **marks readings from a brand-new device.** If a device has never reached the database, its readings are saved with the device's name (the transport_name in your configuration file ie. [transport.Inverter_read] ) and no number. MPG fills in the number, and creates the device if needed, as soon as the database is back. Nothing is thrown away because of this.
+- **double-checks the numbers.** Before a remembered number is used for storing, MPG confirms it with the database. If the database was deleted and recreated in the meantime, the correct number is used.
+
+> **Keep the backlog file.** The remembered numbers and the saved readings live in the backlog file (`backlog_storage_path` and `backlog_file_name`; in Docker, `/app/backlogs`). Keep that folder on a Docker volume or a bind mount so it survives container upgrades. If it is lost, MPG still works, but the first start with an unavailable database cannot label readings of the devices it no longer remembers until the database is back. This also needs `enable_persistent_storage = true`, which is the default.
+
+#### **Limits to be aware of**
+
+- Readings are only saved while MPG is running. Time during which MPG was not running, for example while its own container was stopped, leaves a gap that cannot be filled in afterwards.
+- The backlog holds at most `max_backlog_size` readings (default 10,000), and readings older than `max_backlog_age` are discarded when MPG starts. A long outage can therefore lose the oldest readings.  At a read every 15 seconds, 10,000 readings gives you about 40 hours of storage.
+- InfluxDB bridges already work this way and are not affected.
+
+### Upgrading the database: how MPG handles it
+
+**Two parts, upgraded separately.** TimescaleDB is made of two parts. The *server* is the program that runs in the Docker image. The *add-ons* (called extensions: `timescaledb` and `timescaledb_toolkit`) are installed inside each individual database. Pulling a new image upgrades the server, but each database still remembers the add-on version it was created with, until the add-ons are updated too.
+
+**What used to go wrong.** A new image often contains only the newest add-on files. A database that still asks for the old version then fails with an error like *could not access file "timescaledb-2.25.1": No such file or directory*, and MPG could not connect. The fix was to run `ALTER EXTENSION timescaledb UPDATE;` by hand.
+
+**What MPG does now.** With `auto_update_extensions = true` (the default), MPG repairs this itself, before anything else connects:
+
+1. It runs the update first, as the very first thing in a fresh connection, because that is the only moment the update works.
+2. It does this for three databases: your own database, the `postgres` database (the server's built-in maintenance database), and `template1` (the pattern from which new databases are copied, so that new databases do not start out with old add-ons).
+3. If the add-ons are already current, nothing changes.
+4. It repeats the check whenever it has to reconnect, so a database that is upgraded while MPG keeps running is repaired as well, without restarting MPG.
+5. If the database is not ready yet (for example it is still restarting after the upgrade), MPG waits briefly as described in *Starting when the database is not ready*.
+
+**What you need to do.** Normally nothing. Upgrade the TimescaleDB image and start the containers in any order, or at the same time.
+
+#### **When MPG cannot fix it by itself**
+
+| Situation | What it means | What to do |
+| --- | --- | --- |
+| The database user is not allowed to update add-ons | The update needs a user that owns the add-ons, normally a superuser (the default user in the Docker setup is one). | The log shows the reason and the exact command. Run it once as a superuser. |
+| `auto_update_extensions = false` | MPG never changes the add-ons. | Run `ALTER EXTENSION timescaledb UPDATE;` and `ALTER EXTENSION timescaledb_toolkit UPDATE;` by hand, as the first command of a new `psql` session. |
+| The new image is too far ahead of the database | Some releases cannot be skipped. | Start the intermediate image version, let the update finish, then move to the newest. |
+| The image is older than the database (a downgrade) | Add-ons cannot be downgraded. | Go back to the newer image, or restore a backup taken before the upgrade. |
+
+Back up the database before upgrading: updating add-ons cannot be undone.
 
 ### Hypertables, Compression and Retention
 
@@ -835,13 +890,13 @@ Pulling a newer `timescaledb-ha` image updates the server software, but each dat
 auto_update_extensions = true
 ```
 
-At startup MPG then runs `ALTER EXTENSION ... UPDATE` for `timescaledb` and then `timescaledb_toolkit`, and logs each step. It is **off by default** because:
+At startup MPG then runs `ALTER EXTENSION ... UPDATE` for `timescaledb` and then `timescaledb_toolkit`, and logs each step. It does this before anything else connects, in your database, in `postgres` and in `template1`, and again whenever it reconnects after an outage (see *Upgrading the database: how MPG handles it* above). It is **on by default**. Things to know before relying on it:
 
 - **It is one-way.** An extension cannot be downgraded. Take a backup first.
 - **It needs a database user that owns the extension, normally a superuser.** The default user in the Docker setup is one. If yours is not, MPG logs the reason together with the manual command, and carries on with the older version.
-- **Other programs connected to the same database are disconnected** at the moment of the update (for example Grafana or pgAdmin). They reconnect on their own, and you may see one failed query.
+- **Other programs connected to the same database are disconnected** at the moment an update actually happens (for example Grafana or pgAdmin). They reconnect on their own, and you may see one failed query.
 
-It is safe to leave switched on: once the versions match, nothing happens at startup.
+It is safe to leave switched on: MPG still runs the check at startup, but once the versions match it changes nothing. Switch it off (`auto_update_extensions = false`) only if you want to control add-on updates yourself.
 
 **Or do it by hand.** Connect to the target database (for example `solar`) with `psql` and run, as the **first command** of a new session:
 
@@ -860,6 +915,11 @@ Restart MPG afterwards. `ALTER EXTENSION ... UPDATE` must be the first statement
 | *Extension 'timescaledb' is at x in database ... but the server provides y* | Warning only. Set `auto_update_extensions = true`, or run the `ALTER EXTENSION ... UPDATE` commands above, to use the newer version. |
 | *auto_update_extensions: updating 'timescaledb' x -> y* | MPG is updating the extension now. Other connections to the database are dropped and reconnect. |
 | *auto_update_extensions: could not update ...* | The database user is not allowed to update the extension. The message includes the reason and the manual command to run as a superuser. MPG continues with the older version. |
+| *preflight: 'timescaledb' in 'solar' is current* | MPG checked the add-ons before connecting and they are up to date (or were just updated). Normal. |
+| *preflight: ... server not answering; not waiting any longer* | The database did not answer within about 30 seconds. MPG starts anyway and keeps trying in the background; readings are saved to the backlog file meanwhile. |
+| *preflight: could not update 'timescaledb' ...* | The database user may not update add-ons. The message includes the manual command to run as a superuser. |
+| *Initial connect failed* / *database unreachable and this device has no id yet* | MPG started while the database was unavailable. Readings are being saved to the backlog file and are sent when the database is back. See *Starting when the database is not ready*. |
+| *could not access file "timescaledb-x.y.z": No such file or directory* | The database still asks for an old add-on version that the new image no longer contains. With `auto_update_extensions = true` MPG repairs this itself; otherwise run `ALTER EXTENSION timescaledb UPDATE;` as above. |
 | *Could not create the 'timescaledb' (or 'timescaledb_toolkit') extension* | The server lacks TimescaleDB, or the database user may not create extensions. Use a TimescaleDB image, or create the extension once as a superuser. |
 | *Not enabling columnstore on `<table>`: ...* | A segment-by or order-by setting is invalid for that table. The table is left unchanged; the message names the problem column. |
 | *Invalid `<setting>` interval ...* | A chunk, compress-after, retention or rollup interval is not a plain interval such as `1 day`. The existing policy is left unchanged. |

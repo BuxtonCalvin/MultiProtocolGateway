@@ -16,6 +16,7 @@ A **transport** is MPG's fundamental unit of configuration. Every device you rea
   - [Modbus TLS](#modbus-tls)
   - [Modbus UDP](#modbus-udp)
   - [Serial Pylon](#serial-pylon)
+  - [Serial VE.Bus](#serial-vebus)
   - [Serial Frame](#serial-frame)
   - [CAN Bus](#can-bus)
   - [Enphase REST](#enphase-rest)
@@ -149,6 +150,7 @@ Scraper transports for serial protocols (RS485, RS232, USB) subclass `serial_bas
 - a `scrape_target` (port, protocol and address), so the gateway schedules the transport in every `read_mode` and consolidates duplicate sections for the same device. A scraper without a `scrape_target` is treated as a bridge and is never polled
 - `read_data()` for sequential and concurrent modes, and `read_data_iter()` for interleaved mode, which yields after every command and takes the gateway's bus lock only for one exchange at a time
 - cycle completeness bookkeeping, so a poll where some commands got no answer is not written by bridges that require complete cycles
+- **startup rows**: a command whose rows are all marked `startup` in the `read interval` column is read once per connection (the first successful read is kept in memory, cleared on every reconnect and when the port is released) and served from that memory on every later cycle, so the rows still decode and publish each cycle. A command shared with a polled row is read every cycle, the derived `_desc` row of an enum or flag row follows its base row, and a failed startup read is retried next cycle. A subclass can call `_invalidate_startup()` after it changes a value on the device. This applies to polled (command/response) transports, the same meaning as for [Modbus](../usage/protocols.md#startup-rows-read-once-per-connection); listen-only transports decode every frame they receive
 - `cleanup()`, which closes the serial port (stopping any background reader) and removes the shared client from the registry. The gateway calls it on every transport before a web UI reload builds the replacements, so the new transports open the port afresh instead of reusing a closed client. This is the same contract as `modbus_base.cleanup()`
 
 Framing is supplied by a **framing family**, an intermediate subclass that implements `_create_client()` and returns the object that owns the port. The families are:
@@ -158,6 +160,7 @@ transport_base
   └─ serial_base                   port, sharing, locking, scheduling, lifecycle (no framing)
        └─ serial_frame_transport   SOI/EOI delimited frames, listen-only or command/response
             └─ serial_pylon        Pylon ASCII protocol, command/response
+       └─ serial_vebus             Victron MK2 length-framed binary protocol, command/response (own wire layer, `serial_mk2_client`)
 ```
 
 A protocol subclasses the family that matches its framing, so adding one never touches `serial_base` or the other protocols. There are three cases.
@@ -353,6 +356,57 @@ bridge = transport.mqtt
 | `timeout` | `5.0` | Seconds to wait for each response. Accepted in the config, but not offered in the web UI. |
 
 The port is opened when the gateway starts, so a missing adapter stops it early. Several batteries can share one port: add one section per address with the same `port` and `baudrate`. Each section is a separate device. On connect MPG asks the battery for its protocol version and uses it in later requests. Commands that get no valid response are skipped for that cycle, and bridges that require complete cycles will not write that poll.
+
+---
+
+### Serial VE.Bus
+
+Reads a Victron VE.Bus device (Multi, MultiPlus, Quattro, Phoenix inverter) through an MK3-USB (or MK2 / MK2.2) interface, using Victron's MK2 serial protocol. **Read-only unless you turn writes on** (see [Writes](#serial-vebus-writes)). Built on `serial_base` with its own wire layer (`serial_mk2_client`), because MK2 frames are `<Length> 0xFF <Command> <Data...> <Checksum>` with no start marker. See [Victron](../devices/Victron.md#11-vebus-serial-access-via-mk3-usb) for wiring, what is published and what is verified.
+
+```ini
+[transport.vebus]
+transport = serial_vebus
+protocol_version = victron_mk3usb_vebus
+port = /dev/ttyUSB0
+baudrate = 2400
+address = 0
+read_interval = 15
+bridge = transport.mqtt
+```
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `port` | `/dev/ttyUSB0` | Serial port path of the MK3-USB. Hardware-ID addressing works as described under [Modbus RTU](#modbus-rtu). |
+| `baudrate` | `2400` | 2400 baud, 8N1 (MK2 protocol 3.1, which lists the MK3 USB). Also accepted as `baud`. |
+| `address` | `0` | VE.Bus device address, 0 to 31 (`0x1F`). One section per device: a three-phase system is three devices, usually addresses 0, 1 and 2. |
+| `timeout` | `1.0` | Seconds to wait for each response. Victron advises 500 ms, and more than 750 ms for the MasterMultiLED frame, so keep it above that. |
+| `write_enabled` | `false` | Standard [write safety](#write-safety-system) switch. Does nothing on its own: see the two opt-ins below. `write_type = relaxed` / `unsafe` as usual. |
+| `allow_panel_writes` | `false` | Allow the `S` remote-panel command: switch position and input current limit. |
+| `allow_setting_writes` | `false` | Allow writing the settings the map marks `W` (EEPROM). |
+| `write_min_interval` | `30` | Minimum seconds between two writes of the same target (the panel, or one setting). |
+
+Devices on one MK3-USB share the port: add one section per address with the same `port`. The transport tells the interface which device to talk to (the `A` command) only when the address changes, and holds the bus for the whole address-then-command sequence, so devices read in parallel never get each other's answers. The first time a value is read the transport asks the device for its scale and offset, applies them, and caches them for the connection; the map therefore sees fixed units. Rows marked `startup` in the `read interval` column (versions, settings) are read once per connection by `serial_base` and republished each cycle from memory. A command the device reports as not supported is skipped and does not make the cycle incomplete. After three commands in a row get no answer the rest of the cycle is skipped and the transport reconnects on the next one. A full cycle is roughly twenty exchanges at 2400 baud, so a `read_interval` of 10 seconds or more is sensible.
+
+#### Serial VE.Bus writes
+
+Writing is off until the section sets `write_enabled = true` **and** at least one of `allow_panel_writes` / `allow_setting_writes`; the two are separate on purpose, so allowing the input current limit never allows EEPROM writes. Only rows marked `W` in the protocol map can be written (the shipped map marks the panel rows `switch_state` and `input_current_limit_control`, and the settings `setting_absorption_voltage`, `setting_float_voltage`, `setting_bulk_current`, `setting_input_current_limit_ac1` and `_ac2`); RAM variables and the flag settings can never be written.
+
+```ini
+[transport.vebus]
+transport = serial_vebus
+protocol_version = victron_mk3usb_vebus
+port = /dev/ttyUSB0
+address = 0
+write_enabled = true
+allow_panel_writes = true
+allow_setting_writes = false
+write_min_interval = 30
+bridge = transport.mqtt
+```
+
+Every write passes these layers, in order: write mode, the opt-in, the `W` allow list, validation at connect (the panel frame reports its limits and a switch register, each writable setting is supported and holds a value inside the device's own limits; 90 % of the probes must pass, `relaxed` waives the score, `unsafe` skips everything below), the device's own limits (nothing is clamped silently, an input current limit of 0 is refused), read-before-write (a value already there is not written, a switch write re-sends the current limit and a limit write keeps the switch state), `write_min_interval`, read-back with a log line saying whether the device took it, and a log line for every write and every refusal. A range in the row's `values` column tightens the device's limits. See [Victron](../devices/Victron.md#vebus-writes) for the details and what is unverified.
+
+The DC and AC info frames and the MasterMultiLED frame describe the whole VE.Bus system, not one device, so every section of a multi-device system publishes the same values for them; use `variable_mask` on the additional sections to publish them once.
 
 ---
 

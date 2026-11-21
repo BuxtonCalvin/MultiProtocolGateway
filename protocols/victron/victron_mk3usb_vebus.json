@@ -1,91 +1,115 @@
 {
   "transport": "serial_vebus",
-  "register_key_type": "text",
+  "baud": 2400,
   "send_holding_register": true,
   "send_input_register": false,
   "send_coil_register": false,
-  "send_discrete_register": false,  
-
-  "vebus_error_codes": {
-    "0": "No error",
-    "1": "Device switched off because one of the other phases switched off",
-    "2": "New and old type MK2 protocol mixed in the system",
-    "3": "Not all, or more than, the expected devices were found",
-    "4": "No other device found",
-    "5": "Overvoltage on AC out",
-    "6": "Error in DDC Program",
-    "7": "External device connected, assistant required",
-    "8": "Ground relay test failed",
-    "10": "System time synchronization problem",
-    "11": "Relay Test Fault",
-    "12": "Config mismatch with 2nd MCU",
-    "14": "Device cannot transmit data",
-    "15": "VE.Bus combination error",
-    "16": "VE.Bus dongle is missing",
-    "17": "Phase master missing",
-    "18": "AC Over-voltage on output of slave while switched off",
-    "19": "Slave does not have AC input",
-    "20": "Configuration mismatch",
-    "22": "Device cannot function as slave",
-    "24": "Switch-over system protection initiated",
-    "25": "Incompatible VE.Bus configuration",
-    "26": "Internal error",
-    "30": "Ghost error",
-    "31": "Ghost error",
-    "128": "Connect prevented by failing relay test"
+  "send_discrete_register": false,
+  "interface_mode_codes": {
+    "66": "VE.Bus, no device address set",
+    "87": "VE 9-bit RS485 device, not VE.Bus"
   },
-
-  "vebus_state_codes": {
-    "0": "off",
-    "1": "low power",
-    "2": "fault",
-    "3": "bulk",
-    "4": "absorption",
-    "5": "float",
-    "6": "storage",
-    "7": "equalize",
-    "8": "passthru",
-    "9": "inverting",
-    "10": "power assist",
-    "11": "power supply mode"
+  "device_state_codes": {
+    "0": "Down",
+    "1": "Startup",
+    "2": "Off",
+    "3": "Device in slave mode",
+    "4": "Invert full",
+    "5": "Invert half",
+    "6": "Invert AES",
+    "7": "Power assist",
+    "8": "Bypass",
+    "9": "Charge"
   },
-
-  "charge_state_codes": {
-    "3": "bulk",
-    "4": "absorption",
-    "5": "float",
-    "6": "storage",
-    "7": "equalize"
+  "switch_state_codes": {
+    "1": "Charger only",
+    "2": "Inverter only",
+    "3": "On",
+    "4": "Off"
   },
-
-  "switch_mode_codes": {
-    "1": "charger only",
-    "2": "inverter only",
-    "3": "on",
-    "4": "off"
+  "charge_sub_state_codes": {
+    "0": "Charge initializing",
+    "1": "Charge bulk",
+    "2": "Charge absorption",
+    "3": "Charge float",
+    "4": "Charge storage",
+    "5": "Charge repeated absorption",
+    "6": "Charge forced absorption",
+    "7": "Charge equalize",
+    "8": "Charge bulk stopped",
+    "255": "Not charging"
   },
-
-  "active_ac_input_codes": {
-    "1": "AC input 1",
-    "2": "AC input 2",
-    "240": "none"
+  "led_status_codes": {
+    "b0": "Mains",
+    "b1": "Absorption",
+    "b2": "Bulk",
+    "b3": "Float",
+    "b4": "Inverter",
+    "b5": "Overload",
+    "b6": "Low battery",
+    "b7": "Temperature"
   },
-
-  "high_temp_alarm_codes": {
-    "0": "ok",
-    "1": "warning",
-    "2": "alarm"
+  "phase_info_codes": {
+    "5": "L4",
+    "6": "L3",
+    "7": "L2",
+    "8": "L1, 1 phase in the system",
+    "9": "L1, 2 phases in the system",
+    "10": "L1, 3 phases in the system",
+    "11": "L1, 4 phases in the system",
+    "12": "DC info"
   },
-
-  "low_battery_alarm_codes": {
-    "0": "ok",
-    "1": "warning",
-    "2": "alarm"
+  "special_three_phase_setting_codes": {
+    "0": "3 phase",
+    "1": "Split phase 180",
+    "2": "2 leg 3 phase 120"
   },
-
-  "overload_alarm_codes": {
-    "0": "ok",
-    "1": "warning",
-    "2": "alarm"
+  "flags0_codes": {
+    "b0": "Multi phase system",
+    "b1": "Multi phase leader",
+    "b2": "60 Hz",
+    "b3": "Disable wave check",
+    "b4": "Do not stop after 10 hr bulk",
+    "b5": "Assist enabled",
+    "b6": "Disable charge",
+    "b7": "Inverse of disable wave check",
+    "b8": "Disable AES",
+    "b11": "Enable reduced float",
+    "b13": "Disable ground relay",
+    "b14": "Weak AC input",
+    "b15": "Remote overrules AC2"
+  },
+  "flags1_codes": {
+    "b0": "VS on bulk protection",
+    "b1": "VS on temperature pre-alarm",
+    "b2": "VS on low battery pre-alarm",
+    "b3": "VS on overload pre-alarm",
+    "b4": "VS on battery ripple pre-alarm",
+    "b5": "VS off temperature pre-alarm",
+    "b6": "VS off low battery pre-alarm",
+    "b7": "VS off overload pre-alarm",
+    "b8": "VS off battery ripple pre-alarm",
+    "b9": "VS on when general failure",
+    "b10": "VS invert",
+    "b11": "Accept wide input frequency",
+    "b12": "Dynamic current limiter",
+    "b13": "Use tubular plate traction battery curve",
+    "b14": "Remote overrules AC1",
+    "b15": "Use low power shutdown in AES instead of modified sinewave"
+  },
+  "flags2_codes": {
+    "b0": "VS2 off when AC1 available",
+    "b1": "VS2 invert",
+    "b2": "VS set inverter period time"
+  },
+  "switch_register_codes": {
+    "b0": "Direct remote switch charge (panel)",
+    "b1": "Direct remote switch invert (panel)",
+    "b2": "Front switch up",
+    "b3": "Front switch down",
+    "b4": "Switch charge (current state)",
+    "b5": "Switch invert (current state)",
+    "b6": "Onboard remote invert switch",
+    "b7": "Remote generator selected"
   }
 }

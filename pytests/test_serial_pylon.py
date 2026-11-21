@@ -214,7 +214,7 @@ def fake_protocol(registers: list[int]) -> MagicMock:
     protocol = MagicMock()
     # data_type ASCII: payload pruning only needs such a row to start inside the payload
     protocol.get_registry_map.return_value = [
-        SimpleNamespace(register=r, variable_name=f"v{r}", data_type=Data_Type.ASCII, register_byte=0) for r in registers
+        SimpleNamespace(register=r, variable_name=f"v{r}", data_type=Data_Type.ASCII, register_byte=0, read_at_startup=False) for r in registers
     ]
     protocol.process_registery.side_effect = _process_registery
     return protocol

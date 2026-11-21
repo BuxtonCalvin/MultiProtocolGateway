@@ -141,6 +141,9 @@ class serial_base(transport_base):
     def __init__(self, settings : TransportSettings) -> None:
         super().__init__(settings)
 
+        self._startup_payloads: dict[int, bytes] = {}
+        ''' payloads of the commands whose rows are all marked "startup" in the map, kept for the connection (see _read_command_cached) '''
+
         self._port_setting: str = settings.get("port", fallback="/dev/ttyUSB0")
         if not self._port_setting:
             raise ValueError("Port is not set")
@@ -251,6 +254,7 @@ class serial_base(transport_base):
         '''
         client: SerialClient | None = self._client
         self._client = None
+        self._startup_payloads.clear()
         if client is None:
             return
 
@@ -399,6 +403,7 @@ class serial_base(transport_base):
             self.connected = False
             return False
 
+        self._startup_payloads.clear()  # a new connection may be a different or restarted device: read the startup rows again
         if self._handshake():
             self.connected = True
         return self.connected
@@ -449,6 +454,44 @@ class serial_base(transport_base):
                 commands.append(entry.register)
         return commands
 
+    def _startup_commands(self) -> set[int]:
+        '''
+        The commands whose rows are all marked "startup" (or "once") in the read interval column. Those are read once
+        per connection and not every cycle, as the Modbus transports do. A command that carries other rows as well is
+        read every cycle. The _desc row the loader derives from an enum or flag row follows the row it describes.
+        '''
+        entries: list[registry_map_entry] = self._registry_map()
+        names: set[tuple[int, str]] = {(entry.register, entry.variable_name) for entry in entries}
+        flags: dict[int, list[bool]] = {}
+        for entry in entries:
+            if entry.variable_name.endswith("_desc") and (entry.register, entry.variable_name[:-5]) in names:
+                continue
+            flags.setdefault(entry.register, []).append(entry.read_at_startup)
+        return {command for command, row_flags in flags.items() if all(row_flags)}
+
+    def _read_command_cached(self, command : int) -> bytes | None:
+        '''
+        _read_command() for the polling loop, honoring the startup rows: a startup command is read once per connection
+        and its payload is served from memory on every later cycle, so the rows still decode and publish each cycle.
+        A read that fails is not remembered and is tried again next cycle.
+        '''
+        self._last_outcome = "ok"  # stays so when the payload comes from the startup cache
+        cached: bytes | None = self._startup_payloads.get(command)
+        if cached is not None:
+            return cached
+
+        payload: bytes | None = self._read_command(command)
+        if payload is not None and command in self._startup_commands():
+            self._startup_payloads[command] = payload
+        return payload
+
+    def _invalidate_startup(self, command : int | None = None) -> None:
+        ''' forgets a remembered startup payload (all of them when command is None), for example after the device value was changed by a write '''
+        if command is None:
+            self._startup_payloads.clear()
+        else:
+            self._startup_payloads.pop(command, None)
+
     def _poll_commands_iter(self) -> Iterator[tuple[int, bytes | None]]:
         '''
         Sends each command once and yields (command, payload) after every attempt, success or
@@ -461,7 +504,7 @@ class serial_base(transport_base):
         self._cycle_expect_unit(len(commands))
 
         for command in commands:
-            payload: bytes | None = self._read_command(command)
+            payload: bytes | None = self._read_command_cached(command)
             if payload is None:
                 self.cycle_mark_incomplete()
             else:

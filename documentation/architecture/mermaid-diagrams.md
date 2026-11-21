@@ -35,7 +35,7 @@ flowchart TD
     subgraph Scrapers["Scraper Transports (Input)"]
         MB["modbus_rtu / tcp / tls / udp"]
         CAN["canbus"]
-        SER["serial_pylon / serial_frame"]
+        SER["serial_pylon / serial_vebus / serial_frame"]
         PACE["modbus_pace / EG4 variants"]
     end
 
@@ -253,6 +253,8 @@ classDiagram
         -_create_client()
         -_check_shared_client()
         -_read_command()
+        -_read_command_cached()
+        -_startup_commands()
         -_process_raw()
         -_exchange()
         -_handshake()
@@ -296,6 +298,16 @@ classDiagram
     class modbus_pace
     class canbus
     class serial_pylon
+    class serial_vebus {
+        +MAX_CONSECUTIVE_FAILURES: int
+        -_ram_info: dict
+        +write_data()
+        +enable_write()
+    }
+    class serial_mk2_client {
+        +current_address: int
+        +read_frame(timeout) bytes
+    }
     class mqtt
     class timescaledb {
         +auto_update_extensions: bool
@@ -356,6 +368,9 @@ classDiagram
     transport_base <|-- serial_base
     serial_base <|-- serial_frame_transport
     serial_frame_transport <|-- serial_pylon
+    serial_base <|-- serial_vebus
+    SerialClient <|.. serial_mk2_client
+    serial_vebus --> serial_mk2_client : creates
     serial_base --> SerialClient : shares one per port
     SerialClient <|.. serial_frame_client
     serial_frame_transport --> serial_frame_client : creates

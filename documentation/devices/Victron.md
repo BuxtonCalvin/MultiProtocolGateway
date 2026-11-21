@@ -197,7 +197,7 @@ MultiPlus or Quattro's VE.Bus port and a USB host. It is required in two scenari
 2. Connect MK3-USB USB plug → USB port on Cerbo GX, Raspberry Pi, or MPG host
 3. Device appears as `/dev/ttyUSBx` (Linux) at 2400 baud
 
-**Serial data available via MK3-USB** (see Section 11 and `victron_mk3usb_vebus_serial_fields.csv`):
+**Serial data available via MK3-USB** (see Section 11 and `victron_mk3usb_vebus.holding_registry_map.csv`):
 
 - AC input voltage, current, power (all phases)
 - AC output voltage, current, power (all phases)
@@ -461,62 +461,167 @@ Victron does not publish this protocol (its staff cite an NDA). The frame layout
 
 ## 11. VE.Bus Serial Access via MK3-USB
 
-The **Victron Interface MK3-USB (VE.Bus to USB)** exposes MultiPlus and Quattro operating data
-directly over USB serial — no GX device or Venus OS required. This is the correct method for
-direct serial polling of VE.Bus inverter-chargers by MPG or any other host.
+The **Victron Interface MK3-USB (VE.Bus to USB)** gives MPG direct access to MultiPlus, Multi, Quattro and Phoenix
+inverter operating data over USB serial, with no GX device or Venus OS. MPG speaks Victron's **MK2 serial protocol**
+through the `serial_vebus` transport (`victron_mk3usb_vebus` protocol). It is **read-only by default**. Writes (the
+switch position, the input current limit and five settings) exist but are off until you opt in, twice; see
+[VE.Bus writes](#vebus-writes).
 
-### Serial Port Parameters
+> **Source and status.** Built from Victron's *Interfacing with VE.Bus products - MK2 Protocol*, version 3.14
+> (section numbers below refer to it). The request frames match the document's Appendix 1 examples byte for byte, and
+> the DC, AC and MasterMultiLED frames of its Appendix 2 trace decode to the values the document prints. **Nothing has
+> been run on real hardware.** "What is and is not verified" below lists what rests on the document and what is inferred.
+
+### Wiring and serial parameters
+
+1. MultiPlus / Quattro VE.Bus RJ45 socket to the MK3-USB RJ45 socket (a normal UTP cable).
+2. MK3-USB USB plug to the MPG host. The device appears as `/dev/ttyUSBx` (use a hardware-ID `port` if you have several adapters).
+3. Do not connect a generic RS485 adapter to VE.Bus.
 
 | Parameter | Value |
 | --- | --- |
-| Baud rate | 2400 |
-| Data bits | 8 |
-| Parity | None |
-| Stop bits | 1 |
-| Flow control | None |
-| OS device path | `/dev/ttyUSBx` (Linux) |
+| Baud rate | 2400 (section 3.1, which lists the MK2.2, MK2 USB and MK3 USB) |
+| Data bits / parity / stop bits | 8 / none / 1 |
+| Flow control | None. A serial MK2.2 needs DTR driven high (3.1); the USB interfaces do not. |
+| MK2 firmware | The document applies to MK2 version 1130125 or later. Keep the MK2/MK3 firmware current (VE Configure updates it). |
 
-### Protocol Notes
+If the MK2 is powered before the VE.Bus device, power-cycle the MK2 (3.6). MPG sends no reset.
 
-The MK3-USB speaks a **proprietary Victron VE.Bus binary protocol** (also referred to as the MK2
-protocol internally). It is not standard Modbus RTU. Options for accessing data:
-
-- **Venus OS / dbus (recommended for GX setups):** When the MK3-USB is connected to a Cerbo GX or
-  Venus Pi, Venus OS handles the protocol layer and exposes data via Modbus TCP (Section 10) and
-  MQTT (Section 9).
-- **Direct serial polling (MPG / standalone):** Use the open-source `velib` Python library or the
-  `mk2pkt` packet library to speak the binary VE.Bus protocol directly.
-- **VE Configure / VictronConnect:** Victron's official configuration tools communicate over MK3-USB
-  using the same binary protocol.
-
-### Data Available via MK3-USB
-
-All fields are documented in `victron_mk3usb_vebus_serial_fields.csv`. Key data groups:
-
-- AC input: voltage, current, power (L1/L2/L3 for three-phase)
-- AC output: voltage, current, power (L1/L2/L3)
-- AC input and output frequency
-- DC battery: voltage and current
-- Inverter temperature
-- VE.Bus operating state and error code
-- Charge state (bulk / absorption / float / storage / equalize)
-- Switch mode (read and write)
-- Alarm flags: low battery, overload, high temperature
-- Active AC input source (Quattro: AC1 or AC2)
-- Relay states
-
-### MPG Serial Configuration (MK3-USB Direct)
+### Configuration
 
 ```ini
-transport = serial
+[transport.vebus]
+transport = serial_vebus
+protocol_version = victron_mk3usb_vebus
 port = /dev/ttyUSB0
-baud = 2400
-protocol_version = victron_mk3_vebus_v1
+baudrate = 2400
+address = 0
+read_interval = 15
+bridge = transport.mqtt
 ```
 
-> ⚠️ In multi-inverter (parallel or three-phase) installations, the MK3-USB connects to the **last
-> unit** in the VE.Bus daisy chain. All phase data from the parallel system is aggregated and
-> accessible through that single connection.
+`address` is the VE.Bus device address, 0 to 31. In a properly configured system the first device is address 0 (Appendix 2).
+A parallel or three-phase installation has one VE.Bus device per unit, so add **one section per device** with the same
+`port` and different `address` values; the transport selects the address (`A` command) only when it changes and keeps the
+select-and-read sequence atomic, so devices on one port can be read in any scheduling mode. Settings are in
+[Serial VE.Bus](../usage/transports.md#serial-vebus).
+
+If you do not know the addresses, the document's discovery method (7.2) is: set an address, send any `W` command, and a
+reply means a device is there; stop after three silent addresses. MPG does not run discovery itself: a section whose
+address has no device logs "No VE.Bus device answered" once per cycle and publishes nothing.
+
+### What is published
+
+Per section (protocol `victron_mk3usb_vebus`; read-only except the rows marked `W`, see [VE.Bus writes](#vebus-writes)):
+
+| Group | Source | Variables |
+| --- | --- | --- |
+| System, from the **info frames** (6.1, 6.2) | `F` 0, 1-3, 5 | `dc_voltage`, `dc_current_inverting`, `dc_current_charging`, `dc_current` (charging minus inverting, as in the vendor example), `ac_out_frequency`; per phase `ac_in_voltage_lN`, `ac_in_current_lN`, `ac_out_voltage_lN`, `ac_out_current_lN`, `ac_in_frequency_lN` (L1 to L3), BF/inverter factors, phase info and state; input current limits and AC-input configuration, switch register |
+| Per device, **RAM variables** (7.3.3, 7.3.13.1) | `W` 0x30, IDs 0-19 | `device_*`: mains, inverter and battery voltage and current, ripple, mains and inverter frequency, AC load current, virtual switch, ignore-AC-input and multi-functional relay bits, state of charge (battery monitor), power values |
+| Per device, **state and identity** | `W` 0x0E, 0x05/0x06; `V`, `L` | `device_state` (+ `_desc`), `charge_sub_state`, `software_version`, `mk2_interface_version`, LED on/blink flags |
+| Per device, **settings** (7.3.4, 7.3.13.2) | `W` 0x31 | absorption/float voltage, bulk current, input current limits, absorption timings, low-battery limits, mains acceptance limits, battery monitor settings, three-phase mode, `Flags0/1/2` as named flags. Virtual-switch settings (IDs 15-43, 52-62) and ID 63 are not mapped. |
+
+The info frames describe the **whole system**; the RAM variables and settings belong to **one device**. In a multi-device
+setup every section publishes the system rows, so mask them (`variable_mask`) on all but one section.
+L2 and L3 are only requested when the L1 frame says the system has that many phases.
+
+Values the device does not support (reported as such by the device, 0x90/0x91, or a scale of 0) are left out, and do not make the cycle incomplete.
+
+The scale and offset of each value come from the device (7.3.8, 7.3.9) and are fetched once per connection; the map
+receives them already applied in fixed units. `startup` rows (identity, settings) are read once per connection.
+A full cycle is about twenty exchanges at 2400 baud: use `read_interval` of 10 s or more.
+
+### What is and is not verified
+
+Verified against the vendor document (byte for byte or value for value, in `pytests/test_serial_vebus*.py`):
+
+- Frame layout, checksum rule, and the request frames of Appendix 1 (`A`, `W` 0x05/0x06/0x30/0x36, `F` 0, `L`).
+- The scale and offset interpretation (7.3.9, 7.3.8) against every scale answer in the Appendix 2 trace, including the
+  signed current, the 0.1 s period time with offset 256, and the three bit variables.
+- The DC, AC L1 and MasterMultiLED frames of Appendix 2: 26.4 V, 0.0 A, 50.0 Hz; 213.0 V, 0.7 A, 213.0 V, 0.4 A, 50.1 Hz; limit 50.0 A in 6.2 A to 100.0 A. (The trace is printed without checksums; the test frames carry computed ones.)
+
+Built from the stated layouts, with no vendor example to compare: device state and sub-state, RAM variable and setting
+values, the software version assembly, LED flags, the switch register, and the three-phase frames.
+
+**Inferred or a judgment call** (not stated by the document):
+
+- The DC info currents are unsigned 24-bit values scaled with the IBat scale (the document says "same scales as the
+  equivalent W values"; the trace's currents were zero).
+- Unit of `state_of_charge` (RAM 13): percent, from its 0.005 scale and the document's own example title "State of Charge".
+  Unit of the power variables 14-19: watt (the document only says "power"). The document lists IDs 14 and 15 with the same
+  description, so which is which is not known; both are published under neutral names. The sign of IBat (RAM 5) is not stated.
+- `Flags2` (setting 60) is read as Flags[32] to Flags[47] by extension of the document's numbering.
+- An inverter factor of 0 (reported by some inverter firmware, footnote c) is counted as 1.
+- Charge sub-state 255 ("Not charging") is MPG's own value for "state is not Charge"; the vendor protocol has no such value.
+- Default timeout 1.0 s (the document advises 500 ms, more than 750 ms for `F` 5), and giving up after three silent commands.
+- That requesting L2/L3 on a single-phase system gets no answer is not stated; MPG avoids the question by not asking.
+- Differences between document versions: 3.12 showed the software version replies as 0x81/0x82 in its example; 3.14 and MPG use 0x82/0x83.
+
+Not implemented: RAM variable writes (the document does not say which are writable), the flag settings, forced
+charge states (`W` 0x0E with a state other than 0), `W` 0x37, `F` 8 reset, `F` 9 battery operational limits, snapshots (`F` 6, `W` 0x38; the document warns a CCGX may use them),
+long Winmon frames and the `X/Y/Z` commands, reading several RAM IDs in one command, device discovery, and L4 rows.
+
+### VE.Bus writes
+
+Two kinds of change exist, each behind its own switch. Neither does anything unless the section also has
+`write_enabled = true`.
+
+| Kind | Opt-in | Command | Rows | Stored? |
+| --- | --- | --- | --- | --- |
+| Panel | `allow_panel_writes = true` | `S` (section 5), variant 2 | `switch_state` (1 charger only, 2 inverter only, 3 on, 4 off), `input_current_limit_control` (amps) | No |
+| Settings | `allow_setting_writes = true` | `W` 0x33 then 0x34 (7.3.6, 7.3.7) | `setting_absorption_voltage`, `setting_float_voltage`, `setting_bulk_current`, `setting_input_current_limit_ac1`, `_ac2` | **Yes, EEPROM** |
+
+Only rows marked `W` in the map can be written; change an `R` to `W` to allow another setting (the same checks apply).
+RAM variables and the flag settings `Flags0` to `Flags3` can never be written: the document warns that changing unused,
+unsupported or "not promoted" flags can damage the device and that `Flags[3]` and `Flags[7]` must stay consistent.
+
+**Safety layers** (all must pass; each has a test showing it refusing and that nothing was sent):
+
+1. `write_enabled`, and `write_type` for `relaxed` / `unsafe`, as for every transport.
+2. The opt-in for that kind of change (honored in every write mode).
+3. The row must be marked `W`.
+4. **Validation at every connect.** At least 90 % of the probes must pass: the MasterMultiLED frame reports its limits and a switch register, and each writable setting is supported and currently holds a value inside the limits the device reports. `relaxed` waives the score; `unsafe` skips this and layers 5 to 9. A section that failed validation (device off at start-up, say) is validated again on the next connect.
+5. **The device's own limits.** A setting must lie inside the minimum and maximum the Multi reports for it (7.3.8); an input current limit inside the Multi's minimum and maximum (6.2). Nothing is clamped silently: a value outside is refused. An input current limit of 0 is refused, because the document says it switches the Multi to invert or bypass. A range in the row's `values` column (applied to the published value) tightens the device's limits.
+6. **Read before write.** The current value must be readable and inside the limits; writing what is already there is skipped (less EEPROM wear, and a retained MQTT message cannot rewrite on every reconnect). The `S` command carries both the switch and the limit, so a write of one re-sends the *current* value of the other (the limit actually in force, or the switch state derived from the switch register) instead of changing it.
+7. `write_min_interval` (default 30 s) between writes of the same target.
+8. **Read back.** A setting is read again and the log says whether the device holds it; a panel write is checked against the MasterMultiLED frame (three reads, 0.5 s apart). Neither can undo the write: they report. The cached start-up value is dropped so the new value is published.
+9. Every write and every refusal is logged (`WRITE VE.Bus ...`, `WRITE_ERROR: ...`).
+
+A refused or failed write never raises; the other values of the same batch are still tried.
+
+Example (home-automation current limit through MQTT, nothing else allowed):
+
+```ini
+[transport.vebus]
+transport = serial_vebus
+protocol_version = victron_mk3usb_vebus
+port = /dev/ttyUSB0
+address = 0
+write_enabled = true
+allow_panel_writes = true
+bridge = transport.mqtt
+```
+
+Publish `16` to the `input_current_limit_control` write topic to set 16 A, or `Off` / `On` / `Charger only` /
+`Inverter only` to `switch_state`. **`Off` stops the inverter: loads on the AC output lose power.**
+
+**Verified:** the `S` frame for "on, 31.5 A" is byte for byte the document's Appendix 1 example (`07 FF 'S' 03 3B 01 01 80 E7`);
+the setting write follows the two-frame sequence and the 0x88 answer of 7.3.6 and 7.3.7; refusals, limits, rate limiting,
+read-back and the locking against other devices on the same interface are tested against a simulated interface.
+
+**Not verified, or inferred. Read this before enabling writes:**
+
+- Nothing has been run against a real Multi. The simulation answers as the document says; where the document is silent (how long a Multi takes to act on `S`, whether it wants a pause between the 0x33 and 0x34 frames) the simulation is the assumption. MPG sends the two frames back to back.
+- The document has no worked example for `W` 0x33/0x34 or for 0x35 answers beyond the field list; the sequence is built from the text.
+- Mapping the switch register bits (6.2: bit 4 `SwitchCharge`, bit 5 `SwitchInvert`, "current state") onto the `S` numbering (charge only 1, inverter only 2, both 3, neither 4) is an inference.
+- Whether a single `S` command persists in the Multi is not stated. The document calls its example a "single remote panel command" and describes a flag that makes the MK2 resend the panel state every half second; MPG never sets it. If a Multi expects a panel to keep talking, the setting may lapse.
+- The document says that when `Input current overridden by panel` (6.2) is not set the internal limit is used even if a remote panel is connected, so MPG refuses limit writes in that case. A GX device, remote panel or another MK2 on the same VE.Bus can overrule or fight these commands; the read-back will then show "not confirmed".
+- A Multi that does not report the switch register (older firmware) cannot have its state read or a write confirmed: standard mode refuses panel writes for it, `relaxed` allows a switch write without confirmation, and a limit-only write is always refused.
+- Settings 50 and 51 take effect only after a reset of the Multi (footnote e); the read-back shows the stored value either way.
+- EEPROM endurance is not given in the document; `write_min_interval` and the no-change skip are the protection.
+
+> In installations with more than one unit, the MK3-USB plugs into any VE.Bus socket of the system; per-device data is
+> selected by address (above), not aggregated.
 
 ---
 
@@ -710,10 +815,12 @@ poll_interval = 10
 **Option C — MK3-USB direct serial (MultiPlus / Quattro, no GX device required):**
 
 ```ini
-transport = serial
+[transport.vebus]
+transport = serial_vebus
 port = /dev/ttyUSB0
-baud = 2400
-protocol_version = victron_mk3_vebus_v1
+baudrate = 2400
+address = 0
+protocol_version = victron_mk3usb_vebus
 ```
 
 **Option D — VE.Direct direct serial (MPPT / BMV / Phoenix, no GX device required):**
@@ -746,7 +853,7 @@ product in the MPG column format
 | `victron_phoenix_inverter.holding_registry_map.csv` | Phoenix inverters (VE.Direct) | CCGX list, `com.victronenergy.inverter` |
 | `victron_gx_generic_canbus.holding_registry_map.csv` | CAN-bus BMS batteries | CAN frames, see below |
 | `victron_vedirect_serial.holding_registry_map.csv` | MPPT / BMV / Phoenix over VE.Direct | VE.Direct protocol 3.34 |
-| `victron_mk3usb_vebus.holding_registry_map.csv` | MultiPlus / Quattro over MK3-USB | Placeholder, see below |
+| `victron_mk3usb_vebus.holding_registry_map.csv` | MultiPlus / Quattro over MK3-USB | MK2 protocol 3.14, see Section 11 |
 
 ### Notes on CSV Usage
 
@@ -760,9 +867,10 @@ product in the MPG column format
   `victron_bmv_battery_monitor` loaded no registers at all because its file was misnamed.
 - VE.Direct field labels (`V`, `PPV`, `CS`, etc.) are ASCII text labels, not numeric register
   addresses. The `register` column in those CSVs carries the label string.
-- The MK3-USB identifiers (`F_AC_IN_V_L1`, etc.) are placeholder names that do not appear in Victron's MK2
-  protocol document, which addresses RAM variables by ID. There is no `serial_vebus` transport yet, so this
-  protocol cannot run.
+- The MK3-USB map is not a register list: its register numbers are MK2 commands (high byte = the vendor command byte,
+  low byte = RAM variable or setting ID, or info-frame type), and the `serial_vebus` transport hands the map
+  already-scaled values in fixed layouts. Earlier versions of this map used placeholder names that were not in
+  Victron's document. See Section 11.
 - Scale factors are in the `unit` column as the multiplier MPG applies (`0.1V` for a register that is divided by 10).
 
 ---
@@ -807,6 +915,8 @@ product in the MPG column format
 | Topics appear then stop after ~60 s | Keepalive not being sent | Publish `{}` to `R/<portal-id>/system/0/Serial` every 50 seconds |
 | Bridge not forwarding topics | Bridge config error or GX IP changed | Verify GX static IP; check `mosquitto -v` logs on broker host |
 | MultiPlus data missing from GX | MK3-USB not in use | MK3-USB is required; never connect generic RS485 to VE.Bus |
+| `serial_vebus`: "No VE.Bus device answered" | Wrong `address`, MK3 not connected to the Multi, or MK2 powered before the Multi | Try addresses 0-2; check the cable; power-cycle the MK3-USB (3.6) |
+| `serial_vebus`: values missing | The device reports them as not supported (e.g. state of charge without the battery monitor function) | Expected; see Section 11 |
 | Modbus TCP returns zeros | Wrong unit ID | Verify unit IDs per Section 10; use `dbus-spy` on GX for live D-Bus inspection |
 | VRM Portal offline | Internet outage or Victron VRM maintenance | Local MQTT and Modbus TCP continue operating; VRM outage does not affect local integrations |
 | Venus OS and MPG topics in different formats | Expected — different systems use different conventions | Use Node-RED (Section 8) to normalize topic format if needed |

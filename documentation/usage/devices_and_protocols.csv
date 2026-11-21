@@ -68,7 +68,7 @@ Sunmart,Off-grid inverter,sunmart,ModBus,https://github.com/BuxtonCalvin/MultiPr
 Victron,BMV battery monitor,victron_bmv_battery_monitor,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Victron.md
 Victron,GX generic CAN bus,victron_gx_generic_canbus,CanBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Victron.md
 Victron,GX v3.3,victron_gx_v3.3,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Victron.md
-Victron,MK3-USB VE.Bus (placeholder),victron_mk3usb_vebus,Serial,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Victron.md
+Victron,MK3-USB VE.Bus,victron_mk3usb_vebus,Serial,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Victron.md
 Victron,MultiPlus / Quattro,victron_multiplus_quattro,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Victron.md
 Victron,Phoenix inverter,victron_phoenix_inverter,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Victron.md
 Victron,SmartSolar MPPT,victron_smartsolar_mppt,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Victron.md

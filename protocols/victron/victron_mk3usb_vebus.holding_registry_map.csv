@@ -1,36 +1,97 @@
 register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note,ha_device_class,ha_state_class,ha_entity_category
-# TRANSPORT: needs a new transport - suggested name serial_vebus (subclass of serial_base). Victron VE.Bus MK2/MK3 serial protocol through a MK3-USB interface; serial parameters to be confirmed against Victron's MK2/MK3 protocol document. Not Modbus.,,,,,,,,,,,,
-# KEYS: register_key_type is text; the register column holds the VE.Bus field name (case-sensitive).,,,,,,,,,,,,
-F_AC_IN1_IGN,ac_in1_ignored,Ignore AC Input 1,,bool,"0=no,1=yes",,R/W,,Disable AC input 1 (islanding/generator control),,,
-F_AC_IN2_IGN,ac_in2_ignored,Ignore AC Input 2,,bool,"0=no,1=yes",,R/W,,Disable AC input 2 (Quattro only),,,
-F_AC_IN_F,ac_in_frequency,AC Input Frequency,Hz,float,45-65,,R,,Mains supply frequency,frequency,measurement,
-F_AC_IN_I_L1,ac_in_current_l1,AC Input Current L1,A,float,,,R,,AC mains input current phase 1,current,measurement,
-F_AC_IN_I_L2,ac_in_current_l2,AC Input Current L2,A,float,,,R,,AC mains input current phase 2 (three-phase),current,measurement,
-F_AC_IN_I_L3,ac_in_current_l3,AC Input Current L3,A,float,,,R,,AC mains input current phase 3 (three-phase),current,measurement,
-F_AC_IN_SRC,active_ac_input,Active AC Input Source,,uint8,"1=AC input 1,2=AC input 2,240=none",,R,,Currently connected AC input; Quattro has two AC inputs,,,
-F_AC_IN_V_L1,ac_in_voltage_l1,AC Input Voltage L1,V,float,,,R,,AC mains input voltage phase 1,voltage,measurement,
-F_AC_IN_V_L2,ac_in_voltage_l2,AC Input Voltage L2,V,float,,,R,,AC mains input voltage phase 2 (three-phase),voltage,measurement,
-F_AC_IN_V_L3,ac_in_voltage_l3,AC Input Voltage L3,V,float,,,R,,AC mains input voltage phase 3 (three-phase),voltage,measurement,
-F_AC_OUT_F,ac_out_frequency,AC Output Frequency,Hz,float,45-65,,R,,Inverter output frequency,frequency,measurement,
-F_AC_OUT_I_L1,ac_out_current_l1,AC Output Current L1,A,float,,,R,,Inverter AC output current phase 1,current,measurement,
-F_AC_OUT_I_L2,ac_out_current_l2,AC Output Current L2,A,float,,,R,,Inverter AC output current phase 2 (three-phase),current,measurement,
-F_AC_OUT_I_L3,ac_out_current_l3,AC Output Current L3,A,float,,,R,,Inverter AC output current phase 3 (three-phase),current,measurement,
-F_AC_OUT_V_L1,ac_out_voltage_l1,AC Output Voltage L1,V,float,,,R,,Inverter AC output voltage phase 1,voltage,measurement,
-F_AC_OUT_V_L2,ac_out_voltage_l2,AC Output Voltage L2,V,float,,,R,,Inverter AC output voltage phase 2 (three-phase),voltage,measurement,
-F_AC_OUT_V_L3,ac_out_voltage_l3,AC Output Voltage L3,V,float,,,R,,Inverter AC output voltage phase 3 (three-phase),voltage,measurement,
-F_AUX1,aux_relay_1,Auxiliary Relay 1,,bool,"0=open,1=closed",,R,,Programmable auxiliary relay 1 state,,,
-F_AUX2,aux_relay_2,Auxiliary Relay 2,,bool,"0=open,1=closed",,R,,Programmable auxiliary relay 2 state,,,
-F_CHARGE_STATE,charge_state,Charge State,,uint8,"3=bulk,4=absorption,5=float,6=storage,7=equalize",,R,,Battery charging algorithm state,,,
-F_CHARGER,charger_enabled,Charger Active,,bool,"0=no,1=yes",,R,,Battery charger section active,,,
-F_DC_I,dc_current,DC Battery Current,A,float,-1000-1000,,R,,Battery current; positive=charging negative=discharging,current,measurement,
-F_DC_T,dc_temperature,Inverter Temperature,°C,int,-40-100,,R,,Internal inverter temperature,temperature,measurement,
-F_DC_V,dc_voltage,DC Battery Voltage,V,float,0-65,,R,,Battery bank voltage at inverter terminals,voltage,measurement,
-F_ERROR,vebus_error,VE.Bus Error Code,,uint8,0-255,,R,,Error condition code; 0=no error; see VE.Bus error table,,,
-F_HIGHTEMP,high_temp_alarm,High Temperature Alarm,,uint8,"0=ok,1=warning,2=alarm",,R,,Inverter over-temperature alarm state,,,
-F_INVERTER,inverter_enabled,Inverter Active,,bool,"0=no,1=yes",,R,,Inverter section active,,,
-F_LOWBAT,low_battery_alarm,Low Battery Alarm,,uint8,"0=ok,1=warning,2=alarm",,R,,Low battery voltage alarm state,,,
-F_MODE,switch_mode,Switch Mode,,uint8,"1=charger only,2=inverter only,3=on,4=off",,R/W,,Current operating mode; writable to change mode,,,
-F_OVERLOAD,overload_alarm,Overload Alarm,,uint8,"0=ok,1=warning,2=alarm",,R,,AC output overload alarm state,,,
-F_PASSTHRU,passthru_active,Passthrough Active,,bool,"0=no,1=yes",,R,,AC input being passed directly to output,,,
-F_STATE,vebus_state,VE.Bus State,,uint8,"0=off,1=low power,2=fault,3=bulk,4=absorption,5=float,6=storage,7=equalize,8=passthru,9=inverting,10=power assist,11=power supply mode",,R,,Operating state of the VE.Bus system,,,
-F_WARN,warning_flags,Warning Flags,,uint16,0-65535,,R,,Active warning bitmask,,,
+x5600,mk2_interface_version,MK2 interface version,,UINT,,startup,R,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}","'V' reply (3.4): 4 bytes, least significant first. 3.4: the document applies to MK2 versions 1130125 or later",,,diagnostic
+x5600.4,mk2_interface_mode,Interface mode,,BYTE,,startup,R,,'V' reply (3.4): 0x57 ('W') = VE 9-bit RS485 target; 0x42 ('B') = VE.Bus with no address set; any other value is the device address set in the interface,,,diagnostic
+x0500,software_version,Software version,,UINT,,startup,R,,"Device software version AABBCCC (7.3.1): part 0 is the low 16 bits, part 1 the high 16 bits",,,diagnostic
+x0E00,device_state,Device state,,BYTE,,,R,,"CommandGetSetDeviceState (7.3.2), sent with State 0 (inquire only; MPG never changes the state). Needs firmware xxyy122 or later",,,
+x0E00.1,charge_sub_state,Charge sub state,,BYTE,,,R,,7.3.2. Only meaningful while the state is Charge; MPG sends 255 in every other state (not part of the vendor protocol),,,
+x4C00,led_on,LED status,,8BIT_FLAGS,,,R,,'L' reply byte 0 (section 4): LEDs that are on. 0x1F in both bytes means the interface could not determine the status,,,diagnostic
+x4C00.1,led_blink,LED status,,8BIT_FLAGS,,,R,,'L' reply byte 1 (section 4): LEDs that blink. A blinking LED whose 'on' bit is 0 blinks in anti phase with the others,,,diagnostic
+x4600.1,dc_voltage,DC voltage,0.001V,INT,,,R,,"'F' 0 DC info frame (6.1), scaled with the UBat scale (system value, not per device)",voltage,measurement,
+x4600.5,dc_current_inverting,DC current used by inverting devices,0.001A,INT,,,R,,"'F' 0 (6.1): unsigned 24-bit on the wire, scaled with the IBat scale",current,measurement,
+x4600.9,dc_current_charging,DC current provided by charging devices,0.001A,INT,,,R,,"'F' 0 (6.1): unsigned 24-bit on the wire, scaled with the IBat scale",current,measurement,
+x4600.13,dc_current,Battery current,0.001A,INT,,,R,,"Derived as in the vendor example (Appendix 2): charging current minus inverting current, so positive is charging",current,measurement,
+x4600.17,ac_out_frequency,Inverter frequency,0.001Hz,INT,,,R,,"'F' 0 (6.1): 10 / inverter period, using the Inverter Period Time scale (Appendix 2)",frequency,measurement,
+x4601,ac_l1_phase_info,Phase info,,BYTE,,,R,,"'F' 1 (6.1) phase info byte: which phase the frame describes and, for L1, how many phases the system has",,,diagnostic
+x4601.1,ac_l1_bf_factor,AC L1 BF factor,,BYTE,,,R,,'F' 1 (6.1): multiplier already applied to the mains current of this phase,,,diagnostic
+x4601.2,ac_l1_inverter_factor,AC L1 inverter factor,,BYTE,,,R,,"'F' 1 (6.1): multiplier already applied to the inverter current of this phase; inverters on firmware xxyy120-125 send 0, which MPG counts as 1 (footnote c)",,,diagnostic
+x4601.3,ac_in_voltage_l1,AC L1 mains voltage,0.001V,INT,,,R,,"'F' 1 (6.1), UMainsRMS scale",voltage,measurement,
+x4601.7,ac_in_current_l1,AC L1 mains current,0.001A,INT,,,R,,"'F' 1 (6.1), IMainsRMS scale, times the BF factor",current,measurement,
+x4601.11,ac_out_voltage_l1,AC L1 inverter voltage,0.001V,INT,,,R,,"'F' 1 (6.1), UInverterRMS scale",voltage,measurement,
+x4601.15,ac_out_current_l1,AC L1 inverter current,0.001A,INT,,,R,,"'F' 1 (6.1), IInverterRMS scale, times the inverter factor",current,measurement,
+x4601.23,ac_l1_state,Device state,,BYTE,,,R,,"'F' 1 (6.1) <State>: the Multi main state, same codes as the device state command. Firmware 207 and later; older firmware sends a reserved byte instead (the Appendix 2 trace shows 0x79), which has no description",,,diagnostic
+x4601.19,ac_in_frequency_l1,AC L1 mains frequency,0.001Hz,INT,,,R,,"'F' 1 (6.1): 10 / mains period, using the Mains Period Time scale",frequency,measurement,
+x4602,ac_l2_phase_info,Phase info,,BYTE,,,R,,"'F' 2 (6.1) phase info byte: which phase the frame describes and, for L1, how many phases the system has (three-phase and split-phase systems only)",,,diagnostic
+x4602.1,ac_l2_bf_factor,AC L2 BF factor,,BYTE,,,R,,'F' 2 (6.1): multiplier already applied to the mains current of this phase,,,diagnostic
+x4602.2,ac_l2_inverter_factor,AC L2 inverter factor,,BYTE,,,R,,"'F' 2 (6.1): multiplier already applied to the inverter current of this phase; inverters on firmware xxyy120-125 send 0, which MPG counts as 1 (footnote c)",,,diagnostic
+x4602.3,ac_in_voltage_l2,AC L2 mains voltage,0.001V,INT,,,R,,"'F' 2 (6.1), UMainsRMS scale (three-phase and split-phase systems only)",voltage,measurement,
+x4602.7,ac_in_current_l2,AC L2 mains current,0.001A,INT,,,R,,"'F' 2 (6.1), IMainsRMS scale, times the BF factor (three-phase and split-phase systems only)",current,measurement,
+x4602.11,ac_out_voltage_l2,AC L2 inverter voltage,0.001V,INT,,,R,,"'F' 2 (6.1), UInverterRMS scale (three-phase and split-phase systems only)",voltage,measurement,
+x4602.15,ac_out_current_l2,AC L2 inverter current,0.001A,INT,,,R,,"'F' 2 (6.1), IInverterRMS scale, times the inverter factor (three-phase and split-phase systems only)",current,measurement,
+x4602.23,ac_l2_state,Device state,,BYTE,,,R,,"'F' 2 (6.1) <State>: the Multi main state, same codes as the device state command. Firmware 207 and later; older firmware sends a reserved byte instead (the Appendix 2 trace shows 0x79), which has no description (three-phase and split-phase systems only)",,,diagnostic
+x4602.19,ac_in_frequency_l2,AC L2 mains frequency,0.001Hz,INT,,,R,,"'F' 2 (6.1): 10 / mains period, using the Mains Period Time scale (three-phase and split-phase systems only)",frequency,measurement,
+x4603,ac_l3_phase_info,Phase info,,BYTE,,,R,,"'F' 3 (6.1) phase info byte: which phase the frame describes and, for L1, how many phases the system has (three-phase systems only)",,,diagnostic
+x4603.1,ac_l3_bf_factor,AC L3 BF factor,,BYTE,,,R,,'F' 3 (6.1): multiplier already applied to the mains current of this phase,,,diagnostic
+x4603.2,ac_l3_inverter_factor,AC L3 inverter factor,,BYTE,,,R,,"'F' 3 (6.1): multiplier already applied to the inverter current of this phase; inverters on firmware xxyy120-125 send 0, which MPG counts as 1 (footnote c)",,,diagnostic
+x4603.3,ac_in_voltage_l3,AC L3 mains voltage,0.001V,INT,,,R,,"'F' 3 (6.1), UMainsRMS scale (three-phase systems only)",voltage,measurement,
+x4603.7,ac_in_current_l3,AC L3 mains current,0.001A,INT,,,R,,"'F' 3 (6.1), IMainsRMS scale, times the BF factor (three-phase systems only)",current,measurement,
+x4603.11,ac_out_voltage_l3,AC L3 inverter voltage,0.001V,INT,,,R,,"'F' 3 (6.1), UInverterRMS scale (three-phase systems only)",voltage,measurement,
+x4603.15,ac_out_current_l3,AC L3 inverter current,0.001A,INT,,,R,,"'F' 3 (6.1), IInverterRMS scale, times the inverter factor (three-phase systems only)",current,measurement,
+x4603.23,ac_l3_state,Device state,,BYTE,,,R,,"'F' 3 (6.1) <State>: the Multi main state, same codes as the device state command. Firmware 207 and later; older firmware sends a reserved byte instead (the Appendix 2 trace shows 0x79), which has no description (three-phase systems only)",,,diagnostic
+x4603.19,ac_in_frequency_l3,AC L3 mains frequency,0.001Hz,INT,,,R,,"'F' 3 (6.1): 10 / mains period, using the Mains Period Time scale (three-phase systems only)",frequency,measurement,
+x5300,switch_state,Switch state,,BYTE,,,W,,"'S' switch position (5), read back from the switch register of the MasterMultiLED frame (6.2) and sent with the 'S' command. 1 charger only, 2 inverter only, 3 on, 4 off. 0 (no description) when the Multi firmware does not report the switch register. Writes need write_enabled, allow_panel_writes and a firmware that reports the register; 4 (off) stops the inverter, so loads lose AC power. A GX device or remote panel on the same VE.Bus may overrule it",,,
+x5300.1,input_current_limit_control,Input current limit control,0.1A,USHORT,,,W,,"'S' input current limit (5) as amps x 10, read back as the actual limit of the MasterMultiLED frame. Writes need write_enabled and allow_panel_writes, are refused outside the minimum and maximum the Multi reports and at 0 (which switches the Multi to invert or bypass), are not stored by the Multi, and only act while the Multi lets a remote panel override the input current limit (6.2)",current,,
+x4605.b0.4,last_active_ac_input,Last active input,,2BIT,,,R,,"'F' 5 MasterMultiLED (6.2), AC input configuration bits 0-1: the last AC input used, counting from 0. It does not mean anything is connected to it",,,diagnostic
+x4605.b2.4,input_current_overridden_by_panel,Input current overridden by panel,,1BIT,,,R,,"'F' 5 (6.2), AC input configuration bit 2: a remote panel can override the input current limit of this input",,,diagnostic
+x4605.b3.4,dmc_dedicated,DMC dedicated,,1BIT,,,R,,"'F' 5 (6.2), AC input configuration bit 3: when set the document says to ignore data bytes 4 to 10",,,diagnostic
+x4605.b4.4,ac_input_count,Number of AC inputs,,3BIT,,,R,,"'F' 5 (6.2), AC input configuration bits 4-6: number of AC inputs in the system. Needs Multi firmware 415 or later; older firmware sends 0",,,diagnostic
+x4605.b7.4,remote_panel_detected,Remote panel detected,,1BIT,,,R,,"'F' 5 (6.2), AC input configuration bit 7. Needs Multi firmware 415 or later",,,diagnostic
+x4605.11,switch_register,Switch register,,8BIT_FLAGS,,,R,,"'F' 5 (6.2) data byte 11, added in version 3.14 of the document; older firmware does not send it and the row is then skipped",,,diagnostic
+x4605.5,input_current_limit_minimum,Minimum input current limit,0.1A,USHORT,,,R,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",'F' 5 (6.2): deci-amps (62 = 6.2 A in the vendor example),current,,diagnostic
+x4605.7,input_current_limit_maximum,Maximum input current limit,0.1A,USHORT,,,R,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",'F' 5 (6.2): deci-amps,current,,diagnostic
+x4605.9,input_current_limit,Actual input current limit,0.1A,USHORT,,,R,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",'F' 5 (6.2): deci-amps,current,measurement,
+x3000,device_mains_voltage,UMainsRMS,0.001V,INT,,,R,,"RAM variable 0 (7.3.13.1), scaled with the device's own scale (7.3.9). One device, not the whole system",voltage,measurement,
+x3001,device_mains_current,IMainsRMS,0.001A,INT,,,R,,"RAM variable 1 (7.3.13.1), scaled with the device's own scale (7.3.9). One device, not the whole system",current,measurement,
+x3002,device_inverter_voltage,UInverterRMS,0.001V,INT,,,R,,"RAM variable 2 (7.3.13.1), scaled with the device's own scale (7.3.9). One device, not the whole system",voltage,measurement,
+x3003,device_inverter_current,IInverterRMS,0.001A,INT,,,R,,"RAM variable 3 (7.3.13.1), scaled with the device's own scale (7.3.9). One device, not the whole system",current,measurement,
+x3004,device_battery_voltage,UBat,0.001V,INT,,,R,,"RAM variable 4 (7.3.13.1), scaled with the device's own scale (7.3.9). One device, not the whole system",voltage,measurement,
+x3005,device_battery_current,IBat,0.001A,INT,,,R,,"RAM variable 5 (7.3.13.1), scaled with the device's own scale (7.3.9); the document does not state the sign convention. One device, not the whole system",current,measurement,
+x3006,device_battery_ripple_voltage,UBatRMS,0.001V,INT,,,R,,"RAM variable 6 (7.3.13.1), scaled with the device's own scale (7.3.9) (RMS value of the ripple voltage). One device, not the whole system",voltage,measurement,
+x3007,device_inverter_frequency,Inverter Period Time,0.001Hz,INT,,,R,,"RAM variable 7 (7.3.13.1), scaled with the device's own scale (7.3.9); time base 0.1 s, published as the frequency 10 / period. One device, not the whole system",frequency,measurement,
+x3008,device_mains_frequency,Mains Period Time,0.001Hz,INT,,,R,,"RAM variable 8 (7.3.13.1), scaled with the device's own scale (7.3.9); time base 0.1 s, published as the frequency 10 / period. One device, not the whole system",frequency,measurement,
+x3009,device_ac_load_current,Signed AC Load Current,0.001A,INT,,,R,,"RAM variable 9 (7.3.13.1), scaled with the device's own scale (7.3.9). One device, not the whole system",current,measurement,
+x300E,device_inverter_power_14,Inverter Power (filtered) ID 14,0.001W,INT,,,R,,"RAM variable 14 (7.3.13.1), scaled with the device's own scale (7.3.9); 16-bit signed, positive = AC to DC (charging). The document lists IDs 14 and 15 with the same name; which is which is not stated. The unit is not stated either (W assumed). One device, not the whole system",power,measurement,
+x300F,device_inverter_power_15,Inverter Power (filtered) ID 15,0.001W,INT,,,R,,"RAM variable 15 (7.3.13.1), scaled with the device's own scale (7.3.9); see ID 14: the document gives both IDs the same description. One device, not the whole system",power,measurement,
+x3010,device_output_power,Output power (filtered),0.001W,INT,,,R,,"RAM variable 16 (7.3.13.1), scaled with the device's own scale (7.3.9); positive = out of the Multi towards the loads. The unit is not stated (W assumed). One device, not the whole system",power,measurement,
+x3011,device_inverter_power_17_unfiltered,Inverter Power (unfiltered) ID 17,0.001W,INT,,,R,,"RAM variable 17 (7.3.13.1), scaled with the device's own scale (7.3.9); unfiltered counterpart of ID 14 (the document: 17-19 correspond with 14-16), power measured during the last cycle. The unit is not stated (W assumed). One device, not the whole system",power,measurement,
+x3012,device_inverter_power_18_unfiltered,Inverter Power (unfiltered) ID 18,0.001W,INT,,,R,,"RAM variable 18 (7.3.13.1), scaled with the device's own scale (7.3.9); unfiltered counterpart of ID 15. One device, not the whole system",power,measurement,
+x3013,device_output_power_unfiltered,Output power (unfiltered),0.001W,INT,,,R,,"RAM variable 19 (7.3.13.1), scaled with the device's own scale (7.3.9); unfiltered counterpart of ID 16. One device, not the whole system",power,measurement,
+x300A,virtual_switch_position,Virtual switch position,,INT,,,R,,"RAM variable 10 (7.3.13.1), a single bit (7.3.9); the document does not describe what 1 means beyond the name",,,diagnostic
+x300B,ignore_ac_input_state,Ignore AC input state,,INT,,,R,,"RAM variable 11 (7.3.13.1), a single bit (7.3.9); the document does not describe what 1 means beyond the name",,,diagnostic
+x300C,multi_functional_relay_state,Multi functional relay state,,INT,,,R,,"RAM variable 12 (7.3.13.1), a single bit (7.3.9); the document does not describe what 1 means beyond the name",,,diagnostic
+x300D,state_of_charge,Charge state (battery monitor function),0.001%,INT,,,R,,RAM variable 13 (7.3.13.1). The document does not state the unit. The vendor example scale (0.005) and its own title for this value (State of Charge) suggest percent; treat as inferred. Only present when the battery monitor function is enabled,battery,measurement,
+x3102.2,setting_absorption_voltage,UBatAbsorption,0.001V,INT,,startup,W,,"Setting 2 (7.3.13.2), scaled with the setting's own scale and offset (7.3.8). Writable: needs write_enabled and allow_setting_writes; written to the Multi's EEPROM, refused outside the minimum and maximum the Multi reports for it",,,diagnostic
+x3103.2,setting_float_voltage,UBatFloat,0.001V,INT,,startup,W,,"Setting 3 (7.3.13.2), scaled with the setting's own scale and offset (7.3.8). Writable: needs write_enabled and allow_setting_writes; written to the Multi's EEPROM, refused outside the minimum and maximum the Multi reports for it",,,diagnostic
+x3104.2,setting_bulk_current,IBatBulk,0.001A,INT,,startup,W,,"Setting 4 (7.3.13.2), scaled with the setting's own scale and offset (7.3.8). Writable: needs write_enabled and allow_setting_writes; written to the Multi's EEPROM, refused outside the minimum and maximum the Multi reports for it",,,diagnostic
+x3105.2,setting_inverter_voltage,UInvSetpoint,0.001V,INT,,startup,R,,"Setting 5 (7.3.13.2), scaled with the setting's own scale and offset (7.3.8)",,,diagnostic
+x3106.2,setting_input_current_limit_ac1,IMainsLimit (AC1),0.001A,INT,,startup,W,,"Setting 6 (7.3.13.2), scaled with the setting's own scale and offset (7.3.8). Writable: needs write_enabled and allow_setting_writes; written to the Multi's EEPROM, refused outside the minimum and maximum the Multi reports for it",,,diagnostic
+x3107.2,setting_repeated_absorption_time,Repeated Absorption Time,0.001min,INT,,startup,R,,"Setting 7 (7.3.13.2), scaled with the setting's own scale and offset (7.3.8); the document's default time unit is the minute (7.3.10)",,,diagnostic
+x3108.2,setting_repeated_absorption_interval,Repeated Absorption Interval,0.001min,INT,,startup,R,,"Setting 8 (7.3.13.2), scaled with the setting's own scale and offset (7.3.8); the document's default time unit is the minute (7.3.10)",,,diagnostic
+x3109.2,setting_absorption_duration,(Maximum) Absorption duration,0.001min,INT,,startup,R,,"Setting 9 (7.3.13.2), scaled with the setting's own scale and offset (7.3.8); the document's default time unit is the minute (7.3.10)",,,diagnostic
+x310A,setting_charge_characteristic,Charge characteristic,,USHORT,,startup,R,,"Setting 10 (7.3.13.2), raw value; the document does not list the values",,,diagnostic
+x310B.2,setting_low_battery_shutdown_voltage,UBatLowLimit for Inverter,0.001V,INT,,startup,R,,"Setting 11 (7.3.13.2), scaled with the setting's own scale and offset (7.3.8)",,,diagnostic
+x310C.2,setting_low_battery_hysteresis,UBatLow hysteresis for Inverter,0.001V,INT,,startup,R,,"Setting 12 (7.3.13.2), scaled with the setting's own scale and offset (7.3.8)",,,diagnostic
+x310D,setting_number_of_slaves,Number of slaves connected,,USHORT,,startup,R,,"Setting 13 (7.3.13.2), raw value",,,diagnostic
+x310E,setting_special_three_phase,Special three phase setting,,USHORT,,startup,R,,"Setting 14 (7.3.13.2), raw value",,,diagnostic
+x312C.2,setting_lowest_acceptable_mains_voltage,Lowest acceptable UMains,0.001V,INT,,startup,R,,"Setting 44 (7.3.13.2), scaled with the setting's own scale and offset (7.3.8)",,,diagnostic
+x312D.2,setting_lowest_mains_hysteresis,Hysteresis for parameter 44,0.001V,INT,,startup,R,,"Setting 45 (7.3.13.2), scaled with the setting's own scale and offset (7.3.8)",,,diagnostic
+x312E.2,setting_highest_acceptable_mains_voltage,Highest acceptable UMains,0.001V,INT,,startup,R,,"Setting 46 (7.3.13.2), scaled with the setting's own scale and offset (7.3.8)",,,diagnostic
+x312F.2,setting_highest_mains_hysteresis,Hysteresis for parameter 46,0.001V,INT,,startup,R,,"Setting 47 (7.3.13.2), scaled with the setting's own scale and offset (7.3.8)",,,diagnostic
+x3130.2,setting_assist_current_boost_factor,Assist current boost factor,0.001,INT,,startup,R,,"Setting 48 (7.3.13.2), scaled with the setting's own scale and offset (7.3.8)",,,diagnostic
+x3131.2,setting_input_current_limit_ac2,IMainsLimit (AC2),0.001A,INT,,startup,W,,"Setting 49 (7.3.13.2), scaled with the setting's own scale and offset (7.3.8). Writable: needs write_enabled and allow_setting_writes; written to the Multi's EEPROM, refused outside the minimum and maximum the Multi reports for it",,,diagnostic
+x3132.2,setting_aes_low_current_limit,Low current limit for switching to AES,0.001A,INT,,startup,R,,"Setting 50 (7.3.13.2), scaled with the setting's own scale and offset (7.3.8)",,,diagnostic
+x3133.2,setting_aes_current_hysteresis,Hysteresis on AES current limit,0.001A,INT,,startup,R,,"Setting 51 (7.3.13.2), scaled with the setting's own scale and offset (7.3.8)",,,diagnostic
+x3140.2,setting_battery_capacity,Battery capacity for battery monitor function,0.001,INT,,startup,R,,"Setting 64 (7.3.13.2), scaled with the setting's own scale and offset (7.3.8); the document does not state the unit",,,diagnostic
+x3141.2,setting_battery_monitor_absorption_charge,Charge percentage set when bulk changes to absorption,0.001,INT,,startup,R,,"Setting 65 (7.3.13.2), scaled with the setting's own scale and offset (7.3.8); the document describes it as a charge percentage but gives no unit, so none is assumed",,,diagnostic
+x3100,setting_flags0,Flags0,,16BIT_FLAGS,,startup,R,,Setting 0 (7.3.13.3): Flags[0] to Flags[15]. Bits the document marks as not promoted or unused are not named,,,diagnostic
+x3101,setting_flags1,Flags1,,16BIT_FLAGS,,startup,R,,Setting 1 (7.3.13.3): Flags[16] to Flags[31]. Bits the document marks as not promoted or unused are not named,,,diagnostic
+x313C,setting_flags2,Flags2,,16BIT_FLAGS,,startup,R,,Setting 60 (7.3.13.3): Flags[32] to Flags[47] (inferred from the numbering in 7.3.13.3: the document names settings 60 and 61 Flags2 and Flags3 and 3.14 describes flags 32 to 34 as virtual switch flags). Bits the document marks as not promoted or unused are not named,,,diagnostic

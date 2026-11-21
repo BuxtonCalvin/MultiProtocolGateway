@@ -173,6 +173,14 @@
     "baudrate": "19200",
     "timeout": "5.0"
   },
+  "serial_vebus": {
+    "$extends": "_serial_base",
+    "allow_panel_writes": "false",
+    "allow_setting_writes": "false",
+    "baudrate": "2400",
+    "timeout": "1.0",
+    "write_min_interval": "30"
+  },
   "modbus_pace": {
     "$extends": "_modbus_base",
     "baudrate": "9600",

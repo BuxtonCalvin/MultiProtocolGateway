@@ -54,7 +54,7 @@
 | [Solis / Ginlong](Solis.md) | String and hybrid inverters | Ethernet logger / RS485 | Modbus TCP / RTU | [Solis.md](Solis.md) |
 | [SRNE](SRNE.md) | ASF/ASP, HYP, HESP, HF/HFP | RS485 | Modbus RTU | [SRNE.md](SRNE.md) |
 | [Sungrow](Sungrow.md) | SG Series, SHxxRT, SG350HX | RS485 / Ethernet | Modbus RTU / TCP | [Sungrow.md](Sungrow.md) |
-| [Victron Energy](Victron.md) | MultiPlus, MultiPlus-II, Quattro, Cerbo GX | Ethernet / VE.Bus / VE.Direct | MQTT native (Venus OS) | [Victron.md](Victron.md) |
+| [Victron Energy](Victron.md) | MultiPlus, MultiPlus-II, Quattro, Cerbo GX | Ethernet / VE.Bus / VE.Direct | MQTT native (Venus OS); VE.Bus via MK3-USB serial (`serial_vebus`, read-only unless writes are enabled) | [Victron.md](Victron.md) |
 
 ### Power / Energy Meters
 

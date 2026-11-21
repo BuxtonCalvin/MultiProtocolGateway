@@ -599,7 +599,7 @@ A value shorter than the transport interval is silently clamped to the transport
 
 #### Startup Rows (read once per connection)
 
-Configuration that rarely changes (transformer ratios, communication settings, pulse constants) and logs (history, events) do not need polling. A row whose `read interval` is `startup` (`once` is accepted too) is read once when the transport connects, and again after a reconnect, by the startup routine in `classes/discovery/startup.py`.
+Configuration that rarely changes (transformer ratios, communication settings, pulse constants) and logs (history, events) do not need polling. A row whose `read interval` is `startup` (`once` is accepted too) is read once when the transport connects, and again after a reconnect. For Modbus this is the startup routine in `classes/discovery/startup.py`; polled serial transports (`serial_base` subclasses such as `serial_vebus`) read the command once and serve the payload from memory on every later cycle.
 
 The row is otherwise an ordinary row: it is listed in the register map, can be selected, masked or screened in the web UI, keeps its data type, unit, code table and adjustments, and is skipped when it is marked `RD` or `WO`.
 
@@ -948,7 +948,7 @@ MPG ships with pre-built protocols for the following devices. All protocols are 
 | `victron_bmv_battery_monitor` | Victron BMV battery monitor | Modbus RTU |
 | `victron_gx_generic_canbus` | CAN-bus BMS batteries (Victron GX, SMA, Pylontech V1.3 frame set) | CAN bus |
 | `victron_gx_v3.3` | Victron GX v3.3 | Modbus RTU |
-| `victron_mk3usb_vebus` | Victron MK3-USB VE.Bus (placeholder) | VE.Bus serial, no transport yet |
+| `victron_mk3usb_vebus` | Victron MK3-USB VE.Bus (Multi, Quattro, Phoenix inverter) | Serial (`serial_vebus`, MK2 protocol; read-only unless writes are enabled) |
 | `victron_multiplus_quattro` | Victron MultiPlus / Quattro | Modbus RTU |
 | `victron_phoenix_inverter` | Victron Phoenix inverter | Modbus RTU |
 | `victron_smartsolar_mppt` | Victron SmartSolar MPPT | Modbus RTU |

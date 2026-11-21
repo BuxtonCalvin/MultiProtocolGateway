@@ -307,12 +307,11 @@ def test_eg4_serial_number_range_is_not_truncated() -> None:
     ("protocol", "key", "expected_type"),
     [
         ("victron_vedirect_serial", "Alarm", Data_Type.STRING),
-        ("victron_mk3usb_vebus", "F_AC_IN_V_L1", Data_Type.FLOAT32),
         ("sma_energy_meter_speedwire", "0:1.8.0", Data_Type.UINT64),
     ],
 )
 def test_text_keyed_protocols_load(protocol: str, key: str, expected_type: Data_Type) -> None:
-    """VE.Direct, VE.Bus and SMA Speedwire maps (label/OBIS keys) now load every row."""
+    """VE.Direct and SMA Speedwire maps (label/OBIS keys) now load every row."""
     entries: list[registry_map_entry] = _entries(protocol)
     assert len(entries) > 20
     keys: list[str] = [entry.register_key for entry in entries]
@@ -323,7 +322,6 @@ def test_text_keyed_protocols_load(protocol: str, key: str, expected_type: Data_
 
 TEXT_KEYED_TRANSPORTS: dict[str, str] = {
     "victron_vedirect_serial": "serial_vedirect",
-    "victron_mk3usb_vebus": "serial_vebus",
     "sma_energy_meter_speedwire": "sma_speedwire",
 }
 PROTOCOLS_DIR: Path = Path(__file__).resolve().parent.parent / "protocols"

@@ -138,7 +138,7 @@ def make(cls: type[serial_base] = FakeSerial, **values: Any) -> Any:
 
 def fake_protocol(registers: list[int]) -> MagicMock:
     protocol = MagicMock()
-    protocol.get_registry_map.return_value = [SimpleNamespace(register=r, variable_name=f"v{r}") for r in registers]
+    protocol.get_registry_map.return_value = [SimpleNamespace(register=r, variable_name=f"v{r}", read_at_startup=False) for r in registers]
     protocol.process_registery.side_effect = _process_registery
     return protocol
 
@@ -748,7 +748,7 @@ def mapped_protocol(custom: list[Any], holding: list[Any]) -> MagicMock:
 
 
 def row(register: int, byte: int = 0, data_type: Data_Type = Data_Type.USHORT) -> Any:
-    return SimpleNamespace(register=register, register_byte=byte, data_type=data_type, variable_name=f"v{register}_{byte}")
+    return SimpleNamespace(register=register, register_byte=byte, data_type=data_type, variable_name=f"v{register}_{byte}", read_at_startup=False)
 
 
 def test_a_custom_bus_map_wins_over_a_holding_map() -> None:
@@ -940,3 +940,93 @@ def test_an_exchange_connects_on_demand(serial_layer: None) -> None:
 def test_an_exchange_with_the_adapter_unplugged_returns_nothing_instead_of_raising(serial_layer: None, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(serial_base_module, "find_usb_serial_port", _no_port)
     assert build(LazySerial)._exchange(3) is None
+
+
+# --------------------------------------------------------------------------- #
+# startup rows: read once per connection, in the base class                   #
+# --------------------------------------------------------------------------- #
+
+def startup_protocol(rows: list[tuple[int, str, bool]]) -> MagicMock:
+    """A protocol whose rows are (register, variable name, read once at startup)."""
+    protocol = MagicMock()
+    protocol.get_registry_map.return_value = [SimpleNamespace(register=r, variable_name=n, read_at_startup=s) for r, n, s in rows]
+    protocol.process_registery.side_effect = _process_registery
+    return protocol
+
+
+class CountingSerial(FakeSerial):
+    """Counts how many times each command goes to the device."""
+
+    def __init__(self, settings: Any) -> None:
+        super().__init__(settings)
+        self.sent: list[int] = []
+
+    def _read_command(self, command: int) -> bytes | None:
+        self.sent.append(command)
+        return self.responses.get(command)
+
+
+def test_startup_commands_are_read_once_and_served_from_memory_afterwards() -> None:
+    transport = make(CountingSerial)
+    transport.protocolSettings = startup_protocol([(1, "identity", True), (2, "live", False)])
+    transport.responses = {1: b"\x01", 2: b"\x02"}
+
+    first = transport.read_data()
+    second = transport.read_data()
+
+    assert transport.sent == [1, 2, 2], "command 1 went to the device once, command 2 every cycle"
+    assert first == second, "the cached payload still decodes and publishes every cycle"
+
+
+def test_a_command_shared_with_a_polled_row_is_not_a_startup_command() -> None:
+    transport = make(CountingSerial)
+    transport.protocolSettings = startup_protocol([(1, "identity", True), (1, "live_part", False)])
+    assert transport._startup_commands() == set()
+
+
+def test_the_description_row_of_an_enum_follows_the_row_it_describes() -> None:
+    """The loader derives <name>_desc without the startup flag; it must not keep the command polled."""
+    transport = make(CountingSerial)
+    transport.protocolSettings = startup_protocol([(1, "mode", True), (1, "mode_desc", False), (2, "other_desc", False)])
+    assert transport._startup_commands() == {1}
+
+
+def test_a_failed_startup_read_is_tried_again_next_cycle() -> None:
+    transport = make(CountingSerial)
+    transport.protocolSettings = startup_protocol([(1, "identity", True)])
+
+    transport.read_data()  # no response: nothing is remembered
+    transport.responses = {1: b"\x01"}
+    transport.read_data()
+    transport.read_data()
+
+    assert transport.sent == [1, 1], "retried once it answered, then served from memory"
+
+
+def test_startup_payloads_are_forgotten_on_reconnect_and_on_release() -> None:
+    transport = make(CountingSerial)
+    transport.protocolSettings = startup_protocol([(1, "identity", True)])
+    transport.responses = {1: b"\x01"}
+
+    transport.read_data()
+    transport.connect()  # a new connection: the device may have been replaced or restarted
+    transport.read_data()
+    assert transport.sent == [1, 1]
+
+    transport._release_client()
+    assert transport._startup_payloads == {}
+
+
+def test_a_startup_payload_can_be_invalidated_after_the_value_changed() -> None:
+    transport = make(CountingSerial)
+    transport.protocolSettings = startup_protocol([(1, "setting", True), (2, "other", True)])
+    transport.responses = {1: b"\x01", 2: b"\x02"}
+    transport.read_data()
+
+    transport._invalidate_startup(1)
+    transport.read_data()
+    assert transport.sent == [1, 2, 1]
+
+    transport._invalidate_startup()
+    transport.read_data()
+    assert transport.sent == [1, 2, 1, 1, 2]
