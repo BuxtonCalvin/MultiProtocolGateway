@@ -162,7 +162,7 @@ _log: logging.Logger = logging.getLogger(__name__)
 
 router: APIRouter = APIRouter(tags=["timeshift"])
 
-MAX_UPLOAD_BYTES: int = 25 * 1024 * 1024  # 25 MB -- generous for a single date-range spreadsheet/CSV export
+MAX_UPLOAD_BYTES: int = 300 * 1024 * 1024  # 300 MB -- generous for a single date-range spreadsheet/CSV export
 
 
 def _require_bridge(request: Request, version: str) -> influxdb_out | influxdb3_out | timescaledb:

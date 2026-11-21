@@ -36,17 +36,28 @@ from unittest.mock import MagicMock
 
 import pytest
 import serial
-from test_serial_vebus import (  # noqa: F401  (the autouse fixture must be imported to apply here)
+from test_serial_vebus import (
     FakeDevice,
     FakeInterface,
     PanelModel,
+    isolated_registries,
     log_of,
     make_transport,
 )
 
 from classes.protocol_settings import registry_map_entry
+from classes.transports.serial_base import serial_base
 from classes.transports.serial_vebus import serial_vebus
 from pytests.conftest import approx
+
+_ISOLATION: object = isolated_registries
+''' Referenced on purpose: the autouse fixture only applies in a module whose namespace has it, and an import nothing
+uses gets removed by linters. Without it the tests share one cached serial client and see each other's simulated device. '''
+
+
+def test_the_serial_client_registry_is_isolated_for_this_module() -> None:
+    """Guard: fails loudly if the autouse isolation fixture stops applying here (see _ISOLATION above)."""
+    assert serial_base.clients == {}, "a cached serial client from another test is visible: the isolated_registries fixture is not active in this module"
 
 SETTINGS_INFO: dict[int, tuple[int, int]] = {2: (0xFF9C, 0), 3: (0xFF9C, 0), 4: (0xFFF6, 0), 6: (0xFFF6, 0), 49: (0xFFF6, 0)}
 ''' Sc = -100 (scale 0.01) for the voltages, -10 (scale 0.1) for the currents (7.3.8) '''
