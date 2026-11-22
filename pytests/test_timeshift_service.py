@@ -874,7 +874,7 @@ class TestCopyUpsert:
         assert statements[1].startswith("INSERT INTO device_metrics_narrow") and statements[2] == "TRUNCATE stg"
         copy_sql, payload = cursor.copy_expert.call_args.args
         assert copy_sql == "COPY stg (m_time, device_info_id, metric_name, metric_value, metric_ascii) FROM STDIN"
-        assert payload.getvalue() == f"{when.isoformat()}\t7\tsoc\t50.0\t\\N\n"
+        assert payload.getvalue() == f"{when.isoformat()}\t7\tsoc\t50\t\\N\n"
 
     def test_no_rows_sends_nothing(self) -> None:
         cursor = MagicMock()
@@ -890,6 +890,7 @@ class TestCopyCell:
         (None, "\\N"),
         (True, "t"), (False, "f"),
         (3, "3"), (1.5, "1.5"), (-1e-09, "-1e-09"), (float("nan"), "nan"), (float("inf"), "inf"),
+        (19212.0, "19212"), (-4.0, "-4"), (-0.0, "0"), (3.0e12, "3000000000000"), (1e300, "1e+300"),   # a whole float must be valid for an integer column
         ("plain", "plain"), ("", ""), ("caf\u00e9 \u2713", "caf\u00e9 \u2713"),
         ("a\tb", "a\\tb"), ("a\nb", "a\\nb"), ("a\rb", "a\\rb"), ("a\\b", "a\\\\b"),
         ("\\N", "\\\\N"),   # the two characters backslash-N as DATA must not read back as NULL

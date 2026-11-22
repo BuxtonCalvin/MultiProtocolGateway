@@ -2191,7 +2191,14 @@ def _copy_cell(value: Any) -> str:
     if isinstance(value, datetime):
         return value.isoformat()
     if isinstance(value, float):
-        return repr(float(value))   # 'nan' / 'inf' are accepted by PostgreSQL's float input
+        number: float = float(value)
+        # A whole number is written without ".0": COPY's text format is strict, and "19212.0" is rejected by an
+        # integer column (an INSERT would have let PostgreSQL convert it), whereas "19212" is accepted by integer and
+        # floating-point columns alike. Anything fractional, huge, NaN or infinite keeps repr(); 'nan' and 'inf' are
+        # accepted by PostgreSQL's float input.
+        if number.is_integer() and abs(number) < 1e18:
+            return str(int(number))
+        return repr(number)
     if isinstance(value, int):
         return str(int(value))
     return str(value).replace("\\", "\\\\").replace("\t", "\\t").replace("\n", "\\n").replace("\r", "\\r")
