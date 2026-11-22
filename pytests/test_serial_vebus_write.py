@@ -515,3 +515,51 @@ def test_a_write_to_one_device_never_disturbs_reads_of_another() -> None:
 
     assert set(seen) == {27000}, "device 1 always answered for itself"
     assert interface.devices[0].settings[2] in (5600, 5700)
+
+
+# --------------------------------------------------------------------------- #
+# the row's own adjustments, in both directions                                 #
+# --------------------------------------------------------------------------- #
+
+def test_a_row_offset_is_reversed_when_writing() -> None:
+    """Published = payload * unit_mod + Offset, so a published 58.0 with Offset 1 means the device value 57.0."""
+    interface: FakeInterface = settings_interface()
+    transport: serial_vebus = writer(interface, panel=False)
+    row: registry_map_entry = next(entry for entry in transport._registry_map() if entry.variable_name == "setting_absorption_voltage")
+    row.adjustments = {"Offset": 1.0}
+    transport.write_data({"setting_absorption_voltage": 58.0}, MagicMock())
+    assert interface.devices[0].settings[2] == 5700
+
+
+def test_a_row_unit_multiplier_is_reversed_when_writing() -> None:
+    interface: FakeInterface = settings_interface()
+    transport: serial_vebus = writer(interface, panel=False)
+    row: registry_map_entry = next(entry for entry in transport._registry_map() if entry.variable_name == "setting_absorption_voltage")
+    row.unit_mod = 0.01  # published = payload (thousandths of a volt) * 0.01: 570 means 57.0 V
+    transport.write_data({"setting_absorption_voltage": 570.0}, MagicMock())
+    assert interface.devices[0].settings[2] == 5700
+
+
+@pytest.mark.parametrize("adjustments", [{"High_Low": "x?(0,65535]->(x-2731)/10"}, {"Context": {"formula": "x*2"}}])
+def test_a_row_whose_adjustment_cannot_be_reversed_is_not_written(adjustments: dict[str, object]) -> None:
+    interface: FakeInterface = settings_interface()
+    transport: serial_vebus = writer(interface, panel=False)
+    row: registry_map_entry = next(entry for entry in transport._registry_map() if entry.variable_name == "setting_absorption_voltage")
+    row.adjustments = adjustments
+    transport.write_data({"setting_absorption_voltage": 57.0}, MagicMock())
+    assert not sent(interface, "W 33")
+    assert "cannot be reversed" in logged(transport, "error")
+
+
+def test_the_startup_values_are_static_values_and_a_write_updates_them() -> None:
+    interface: FakeInterface = settings_interface()
+    transport: serial_vebus = writer(interface, panel=False)
+    transport.read_data()
+    assert transport.protocolSettings is not None
+    assert transport.protocolSettings.static_values["setting_absorption_voltage"] == approx(56.4)
+    assert transport.protocolSettings.static_values["software_version"] == 2612123
+
+    transport.write_data({"setting_absorption_voltage": 57.0}, MagicMock())
+    assert "setting_absorption_voltage" not in transport.protocolSettings.static_values, "the stale value is dropped at once"
+    transport.read_data()
+    assert transport.protocolSettings.static_values["setting_absorption_voltage"] == approx(57.0)

@@ -385,6 +385,8 @@ class serial_vebus(serial_base):
     ''' an input current limit of 0x8000 or more is ignored by the system (5) '''
     FLAG_SETTINGS : frozenset[int] = frozenset({0, 1, 60, 61})
     ''' settings that are flag words: never written (7.3.13.3 warns about unused, unsupported and "not promoted" flags) '''
+    NORMALIZED_PER_UNIT : int = 1000
+    ''' the scaled value of a setting payload is the display value in thousandths: the map's 0.001 unit_mod turns it back '''
     MASTER_MULTI_LED_MAX_AGE : float = 2.0
     ''' a MasterMultiLED frame read this recently is reused when polling, so the panel rows do not cost a second 750 ms exchange '''
     DEFAULT_WRITE_MIN_INTERVAL : float = 30.0
@@ -766,7 +768,7 @@ class serial_vebus(serial_base):
             raw: int | None = self._w_single_locked(self.W_READ_SETTING, setting, frozenset({self.R_SETTING_OK}), self.R_SETTING_UNSUPPORTED)
         if raw is None:
             raise _Silent
-        return struct.pack(">Hi", raw, _to_int32(display_value(raw, info) * 1000))
+        return struct.pack(">Hi", raw, _to_int32(display_value(raw, info) * self.NORMALIZED_PER_UNIT))
 
     def _read_info_frame(self, frame_type : int) -> SimpleNamespace:
         '''
@@ -989,6 +991,13 @@ class serial_vebus(serial_base):
 
     # -- panel: the 'S' command (5) --
 
+    def _device_value(self, entry : registry_map_entry, value : int | float | str) -> float:
+        ''' serial_base._to_device_value, with a refusal instead of ValueError (which _attempt would take for a serial error) '''
+        try:
+            return self._to_device_value(entry, value)
+        except ValueError as err:
+            raise _Refused(str(err)) from None
+
     def _switch_state_value(self, entry : registry_map_entry, value : int | float | str) -> int:
         ''' 1 charger only, 2 inverter only, 3 on, 4 off; the code text of the map is accepted too '''
         text: str | int | float = value
@@ -1021,7 +1030,7 @@ class serial_vebus(serial_base):
             if not math.isfinite(amps) or amps < 0:
                 msg = f"{amps} A is not a usable input current limit"
                 raise _Refused(msg)
-            new_limit = round(amps * 10)
+            new_limit = round(self._device_value(limit_row[0], amps))  # the row's own unit_mod (0.1 A per count) and Offset reversed
             if new_limit >= self.LIMIT_IGNORED:
                 msg = f"{amps} A is beyond what the protocol can send as a limit"
                 raise _Refused(msg)
@@ -1146,7 +1155,8 @@ class serial_vebus(serial_base):
             raise _Refused(msg)
         self._within_row_range(entry, number)
 
-        raw: int = round(number / info.scale) - info.offset if entry.register_byte >= 2 else round(number)
+        device: float = self._device_value(entry, number)  # the row's own unit_mod and Offset reversed
+        raw: int = round(device / self.NORMALIZED_PER_UNIT / info.scale) - info.offset if entry.register_byte >= 2 else round(device)
         if not 0 <= raw <= 0xFFFF:
             msg = f"{value} does not fit a 16-bit setting"
             raise _Refused(msg)

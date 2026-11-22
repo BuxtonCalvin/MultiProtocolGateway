@@ -44,10 +44,11 @@ from __future__ import annotations
 # classes/WebServer/transport_defaults.json, because the UI's AST scanner reads each transport
 # file on its own and does not follow Python inheritance. A concrete transport must also
 # declare its own literal transport_type = "scraper" for the same reason.
+import math
 import threading
 from collections.abc import Iterator
 from types import SimpleNamespace
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 import serial
 
@@ -143,6 +144,8 @@ class serial_base(transport_base):
 
         self._startup_payloads: dict[int, bytes] = {}
         ''' payloads of the commands whose rows are all marked "startup" in the map, kept for the connection (see _read_command_cached) '''
+        self._static_names: set[str] = set()
+        ''' the variable names this transport put into protocolSettings.static_values from those payloads (see _sync_static_values) '''
 
         self._port_setting: str = settings.get("port", fallback="/dev/ttyUSB0")
         if not self._port_setting:
@@ -254,7 +257,7 @@ class serial_base(transport_base):
         '''
         client: SerialClient | None = self._client
         self._client = None
-        self._startup_payloads.clear()
+        self._forget_startup()
         if client is None:
             return
 
@@ -403,7 +406,7 @@ class serial_base(transport_base):
             self.connected = False
             return False
 
-        self._startup_payloads.clear()  # a new connection may be a different or restarted device: read the startup rows again
+        self._forget_startup()  # a new connection may be a different or restarted device: read the startup rows again
         if self._handshake():
             self.connected = True
         return self.connected
@@ -483,14 +486,71 @@ class serial_base(transport_base):
         payload: bytes | None = self._read_command(command)
         if payload is not None and command in self._startup_commands():
             self._startup_payloads[command] = payload
+            self._sync_static_values()
         return payload
 
     def _invalidate_startup(self, command : int | None = None) -> None:
         ''' forgets a remembered startup payload (all of them when command is None), for example after the device value was changed by a write '''
         if command is None:
-            self._startup_payloads.clear()
+            self._forget_startup()
         else:
             self._startup_payloads.pop(command, None)
+            self._sync_static_values()
+
+    def _forget_startup(self) -> None:
+        ''' drops every remembered startup payload and the static values decoded from them '''
+        self._startup_payloads.clear()
+        self._sync_static_values()
+
+    def _sync_static_values(self) -> None:
+        '''
+        Keeps protocolSettings.static_values equal to the decoded startup payloads, as the Modbus startup routine does:
+        Context formulas (and the protocol's context_variables) fall back on those values for a variable that is not
+        in the decode pass they are evaluated in. The payloads are decoded together, so a formula between two startup rows
+        resolves; a formula that needs a polled variable stays unresolved here and is evaluated in the normal pass.
+        The values this transport added earlier are replaced, never anything else.
+        '''
+        protocol: Any = self.protocolSettings
+        current: object = getattr(protocol, "static_values", None)
+        if not isinstance(current, dict):
+            return  # no protocol, or a stand-in that has no static values
+        merged: dict[str, int | float | str] = {name: value for name, value in cast(dict[str, int | float | str], current).items() if name not in self._static_names}
+        decoded: dict[str, int | float | str] = self._process_raw(dict(self._startup_payloads)) if self._startup_payloads else {}
+        merged.update(decoded)
+        protocol.static_values = merged
+        self._static_names = set(decoded)
+
+    def _to_device_value(self, entry : registry_map_entry, value : int | float | str) -> float:
+        '''
+        The number a device holds for a value as published: the reverse of the row's unit_mod and Offset (decoding
+        is device value * unit_mod + Offset). Rows whose High_Low or Context adjustment shapes the published value cannot be
+        reversed, and writing them would put a wrong number on the device, so they raise ValueError, as does a non-numeric
+        value. Modbus reverses unit_mod only; a transport that writes should call this instead of doing its own arithmetic.
+        '''
+        try:
+            number: float = float(value)
+        except (TypeError, ValueError):
+            msg: str = f"'{value}' is not a number"
+            raise ValueError(msg) from None
+        if not math.isfinite(number):
+            msg = f"'{value}' is not a finite number"
+            raise ValueError(msg)
+
+        adjustments: dict[str, object] = {str(key).lower(): found for key, found in (entry.adjustments or {}).items()}  # as DataAdjustments.get_adjustment: case-insensitive
+        for name in ("High_Low", "Context"):
+            if name.lower() in adjustments:
+                msg = f"'{entry.variable_name}' has a {name} adjustment that cannot be reversed, so it cannot be written"
+                raise ValueError(msg)
+        offset: object | None = adjustments.get("offset")
+        if offset is not None:
+            try:
+                number -= float(cast(str | int | float, offset))
+            except (TypeError, ValueError):
+                msg = f"'{entry.variable_name}' has an Offset adjustment that is not a number: {offset!r}"
+                raise ValueError(msg) from None
+        if entry.unit_mod != 1:
+            number /= entry.unit_mod
+        return number
 
     def _poll_commands_iter(self) -> Iterator[tuple[int, bytes | None]]:
         '''

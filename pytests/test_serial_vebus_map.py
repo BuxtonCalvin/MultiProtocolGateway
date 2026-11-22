@@ -66,7 +66,7 @@ def read_cycle(device: FakeDevice | None = None, **interface_settings: Any) -> t
     interface = FakeInterface({0: device if device is not None else FakeDevice()})
     for key, value in interface_settings.items():
         setattr(interface, key, value)
-    transport: serial_vebus = make_transport(interface, protocol_version="victron_mk3usb_vebus")
+    transport = make_transport(interface, protocol_version="victron_mk3usb_vebus")
     return transport.read_data(), transport, interface
 
 
@@ -111,14 +111,14 @@ def test_no_flag_word_and_no_ram_variable_is_writable() -> None:
 
 
 def test_variable_names_are_valid_and_unique() -> None:
-    names: list[str] = [row["variable_name"] for row in rows()]
+    names = [row["variable_name"] for row in rows()]
     assert all(re.fullmatch(r"[a-z0-9_]+", name) for name in names)
     assert len(names) == len(set(names))
 
 
 def test_no_invented_names_remain() -> None:
     """The placeholder's F_AC_IN_V_L1 style names are not in the vendor document."""
-    text: str = MAP_FILE.read_text()
+    text = MAP_FILE.read_text()
     assert "F_AC_" not in text and "F_DC_" not in text
 
 
@@ -130,7 +130,7 @@ def test_every_register_is_a_command_the_transport_knows() -> None:
 
 def test_every_enum_and_flag_table_the_rows_need_is_in_the_json() -> None:
     tables = json.loads(JSON_FILE.read_text())
-    needed: set[str] = {row["documented_name"].strip().lower().replace(" ", "_") + "_codes" for row in rows() if row["data_type"] == "8BIT_FLAGS" or row["data_type"] == "16BIT_FLAGS"}
+    needed = {row["documented_name"].strip().lower().replace(" ", "_") + "_codes" for row in rows() if row["data_type"] == "8BIT_FLAGS" or row["data_type"] == "16BIT_FLAGS"}
     needed |= {"interface_mode_codes", "device_state_codes", "charge_sub_state_codes", "phase_info_codes", "special_three_phase_setting_codes"}
     assert needed <= set(tables), needed - set(tables)
 
@@ -225,7 +225,7 @@ def test_settings_are_scaled_and_flags_are_named() -> None:
 
 
 def test_unsupported_values_are_simply_absent() -> None:
-    device: FakeDevice = full_device()
+    device = full_device()
     del device.ram_info[13]
     data, transport, _ = read_cycle(device)
     assert "state_of_charge" not in data and "device_battery_voltage" in data
@@ -233,7 +233,7 @@ def test_unsupported_values_are_simply_absent() -> None:
 
 
 def test_power_variables_14_to_19_are_published_when_the_device_has_them() -> None:
-    device: FakeDevice = full_device()
+    device = full_device()
     device.ram_info[16] = (0x8064, 0)  # signed, 0.01
     device.ram[16] = 0x10000 - 250
     data, _, _ = read_cycle(device)
@@ -255,13 +255,13 @@ def test_the_ac_state_byte_and_the_phase_info_are_described() -> None:
 
 
 def test_the_switch_register_added_in_3_14_is_published_when_sent() -> None:
-    frame: bytes = ve_bus("41" "10090000" "00" "3E00" "E803" "F401" "14")  # 12th data byte: bits 2 and 4
+    frame = ve_bus("41" "10090000" "00" "3E00" "E803" "F401" "14")  # 12th data byte: bits 2 and 4
     data, _, _ = read_cycle(full_device(), system_frames={**FakeInterface().system_frames, 5: [frame]})
     assert data["switch_register"] == "Front switch up,Switch charge (current state)"
 
 
 def test_the_ac_input_count_and_remote_panel_bits_decode() -> None:
-    frame: bytes = ve_bus("41" "10090000" "A4" "3E00" "E803" "F401" "00")  # config 0b10100100: overridden, 2 inputs, remote panel
+    frame = ve_bus("41" "10090000" "A4" "3E00" "E803" "F401" "00")  # config 0b10100100: overridden, 2 inputs, remote panel
     data, _, _ = read_cycle(full_device(), system_frames={**FakeInterface().system_frames, 5: [frame]})
     assert data["input_current_overridden_by_panel"] == 1
     assert data["ac_input_count"] == 2

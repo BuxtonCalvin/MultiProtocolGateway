@@ -599,7 +599,7 @@ A value shorter than the transport interval is silently clamped to the transport
 
 #### Startup Rows (read once per connection)
 
-Configuration that rarely changes (transformer ratios, communication settings, pulse constants) and logs (history, events) do not need polling. A row whose `read interval` is `startup` (`once` is accepted too) is read once when the transport connects, and again after a reconnect. For Modbus this is the startup routine in `classes/discovery/startup.py`; polled serial transports (`serial_base` subclasses such as `serial_vebus`) read the command once and serve the payload from memory on every later cycle.
+Configuration that rarely changes (transformer ratios, communication settings, pulse constants) and logs (history, events) do not need polling. A row whose `read interval` is `startup` (`once` is accepted too) is read once when the transport connects, and again after a reconnect. For Modbus this is the startup routine in `classes/discovery/startup.py`; polled serial transports (`serial_base` subclasses such as `serial_vebus`) read the command once, serve the payload from memory on every later cycle, and publish the decoded values as `static_values` for Context formulas in the same way.
 
 The row is otherwise an ordinary row: it is listed in the register map, can be selected, masked or screened in the web UI, keeps its data type, unit, code table and adjustments, and is skipped when it is marked `RD` or `WO`.
 
