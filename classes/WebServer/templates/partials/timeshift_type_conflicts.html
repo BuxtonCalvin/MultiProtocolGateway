@@ -1,3 +1,22 @@
+<!--
+  Description: Defines the timeshift/import error handling.
+  File: timeshift_type_conflicts.html
+
+  Copyright 2026 Kevin Burke
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://apache.org
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+
 {#
   partials/timeshift_type_conflicts.html
   Included by timeshift_preview.html and timeshift_result.html. Context: result — TimeshiftImportResult.
@@ -13,7 +32,7 @@
     Those values were not written; every other value in the same rows was.
   </p>
   {% if result.suggest_rounding %}
-  <p class="text-xs mt-1">Some were decimals bound for whole-number columns — tick <strong>Round decimal values to whole numbers for integer columns</strong> to import them rounded instead.</p>
+  <p class="text-xs mt-1">Some were decimals bound for whole-number columns — leave <strong>Round decimal values to whole numbers for integer columns</strong> ticked to import them rounded instead.</p>
   {% endif %}
   <div class="overflow-x-auto max-h-56 overflow-y-auto mt-1">
     <table class="w-auto text-xs border-collapse">

@@ -249,9 +249,9 @@
       {% if version == 'timescale' %}
       <label id="ts-round-wrap" class="hidden col-span-3 text-xs mb-1.5">
         <span class="flex items-center gap-1.5">
-          <input type="checkbox" id="ts-round-integer">
+          <input type="checkbox" id="ts-round-integer" checked>
           Round decimal values to whole numbers for integer columns
-          <span class="italic surface-subtle">(wide tables: otherwise a value like 175.4 in a BIGINT/INTEGER/SMALLINT column is skipped; rounding is lossy)</span>
+          <span class="italic surface-subtle">(wide tables: ticked by default; unticked, a value like 175.4 in a BIGINT/INTEGER/SMALLINT column is skipped; rounding is lossy)</span>
         </span>
       </label>
       {% endif %}
@@ -1156,7 +1156,7 @@
         MpgDateTime.set('ts-import-start', data.earliest);   // server sends YYYY-MM-DDTHH:MM:SS; shown as YYYY-MM-DD  HH:MM:SS
         note.textContent = isEg4
           ? 'Set to the earliest timestamp in the file (all sheets combined). You can still edit it.'
-          : 'Set to the first local timezone timestamp in the file. You can still edit it.';
+          : 'Set to the first timestamp in the file. You can still edit it.';
         note.classList.remove('hidden');
       } else {
         note.classList.add('hidden');
