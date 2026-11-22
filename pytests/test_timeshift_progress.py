@@ -156,20 +156,21 @@ class TestBatchedWriters:
                 ts.write_points_v3(None, _v1_points(25_000))
         assert exc.value.may_have_partial_write is True
 
-    def test_timescale_reports_wide_then_narrow_inside_one_transaction(self) -> None:
+    def test_timescale_reports_each_batch_inside_one_transaction(self) -> None:
         session = MagicMock()
         session.__enter__ = MagicMock(return_value=session)
         session.__exit__ = MagicMock(return_value=False)
         session.begin.return_value.__enter__ = MagicMock(return_value=None)
         session.begin.return_value.__exit__ = MagicMock(return_value=False)
         bridge = SimpleNamespace(SessionFactory=MagicMock(return_value=session), tsdb_connected=True)
-        points: list[ts.TimescalePointDict] = [ts.TimescalePointDict(time_iso=f"2025-06-01T00:00:{n % 60:02d}", fields={"soc": float(n), "v": 1.0}) for n in range(1500)]
+        points: list[ts.TimescalePointDict] = [ts.TimescalePointDict(time_iso=f"2025-06-01T00:00:{n % 60:02d}", fields={"soc": float(n), "v": 1.0}) for n in range(1200)]
         progress: _Recorder = _Recorder()
-        with patch.object(ts, "get_timescale_bridge", return_value=bridge):
+        with patch.object(ts, "get_timescale_bridge", return_value=bridge), patch.object(ts, "_copy_upsert"):
             ts.write_points_timescale(None, "wide", "device_metrics_wide__x", 7, points, progress)
-        assert progress[0][1:] == (0, 0)                       # "preparing" is indeterminate
-        assert progress[-1][1:] == (4500, 4500)                # 1500 wide upserts + 3000 narrow values
-        assert "narrow table" in progress[-1][0]
+        assert progress[0][1:] == (0, 0)                                  # "preparing" is indeterminate
+        assert [done for _l, done, _t in progress[1:]] == [1000, 1200]
+        assert {total for _l, _d, total in progress[1:]} == {1200}
+        assert progress[-1][0] == "Writing points · 1,200 of 1,200"
         assert session.begin.call_count == 1
 
 

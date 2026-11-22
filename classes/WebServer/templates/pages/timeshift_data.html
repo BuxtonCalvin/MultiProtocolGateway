@@ -1156,7 +1156,7 @@
         MpgDateTime.set('ts-import-start', data.earliest);   // server sends YYYY-MM-DDTHH:MM:SS; shown as YYYY-MM-DD  HH:MM:SS
         note.textContent = isEg4
           ? 'Set to the earliest timestamp in the file (all sheets combined). You can still edit it.'
-          : 'Set to the first timestamp in the file. You can still edit it.';
+          : 'Set to the first local timezone timestamp in the file. You can still edit it.';
         note.classList.remove('hidden');
       } else {
         note.classList.add('hidden');

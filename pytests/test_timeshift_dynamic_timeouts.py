@@ -145,7 +145,7 @@ class TestStatementTimeout:
         session.begin.return_value.__exit__ = MagicMock(return_value=False)
         bridge = SimpleNamespace(SessionFactory=MagicMock(return_value=session), tsdb_connected=True)
         points: list[ts.TimescalePointDict] = [ts.TimescalePointDict(time_iso="2025-06-01T00:00:00", fields={"soc": 50.0})]
-        with patch.object(ts, "get_timescale_bridge", return_value=bridge):
+        with patch.object(ts, "get_timescale_bridge", return_value=bridge), patch.object(ts, "_copy_upsert"):
             ts.write_points_timescale(None, "narrow", "device_metrics_narrow", 7, points)
         first_sql, first_params = session.execute.call_args_list[0].args
         assert "set_config('statement_timeout'" in str(first_sql)

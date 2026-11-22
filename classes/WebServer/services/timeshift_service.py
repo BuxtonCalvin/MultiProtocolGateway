@@ -113,7 +113,6 @@ from zoneinfo import ZoneInfo, available_timezones
 
 import pandas as pd
 from fastapi import HTTPException
-from influxdb_client_3.write_client.client.write.point import Point
 from starlette.datastructures import State
 
 from .bridge_service import get_timescale_bridge
@@ -509,7 +508,7 @@ def suggest_field_mapping(
     claims.sort(key=lambda c: (-c[0], c[1], c[2]))
     taken: set[str] = set()
     for score, index, name in claims:
-        col: str = source_columns[index]
+        col = source_columns[index]
         if col not in assigned and name not in taken:
             assigned[col] = (name, score)
             taken.add(name)
@@ -1320,7 +1319,7 @@ def _open_v3_client(bridge: Any, *, query_timeout_s: float | None = None, write_
 
 V1_WRITE_BATCH_SIZE: int = 1000        # points per HTTP request to InfluxDB v1
 V3_WRITE_BATCH_SIZE: int = 10_000      # points per write call to InfluxDB v3 (each is its own request, so progress is real)
-TS_NARROW_BATCH_SIZE: int = 2_000      # narrow rows per statement inside the one TimescaleDB transaction
+TS_WRITE_BATCH_POINTS: int = 1_000     # points per TimescaleDB write step (one COPY + merge per table, then one progress event)
 
 
 def _points_label(done: int, total: int) -> str:
@@ -1433,7 +1432,7 @@ def write_points_v3(
         for offset in range(0, total, V3_WRITE_BATCH_SIZE):
             influx_points: list[Point] = []
             for p in points[offset:offset + V3_WRITE_BATCH_SIZE]:
-                pt: Point = Point(p.measurement)
+                pt = Point(p.measurement)
                 for tag_key, tag_val in p.tags.items():
                     pt = pt.tag(tag_key, tag_val)  # type: ignore[reportUnknownMemberType]
                 for field_key, field_val in p.fields.items():
@@ -1600,7 +1599,7 @@ def load_tag_options(
                 quoted_key: str = _sql_quote_ident(key)
                 values: set[str] = set()
                 for index, window in enumerate(_V3_DEVICE_LOOKBACKS):
-                    sql: str = (
+                    sql = (
                         f"SELECT DISTINCT {quoted_key} FROM {_sql_quote_ident(measurement)} "  # noqa: S608
                         f"WHERE time >= now() - INTERVAL '{window}' AND {quoted_key} IS NOT NULL LIMIT {MAX_TAG_VALUES}"
                     )
@@ -2046,7 +2045,7 @@ def build_points_timescale(
 
     SECURITY: `mapping`'s values become dict keys on the returned
     TimescalePointDicts, and for table_kind == "wide" those keys are used
-    by write_points_timescale()/_wide_upsert_sql() to build a raw SQL
+    by write_points_timescale()/_upsert_from_stage_sql() to build a raw SQL
     column list -- unlike an InfluxDB field name (just a tag value in a
     parameterized line-protocol write), a wide-table target name is a SQL
     identifier. `mapping` itself is client-supplied JSON
@@ -2060,7 +2059,7 @@ def build_points_timescale(
     same untrusted-name whitelist discipline delete_fields()/
     edit_metric_values() apply before building their own column lists.
     Narrow-table targets become metric_name bind PARAMETER values (see
-    _NARROW_UPSERT_SQL), never identifiers, so they carry no such risk and
+    _NARROW_COLUMNS), never identifiers, so they carry no such risk and
     existing_wide_columns is ignored for table_kind == "narrow".
 
     A wide-table value that fails transports.timescaledb._coerce_value_for_
@@ -2166,12 +2165,8 @@ def build_points_timescale(
 # DeviceMetricsNarrow. ON CONFLICT DO UPDATE (not DO NOTHING, unlike the live flush worker's own narrow
 # write) so re-running a Timeshift import over the same target range is idempotent/overwriting, the
 # same expectation InfluxDB's line-protocol writes already give this screen's other two destinations.
-_NARROW_UPSERT_SQL: str = (
-    "INSERT INTO device_metrics_narrow (m_time, device_info_id, metric_name, metric_value, metric_ascii) "
-    "VALUES (:m_time, :device_info_id, :metric_name, :metric_value, :metric_ascii) "
-    "ON CONFLICT (m_time, device_info_id, metric_name) DO UPDATE SET "
-    "metric_value = EXCLUDED.metric_value, metric_ascii = EXCLUDED.metric_ascii"
-)
+_NARROW_COLUMNS: list[str] = ["m_time", "device_info_id", "metric_name", "metric_value", "metric_ascii"]
+_NARROW_KEY: list[str] = ["m_time", "device_info_id", "metric_name"]
 
 
 def _narrow_value_pair(value: int | float | str | bool) -> tuple[float, str | None]:
@@ -2183,27 +2178,107 @@ def _narrow_value_pair(value: int | float | str | bool) -> tuple[float, str | No
     return 0.0, str(value)
 
 
-def _wide_upsert_sql(table_name: str, columns: list[str]) -> str:
+def _copy_cell(value: Any) -> str:
     """
-    ON CONFLICT (m_time, device_info_id) DO UPDATE -- that pair is the wide
-    table's own primary key (see transports.timescaledb.timescaledb.
-    _ensure_wide_table_exists), so this is the same idempotent-overwrite
-    reasoning _NARROW_UPSERT_SQL's docstring gives, for the wide side of a
-    dual write. `table_name`/`columns` are trusted SQL identifiers by the
-    time they reach here -- table_name from bridge_service.
-    resolve_wide_table_name() (itself sourced from protocol_registry, only
-    ever a name this app created), columns from metric_catalog.
-    clean_column_name (sanitized at wide-table-creation time) -- the same
-    trust level transports.timescaledb.BridgeAdminManager._wide_view_names
-    already extends to a wide_table_name it's given.
+    One value in PostgreSQL's COPY text format: NULL is \\N, and backslash, tab, newline and carriage return are
+    backslash-escaped, so a string can never be mistaken for a delimiter or for NULL (a literal \\N in the data
+    becomes \\\\N). Numbers go through float()/int() first so a NumPy scalar never writes its repr.
     """
-    col_list: str = ", ".join(["m_time", "device_info_id", *columns])
-    val_list: str = ", ".join([":m_time", ":device_info_id", *(f":{c}" for c in columns)])
-    update_list: str = ", ".join(f"{c} = EXCLUDED.{c}" for c in columns)
+    if value is None:
+        return "\\N"
+    if isinstance(value, bool):
+        return "t" if value else "f"
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, float):
+        return repr(float(value))   # 'nan' / 'inf' are accepted by PostgreSQL's float input
+    if isinstance(value, int):
+        return str(int(value))
+    return str(value).replace("\\", "\\\\").replace("\t", "\\t").replace("\n", "\\n").replace("\r", "\\r")
+
+
+def _upsert_from_stage_sql(target: str, stage: str, columns: list[str], key_columns: list[str]) -> str:
+    """
+    Merges the rows COPYed into `stage` into `target`: ON CONFLICT on the table's own primary key, overwriting the other
+    columns: re-running a Timeshift import over the same range overwrites instead of failing, the same
+    expectation InfluxDB's line-protocol writes give this screen's other two destinations. `target`/`columns` are trusted SQL identifiers by the time they reach here -- target from
+    bridge_service.resolve_wide_table_name() (itself sourced from protocol_registry, only ever a name this app created) or
+    the fixed narrow table, columns from metric_catalog.clean_column_name (sanitized at wide-table-creation time) -- the
+    same trust level transports.timescaledb.BridgeAdminManager._wide_view_names already extends to a table name it's given.
+    """
+    col_list: str = ", ".join(columns)
+    update_list: str = ", ".join(f"{c} = EXCLUDED.{c}" for c in columns if c not in key_columns)
     return (
-        f"INSERT INTO {table_name} ({col_list}) VALUES ({val_list}) "  # noqa: S608
-        f"ON CONFLICT (m_time, device_info_id) DO UPDATE SET {update_list}"
+        f"INSERT INTO {target} ({col_list}) SELECT {col_list} FROM {stage} "  # noqa: S608
+        f"ON CONFLICT ({', '.join(key_columns)}) DO UPDATE SET {update_list}"
     )
+
+
+def _copy_upsert(
+    cursor: Any, target: str, stage: str, columns: list[str], key_columns: list[str], rows: list[tuple[Any, ...]],
+    ) -> None:
+    """
+    Bulk-upserts `rows` (tuples in `columns` order, keys unique) into `target`: COPY them into a temporary table shaped
+    like `target`, then merge that into `target` with ON CONFLICT (COPY itself cannot upsert). COPY streams the rows in
+    one go instead of building and parsing a big INSERT, which is what makes this the fast path. The staging table
+    lives only inside the import's transaction and is emptied after each merge.
+    """
+    if not rows:
+        return
+    cursor.execute(f"CREATE TEMP TABLE IF NOT EXISTS {stage} (LIKE {target}) ON COMMIT DROP")
+    payload: io.StringIO = io.StringIO("".join("\t".join(_copy_cell(v) for v in row) + "\n" for row in rows))
+    cursor.copy_expert(f"COPY {stage} ({', '.join(columns)}) FROM STDIN", payload)  # noqa: S608
+    cursor.execute(_upsert_from_stage_sql(target, stage, columns, key_columns))
+    cursor.execute(f"TRUNCATE {stage}")
+
+
+_WIDE_KEY: list[str] = ["m_time", "device_info_id"]
+_WIDE_STAGE: str = "_mpg_timeshift_stage_wide"
+_NARROW_STAGE: str = "_mpg_timeshift_stage_narrow"
+
+
+def _upsert_wide_batch(
+    cursor: Any, table_name: str, device_info_id: int, points: list[TimescalePointDict], times: list[datetime],
+    ) -> None:
+    """
+    Upserts `points` into the wide table. A run of consecutive points that share a column set is one COPY + merge (the
+    usual case: every row of a file has the same columns); a change of column set starts a new one, so the order
+    points are applied in is the order they appear. Within a run a repeated timestamp keeps its last row, which is
+    what applying the rows one after another would have left (PostgreSQL refuses a single statement that updates the
+    same row twice).
+    """
+    run_columns: tuple[str, ...] = ()
+    run_rows: dict[datetime, tuple[Any, ...]] = {}
+
+    def flush() -> None:
+        if run_rows:
+            _copy_upsert(
+                cursor, table_name, _WIDE_STAGE, [*_WIDE_KEY, *run_columns], _WIDE_KEY,
+                [(m_time, device_info_id, *values) for m_time, values in run_rows.items()],
+            )
+            run_rows.clear()
+
+    for p, m_time in zip(points, times):
+        if not p.fields:
+            continue
+        columns: tuple[str, ...] = tuple(p.fields)
+        if columns != run_columns:
+            flush()
+            run_columns = columns
+        run_rows[m_time] = tuple(p.fields.values())
+    flush()
+
+
+def _narrow_rows_for(points: list[TimescalePointDict], times: list[datetime], device_info_id: int) -> tuple[list[tuple[Any, ...]], int]:
+    """(rows, built): the narrow-table rows for `points`, one per field, with a repeated (time, metric) keeping its last value; `built` counts them before that."""
+    rows: dict[tuple[datetime, str], tuple[Any, ...]] = {}
+    built: int = 0
+    for p, m_time in zip(points, times):
+        for name, value in p.fields.items():
+            metric_value, metric_ascii = _narrow_value_pair(value)
+            rows[(m_time, name)] = (m_time, device_info_id, name, metric_value, metric_ascii)
+            built += 1
+    return list(rows.values()), built
 
 
 def write_points_timescale(
@@ -2257,10 +2332,6 @@ def write_points_timescale(
         RuntimeError: no TimescaleDB bridge is attached to this gateway, or it isn't connected.
         ValueError: table_kind isn't "narrow"/"wide".
     """
-    from sqlalchemy import (  # noqa: PLC0415 -- local: see build_points_timescale's identical note on deferring this transport's imports
-        text as _sql_text,
-    )
-
     if table_kind not in ("narrow", "wide"):
         msg: str = f"Unknown table_kind '{table_kind}' -- expected 'narrow' or 'wide'."
         raise ValueError(msg)
@@ -2311,48 +2382,36 @@ def write_points_timescale(
         f"[Timeshift] TimescaleDB import: prepared {sorted(tables_to_prepare)} (paused/decompressed for "
         f"{range_start:%Y-%m-%d %H:%M} to {range_end:%Y-%m-%d %H:%M} UTC) in {t_prepared - t_start:.1f}s; writing {len(points)} point(s)."
     )
-    narrow_rows: list[dict[str, Any]] = []
-    rows_written = 0
-
-    # Bar units: one per point for the wide upsert (wide tables only) plus one per narrow row.
-    narrow_total: int = sum(len(p.fields) for p in points)
-    bar_total: int = (len(points) if table_kind == "wide" else 0) + narrow_total
-    wide_done: int = 0
+    narrow_built: int = 0
+    total: int = len(points)
 
     try:
         with bridge.SessionFactory() as session:
             with session.begin():
                 _set_local_statement_timeout(session, import_timeout_s)
-                for p, m_time in zip(points, times):
-                    # p.time_iso is a naive-UTC ISO string (see TimescalePointDict/build_points_timescale,
-                    # and InfluxPointDict's identical convention). Explicitly re-attaching UTC here, rather
-                    # than binding the naive string/datetime directly, matters because these columns are
-                    # TIMESTAMPTZ: a naive value would otherwise be interpreted in the DB session's own
-                    # timezone setting (not necessarily UTC), silently shifting every written timestamp.
-                    if table_kind == "wide":
-                        sql: str = _wide_upsert_sql(table_name, list(p.fields.keys()))
-                        params: dict[str, Any] = {"m_time": m_time, "device_info_id": device_info_id, **p.fields}
-                        session.execute(_sql_text(sql), params)
-                        wide_done += 1
-                        if on_progress is not None and wide_done % 500 == 0:
-                            on_progress(f"Writing wide table · {wide_done:,} of {len(points):,} points", wide_done, bar_total)
-                    for name, value in p.fields.items():
-                        metric_value, metric_ascii = _narrow_value_pair(value)
-                        narrow_rows.append({
-                            "m_time": m_time, "device_info_id": device_info_id,
-                            "metric_name": name, "metric_value": metric_value, "metric_ascii": metric_ascii,
-                        })
-                    rows_written += 1
-
-                # Chunked only so progress is real: every chunk is still inside this one transaction.
-                for offset in range(0, len(narrow_rows), TS_NARROW_BATCH_SIZE):
-                    session.execute(_sql_text(_NARROW_UPSERT_SQL), narrow_rows[offset:offset + TS_NARROW_BATCH_SIZE])
-                    narrow_done: int = min(offset + TS_NARROW_BATCH_SIZE, len(narrow_rows))
-                    if on_progress is not None:
-                        on_progress(
-                            f"Writing narrow table · {narrow_done:,} of {len(narrow_rows):,} values",
-                            (wide_done if table_kind == "wide" else 0) + narrow_done, bar_total,
-                        )
+                # The raw DBAPI cursor of this same transaction, so the COPY + merge below are inside it. One COPY per
+                # batch instead of one statement per point (and per narrow row) turns a network round trip per value
+                # into a handful per thousand points.
+                cursor: Any = session.connection().connection.cursor()
+                try:
+                    for offset in range(0, total, TS_WRITE_BATCH_POINTS):
+                        batch: list[TimescalePointDict] = points[offset:offset + TS_WRITE_BATCH_POINTS]
+                        batch_times: list[datetime] = times[offset:offset + TS_WRITE_BATCH_POINTS]
+                        # p.time_iso is a naive-UTC ISO string (see TimescalePointDict/build_points_timescale,
+                        # and InfluxPointDict's identical convention); `times` re-attaches UTC explicitly, rather
+                        # than binding the naive value, because these columns are TIMESTAMPTZ: a naive value would
+                        # otherwise be interpreted in the DB session's own timezone setting (not necessarily UTC),
+                        # silently shifting every written timestamp.
+                        if table_kind == "wide":
+                            _upsert_wide_batch(cursor, table_name, device_info_id, batch, batch_times)
+                        narrow_rows, built = _narrow_rows_for(batch, batch_times, device_info_id)
+                        narrow_built += built
+                        _copy_upsert(cursor, "device_metrics_narrow", _NARROW_STAGE, _NARROW_COLUMNS, _NARROW_KEY, narrow_rows)
+                        written_so_far: int = min(offset + TS_WRITE_BATCH_POINTS, total)
+                        if on_progress is not None:
+                            on_progress(_points_label(written_so_far, total), written_so_far, total)
+                finally:
+                    cursor.close()
     finally:
         # hypertable_mgr can't actually be None here when paused_job_ids_by_table
         # is non-empty (it's only ever populated inside the `if hypertable_mgr is
@@ -2368,10 +2427,10 @@ def write_points_timescale(
                     _log.warning(f"[Timeshift] Could not resume compression job(s) {job_ids} for '{t}': {e}")
 
     _log.info(
-        f"[Timeshift] TimescaleDB import: wrote {rows_written} point(s) / {len(narrow_rows)} narrow row(s) in "
+        f"[Timeshift] TimescaleDB import: wrote {total} point(s) / {narrow_built} narrow row(s) in "
         f"{time.perf_counter() - t_prepared:.1f}s (total {time.perf_counter() - t_start:.1f}s)."
     )
-    return rows_written, len(narrow_rows)
+    return total, narrow_built
 
 
 def iter_export_windows_timescale(
@@ -2457,7 +2516,7 @@ def _iter_timescale_windows(
                 select_cols: str = ", ".join(_sql_quote_ident(c) for c in field_names)
                 result = session.execute(
                     _sql_text(
-                        f"SELECT m_time, {select_cols} FROM {table_name} "  # noqa: S608 -- table_name/select_cols are trusted identifiers, see _wide_upsert_sql's docstring
+                        f"SELECT m_time, {select_cols} FROM {table_name} "  # noqa: S608 -- table_name/select_cols are trusted identifiers, see _upsert_from_stage_sql's docstring
                         f"WHERE device_info_id = :did AND m_time >= :start AND m_time {end_op} :end ORDER BY m_time"
                     ),
                     bounds,

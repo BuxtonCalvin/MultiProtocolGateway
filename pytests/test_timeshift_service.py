@@ -119,7 +119,7 @@ class TestConsolidateSheets:
         assert result.warnings == []
 
     def test_sheets_with_different_columns_same_times_are_joined(self) -> None:
-        t = _times("2025-06-01 00:00", 3)
+        t: pd.DatetimeIndex = _times("2025-06-01 00:00", 3)
         a = pd.DataFrame({"Time": t, "SOC": [50, 51, 52]})
         b = pd.DataFrame({"Time": t, "Grid Voltage": [240.0, 241.0, 239.5]})
         df: pd.DataFrame = ts.consolidate_sheets({"Battery": a, "Grid": b}).dataframe
@@ -197,11 +197,11 @@ class TestParseUpload:
         assert parsed.sheets_used == []
 
     def test_csv_uses_existing_path(self) -> None:
-        parsed = ts.parse_upload("x.csv", b"time,soc\n2025-06-01T00:00:00,5\n", "eg4")
+        parsed: ts.ParsedSpreadsheet = ts.parse_upload("x.csv", b"time,soc\n2025-06-01T00:00:00,5\n", "eg4")
         assert list(parsed.dataframe.columns) == ["time", "soc"]
 
     def test_influx_csv_workbook_only_reads_first_sheet_like_before(self) -> None:
-        data = _workbook_bytes({
+        data: bytes = _workbook_bytes({
             "A": pd.DataFrame({"time": _times("2025-06-01 00:00", 2), "soc": [1, 2]}),
             "B": pd.DataFrame({"time": _times("2025-06-02 00:00", 2), "soc": [3, 4]}),
         })
@@ -684,6 +684,17 @@ class TestWritePointsTimescale:
         """These tests count the SQL the import writes; the statement_timeout call has its own tests (test_timeshift_dynamic_timeouts.py)."""
         monkeypatch.setattr(ts, "_set_local_statement_timeout", MagicMock())
 
+    @pytest.fixture(autouse=True)
+    def upserts(self, monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, list[str], list[tuple[Any, ...]]]]:
+        """Replaces the COPY + merge call; every (target table, columns, rows) the import issues is recorded here, in order."""
+        recorded: list[tuple[str, list[str], list[tuple[Any, ...]]]] = []
+
+        def record(_cursor: object, target: str, _stage: str, columns: list[str], _keys: list[str], rows: list[tuple[Any, ...]]) -> None:
+            recorded.append((target, columns, rows))
+
+        monkeypatch.setattr(ts, "_copy_upsert", record)
+        return recorded
+
     def _bridge(self) -> tuple[SimpleNamespace, MagicMock]:
         session = MagicMock()
         session.__enter__ = MagicMock(return_value=session)
@@ -693,48 +704,83 @@ class TestWritePointsTimescale:
         bridge = SimpleNamespace(SessionFactory=MagicMock(return_value=session), tsdb_connected=True)
         return bridge, session
 
-    def test_narrow_only_writes_narrow(self) -> None:
-        bridge, session = self._bridge()
+    def test_narrow_only_writes_narrow(self, upserts: list[tuple[str, list[str], list[tuple[Any, ...]]]]) -> None:
+        bridge, _session = self._bridge()
         points: list[ts.TimescalePointDict] = [ts.TimescalePointDict(time_iso="2025-06-01T00:00:00", fields={"soc": 50.0, "note": "ok"})]
         with patch.object(ts, "get_timescale_bridge", return_value=bridge):
             written, narrow_rows = ts.write_points_timescale(None, "narrow", "device_metrics_narrow", 7, points)
         assert (written, narrow_rows) == (1, 2)
-        calls = session.execute.call_args_list
-        assert len(calls) == 1   # only the narrow batch -- no wide insert at all
-        sql_text, params = calls[0].args
-        assert "device_metrics_narrow" in str(sql_text)
-        assert len(params) == 2
-        by_name: dict[Any, Any] = {p["metric_name"]: p for p in params}
-        assert by_name["soc"] == {"m_time": datetime(2025, 6, 1, tzinfo=timezone.utc), "device_info_id": 7, "metric_name": "soc", "metric_value": 50.0, "metric_ascii": None}
-        assert by_name["note"]["metric_value"] == 0.0 and by_name["note"]["metric_ascii"] == "ok"
+        assert len(upserts) == 1   # only the narrow batch -- no wide insert at all
+        target, columns, rows = upserts[0]
+        assert target == "device_metrics_narrow" and columns == ["m_time", "device_info_id", "metric_name", "metric_value", "metric_ascii"]
+        by_name: dict[Any, tuple[Any, ...]] = {r[2]: r for r in rows}
+        when: datetime = datetime(2025, 6, 1, tzinfo=timezone.utc)
+        assert by_name["soc"] == (when, 7, "soc", 50.0, None)
+        assert by_name["note"][3] == 0.0 and by_name["note"][4] == "ok"
 
-    def test_wide_mirrors_same_fields_into_narrow(self) -> None:
-        bridge, session = self._bridge()
+    def test_wide_mirrors_same_fields_into_narrow(self, upserts: list[tuple[str, list[str], list[tuple[Any, ...]]]]) -> None:
+        bridge, _session = self._bridge()
         points: list[ts.TimescalePointDict] = [ts.TimescalePointDict(time_iso="2025-06-01T00:00:00", fields={"pv1_voltage": 300.5})]
         with patch.object(ts, "get_timescale_bridge", return_value=bridge):
             written, narrow_rows = ts.write_points_timescale(None, "wide", "device_metrics_wide__eg4_18kpv", 7, points)
         assert (written, narrow_rows) == (1, 1)
-        assert session.execute.call_count == 2   # one wide upsert, one narrow batch
-        wide_sql, wide_params = session.execute.call_args_list[0].args
-        assert "device_metrics_wide__eg4_18kpv" in str(wide_sql) and "ON CONFLICT (m_time, device_info_id)" in str(wide_sql)
-        assert wide_params == {"m_time": datetime(2025, 6, 1, tzinfo=timezone.utc), "device_info_id": 7, "pv1_voltage": 300.5}
-        _narrow_sql, narrow_params = session.execute.call_args_list[1].args
-        assert narrow_params == [{"m_time": datetime(2025, 6, 1, tzinfo=timezone.utc), "device_info_id": 7, "metric_name": "pv1_voltage", "metric_value": 300.5, "metric_ascii": None}]
+        assert len(upserts) == 2   # one wide upsert, one narrow batch
+        wide_target, wide_columns, wide_rows = upserts[0]
+        assert wide_target == "device_metrics_wide__eg4_18kpv" and wide_columns == ["m_time", "device_info_id", "pv1_voltage"]
+        assert wide_rows == [(datetime(2025, 6, 1, tzinfo=timezone.utc), 7, 300.5)]
+        assert upserts[1][0] == "device_metrics_narrow"
+        assert upserts[1][2] == [(datetime(2025, 6, 1, tzinfo=timezone.utc), 7, "pv1_voltage", 300.5, None)]
 
-    def test_boolean_field_mirrors_as_zero_or_one_in_narrow(self) -> None:
-        bridge, session = self._bridge()
+    def test_boolean_field_mirrors_as_zero_or_one_in_narrow(self, upserts: list[tuple[str, list[str], list[tuple[Any, ...]]]]) -> None:
+        bridge, _session = self._bridge()
         points: list[ts.TimescalePointDict] = [ts.TimescalePointDict(time_iso="2025-06-01T00:00:00", fields={"is_charging": True})]
         with patch.object(ts, "get_timescale_bridge", return_value=bridge):
             ts.write_points_timescale(None, "wide", "device_metrics_wide__x", 1, points)
-        narrow_params = session.execute.call_args_list[1].args[1]
-        assert narrow_params[0]["metric_value"] == 1.0 and narrow_params[0]["metric_ascii"] is None
+        narrow_row: tuple[Any, ...] = upserts[1][2][0]
+        assert narrow_row[3] == 1.0 and narrow_row[4] is None
 
-    def test_no_points_is_a_no_op(self) -> None:
+    def test_a_whole_file_of_points_is_batched_not_sent_one_by_one(self, upserts: list[tuple[str, list[str], list[tuple[Any, ...]]]]) -> None:
+        bridge, _session = self._bridge()
+        count: int = ts.TS_WRITE_BATCH_POINTS * 2 + 1
+        points: list[ts.TimescalePointDict] = [ts.TimescalePointDict(time_iso=f"2025-06-01T{n // 3600:02d}:{n // 60 % 60:02d}:{n % 60:02d}", fields={"a": 1.0, "b": 2.0}) for n in range(count)]
+        with patch.object(ts, "get_timescale_bridge", return_value=bridge):
+            ts.write_points_timescale(None, "wide", "device_metrics_wide__x", 1, points)
+        assert len(upserts) == 6   # three batches, each one wide statement and one narrow statement
+        assert [len(rows) for _target, _columns, rows in upserts[0::2]] == [ts.TS_WRITE_BATCH_POINTS, ts.TS_WRITE_BATCH_POINTS, 1]
+
+    def test_a_repeated_timestamp_keeps_its_last_row(self, upserts: list[tuple[str, list[str], list[tuple[Any, ...]]]]) -> None:
+        """PostgreSQL rejects one statement that updates a row twice; applying the rows in order would have left the last."""
+        bridge, _session = self._bridge()
+        points: list[ts.TimescalePointDict] = [
+            ts.TimescalePointDict(time_iso="2025-06-01T00:00:00", fields={"a": 1.0}),
+            ts.TimescalePointDict(time_iso="2025-06-01T00:00:00", fields={"a": 9.0}),
+        ]
+        with patch.object(ts, "get_timescale_bridge", return_value=bridge):
+            written, narrow_rows = ts.write_points_timescale(None, "wide", "device_metrics_wide__x", 1, points)
+        assert (written, narrow_rows) == (2, 2)
+        assert [r[2] for r in upserts[0][2]] == [9.0]
+        assert [r[3] for r in upserts[1][2]] == [9.0]
+
+    def test_rows_with_different_columns_become_separate_statements_in_order(self, upserts: list[tuple[str, list[str], list[tuple[Any, ...]]]]) -> None:
+        bridge, _session = self._bridge()
+        points: list[ts.TimescalePointDict] = [
+            ts.TimescalePointDict(time_iso="2025-06-01T00:00:00", fields={"a": 1.0}),
+            ts.TimescalePointDict(time_iso="2025-06-01T00:00:10", fields={"a": 2.0}),
+            ts.TimescalePointDict(time_iso="2025-06-01T00:00:20", fields={"a": 3.0, "b": 4.0}),
+        ]
+        with patch.object(ts, "get_timescale_bridge", return_value=bridge):
+            ts.write_points_timescale(None, "wide", "device_metrics_wide__x", 1, points)
+        wide: list[tuple[str, list[str], list[tuple[Any, ...]]]] = [u for u in upserts if u[0] == "device_metrics_wide__x"]
+        assert [len(rows) for _target, _columns, rows in wide] == [2, 1]
+        assert wide[0][1] == ["m_time", "device_info_id", "a"] and wide[1][1] == ["m_time", "device_info_id", "a", "b"]
+
+    def test_no_points_is_a_no_op(self, upserts: list[tuple[str, list[str], list[tuple[Any, ...]]]]) -> None:
         bridge, session = self._bridge()
         with patch.object(ts, "get_timescale_bridge", return_value=bridge):
             result: tuple[int, int] = ts.write_points_timescale(None, "narrow", "device_metrics_narrow", 1, [])
         assert result == (0, 0)
         session.execute.assert_not_called()
+        assert upserts == []
 
     def test_no_bridge_raises(self) -> None:
         with patch.object(ts, "get_timescale_bridge", return_value=None):
@@ -811,14 +857,51 @@ class TestWritePointsTimescale:
         assert (written, narrow_rows) == (1, 1)
 
 
-class TestWideUpsertSql:
-    def test_upsert_shape(self) -> None:
-        sql: str = ts._wide_upsert_sql("device_metrics_wide__x", ["a", "b"])  # pyright: ignore[reportPrivateUsage] -- exercising the SQL-shape helper directly
+class TestCopyUpsert:
+    def test_merge_sql_shape(self) -> None:
+        sql: str = ts._upsert_from_stage_sql("device_metrics_wide__x", "stage", ["m_time", "device_info_id", "a", "b"], ["m_time", "device_info_id"])  # pyright: ignore[reportPrivateUsage] -- exercising the SQL-shape helper directly
         assert sql == (
-            "INSERT INTO device_metrics_wide__x (m_time, device_info_id, a, b) "
-            "VALUES (:m_time, :device_info_id, :a, :b) "
+            "INSERT INTO device_metrics_wide__x (m_time, device_info_id, a, b) SELECT m_time, device_info_id, a, b FROM stage "
             "ON CONFLICT (m_time, device_info_id) DO UPDATE SET a = EXCLUDED.a, b = EXCLUDED.b"
         )
+
+    def test_copies_into_a_staging_table_then_merges_and_empties_it(self) -> None:
+        cursor = MagicMock()
+        when: datetime = datetime(2025, 6, 1, tzinfo=timezone.utc)
+        ts._copy_upsert(cursor, "device_metrics_narrow", "stg", ["m_time", "device_info_id", "metric_name", "metric_value", "metric_ascii"], ["m_time", "device_info_id", "metric_name"], [(when, 7, "soc", 50.0, None)])  # pyright: ignore[reportPrivateUsage]
+        statements: list[str] = [c.args[0] for c in cursor.execute.call_args_list]
+        assert statements[0] == "CREATE TEMP TABLE IF NOT EXISTS stg (LIKE device_metrics_narrow) ON COMMIT DROP"
+        assert statements[1].startswith("INSERT INTO device_metrics_narrow") and statements[2] == "TRUNCATE stg"
+        copy_sql, payload = cursor.copy_expert.call_args.args
+        assert copy_sql == "COPY stg (m_time, device_info_id, metric_name, metric_value, metric_ascii) FROM STDIN"
+        assert payload.getvalue() == f"{when.isoformat()}\t7\tsoc\t50.0\t\\N\n"
+
+    def test_no_rows_sends_nothing(self) -> None:
+        cursor = MagicMock()
+        ts._copy_upsert(cursor, "t", "stg", ["a"], ["a"], [])  # pyright: ignore[reportPrivateUsage]
+        cursor.execute.assert_not_called()
+        cursor.copy_expert.assert_not_called()
+
+
+class TestCopyCell:
+    """The COPY text format: tab-separated, NULL is \\N, and the four special characters are backslash-escaped."""
+
+    @pytest.mark.parametrize(("value", "expected"), [
+        (None, "\\N"),
+        (True, "t"), (False, "f"),
+        (3, "3"), (1.5, "1.5"), (-1e-09, "-1e-09"), (float("nan"), "nan"), (float("inf"), "inf"),
+        ("plain", "plain"), ("", ""), ("caf\u00e9 \u2713", "caf\u00e9 \u2713"),
+        ("a\tb", "a\\tb"), ("a\nb", "a\\nb"), ("a\rb", "a\\rb"), ("a\\b", "a\\\\b"),
+        ("\\N", "\\\\N"),   # the two characters backslash-N as DATA must not read back as NULL
+        ('say "hi", \'x\'', 'say "hi", \'x\''),
+    ])
+    def test_cell(self, value: Any, expected: str) -> None:
+        assert ts._copy_cell(value) == expected  # pyright: ignore[reportPrivateUsage]
+
+    def test_numpy_scalars_write_plain_numbers(self) -> None:
+        import numpy as np
+        assert ts._copy_cell(np.float64(2.5)) == "2.5"  # pyright: ignore[reportPrivateUsage]
+        assert ts._copy_cell(np.int64(7)) == "7"  # pyright: ignore[reportPrivateUsage]
 
 
 class TestNarrowValuePair:
@@ -1078,5 +1161,5 @@ class TestExportRangeRowsV3FileLimit:
                 datetime(2020, 1, 1, tzinfo=timezone.utc), datetime(2025, 1, 1, tzinfo=timezone.utc),
                 datetime(2020, 1, 1, tzinfo=timezone.utc), set(),
             )
-        windows = ts._plan_windows(datetime(2020, 1, 1, tzinfo=timezone.utc), datetime(2025, 1, 1, tzinfo=timezone.utc), ts.V3_EXPORT_WINDOW)  # pyright: ignore[reportPrivateUsage]
+        windows: list[tuple[datetime, datetime, bool]] = ts._plan_windows(datetime(2020, 1, 1, tzinfo=timezone.utc), datetime(2025, 1, 1, tzinfo=timezone.utc), ts.V3_EXPORT_WINDOW)  # pyright: ignore[reportPrivateUsage]
         assert client.query.call_count == len(windows)
