@@ -72,7 +72,7 @@ class TestSuggestFieldMappingDefaults:
     FIELDS: list[str] = ["pv1_voltage", "soc"]
 
     def test_eg4_unmatched_column_starts_ignored(self) -> None:
-        rows: list[ts.FieldMappingRow] = ts.suggest_field_mapping(["pv1Voltage", "Totally Unrelated Metric"], self.FIELDS, set(), "eg4")
+        rows: list[ts.FieldMappingRow] = ts.suggest_field_mapping(["pv1Voltage", "Totally Unrelated Metric"], self.FIELDS, set())
         by_col: dict[str, ts.FieldMappingRow] = {r.source_column: r for r in rows}
         assert by_col["pv1Voltage"].suggested_field == "pv1_voltage"
         assert by_col["pv1Voltage"].default_ignored is False
@@ -80,24 +80,25 @@ class TestSuggestFieldMappingDefaults:
         assert by_col["Totally Unrelated Metric"].default_ignored is True
 
     def test_eg4_below_threshold_match_is_ignored_too(self) -> None:
-        rows: list[ts.FieldMappingRow] = ts.suggest_field_mapping(["pv1Voltage"], self.FIELDS, set(), "eg4", confidence_threshold=1.5)
+        rows: list[ts.FieldMappingRow] = ts.suggest_field_mapping(["pv1Voltage"], self.FIELDS, set(), confidence_threshold=1.5)
         assert rows[0].suggested_field == ""
         assert rows[0].default_ignored is True
 
     def test_eg4_new_measurement_does_not_ignore_everything(self) -> None:
         """No existing schema -> nothing can 'match', so nothing is pre-ignored on that basis."""
-        rows: list[ts.FieldMappingRow] = ts.suggest_field_mapping(["pv1Voltage", "Anything"], [], set(), "eg4")
+        rows: list[ts.FieldMappingRow] = ts.suggest_field_mapping(["pv1Voltage", "Anything"], [], set())
         assert [r.default_ignored for r in rows] == [False, False]
 
     def test_tag_and_reserved_columns_still_ignored(self) -> None:
-        rows: list[ts.FieldMappingRow] = ts.suggest_field_mapping(["device_name", "time"], self.FIELDS, {"device_name"}, "eg4")
+        rows: list[ts.FieldMappingRow] = ts.suggest_field_mapping(["device_name", "time"], self.FIELDS, {"device_name"})
         assert all(r.default_ignored for r in rows)
 
-    def test_influx_csv_unmatched_column_is_not_ignored(self) -> None:
-        rows: list[ts.FieldMappingRow] = ts.suggest_field_mapping(["soc", "brand_new"], self.FIELDS, set(), "influx_csv")
+    def test_exact_match_is_kept_and_unmatched_column_is_ignored(self) -> None:
+        """A re-imported CSV is matched like an EG4 export: an exact name scores 100%, anything under the threshold is pre-ignored."""
+        rows: list[ts.FieldMappingRow] = ts.suggest_field_mapping(["soc", "brand_new"], self.FIELDS, set())
         by_col: dict[str, ts.FieldMappingRow] = {r.source_column: r for r in rows}
-        assert by_col["soc"].default_ignored is False
-        assert by_col["brand_new"].default_ignored is False
+        assert by_col["soc"].default_ignored is False and by_col["soc"].suggested_field == "soc"
+        assert by_col["brand_new"].default_ignored is True
 
 
 # ---------------------------------------------------------------------------
@@ -228,6 +229,11 @@ class TestTimeColumnAndEarliest:
     def test_earliest_timestamp_converts_tz_aware_to_local(self) -> None:
         df = pd.DataFrame({"Time": pd.to_datetime(["2025-06-01 12:00:00+00:00"])})
         assert ts.earliest_timestamp(df, "Time", "America/Los_Angeles") == "2025-06-01T05:00:00"
+
+    def test_earliest_timestamp_reads_a_csv_s_naive_times_as_utc(self) -> None:
+        df = pd.DataFrame({"Time": ["2025-06-01T15:00:00", "2025-06-02T00:00:00"]})
+        assert ts.earliest_timestamp(df, "Time", "America/Los_Angeles", source_is_local=False) == "2025-06-01T08:00:00"
+        assert ts.earliest_timestamp(df, "Time", "America/Los_Angeles") == "2025-06-01T15:00:00"   # EG4: naive is already local
 
     def test_earliest_timestamp_missing_or_unparsable(self) -> None:
         assert ts.earliest_timestamp(pd.DataFrame({"a": [1]}), "Time", "UTC") is None
@@ -1064,7 +1070,7 @@ class TestExportRangeRowsV3FileLimit:
         assert all(row["time"].startswith("2026-01-01") for row in rows)   # every slice's rows got the same shift, not just the first
 
     def test_enterprise_like_bridge_never_splits(self) -> None:
-        """A bridge with no per-query limit at all (Enterprise) issues exactly one query regardless of range width."""
+        """A bridge with no per-query limit at all (Enterprise) issues exactly one query per export window and never bisects one."""
         bridge, client = self._bridge_with_width_limit(timedelta(days=3650))
         with patch.object(ts, "get_influxdb3_bridge", return_value=bridge):
             ts.export_range_rows(
@@ -1072,4 +1078,5 @@ class TestExportRangeRowsV3FileLimit:
                 datetime(2020, 1, 1, tzinfo=timezone.utc), datetime(2025, 1, 1, tzinfo=timezone.utc),
                 datetime(2020, 1, 1, tzinfo=timezone.utc), set(),
             )
-        assert client.query.call_count == 1
+        windows = ts._plan_windows(datetime(2020, 1, 1, tzinfo=timezone.utc), datetime(2025, 1, 1, tzinfo=timezone.utc), ts.V3_EXPORT_WINDOW)  # pyright: ignore[reportPrivateUsage]
+        assert client.query.call_count == len(windows)

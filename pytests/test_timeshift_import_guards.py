@@ -207,7 +207,7 @@ class TestTypeMismatchSummary:
 
 class TestUniqueMatching:
     def _suggest(self, columns: list[str], fields: list[str]) -> dict[str, str]:
-        rows: list[ts_router.FieldMappingRow] = ts.suggest_field_mapping(columns, fields, set(), "eg4")
+        rows: list[ts_router.FieldMappingRow] = ts.suggest_field_mapping(columns, fields, set())
         return {r.source_column: ("" if r.default_ignored else r.suggested_field) for r in rows}
 
     def test_no_destination_field_is_suggested_twice(self) -> None:

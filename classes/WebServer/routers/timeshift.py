@@ -39,11 +39,16 @@ Flow:
      field counts + a small sample of what an import with the current
      mapping/tags/time settings would write, without touching InfluxDB.
   5. POST /api/timeshift/import                        -- runs the import
-     for real, using the same mapping/tags/time settings.
-  6. GET  /api/timeshift/export.csv                    -- streams a
-     time-shifted CSV of an InfluxDB/TimescaleDB date range. The page
-     either saves it into a folder the user picks in the browser or, in
-     browsers that cannot pick a folder, lets the browser download it.
+     for real, using the same mapping/tags/time settings. Streams
+     newline-delimited JSON progress events for the page's thermometer.
+  6. GET  /api/timeshift/export/stream                 -- exports a
+     time-shifted CSV of an InfluxDB/TimescaleDB date range window by
+     window into a temporary file, streaming progress events for the
+     thermometer; its last event names the finished file.
+     GET  /api/timeshift/export/file/{token}           -- that file, as a
+     download. The page either saves it into a folder the user picks in
+     the browser or, in browsers that cannot pick a folder, lets the
+     browser download it.
   7. DELETE /api/timeshift/upload/{upload_id}           -- discards a
      server-side upload the admin no longer needs (e.g. switched files).
   8. GET  /api/timeshift/tag-values                    -- JSON: existing tag
@@ -76,20 +81,25 @@ explicitly, per the same convention routers/influxdb.py already follows.
 
 from __future__ import annotations
 
-import csv
-import io
 import json
 import logging
 import re
 import time
+from collections.abc import Generator
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import pandas as pd
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    StreamingResponse,
+)
 from pydantic import BaseModel
+from starlette.background import BackgroundTask
 
 from ..database import session_scope
 from ..services.bridge_service import (
@@ -109,9 +119,13 @@ from ..services.influxdb_service import (
 from ..services.timeshift_service import (
     DEFAULT_CONFIDENCE_THRESHOLD,
     STANDARD_TAG_KEYS,
+    ExportFile,
+    ExportWindow,
     FieldMappingRow,
     InfluxPointDict,
+    JobResult,
     ParsedSpreadsheet,
+    ProgressReporter,
     RetentionPolicyConflictError,
     SourceKind,
     TagOptions,
@@ -122,28 +136,34 @@ from ..services.timeshift_service import (
     build_points_timescale,
     check_influx_retention,
     compute_time_delta,
+    discard_export_file,
     discard_upload,
     duplicate_targets_message,
     earliest_timestamp,
-    export_range_rows,
-    export_range_rows_timescale,
     find_duplicate_targets,
     find_time_column,
+    get_export_file,
     get_upload,
     is_eg4_protocol_in_use,
+    iter_export_windows,
+    iter_export_windows_timescale,
     load_influx_field_types,
     load_tag_options,
     load_timescale_field_types,
     log_type_mismatch_summary,
     machine_timezone_for,
     measurements_for,
+    new_export_paths,
     parse_upload,
+    register_export_file,
     store_upload,
+    stream_job,
     suggest_field_mapping,
     timescale_devices_for,
     timescale_fields_for,
     timescale_tables_for,
     timezone_groups,
+    write_export_csv,
     write_points_timescale,
     write_points_v1,
     write_points_v3,
@@ -438,7 +458,7 @@ async def timeshift_upload(
     upload: TimeshiftUpload = store_upload(request.app.state, file.filename or "upload", resolved_source_kind, df)
 
     mapping_rows: list[FieldMappingRow] = suggest_field_mapping(
-        upload.columns, target_fields, reserved_columns, resolved_source_kind, confidence_threshold,
+        upload.columns, target_fields, reserved_columns, confidence_threshold,
     )
 
     return request.app.state.templates.TemplateResponse(
@@ -467,12 +487,12 @@ def timeshift_discard_upload(upload_id: str, request: Request) -> dict[str, bool
 
 @router.get("/api/timeshift/upload/{upload_id}/earliest")
 def timeshift_upload_earliest(
-    upload_id: str, request: Request, time_column: str, local_timezone: str,
+    upload_id: str, request: Request, time_column: str, local_timezone: str, source_is_local: bool = True,
     ) -> dict[str, str | None]:
     """
     Earliest timestamp in `time_column` of a stored upload (in `local_timezone`,
     formatted for a datetime-local input), or null if there isn't a parsable
-    one. The EG4 import uses it as "Source Start" -- for a consolidated
+    one. `source_is_local=false` (a re-imported export CSV) reads naive times as UTC before converting. The EG4 import uses it as "Source Start" -- for a consolidated
     multi-sheet workbook that is the earliest time across ALL sheets.
     """
     upload: TimeshiftUpload | None = get_upload(request.app.state, upload_id)
@@ -484,7 +504,7 @@ def timeshift_upload_earliest(
         ZoneInfo(local_timezone)
     except (ZoneInfoNotFoundError, ValueError):
         raise HTTPException(status_code=400, detail=f"'{local_timezone}' is not a valid IANA timezone name.")
-    return {"earliest": earliest_timestamp(upload.dataframe, time_column, local_timezone)}
+    return {"earliest": earliest_timestamp(upload.dataframe, time_column, local_timezone, source_is_local)}
 
 
 @router.get("/api/timeshift/tag-values")
@@ -674,7 +694,7 @@ def _run_common_timescale(
 
 
 @router.post("/api/timeshift/preview", response_class=HTMLResponse, response_model=None)
-async def timeshift_preview(payload: TimeshiftRunRequest, request: Request) -> HTMLResponse:
+def timeshift_preview(payload: TimeshiftRunRequest, request: Request) -> HTMLResponse:
     """Read-only preview: builds the points the current mapping/settings would write, without touching InfluxDB/TimescaleDB."""
     if payload.version == "timescale":
         return _render_timescale_preview(*_run_common_timescale(payload, request), payload=payload, request=request)
@@ -768,9 +788,26 @@ def _render_timescale_preview(
     )
 
 
-@router.post("/api/timeshift/import", response_class=HTMLResponse, response_model=None)
-async def timeshift_import(payload: TimeshiftRunRequest, request: Request) -> HTMLResponse:
-    """Runs the import for real -- writes every built point to the resolved bridge, using the same mapping/settings preview validated."""
+def _render_import_result(request: Request, result: TimeshiftImportResult, destination: str, table_kind: str | None) -> str:
+    """The result panel (partials/timeshift_result.html) as HTML, for the import stream's final event."""
+    return request.app.state.templates.get_template("partials/timeshift_result.html").render(
+        result=result, action="import", destination=destination, table_kind=table_kind,
+    )
+
+
+@router.post("/api/timeshift/import", response_model=None)
+def timeshift_import(payload: TimeshiftRunRequest, request: Request) -> StreamingResponse:
+    """
+    Runs the import for real -- writes every built point to the resolved bridge, using the same mapping/settings preview validated.
+
+    Everything that can be refused is refused first, as an ordinary HTTP error (400/404/409) before anything is written:
+    the stored upload, the mapping, the points the file produces, and the retention policy. Only then does the response
+    become a stream of newline-delimited JSON (see stream_job in services/timeshift_service.py) that drives the page's thermometer:
+    "progress" events while the points are written and one last "done" event carrying `html` (the result panel) and
+    `points_written`, or an "error" event if the write itself fails. The write runs on its own thread and, unlike an
+    export, is NOT abandoned if the browser disconnects: InfluxDB writes aren't transactional, so stopping half-way
+    would leave a partial import.
+    """
     if payload.version == "timescale":
         return _run_timescale_import(*_run_common_timescale(payload, request), payload=payload, request=request)
 
@@ -814,27 +851,22 @@ async def timeshift_import(payload: TimeshiftRunRequest, request: Request) -> HT
         _log.warning(f"[Timeshift] InfluxDB import refused: {retention_conflict}")
         raise HTTPException(status_code=409, detail=str(retention_conflict))
 
-    written: int
-    started: float = time.perf_counter()
-    try:
-        if payload.version == "1":
-            written = write_points_v1(gateway, points, payload.allow_float_coercion)
-        else:
-            written = write_points_v3(gateway, points)
-    except RetentionPolicyConflictError as exc:
-        _log.error(f"[Timeshift] InfluxDB import rejected by retention policy (partial write possible: {exc.may_have_partial_write}): {exc}")
-        raise HTTPException(status_code=409, detail=str(exc))
-    except Exception as exc:
-        _log.exception("[Timeshift] Import failed")
-        raise HTTPException(status_code=500, detail=f"Import failed: {exc}")
+    def job(reporter: ProgressReporter) -> JobResult:
+        started: float = time.perf_counter()
+        written: int
+        try:
+            if payload.version == "1":
+                written = write_points_v1(gateway, points, payload.allow_float_coercion, reporter.report)
+            else:
+                written = write_points_v3(gateway, points, reporter.report)
+        except RetentionPolicyConflictError as exc:
+            _log.error(f"[Timeshift] InfluxDB import rejected by retention policy (partial write possible: {exc.may_have_partial_write}): {exc}")
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        _log.info(f"[Timeshift] InfluxDB v{payload.version} import finished: {written} point(s) written in {time.perf_counter() - started:.1f}s.")
+        result.points_written = written
+        return {"points_written": written, "html": _render_import_result(request, result, "InfluxDB", None)}
 
-    _log.info(f"[Timeshift] InfluxDB v{payload.version} import finished: {written} point(s) written in {time.perf_counter() - started:.1f}s.")
-    result.points_written = written
-    return request.app.state.templates.TemplateResponse(
-        request=request,
-        name="partials/timeshift_result.html",
-        context={"result": result, "action": "import", "destination": "InfluxDB", "table_kind": None},
-    )
+    return StreamingResponse(stream_job(job, name="import", cancel_on_disconnect=False, error_prefix="Import failed: "), media_type="application/x-ndjson")
 
 
 def _run_timescale_import(
@@ -846,8 +878,8 @@ def _run_timescale_import(
     *,
     payload: TimeshiftRunRequest,
     request: Request,
-    ) -> HTMLResponse:
-    """TimescaleDB counterpart of the InfluxDB import branch above -- builds points then calls write_points_timescale() for the dual (or narrow-only) write."""
+    ) -> StreamingResponse:
+    """TimescaleDB counterpart of the InfluxDB import branch above -- builds points then streams write_points_timescale()'s dual (or narrow-only) write."""
     _require_unique_targets(mapping)
     points: list[TimescalePointDict]
     result: TimeshiftImportResult
@@ -865,22 +897,16 @@ def _run_timescale_import(
         f"{sum(len(p.fields) for p in points)} value(s) to write{' (to the wide table and mirrored to device_metrics_narrow)' if table_kind == 'wide' else ''}."
     )
     log_type_mismatch_summary(result, "TimescaleDB")
-    try:
-        # resolved_table_name -- never payload.measurement -- see
-        # _resolve_timescale_table_name's SECURITY note.
-        written, narrow_metric_rows = write_points_timescale(gateway, table_kind, resolved_table_name, device_info_id, points)
-    except Exception as exc:
-        _log.exception("[Timeshift] TimescaleDB import failed")
-        raise HTTPException(status_code=500, detail=f"Import failed: {exc}")
 
-    result.points_written = written
-    if table_kind == "wide":
-        result.warnings.append(f"Also mirrored {narrow_metric_rows} value(s) into the narrow table (device_metrics_narrow).")
-    return request.app.state.templates.TemplateResponse(
-        request=request,
-        name="partials/timeshift_result.html",
-        context={"result": result, "action": "import", "destination": "TimescaleDB", "table_kind": table_kind},
-    )
+    def job(reporter: ProgressReporter) -> JobResult:
+        # resolved_table_name -- never payload.measurement -- see _resolve_timescale_table_name's SECURITY note.
+        written, narrow_metric_rows = write_points_timescale(gateway, table_kind, resolved_table_name, device_info_id, points, reporter.report)
+        result.points_written = written
+        if table_kind == "wide":
+            result.warnings.append(f"Also mirrored {narrow_metric_rows} value(s) into the narrow table (device_metrics_narrow).")
+        return {"points_written": written, "html": _render_import_result(request, result, "TimescaleDB", table_kind)}
+
+    return StreamingResponse(stream_job(job, name="import", cancel_on_disconnect=False, error_prefix="Import failed: "), media_type="application/x-ndjson")
 
 
 # ---------------------------------------------------------------------------
@@ -893,7 +919,7 @@ def _safe_filename_part(value: str) -> str:
     return cleaned or "export"
 
 
-def _build_export_csv(
+def _open_export(
     request: Request,
     version: str,
     measurement: str,
@@ -906,14 +932,15 @@ def _build_export_csv(
     table_kind: str | None,
     protocol_name: str | None,
     device_info_id: int | None,
-) -> tuple[str, str, int]:
+) -> tuple[Generator[ExportWindow, None, None], str]:
     """
-    Runs the export and returns (file_name, csv_text, row_count). Shared by the browser-download endpoint and the
-    save-to-folder endpoint so both produce identical files.
+    Validates an export request and returns (windows, file_name): the window iterator that reads the data (nothing is queried
+    until it is consumed) and the name the CSV will be saved under. Anything wrong with the request is raised here, as an
+    ordinary HTTP error, before the response becomes a stream.
 
     SECURITY: for version="timescale" the actual table queried is resolved server-side from table_kind/protocol_name
     via _resolve_timescale_table_name() -- `measurement` (a client-supplied value) is used only to name the file,
-    never passed to export_range_rows_timescale(), which splices its table_name argument directly into a SQL identifier.
+    never passed to iter_export_windows_timescale(), which splices its table_name argument directly into a SQL identifier.
     """
     _require_bridge(request, version)
     gateway: "Protocol_Gateway | None" = getattr(request.app.state, "gateway", None)
@@ -924,40 +951,32 @@ def _build_export_csv(
     end_dt: datetime = _parse_local_datetime(end_time, local_timezone, end_of_second=True)
     target_dt: datetime = _parse_local_datetime(target_start, local_timezone)
 
-    header: list[str]
-    rows: list[dict[str, Any]]
+    windows: Generator[ExportWindow, None, None]
     try:
         if version == "timescale":
             resolved_table_kind: str = table_kind if table_kind is not None else "narrow"  # narrowed for the type checker -- the guard above already ensured it's set
             resolved_device_id: int = device_info_id if device_info_id is not None else -1  # same
             resolved_table_name: str = _resolve_timescale_table_name(gateway, resolved_table_kind, protocol_name)
-            header, rows = export_range_rows_timescale(
+            windows = iter_export_windows_timescale(
                 gateway, resolved_table_kind, resolved_table_name, protocol_name, resolved_device_id, start_dt, end_dt, target_dt,
             )
         else:
             tags: dict[str, str] = _parse_tags_json(tags_json) if tags_json and tags_json != "{}" else {}
-            header, rows = export_range_rows(
+            windows = iter_export_windows(
                 gateway, version, measurement, device_identifier, start_dt, end_dt, target_dt, set(tags.keys()),
             )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-
-    buf: io.StringIO = io.StringIO(newline="")
-    writer: "csv.DictWriter[str]" = csv.DictWriter(buf, fieldnames=header)
-    writer.writeheader()
-    writer.writerows(rows)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     filename: str = f"{_safe_filename_part(measurement)}_{start_dt.strftime('%Y%m%d')}_{end_dt.strftime('%Y%m%d')}_v{version}.csv"
-    return filename, buf.getvalue(), len(rows)
+    return windows, filename
 
 
-@router.get("/api/timeshift/export.csv")
-def timeshift_export_csv(
+@router.get("/api/timeshift/export/stream", response_model=None)
+def timeshift_export_stream(
     request: Request,
     version: str,
-    measurement: str,             # for version="timescale": unused for the query itself (see _build_export_csv) -- kept only for the download filename
+    measurement: str,             # for version="timescale": unused for the query itself (see _open_export) -- kept only for the file name
     start_time: str,
     end_time: str,
     target_start: str,
@@ -969,17 +988,41 @@ def timeshift_export_csv(
     device_info_id: int | None = None,      # required when version="timescale"
 ) -> StreamingResponse:
     """
-    Streams a time-shifted CSV download of `measurement` between start_time and end_time through the browser's own
-    Save dialog -- the same download convention as /api/protocols/.../export.csv. For version="timescale" a narrow
+    Exports `measurement` between start_time and end_time to a time-shifted CSV, streaming its progress as newline-delimited
+    JSON (see stream_job in services/timeshift_service.py) so the page's thermometer can follow it. For version="timescale" a narrow
     table's (m_time, metric_name) rows are pivoted into the same wide-shaped CSV a wide-table export produces (see
-    services.timeshift_service.export_range_rows_timescale).
+    services.timeshift_service.iter_export_windows_timescale).
+
+    The range is read one window at a time and written to a temporary file, never held whole in memory (an export of
+    several months used to be built as one in-memory list, then one in-memory string, and froze the app). The last event is
+    {"type": "done", "token", "filename", "rows", "bytes"}; the browser then fetches the file from
+    /api/timeshift/export/file/{token}. The work stops if the browser disconnects.
     """
-    filename, csv_text, _row_count = _build_export_csv(
+    windows, filename = _open_export(
         request, version, measurement, start_time, end_time, target_start, local_timezone,
         device_identifier, tags_json, table_kind, protocol_name, device_info_id,
     )
-    return StreamingResponse(
-        iter([csv_text]),
-        media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+
+    def job(reporter: ProgressReporter) -> JobResult:
+        csv_path, spool_path = new_export_paths(request.app.state)
+        try:
+            rows: int = write_export_csv(windows, csv_path, spool_path, reporter.report, reporter.raise_if_cancelled)
+        finally:
+            windows.close()   # closes the database client/session even when the export was cancelled or failed part-way
+        export: ExportFile = register_export_file(request.app.state, csv_path, filename, rows)
+        _log.info(f"[Timeshift] Export finished: {rows} row(s), {export.size_bytes} bytes, {filename}.")
+        return {"token": export.token, "filename": export.filename, "rows": rows, "bytes": export.size_bytes}
+
+    return StreamingResponse(stream_job(job, name="export", cancel_on_disconnect=True, error_prefix="Export failed: "), media_type="application/x-ndjson")
+
+
+@router.get("/api/timeshift/export/file/{token}", response_model=None)
+def timeshift_export_file(token: str, request: Request) -> FileResponse:
+    """The finished CSV of an export, as a download. The file is deleted once it has been sent (or after an hour if never fetched)."""
+    export: ExportFile | None = get_export_file(request.app.state, token)
+    if export is None or not export.path.exists():
+        raise HTTPException(status_code=404, detail="This export has expired or was already downloaded -- please export again.")
+    return FileResponse(
+        export.path, media_type="text/csv", filename=export.filename,
+        background=BackgroundTask(discard_export_file, request.app.state, token),
     )

@@ -34,8 +34,8 @@
   "no confident match"), a target-field <select> (existing fields, plus
   "+ New field…" when allow_new_field -- which reveals a free-text input
   for a field name that doesn't exist yet), and an "Ignore" checkbox
-  (pre-checked per default_ignored: tag-shaped/reserved columns and, for
-  EG4 imports, columns with no confident match to an existing field).
+  (pre-checked per default_ignored: tag-shaped/reserved columns and
+  columns with no confident match to an existing field, for EG4 and re-imported CSV files alike).
 
   A row with no confident suggestion (row.suggested_field == "") carries
   data-below-threshold="true". The page's JS (refreshBelowThresholdOptions())
@@ -131,8 +131,8 @@
     </table>
   </div>
   <p class="surface-subtle text-xs mt-1">
-    Rows checked "Ignore" are dropped entirely. Tag-shaped columns are pre-checked, and so are EG4
-    columns with no match to an existing field: un-check one to map it.
+    Rows checked "Ignore" are dropped entirely. Tag-shaped columns are pre-checked, and so are
+    columns with no match to an existing field (below the confidence threshold): un-check one to map it.
     {% if allow_new_field is not defined or allow_new_field %}
     Pick "+ New field…" to write a column under a brand-new field name.
     {% else %}

@@ -297,7 +297,19 @@
       <p class="surface-subtle text-xs mt-1">Leave equal to Source Start to export with no shift.</p>
     </div>
     <div class="flex items-center gap-3 flex-wrap">
-      <button type="button" class="btn-tertiary text-xs" onclick="doExport()">Export&hellip;</button>
+      <button type="button" id="ts-export-button" class="btn-tertiary text-xs" onclick="doExport()">Export&hellip;</button>
+      {#- Real progress thermometer, same look as Timescale DB -> Rebuild Compression's; driven by the "progress" events
+          streamed from GET /api/timeshift/export/stream (see TsProgress below). -#}
+      <div id="ts-export-progress-track"
+           class="hidden w-40 h-1.5 rounded-full bg-mpg-700 overflow-hidden"
+           role="progressbar" aria-label="Export in progress">
+        <div id="ts-export-progress-fill"
+             class="h-full bg-accent rounded-full transition-all duration-300 ease-out"
+             style="width: 0%;"></div>
+      </div>
+      <span id="ts-export-progress-text"
+            class="hidden text-xs font-mono tabular-nums mini-table-meta"
+            role="status" aria-live="off"></span>
       <span id="ts-export-hint" class="surface-subtle text-xs"></span>
     </div>
     <div id="ts-export-status"></div>
@@ -347,12 +359,20 @@
     <div id="ts-import-buttons" class="hidden flex-on-show items-center gap-2">
       <button type="button" class="btn-tertiary text-xs" onclick="runPreview()">Preview</button>
       <button type="button" class="btn-tertiary text-xs" onclick="runImport()">Import to {{ 'TimescaleDB' if version == 'timescale' else 'InfluxDB' }}</button>
+      {#- Same thermometer as the export panel, driven by the "progress" events streamed from POST /api/timeshift/import. -#}
+      <div id="ts-import-progress-track"
+           class="hidden w-40 h-1.5 rounded-full bg-mpg-700 overflow-hidden"
+           role="progressbar" aria-label="Import in progress">
+        <div id="ts-import-progress-fill"
+             class="h-full bg-accent rounded-full transition-all duration-300 ease-out"
+             style="width: 0%;"></div>
+      </div>
+      <span id="ts-import-progress-text"
+            class="hidden text-xs font-mono tabular-nums mini-table-meta"
+            role="status" aria-live="off"></span>
     </div>
 
     <div id="ts-import-status"></div>
-    {#- Same "this can take several minutes" banner the Commit flow shows for slow TimescaleDB work (base.html: MpgSlowOp). -#}
-    <div id="ts-slow-banner" role="status" aria-live="polite"
-         class="hidden px-4 py-2 text-sm rounded border bg-accent/10 border-accent/40 text-accent"></div>
     <div id="ts-preview-container"></div>
     <div id="ts-result-container"></div>
   </div>
@@ -788,6 +808,107 @@
     container.appendChild(box);
   }
 
+  // ---- Progress thermometers ----
+  // Same look and lifecycle as the Rebuild Compression thermometer (pages/timescale_rebuild_compression.html): a track and
+  // fill plus a text readout ("Reading data: window 3 of 27 · 41,200 rows · 11% · 0:42") that shows it is moving even when
+  // the bar itself barely does. `prefix` is 'ts-export' or 'ts-import'. A phase with nothing countable yet (total 0) leaves
+  // the bar where it is and only the label and the elapsed time move -- the elapsed time ticks once a second on its own.
+  const TsProgress = (function () {
+    const startedAt = {};
+    const labels = {};
+    const percents = {};
+    const timers = {};
+
+    function formatElapsed(ms) {
+      const s = Math.max(0, Math.round(ms / 1000));
+      return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+    }
+
+    function render(prefix) {
+      const el = document.getElementById(prefix + '-progress-text');
+      if (!el) { return; }
+      const pct = percents[prefix];
+      const pctText = pct === null ? '' : ((pct < 10 ? pct.toFixed(1) : String(Math.round(pct))) + '% · ');
+      el.textContent = labels[prefix] + ' · ' + pctText + formatElapsed(Date.now() - startedAt[prefix]);
+      el.classList.remove('hidden');
+    }
+
+    function show(prefix, label) {
+      const track = document.getElementById(prefix + '-progress-track');
+      const fill = document.getElementById(prefix + '-progress-fill');
+      if (!track || !fill) { return; }
+      clearInterval(timers[prefix]);
+      fill.classList.remove('bg-danger');
+      fill.classList.add('bg-accent');
+      fill.style.width = '0%';
+      track.classList.remove('hidden');
+      startedAt[prefix] = Date.now();
+      labels[prefix] = label;
+      percents[prefix] = null;
+      render(prefix);
+      timers[prefix] = setInterval(function () { render(prefix); }, 1000);
+    }
+
+    function update(prefix, label, done, total) {
+      const fill = document.getElementById(prefix + '-progress-fill');
+      if (!fill) { return; }
+      labels[prefix] = label;
+      if (total > 0) {
+        percents[prefix] = Math.min(100, (done / total) * 100);
+        fill.style.width = percents[prefix] + '%';
+      }
+      render(prefix);
+    }
+
+    function hide(prefix, success) {
+      const track = document.getElementById(prefix + '-progress-track');
+      const fill = document.getElementById(prefix + '-progress-fill');
+      if (!track || !fill) { return; }
+      clearInterval(timers[prefix]);
+      fill.classList.toggle('bg-danger', !success);
+      fill.classList.toggle('bg-accent', success);
+      if (success) { fill.style.width = '100%'; }
+      labels[prefix] = success ? 'Done' : 'Stopped with errors';
+      percents[prefix] = null;
+      render(prefix);
+      // Let the final state be visible for a beat before resetting, rather than snapping straight back to hidden.
+      setTimeout(function () {
+        track.classList.add('hidden');
+        fill.classList.remove('bg-danger');
+        fill.classList.add('bg-accent');
+        fill.style.width = '0%';
+        const text = document.getElementById(prefix + '-progress-text');
+        if (text) { text.classList.add('hidden'); text.textContent = ''; }
+      }, success ? 1500 : 4000);
+    }
+
+    return { show: show, update: update, hide: hide };
+  })();
+
+  // Reads a newline-delimited JSON response (see stream_job in services/timeshift_service.py) and calls onEvent for each event as it arrives.
+  async function readNdjson(resp, onEvent) {
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) { break; }
+      buffer += decoder.decode(value, { stream: true });
+      let newlineIndex;
+      while ((newlineIndex = buffer.indexOf('\n')) >= 0) {
+        const line = buffer.slice(0, newlineIndex).trim();
+        buffer = buffer.slice(newlineIndex + 1);
+        if (!line) { continue; }
+        try { onEvent(JSON.parse(line)); } catch (e) { /* a partial/garbled line -- skip rather than abort the stream */ }
+      }
+    }
+  }
+
+  // The {"detail": ...} message of a failed (non-streamed) request, or `fallback`.
+  async function httpErrorDetail(resp, fallback) {
+    try { return (await resp.json()).detail || fallback; } catch (e) { return fallback; }   // non-JSON error body
+  }
+
   // ---- Export ----
   // Validates the Export panel and returns the request parameters shared by both export buttons, or null (after
   // showing the reason) when something is missing.
@@ -855,53 +976,90 @@
     }
   }
 
+  function formatBytes(n) {
+    if (n >= 1048576) { return (n / 1048576).toFixed(1) + ' MB'; }
+    if (n >= 1024) { return Math.round(n / 1024) + ' KB'; }
+    return n + ' bytes';
+  }
+
+  // Exporting is two steps. GET /api/timeshift/export/stream reads the range window by window into a temporary file on the
+  // server while streaming progress events for the thermometer; its last event names the finished file, which is then
+  // fetched from /api/timeshift/export/file/{token} -- straight into the chosen folder (streamed, never held whole in the
+  // browser's memory), or as a normal browser download where no folder can be chosen.
   async function doExport() {
     const params = buildExportParams();
     if (params === null) { return; }
     document.getElementById('ts-export-status').innerHTML = '';
 
-    if (!folderPickerSupported()) {
-      window.location.href = '/api/timeshift/export.csv?' + params.toString();
-      showStatus('ts-export-status', 'Export sent to your browser\u2019s download location.', false);
-      return;
-    }
-
     // The picker must be opened straight from the click (before any slow work), so it comes before the export itself.
-    let dir;
+    let dir = null;
+    if (folderPickerSupported()) {
+      try {
+        dir = await window.showDirectoryPicker({ id: 'mpg-timeshift-export', mode: 'readwrite' });
+      } catch (e) {
+        if (e && e.name === 'AbortError') { return; }   // the user closed the picker: nothing to do
+        showStatus('ts-export-status', 'Could not open that folder: ' + e + ' (some system folders cannot be chosen; try a sub-folder).', true);
+        return;
+      }
+    }
+
+    const button = document.getElementById('ts-export-button');
+    button.disabled = true;
+    TsProgress.show('ts-export', 'Starting export');
+    let finished = null;
+    let failure = null;
     try {
-      dir = await window.showDirectoryPicker({ id: 'mpg-timeshift-export', mode: 'readwrite' });
+      const resp = await fetch('/api/timeshift/export/stream?' + params.toString(), { headers: { 'Cache-Control': 'no-cache' } });
+      if (!resp.ok) {
+        failure = await httpErrorDetail(resp, resp.statusText || 'Export failed.');
+      } else {
+        await readNdjson(resp, function (event) {
+          if (event.type === 'progress') { TsProgress.update('ts-export', event.label, event.done, event.total); }
+          else if (event.type === 'done') { finished = event; }
+          else if (event.type === 'error') { failure = event.detail; }
+        });
+      }
     } catch (e) {
-      if (e && e.name === 'AbortError') { return; }   // the user closed the picker: nothing to do
-      showStatus('ts-export-status', 'Could not open that folder: ' + e + ' (some system folders cannot be chosen; try a sub-folder).', true);
+      failure = 'Export failed: ' + e;
+    }
+    if (!failure && !finished) { failure = 'Export stopped before it finished.'; }
+    if (failure) {
+      TsProgress.hide('ts-export', false);
+      button.disabled = false;
+      showStatus('ts-export-status', failure.startsWith('Export') ? failure : 'Export failed: ' + failure, true);
       return;
     }
 
-    showStatus('ts-export-status', 'Exporting... a long date range can take a few minutes.', false);
-    let resp;
-    try {
-      resp = await fetch('/api/timeshift/export.csv?' + params.toString());
-    } catch (e) {
-      showStatus('ts-export-status', 'Export failed: ' + e, true);
+    const fileUrl = '/api/timeshift/export/file/' + encodeURIComponent(finished.token);
+    const rowsText = finished.rows + ' row' + (finished.rows === 1 ? '' : 's');
+    if (dir === null) {
+      window.location.href = fileUrl;
+      TsProgress.hide('ts-export', true);
+      button.disabled = false;
+      showStatus('ts-export-status', 'Export sent to your browser\u2019s download location (' + rowsText + ', ' + formatBytes(finished.bytes) + ').', false);
       return;
     }
-    if (!resp.ok) {
-      let detail = resp.statusText;
-      try { detail = (await resp.json()).detail || detail; } catch (e) { /* non-JSON error body */ }
-      showStatus('ts-export-status', 'Export failed: ' + detail, true);
-      return;
-    }
-    const match = /filename="([^"]+)"/.exec(resp.headers.get('Content-Disposition') || '');
+
     try {
-      const blob = await resp.blob();
-      const fileName = await uniqueFileName(dir, match ? match[1] : 'timeshift_export.csv');
+      TsProgress.update('ts-export', 'Saving ' + finished.filename + ' to the folder', 0, 0);
+      const fileResp = await fetch(fileUrl);
+      if (!fileResp.ok) { throw new Error(await httpErrorDetail(fileResp, fileResp.statusText)); }
+      const fileName = await uniqueFileName(dir, finished.filename);
       const fileHandle = await dir.getFileHandle(fileName, { create: true });
       const writable = await fileHandle.createWritable();
-      await writable.write(blob);
-      await writable.close();
-      showStatus('ts-export-status', 'Saved ' + fileName + ' (' + blob.size + ' bytes) to the "' + dir.name + '" folder.', false);
+      if (fileResp.body) {
+        await fileResp.body.pipeTo(writable);   // streams the file to disk and closes it
+      } else {
+        await writable.write(await fileResp.blob());
+        await writable.close();
+      }
+      TsProgress.hide('ts-export', true);
+      showStatus('ts-export-status', 'Saved ' + fileName + ' (' + rowsText + ', ' + formatBytes(finished.bytes) + ') to the "' + dir.name + '" folder.', false);
     } catch (e) {
+      TsProgress.hide('ts-export', false);
       showStatus('ts-export-status', 'Could not write the file: ' + e, true);
     }
+    button.disabled = false;
   }
 
   initExportHint();
@@ -974,17 +1132,21 @@
     refreshBelowThresholdOptions();
   }
 
-  // EG4 imports: Source Start defaults to the earliest timestamp in the (consolidated) file, for the
-  // selected Time Column. The admin can still overwrite it. Other source kinds are left untouched.
-  async function refreshImportSourceStart() {
+  // Source Start defaults to the earliest timestamp in the file for the selected Time Column. An EG4 import always
+  // takes it (all sheets combined) when the file or Time Column changes; a re-imported CSV, and the Preview/Import buttons (onlyIfEmpty), take it only while Source Start AND Target Start are both
+  // empty, so a date the admin typed is never overwritten. The admin can still edit it afterwards.
+  async function refreshImportSourceStart(onlyIfEmpty) {
     const uploadId = TimeshiftState.uploadId;
     const timeColumn = document.getElementById('ts-time-column').value;
     const note = document.getElementById('ts-import-start-note');
-    if (TimeshiftState.sourceMode !== 'eg4' || !uploadId || !timeColumn) { return; }
+    if (!uploadId || !timeColumn) { return; }
+    const isEg4 = TimeshiftState.sourceMode === 'eg4';
+    if ((onlyIfEmpty || !isEg4) && (MpgDateTime.read('ts-import-start') || MpgDateTime.read('ts-import-target'))) { return; }
 
     const params = new URLSearchParams({
       time_column: timeColumn,
       local_timezone: document.getElementById('ts-timezone').value.trim(),
+      source_is_local: isEg4 ? 'true' : 'false',   // a re-imported CSV's naive times are UTC
     });
     try {
       const resp = await fetch('/api/timeshift/upload/' + encodeURIComponent(uploadId) + '/earliest?' + params.toString());
@@ -992,7 +1154,9 @@
       const data = await resp.json();
       if (data.earliest) {
         MpgDateTime.set('ts-import-start', data.earliest);   // server sends YYYY-MM-DDTHH:MM:SS; shown as YYYY-MM-DD  HH:MM:SS
-        note.textContent = 'Set to the earliest timestamp in the file (all sheets combined). You can still edit it.';
+        note.textContent = isEg4
+          ? 'Set to the earliest timestamp in the file (all sheets combined). You can still edit it.'
+          : 'Set to the first timestamp in the file. You can still edit it.';
         note.classList.remove('hidden');
       } else {
         note.classList.add('hidden');
@@ -1112,6 +1276,7 @@
   }
 
   async function runPreview() {
+    await refreshImportSourceStart(true);   // empty Source Start + Target Start -> the file's first timestamp
     const payload = buildRunPayload();
     if (!payload) { return; }
     document.getElementById('ts-import-status').innerHTML = '';
@@ -1159,6 +1324,7 @@
   }
 
   async function runImport() {
+    await refreshImportSourceStart(true);   // empty Source Start + Target Start -> the file's first timestamp
     const payload = buildRunPayload();
     if (!payload) { return; }
     const slow = slowImportWarning(payload);
@@ -1174,32 +1340,34 @@
     document.getElementById('ts-import-status').innerHTML = '';
     document.getElementById('ts-result-container').innerHTML = '';
     setImportBusy(true);
-    MpgSlowOp.start('ts-slow-banner', {
-      key: 'mpg-ts-import-' + (isTimescale() ? 'timescale' : 'influx') + '-secs',
-      headline: slow.headline,
-      detail: slow.detail,
-    });
+    // The server first reads the file and builds the points (no events yet), then streams one progress event per batch written.
+    TsProgress.show('ts-import', 'Preparing: building points from the file');
 
-    let resp, html;
+    let finished = null;
+    let failure = null;
     try {
-      resp = await fetch('/api/timeshift/import', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+      const resp = await fetch('/api/timeshift/import', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-cache' }, body: JSON.stringify(payload),
       });
-      html = await resp.text();
+      if (!resp.ok) {
+        failure = await httpErrorDetail(resp, 'Import failed.');
+      } else {
+        await readNdjson(resp, function (event) {
+          if (event.type === 'progress') { TsProgress.update('ts-import', event.label, event.done, event.total); }
+          else if (event.type === 'done') { finished = event; }
+          else if (event.type === 'error') { failure = event.detail; }
+        });
+      }
     } catch (e) {
-      MpgSlowOp.stop(false);
-      setImportBusy(false);
-      showStatus('ts-import-status', 'Import request failed — see the browser console.', true);
-      return;
+      failure = 'Import request failed — see the browser console.';
     }
-    MpgSlowOp.stop(resp.ok);
+    if (!failure && !finished) { failure = 'The connection dropped before the import reported back. It may still be running on the server; check the result before re-running it (re-running is safe, the same timestamps overwrite).'; }
+    TsProgress.hide('ts-import', !failure);
     setImportBusy(false);
-    if (resp.ok) {
-      document.getElementById('ts-result-container').innerHTML = html;
+    if (failure) {
+      showStatus('ts-import-status', failure, true);
     } else {
-      let detail = 'Import failed.';
-      try { detail = JSON.parse(html).detail || detail; } catch (e) { /* non-JSON error body */ }
-      showStatus('ts-import-status', detail, true);
+      document.getElementById('ts-result-container').innerHTML = finished.html;
     }
   }
 </script>

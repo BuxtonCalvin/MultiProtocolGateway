@@ -82,10 +82,14 @@ re-parsing the file at every step.
 
 from __future__ import annotations
 
+import csv
 import io
+import json
 import logging
 import math
+import queue
 import re
+import tempfile
 import threading
 import time
 import uuid
@@ -93,10 +97,23 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from difflib import SequenceMatcher
-from typing import TYPE_CHECKING, Any, Callable, Generator, Iterable, Literal, cast
+from pathlib import Path
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Final,
+    Generator,
+    Iterable,
+    Iterator,
+    Literal,
+    cast,
+)
 from zoneinfo import ZoneInfo, available_timezones
 
 import pandas as pd
+from fastapi import HTTPException
+from influxdb_client_3.write_client.client.write.point import Point
 from starlette.datastructures import State
 
 from .bridge_service import get_timescale_bridge
@@ -120,6 +137,121 @@ if TYPE_CHECKING:
     from ...transports.influxdb_out import influxdb_out
 
 _log: logging.Logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Progress stream -- the transport behind the Timeshift Data thermometers
+#
+# Follows the convention PATCH /api/timescale/compression/rebuild already set for the Rebuild Compression thermometer:
+# one long-lived response of newline-delimited JSON (media type application/x-ndjson), read incrementally by the
+# browser, with no job ID and no polling endpoint. Every line is one event:
+#
+#     {"type": "progress", "label": str, "done": int, "total": int}
+#         `done`/`total` size the bar; `total` of 0 means "working, but nothing countable yet" (the bar stays empty and
+#         only the label and the elapsed time move). `label` is the complete text shown beside the bar.
+#     {"type": "done", ...}
+#         Exactly one, last, carrying whatever the job returned (merged into the event).
+#     {"type": "error", "detail": str}
+#         Exactly one, last, in place of "done". Errors raised before the first event never reach stream_job: the
+#         endpoints validate everything they can synchronously so those still come back as ordinary HTTP errors.
+#
+# The job body runs on its own thread (it is blocking database and file work), and stream_job() relays the events from
+# a queue, so the web server's event loop is never held by a Timeshift job.
+#
+# Cancellation: an export abandons its work when the browser disconnects (nobody is left to receive the file), so it
+# asks for cancel_on_disconnect. An import must NOT: InfluxDB writes are not transactional, so stopping one half-way
+# would leave a partial import, exactly what the old single blocking request never did.
+# ---------------------------------------------------------------------------
+
+ProgressCallback = Callable[[str, int, int], None]
+"""(label, done, total) — see this module's docstring for what each means."""
+
+JobResult = dict[str, object]
+
+# Progress events are throttled so a fast writer cannot flood the connection; the final event of a phase always gets through.
+_MIN_EVENT_INTERVAL_S: Final[float] = 0.1
+
+
+class JobCancelledError(Exception):
+    """Raised inside a job (by ProgressReporter.raise_if_cancelled) once its browser has gone away."""
+
+
+class ProgressReporter:
+    """What a job body is handed: report progress, and (for cancellable jobs) check whether to stop."""
+
+    def __init__(self, events: queue.Queue[str]) -> None:
+        self._events: queue.Queue[str] = events
+        self._cancelled: threading.Event = threading.Event()
+        self._last_sent_at: float = 0.0
+
+    def report(self, label: str, done: int, total: int) -> None:
+        """Queues a progress event, dropping it if the previous one went out under 0.1 s ago (unless the phase is complete)."""
+        now: float = time.monotonic()
+        finished: bool = total > 0 and done >= total
+        if not finished and now - self._last_sent_at < _MIN_EVENT_INTERVAL_S:
+            return
+        self._last_sent_at = now
+        self._events.put(json.dumps({"type": "progress", "label": label, "done": max(done, 0), "total": max(total, 0)}) + "\n")
+
+    def cancel(self) -> None:
+        self._cancelled.set()
+
+    def raise_if_cancelled(self) -> None:
+        if self._cancelled.is_set():
+            raise JobCancelledError
+
+
+def _error_line(detail: str) -> str:
+    return json.dumps({"type": "error", "detail": detail}) + "\n"
+
+
+def stream_job(
+    job: Callable[[ProgressReporter], JobResult],
+    *,
+    name: str,
+    cancel_on_disconnect: bool,
+    error_prefix: str = "",
+    ) -> Generator[str, None, None]:
+    """
+    Runs `job` on a worker thread and yields its NDJSON events as they happen, ending with one "done" or "error" line.
+
+    A job signals a user-facing failure by raising HTTPException (its detail becomes the error text, the same wording the
+    endpoint used to return as the HTTP detail); any other exception is logged and reported as `error_prefix` + its message.
+    """
+    events: queue.Queue[str] = queue.Queue()
+    reporter: ProgressReporter = ProgressReporter(events)
+    finished: threading.Event = threading.Event()
+
+    def run() -> None:
+        final: str
+        try:
+            result: JobResult = job(reporter)
+            final = json.dumps({"type": "done", **result}) + "\n"
+        except JobCancelledError:
+            _log.info(f"[Timeshift] {name} cancelled: the browser disconnected.")
+            final = _error_line("Cancelled.")
+        except HTTPException as exc:
+            final = _error_line(str(exc.detail))
+        except Exception as exc:
+            _log.exception(f"[Timeshift] {name} failed")
+            final = _error_line(f"{error_prefix}{exc}")
+        finally:
+            finished.set()
+        events.put(final)
+
+    worker: threading.Thread = threading.Thread(target=run, name=f"timeshift-{name}", daemon=True)
+    worker.start()
+
+    try:
+        while True:
+            line: str = events.get()
+            yield line
+            if finished.is_set() and events.empty():
+                return
+    finally:
+        # The generator is closed early when the browser disconnects mid-stream.
+        if cancel_on_disconnect and not finished.is_set():
+            reporter.cancel()
+
 
 SourceKind = Literal["eg4", "influx_csv"]
 InfluxVersion = Literal["1", "3"]
@@ -333,7 +465,6 @@ def suggest_field_mapping(
     source_columns: list[str],
     influx_fields: list[str],
     tag_keys: set[str],
-    source_kind: SourceKind,
     confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD,
     ) -> list[FieldMappingRow]:
     """
@@ -341,20 +472,13 @@ def suggest_field_mapping(
     confirm/adjust -- the interactive replacement for InfluxDateConverter.
     py's perform_schema_validation()/mapping_needed.csv hand-edit cycle.
 
-    For source_kind == "influx_csv" (a file this same screen previously
-    exported), the mapping is the identity mapping for every column that
-    already matches an InfluxDB field name exactly -- mirroring
-    write_csv_to_influx()'s is_influx_source_csv branch, which skips fuzzy
-    matching entirely since the columns already ARE the field names.
-
-    For source_kind == "eg4", each column is fuzzy-matched against
-    `influx_fields` via guess_mapping(); a match scoring at or above
-    `confidence_threshold` is pre-filled. A column that does NOT reach the
-    threshold starts with "Ignore" pre-checked -- an EG4 export carries
-    many columns MPG never records, and silently creating a new InfluxDB
-    field for each of them is rarely what the admin wants. The row is
-    still shown, so the admin can un-check Ignore and either pick an
-    existing field or "+ New field..." for it.
+    Both source kinds ("eg4", and "influx_csv" -- a file this same screen previously exported) are matched the same
+    way: each column is fuzzy-matched against `influx_fields` via rank_mappings(); a match scoring at or above
+    `confidence_threshold` is pre-filled (an exact name match scores 100%). A column that does NOT reach the
+    threshold starts with "Ignore" pre-checked -- an EG4 export carries many columns MPG never records, and
+    silently creating a new InfluxDB field for each of them is rarely what the admin wants; a re-imported CSV
+    that was edited by hand can likewise carry columns the destination has never had. The row is still shown, so
+    the admin can un-check Ignore and either pick an existing field or "+ New field...".
 
     Exception: when `influx_fields` is empty (a brand-new measurement with
     no schema yet) there is nothing for a column to match, so nothing is
@@ -372,34 +496,26 @@ def suggest_field_mapping(
     influx_field_set: set[str] = set(influx_fields)
     rows: list[FieldMappingRow] = []
 
-    # EG4: assign destination fields to columns as a one-to-one matching, best score first (ties: column order, then
+    # Assign destination fields to columns as a one-to-one matching, best score first (ties: column order, then
     # name), so no two columns are ever pre-filled with the same field. A column whose best match was claimed by a
     # better-scoring column falls back to its next-best free field if that still clears the threshold, else is left
     # unmatched. Without this, ePv1All/ePv2All/ePv3All would all be suggested "epv1_all".
     assigned: dict[str, tuple[str, float]] = {}
-    if source_kind == "eg4":
-        claims: list[tuple[float, int, str]] = []
-        for index, col in enumerate(source_columns):
-            if col in tag_keys or col.strip().lower() in RESERVED_COLUMN_NAMES:
-                continue
-            claims.extend((score, index, name) for name, score in rank_mappings(col, influx_field_set) if score >= confidence_threshold)
-        claims.sort(key=lambda c: (-c[0], c[1], c[2]))
-        taken: set[str] = set()
-        for score, index, name in claims:
-            col = source_columns[index]
-            if col not in assigned and name not in taken:
-                assigned[col] = (name, score)
-                taken.add(name)
+    claims: list[tuple[float, int, str]] = []
+    for index, col in enumerate(source_columns):
+        if col in tag_keys or col.strip().lower() in RESERVED_COLUMN_NAMES:
+            continue
+        claims.extend((score, index, name) for name, score in rank_mappings(col, influx_field_set) if score >= confidence_threshold)
+    claims.sort(key=lambda c: (-c[0], c[1], c[2]))
+    taken: set[str] = set()
+    for score, index, name in claims:
+        col: str = source_columns[index]
+        if col not in assigned and name not in taken:
+            assigned[col] = (name, score)
+            taken.add(name)
 
     for col in source_columns:
         default_ignored: bool = col in tag_keys or col.strip().lower() in RESERVED_COLUMN_NAMES
-
-        if source_kind == "influx_csv":
-            if col in influx_field_set:
-                rows.append(FieldMappingRow(col, col, 1.0, default_ignored))
-            else:
-                rows.append(FieldMappingRow(col, "", 0.0, default_ignored))
-            continue
 
         if default_ignored:
             rows.append(FieldMappingRow(col, "", 0.0, True))  # noqa: FBT003
@@ -409,7 +525,7 @@ def suggest_field_mapping(
             guess, score = assigned[col]
             rows.append(FieldMappingRow(col, guess, score, False))  # noqa: FBT003
         else:
-            # Unmatched EG4 metric (or its match went to a better-scoring column) -> Ignore pre-checked (see docstring),
+            # Unmatched column (or its match went to a better-scoring column) -> Ignore pre-checked (see docstring),
             # unless there is no schema to match against.
             rows.append(FieldMappingRow(col, "", 0.0, bool(influx_field_set)))
 
@@ -493,7 +609,7 @@ def find_time_column(df: pd.DataFrame) -> str | None:
     return None
 
 
-def earliest_timestamp(df: pd.DataFrame, time_column: str, local_tz: str) -> str | None:
+def earliest_timestamp(df: pd.DataFrame, time_column: str, local_tz: str, source_is_local: bool = True) -> str | None:
     """
     The earliest valid timestamp in `time_column`, formatted for an
     <input type="datetime-local" step="1"> (YYYY-MM-DDTHH:MM:SS), or None if
@@ -501,6 +617,12 @@ def earliest_timestamp(df: pd.DataFrame, time_column: str, local_tz: str) -> str
     "Source Start" default. Naive values (an EG4 export is naive local time)
     are returned as-is; tz-aware ones are converted to `local_tz` first so
     the result is always in the same zone the page interprets it in.
+
+    source_is_local=False is a re-imported export CSV: its naive times are UTC
+    (build_points reads them that way), so they are converted to `local_tz`
+    too -- otherwise Source Start would show the file's UTC clock reading in a
+    box the page reads as local time, and any Target Start typed against it
+    would land the data offset by the UTC difference.
     """
     if time_column not in df.columns:
         return None
@@ -510,6 +632,8 @@ def earliest_timestamp(df: pd.DataFrame, time_column: str, local_tz: str) -> str
 
     if ts.empty:
         return None
+    if ts.dt.tz is None and not source_is_local:
+        ts = ts.dt.tz_localize("UTC")
     if ts.dt.tz is not None:
         ts = ts.dt.tz_convert(ZoneInfo(local_tz)).dt.tz_localize(None)
     return ts.min().strftime("%Y-%m-%dT%H:%M:%S")
@@ -1194,7 +1318,19 @@ def _open_v3_client(bridge: Any, *, query_timeout_s: float | None = None, write_
     return InfluxDBClient3(**kwargs)
 
 
-def write_points_v1(gateway: "Protocol_Gateway | None", points: list[InfluxPointDict], allow_float_coercion: bool) -> int:
+V1_WRITE_BATCH_SIZE: int = 1000        # points per HTTP request to InfluxDB v1
+V3_WRITE_BATCH_SIZE: int = 10_000      # points per write call to InfluxDB v3 (each is its own request, so progress is real)
+TS_NARROW_BATCH_SIZE: int = 2_000      # narrow rows per statement inside the one TimescaleDB transaction
+
+
+def _points_label(done: int, total: int) -> str:
+    return f"Writing points · {done:,} of {total:,}"
+
+
+def write_points_v1(
+    gateway: "Protocol_Gateway | None", points: list[InfluxPointDict], allow_float_coercion: bool,
+    on_progress: ProgressCallback | None = None,
+    ) -> int:
     """
     Writes points to a live influxdb_out (v1) bridge via its own
     InfluxDBClient, same retry-on-type-conflict behavior as
@@ -1218,26 +1354,36 @@ def write_points_v1(gateway: "Protocol_Gateway | None", points: list[InfluxPoint
     # Own client with a longer timeout than the bridge's (10 s) -- see "Dynamic timeouts" above.
     client = _open_v1_client(bridge, V1_WRITE_TIMEOUT_S)
     try:
-        return _write_points_v1_with_client(client, payload, allow_float_coercion)
+        return _write_points_v1_with_client(client, payload, allow_float_coercion, on_progress)
     finally:
         client.close()
 
 
-def _write_points_v1_with_client(client: Any, payload: list[dict[str, Any]], allow_float_coercion: bool) -> int:
-    """The retry-on-type-conflict write loop of write_points_v1(), against an already-open client."""
+def _write_points_v1_with_client(
+    client: Any, payload: list[dict[str, Any]], allow_float_coercion: bool, on_progress: ProgressCallback | None = None,
+    ) -> int:
+    """
+    The retry-on-type-conflict write loop of write_points_v1(), against an already-open client. Points go out one batch
+    of V1_WRITE_BATCH_SIZE at a time (progress is reported after each). On a field-type conflict the offending field is
+    forced to float in every point not yet written and the failing batch is retried; batches already accepted are kept.
+    """
     from influxdb.exceptions import InfluxDBClientError  # type: ignore[import-untyped]  # noqa: PLC0415
 
-    while True:
+    total: int = len(payload)
+    written: int = 0
+    if on_progress is not None:
+        on_progress(_points_label(0, total), 0, total)
+    while written < total:
+        batch: list[dict[str, Any]] = payload[written:written + V1_WRITE_BATCH_SIZE]
         try:
-            client.write_points(payload, batch_size=1000)  # type: ignore[reportUnknownMemberType]
-            return len(payload)
+            client.write_points(batch, batch_size=V1_WRITE_BATCH_SIZE)  # type: ignore[reportUnknownMemberType]
         except InfluxDBClientError as e:
             if allow_float_coercion and getattr(e, "code", None) == 400 and "field type conflict" in str(getattr(e, "content", "")):
                 match: re.Match[str] | None = re.search(r'input field \\?"([^\\"]+)\\?"', str(e.content))  # type: ignore[reportUnknownArgumentType]  -- InfluxDBClientError.content has no type in the influxdb package's own (untyped) exception class
                 if match:
                     offending_field: str = match.group(1)
                     _log.info(f"[Timeshift] Type conflict on field '{offending_field}' -- forcing to float and retrying.")
-                    for pt in payload:
+                    for pt in payload[written:]:
                         val: Any = pt["fields"].get(offending_field)
                         if isinstance(val, (int, float)) and not isinstance(val, bool):
                             pt["fields"][offending_field] = float(val)
@@ -1252,10 +1398,20 @@ def _write_points_v1_with_client(client: Any, payload: list[dict[str, Any]], all
                 )
                 raise RetentionPolicyConflictError(retention_msg, may_have_partial_write=True) from e
             raise
+        written += len(batch)
+        if on_progress is not None:
+            on_progress(_points_label(written, total), written, total)
+    return total
 
 
-def write_points_v3(gateway: "Protocol_Gateway | None", points: list[InfluxPointDict]) -> int:
-    """Writes points to a live influxdb3_out (v3) bridge via its own InfluxDBClient3, using the same Point-building convention as influxdb3_out._dict_to_influx3_point()."""
+def write_points_v3(
+    gateway: "Protocol_Gateway | None", points: list[InfluxPointDict], on_progress: ProgressCallback | None = None,
+    ) -> int:
+    """
+    Writes points to a live influxdb3_out (v3) bridge via its own InfluxDBClient3, using the same Point-building
+    convention as influxdb3_out._dict_to_influx3_point(). Points go out V3_WRITE_BATCH_SIZE at a time so progress is
+    real; a retry after a failure is safe (same timestamps overwrite).
+    """
     from influxdb_client_3 import Point  # type: ignore[import-untyped]
 
     bridge: influxdb3_out | None = get_influxdb3_bridge(gateway)
@@ -1264,34 +1420,42 @@ def write_points_v3(gateway: "Protocol_Gateway | None", points: list[InfluxPoint
     if bridge.client is None:
         raise RuntimeError("InfluxDB v3 bridge is not connected.")
 
+    total: int = len(points)
     if not points:
         return 0
 
-    influx_points: list[Point] = []
-    for p in points:
-        pt = Point(p.measurement)
-        for tag_key, tag_val in p.tags.items():
-            pt = pt.tag(tag_key, tag_val)  # type: ignore[reportUnknownMemberType]
-        for field_key, field_val in p.fields.items():
-            pt = pt.field(field_key, field_val)  # type: ignore[reportUnknownMemberType]
-        pt = pt.time(pd.Timestamp(p.time_iso).value)  # type: ignore[reportUnknownMemberType]
-        influx_points.append(pt)
-
-    # v3 sends everything in one write, so its timeout scales with the point count (the client default is 10 s).
-    client: Any = _open_v3_client(bridge, write_timeout_s=v3_write_timeout_seconds(len(influx_points)))
+    # Each batch is its own write, so the timeout only has to cover one batch (the client default is 10 s).
+    client: Any = _open_v3_client(bridge, write_timeout_s=v3_write_timeout_seconds(min(total, V3_WRITE_BATCH_SIZE)))
+    written: int = 0
     try:
-        client.write(record=influx_points, database=bridge.database)  # type: ignore[reportUnknownMemberType]
-    except Exception as exc:
-        if _is_retention_error(str(exc)):
-            retention_msg: str = (
-                f"InfluxDB rejected the import and mentioned the retention period ({exc}). Either extend the database's "
-                "retention period or change Target Start so the imported range is within it."
-            )
-            raise RetentionPolicyConflictError(retention_msg) from exc
-        raise
+        if on_progress is not None:
+            on_progress(_points_label(0, total), 0, total)
+        for offset in range(0, total, V3_WRITE_BATCH_SIZE):
+            influx_points: list[Point] = []
+            for p in points[offset:offset + V3_WRITE_BATCH_SIZE]:
+                pt: Point = Point(p.measurement)
+                for tag_key, tag_val in p.tags.items():
+                    pt = pt.tag(tag_key, tag_val)  # type: ignore[reportUnknownMemberType]
+                for field_key, field_val in p.fields.items():
+                    pt = pt.field(field_key, field_val)  # type: ignore[reportUnknownMemberType]
+                pt = pt.time(pd.Timestamp(p.time_iso).value)  # type: ignore[reportUnknownMemberType]
+                influx_points.append(pt)
+            try:
+                client.write(record=influx_points, database=bridge.database)  # type: ignore[reportUnknownMemberType]
+            except Exception as exc:
+                if _is_retention_error(str(exc)):
+                    retention_msg: str = (
+                        f"InfluxDB rejected the import and mentioned the retention period ({exc}). Either extend the database's "
+                        "retention period or change Target Start so the imported range is within it."
+                    )
+                    raise RetentionPolicyConflictError(retention_msg, may_have_partial_write=written > 0) from exc
+                raise
+            written += len(influx_points)
+            if on_progress is not None:
+                on_progress(_points_label(written, total), written, total)
     finally:
         client.close()
-    return len(influx_points)
+    return written
 
 
 def load_influx_field_types(gateway: "Protocol_Gateway | None", version: str, measurement: str) -> dict[str, str]:
@@ -1436,7 +1600,7 @@ def load_tag_options(
                 quoted_key: str = _sql_quote_ident(key)
                 values: set[str] = set()
                 for index, window in enumerate(_V3_DEVICE_LOOKBACKS):
-                    sql = (
+                    sql: str = (
                         f"SELECT DISTINCT {quoted_key} FROM {_sql_quote_ident(measurement)} "  # noqa: S608
                         f"WHERE time >= now() - INTERVAL '{window}' AND {quoted_key} IS NOT NULL LIMIT {MAX_TAG_VALUES}"
                     )
@@ -1490,6 +1654,7 @@ def _sql_quote_literal(value: str) -> str:
 
 def _query_v3_time_slices(
     run: Callable[[datetime, datetime, bool], list[dict[str, Any]]], start_time: datetime, end_time: datetime,
+    *, end_inclusive: bool = True,
     ) -> list[dict[str, Any]]:
     """
     Runs `run(slice_start, slice_end, end_inclusive)` over [start_time,
@@ -1545,8 +1710,195 @@ def _query_v3_time_slices(
             _go(midpoint, slice_end, end_inclusive=end_inclusive)
             return
 
-    _go(start_time, end_time, end_inclusive=True)
+    _go(start_time, end_time, end_inclusive=end_inclusive)
     return rows
+
+
+# ---------------------------------------------------------------------------
+# Export, one window at a time
+#
+# An export is read in time windows and each window is handed to the caller before the next is queried, so memory
+# holds one window (not the whole range) and the caller can report progress after every window. The windows are
+# contiguous and half-open except the last, so a point exactly on a boundary is read once.
+# ---------------------------------------------------------------------------
+
+V3_EXPORT_WINDOW: timedelta = timedelta(days=7)
+TS_EXPORT_WINDOW: timedelta = timedelta(days=1)   # a TimescaleDB narrow table holds one row per metric per sample, so its windows are shorter
+
+
+@dataclass(frozen=True)
+class ExportWindow:
+    """The rows of one export window, already time-shifted. `index` is 1-based; `total` is the window count of the whole export."""
+    index: int
+    total: int
+    rows: list[dict[str, Any]]
+
+
+def _plan_windows(start_time: datetime, end_time: datetime, span: timedelta) -> list[tuple[datetime, datetime, bool]]:
+    """(window_start, window_end, end_inclusive) covering [start_time, end_time]: contiguous, half-open except the last."""
+    windows: list[tuple[datetime, datetime, bool]] = []
+    window_start: datetime = start_time
+    while True:
+        window_end: datetime = min(window_start + span, end_time)
+        is_last: bool = window_end >= end_time
+        windows.append((window_start, window_end, is_last))
+        if is_last:
+            return windows
+        window_start = window_end
+
+
+def _header_for(rows: Iterable[dict[str, Any]]) -> list[str]:
+    """\"time\" first, then every other column in first-seen order."""
+    header: list[str] = ["time"]
+    seen: set[str] = {"time"}
+    for row in rows:
+        for k in row:
+            if k not in seen:
+                seen.add(k)
+                header.append(k)
+    return header
+
+
+def iter_export_windows(
+    gateway: "Protocol_Gateway | None",
+    version: str,
+    measurement: str,
+    device_identifier: str | None,
+    start_time: datetime,
+    end_time: datetime,
+    target_start: datetime,
+    tag_keys: set[str],
+    ) -> Generator[ExportWindow, None, None]:
+    """
+    Queries every field for `measurement` (optionally filtered to one device_identifier) between start_time/end_time one
+    window at a time, applying the same time-shift delta InfluxDateConverter.export_influx_data_to_csv() does. Tag
+    columns (`tag_keys`) are dropped from the output, same as IGNORE_TAGS there -- on re-import, tags are re-supplied as
+    fixed values via the Tags panel, not read back from the file.
+
+    Validation happens now, when this is called; the queries run as the returned iterator is consumed, and its client is
+    closed when the iterator is exhausted or closed.
+
+    Raises:
+        ValueError: end_time before start_time, or no connected bridge.
+    """
+    if end_time < start_time:
+        raise ValueError("End time must not be before start time.")
+
+    time_delta: timedelta = compute_time_delta(start_time, target_start)
+    if version == "1":
+        v1_bridge: influxdb_out | None = get_influxdb1_bridge(gateway)
+        if v1_bridge is None or v1_bridge.client is None:
+            raise ValueError("No connected InfluxDB v1 bridge is attached to this gateway.")
+        return _iter_v1_windows(v1_bridge, measurement, device_identifier, start_time, end_time, time_delta, tag_keys)
+
+    v3_bridge: influxdb3_out | None = get_influxdb3_bridge(gateway)
+    if v3_bridge is None or v3_bridge.client is None:
+        raise ValueError("No connected InfluxDB v3 bridge is attached to this gateway.")
+    return _iter_v3_windows(v3_bridge, measurement, device_identifier, start_time, end_time, time_delta, tag_keys)
+
+
+def _iter_v1_windows(
+    bridge: Any, measurement: str, device_identifier: str | None, start_time: datetime, end_time: datetime,
+    time_delta: timedelta, tag_keys: set[str],
+    ) -> Generator[ExportWindow, None, None]:
+    from influxdb.client import quote_ident  # type: ignore[import-untyped]
+    from influxdb.resultset import ResultSet  # type: ignore[import-untyped]
+        #-- real (runtime) import for the isinstance() check below;
+        # safe here (unlike a module-level import) because a v1 bridge has already been confirmed,
+        # which means the `influxdb` package is necessarily already installed and importable
+        # -- same reasoning as write_points_v1()'s own local `from influxdb.exceptions import InfluxDBClientError`.
+
+    quoted_measurement: str = quote_ident(measurement)
+    utc: ZoneInfo = ZoneInfo("UTC")
+    windows: list[tuple[datetime, datetime, bool]] = _plan_windows(start_time, end_time, V1_EXPORT_WINDOW)
+
+    def window_query(window_start: datetime, window_end: datetime, end_inclusive: bool) -> str:
+        end_op: str = "<=" if end_inclusive else "<"
+        window_where: str = (
+            f"time >= {_influxql_quote_literal(window_start.astimezone(utc).strftime('%Y-%m-%dT%H:%M:%S.%fZ'))} "
+            f"AND time {end_op} {_influxql_quote_literal(window_end.astimezone(utc).strftime('%Y-%m-%dT%H:%M:%S.%fZ'))}"
+        )
+        if device_identifier:
+            window_where += f" AND device_identifier = {_influxql_quote_literal(device_identifier)}"
+        return f"SELECT * FROM {quoted_measurement} WHERE {window_where}"  # noqa: S608
+
+    # One client serves every window (timeout sized for a full window) and is closed when the iterator ends.
+    export_client: Any = _open_v1_client(bridge, export_timeout_seconds(start_time, start_time + V1_EXPORT_WINDOW))
+    try:
+        for number, (window_start, window_end, end_inclusive) in enumerate(windows, start=1):
+            # InfluxDBClient.query() can return a single ResultSet, a list[ResultSet] (only if the query string held
+            # multiple ';'-separated statements), or a Generator[ResultSet, Any, None] (only when chunked=True) -- all
+            # part of its real signature. Only the plain-ResultSet case should ever occur for one un-chunked SELECT;
+            # the others are checked explicitly so a surprise fails with a clear error, not an AttributeError.
+            query_result: Generator[ResultSet, Any, None] | ResultSet | list[ResultSet] = export_client.query(window_query(window_start, window_end, end_inclusive), database=bridge.database, epoch="ns")  # type: ignore[reportUnknownMemberType]
+            if not isinstance(query_result, ResultSet):
+                msg: str = (f"Expected a single, non-chunked result set for measurement '{measurement}', "
+                    f"got {type(query_result).__name__}.")
+                _log.error(msg)
+                raise ValueError(msg)  # noqa: TRY004 -- callers (the export endpoint) report ValueError's message to the user
+            points: list[dict[str, Any]] = cast(list[dict[str, Any]], list(query_result.get_points()))  # type: ignore[reportUnknownMemberType]  -- influxdb client's ResultSet.get_points() has no precise element type in its stubs
+
+            rows: list[dict[str, Any]] = []
+            for point in points:
+                time_ns: Any = point.get("time")
+                ts: pd.Timestamp = pd.Timestamp(int(time_ns), unit="ns", tz="UTC")
+                new_row: dict[str, Any] = {"time": (ts + time_delta).tz_localize(None).isoformat()}
+                for k, v in point.items():
+                    if k in tag_keys or k == "time":
+                        continue
+                    new_row[k] = v
+                rows.append(new_row)
+            yield ExportWindow(number, len(windows), rows)
+    finally:
+        export_client.close()
+
+
+def _iter_v3_windows(
+    bridge: Any, measurement: str, device_identifier: str | None, start_time: datetime, end_time: datetime,
+    time_delta: timedelta, tag_keys: set[str],
+    ) -> Generator[ExportWindow, None, None]:
+    quoted_measurement: str = _sql_quote_ident(measurement)
+    windows: list[tuple[datetime, datetime, bool]] = _plan_windows(start_time, end_time, V3_EXPORT_WINDOW)
+
+    # A wide range can exceed InfluxDB 3 CORE's per-query Parquet file limit (Enterprise has none), so each window is
+    # queried through _query_v3_time_slices, which bisects the window further only if the server rejects it.
+    def fetch_slice(slice_start: datetime, slice_end: datetime, end_inclusive: bool) -> list[dict[str, Any]]:
+        end_op: str = "<=" if end_inclusive else "<"
+        slice_start_lit: str = slice_start.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        slice_end_lit: str = slice_end.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        slice_where: str = f"time >= {_sql_quote_literal(slice_start_lit)} AND time {end_op} {_sql_quote_literal(slice_end_lit)}"
+        if device_identifier:
+            slice_where += f" AND device_identifier = {_sql_quote_literal(device_identifier)}"
+        slice_sql: str = f"SELECT * FROM {quoted_measurement} WHERE {slice_where}"  # noqa: S608
+        # InfluxDBClient3.query(..., mode="all") (the default we rely on by not passing `mode=`) returns a
+        # pyarrow.Table at runtime -- undocumented in its own (untyped) signature, but true of the installed client per
+        # its source. It is typed as Any rather than pyarrow.Table because pyarrow ships no py.typed marker, so pyright
+        # resolves pyarrow.Table to Unknown even when imported.
+        slice_table: Any = export_client.query(slice_sql, database=bridge.database, language="sql")  # type: ignore[reportUnknownMemberType]
+        return [cast(dict[str, Any], r) for r in slice_table.to_pylist()]  # type: ignore[reportUnknownMemberType]
+
+    # Own client whose per-query timeout is sized for one window (the client's default is 5 minutes).
+    export_client: Any = _open_v3_client(bridge, query_timeout_s=export_timeout_seconds(start_time, start_time + V3_EXPORT_WINDOW))
+    try:
+        for number, (window_start, window_end, end_inclusive) in enumerate(windows, start=1):
+            records: list[dict[str, Any]] = _query_v3_time_slices(fetch_slice, window_start, window_end, end_inclusive=end_inclusive)
+            rows: list[dict[str, Any]] = []
+            for record_map in records:
+                time_value: Any = record_map.get("time")
+                if time_value is None:
+                    continue  # a record with no time value can't be placed on the timeline -- skip it
+                ts: pd.Timestamp = pd.Timestamp(time_value)
+                if ts.tzinfo is None:
+                    ts = ts.tz_localize("UTC")
+                new_row: dict[str, Any] = {"time": (ts.tz_convert("UTC") + time_delta).tz_localize(None).isoformat()}
+                for k, v in record_map.items():
+                    if k in tag_keys or k == "time":
+                        continue
+                    new_row[k] = v
+                rows.append(new_row)
+            yield ExportWindow(number, len(windows), rows)
+    finally:
+        export_client.close()
 
 
 def export_range_rows(
@@ -1559,155 +1911,11 @@ def export_range_rows(
     target_start: datetime,
     tag_keys: set[str],
     ) -> tuple[list[str], list[dict[str, Any]]]:
-    """
-    Queries every field for `measurement` (optionally filtered to one
-    device_identifier) between start_time/end_time, applies the same
-    time-shift delta InfluxDateConverter.export_influx_data_to_csv() does,
-    and returns (header, rows) ready for CSV writing. Tag columns
-    (`tag_keys`) are dropped from the output, same as IGNORE_TAGS there --
-    on re-import, tags are re-supplied as fixed values via the Tags panel,
-    not read back from the file.
-
-    Raises:
-        ValueError: end_time before start_time, or no bridge attached.
-    """
-    if end_time < start_time:
-        raise ValueError("End time must not be before start time.")
-
-    time_delta: timedelta = compute_time_delta(start_time, target_start)
+    """iter_export_windows() collected into one (header, rows) pair -- everything in memory, so only for ranges known to be small."""
     rows: list[dict[str, Any]] = []
-    bridge: influxdb_out | influxdb3_out | None = None
-    if version == "1":
-        bridge = get_influxdb1_bridge(gateway)
-        if bridge is None or bridge.client is None:
-            raise ValueError("No connected InfluxDB v1 bridge is attached to this gateway.")
-
-        from influxdb.client import quote_ident  # type: ignore[import-untyped]
-        from influxdb.resultset import ResultSet  # type: ignore[import-untyped]
-            #-- real (runtime) import for the isinstance() check below;
-            # safe here (unlike a module-level import) because this line only runs once
-            # get_influxdb1_bridge() has already confirmed a v1 bridge exists,
-            # which means the `influxdb` package is necessarily already installed and importable
-            # -- same reasoning as write_points_v1()'s own local `from influxdb.exceptions import InfluxDBClientError`.
-
-
-        quoted_measurement: str = quote_ident(measurement)
-        utc: ZoneInfo = ZoneInfo("UTC")
-
-        def _v1_window_query(window_start: datetime, window_end: datetime, end_inclusive: bool) -> str:
-            end_op: str = "<=" if end_inclusive else "<"
-            window_where: str = (
-                f"time >= {_influxql_quote_literal(window_start.astimezone(utc).strftime('%Y-%m-%dT%H:%M:%S.%fZ'))} "
-                f"AND time {end_op} {_influxql_quote_literal(window_end.astimezone(utc).strftime('%Y-%m-%dT%H:%M:%S.%fZ'))}"
-            )
-            if device_identifier:
-                window_where += f" AND device_identifier = {_influxql_quote_literal(device_identifier)}"
-            return f"SELECT * FROM {quoted_measurement} WHERE {window_where}"  # noqa: S608
-
-        # Read the range one V1_EXPORT_WINDOW (a week) at a time rather than as one huge SELECT: each request stays small
-        # for the server, and the timeout only has to cover one window, however long the whole range is. Windows are
-        # half-open except the last, so a point exactly on a boundary is returned once. One client serves every window
-        # (timeout sized for a full window) and is closed when the loop ends.
-        export_client: Any = _open_v1_client(bridge, export_timeout_seconds(start_time, start_time + V1_EXPORT_WINDOW))
-        try:
-            window_start: datetime = start_time
-            while True:
-                window_end: datetime = min(window_start + V1_EXPORT_WINDOW, end_time)
-                is_last: bool = window_end >= end_time
-                query: str = _v1_window_query(window_start, window_end, is_last)
-                # InfluxDBClient.query() can return a single ResultSet, a list[ResultSet] (only if the query string held
-                # multiple ';'-separated statements), or a Generator[ResultSet, Any, None] (only when chunked=True) -- all
-                # part of its real signature. Only the plain-ResultSet case should ever occur for one un-chunked SELECT;
-                # the others are checked explicitly so a surprise fails with a clear error, not an AttributeError.
-                query_result: Generator[ResultSet, Any, None] | ResultSet | list[ResultSet] = export_client.query(query, database=bridge.database, epoch="ns")  # type: ignore[reportUnknownMemberType]
-                if not isinstance(query_result, ResultSet):
-                    msg: str = (f"Expected a single, non-chunked result set for measurement '{measurement}', "
-                        f"got {type(query_result).__name__}.")
-                    _log.error(msg)
-                    raise ValueError(msg)  # noqa: TRY004 -- callers (the export endpoint) turn ValueError into a 400 with this message
-                points: list[dict[str, Any]] = cast(list[dict[str, Any]], list(query_result.get_points()))  # type: ignore[reportUnknownMemberType]  -- influxdb client's ResultSet.get_points() has no precise element type in its stubs
-
-                for point in points:
-                    time_ns: Any = point.get("time")
-                    ts = pd.Timestamp(int(time_ns), unit="ns", tz="UTC")
-                    new_time: pd.Timestamp = (ts + time_delta).tz_localize(None)
-                    new_row: dict[str, Any] = {"time": new_time.isoformat()}
-                    for k, v in point.items():
-                        if k in tag_keys or k in ("time",):
-                            continue
-                        new_row[k] = v
-                    rows.append(new_row)
-
-                if is_last:
-                    break
-                window_start = window_end
-        finally:
-            export_client.close()
-
-    else:
-        bridge = get_influxdb3_bridge(gateway)
-        if bridge is None or bridge.client is None:
-            raise ValueError("No connected InfluxDB v3 bridge is attached to this gateway.")
-
-        v3_bridge: Any = bridge  # narrowed non-None/non-.client-None just above; re-bound so the closure below doesn't need to re-prove that on every call
-        quoted_measurement: str = _sql_quote_ident(measurement)
-
-        # A wide range can exceed InfluxDB 3 CORE's per-query Parquet file limit
-        # (Enterprise has none), so the query runs per time slice via
-        # _query_v3_time_slices -- one slice, i.e. one query, whenever the whole
-        # range is accepted as-is -- and every slice's rows are concatenated.
-        def _fetch_v3_slice(slice_start: datetime, slice_end: datetime, end_inclusive: bool) -> list[dict[str, Any]]:
-            end_op: str = "<=" if end_inclusive else "<"
-            slice_start_lit: str = slice_start.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-            slice_end_lit: str = slice_end.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-            slice_where: str = f"time >= {_sql_quote_literal(slice_start_lit)} AND time {end_op} {_sql_quote_literal(slice_end_lit)}"
-            if device_identifier:
-                slice_where += f" AND device_identifier = {_sql_quote_literal(device_identifier)}"
-            slice_sql: str = f"SELECT * FROM {quoted_measurement} WHERE {slice_where}"  # noqa: S608
-            # InfluxDBClient3.query(..., mode="all") (the default we rely on by
-            # not passing `mode=`) returns a pyarrow.Table at runtime --
-            # undocumented in its own (untyped) signature, but true of the
-            # installed client per its source; `.to_pylist()` below is a real
-            # pyarrow.Table method, not a dynamic/guessed one. It's typed as
-            # Any rather than pyarrow.Table itself because pyarrow ships no
-            # py.typed marker and its Table class is a Cython/C-extension type
-            # pyright can't introspect -- annotating it "Table" wouldn't add
-            # real checking, only the appearance of it (confirmed: pyright
-            # resolves pyarrow.Table itself to Unknown even when imported).
-            slice_table: Any = export_client.query(slice_sql, database=v3_bridge.database, language="sql")  # type: ignore[reportUnknownMemberType]
-            return [cast(dict[str, Any], r) for r in slice_table.to_pylist()]  # type: ignore[reportUnknownMemberType]  -- pyarrow.Table ships no py.typed marker, so pyright can't resolve its methods even through an Any-typed reference
-
-        # Own client whose per-query timeout scales with the date range (the client's default is 5 minutes).
-        export_client: Any = _open_v3_client(v3_bridge, query_timeout_s=export_timeout_seconds(start_time, end_time))
-        try:
-            v3_records: list[dict[str, Any]] = list(_query_v3_time_slices(_fetch_v3_slice, start_time, end_time))
-        finally:
-            export_client.close()
-
-        for record_map in v3_records:
-            time_value: Any = record_map.get("time")
-            if time_value is None:
-                continue  # a record with no time value can't be placed on the timeline -- skip it
-            ts = pd.Timestamp(time_value)
-            if ts.tzinfo is None:
-                ts: pd.Timestamp = ts.tz_localize("UTC")
-            new_time = (ts.tz_convert("UTC") + time_delta).tz_localize(None)
-            new_row = {"time": new_time.isoformat()}
-            for k, v in record_map.items():
-                if k in tag_keys or k == "time":
-                    continue
-                new_row[k] = v
-            rows.append(new_row)
-
-    header: list[str] = ["time"]
-    seen: set[str] = {"time"}
-    for row in rows:
-        for k in row:
-            if k not in seen:
-                seen.add(k)
-                header.append(k)
-
-    return header, rows
+    for window in iter_export_windows(gateway, version, measurement, device_identifier, start_time, end_time, target_start, tag_keys):
+        rows.extend(window.rows)
+    return _header_for(rows), rows
 
 
 # ---------------------------------------------------------------------------
@@ -2004,6 +2212,7 @@ def write_points_timescale(
     table_name: str,
     device_info_id: int,
     points: list[TimescalePointDict],
+    on_progress: ProgressCallback | None = None,
     ) -> tuple[int, int]:
     """
     Writes points to the live TimescaleDB bridge -- for table_kind="wide",
@@ -2072,6 +2281,8 @@ def write_points_timescale(
     # "device_metrics_narrow" already for a narrow-only write, so this is a
     # single-element set in that case).
     tables_to_prepare: set[str] = {table_name, "device_metrics_narrow"}
+    if on_progress is not None:
+        on_progress("Preparing: pausing compression and decompressing chunks in the imported range", 0, 0)
     import_timeout_s: float = timescale_import_timeout_seconds(len(points))
     t_start: float = time.perf_counter()
     hypertable_mgr: Any | None = getattr(bridge, "hypertable_mgr", None)
@@ -2103,6 +2314,11 @@ def write_points_timescale(
     narrow_rows: list[dict[str, Any]] = []
     rows_written = 0
 
+    # Bar units: one per point for the wide upsert (wide tables only) plus one per narrow row.
+    narrow_total: int = sum(len(p.fields) for p in points)
+    bar_total: int = (len(points) if table_kind == "wide" else 0) + narrow_total
+    wide_done: int = 0
+
     try:
         with bridge.SessionFactory() as session:
             with session.begin():
@@ -2117,6 +2333,9 @@ def write_points_timescale(
                         sql: str = _wide_upsert_sql(table_name, list(p.fields.keys()))
                         params: dict[str, Any] = {"m_time": m_time, "device_info_id": device_info_id, **p.fields}
                         session.execute(_sql_text(sql), params)
+                        wide_done += 1
+                        if on_progress is not None and wide_done % 500 == 0:
+                            on_progress(f"Writing wide table · {wide_done:,} of {len(points):,} points", wide_done, bar_total)
                     for name, value in p.fields.items():
                         metric_value, metric_ascii = _narrow_value_pair(value)
                         narrow_rows.append({
@@ -2125,8 +2344,15 @@ def write_points_timescale(
                         })
                     rows_written += 1
 
-                if narrow_rows:
-                    session.execute(_sql_text(_NARROW_UPSERT_SQL), narrow_rows)
+                # Chunked only so progress is real: every chunk is still inside this one transaction.
+                for offset in range(0, len(narrow_rows), TS_NARROW_BATCH_SIZE):
+                    session.execute(_sql_text(_NARROW_UPSERT_SQL), narrow_rows[offset:offset + TS_NARROW_BATCH_SIZE])
+                    narrow_done: int = min(offset + TS_NARROW_BATCH_SIZE, len(narrow_rows))
+                    if on_progress is not None:
+                        on_progress(
+                            f"Writing narrow table · {narrow_done:,} of {len(narrow_rows):,} values",
+                            (wide_done if table_kind == "wide" else 0) + narrow_done, bar_total,
+                        )
     finally:
         # hypertable_mgr can't actually be None here when paused_job_ids_by_table
         # is non-empty (it's only ever populated inside the `if hypertable_mgr is
@@ -2148,7 +2374,7 @@ def write_points_timescale(
     return rows_written, len(narrow_rows)
 
 
-def export_range_rows_timescale(
+def iter_export_windows_timescale(
     gateway: "Protocol_Gateway | None",
     table_kind: str,
     table_name: str,
@@ -2157,23 +2383,20 @@ def export_range_rows_timescale(
     start_time: datetime,
     end_time: datetime,
     target_start: datetime,
-    ) -> tuple[list[str], list[dict[str, Any]]]:
+    ) -> Generator[ExportWindow, None, None]:
     """
-    TimescaleDB counterpart of export_range_rows() -- same time-shift math
-    and (header, rows) shape, for one table + device over a date range.
+    TimescaleDB counterpart of iter_export_windows() -- same time-shift math and window shape, for one table + device.
 
-    A wide table is already column-shaped, so its rows come back as-is
-    (minus m_time, replaced by the shifted "time"). A narrow table stores
-    one row per (m_time, metric_name) -- these are pivoted into the same
-    wide-shaped CSV rows (one row per distinct shifted timestamp, one
-    column per distinct metric_name seen in the range) so a narrow export
-    and a wide export produce an identically-shaped file, and so the file
-    re-imports the same way through this same screen's "influx_csv"-style
-    source path regardless of which table it came from.
+    A wide table is already column-shaped, so its rows come back as-is (minus m_time, replaced by the shifted "time").
+    A narrow table stores one row per (m_time, metric_name) -- these are pivoted into the same wide-shaped rows (one row
+    per distinct shifted timestamp, one column per distinct metric_name) so a narrow export and a wide export produce an
+    identically-shaped file, and so the file re-imports the same way through this same screen regardless of which table
+    it came from. A timestamp falls in exactly one window, so pivoting per window loses nothing.
+
+    Validation happens now, when this is called; the queries run as the returned iterator is consumed.
 
     Raises:
-        ValueError: end_time before start_time, no bridge attached/
-                    connected, or table_kind isn't "narrow"/"wide".
+        ValueError: end_time before start_time, no bridge attached/connected, or table_kind isn't "narrow"/"wide".
     """
     if end_time < start_time:
         raise ValueError("End time must not be before start time.")
@@ -2185,58 +2408,221 @@ def export_range_rows_timescale(
     if bridge is None or not getattr(bridge, "tsdb_connected", True):
         raise ValueError("No connected TimescaleDB bridge is attached to this gateway.")
 
+    return _iter_timescale_windows(bridge, gateway, table_kind, table_name, protocol_name, device_info_id, start_time, end_time, target_start)
+
+
+def _iter_timescale_windows(
+    bridge: Any, gateway: "Protocol_Gateway | None", table_kind: str, table_name: str, protocol_name: str | None,
+    device_info_id: int, start_time: datetime, end_time: datetime, target_start: datetime,
+    ) -> Generator[ExportWindow, None, None]:
     from sqlalchemy import (  # noqa: PLC0415 -- local: see build_points_timescale's identical note on deferring this transport's imports
         text as _sql_text,
     )
 
     time_delta: timedelta = compute_time_delta(start_time, target_start)
-    rows: list[dict[str, Any]] = []
+    windows: list[tuple[datetime, datetime, bool]] = _plan_windows(start_time, end_time, TS_EXPORT_WINDOW)
 
     def shift(raw_time: Any) -> str:
-        ts = pd.Timestamp(raw_time)
+        ts: pd.Timestamp = pd.Timestamp(raw_time)
         if ts.tzinfo is None:
-            ts: pd.Timestamp = ts.tz_localize("UTC")
+            ts = ts.tz_localize("UTC")
         return (ts.tz_convert("UTC") + time_delta).tz_localize(None).isoformat()
 
+    field_names: list[str] = []
+    if table_kind == "wide":
+        field_names = [name for f in timescale_fields_for(gateway, "wide", protocol_name) if (name := f.get("name"))]
+
     with bridge.SessionFactory() as session:
-        # Ends with this (never-committed) transaction, so the pooled connection goes back unchanged.
-        _set_local_statement_timeout(session, export_timeout_seconds(start_time, end_time))
-        if table_kind == "narrow":
-            result: Any = session.execute(
-                _sql_text(
-                    "SELECT m_time, metric_name, metric_value, metric_ascii FROM device_metrics_narrow "
-                    "WHERE device_info_id = :did AND m_time BETWEEN :start AND :end ORDER BY m_time"
-                ),
-                {"did": device_info_id, "start": start_time, "end": end_time},
-            )
-            by_time: dict[str, dict[str, Any]] = {}
-            for m_time, metric_name, metric_value, metric_ascii in result:
-                new_row: dict[str, Any] = by_time.setdefault(shift(m_time), {})
-                new_row[metric_name] = metric_ascii if metric_ascii is not None else metric_value
-            rows = [{"time": t, **fields} for t, fields in by_time.items()]
-        else:
-            field_names: list[str] = [name for f in timescale_fields_for(gateway, "wide", protocol_name) if (name := f.get("name"))]
-            if field_names:
+        # Ends with this (never-committed) transaction, so the pooled connection goes back unchanged. The limit applies to
+        # each statement, i.e. to one window.
+        _set_local_statement_timeout(session, export_timeout_seconds(start_time, start_time + TS_EXPORT_WINDOW))
+        for number, (window_start, window_end, end_inclusive) in enumerate(windows, start=1):
+            end_op: str = "<=" if end_inclusive else "<"
+            bounds: dict[str, Any] = {"did": device_info_id, "start": window_start, "end": window_end}
+            rows: list[dict[str, Any]] = []
+            if table_kind == "narrow":
+                result: Any = session.execute(
+                    _sql_text(
+                        "SELECT m_time, metric_name, metric_value, metric_ascii FROM device_metrics_narrow "  # noqa: S608
+                        f"WHERE device_info_id = :did AND m_time >= :start AND m_time {end_op} :end ORDER BY m_time"  # noqa: S608 -- end_op is one of two constants
+                    ),
+                    bounds,
+                )
+                by_time: dict[str, dict[str, Any]] = {}
+                for m_time, metric_name, metric_value, metric_ascii in result:
+                    new_row: dict[str, Any] = by_time.setdefault(shift(m_time), {})
+                    new_row[metric_name] = metric_ascii if metric_ascii is not None else metric_value
+                rows = [{"time": t, **fields} for t, fields in by_time.items()]
+            elif field_names:
                 select_cols: str = ", ".join(_sql_quote_ident(c) for c in field_names)
                 result = session.execute(
                     _sql_text(
                         f"SELECT m_time, {select_cols} FROM {table_name} "  # noqa: S608 -- table_name/select_cols are trusted identifiers, see _wide_upsert_sql's docstring
-                        "WHERE device_info_id = :did AND m_time BETWEEN :start AND :end ORDER BY m_time"
+                        f"WHERE device_info_id = :did AND m_time >= :start AND m_time {end_op} :end ORDER BY m_time"
                     ),
-                    {"did": device_info_id, "start": start_time, "end": end_time},
+                    bounds,
                 )
                 for record in result:
-                    new_row = {"time": shift(record[0])}
+                    wide_row: dict[str, Any] = {"time": shift(record[0])}
                     for name, value in zip(field_names, record[1:]):
-                        new_row[name] = value
-                    rows.append(new_row)
+                        wide_row[name] = value
+                    rows.append(wide_row)
+            yield ExportWindow(number, len(windows), rows)
 
+
+def export_range_rows_timescale(
+    gateway: "Protocol_Gateway | None",
+    table_kind: str,
+    table_name: str,
+    protocol_name: str | None,
+    device_info_id: int,
+    start_time: datetime,
+    end_time: datetime,
+    target_start: datetime,
+    ) -> tuple[list[str], list[dict[str, Any]]]:
+    """iter_export_windows_timescale() collected into one (header, rows) pair -- everything in memory, so only for ranges known to be small."""
+    rows: list[dict[str, Any]] = []
+    for window in iter_export_windows_timescale(gateway, table_kind, table_name, protocol_name, device_info_id, start_time, end_time, target_start):
+        rows.extend(window.rows)
+    return _header_for(rows), rows
+
+
+# ---------------------------------------------------------------------------
+# Export to a CSV file on disk, with progress
+#
+# The column set of the CSV is only known once every window has been read (a column appears the first time any row has
+# it), but the header must come first. So each window's rows are spooled to a temporary JSON-lines file as they arrive
+# (memory holds one window), then a second pass writes the real CSV. The finished file waits in a temp folder, keyed by
+# a token, until the browser fetches it.
+# ---------------------------------------------------------------------------
+
+EXPORT_FILE_TTL: timedelta = timedelta(hours=1)
+_EXPORT_DIR_NAME: str = "mpg_timeshift_exports"
+
+# Bar units: reading the windows is most of the work, so it fills the first 95% of the bar and the second (CSV) pass the
+# rest. Each window is worth _READ_UNITS bar units and the CSV pass _WRITE_UNITS in total, per window of the export.
+_READ_UNITS: int = 19
+_WRITE_UNITS: int = 1
+
+
+@dataclass
+class ExportFile:
+    token: str
+    path: Path
+    filename: str
+    row_count: int
+    size_bytes: int
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+def _export_dir() -> Path:
+    directory: Path = Path(tempfile.gettempdir()) / _EXPORT_DIR_NAME
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
+def _export_store(app_state: State) -> dict[str, ExportFile]:
+    if not hasattr(app_state, "timeshift_exports"):
+        setattr(app_state, "timeshift_exports", {})
+    return cast(dict[str, ExportFile], getattr(app_state, "timeshift_exports"))
+
+
+def _purge_stale_exports(app_state: State) -> None:
+    """Deletes finished exports nobody collected, and spool/CSV files left behind by an interrupted export, once they are older than EXPORT_FILE_TTL."""
+    cutoff: datetime = datetime.now(timezone.utc) - EXPORT_FILE_TTL
+    with _upload_lock(app_state):
+        store: dict[str, ExportFile] = _export_store(app_state)
+        for token in [t for t, e in store.items() if e.created_at < cutoff]:
+            store.pop(token).path.unlink(missing_ok=True)
+    for leftover in _export_dir().iterdir():
+        try:
+            if leftover.stat().st_mtime < cutoff.timestamp():
+                leftover.unlink(missing_ok=True)
+        except OSError:
+            continue  # being written or removed right now -- the next purge will see it
+
+
+def new_export_paths(app_state: State) -> tuple[Path, Path]:
+    """(csv_path, spool_path) for a new export, after clearing out stale ones."""
+    _purge_stale_exports(app_state)
+    stem: str = uuid.uuid4().hex
+    return _export_dir() / f"{stem}.csv", _export_dir() / f"{stem}.spool"
+
+
+def register_export_file(app_state: State, path: Path, filename: str, row_count: int) -> ExportFile:
+    export: ExportFile = ExportFile(uuid.uuid4().hex, path, filename, row_count, path.stat().st_size)
+    with _upload_lock(app_state):
+        _export_store(app_state)[export.token] = export
+    return export
+
+
+def get_export_file(app_state: State, token: str) -> ExportFile | None:
+    with _upload_lock(app_state):
+        return _export_store(app_state).get(token)
+
+
+def discard_export_file(app_state: State, token: str) -> None:
+    """Forgets the export and deletes its file (called once the browser has it)."""
+    with _upload_lock(app_state):
+        export: ExportFile | None = _export_store(app_state).pop(token, None)
+    if export is not None:
+        export.path.unlink(missing_ok=True)
+
+
+def write_export_csv(
+    windows: Iterator[ExportWindow],
+    csv_path: Path,
+    spool_path: Path,
+    on_progress: ProgressCallback,
+    check_cancelled: Callable[[], None],
+    ) -> int:
+    """
+    Consumes `windows` into the CSV at `csv_path` (header: "time" first, then columns in first-seen order -- the same
+    shape and encoding the old in-memory export produced) and returns the number of data rows written. Reports progress
+    after every window and then through the CSV pass; calls `check_cancelled` between windows so a cancelled export
+    stops reading. The spool file is always removed; the CSV is removed too if anything fails.
+    """
     header: list[str] = ["time"]
     seen: set[str] = {"time"}
-    for row in rows:
-        for k in row:
-            if k not in seen:
-                seen.add(k)
-                header.append(k)
+    row_count: int = 0
+    window_total: int = 1
+    try:
+        with spool_path.open("w", encoding="utf-8", newline="\n") as spool:
+            for window in windows:
+                check_cancelled()
+                window_total = window.total
+                for row in window.rows:
+                    for column in row:
+                        if column not in seen:
+                            seen.add(column)
+                            header.append(column)
+                    # default=str writes any non-JSON value (datetime, Decimal, bytes) as str(), exactly what csv would have.
+                    spool.write(json.dumps(row, default=str))
+                    spool.write("\n")
+                row_count += len(window.rows)
+                on_progress(
+                    f"Reading data: window {window.index} of {window.total} · {row_count:,} row{'s' if row_count != 1 else ''}",
+                    window.index * _READ_UNITS, window.total * (_READ_UNITS + _WRITE_UNITS),
+                )
 
-    return header, rows
+        bar_total: int = window_total * (_READ_UNITS + _WRITE_UNITS)
+        written: int = 0
+        with spool_path.open("r", encoding="utf-8", newline="\n") as spooled, csv_path.open("w", encoding="utf-8", newline="") as out:
+            writer: "csv.DictWriter[str]" = csv.DictWriter(out, fieldnames=header)
+            writer.writeheader()
+            for line in spooled:
+                writer.writerow(cast(dict[str, Any], json.loads(line)))
+                written += 1
+                if written % 5000 == 0:
+                    check_cancelled()
+                    on_progress(
+                        f"Writing CSV · {written:,} of {row_count:,} rows",
+                        window_total * _READ_UNITS + (window_total * _WRITE_UNITS * written) // max(row_count, 1), bar_total,
+                    )
+        on_progress(f"Writing CSV · {row_count:,} of {row_count:,} rows", bar_total, bar_total)
+    except BaseException:
+        csv_path.unlink(missing_ok=True)
+        raise
+    finally:
+        spool_path.unlink(missing_ok=True)
+    return row_count
