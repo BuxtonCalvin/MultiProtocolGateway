@@ -1,0 +1,91 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note,ha_device_class,ha_state_class,ha_entity_category
+17,rated_power,Rated Power,0.1W,USHORT,,startup,R,,Rated output power (single register on this family).,power,,diagnostic
+22.b8,inverter_time_year,Inverter Time Year,,8bit,,,R,"{""Offset"": 2000}",High byte of the first time register: year as an offset from 2000. Read-only here; set the clock on the inverter or in the Solarman/Deye app.,,,diagnostic
+22.b0,inverter_time_month,Inverter Time Month,,8bit,,,R,,Low byte of the first time register.,,,diagnostic
+23.b8,inverter_time_day,Inverter Time Day,,8bit,,,R,,High byte of the second time register.,,,diagnostic
+23.b0,inverter_time_hour,Inverter Time Hour,,8bit,,,R,,Low byte of the second time register.,,,diagnostic
+24.b8,inverter_time_minute,Inverter Time Minute,,8bit,,,R,,High byte of the third time register.,,,diagnostic
+24.b0,inverter_time_second,Inverter Time Second,,8bit,,,R,,Low byte of the third time register.,,,diagnostic
+34,inverter_enabled,Inverter Enabled,,USHORT,,,R,,Writable in the vendor document but read-only here; a wrong write can stop the inverter.,,,diagnostic
+32,grid_reconnect_delay,Grid Reconnect Delay,,USHORT,,,R,,Grid reconnect delay.,,,diagnostic
+35,island_mode,Island Mode,,USHORT,,,R,,,,,diagnostic
+36,insulation_check,Insulation Check,,USHORT,,,R,,,,,diagnostic
+38,neutral_to_earth,Neutral To Earth,,USHORT,,,R,,,,,diagnostic
+312,battery_max_charge_current,Battery Max Charge Current,0.01A,USHORT,,60s,RW,,,current,,config
+313,battery_max_discharge_current,Battery Max Discharge Current,0.01A,USHORT,,60s,RW,,,current,,config
+319,battery_shutdown_capacity,Battery Shutdown Capacity,%,USHORT,0-100,60s,RW,,,,,config
+320,battery_restart_capacity,Battery Restart Capacity,%,USHORT,0-100,60s,RW,,,,,config
+321,battery_low_capacity,Battery Low Capacity,%,USHORT,0-100,60s,RW,,,,,config
+328,grid_charge_enabled,Grid Charge Enabled,,USHORT,0-1,60s,RW,,,,,config
+329,priority_load,Priority Load,,USHORT,,60s,RW,,Value shown raw; meaning not published.,,,config
+330,load_limit,Load Limit,,USHORT,,60s,RW,,Value shown raw; meaning not published.,,,config
+331,max_sell_power,Max Sell Power,W,USHORT,,60s,RW,,,,,config
+333,solar_export,Solar Export,,USHORT,0-1,60s,RW,,,,,config
+334,work_mode,Work Mode,,USHORT,,60s,RW,,Value shown raw; meaning not published.,,,config
+335,use_timer,Use Timer,,USHORT,0-1,60s,RW,,,,,config
+336,prog1_time,Prog1 Time,,USHORT,0-2359,60s,RW,,Time of use program 1 start time as HHMM (1530 = 15:30).,,,config
+337,prog2_time,Prog2 Time,,USHORT,0-2359,60s,RW,,Time of use program 2 start time as HHMM (1530 = 15:30).,,,config
+338,prog3_time,Prog3 Time,,USHORT,0-2359,60s,RW,,Time of use program 3 start time as HHMM (1530 = 15:30).,,,config
+339,prog4_time,Prog4 Time,,USHORT,0-2359,60s,RW,,Time of use program 4 start time as HHMM (1530 = 15:30).,,,config
+340,prog5_time,Prog5 Time,,USHORT,0-2359,60s,RW,,Time of use program 5 start time as HHMM (1530 = 15:30).,,,config
+341,prog6_time,Prog6 Time,,USHORT,0-2359,60s,RW,,Time of use program 6 start time as HHMM (1530 = 15:30).,,,config
+342,prog1_power,Prog1 Power,W,USHORT,,60s,RW,,Time of use program 1 power limit.,,,config
+343,prog2_power,Prog2 Power,W,USHORT,,60s,RW,,Time of use program 2 power limit.,,,config
+344,prog3_power,Prog3 Power,W,USHORT,,60s,RW,,Time of use program 3 power limit.,,,config
+345,prog4_power,Prog4 Power,W,USHORT,,60s,RW,,Time of use program 4 power limit.,,,config
+346,prog5_power,Prog5 Power,W,USHORT,,60s,RW,,Time of use program 5 power limit.,,,config
+347,prog6_power,Prog6 Power,W,USHORT,,60s,RW,,Time of use program 6 power limit.,,,config
+354,prog1_capacity,Prog1 Capacity,%,USHORT,0-100,60s,RW,,Time of use program 1 battery SOC target.,,,config
+355,prog2_capacity,Prog2 Capacity,%,USHORT,0-100,60s,RW,,Time of use program 2 battery SOC target.,,,config
+356,prog3_capacity,Prog3 Capacity,%,USHORT,0-100,60s,RW,,Time of use program 3 battery SOC target.,,,config
+357,prog4_capacity,Prog4 Capacity,%,USHORT,0-100,60s,RW,,Time of use program 4 battery SOC target.,,,config
+358,prog5_capacity,Prog5 Capacity,%,USHORT,0-100,60s,RW,,Time of use program 5 battery SOC target.,,,config
+359,prog6_capacity,Prog6 Capacity,%,USHORT,0-100,60s,RW,,Time of use program 6 battery SOC target.,,,config
+360,prog1_charge,Prog1 Charge,,USHORT,,60s,RW,,Time of use program 1 charge setting; value shown raw.,,,config
+361,prog2_charge,Prog2 Charge,,USHORT,,60s,RW,,Time of use program 2 charge setting; value shown raw.,,,config
+362,prog3_charge,Prog3 Charge,,USHORT,,60s,RW,,Time of use program 3 charge setting; value shown raw.,,,config
+363,prog4_charge,Prog4 Charge,,USHORT,,60s,RW,,Time of use program 4 charge setting; value shown raw.,,,config
+364,prog5_charge,Prog5 Charge,,USHORT,,60s,RW,,Time of use program 5 charge setting; value shown raw.,,,config
+365,prog6_charge,Prog6 Charge,,USHORT,,60s,RW,,Time of use program 6 charge setting; value shown raw.,,,config
+374,battery_charge_limit_current,Battery Charge Limit Current,A,USHORT,,,R,,BMS charge current limit.,current,measurement,
+375,battery_discharge_limit_current,Battery Discharge Limit Current,A,USHORT,,,R,,BMS discharge current limit.,current,measurement,
+372,bms_charge_voltage,BMS Charge Voltage,0.01V,USHORT,,,R,,,voltage,measurement,
+376,bms_battery_soc,BMS Battery SOC,%,USHORT,0-100,,R,,,battery,measurement,
+377,bms_battery_voltage,BMS Battery Voltage,0.01V,USHORT,,,R,,,voltage,measurement,
+378,bms_battery_current,BMS Battery Current,A,SHORT,,,R,,,current,measurement,
+379,bms_battery_temperature,BMS Battery Temperature,0.1°C,USHORT,,,R,,Offset behavior is not confirmed for this family; compare with the inverter display.,temperature,measurement,
+392,battery_soh,Battery SOH,%,USHORT,0-100,,R,,,,measurement,diagnostic
+407,battery_capacity,Battery Capacity,0.1Ah,USHORT,,,R,,,,measurement,diagnostic
+408,battery_cell_voltage_max,Battery Cell Voltage Max,0.001V,USHORT,,,R,,,voltage,measurement,
+409,battery_cell_voltage_min,Battery Cell Voltage Min,0.001V,USHORT,,,R,,,voltage,measurement,
+410,battery_cell_temperature_max,Battery Cell Temperature Max,0.1°C,USHORT,,,R,,Offset behavior is not confirmed for this family; compare with the inverter display.,temperature,measurement,
+411,battery_cell_temperature_min,Battery Cell Temperature Min,0.1°C,USHORT,,,R,,Offset behavior is not confirmed for this family; compare with the inverter display.,temperature,measurement,
+412,battery_modules,Battery Modules,,USHORT,,,R,,Number of battery modules.,,,diagnostic
+1001,overall_state,Overall State,,USHORT,,,R,,"Inverter operating state; meaning not published, shown raw.",,,diagnostic
+1028_1029,inverter_power,Inverter Power,0.1W,INT,,,R,"{""Register_Endian"": ""little_endian-CDAB""}","Signed 32-bit, low word first.",power,measurement,
+1032,radiator_temperature,Radiator Temperature,0.01°C,USHORT,,,R,,Offset behavior is not confirmed for this family; compare with the inverter display.,temperature,measurement,
+1033,load_voltage,Load Voltage,0.1V,USHORT,,,R,,,voltage,measurement,
+1034,grid_voltage,Grid Voltage,0.1V,USHORT,,,R,,,voltage,measurement,
+1035,grid_frequency,Grid Frequency,0.01Hz,USHORT,,,R,,,frequency,measurement,
+1037,load_frequency,Load Frequency,0.01Hz,USHORT,,,R,,,frequency,measurement,
+1078,grid_current,Grid Current,0.1A,SHORT,,,R,,,current,measurement,
+1080,grid_connected,Grid Connected,,USHORT,,,R,,Grid relay state; value shown raw.,,,diagnostic
+1081,inverter_current,Inverter Current,0.1A,SHORT,,,R,,,current,measurement,
+1083,grid_power,Grid Power,W,SHORT,,,R,,Positive = import.,power,measurement,
+1087,load_power,Load Power,W,USHORT,,,R,,,power,measurement,
+1068,battery_current,Battery Current,0.01A,SHORT,,,R,,"Positive = charging, negative = discharging.",current,measurement,
+1067,battery_voltage,Battery Voltage,0.01V,USHORT,,,R,,,voltage,measurement,
+1069,battery_soc,Battery SOC,%,USHORT,0-100,,R,,,battery,measurement,
+1070,battery_temperature,Battery Temperature,0.1°C,USHORT,,,R,,Offset behavior is not confirmed for this family; compare with the inverter display.,temperature,measurement,
+1071,battery_power,Battery Power,W,SHORT,,,R,,"Positive = charging, negative = discharging.",power,measurement,
+1072,day_battery_discharge,Day Battery Discharge,0.1kWh,USHORT,,,R,,,energy,total_increasing,
+1073,day_battery_charge,Day Battery Charge,0.1kWh,USHORT,,,R,,,energy,total_increasing,
+1074_1075,total_battery_discharge,Total Battery Discharge,0.1kWh,UINT,,,R,"{""Register_Endian"": ""little_endian-CDAB""}",,energy,total_increasing,
+1076_1077,total_battery_charge,Total Battery Charge,0.1kWh,UINT,,,R,"{""Register_Endian"": ""little_endian-CDAB""}",,energy,total_increasing,
+1089,day_grid_import,Day Grid Import,0.1kWh,USHORT,,,R,,,energy,total_increasing,
+1090,day_grid_export,Day Grid Export,0.1kWh,USHORT,,,R,,,energy,total_increasing,
+1091_1092,total_grid_import,Total Grid Import,0.1kWh,UINT,,,R,"{""Register_Endian"": ""little_endian-CDAB""}",,energy,total_increasing,
+1093_1094,total_grid_export,Total Grid Export,0.1kWh,UINT,,,R,"{""Register_Endian"": ""little_endian-CDAB""}",,energy,total_increasing,
+1098,day_load_energy,Day Load Energy,0.1kWh,USHORT,,,R,,,energy,total_increasing,
+1099_1100,total_load_energy,Total Load Energy,0.1kWh,UINT,,,R,"{""Register_Endian"": ""little_endian-CDAB""}",,energy,total_increasing,
+1127,inverter_temperature,Inverter Temperature,,USHORT,,,R,,Offset behavior is not confirmed for this family; compare with the inverter display.,,measurement,diagnostic

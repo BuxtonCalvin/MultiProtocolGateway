@@ -25,10 +25,10 @@
 
 | Manufacturer | Key Models | Interface | Protocol | Guide |
 | --- | --- | --- | --- | --- |
-| [Deye / Sunsynk](Deye_Sunsynk.md) | SUN-xK-SG04LP3, SG05LP3, Sunsynk 5–16kW | RS485 RJ45 / Solarman TCP 8899 | Modbus RTU | [Deye_Sunsynk.md](Deye_Sunsynk.md) |
 | [A-Tronix](A_Tronix.md) | Hybridpower AX2 Gen3, AX / AX Plus hybrids | RS485 / Modbus TCP | Modbus RTU / TCP | [A_Tronix.md](A_Tronix.md) |
 | [ABB / FIMER](ABB_Fimer.md) | TRIO, REACT2, VSN300 / VSN700, legacy PVI / UNO | RS485 / Ethernet | Modbus RTU / TCP (SunSpec) | [ABB_Fimer.md](ABB_Fimer.md) |
 | [APsystems](APsystems.md) | ECU-R, ECU-C gateways | Ethernet / RS485 | SunSpec Modbus | [APsystems.md](APsystems.md) |
+| [Deye / Sunsynk](Deye_Sunsynk.md) | Hybrids: SG01/02/03/04/05LP1 (incl. US split-phase SG01LP1-US), SG04LP3, SG05LP3, SG01HP3, SG02HP3, micro hybrid ESS, Sunsynk 3.6–16kW (grid-tie string and micro inverters not covered) | RS485 RJ45 / RS485 gateway | Modbus RTU | [Deye_Sunsynk.md](Deye_Sunsynk.md) |
 | [EG4](EG4.md) | 6000XP, 12000XP, 18KPV, 3000EHV | RS485 RJ45 | Modbus RTU | [EG4.md](EG4.md) |
 | [Enphase](Enphase.md) | IQ7/IQ8 Microinverters, IQ Battery, IQ Gateway | Ethernet (LAN REST API) | HTTP JSON API | [Enphase.md](Enphase.md) |
 | [FoxESS](FoxESS.md) | H1, KH, H3-style inverters | LAN / RS485 | Modbus TCP / RTU | [FoxESS.md](FoxESS.md) |

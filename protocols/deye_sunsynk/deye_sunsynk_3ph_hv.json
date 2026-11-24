@@ -1,0 +1,139 @@
+{
+  "send_holding_register": true,
+  "send_input_register": false,
+  "send_coil_register": false,
+  "send_discrete_register": false,
+  "batch_size": 40,
+  "device_type_codes": {
+    "2": "String inverter",
+    "3": "Single-phase hybrid",
+    "4": "Microinverter",
+    "5": "Three-phase hybrid",
+    "512": "String inverter (0x0200)",
+    "768": "Single-phase hybrid (0x0300)",
+    "1024": "Microinverter (0x0400)",
+    "1280": "Three-phase hybrid (0x0500)"
+  },
+  "overall_state_codes": {
+    "0": "standby",
+    "1": "self-check",
+    "2": "normal",
+    "3": "alarm",
+    "4": "fault"
+  },
+  "grid_connected_codes": {
+    "0": "disconnected",
+    "1": "connected"
+  },
+  "generator_input_codes": {
+    "0": "Generator input",
+    "1": "Smart Load output",
+    "2": "Micro inverter input"
+  },
+  "priority_load_codes": {
+    "0": "battery",
+    "1": "load"
+  },
+  "use_timer_codes": {
+    "0": "off",
+    "1": "on"
+  },
+  "load_limit_codes": {
+    "0": "Selling First",
+    "1": "Zero Export to Load",
+    "2": "Zero Export to CT"
+  },
+  "relay_flags": {
+    "b0": "inverter relay",
+    "b1": "undefined load relay",
+    "b2": "grid relay",
+    "b3": "generator relay",
+    "b4": "grid give power relay",
+    "b5": "dry contact 1",
+    "b6": "dry contact 2"
+  },
+  "warning_1_flags": {
+    "b1": "W2 fan warning",
+    "b2": "W3 grid phase wrong"
+  },
+  "warning_2_flags": {
+    "b14": "W31 battery communication warning",
+    "b15": "W32 parallel communication warning"
+  },
+  "prog_charge_flags": {
+    "b0": "grid charge",
+    "b1": "generator charge"
+  },
+  "fault_1_codes": {
+    "b0": "DC_Inversed_Failure - F01",
+    "b1": "DC_Insulation_Failure - F02",
+    "b2": "GFDI_Failure - F03",
+    "b3": "GFDI_Ground_Failure - F04",
+    "b4": "EEPROM_Read_Failure - F05",
+    "b5": "EEPROM_Write_Failure - F06",
+    "b6": "DC/DC_Softstart_Fault - F07",
+    "b7": "GFDI_Relay_Failure - F08",
+    "b8": "IGBT_Failure - F09",
+    "b9": "AuxPowerBoard_Failure - F10",
+    "b10": "AC_MainContactor_Failure - F11",
+    "b11": "AC_SlaveContactor_Failure - F12",
+    "b12": "Grid_Mode_changed - F13",
+    "b13": "DC_OverCurr_Fault - F14",
+    "b14": "SW_AC_OverCurr_Fault - F15",
+    "b15": "GFCI_Failure - F16"
+  },
+  "fault_2_codes": {
+    "b0": "Tz_PV_OverCurr_Fault - F17",
+    "b1": "HW_Ac_OverCurr_Fault - F18",
+    "b2": "Tz_Integ_Fault - F19",
+    "b3": "Tz_Dc_OverCurr_Fault - F20",
+    "b4": "Tz_HV_OverCurr_Fault - F21",
+    "b5": "Tz_EmergStop_Fault - F22",
+    "b6": "Tz_GFCI_OC_Fault - F23",
+    "b7": "DC_Insulation_ISO_Fault - F24",
+    "b8": "DC_Feedback_Fault - F25",
+    "b9": "BusUnbalance_Fault - F26",
+    "b10": "DC_Insulation_Fault - F27",
+    "b11": "DCIOver_M1_Fault - F28",
+    "b12": "Parallel_CANBus_Fault - F29",
+    "b13": "AC_MainContactor_Fault - F30",
+    "b14": "AC_SlaveContactor_Fault - F31",
+    "b15": "DCIOver_M2_Fault - F32"
+  },
+  "fault_3_codes": {
+    "b0": "AC_OverCurr_Fault - F33",
+    "b1": "AC_Overload_Fault - F34",
+    "b2": "AC_NoUtility_Fault - F35",
+    "b3": "AC_GridPhaseSeque_Fault - F36",
+    "b4": "AC_Volt_Unbalance_Fault - F37",
+    "b5": "Parallel_system_Stop1 - F38",
+    "b6": "INT_AC_OverCurr_Fault - F39",
+    "b7": "INT_DC_OverCurr_Fault - F40",
+    "b8": "Parallel_System_Stop - F41",
+    "b9": "Parallel_Version_Fault - F42",
+    "b10": "AC_VW_OverVolt_Fault - F43",
+    "b11": "AC_VW_UnderVolt_Fault - F44",
+    "b12": "AC_UV_OverVolt_Fault - F45",
+    "b13": "AC_UV_UnderVolt_Fault - F46",
+    "b14": "AC_OverFreq_Fault - F47",
+    "b15": "AC_UnderFreq_Fault - F48"
+  },
+  "fault_4_codes": {
+    "b0": "AC_U_GridCurr_DcHigh_Fault - F49",
+    "b1": "AC_V_GridCurr_DcHigh_Fault - F50",
+    "b2": "AC_W_GridCurr_DcHigh_Fault - F51",
+    "b3": "AC_A_InductCurr_DcHigh_Fault - F52",
+    "b4": "AC_B_InductCurr_DcHigh_Fault - F53",
+    "b5": "BAT_VoltHigh_Fault - F54",
+    "b6": "DC_VoltHigh_Fault - F55",
+    "b7": "DC_VoltLow_Fault - F56",
+    "b8": "AC_BackFeed_Fault - F57",
+    "b9": "BMS_Communication_Fault - F58",
+    "b10": "AC_V_GridCurr_High_Fault - F59",
+    "b11": "Gen_Volt_or_Fre_Fault - F60",
+    "b12": "Button_Manual_OFF - F61",
+    "b13": "DRMs0_Stop - F62",
+    "b14": "Arc_Fault - F63",
+    "b15": "Heatsink_HighTemp_Fault - F64"
+  }
+}

@@ -900,8 +900,11 @@ MPG ships with pre-built protocols for the following devices. All protocols are 
 | `accuenergy_acuvim` | Accuenergy Acuvim II / IIR / IIE / IIW power meters | Modbus RTU |
 | `acrel_dtsd1352_c` | Acrel DTSD1352-C three-phase DIN-rail energy meter | Modbus RTU |
 | `apsystems_ecu_sunspec` | APsystems ECU SunSpec gateway | Modbus TCP |
-| `deye_sunsynk` | Deye / Sunsynk hybrid inverters | Modbus |
-| `deye_sunsynk_hybrid` | Deye / Sunsynk hybrid inverter extended map | Modbus |
+| `deye_sunsynk` | Deye / Sunsynk single-phase hybrid inverters, core monitoring subset | Modbus |
+| `deye_sunsynk_hybrid` | Deye / Sunsynk single-phase hybrid inverters (SG01/02/03/04/05LP1 and US split-phase SG01LP1-US), full map | Modbus |
+| `deye_sunsynk_3ph_lv` | Deye / Sunsynk three-phase low-voltage hybrid inverters (SG04LP3 / SG05LP3) | Modbus |
+| `deye_sunsynk_3ph_hv` | Deye / Sunsynk three-phase high-voltage hybrid inverters (SG01HP3 / SG02HP3) | Modbus |
+| `deye_sunsynk_micro_ess` | Deye hybrid microinverter / ESS units | Modbus |
 | `eg4_18kpv` | EG4 18KPV inverter | Modbus TCP |
 | `eg4_3000ehv_v1` | EG4 3000EHV inverter | Modbus RTU |
 | `eg4_gridboss_re` | EG4 GridBOSS / related equipment | Modbus RTU |

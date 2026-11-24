@@ -45,7 +45,7 @@ from classes.transports.modbus_base import modbus_base
 
 JK: str = "jk_bms_modbus_rtu"
 # Protocols that do not set the option: their ranges must be exactly what the original formulas gave.
-UNCHANGED: list[str] = ["eg4_v58", "deye_sunsynk_hybrid", "abb_fimer_trio_50_60", "pace_bms_v1.3", "victron_smartsolar_mppt"]
+UNCHANGED: list[str] = ["eg4_v58", "solark_hybrid", "abb_fimer_trio_50_60", "pace_bms_v1.3", "victron_smartsolar_mppt"]
 
 
 def _load(name: str) -> protocol_settings:
@@ -250,6 +250,6 @@ def test_jk_csv_registers_match_jk_documented_addresses_in_notes() -> None:
     for e in _jk_rows():
         if e.variable_name.endswith("_desc"):  # derived helper rows the loader adds for flag registers
             continue
-        match = re.match(r"0x([0-9A-Fa-f]+)", e.note)
+        match: re.Match[str] | None = re.match(r"0x([0-9A-Fa-f]+)", e.note)
         assert match is not None, e.variable_name
         assert int(match.group(1), 16) == e.register, e.variable_name

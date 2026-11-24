@@ -1,0 +1,196 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note,ha_device_class,ha_state_class,ha_entity_category
+0,device_type,Device Type,,USHORT,,startup,R,,"Device type. Community references report it either as the high byte of the word (0x0300 single-phase hybrid, 0x0500 three-phase hybrid) or as the small number itself, so both encodings are in the code table.",,,diagnostic
+2,communication_protocol_version,Communication Protocol Version,,USHORT,,startup,R,,Modbus protocol document version the firmware implements.,,,diagnostic
+3~7,serial_number,Serial Number,,ASCII,,startup,R,,"Ten ASCII characters, two per register.",,,diagnostic
+20_21,rated_power,Rated Power,0.1W,UINT,,startup,R,"{""Register_Endian"": ""little_endian-CDAB""}","Rated output power. Low word at register 20, high word at 21.",power,,diagnostic
+62.b8,inverter_time_year,Inverter Time Year,,8bit,,,R,"{""Offset"": 2000}",High byte of the first time register: year as an offset from 2000. Read-only here; set the clock on the inverter or in the Solarman/Deye app.,,,diagnostic
+62.b0,inverter_time_month,Inverter Time Month,,8bit,,,R,,Low byte of the first time register.,,,diagnostic
+63.b8,inverter_time_day,Inverter Time Day,,8bit,,,R,,High byte of the second time register.,,,diagnostic
+63.b0,inverter_time_hour,Inverter Time Hour,,8bit,,,R,,Low byte of the second time register.,,,diagnostic
+64.b8,inverter_time_minute,Inverter Time Minute,,8bit,,,R,,High byte of the third time register.,,,diagnostic
+64.b0,inverter_time_second,Inverter Time Second,,8bit,,,R,,Low byte of the third time register.,,,diagnostic
+80,inverter_enabled,Inverter Enabled,,USHORT,,,R,,"Documented 0=off, 1=on, but community sources disagree on the values and writing it can put the inverter in standby (fault F19). Read-only here.",,,diagnostic
+500,overall_state,Overall State,,USHORT,,,R,,Inverter operating state.,,,
+502,day_active_energy,Day Active Energy,0.1kWh,USHORT,,,R,,AC energy today.,energy,total_increasing,
+506_507,total_active_energy,Total Active Energy,0.1kWh,UINT,,,R,"{""Register_Endian"": ""little_endian-CDAB""}",Lifetime AC energy.,energy,total_increasing,
+514,day_battery_charge,Day Battery Charge,0.1kWh,USHORT,,,R,,,energy,total_increasing,
+515,day_battery_discharge,Day Battery Discharge,0.1kWh,USHORT,,,R,,,energy,total_increasing,
+516_517,total_battery_charge,Total Battery Charge,0.1kWh,UINT,,,R,"{""Register_Endian"": ""little_endian-CDAB""}",,energy,total_increasing,
+518_519,total_battery_discharge,Total Battery Discharge,0.1kWh,UINT,,,R,"{""Register_Endian"": ""little_endian-CDAB""}",,energy,total_increasing,
+520,day_grid_import,Day Grid Import,0.1kWh,USHORT,,,R,,,energy,total_increasing,
+521,day_grid_export,Day Grid Export,0.1kWh,USHORT,,,R,,,energy,total_increasing,
+522_523,total_grid_import,Total Grid Import,0.1kWh,UINT,,,R,"{""Register_Endian"": ""little_endian-CDAB""}",,energy,total_increasing,
+524_525,total_grid_export,Total Grid Export,0.1kWh,UINT,,,R,"{""Register_Endian"": ""little_endian-CDAB""}",,energy,total_increasing,
+526,day_load_energy,Day Load Energy,0.1kWh,USHORT,,,R,,,energy,total_increasing,
+527_528,total_load_energy,Total Load Energy,0.1kWh,UINT,,,R,"{""Register_Endian"": ""little_endian-CDAB""}",,energy,total_increasing,
+529,day_pv_energy,Day PV Energy,0.1kWh,USHORT,,,R,,,energy,total_increasing,
+534_535,total_pv_energy,Total PV Energy,0.1kWh,UINT,,,R,"{""Register_Endian"": ""little_endian-CDAB""}",,energy,total_increasing,
+536,day_gen_energy,Day Generator Energy,0.1kWh,USHORT,,,R,,,energy,total_increasing,
+540,dc_transformer_temperature,DC Transformer Temperature,0.1°C,USHORT,,,R,"{""Offset"": -100}",Raw value has a +1000 offset: (raw - 1000) x 0.1 degrees C.,temperature,measurement,
+541,radiator_temperature,Radiator Temperature,0.1°C,USHORT,,,R,"{""Offset"": -100}",Raw value has a +1000 offset: (raw - 1000) x 0.1 degrees C.,temperature,measurement,
+552,relay_status,Relay Status,,16BIT_FLAGS,@relay_flags,,R,,Relay and dry contact states.,,,diagnostic
+552.b2,grid_connected,Grid Connected,,1bit,0-1,,R,,Grid relay closed (bit 2 of register 552).,,,diagnostic
+553,warning_1,Warning 1,,16BIT_FLAGS,@warning_1_flags,,R,,,,,diagnostic
+554,warning_2,Warning 2,,16BIT_FLAGS,@warning_2_flags,,R,,,,,diagnostic
+555,fault_1,Fault 1,,16BIT_FLAGS,,,R,,Fault flags F01-F16; names in fault_1_codes in the protocol JSON.,,,diagnostic
+556,fault_2,Fault 2,,16BIT_FLAGS,,,R,,Fault flags F17-F32.,,,diagnostic
+557,fault_3,Fault 3,,16BIT_FLAGS,,,R,,Fault flags F33-F48.,,,diagnostic
+558,fault_4,Fault 4,,16BIT_FLAGS,,,R,,Fault flags F49-F64.,,,diagnostic
+586,battery_temperature,Battery Temperature,0.1°C,USHORT,,,R,"{""Offset"": -100}",Confirm the offset against the inverter display on your firmware. Raw value has a +1000 offset: (raw - 1000) x 0.1 degrees C.,temperature,measurement,
+587,battery_voltage,Battery Voltage,0.1V,USHORT,,,R,,,voltage,measurement,
+588,battery_soc,Battery SOC,%,USHORT,0-100,,R,,,battery,measurement,
+589,battery_2_soc,Battery 2 SOC,%,USHORT,0-100,,R,,"Second battery input, when fitted.",battery,measurement,
+590,battery_power,Battery Power,10W,SHORT,,,R,,"Positive = charging, negative = discharging. High-voltage models report this in 10 W steps.",power,measurement,
+591,battery_current,Battery Current,0.01A,SHORT,,,R,,"Positive = charging, negative = discharging.",current,measurement,
+593,battery_2_voltage,Battery 2 Voltage,0.1V,USHORT,,,R,,,voltage,measurement,
+594,battery_2_current,Battery 2 Current,0.01A,SHORT,,,R,,,current,measurement,
+595,battery_2_power,Battery 2 Power,10W,SHORT,,,R,,High-voltage models report this in 10 W steps.,power,measurement,
+596,battery_2_temperature,Battery 2 Temperature,0.1°C,USHORT,,,R,"{""Offset"": -100}",Raw value has a +1000 offset: (raw - 1000) x 0.1 degrees C.,temperature,measurement,
+598,grid_l1_voltage,Grid L1 Voltage,0.1V,USHORT,,,R,,,voltage,measurement,
+599,grid_l2_voltage,Grid L2 Voltage,0.1V,USHORT,,,R,,,voltage,measurement,
+600,grid_l3_voltage,Grid L3 Voltage,0.1V,USHORT,,,R,,,voltage,measurement,
+604,grid_l1_inner_power,Grid L1 Inner Side Power,W,SHORT,,,R,,,power,measurement,
+605,grid_l2_inner_power,Grid L2 Inner Side Power,W,SHORT,,,R,,,power,measurement,
+606,grid_l3_inner_power,Grid L3 Inner Side Power,W,SHORT,,,R,,,power,measurement,
+609,grid_frequency,Grid Frequency,0.01Hz,USHORT,,,R,,,frequency,measurement,
+610,grid_current_l1,Grid Current L1,0.01A,SHORT,,,R,,,current,measurement,
+611,grid_current_l2,Grid Current L2,0.01A,SHORT,,,R,,,current,measurement,
+612,grid_current_l3,Grid Current L3,0.01A,SHORT,,,R,,,current,measurement,
+613,grid_ct_current_l1,Grid CT Current L1,0.01A,SHORT,,,R,,,current,measurement,
+614,grid_ct_current_l2,Grid CT Current L2,0.01A,SHORT,,,R,,,current,measurement,
+615,grid_ct_current_l3,Grid CT Current L3,0.01A,SHORT,,,R,,,current,measurement,
+616,grid_ct_l1_power,Grid CT L1 Power,W,SHORT,,,R,,,power,measurement,
+617,grid_ct_l2_power,Grid CT L2 Power,W,SHORT,,,R,,,power,measurement,
+618,grid_ct_l3_power,Grid CT L3 Power,W,SHORT,,,R,,,power,measurement,
+619,grid_ct_power,Grid CT Power,W,SHORT,,,R,,Total power at the external CT. Values above 32 kW need the high word registers (not mapped).,power,measurement,
+622,grid_l1_power,Grid L1 Power,W,SHORT,,,R,,,power,measurement,
+623,grid_l2_power,Grid L2 Power,W,SHORT,,,R,,,power,measurement,
+624,grid_l3_power,Grid L3 Power,W,SHORT,,,R,,,power,measurement,
+625,grid_power,Grid Power,W,SHORT,,,R,,Total grid power. Positive = import.,power,measurement,
+627,inverter_l1_voltage,Inverter L1 Voltage,0.1V,USHORT,,,R,,,voltage,measurement,
+628,inverter_l2_voltage,Inverter L2 Voltage,0.1V,USHORT,,,R,,,voltage,measurement,
+629,inverter_l3_voltage,Inverter L3 Voltage,0.1V,USHORT,,,R,,,voltage,measurement,
+630,inverter_l1_current,Inverter L1 Current,0.01A,SHORT,,,R,,,current,measurement,
+631,inverter_l2_current,Inverter L2 Current,0.01A,SHORT,,,R,,,current,measurement,
+632,inverter_l3_current,Inverter L3 Current,0.01A,SHORT,,,R,,,current,measurement,
+633,inverter_l1_power,Inverter L1 Power,W,SHORT,,,R,,,power,measurement,
+634,inverter_l2_power,Inverter L2 Power,W,SHORT,,,R,,,power,measurement,
+635,inverter_l3_power,Inverter L3 Power,W,SHORT,,,R,,,power,measurement,
+636,inverter_power,Inverter Power,W,SHORT,,,R,,,power,measurement,
+638,inverter_frequency,Inverter Frequency,0.01Hz,USHORT,,,R,,,frequency,measurement,
+640,ups_load_l1_power,UPS Load L1 Power,W,USHORT,,,R,,,power,measurement,
+641,ups_load_l2_power,UPS Load L2 Power,W,USHORT,,,R,,,power,measurement,
+642,ups_load_l3_power,UPS Load L3 Power,W,USHORT,,,R,,,power,measurement,
+643,ups_load_power,UPS Load Total Power,W,USHORT,,,R,,,power,measurement,
+644,load_l1_voltage,Load L1 Voltage,0.1V,USHORT,,,R,,,voltage,measurement,
+645,load_l2_voltage,Load L2 Voltage,0.1V,USHORT,,,R,,,voltage,measurement,
+646,load_l3_voltage,Load L3 Voltage,0.1V,USHORT,,,R,,,voltage,measurement,
+650,load_l1_power,Load L1 Power,W,SHORT,,,R,,,power,measurement,
+651,load_l2_power,Load L2 Power,W,SHORT,,,R,,,power,measurement,
+652,load_l3_power,Load L3 Power,W,SHORT,,,R,,,power,measurement,
+653,load_power,Load Power Total,W,SHORT,,,R,,,power,measurement,
+655,load_frequency,Load Frequency,0.01Hz,USHORT,,,R,,,frequency,measurement,
+661,gen_l1_voltage,Generator L1 Voltage,0.1V,USHORT,,,R,,,voltage,measurement,
+662,gen_l2_voltage,Generator L2 Voltage,0.1V,USHORT,,,R,,,voltage,measurement,
+663,gen_l3_voltage,Generator L3 Voltage,0.1V,USHORT,,,R,,,voltage,measurement,
+664,gen_l1_power,Generator L1 Power,W,SHORT,,,R,,,power,measurement,
+665,gen_l2_power,Generator L2 Power,W,SHORT,,,R,,,power,measurement,
+666,gen_l3_power,Generator L3 Power,W,SHORT,,,R,,,power,measurement,
+667,aux_power,AUX Power,W,SHORT,,,R,,Total power at the generator/AUX port.,power,measurement,
+672,pv1_power,PV1 Power,10W,SHORT,,,R,,High-voltage models report this in 10 W steps.,power,measurement,
+673,pv2_power,PV2 Power,10W,SHORT,,,R,,High-voltage models report this in 10 W steps.,power,measurement,
+674,pv3_power,PV3 Power,10W,SHORT,,,R,,Models with that many MPPT inputs. High-voltage models report this in 10 W steps.,power,measurement,
+675,pv4_power,PV4 Power,10W,SHORT,,,R,,Models with that many MPPT inputs. High-voltage models report this in 10 W steps.,power,measurement,
+727,pv5_power,PV5 Power,10W,SHORT,,,R,,Models with that many MPPT inputs. High-voltage models report this in 10 W steps.,power,measurement,
+728,pv6_power,PV6 Power,10W,SHORT,,,R,,Models with that many MPPT inputs. High-voltage models report this in 10 W steps.,power,measurement,
+729,pv7_power,PV7 Power,10W,SHORT,,,R,,Models with that many MPPT inputs. High-voltage models report this in 10 W steps.,power,measurement,
+730,pv8_power,PV8 Power,10W,SHORT,,,R,,Models with that many MPPT inputs. High-voltage models report this in 10 W steps.,power,measurement,
+676,pv1_voltage,PV1 Voltage,0.1V,USHORT,,,R,,,voltage,measurement,
+677,pv1_current,PV1 Current,0.1A,USHORT,,,R,,,current,measurement,
+678,pv2_voltage,PV2 Voltage,0.1V,USHORT,,,R,,,voltage,measurement,
+679,pv2_current,PV2 Current,0.1A,USHORT,,,R,,,current,measurement,
+680,pv3_voltage,PV3 Voltage,0.1V,USHORT,,,R,,,voltage,measurement,
+681,pv3_current,PV3 Current,0.1A,USHORT,,,R,,,current,measurement,
+682,pv4_voltage,PV4 Voltage,0.1V,USHORT,,,R,,,voltage,measurement,
+683,pv4_current,PV4 Current,0.1A,USHORT,,,R,,,current,measurement,
+99,battery_equalization_voltage,Battery Equalization Voltage,0.01V,USHORT,,60s,RW,,,voltage,,config
+100,battery_absorption_voltage,Battery Absorption Voltage,0.01V,USHORT,,60s,RW,,,voltage,,config
+101,battery_float_voltage,Battery Float Voltage,0.01V,USHORT,,60s,RW,,,voltage,,config
+102,battery_capacity_current,Battery Capacity,Ah,USHORT,,60s,RW,,,,,config
+104,system_zero_export_power,System Zero Export Power,10W,SHORT,,60s,RW,,,,,config
+105,battery_equalization_days,Battery Equalization Days,days,USHORT,,60s,RW,,,,,config
+106,battery_equalization_hours,Battery Equalization Hours,0.5h,USHORT,,60s,RW,,Duration in 30 minute steps.,,,config
+108,battery_max_charge_current,Battery Max Charge Current,A,USHORT,0-300,60s,RW,,,current,,config
+109,battery_max_discharge_current,Battery Max Discharge Current,A,USHORT,0-300,60s,RW,,,current,,config
+111,battery_type,Battery Type,,USHORT,,60s,RW,,"Battery control mode (lead-acid, lithium, no battery); numeric code.",,,config
+112.b0,battery_wake_up,Battery Wake Up,,1bit,0-1,60s,RW,,,,,config
+113,battery_resistance,Battery Resistance,mOhm,USHORT,,60s,RW,,,,,config
+114,battery_charge_efficiency,Battery Charge Efficiency,0.1%,USHORT,,60s,RW,,,,,config
+115,battery_shutdown_capacity,Battery Shutdown Capacity,%,USHORT,0-100,60s,RW,,,,,config
+116,battery_restart_capacity,Battery Restart Capacity,%,USHORT,0-100,60s,RW,,,,,config
+117,battery_low_capacity,Battery Low Capacity,%,USHORT,0-100,60s,RW,,,,,config
+118,battery_shutdown_voltage,Battery Shutdown Voltage,0.01V,USHORT,,60s,RW,,,voltage,,config
+119,battery_restart_voltage,Battery Restart Voltage,0.01V,USHORT,,60s,RW,,,voltage,,config
+120,battery_low_voltage,Battery Low Voltage,0.01V,USHORT,,60s,RW,,,voltage,,config
+121,gen_max_operating_time,Generator Max Operating Time,0.1h,USHORT,,60s,RW,,,,,config
+122,gen_cooling_time,Generator Cooling Time,0.1h,USHORT,,60s,RW,,,,,config
+123,gen_charge_start_voltage,Generator Charge Start Voltage,0.01V,USHORT,,60s,RW,,,voltage,,config
+124,gen_charge_start_soc,Generator Charge Start SOC,%,USHORT,0-100,60s,RW,,,,,config
+125,gen_charge_battery_current,Generator Charge Battery Current,A,USHORT,0-300,60s,RW,,,current,,config
+126,grid_charge_start_voltage,Grid Charge Start Voltage,0.01V,USHORT,,60s,RW,,,voltage,,config
+127,grid_charge_start_soc,Grid Charge Start SOC,%,USHORT,0-100,60s,RW,,,,,config
+128,grid_charge_battery_current,Grid Charge Battery Current,A,USHORT,0-300,60s,RW,,,current,,config
+129,gen_charge_enabled,Generator Charge Enabled,,USHORT,0-1,60s,RW,,,,,config
+130,grid_charge_enabled,Grid Charge Enabled,,USHORT,0-1,60s,RW,,,,,config
+133,generator_input,Generator Input,,USHORT,,60s,RW,,AUX port function.,,,config
+141,priority_load,Priority Load,,USHORT,,60s,RW,,Energy management mode word (priority load). Some references label this register an energy management bitmask; value shown raw.,,,config
+142,load_limit,Load Limit,,USHORT,,60s,RW,,"Work mode: Selling First, Zero Export to Load, Zero Export to CT.",,,config
+143,export_limit_power,Export Limit Power,10W,USHORT,,60s,RW,,,,,config
+145,solar_export,Solar Export,,USHORT,0-1,60s,RW,,,,,config
+146.b0,use_timer,Use Timer,,1bit,0-1,60s,RW,,Bit 0 of register 146: time of use schedule enabled. Bits 1-7 enable Monday through Sunday.,,,config
+182,grid_standard,Grid Standard,,USHORT,,startup,R,,,,,config
+183,configured_grid_frequency,Configured Grid Frequency,,USHORT,,startup,R,,,,,config
+184,configured_grid_phases,Configured Grid Phases,,USHORT,,startup,R,,,,,config
+191,grid_peak_shaving_power,Grid Peak Shaving Power,10W,USHORT,,60s,RW,,,,,config
+340,max_solar_power,Max Solar Power,10W,USHORT,,60s,RW,,,,,config
+148,prog1_time,Prog1 Time,,USHORT,0-2359,60s,RW,,"Time of use program 1 start time as HHMM (decimal digits, for example 1530 = 15:30). The inverter works in 5 minute steps.",,,config
+149,prog2_time,Prog2 Time,,USHORT,0-2359,60s,RW,,"Time of use program 2 start time as HHMM (decimal digits, for example 1530 = 15:30). The inverter works in 5 minute steps.",,,config
+150,prog3_time,Prog3 Time,,USHORT,0-2359,60s,RW,,"Time of use program 3 start time as HHMM (decimal digits, for example 1530 = 15:30). The inverter works in 5 minute steps.",,,config
+151,prog4_time,Prog4 Time,,USHORT,0-2359,60s,RW,,"Time of use program 4 start time as HHMM (decimal digits, for example 1530 = 15:30). The inverter works in 5 minute steps.",,,config
+152,prog5_time,Prog5 Time,,USHORT,0-2359,60s,RW,,"Time of use program 5 start time as HHMM (decimal digits, for example 1530 = 15:30). The inverter works in 5 minute steps.",,,config
+153,prog6_time,Prog6 Time,,USHORT,0-2359,60s,RW,,"Time of use program 6 start time as HHMM (decimal digits, for example 1530 = 15:30). The inverter works in 5 minute steps.",,,config
+154,prog1_power,Prog1 Power,10W,USHORT,,60s,RW,,Time of use program 1 power limit. High-voltage models report this in 10 W steps.,,,config
+155,prog2_power,Prog2 Power,10W,USHORT,,60s,RW,,Time of use program 2 power limit. High-voltage models report this in 10 W steps.,,,config
+156,prog3_power,Prog3 Power,10W,USHORT,,60s,RW,,Time of use program 3 power limit. High-voltage models report this in 10 W steps.,,,config
+157,prog4_power,Prog4 Power,10W,USHORT,,60s,RW,,Time of use program 4 power limit. High-voltage models report this in 10 W steps.,,,config
+158,prog5_power,Prog5 Power,10W,USHORT,,60s,RW,,Time of use program 5 power limit. High-voltage models report this in 10 W steps.,,,config
+159,prog6_power,Prog6 Power,10W,USHORT,,60s,RW,,Time of use program 6 power limit. High-voltage models report this in 10 W steps.,,,config
+160,prog1_voltage,Prog1 Voltage,0.01V,USHORT,,60s,RW,,Time of use program 1 battery voltage target.,,,config
+161,prog2_voltage,Prog2 Voltage,0.01V,USHORT,,60s,RW,,Time of use program 2 battery voltage target.,,,config
+162,prog3_voltage,Prog3 Voltage,0.01V,USHORT,,60s,RW,,Time of use program 3 battery voltage target.,,,config
+163,prog4_voltage,Prog4 Voltage,0.01V,USHORT,,60s,RW,,Time of use program 4 battery voltage target.,,,config
+164,prog5_voltage,Prog5 Voltage,0.01V,USHORT,,60s,RW,,Time of use program 5 battery voltage target.,,,config
+165,prog6_voltage,Prog6 Voltage,0.01V,USHORT,,60s,RW,,Time of use program 6 battery voltage target.,,,config
+166,prog1_capacity,Prog1 Capacity,%,USHORT,0-100,60s,RW,,Time of use program 1 battery SOC target.,,,config
+167,prog2_capacity,Prog2 Capacity,%,USHORT,0-100,60s,RW,,Time of use program 2 battery SOC target.,,,config
+168,prog3_capacity,Prog3 Capacity,%,USHORT,0-100,60s,RW,,Time of use program 3 battery SOC target.,,,config
+169,prog4_capacity,Prog4 Capacity,%,USHORT,0-100,60s,RW,,Time of use program 4 battery SOC target.,,,config
+170,prog5_capacity,Prog5 Capacity,%,USHORT,0-100,60s,RW,,Time of use program 5 battery SOC target.,,,config
+171,prog6_capacity,Prog6 Capacity,%,USHORT,0-100,60s,RW,,Time of use program 6 battery SOC target.,,,config
+172,prog1_charge,Prog1 Charge,,16BIT_FLAGS,@prog_charge_flags,60s,RW,,"Time of use program 1 flags. The whole word is written, so read it first and keep the other bits.",,,config
+173,prog2_charge,Prog2 Charge,,16BIT_FLAGS,@prog_charge_flags,60s,RW,,"Time of use program 2 flags. The whole word is written, so read it first and keep the other bits.",,,config
+174,prog3_charge,Prog3 Charge,,16BIT_FLAGS,@prog_charge_flags,60s,RW,,"Time of use program 3 flags. The whole word is written, so read it first and keep the other bits.",,,config
+175,prog4_charge,Prog4 Charge,,16BIT_FLAGS,@prog_charge_flags,60s,RW,,"Time of use program 4 flags. The whole word is written, so read it first and keep the other bits.",,,config
+176,prog5_charge,Prog5 Charge,,16BIT_FLAGS,@prog_charge_flags,60s,RW,,"Time of use program 5 flags. The whole word is written, so read it first and keep the other bits.",,,config
+177,prog6_charge,Prog6 Charge,,16BIT_FLAGS,@prog_charge_flags,60s,RW,,"Time of use program 6 flags. The whole word is written, so read it first and keep the other bits.",,,config
+210,bms_charge_voltage,BMS Charge Voltage,0.1V,USHORT,,,R,,,voltage,measurement,
+211,bms_discharge_voltage,BMS Discharge Voltage,0.1V,USHORT,,,R,,,voltage,measurement,
+212,bms_charge_current_limit,BMS Charge Current Limit,A,SHORT,,,R,,,current,measurement,
+213,bms_discharge_current_limit,BMS Discharge Current Limit,A,SHORT,,,R,,,current,measurement,
+214,bms_battery_soc,BMS Battery SOC,%,USHORT,0-100,,R,,,battery,measurement,
+215,bms_battery_voltage,BMS Battery Voltage,0.1V,USHORT,,,R,,,voltage,measurement,
+216,bms_battery_current,BMS Battery Current,0.1A,SHORT,,,R,,,current,measurement,
+217,bms_battery_temperature,BMS Battery Temperature,0.1°C,USHORT,,,R,"{""Offset"": -100}",Raw value has a +1000 offset: (raw - 1000) x 0.1 degrees C.,temperature,measurement,
+218,bms_max_charge_current,BMS Max Charge Current,A,SHORT,,,R,,,current,measurement,
+219,bms_max_discharge_current,BMS Max Discharge Current,A,SHORT,,,R,,,current,measurement,
+220,bms_alarm_flag,BMS Alarm Flag,,USHORT,,,R,,,,,diagnostic

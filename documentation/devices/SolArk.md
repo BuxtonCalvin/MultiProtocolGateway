@@ -32,7 +32,7 @@
 Sol-Ark inverters share hardware lineage with Deye and Sunsynk and expose a Modbus RS485 interface for monitoring. This guide covers hardware connection options, port identification, wiring, API access, and MPG configuration for publishing Sol-Ark data to an MQTT broker.
 
 > **Important:** Sol-Ark's monitoring dongle port is **separate** from the Modbus RS485 port on models that have both. This integration does not interfere with the Sol-Ark cloud dongle on those models — both can operate simultaneously. On models with a combined BMS/RS485 port, a splitter cable is required (see Section 6).
-> **Register map compatibility:** Sol-Ark shares its Modbus register map with Deye and Sunsynk. If `solark_v1.1` is not recognized, the Deye/Sunsynk protocol selector may also work. Refer to the Deye/Sunsynk guide for full register documentation.
+> **Register map compatibility:** Sol-Ark and Deye/Sunsynk come from the same hardware lineage, but Deye uses a different register layout for each hardware family (single-phase, three-phase LV, three-phase HV), and Sol-Ark US models are split-phase. Deye's own US split-phase model (SG01LP1-US) uses the single-phase layout, but Sol-Ark's register layout is not confirmed to match. If `solark_v1.1` does not give correct values, compare a few readings with the inverter display before trying `deye_sunsynk_hybrid`. See the Deye/Sunsynk guide for the family differences.
 
 ---
 
@@ -245,13 +245,13 @@ soc = inverter.read_holding_registers(register_addr=103, quantity=1)
 print(f"Battery SOC: {soc[0]}%")
 ```
 
-The Sol-Ark/Deye/Sunsynk register map is shared. Refer to the Deye/Sunsynk guide (Section 8) for the full Solarman V5 framing specification and register map.
+Refer to the Deye/Sunsynk guide (Section 8) for the full Solarman V5 framing specification. Register layouts differ by hardware family; see Section 3 of that guide.
 
 ### Sol-Ark Monitoring Portal
 
 Sol-Ark provides cloud monitoring via the Sol-Ark Customer Portal, which uses the Solarman backend. The SolarmanPV cloud API (documented in the Deye/Sunsynk guide, Section 8) applies equally to Sol-Ark systems.
 
-> **MPG module note:** A `solark_solarman_v1` protocol module using `pysolarmanv5` over port 8899 would provide full Modbus register access for Sol-Ark inverters via the existing Wi-Fi dongle, without requiring a physical RS485 cable. The Sol-Ark and Deye/Sunsynk register maps are compatible — a shared `deye_sunsynk_solark_v1` module is likely sufficient for all three brands.
+> **MPG module note:** A `solark_solarman_v1` protocol module using `pysolarmanv5` over port 8899 would provide full Modbus register access for Sol-Ark inverters via the existing Wi-Fi dongle, without requiring a physical RS485 cable. Register compatibility between Sol-Ark and the Deye families is not confirmed, so a Sol-Ark module should be validated against Sol-Ark's own Modbus document.
 
 ---
 

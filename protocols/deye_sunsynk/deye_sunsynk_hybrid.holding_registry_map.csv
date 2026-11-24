@@ -1,112 +1,147 @@
 register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note,ha_device_class,ha_state_class,ha_entity_category
-# ─── System / Identity ─────────────────────────────────────────────────────────,,,,,,,,,,,,
-16,rated_power_hi,Rated Power High Word,W,uint16,,,R,,High word of 32-bit rated power; combine with register 17,power,measurement,
-17,rated_power_lo,Rated Power Low Word,W,uint16,,,R,,Low word of 32-bit rated power; full value = (reg16<<16)|reg17; multiply by 0.1,power,measurement,
-22,date_time_year_month,Date Time Year/Month,,uint16,,,R/W,,High byte = year (offset from 2000); low byte = month (1-12),,,
-23,date_time_day_hour,Date Time Day/Hour,,uint16,,,R/W,,High byte = day; low byte = hour,,,
-24,date_time_min_sec,Date Time Minute/Second,,uint16,,,R/W,,High byte = minute; low byte = second,,,
-43,inverter_enabled,Inverter Enable,,uint16,"0=off,1=on",,R/W,,Enable or disable inverter output,,,
-59,overall_state,Overall State,,uint16,"0=standby,1=self-check,2=normal,3=alarm,4=fault",,R,,Inverter operating state; see Fronius state table,,,
-60,day_active_energy,Day Active Energy,0.1kWh,int16,,,R,,AC energy generated today; multiply by -0.1 for kWh (signed; negative = generation),energy,total_increasing,
-61,day_reactive_energy,Day Reactive Energy,0.1kVarh,int16,,,R,,Reactive energy today; multiply by -0.1,,,
-63,total_active_energy_hi,Total Active Energy High,0.1kWh,uint16,,,R,,High word of 32-bit lifetime energy; combine with reg64; multiply by 0.1,energy,total_increasing,
-64,total_active_energy_lo,Total Active Energy Low,0.1kWh,uint16,,,R,,Low word of 32-bit lifetime active energy,energy,total_increasing,
-65,month_pv_energy,Month PV Energy,0.1kWh,uint16,,,R,,PV energy generated this calendar month; multiply by 0.1,energy,total_increasing,
-66,month_load_energy,Month Load Energy,0.1kWh,uint16,,,R,,Load energy consumed this month; multiply by 0.1,energy,total_increasing,
-67,month_grid_energy,Month Grid Energy,0.1kWh,uint16,,,R,,Grid energy (import) this month; multiply by 0.1,energy,total_increasing,
-68,year_pv_energy_hi,Year PV Energy High,0.1kWh,uint16,,,R,,High word of 32-bit year PV energy,energy,total_increasing,
-69,year_pv_energy_lo,Year PV Energy Low,0.1kWh,uint16,,,R,,Low word of 32-bit year PV energy,energy,total_increasing,
-70,day_battery_charge,Day Battery Charge,0.1kWh,uint16,,,R,,Battery energy charged today; multiply by 0.1,energy,total_increasing,
-71,day_battery_discharge,Day Battery Discharge,0.1kWh,uint16,,,R,,Battery energy discharged today; multiply by 0.1,energy,total_increasing,
-72,total_battery_charge_hi,Total Battery Charge High,0.1kWh,uint16,,,R,,Lifetime battery charged (high word); multiply by 0.1,energy,total_increasing,
-73,total_battery_charge_lo,Total Battery Charge Low,0.1kWh,uint16,,,R,,Lifetime battery charged (low word),energy,total_increasing,
-74,total_battery_discharge_hi,Total Battery Discharge High,0.1kWh,uint16,,,R,,Lifetime battery discharged (high word),energy,total_increasing,
-75,total_battery_discharge_lo,Total Battery Discharge Low,0.1kWh,uint16,,,R,,Lifetime battery discharged (low word),energy,total_increasing,
-76,day_grid_import,Day Grid Import,0.1kWh,uint16,,,R,,Grid energy imported today; multiply by 0.1,energy,total_increasing,
-77,day_grid_export,Day Grid Export,0.1kWh,uint16,,,R,,Grid energy exported today; multiply by 0.1,energy,total_increasing,
-78,total_grid_import_hi,Total Grid Import High,0.1kWh,uint16,,,R,,Lifetime grid import (high word),energy,total_increasing,
-80,total_grid_import_lo,Total Grid Import Low,0.1kWh,uint16,,,R,,Lifetime grid import (low word); note register 79 is gap,energy,total_increasing,
-81,total_grid_export_hi,Total Grid Export High,0.1kWh,uint16,,,R,,Lifetime grid export (high word),energy,total_increasing,
-82,total_grid_export_lo,Total Grid Export Low,0.1kWh,uint16,,,R,,Lifetime grid export (low word),energy,total_increasing,
-84,day_load_energy,Day Load Energy,0.1kWh,uint16,,,R,,Load energy consumed today; multiply by 0.1,energy,total_increasing,
-85,total_load_energy_hi,Total Load Energy High,0.1kWh,uint16,,,R,,Lifetime load energy (high word),energy,total_increasing,
-86,total_load_energy_lo,Total Load Energy Low,0.1kWh,uint16,,,R,,Lifetime load energy (low word),energy,total_increasing,
-87,year_load_energy_hi,Year Load Energy High,0.1kWh,uint16,,,R,,Year-to-date load energy (high word),energy,total_increasing,
-88,year_load_energy_lo,Year Load Energy Low,0.1kWh,uint16,,,R,,Year-to-date load energy (low word),energy,total_increasing,
-90,dc_transformer_temperature,DC Transformer Temperature,0.1°C,int16,,,R,,Internal DC transformer temperature; multiply by 0.1,temperature,measurement,
-91,radiator_temperature,Radiator Temperature,0.1°C,int16,,,R,,Heat sink / radiator temperature; multiply by 0.1,temperature,measurement,
-92,sd_status,SD Card Status,,uint16,,,R,,SD card present and status code,,,
-95,environment_temperature,Environment Temperature,0.1°C,int16,,,R,,Ambient temperature sensor; multiply by 0.1,temperature,measurement,
-96,total_pv_energy_hi,Total PV Energy High,0.1kWh,uint16,,,R,,Lifetime PV energy (high word),energy,total_increasing,
-97,total_pv_energy_lo,Total PV Energy Low,0.1kWh,uint16,,,R,,Lifetime PV energy (low word),energy,total_increasing,
-98,year_grid_export_hi,Year Grid Export High,0.1kWh,uint16,,,R,,Year-to-date grid export (high word),energy,total_increasing,
-99,year_grid_export_lo,Year Grid Export Low,0.1kWh,uint16,,,R,,Year-to-date grid export (low word),energy,total_increasing,
-103,fault_1,fault_1,,uint16,,,R,,Fault bitmask word 1 (Sol-Ark/Deye F08-F16); see fault_1_codes in JSON,,,
-104,fault_2,fault_2,,uint16,,,R,,Fault bitmask word 2 (F18-F29); see fault_2_codes in JSON,,,
-105,fault_3,fault_3,,uint16,,,R,,Fault bitmask word 3 (F33-F48); see fault_3_codes in JSON,,,
-106,fault_4,fault_4,,uint16,,,R,,Fault bitmask word 4 (F55-F64); see fault_4_codes in JSON,,,
-108,day_pv_energy,Day PV Energy,0.1kWh,uint16,,,R,,PV energy generated today; multiply by 0.1,energy,total_increasing,
-# ─── Solar PV Inputs ───────────────────────────────────────────────────────────,,,,,,,,,,,,
-109,pv1_voltage,PV1 Voltage,0.1V,uint16,0-6500,,R,,PV string 1 voltage; multiply by 0.1,voltage,measurement,
-110,pv1_current,PV1 Current,0.1A,uint16,0-1000,,R,,PV string 1 current; multiply by 0.1,current,measurement,
-111,pv2_voltage,PV2 Voltage,0.1V,uint16,0-6500,,R,,PV string 2 voltage; multiply by 0.1,voltage,measurement,
-112,pv2_current,PV2 Current,0.1A,uint16,0-1000,,R,,PV string 2 current; multiply by 0.1,current,measurement,
-113,pv3_voltage,PV3 Voltage,0.1V,uint16,0-6500,,R,,PV string 3 voltage (4-MPPT models); multiply by 0.1,voltage,measurement,
-114,pv3_current,PV3 Current,0.1A,uint16,0-1000,,R,,PV string 3 current; multiply by 0.1,current,measurement,
-186,pv1_power,PV1 Power,W,int16,-32767-32767,,R,,PV string 1 power; multiply by -1 for positive watt reading,power,measurement,
-187,pv2_power,PV2 Power,W,int16,-32767-32767,,R,,PV string 2 power; multiply by -1,power,measurement,
-188,pv3_power,PV3 Power,W,int16,-32767-32767,,R,,PV string 3 power; multiply by -1 (4-MPPT models),power,measurement,
-# ─── Grid ──────────────────────────────────────────────────────────────────────,,,,,,,,,,,,
-79,grid_frequency,Grid Frequency,0.01Hz,uint16,4500-6500,,R,,Mains frequency; multiply by 0.01,frequency,measurement,
-150,grid_voltage,Grid Voltage L1,0.1V,uint16,,,R,,Grid voltage phase L1; multiply by 0.1 (single-phase),voltage,measurement,
-160,grid_current_l1,Grid Current L1,0.01A,int16,,,R,,Grid current L1; combine with 161 as MathSensor; multiply by 0.01,current,measurement,
-161,grid_current_l2,Grid Current L2,0.01A,int16,,,R,,Grid current L2 (three-phase); multiply by 0.01,current,measurement,
-167,grid_ld_power,Grid Power L1,W,int16,-32767-32767,,R,,Grid/AC input power phase L1; multiply by -1 for conventional sign,power,measurement,
-168,grid_l2_power,Grid Power L2,W,int16,-32767-32767,,R,,Grid/AC input power phase L2; multiply by -1 (three-phase),power,measurement,
-169,grid_power,Grid Power Total,W,int16,-32767-32767,,R,,Total grid power L1+L2; positive=import negative=export; multiply by -1,power,measurement,
-172,grid_ct_power,Grid CT Power,W,int16,-32767-32767,,R,,Power measured at grid CT clamp; positive=import; multiply by -1,power,measurement,
-194,grid_connected,Grid Connected,,uint16,"0=disconnected,1=connected",,R,,Grid relay/connection status,,,
-192,load_frequency,Load Frequency,0.01Hz,uint16,,,R,,Inverter output frequency; multiply by 0.01,frequency,measurement,
-# ─── Inverter AC Output ────────────────────────────────────────────────────────,,,,,,,,,,,,
-154,inverter_voltage,Inverter Voltage,0.1V,uint16,,,R,,AC output voltage; multiply by 0.1,voltage,measurement,
-164,inverter_current,Inverter Current,0.01A,int16,,,R,,AC output current; multiply by 0.01,current,measurement,
-175,inverter_power,Inverter Power,W,int16,-32767-32767,,R,,Inverter AC output power; multiply by -1,power,measurement,
-193,inverter_frequency,Inverter Frequency,0.01Hz,uint16,,,R,,Inverter output frequency; multiply by 0.01,frequency,measurement,
-# ─── Load / Output ─────────────────────────────────────────────────────────────,,,,,,,,,,,,
-176,load_l1_power,Load Power L1,W,int16,-32767-32767,,R,,Load power phase L1; multiply by -1,power,measurement,
-177,load_l2_power,Load Power L2,W,int16,-32767-32767,,R,,Load power phase L2 (three-phase); multiply by -1,power,measurement,
-178,load_power,Load Power Total,W,int16,-32767-32767,,R,,Total load power; multiply by -1,power,measurement,
-166,aux_power,AUX / Generator Power,W,int16,-32767-32767,,R,,AUX (generator) input power; multiply by -1,power,measurement,
-181,aux_voltage,AUX Voltage,0.1V,uint16,,,R,,AUX port voltage; multiply by 0.1,voltage,measurement,
-196,aux_frequency,AUX Frequency,0.1Hz,uint16,,,R,,AUX port frequency; multiply by 0.1,frequency,measurement,
-# ─── Battery ───────────────────────────────────────────────────────────────────,,,,,,,,,,,,
-182,battery_temperature,Battery Temperature,0.1°C,int16,-300-1500,,R,,Battery temperature; multiply by 0.1,temperature,measurement,
-183,battery_voltage,Battery Voltage,0.01V,uint16,,,R,,Battery terminal voltage; multiply by 0.01,voltage,measurement,
-184,battery_soc,Battery SOC,%,uint16,0-100,,R,,Battery state of charge (0-100),battery,measurement,
-190,battery_power,Battery Power,W,int16,-32767-32767,,R,,Battery power; positive=charging negative=discharging; multiply by -1,power,measurement,
-191,battery_current,Battery Current,0.01A,int16,-3276-3276,,R,,Battery current; positive=charging; multiply by -0.01,current,measurement,
-200,control_mode,Control Mode,,uint16,,,R,,System control mode; see Deye mode table,,,
-217,battery_shutdown_capacity,Battery Shutdown Capacity,%,uint16,0-100,,R/W,,SOC at which battery disconnects to protect against deep discharge,,measurement,
-218,battery_restart_capacity,Battery Restart Capacity,%,uint16,0-100,,R/W,,SOC at which battery reconnects after shutdown,,measurement,
-219,battery_low_capacity,Battery Low Capacity,%,uint16,0-100,,R/W,,SOC at which low battery warning is issued,,measurement,
-220,battery_shutdown_voltage,Battery Shutdown Voltage,0.01V,uint16,,,R/W,,Voltage threshold for battery disconnect; multiply by 0.01,voltage,measurement,
-222,battery_low_voltage,Battery Low Voltage,0.01V,uint16,,,R/W,,Voltage threshold for low battery warning; multiply by 0.01,voltage,measurement,
-232,grid_charge_enabled,Grid Charge Enable,,uint16,0-1,,R/W,,Bitmask bit 0: 1=allow charging from grid,,,
-235,generator_input,Generator Input Mode,,uint16,"0=disable,1=output,2=input",,R/W,,AUX port function configuration,,,
-243,priority_load,Priority Load Mode,,uint16,"0=battery,1=load",,R/W,,Energy dispatch priority,,,
-248,use_timer,Use Timer,,uint16,"0=off,1=on",,R/W,,Enable time-of-use schedule,,,
-312,battery_charge_voltage,Battery Charging Voltage,0.01V,uint16,,,R,,Active battery charge voltage setpoint; multiply by 0.01,voltage,measurement,
-314,battery_charge_limit_current,Battery Charge Limit Current,A,int16,,,R,,Maximum allowed charge current (from BMS),current,measurement,
-315,battery_discharge_limit_current,Battery Discharge Limit Current,A,int16,,,R,,Maximum allowed discharge current (from BMS),current,measurement,
-603,battery_1_soc,Battery 1 SOC (Master),%,uint16,0-100,,R,,SOC of battery module 1 in multi-battery systems,battery,measurement,
-611,battery_1_cycles,Battery 1 Cycle Count,,uint16,0-65535,,R,,Charge cycle count for battery module 1,,,
-,,,,,,,,,,,,
-# Deye SUN-xK-SG series / Sunsynk hybrid inverters (single-phase and three-phase),,,,,,,,,,,,
-# Identical register map shared between Deye and Sunsynk branded units; also used by Sol-Ark,,,,,,,,,,,,
-# Interface: Modbus RTU RS485 on COM/RJ45 port; 9600 baud 8N1; unit ID 1 (default),,,,,,,,,,,,
-# Also accessible via Modbus TCP (disabled by default; enable in inverter settings),,,,,,,,,,,,
-# RS485 wiring: RJ45 port on inverter; pins 7(A+) and 8(B-) for single-phase models,,,,,,,,,,,,
-#   Three-phase models: verify pinout against model-specific manual,,,,,,,,,,,,
-# Function code: FC03 (read holding registers); FC06 (write single); FC16 (write multiple),,,,,,,,,,,,
-# All values are uint16 unless noted; scaling factors listed in note column,,,,,,,,,,,,
-# Register addresses are decimal; protocol document uses hex — add 1 to hex value for Modbus PDU,,,,,,,,,,,,
+0,device_type,Device Type,,USHORT,,startup,R,,"Device type. Community references report it either as the high byte of the word (0x0300 single-phase hybrid, 0x0500 three-phase hybrid) or as the small number itself, so both encodings are in the code table.",,,diagnostic
+2,communication_protocol_version,Communication Protocol Version,,USHORT,,startup,R,,Modbus protocol document version the firmware implements (for example 0x0201 = 513).,,,diagnostic
+3~7,serial_number,Serial Number,,ASCII,,startup,R,,"Ten ASCII characters, two per register.",,,diagnostic
+11,control_board_aux_version,Control Board Auxiliary Version,,USHORT,,startup,R,,Control board auxiliary program version (V118 protocol document).,,,diagnostic
+13,control_board_version,Control Board Firmware Version,,USHORT,,startup,R,,Matches the MAIN version on the inverter LCD.,,,diagnostic
+14,communication_board_version,Communication Board Firmware Version,,USHORT,,startup,R,,Matches the HMI version on the inverter LCD.,,,diagnostic
+16_17,rated_power,Rated Power,0.1W,UINT,,startup,R,"{""Register_Endian"": ""little_endian-CDAB""}","Rated output power. Low word at register 16, high word at 17.",power,,diagnostic
+22.b8,inverter_time_year,Inverter Time Year,,8bit,,,R,"{""Offset"": 2000}",High byte of the first time register: year as an offset from 2000. Read-only here; set the clock on the inverter or in the Solarman/Deye app.,,,diagnostic
+22.b0,inverter_time_month,Inverter Time Month,,8bit,,,R,,Low byte of the first time register.,,,diagnostic
+23.b8,inverter_time_day,Inverter Time Day,,8bit,,,R,,High byte of the second time register.,,,diagnostic
+23.b0,inverter_time_hour,Inverter Time Hour,,8bit,,,R,,Low byte of the second time register.,,,diagnostic
+24.b8,inverter_time_minute,Inverter Time Minute,,8bit,,,R,,High byte of the third time register.,,,diagnostic
+24.b0,inverter_time_second,Inverter Time Second,,8bit,,,R,,Low byte of the third time register.,,,diagnostic
+43,inverter_enabled,Inverter Enabled,,USHORT,,,R,,"Documented 0=off, 1=on. Reported to read 0 on a running SG05LP1 (firmware 3389-1515) and writing it can shut the inverter down, so it is read-only here.",,,diagnostic
+53,max_solar_power,Max Solar Power,W,USHORT,,60s,RW,,Maximum PV power the inverter will use.,,,config
+59,overall_state,Overall State,,USHORT,,,R,,Inverter operating state.,,,
+60,day_active_energy,Day Active Energy,0.1kWh,USHORT,,,R,,AC energy today.,energy,total_increasing,
+61,day_reactive_energy,Day Reactive Energy,0.1kVarh,USHORT,,,R,,Reactive energy today.,,total_increasing,
+63_64,total_active_energy,Total Active Energy,0.1kWh,UINT,,,R,"{""Register_Endian"": ""little_endian-CDAB""}",Lifetime AC energy.,energy,total_increasing,
+65,month_pv_energy,Month PV Energy,0.1kWh,USHORT,,,R,,PV energy this month. The V118 document lists 1 kWh steps; hardware tests found 0.1 kWh.,energy,total_increasing,
+66,month_load_energy,Month Load Energy,0.1kWh,USHORT,,,R,,Load energy this month. Scale not confirmed on every firmware.,energy,total_increasing,
+67,month_grid_energy,Month Grid Energy,0.1kWh,USHORT,,,R,,Grid energy this month. Scale not confirmed on every firmware.,energy,total_increasing,
+68_69,year_pv_energy,Year PV Energy,0.1kWh,UINT,,,R,"{""Register_Endian"": ""little_endian-CDAB""}",PV energy this year.,energy,total_increasing,
+70,day_battery_charge,Day Battery Charge,0.1kWh,USHORT,,,R,,Battery charge energy today.,energy,total_increasing,
+71,day_battery_discharge,Day Battery Discharge,0.1kWh,USHORT,,,R,,Battery discharge energy today.,energy,total_increasing,
+72_73,total_battery_charge,Total Battery Charge,0.1kWh,UINT,,,R,"{""Register_Endian"": ""little_endian-CDAB""}",Lifetime battery charge.,energy,total_increasing,
+74_75,total_battery_discharge,Total Battery Discharge,0.1kWh,UINT,,,R,"{""Register_Endian"": ""little_endian-CDAB""}",Lifetime battery discharge.,energy,total_increasing,
+76,day_grid_import,Day Grid Import,0.1kWh,USHORT,,,R,,Energy bought from the grid today.,energy,total_increasing,
+77,day_grid_export,Day Grid Export,0.1kWh,USHORT,,,R,,Energy sold to the grid today.,energy,total_increasing,
+78_80,total_grid_import,Total Grid Import,0.1kWh,UINT,,,R,"{""Register_Endian"": ""little_endian-CDAB""}","Lifetime grid import. Register 79 is the grid frequency, not part of this value.",energy,total_increasing,
+81_82,total_grid_export,Total Grid Export,0.1kWh,UINT,,,R,"{""Register_Endian"": ""little_endian-CDAB""}",Lifetime grid export.,energy,total_increasing,
+84,day_load_energy,Day Load Energy,0.1kWh,USHORT,,,R,,Load energy today.,energy,total_increasing,
+85_86,total_load_energy,Total Load Energy,0.1kWh,UINT,,,R,"{""Register_Endian"": ""little_endian-CDAB""}",Lifetime load energy.,energy,total_increasing,
+87_88,year_load_energy,Year Load Energy,0.1kWh,UINT,,,R,"{""Register_Endian"": ""little_endian-CDAB""}",Load energy this year. Reported unreliable on some firmware.,energy,total_increasing,
+79,grid_frequency,Grid Frequency,0.01Hz,USHORT,,,R,,,frequency,measurement,
+90,dc_transformer_temperature,DC Transformer Temperature,0.1°C,USHORT,,,R,"{""Offset"": -100}",Raw value has a +1000 offset: (raw - 1000) x 0.1 degrees C.,temperature,measurement,
+91,radiator_temperature,Radiator Temperature,0.1°C,USHORT,,,R,"{""Offset"": -100}",Raw value has a +1000 offset: (raw - 1000) x 0.1 degrees C.,temperature,measurement,
+92,sd_status,SD Card Status,,USHORT,,,R,,SD card status code.,,,diagnostic
+95,environment_temperature,Environment Temperature,0.1°C,USHORT,,,R,"{""Offset"": -100}",Raw value has a +1000 offset: (raw - 1000) x 0.1 degrees C.,temperature,measurement,
+96_97,total_pv_energy,Total PV Energy,0.1kWh,UINT,,,R,"{""Register_Endian"": ""little_endian-CDAB""}",Lifetime PV energy.,energy,total_increasing,
+98_99,year_grid_export,Year Grid Export,0.1kWh,UINT,,,R,"{""Register_Endian"": ""little_endian-CDAB""}",Grid export this year. Reported unreliable on some firmware.,energy,total_increasing,
+103,fault_1,Fault 1,,16BIT_FLAGS,,,R,,Fault flags F01-F16; names in fault_1_codes in the protocol JSON.,,,diagnostic
+104,fault_2,Fault 2,,16BIT_FLAGS,,,R,,Fault flags F17-F32.,,,diagnostic
+105,fault_3,Fault 3,,16BIT_FLAGS,,,R,,Fault flags F33-F48.,,,diagnostic
+106,fault_4,Fault 4,,16BIT_FLAGS,,,R,,Fault flags F49-F64.,,,diagnostic
+108,day_pv_energy,Day PV Energy,0.1kWh,USHORT,,,R,,PV energy today.,energy,total_increasing,
+109,pv1_voltage,PV1 Voltage,0.1V,USHORT,,,R,,PV string 1 voltage.,voltage,measurement,
+110,pv1_current,PV1 Current,0.1A,USHORT,,,R,,PV string 1 current.,current,measurement,
+111,pv2_voltage,PV2 Voltage,0.1V,USHORT,,,R,,PV string 2 voltage.,voltage,measurement,
+112,pv2_current,PV2 Current,0.1A,USHORT,,,R,,PV string 2 current.,current,measurement,
+113,pv3_voltage,PV3 Voltage,0.1V,USHORT,,,R,,PV string 3 voltage (models with that many MPPT inputs).,voltage,measurement,
+114,pv3_current,PV3 Current,0.1A,USHORT,,,R,,PV string 3 current (models with that many MPPT inputs).,current,measurement,
+115,pv4_voltage,PV4 Voltage,0.1V,USHORT,,,R,,PV string 4 voltage (models with that many MPPT inputs).,voltage,measurement,
+116,pv4_current,PV4 Current,0.1A,USHORT,,,R,,PV string 4 current (models with that many MPPT inputs).,current,measurement,
+150,grid_voltage,Grid Voltage,0.1V,USHORT,,,R,,,voltage,measurement,
+154,inverter_voltage,Inverter Voltage,0.1V,USHORT,,,R,,AC output voltage.,voltage,measurement,
+160,grid_current_l1,Grid Current L1,0.01A,SHORT,,,R,,US split-phase (SG01LP1-US): L1 leg.,current,measurement,
+161,grid_current_l2,Grid Current L2,0.01A,SHORT,,,R,,US split-phase (SG01LP1-US): L2 leg.,current,measurement,
+164,inverter_current,Inverter Current,0.01A,SHORT,,,R,,,current,measurement,
+166,aux_power,AUX Power,W,SHORT,,,R,,AUX/generator port power.,power,measurement,
+167,grid_ld_power,Grid LD Power,W,SHORT,,,R,,Internal CT (grid side load) power L1.,power,measurement,
+168,grid_l2_power,Grid L2 Power,W,SHORT,,,R,,US split-phase: L2 leg of the grid-side CT.,power,measurement,
+169,grid_power,Grid Power,W,SHORT,,,R,,Total grid power at the inverter grid port. Positive = import. SG02LP1 and 12-16 kW models report this in 10 W steps; set the unit to 10W in a protocol override if the value is ten times too small.,power,measurement,
+172,grid_ct_power,Grid CT Power,W,SHORT,,,R,,Power measured by the external CT clamp (used for zero export). Same 10 W note as grid_power.,power,measurement,
+175,inverter_power,Inverter Power,W,SHORT,,,R,,Inverter AC output power.,power,measurement,
+176,load_l1_power,Load Power L1,W,SHORT,,,R,,US split-phase: L1 leg.,power,measurement,
+177,load_l2_power,Load Power L2,W,SHORT,,,R,,US split-phase: L2 leg.,power,measurement,
+178,load_power,Load Power Total,W,SHORT,,,R,,,power,measurement,
+182,battery_temperature,Battery Temperature,0.1°C,USHORT,,,R,"{""Offset"": -100}",Raw value has a +1000 offset: (raw - 1000) x 0.1 degrees C.,temperature,measurement,
+183,battery_voltage,Battery Voltage,0.01V,USHORT,,,R,,,voltage,measurement,
+184,battery_soc,Battery SOC,%,USHORT,0-100,,R,,,battery,measurement,
+186,pv1_power,PV1 Power,W,SHORT,,,R,,,power,measurement,
+187,pv2_power,PV2 Power,W,SHORT,,,R,,,power,measurement,
+188,pv3_power,PV3 Power,W,SHORT,,,R,,Models with a third MPPT input.,power,measurement,
+189,pv4_power,PV4 Power,W,SHORT,,,R,,Models with a fourth MPPT input.,power,measurement,
+190,battery_power,Battery Power,W,SHORT,,,R,,"Positive = charging, negative = discharging.",power,measurement,
+191,battery_current,Battery Current,0.01A,SHORT,,,R,,"Positive = charging, negative = discharging.",current,measurement,
+192,load_frequency,Load Frequency,0.01Hz,USHORT,,,R,,,frequency,measurement,
+193,inverter_frequency,Inverter Frequency,0.01Hz,USHORT,,,R,,,frequency,measurement,
+194,grid_connected,Grid Connected,,USHORT,,,R,,"Grid relay: 0 = open, 1 = closed.",,,diagnostic
+200,control_mode,Control Mode,,USHORT,,,R,,System control mode. Meaning not published; shown raw.,,,diagnostic
+201,battery_equalization_voltage,Battery Equalization Voltage,0.01V,USHORT,,60s,RW,,,voltage,,config
+202,battery_absorption_voltage,Battery Absorption Voltage,0.01V,USHORT,,60s,RW,,,voltage,,config
+203,battery_float_voltage,Battery Float Voltage,0.01V,USHORT,,60s,RW,,,voltage,,config
+206,grid_trickle_feed_power,Grid Trickle Feed Power,W,SHORT,,60s,RW,,,,,config
+210,battery_max_charge_current,Battery Max Charge Current,A,USHORT,0-300,60s,RW,,,current,,config
+211,battery_max_discharge_current,Battery Max Discharge Current,A,USHORT,0-300,60s,RW,,,current,,config
+217,battery_shutdown_capacity,Battery Shutdown Capacity,%,USHORT,0-100,60s,RW,,SOC at which the battery is disconnected.,,,config
+218,battery_restart_capacity,Battery Restart Capacity,%,USHORT,0-100,60s,RW,,SOC at which the battery reconnects.,,,config
+219,battery_low_capacity,Battery Low Capacity,%,USHORT,0-100,60s,RW,,SOC at which the low battery warning is raised.,,,config
+220,battery_shutdown_voltage,Battery Shutdown Voltage,0.01V,USHORT,,60s,RW,,,voltage,,config
+221,battery_restart_voltage,Battery Restart Voltage,0.01V,USHORT,,60s,RW,,,voltage,,config
+222,battery_low_voltage,Battery Low Voltage,0.01V,USHORT,,60s,RW,,,voltage,,config
+230,grid_charge_battery_current,Grid Charge Battery Current,A,USHORT,0-300,60s,RW,,,current,,config
+232.b0,grid_charge_enabled,Grid Charge Enabled,,1bit,0-1,60s,RW,,Bit 0 of register 232: 1 = allow charging from the grid.,,,config
+235,generator_input,Generator Input,,USHORT,,60s,RW,,AUX port function.,,,config
+243.b0,priority_load,Priority Load,,1bit,0-1,60s,RW,,"Bit 0 of register 243: 0 = battery first, 1 = load first.",,,config
+244,load_limit,Load Limit,,USHORT,,60s,RW,,"Export behavior: Allow Export, Essentials or Zero Export.",,,config
+245,max_sell_power,Max Sell Power,W,USHORT,,60s,RW,,,,,config
+247.b0,solar_export,Solar Export,,1bit,0-1,60s,RW,,Bit 0 of register 247: 1 = sell surplus PV to the grid.,,,config
+248.b0,use_timer,Use Timer,,1bit,0-1,60s,RW,,Bit 0 of register 248: 1 = time of use schedule enabled.,,,config
+250,prog1_time,Prog1 Time,,USHORT,0-2359,60s,RW,,"Time of use program 1 start time as HHMM (decimal digits, for example 1530 = 15:30). The inverter works in 5 minute steps.",,,config
+251,prog2_time,Prog2 Time,,USHORT,0-2359,60s,RW,,"Time of use program 2 start time as HHMM (decimal digits, for example 1530 = 15:30). The inverter works in 5 minute steps.",,,config
+252,prog3_time,Prog3 Time,,USHORT,0-2359,60s,RW,,"Time of use program 3 start time as HHMM (decimal digits, for example 1530 = 15:30). The inverter works in 5 minute steps.",,,config
+253,prog4_time,Prog4 Time,,USHORT,0-2359,60s,RW,,"Time of use program 4 start time as HHMM (decimal digits, for example 1530 = 15:30). The inverter works in 5 minute steps.",,,config
+254,prog5_time,Prog5 Time,,USHORT,0-2359,60s,RW,,"Time of use program 5 start time as HHMM (decimal digits, for example 1530 = 15:30). The inverter works in 5 minute steps.",,,config
+255,prog6_time,Prog6 Time,,USHORT,0-2359,60s,RW,,"Time of use program 6 start time as HHMM (decimal digits, for example 1530 = 15:30). The inverter works in 5 minute steps.",,,config
+256,prog1_power,Prog1 Power,W,USHORT,,60s,RW,,Time of use program 1 power limit.,,,config
+257,prog2_power,Prog2 Power,W,USHORT,,60s,RW,,Time of use program 2 power limit.,,,config
+258,prog3_power,Prog3 Power,W,USHORT,,60s,RW,,Time of use program 3 power limit.,,,config
+259,prog4_power,Prog4 Power,W,USHORT,,60s,RW,,Time of use program 4 power limit.,,,config
+260,prog5_power,Prog5 Power,W,USHORT,,60s,RW,,Time of use program 5 power limit.,,,config
+261,prog6_power,Prog6 Power,W,USHORT,,60s,RW,,Time of use program 6 power limit.,,,config
+262,prog1_voltage,Prog1 Voltage,0.01V,USHORT,,60s,RW,,Time of use program 1 battery voltage target.,,,config
+263,prog2_voltage,Prog2 Voltage,0.01V,USHORT,,60s,RW,,Time of use program 2 battery voltage target.,,,config
+264,prog3_voltage,Prog3 Voltage,0.01V,USHORT,,60s,RW,,Time of use program 3 battery voltage target.,,,config
+265,prog4_voltage,Prog4 Voltage,0.01V,USHORT,,60s,RW,,Time of use program 4 battery voltage target.,,,config
+266,prog5_voltage,Prog5 Voltage,0.01V,USHORT,,60s,RW,,Time of use program 5 battery voltage target.,,,config
+267,prog6_voltage,Prog6 Voltage,0.01V,USHORT,,60s,RW,,Time of use program 6 battery voltage target.,,,config
+268,prog1_capacity,Prog1 Capacity,%,USHORT,0-100,60s,RW,,Time of use program 1 battery SOC target.,,,config
+269,prog2_capacity,Prog2 Capacity,%,USHORT,0-100,60s,RW,,Time of use program 2 battery SOC target.,,,config
+270,prog3_capacity,Prog3 Capacity,%,USHORT,0-100,60s,RW,,Time of use program 3 battery SOC target.,,,config
+271,prog4_capacity,Prog4 Capacity,%,USHORT,0-100,60s,RW,,Time of use program 4 battery SOC target.,,,config
+272,prog5_capacity,Prog5 Capacity,%,USHORT,0-100,60s,RW,,Time of use program 5 battery SOC target.,,,config
+273,prog6_capacity,Prog6 Capacity,%,USHORT,0-100,60s,RW,,Time of use program 6 battery SOC target.,,,config
+274,prog1_charge,Prog1 Charge,,16BIT_FLAGS,@prog_charge_flags,60s,RW,,"Time of use program 1 flags. The whole word is written, so read it first and keep the other bits.",,,config
+275,prog2_charge,Prog2 Charge,,16BIT_FLAGS,@prog_charge_flags,60s,RW,,"Time of use program 2 flags. The whole word is written, so read it first and keep the other bits.",,,config
+276,prog3_charge,Prog3 Charge,,16BIT_FLAGS,@prog_charge_flags,60s,RW,,"Time of use program 3 flags. The whole word is written, so read it first and keep the other bits.",,,config
+277,prog4_charge,Prog4 Charge,,16BIT_FLAGS,@prog_charge_flags,60s,RW,,"Time of use program 4 flags. The whole word is written, so read it first and keep the other bits.",,,config
+278,prog5_charge,Prog5 Charge,,16BIT_FLAGS,@prog_charge_flags,60s,RW,,"Time of use program 5 flags. The whole word is written, so read it first and keep the other bits.",,,config
+279,prog6_charge,Prog6 Charge,,16BIT_FLAGS,@prog_charge_flags,60s,RW,,"Time of use program 6 flags. The whole word is written, so read it first and keep the other bits.",,,config
+292,gen_peak_shaving_power,Gen Peak Shaving Power,W,USHORT,,60s,RW,,,,,config
+293,grid_peak_shaving_power,Grid Peak Shaving Power,W,USHORT,,60s,RW,,,,,config
+312,battery_charge_voltage,Battery Charge Voltage,0.01V,USHORT,,,R,,BMS charge voltage request as seen by the inverter.,voltage,measurement,
+313,battery_discharge_voltage,Battery Discharge Voltage,0.01V,USHORT,,,R,,BMS discharge voltage as seen by the inverter. Reads 0 on some firmware.,voltage,measurement,
+314,battery_charge_limit_current,Battery Charge Limit Current,A,SHORT,,,R,,BMS charge current limit.,current,measurement,
+315,battery_discharge_limit_current,Battery Discharge Limit Current,A,SHORT,,,R,,BMS discharge current limit.,current,measurement,
+316,bms_battery_soc,BMS Battery SOC,%,USHORT,0-100,,R,,SOC reported by the BMS.,battery,measurement,
+317,bms_battery_voltage,BMS Battery Voltage,0.01V,USHORT,,,R,,Battery voltage reported by the BMS.,voltage,measurement,
+318,bms_battery_current,BMS Battery Current,A,SHORT,,,R,,"BMS current, 1 A steps; sign is opposite to the BMS display.",current,measurement,
+319,bms_battery_temperature,BMS Battery Temperature,0.1°C,USHORT,,,R,"{""Offset"": -100}",Raw value has a +1000 offset: (raw - 1000) x 0.1 degrees C.,temperature,measurement,
+320,bms_max_charge_current,BMS Max Charge Current,A,SHORT,,,R,,Reads 0 on some firmware.,current,measurement,
+321,bms_max_discharge_current,BMS Max Discharge Current,A,SHORT,,,R,,Reads 0 on some firmware.,current,measurement,
+325,bms_protocol,BMS Protocol,,USHORT,,60s,RW,,Selected BMS communication protocol (inverter menu); numeric code.,,,config
+603,battery_1_soc,Battery 1 SOC,%,USHORT,0-100,,R,,SOC of battery module 1 in multi-battery systems.,battery,measurement,
+611,battery_1_cycles,Battery 1 Cycle Count,,USHORT,,,R,,Charge cycle count for battery module 1.,,,diagnostic

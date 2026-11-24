@@ -11,8 +11,11 @@ ABB / FIMER,VSN300 / VSN700 SunSpec,abb_fimer_vsn300_sunspec,ModBus,https://gith
 Accuenergy,Acuvim II / IIR / IIE / IIW power meters,accuenergy_acuvim,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Accuenergy.md
 Acrel,DTSD1352-C three-phase DIN-rail energy meter,acrel_dtsd1352_c,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Acrel.md
 APsystems,ECU SunSpec gateway,apsystems_ecu_sunspec,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/APsystems.md
-Deye / Sunsynk,Hybrid inverter,deye_sunsynk,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Deye_Sunsynk.md
-Deye / Sunsynk,Hybrid inverter extended map,deye_sunsynk_hybrid,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Deye_Sunsynk.md
+Deye / Sunsynk,"Single-phase hybrid inverter (SG01/02/03/04/05LP1, US split-phase SG01LP1-US), core monitoring map",deye_sunsynk,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Deye_Sunsynk.md
+Deye / Sunsynk,"Single-phase hybrid inverter (SG01/02/03/04/05LP1, US split-phase SG01LP1-US), full map",deye_sunsynk_hybrid,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Deye_Sunsynk.md
+Deye / Sunsynk,Three-phase low-voltage hybrid inverter (SG04LP3 / SG05LP3),deye_sunsynk_3ph_lv,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Deye_Sunsynk.md
+Deye / Sunsynk,Three-phase high-voltage hybrid inverter (SG01HP3 / SG02HP3),deye_sunsynk_3ph_hv,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Deye_Sunsynk.md
+Deye / Sunsynk,Hybrid microinverter / ESS,deye_sunsynk_micro_ess,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Deye_Sunsynk.md
 Eastron,SDM120M energy meter,eastron_eastron_sdm120m,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Eastron.md
 EG4,18KPV,eg4_18kpv,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/EG4.md
 EG4,3000EHV,eg4_3000ehv_v1,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/EG4.md
