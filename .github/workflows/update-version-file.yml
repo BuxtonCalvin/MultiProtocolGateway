@@ -1,0 +1,44 @@
+name: Update VERSION file (major releases only)
+
+# A downloaded source zip has no .git folder, so the app reads its version from the VERSION file.
+# To avoid a commit for every release, this workflow rewrites VERSION only when a NEW MAJOR
+# version is published (1.5.0 -> 2.0.0). See tools/update_version_file.py and
+# documentation/usage/releasing.md.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write   # to push the VERSION commit
+
+jobs:
+  update-version:
+    # Pre-releases never change VERSION.
+    if: ${{ !github.event.release.prerelease }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout the default branch
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}   # a release event checks out the tag; the commit must land on the branch
+          fetch-depth: 0                                       # all tags, to find the previous release
+
+      - name: Decide whether VERSION changes
+        id: version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: python3 tools/update_version_file.py --tag "$RELEASE_TAG" --github-output
+
+      - name: Commit VERSION
+        if: steps.version.outputs.changed == 'true'
+        env:
+          NEW_VERSION: ${{ steps.version.outputs.version }}
+          BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add VERSION
+          git commit -m "chore: set VERSION to ${NEW_VERSION}"
+          git push origin "HEAD:${BRANCH}"

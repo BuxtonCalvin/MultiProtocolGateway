@@ -1,89 +1,155 @@
+# Release Drafter v7 configuration.
+# Reference: https://github.com/release-drafter/release-drafter  (keys, templates, categories)
+#
+# How it fits together (see documentation/usage/releasing.md):
+#   * Every merged pull request is classified by its TITLE, using conventional-commit matching
+#     ("feat: ...", "fix: ...", "patch: ...", "feat!: ..."), or by a label.
+#   * Two independent decisions are made per pull request:
+#       - the SECTION it is listed under in the release notes (the changelog categories), and
+#       - the VERSION BUMP it asks for (the version-resolver categories). The highest bump wins.
+#   * The auto_label job (release.yml) puts the matching label on the pull request (autolabeler below).
+#   * Publishing the draft creates the git tag (tag-template) that the app's version comes from.
+#
+# VERSION NUMBERS (MAJOR.MINOR.PATCH). Title keyword -> bump, for example from 1.4.2:
+#     major   breaking change: "feat!:", "fix!:", "breaking:", label "major"   -> 2.0.0
+#     minor   "feat:", "fix:", "perf:", label "minor"                          -> 1.5.0
+#     patch   "patch:" (a very minor bug fix) and routine work: "chore:", "build:", "ci:",
+#             "test:", "refactor:", "style:", "docs:". Dependabot's "chore(deps):" titles
+#             and its "dependencies" label land here too                       -> 1.4.3
+#   A title that matches nothing asks for a minor bump, so nothing is ever under-bumped.
+#   The draft keeps collecting changes until you publish it, so you decide how many releases exist.
+
 name-template: "v$RESOLVED_VERSION"
 tag-template: "v$RESOLVED_VERSION"
+# Only tags that start with "v" are treated as release tags (the prefix is removed before the
+# version is parsed). Any other tag in the repository is ignored by Release Drafter.
+tag-prefix: "v"
 
-# Autolabeler inspects each PR's title so you don't have to manually label every PR. 
-autolabeler:
-  - label: "major"
-    title:
-      - "/^breaking(\\(.*\\))?!:/i"
-    body:
-      - "/BREAKING CHANGE/i"
-  - label: "minor"
-    title:
-      - "/^feat(\\(.*\\))?:/i"
-  - label: "patch"
-    title:
-      - "/^fix(\\(.*\\))?:/i"
-      - "/^perf(\\(.*\\))?:/i"
-  - label: "documentation"
-    title:
-      - "/^docs(\\(.*\\))?:/i"
-  - label: "chore"
-    title:
-      - "/^chore(\\(.*\\))?:/i"
-      - "/^ci(\\(.*\\))?:/i"
-      - "/^refactor(\\(.*\\))?:/i"
-      - "/^test(\\(.*\\))?:/i"
-
-# Section configurations for what visibly appears in your release notes changelog
 categories:
-  - title: '🚨 Breaking Changes'
-    labels:
-      - 'major'
-      - 'breaking'
-  - title: '🚀 Features'
-    labels:
-      - 'minor'
-      - 'feature'
-      - 'enhancement'
-  - title: '🐛 Bug Fixes'
-    labels:
-      - 'patch'
-      - 'fix'
-      - 'bugfix'
-      - 'bug'
-  - title: '🧰 Maintenance'
-    labels:
-      - 'chore'
-      - 'dependencies'
-      - 'ci'
-      - 'github-actions'
-      - 'docker'
-      - 'python'
-  - title: '📚 Documentation'
-    labels:
-      - 'documentation'
-      - 'docs'
+  # Excluded from the notes and from the version calculation. Add the label to a PR to hide it.
+  - type: pre-exclude
+    when:
+      label: skip-changelog
 
-# Prevents matching PRs from appearing in the release notes changelog text
-exclude-labels:
-  - 'skip-changelog'
+  # ---- SECTIONS of the release notes, in the order they are rendered. `exclusive: true` lists a PR
+  # ---- in the first section that matches instead of repeating it in several.
+  - title: "🚨 Breaking Changes"
+    exclusive: true
+    when:
+      - conventional:
+          breaking: true        # "feat!: ...", "fix(api)!: ...", "breaking!: ..."
+      - conventional:
+          type: breaking        # "breaking: ..." without the "!"
+      - labels: [major, breaking]
 
-# Handles calculations for tracking major, minor, and patch bumps
-version-resolver:
-  major:
-    labels:
-      - 'major'
-      - 'breaking'
-  minor:
-    labels:
-      - 'minor'
-      - 'feature'
-      - 'enhancement'
-  patch:
-    labels:
-      - 'patch'
-      - 'fix'
-      - 'bugfix'
-      - 'bug'
-      - 'chore'
-      - 'dependencies'
-      - 'documentation'
-  default: 'patch'
+  - title: "🚀 Features"
+    exclusive: true
+    when:
+      - conventional:
+          type: feat
+      - labels: [minor, feature, enhancement]
+
+  - title: "🐛 Bug Fixes"
+    exclusive: true
+    when:
+      - conventional:
+          types: [fix, perf, patch]
+      - labels: [fix, bugfix, bug, patch]
+
+  - title: "🧰 Maintenance"
+    exclusive: true
+    when:
+      - conventional:
+          types: [chore, ci, refactor, test, build, style]
+      - labels: [chore, dependencies, ci, github-actions, docker, python]
+
+  - title: "📚 Documentation"
+    exclusive: true
+    when:
+      - conventional:
+          type: docs
+      - labels: [documentation, docs]
+
+  # Catch-all (the one changelog category without `when`): PRs whose title is not in the
+  # conventional form still appear in the notes instead of being dropped.
+  - title: "🔧 Other Changes"
+
+  # ---- VERSION BUMP. Every matching category contributes and the highest bump wins, so an extra
+  # ---- label can never lower the bump of a feature or a breaking change.
+  - type: version-resolver
+    semver-increment: major
+    when:
+      - conventional:
+          breaking: true
+      - conventional:
+          type: breaking
+      - labels: [major, breaking]
+
+  - type: version-resolver
+    semver-increment: minor
+    when:
+      - conventional:
+          types: [feat, fix, perf]
+      - labels: [minor, feature, enhancement, fix, bugfix, bug]
+
+  - type: version-resolver
+    semver-increment: patch
+    when:
+      - conventional:
+          types: [patch, chore, ci, refactor, test, build, style, docs]
+      - labels: [patch, chore, ci, dependencies, github-actions, docker, python, documentation, docs]
+
+  # Fallback (no `when`): used only when nothing above matched, i.e. a title that is not in the
+  # conventional form. It asks for a minor bump rather than guessing that the change is small.
+  - type: version-resolver
+    semver-increment: minor
+
+# AUTOLABELER (run by the auto_label job in .github/workflows/release.yml). Adds the labels the categories
+# above recognize, so a pull request is labeled for everyone to see and the label can be corrected by hand.
+# A ticked "This is a breaking change" box, or the words "BREAKING CHANGE", in the description add `major`
+# (categories only read the title and labels). The matchers are regular expressions; a label is added when
+# any one of them matches.
+autolabeler:
+  - label: 'major'
+    title:
+      - '/^[a-z]+(\(.+\))?!:/i'        # "feat!: ...", "fix(api)!: ...", "breaking!: ..."
+      - '/^breaking(\(.+\))?:/i'
+    body:
+      - '/BREAKING[ -]CHANGE/'
+      - '/-\s*\[x\]\s*This is a breaking change/i'
+  - label: 'feature'
+    title:
+      - '/^feat(\(.+\))?:/i'
+  - label: 'fix'
+    title:
+      - '/^(fix|perf)(\(.+\))?:/i'
+  - label: 'patch'
+    title:
+      - '/^patch(\(.+\))?:/i'
+  - label: 'documentation'
+    title:
+      - '/^docs(\(.+\))?:/i'
+  - label: 'chore'
+    title:
+      - '/^(chore|ci|refactor|test|build|style)(\(.+\))?:/i'
+
+# NOTES FORMAT. One bullet per merged pull request, grouped under a heading per category, showing its
+# pull request link and authors:
+#
+#   ### Bug Fixes
+#   * Fix reconnect message ([#42](https://github.com/o/r/pull/42) by @alice)
+#
+# Release Drafter cannot print a commit hash, so the Changelog page adds it: tools/generate_changelog.py
+# looks every pull request up through the GitHub API and records the merge commit. All authors are
+# credited, the maintainer included. Entries within a category are sorted by title.
+category-template: "### $TITLE"
+change-template: "* $TITLE ([#$NUMBER]($URL) by $AUTHORS)"
+sort-by: title
+sort-direction: ascending
 
 template: |
-  ## Changes
+  ## v$RESOLVED_VERSION
 
   $CHANGES
 
-  **Full Changelog**: https://github.com/$OWNER/$REPOSITORY/compare/$PREVIOUS_TAG...v$RESOLVED_VERSION
+  **Detailed Changes**: [$PREVIOUS_TAG...v$RESOLVED_VERSION](https://github.com/$OWNER/$REPOSITORY/compare/$PREVIOUS_TAG...v$RESOLVED_VERSION)

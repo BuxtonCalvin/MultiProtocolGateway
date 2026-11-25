@@ -40,6 +40,16 @@ COPY protocol_gateway.py /app/
 COPY defs/ /app/defs/
 COPY classes /app/classes/
 COPY documentation/ /app/documentation/
+COPY tools/ /app/tools/
+
+# Build metadata, set by the Docker workflows from `git describe` (see tools/generate_changelog.py).
+# A running container has no .git folder, so the version is baked in here. The release history
+# for the Changelog page (classes/WebServer/changelog.json) is generated before the build and
+# arrives with the COPY of classes/ above.
+ARG APP_VERSION=unknown
+ARG GIT_COMMIT=unknown
+ENV MPG_VERSION=${APP_VERSION} \
+    MPG_COMMIT=${GIT_COMMIT}
 
 # Set up entrypoint
 COPY entrypoint.sh /entrypoint.sh

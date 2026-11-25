@@ -2,7 +2,7 @@
 
 **Multi Protocol Gateway (MPG)** reads live data from solar inverters, battery management systems (BMS), energy meters, and other Modbus/CAN-speaking hardware. MPG then fans that data out to your choice of bridges: MQTT, InfluxDB, TimescaleDB, Prometheus, and JSON — all managed through a built-in web UI; no config-file editing required. MPG allows you to read data from concurrent hardware devices and protocols, and then push the data to one, or more software bridges. If you have a device that speaks Modbus RTU/TCP, CAN bus, or one of the supported proprietary serial protocols and you want its data in Home Assistant, Grafana, Prometheus, or a time-series database, this app should work for you.
 
-[![Python 3.11](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.11.yml/badge.svg)](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.11.yml) ➔ [![Python 3.14](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.14.yml/badge.svg)](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.14.yml) [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE) [![Ruff](https://img.shields.io/badge/Linter-Ruff-brightgreen?style=flat-square)](https://github.com/charliermarsh/ruff) [![CodeQL Status](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/codeql.yml/badge.svg)](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/codeql.yml) [![Docker Pulls](https://img.shields.io/docker/pulls/buxtoncalvin/multiprotocolgateway?style=flat-square&logo=docker)](https://hub.docker.com/r/buxtoncalvin/multiprotocolgateway) [![Docker Image Size](https://img.shields.io/docker/image-size/buxtoncalvin/multiprotocolgateway?style=flat-square&logo=docker&color=blue)](https://hub.docker.com/r/buxtoncalvin/multiprotocolgateway)
+[![Python 3.11](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.11.yml/badge.svg)](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.11.yml) ➔ [![Python 3.15](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.15.yml/badge.svg)](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/python-3.15.yml) [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE) [![Ruff](https://img.shields.io/badge/Linter-Ruff-brightgreen?style=flat-square)](https://github.com/charliermarsh/ruff) [![CodeQL Status](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/codeql.yml/badge.svg)](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/codeql.yml) [![Docker Pulls](https://img.shields.io/docker/pulls/buxtoncalvin/multiprotocolgateway?style=flat-square&logo=docker)](https://hub.docker.com/r/buxtoncalvin/multiprotocolgateway) [![Docker Image Size](https://img.shields.io/docker/image-size/buxtoncalvin/multiprotocolgateway?style=flat-square&logo=docker&color=blue)](https://hub.docker.com/r/buxtoncalvin/multiprotocolgateway)
 
 [![Dashboard](classes/WebServer/static/screenshots/dashboard.png)](classes/WebServer/static/screenshots/dashboard.png)
 
@@ -13,7 +13,8 @@
 **Recommended:** install via Docker Compose — it brings up MPG alongside whichever bridges (MQTT, InfluxDB, TimescaleDB, Grafana, etc.) you actually want. See [Full Docker Compose Stack](#full-docker-compose-stack) for the complete stack, or the minimal single-container version below.
 
 ``` ini
-docker pull buxtoncalvin/multiprotocolgateway
+docker pull buxtoncalvin/multiprotocolgateway           # latest
+# docker pull buxtoncalvin/multiprotocolgateway:1.0.0   # a specific release
 docker run \
   -v $(pwd)/config.cfg:/app/config/config.cfg \
   -p 1717:1717 \
@@ -128,7 +129,7 @@ The web UI is available at **`http://localhost:1717`** as soon as the gateway st
 | **Web UI** | Full browser-based configuration and live management on port **1717** |
 | **Protocol library** | 38 manufacturers with register maps; 67 more with device metadata stubbed in |
 | **Config management** | SQLite staging database; changes are previewed and committed — no raw file editing required. |
-| **Python versions** | 3.11 – 3.14 |
+| **Python versions** | 3.11 – 3.15 |
 | **Deployment** | Script, systemd service, Docker container, Home Assistant add-on |
 
 ---
@@ -238,6 +239,10 @@ Separate pages manage gateway-wide settings: Read mode and dynamic configuration
 [![Logging](classes/WebServer/static/screenshots/logging-settings.png)](classes/WebServer/static/screenshots/logging-settings.png)
 
 [![Messages](classes/WebServer/static/screenshots/messages.png)](classes/WebServer/static/screenshots/messages.png)
+
+### Changelog
+
+**Global Settings → Changelog** shows the installed version and the release history as a collapsible outline (major series → release → section → entry), with each entry's pull request number, author and commit linked to GitHub. Versions and notes are driven by git: the version is the nearest release tag, and each entry is a published GitHub Release (assembled by release-drafter from merged pull request titles). The history is captured when the Docker image is built. See [`releasing.md`](documentation/usage/releasing.md) for the release procedure, including the step-by-step VS Code workflow.
 
 ### Log Viewer
 

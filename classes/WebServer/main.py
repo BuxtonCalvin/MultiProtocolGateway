@@ -54,6 +54,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.engine import Engine
 
 from classes.WebServer.models import ConfigBackup
+from defs.app_version import app_version
 
 from .database import ensure_app_state, ensure_schema, init_db, session_scope
 from .file_watcher import FileWatcher
@@ -375,7 +376,7 @@ def create_app(
     app = FastAPI(
         title="MPG Web Management UI",
         description="Protocol Gateway Configuration & Monitoring",
-        version="1.0.0",
+        version=app_version(),
         lifespan=lifespan,
     )
 
@@ -386,6 +387,10 @@ def create_app(
     # Templates
     templates: Jinja2Templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
     app.state.templates = templates
+
+    # Jinja global: the running version (nearest git release tag, see defs/app_version.py),
+    # shown on the About page. The Changelog page gets the same value through its own context.
+    templates.env.globals["app_version"] = app_version()  # type: ignore[reportUnknownMemberType]
 
     # Jinja global — lets base.html decide whether to show the "Timescale DB"
     # nav pad without every single page route having to thread the answer

@@ -41,6 +41,7 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Sequence
 
+from defs.app_version import app_version, base_version, is_development_build
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import (
     HTMLResponse,
@@ -78,6 +79,7 @@ from ..scanner import (
     scan_transport_library,
 )
 from ..services.analysis_service import get_transport_connection_status
+from ..services.changelog_service import Changelog, ChangelogLoadError, load_changelog
 from ..services.device_service import (
     DeviceSummary,
     NavData,
@@ -446,6 +448,40 @@ async def about_page(request: Request):
         request=request,
         name="pages/about.html",
         context=base_context(request, nav),
+    )
+
+
+@router.get("/pages/changelog", response_class=HTMLResponse, response_model=None)
+async def changelog_page(request: Request):
+    """
+    Show the installed version and the release history (Global Settings -> Changelog).
+
+    The history comes from ``classes/WebServer/changelog.json``, which is generated from the
+    repository's published GitHub Releases at build time (``tools/generate_changelog.py``).
+    A missing or invalid file is reported on the page rather than failing the request.
+    """
+    with session_scope() as db:
+        nav: NavData = get_nav_data(db)
+    changelog: Changelog | None = None
+    changelog_error: str | None = None
+    try:
+        changelog = load_changelog()
+    except ChangelogLoadError as exc:
+        changelog_error = str(exc)
+        msg: str = f"Changelog could not be loaded: {exc}"
+        _log.warning(msg)
+    version: str = app_version()
+    return request.app.state.templates.TemplateResponse(
+        request=request,
+        name="pages/changelog.html",
+        context={
+            **base_context(request, nav),
+            "changelog": changelog,
+            "changelog_error": changelog_error,
+            "app_version": version,
+            "base_version": base_version(version),
+            "is_dev_build": is_development_build(version),
+        },
     )
 
 

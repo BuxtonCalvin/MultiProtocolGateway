@@ -4,6 +4,8 @@ on:
   # push:
     # branches:
       # - master
+  release:
+    types: [published]   # publishing a GitHub Release builds and pushes the image for that version
   workflow_dispatch:
 
 permissions:
@@ -16,13 +18,23 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
-      
+        with:
+          fetch-depth: 0   # full history and tags, so `git describe` can find the version
+
       - name: Prepare Docker Metadata
         id: prep
         run: |
           REPO_LC=$(echo "${{ github.event.repository.name }}" | tr '[:upper:]' '[:lower:]')
           echo "repo=${REPO_LC}" >> $GITHUB_OUTPUT
-          echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT        
+          echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
+
+      - name: Generate changelog and build info
+        id: buildinfo
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # Writes classes/WebServer/changelog.json from the published GitHub Releases and sets
+        # the version / image_tag / commit outputs used below.
+        run: python3 tools/generate_changelog.py --github-output
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v4
@@ -38,7 +50,11 @@ jobs:
         with:
           context: .
           push: true
-          # This builds once and applies both tags to a single image
+          build-args: |
+            APP_VERSION=${{ steps.buildinfo.outputs.version }}
+            GIT_COMMIT=${{ steps.buildinfo.outputs.commit }}
+          # This builds once and applies all tags to a single image
           tags: |
             ${{ secrets.DOCKER_USERNAME }}/${{ steps.prep.outputs.repo }}:latest
             ${{ secrets.DOCKER_USERNAME }}/${{ steps.prep.outputs.repo }}:${{ steps.prep.outputs.date }}
+            ${{ secrets.DOCKER_USERNAME }}/${{ steps.prep.outputs.repo }}:${{ steps.buildinfo.outputs.image_tag }}

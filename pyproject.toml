@@ -20,22 +20,26 @@
 #python -m twine upload dist/*
 
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=61.0", "setuptools-scm>=8", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "multi-protocol-gateway"
-version = "1.1.10"
 description = "Reads live register data from Modbus RTU/TCP, CAN bus, and proprietary serial protocols, then fans that data out to any combination of MQTT brokers, TimescaleDB, InfluxDB, and JSON outputs — all managed through a built-in web administration UI."
 readme = "README.md"
 license = "Apache-2.0"
 authors = [{ name = "BuxtonCalvin", email = "buxtoncalvin@gmail.com" }]
 requires-python = ">=3.11"
-dynamic = ["dependencies", "optional-dependencies"]
+dynamic = ["version", "dependencies", "optional-dependencies"]
 
 [project.scripts]
 protocol-gateway = "protocol_gateway:main"
 mpg = "protocol_gateway:main"
+
+# The version comes from the latest git tag (v1.1.10 -> 1.1.10), so it is never edited by hand.
+# See documentation/usage/releasing.md.
+[tool.setuptools_scm]
+fallback_version = "0.0.0"
 
 [tool.setuptools]
 py-modules = ["protocol_gateway"]

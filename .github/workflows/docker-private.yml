@@ -1,41 +1,55 @@
 name: Publish Docker Private Image
 
-on:   
+on:
   workflow_dispatch:
 
 permissions:
   contents: read
 
-jobs:   
-  build-and-push:     
+jobs:
+  build-and-push:
     runs-on: ubuntu-latest
 
-    steps:       
-      - name: Checkout code         
+    steps:
+      - name: Checkout code
         uses: actions/checkout@v7
-              
-      - name: Prepare Docker Metadata         
-        id: prep         
-        run: |           
-          REPO_LC=$(echo "${{ github.event.repository.name }}" | tr '[:upper:]' '[:lower:]')           
-          echo "repo=${REPO_LC}" >> $GITHUB_OUTPUT           
-          echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT                
-                
-      - name: Log in to Docker Hub         
+        with:
+          fetch-depth: 0   # full history and tags, so `git describe` can find the version
+
+      - name: Prepare Docker Metadata
+        id: prep
+        run: |
+          REPO_LC=$(echo "${{ github.event.repository.name }}" | tr '[:upper:]' '[:lower:]')
+          echo "repo=${REPO_LC}" >> $GITHUB_OUTPUT
+          echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
+
+      - name: Generate changelog and build info
+        id: buildinfo
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # Writes classes/WebServer/changelog.json from the published GitHub Releases and sets
+        # the version / image_tag / commit outputs used below.
+        run: python3 tools/generate_changelog.py --github-output
+
+      - name: Log in to Docker Hub
         uses: docker/login-action@v4
-        with:           
-          username: ${{ secrets.DOCKER_USERNAME }}           
-          password: ${{ secrets.DOCKER_TOKEN }}        
-        
-      - name: Set up Docker Buildx         
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
-        
-      - name: Build and push Docker image         
-        uses: docker/build-push-action@v7    
-        with:           
-          context: .           
-          push: true           
-          # This builds once and applies both tags to a single image           
-          tags: |             
-            ${{ secrets.DOCKER_USERNAME }}/mpg:latest             
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          build-args: |
+            APP_VERSION=${{ steps.buildinfo.outputs.version }}
+            GIT_COMMIT=${{ steps.buildinfo.outputs.commit }}
+          # This builds once and applies all tags to a single image
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/mpg:latest
             ${{ secrets.DOCKER_USERNAME }}/mpg:${{ steps.prep.outputs.date }}
+            ${{ secrets.DOCKER_USERNAME }}/mpg:${{ steps.buildinfo.outputs.image_tag }}

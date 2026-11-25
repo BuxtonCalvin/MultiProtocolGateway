@@ -1,26 +1,43 @@
 name: Release
 
+# Release Drafter v7. Two jobs:
+#   * update_release_draft keeps the draft GitHub Release up to date as pull requests are merged into master.
+#     Configuration: .github/release-drafter.yml. Publish the draft on GitHub to create the version tag
+#     (see documentation/usage/releasing.md).
+#   * auto_label labels pull requests from their title and description (the `autolabeler:` block of the
+#     same configuration file). In v7 this is a separate action; the drafter itself no longer labels anything.
+#     pull_request_target is used so pull requests from forks are labeled too. The job never checks out or
+#     runs the pull request's code; it only reads the title, description and branch name.
+
 on:
   push:
     branches:
       - master
   pull_request_target:
-    types: [opened, reopened, synchronize, edited]
+    types: [opened, reopened, synchronize]   # the event types the v7 autolabeler documents
     branches:
       - master
+  workflow_dispatch:   # run by hand to rebuild the draft, e.g. after publishing a release
 
 permissions:
   contents: read
 
 jobs:
   update_release_draft:
+    if: github.event_name != 'pull_request_target'
     permissions:
-      contents: write   # to create/update the draft release
-      pull-requests: write   # to autolabel PRs
+      contents: write        # create/update the draft release
+      pull-requests: read    # read the merged pull requests
     runs-on: ubuntu-latest
     steps:
       - uses: release-drafter/release-drafter@v7
         with:
           config-name: release-drafter.yml
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  auto_label:
+    if: github.event_name == 'pull_request_target'
+    permissions:
+      pull-requests: write   # add labels
+    runs-on: ubuntu-latest
+    steps:
+      - uses: release-drafter/release-drafter/autolabeler@v7

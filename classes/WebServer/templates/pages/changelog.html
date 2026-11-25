@@ -1,0 +1,223 @@
+<!--
+  Description: Defines the changelog web UI template for the MultiProtocolGateway admin interface.
+  File: changelog.html
+
+  Copyright 2026 Kevin Burke
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://apache.org
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+
+{% extends "base.html" %}
+{% block title %}Changelog — MPG Admin{% endblock %}
+
+{% block head %}
+<style>
+  /* Collapsible outline: series > release > section > entry. Plain CSS so it does not depend on which
+     Tailwind classes were compiled. */
+  .cl-summary { cursor: pointer; list-style: none; display: flex; align-items: center; flex-wrap: wrap; gap: .5rem; }
+  .cl-summary::-webkit-details-marker { display: none; }
+  .cl-chevron { width: 1rem; height: 1rem; flex: none; transition: transform .15s; transform: rotate(-90deg); }
+  details[open] > .cl-summary > .cl-chevron { transform: rotate(0deg); }
+  .cl-nest { margin: .5rem 0 0 .5rem; padding-left: .75rem; border-left: 1px solid rgba(128, 128, 128, .35); }
+  .cl-entries { list-style: disc; padding-left: 1.25rem; margin: .25rem 0 0; }
+  .cl-entries li { margin: .3rem 0; }
+  .cl-meta a, .cl-entries a { text-decoration: underline; }
+</style>
+{% endblock %}
+
+{% block content %}
+{#
+  The release history is read from classes/WebServer/changelog.json, which
+  tools/generate_changelog.py builds from the repository's published GitHub Releases
+  (loaded, validated and linked by services/changelog_service.py). Edit the release notes on
+  GitHub, not this template. Every URL here was built by the service from a validated number,
+  login or hash; release-note text is already escaped.
+  Context: changelog (Changelog | None), changelog_error (str | None),
+           app_version (str), base_version (str), is_dev_build (bool).
+  Outline (each level is a <details> that can be collapsed): series (2.x) > release > section > entry.
+  Notes written before sections existed (and free text) arrive as sanitized HTML (notes_html), hence "| safe".
+#}
+<div class="max-w-3xl mx-auto space-y-6" data-changelog>
+  <h1 class="surface-title font-bold text-xl">Changelog</h1>
+
+  <div class="card space-y-1 text-sm">
+    <p class="surface-text">
+      Installed version:
+      <strong class="surface-title font-mono" id="installed-version">{{ app_version }}</strong>
+    </p>
+    {% if is_dev_build %}
+    <p class="surface-muted leading-relaxed">
+      This is not exactly release <span class="font-mono">v{{ base_version }}</span>. It may
+      contain later changes that are not part of that release.
+    </p>
+    {% endif %}
+  </div>
+
+  {% if changelog_error %}
+  <div class="card" role="alert">
+    <p class="surface-text text-sm font-medium">The release history could not be loaded.</p>
+    <p class="mt-1 surface-muted text-sm leading-relaxed">{{ changelog_error }}</p>
+    <p class="mt-2 text-sm">
+      <a href="https://github.com/BuxtonCalvin/MultiProtocolGateway/releases"
+         target="_blank" rel="noopener"
+         class="text-accent hover:underline focus:outline-none focus:ring-1 focus:ring-accent">
+        View the releases on GitHub
+      </a>
+    </p>
+  </div>
+  {% elif not changelog.releases %}
+  <div class="card">
+    <p class="surface-text text-sm font-medium">No releases have been published yet.</p>
+    <p class="mt-2 text-sm">
+      <a href="{{ changelog.releases_url }}" target="_blank" rel="noopener"
+         class="text-accent hover:underline focus:outline-none focus:ring-1 focus:ring-accent">
+        View the releases on GitHub
+      </a>
+    </p>
+  </div>
+  {% else %}
+
+  <div class="flex gap-2">
+    <button type="button" id="changelog-expand" class="btn-secondary text-xs">Expand all</button>
+    <button type="button" id="changelog-collapse" class="btn-secondary text-xs">Collapse all</button>
+  </div>
+
+  {% for series in changelog.series %}
+  {% set series_loop = loop %}
+  <details class="card" data-series{% if loop.first %} open{% endif %}>
+    <summary class="cl-summary">
+      <svg class="cl-chevron surface-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+      </svg>
+      <h2 class="surface-title font-semibold text-base">Version {{ series.label }}</h2>
+      <span class="surface-muted text-xs">
+        {{ series.releases | length }} release{{ "" if series.releases | length == 1 else "s" }}
+        {%- if series.entry_count %}, {{ series.entry_count }} change{{ "" if series.entry_count == 1 else "s" }}{% endif %}
+      </span>
+    </summary>
+
+    <div class="cl-nest space-y-3">
+      {% for release in series.releases %}
+      {% set release_open = (series_loop.first and loop.first) or release.version == base_version %}
+      <details id="release-{{ release.version }}" data-release{% if release_open %} open{% endif %}>
+        <summary class="cl-summary">
+          <svg class="cl-chevron surface-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+          </svg>
+          <span class="surface-title font-semibold text-sm">Version {{ release.version }}</span>
+          {% if release.prerelease %}
+          <span class="text-xs surface-muted">pre-release</span>
+          {% endif %}
+          {% if release.version == base_version %}
+          <span class="text-xs text-accent" data-installed-badge>
+            {{ "installed" if not is_dev_build else "installed (base)" }}
+          </span>
+          {% endif %}
+          {% if release.published %}
+          <span class="surface-muted text-xs">{{ release.published }}</span>
+          {% endif %}
+        </summary>
+
+        <div class="cl-nest space-y-2">
+          <p class="cl-meta surface-muted text-xs leading-relaxed">
+            Tag:
+            {% if release.url %}<a href="{{ release.url }}" target="_blank" rel="noopener">{{ release.tag }}</a>{% else %}{{ release.tag }}{% endif %}
+            {%- if release.commit %} · Commit: <a href="{{ release.commit_url }}" target="_blank" rel="noopener"><code class="font-mono">{{ release.commit }}</code></a>{% endif %}
+            {%- if release.released_by %} · Released by: <a href="{{ release.released_by.url }}" target="_blank" rel="noopener">@{{ release.released_by.login }}</a>{% endif %}
+            {%- if release.compare_url %} · <a href="{{ release.compare_url }}" target="_blank" rel="noopener">Detailed changes: {{ release.previous_tag }}...{{ release.tag }}</a>{% endif %}
+          </p>
+
+          {% if release.intro_html %}
+          <div class="docs-article surface-muted text-sm leading-relaxed">{{ release.intro_html | safe }}</div>
+          {% endif %}
+
+          {% for section in release.sections %}
+          <details data-section{% if release_open %} open{% endif %}>
+            <summary class="cl-summary">
+              <svg class="cl-chevron surface-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+              </svg>
+              <h3 class="surface-title font-medium text-sm">{{ section.title }}</h3>
+              <span class="surface-muted text-xs">({{ section.entries | length }})</span>
+            </summary>
+            <ul class="cl-entries surface-muted text-sm leading-relaxed">
+              {% for entry in section.entries %}
+              <li data-entry>
+                {{- entry.title_html | safe }}
+                {%- if entry.number or entry.authors or entry.sha %} (
+                  {%- if entry.number %}<a href="{{ entry.pr_url }}" target="_blank" rel="noopener">#{{ entry.number }}</a>{% endif -%}
+                  {%- if entry.authors %}{% if entry.number %} {% endif %}by
+                    {% for author in entry.authors %}<a href="{{ author.url }}" target="_blank" rel="noopener">@{{ author.login }}</a>{% if not loop.last %}, {% endif %}{% endfor %}
+                  {%- endif -%}
+                  {%- if entry.sha %}{% if entry.number or entry.authors %}, {% endif %}<a href="{{ entry.commit_url }}" target="_blank" rel="noopener"><code class="font-mono">{{ entry.sha }}</code></a>{% endif -%}
+                )
+                {%- endif %}
+              </li>
+              {% endfor %}
+            </ul>
+          </details>
+          {% endfor %}
+
+          {% if not release.sections %}
+            {% if release.notes_html %}
+            <div class="docs-article surface-muted text-sm leading-relaxed">{{ release.notes_html | safe }}</div>
+            {% elif not release.intro_html %}
+            <p class="surface-muted text-sm">No release notes were provided for this version.</p>
+            {% endif %}
+          {% endif %}
+        </div>
+      </details>
+      {% endfor %}
+    </div>
+  </details>
+  {% endfor %}
+
+  <p class="surface-muted text-xs">
+    Generated {{ changelog.generated_at or "at build time" }} from the
+    <a href="{{ changelog.releases_url }}" target="_blank" rel="noopener" class="underline">GitHub releases</a>.
+  </p>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+{% if not changelog_error and changelog and changelog.releases %}
+<script>
+(function () {
+  var root = document.querySelector("[data-changelog]");
+  if (!root) { return; }
+
+  function setAll(open) {
+    Array.prototype.forEach.call(root.querySelectorAll("details"), function (d) { d.open = open; });
+  }
+  var expand = document.getElementById("changelog-expand");
+  var collapse = document.getElementById("changelog-collapse");
+  if (expand) { expand.addEventListener("click", function () { setAll(true); }); }
+  if (collapse) { collapse.addEventListener("click", function () { setAll(false); }); }
+
+  // A link such as /pages/changelog#release-1.2.0 opens every level above that release.
+  function openHash() {
+    if (!location.hash) { return; }
+    var target = document.getElementById(decodeURIComponent(location.hash.slice(1)));
+    if (!target) { return; }
+    for (var node = target; node && node !== root; node = node.parentElement) {
+      if (node.tagName === "DETAILS") { node.open = true; }
+    }
+    target.scrollIntoView();
+  }
+  window.addEventListener("hashchange", openHash);
+  openHash();
+})();
+</script>
+{% endif %}
+{% endblock %}
