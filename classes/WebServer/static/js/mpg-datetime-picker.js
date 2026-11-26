@@ -18,6 +18,7 @@
  *                  "" when the box is empty; null when it holds something unparseable. Also tidies the box's text
  *                  into the canonical display format.
  *   set(id, v)  put a time into a box; v is a Date or any string parse() accepts.
+ *   clear(id)   empty a box, including the calendar's own selected date (setting el.value alone would leave that behind).
  *   parse(str)  -> Date | undefined
  *
  * Copyright 2026 Kevin Burke
@@ -57,6 +58,12 @@
     if (el._flatpickr) { el._flatpickr.setDate(d, false); } else { el.value = toDisplayString(d); }
   }
 
+  function clear(id) {
+    var el = document.getElementById(id);
+    if (!el) { return; }
+    if (el._flatpickr) { el._flatpickr.clear(); } else { el.value = ''; }
+  }
+
   function read(id) {
     var el = document.getElementById(id);
     var raw = el ? el.value.trim() : '';
@@ -87,5 +94,5 @@
     });
   }
 
-  global.MpgDateTime = { init: init, read: read, set: set, parse: parse, FORMAT: FORMAT };
+  global.MpgDateTime = { init: init, read: read, set: set, clear: clear, parse: parse, FORMAT: FORMAT };
 })(window);

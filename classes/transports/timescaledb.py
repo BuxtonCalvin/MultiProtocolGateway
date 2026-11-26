@@ -5412,6 +5412,72 @@ class HyperTableManager:
 
 
     # === moved: rebuild_compression (5956-6291) ===
+    def _maintain_rebuilt_table(self, table_name: str, chunk_names: list[str]) -> None:
+        """
+        Post-rewrite housekeeping for one table of a Rebuild Compression run: a REINDEX CONCURRENTLY of every rewritten chunk,
+        then a VACUUM (ANALYZE) of the table.
+
+        Why: decompress_chunk()/compress_chunk() delete and re-insert every row of a chunk, which leaves dead tuples behind and
+        bloats the chunk's indexes, and the planner statistics still describe the old physical layout.  VACUUM (ANALYZE)
+        reclaims the dead space and refreshes the statistics; REINDEX rebuilds the bloated indexes.
+
+        REINDEX runs per chunk, not against the hypertable: TimescaleDB does not support REINDEX TABLE ... CONCURRENTLY on a
+        hypertable and quietly falls back to a plain REINDEX (an ACCESS EXCLUSIVE lock on every chunk), which would block
+        ingestion.  A chunk is an ordinary PostgreSQL table, so REINDEX TABLE CONCURRENTLY on it only blocks writes briefly.
+        A rollup view resolves to its materialization hypertable first (VACUUM cannot target a view).
+
+        Both statements are refused inside a transaction block, so this uses its own AUTOCOMMIT connection.  Best-effort, like
+        the per-chunk rewrite: a failure (a concurrent lock, a chunk dropped by retention mid-run) is logged and never raised,
+        so it cannot mask the rewrite results that were already recorded.
+
+        Args:
+            table_name: Raw table or rollup view name, as listed in the group's tables.
+            chunk_names: The table's chunk names exactly as the planning pass returned them (schema-less or qualified).
+        """
+        with self.SessionFactory() as session:
+            bind: Engine | Connection = session.get_bind()
+            engine: Engine = bind if isinstance(bind, Engine) else bind.engine
+
+        try:
+            with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+                resolved: str | None = conn.execute(
+                    text("""
+                        SELECT coalesce(
+                            (
+                                SELECT format('%I.%I', ca.materialization_hypertable_schema, ca.materialization_hypertable_name)
+                                FROM timescaledb_information.continuous_aggregates ca
+                                WHERE ca.view_name = :tname
+                            ),
+                            CAST(to_regclass(quote_ident(:tname)) AS text)
+                        )
+                    """),
+                    {"tname": table_name},
+                ).scalar()
+                if resolved is None:
+                    self._log.debug(f"rebuild_compression: '{table_name}' no longer exists, skipping its maintenance.")
+                    return
+
+                reindexed: int = 0
+                for chunk_name in chunk_names:
+                    chunk_ident: str = chunk_name if "." in chunk_name else f"_timescaledb_internal.{chunk_name}"
+                    try:
+                        conn.execute(text(f"REINDEX TABLE CONCURRENTLY {validated_relation_name(chunk_ident)}"))
+                        reindexed += 1
+                    except Exception as e:
+                        self._log.warning(f"rebuild_compression: could not reindex chunk '{chunk_name}' of '{table_name}': {e}")
+
+                try:
+                    conn.execute(text(f"VACUUM (ANALYZE) {validated_relation_name(resolved)}"))
+                except Exception as e:
+                    self._log.warning(f"rebuild_compression: could not vacuum/analyze '{table_name}': {e}")
+                    return
+                self._log.info(
+                    "rebuild_compression: '%s' maintenance done -- %d/%d chunk(s) reindexed, table vacuumed and analyzed.",
+                    table_name, reindexed, len(chunk_names),
+                )
+        except Exception as e:
+            self._log.warning(f"rebuild_compression: maintenance for '{table_name}' failed: {e}")
+
     def rebuild_compression(self, protocol_names: set[str] | None = None) -> Generator[CompressionRebuildEvent, None, None]:
         """
         Full decompress -> recompress pass across every already-compressed
@@ -5534,6 +5600,11 @@ class HyperTableManager:
         means schema-qualifying it against _timescaledb_internal (where
         TimescaleDB always creates chunks) before passing it to either
         call.
+
+        After each table's chunks are rewritten, _maintain_rebuilt_table() runs REINDEX TABLE CONCURRENTLY on every chunk of the
+        table and then VACUUM (ANALYZE) on the table, so the size_after_bytes reported below reflects the reclaimed space.  Both
+        are best-effort and need an AUTOCOMMIT connection; see that method for why REINDEX runs per chunk.  A table whose chunks
+        all failed to rewrite is skipped.
 
         Applies the same dynamic work_mem/lock_timeout tier
         (get_dynamic_settings_helper) every other lock-risky operation
@@ -5709,6 +5780,12 @@ class HyperTableManager:
                             f"rebuild_compression: could not resume compression job(s) "
                             f"{paused_job_ids} for '{table_name}': {e}"
                         )
+
+            # Reclaim the dead space and bloated indexes the rewrite left behind, and refresh the planner statistics.  Runs after
+            # the job is resumed (no reason to keep it paused for this) and before the "after" size snapshot, so the reported
+            # size reflects the vacuumed table.
+            if table_chunks_ok:
+                self._maintain_rebuilt_table(table_name, chunk_names)
 
             acc["table_results"].append({
                 "table_name": table_name,

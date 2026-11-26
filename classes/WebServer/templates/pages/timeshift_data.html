@@ -321,7 +321,7 @@
 
     <div>
       <label for="ts-import-file" class="surface-title text-xs font-semibold uppercase tracking-widest mb-1 block">File</label>
-      <input type="file" id="ts-import-file" accept=".csv,.xls,.xlsx"
+      <input type="file" id="ts-import-file" accept=".csv,.xls,.xlsx" onchange="onImportFileChange()"
              class="theme-input w-full text-xs rounded px-2 py-1.5">
     </div>
 
@@ -782,7 +782,26 @@
     document.getElementById('ts-import-buttons').classList.add('hidden');
     document.getElementById('ts-preview-container').innerHTML = '';
     document.getElementById('ts-result-container').innerHTML = '';
+    clearImportSourceStart();
+    TimeshiftState.uploadId = null;
+  }
+
+  // Source Start describes the file that was last scanned, so it is emptied (with its note) whenever that file stops being the
+  // current one -- otherwise a second file would silently inherit the first file's date.
+  function clearImportSourceStart() {
+    MpgDateTime.clear('ts-import-start');
     document.getElementById('ts-import-start-note').classList.add('hidden');
+  }
+
+  // Choosing (or clearing) a file invalidates the previous scan: its mapping, Time Column, Source Start and upload id all belong
+  // to the old file. Upload & Scan Fields fills them in again for the new one.
+  function onImportFileChange() {
+    clearImportSourceStart();
+    document.getElementById('ts-mapping-container').innerHTML = '';
+    document.getElementById('ts-import-actions').classList.add('hidden');
+    document.getElementById('ts-import-buttons').classList.add('hidden');
+    document.getElementById('ts-preview-container').innerHTML = '';
+    document.getElementById('ts-result-container').innerHTML = '';
     TimeshiftState.uploadId = null;
   }
 

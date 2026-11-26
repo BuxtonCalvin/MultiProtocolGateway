@@ -533,7 +533,7 @@ You need this after a change that alters a table's physical layout but doesn't r
 - Running **Wide Table Column Deletion** — dropping a column requires decompressing every currently-compressed chunk of that wide table first (`ALTER TABLE ... DROP COLUMN` can't run against a compressed one), so the whole table is left decompressed afterward. It stays that size on disk, without the dropped column's old data taking any extra room, until the next scheduled compression pass or a manual **Rebuild Compression** rewrites it under the current (now-smaller) column list.
 - After a **Metrics Edit** (section 4.5) or a **Timeshift Data** import (section 4.7) — both decompress only the chunks that overlap the range they touched, not the whole table, since neither one writes outside that range or changes the column layout. Those chunks are recompressed the same way, by the normal schedule or by running Rebuild Compression sooner for that group.
 
-**Watching a long rebuild.** The thermometer beside "Current Compression Inventory" is weighted by each table's size, so on a large table one chunk can move it by less than a pixel. Next to it the page shows a plain readout — for example `12 of 281 chunks · 4.3% · 2:31` — that updates after every chunk, with "Planning…" until the first chunk finishes (the planning pass and the first chunk's rewrite happen before the first update). The log records the same thing: a start line (chunk and table counts), one line per chunk (`[12/281, 4.3%] '<table>' chunk '<name>' rewritten in 3.1s`, or `FAILED`) and a finish line with the total time. A chunk that is still being rewritten is visible in the database as an active `convert_to_rowstore` / `convert_to_columnstore` statement in `pg_stat_activity`.
+**Watching a long rebuild.** The thermometer beside "Current Compression Inventory" is weighted by each table's size, so on a large table one chunk can move it by less than a pixel. Next to it the page shows a plain readout — for example `12 of 281 chunks · 4.3% · 2:31` — that updates after every chunk, with "Planning…" until the first chunk finishes (the planning pass and the first chunk's rewrite happen before the first update). The log records the same thing: a start line (chunk and table counts), one line per chunk (`[12/281, 4.3%] '<table>' chunk '<name>' rewritten in 3.1s`, or `FAILED`) and a finish line with the total time. A chunk that is still being rewritten is visible in the database as an active `convert_to_rowstore` / `convert_to_columnstore` statement in `pg_stat_activity`. After a table's last chunk the thermometer pauses at that table's share while its maintenance step runs (see *Reindex and Vacuum* below); the log records it as one `maintenance done` line per table.
 
 ![Timescale Rebuild Compression](../../../classes/WebServer/static/screenshots/timescale_rebuild_compression.png)
 
@@ -548,6 +548,15 @@ You need this after a change that alters a table's physical layout but doesn't r
 ##### What Gets Touched
 
 For each selected group, every table in its stack — the raw narrow/wide table, plus its hourly, daily, weekly, and monthly rollup views — is checked for compressed chunks. Only chunks TimescaleDB already reports as compressed are touched; the newest chunk(s), still inside their `compress_after` window and not yet compressed by the background policy, are left alone. Each touched chunk is converted back to the rowstore (decompressed) and immediately converted to the columnstore again (recompressed) against the hypertable's current compression settings.
+
+##### Reindex and Vacuum
+
+Decompressing and recompressing a chunk deletes and re-inserts every row in it, which leaves dead rows and bloated indexes behind and leaves the planner statistics describing the old layout. So once a table's chunks have been rewritten, the rebuild finishes that table with:
+
+1. **`REINDEX TABLE CONCURRENTLY`** on each rewritten chunk, one chunk at a time. This runs per chunk rather than on the hypertable because TimescaleDB does not support `REINDEX ... CONCURRENTLY` on a hypertable — it silently falls back to a plain `REINDEX` that locks every chunk exclusively and would stall ingestion. A chunk is an ordinary PostgreSQL table, so the concurrent form works on it and only blocks writes briefly.
+2. **`VACUUM (ANALYZE)`** on the table (for a rollup view, on the hypertable that stores its data), which reclaims the dead space and refreshes the statistics.
+
+Both statements cannot run inside a transaction, so they use their own autocommit connection. They are best-effort, like the chunk rewrite itself: a failure (for example a lock conflict, or a chunk dropped by retention mid-run) is logged as a warning and does not stop the rest of the run or change the chunk results. A table whose chunks all failed to rewrite is skipped. The "size after" figure is taken after this step, so it includes the space the vacuum reclaimed.
 
 ##### Rollup Progress and Results
 
