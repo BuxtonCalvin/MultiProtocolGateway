@@ -1,0 +1,32 @@
+name: Track Docker Hub Pulls
+
+on:
+  schedule:
+    - cron: '0 0 * * *' # Runs daily at 00:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  track-pulls:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.15'
+
+      - name: Run pull tracker script
+        run: python tools/track_docker_pulls.py
+
+      - name: Commit updated stats
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add tools/docker-pull-history.csv tools/monthly-pulls-badge.json
+          git diff --quiet && git diff --staged --quiet || (git commit -m "chore: update Docker Hub pull stats" && git push)
+
