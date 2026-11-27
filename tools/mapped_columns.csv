@@ -1,0 +1,30 @@
+grafana_name,notes
+afci_arcch1,Real time arc of CH1
+afci_arcch2,Real time arc of CH2
+afci_arcch3,Real time arc of CH3
+afci_arcch4,Real time arc of CH4
+echg_day,Energy Charge today
+edischg_day,Energy Discharge today
+einv_day,Today's on-grid inverter output energy
+eload_day,Represents the total energy in kilowatt-hours (kWh) consumed by the loads connected to the inverter for the current day.
+epsvoltl1n,Voltage of EPS L1N Voltage of generator Emergency Power Supply
+epsvoltl2n,Voltage of EPS L2N Voltage of generator Emergency Power Supply
+epv1_day,PV1 power generation today / AC Energy Storage Epv_day
+etogrid_day,Today's export to grid energy
+etouser_day,Electricity supplied to user from the grid today
+fac,Utility grid frequency
+maxcelltemp_bms,Maximum temperature of cell
+mincelltemp_bms,Minimum temperature of cell
+pcharge,Charging power (power flowing into the battery)
+pdischarge,Discharging power (power flowing out of battery)
+pload,Active power (in Watts) currently being utilized by the loads connected to the inverter
+ppv1,PV1 power
+prec,AC charging rectification power
+ptogrid,Real time rate system export power to grid
+ptouser,Real time rate system import power from the Grid
+soc,Battery capacity
+tinner,Internal temperature
+tradiator1,Radiator temperature 1
+tradiator2,Radiator temperature 2
+vbat,Battery voltage
+vpv1,PV1 voltage

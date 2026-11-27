@@ -45,7 +45,6 @@ config/backups/*.*
 classes/WebServer/**/__init__.py
 config/data-db/*.*
 
-tools/mapped_columns.csv
 classes/WebServer/static/annotation-editor.html
 scripts/*.*
 .stylelintignore.txt
@@ -58,5 +57,3 @@ node_modules
 package-lock.json
 classes/WebServer/changelog.json
 documentation/usage/releasing.md
-/tools/docker-pull-history.csv
-/tools/monthly-pulls-badge.json
