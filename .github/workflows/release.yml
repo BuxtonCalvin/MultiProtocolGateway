@@ -1,43 +1,115 @@
 name: Release
 
-# Release Drafter v7. Two jobs:
-#   * update_release_draft keeps the draft GitHub Release up to date as pull requests are merged into master.
-#     Configuration: .github/release-drafter.yml. Publish the draft on GitHub to create the version tag
-#     (see documentation/usage/releasing.md).
-#   * auto_label labels pull requests from their title and description (the `autolabeler:` block of the
-#     same configuration file). In v7 this is a separate action; the drafter itself no longer labels anything.
-#     pull_request_target is used so pull requests from forks are labeled too. The job never checks out or
-#     runs the pull request's code; it only reads the title, description and branch name.
+# Manual. Reads the commits since the last release (your direct commits and squash-merged pull requests alike),
+# proposes the next version from their keywords, and shows the release notes. Nothing is published unless
+# `mode` is "publish". See documentation/usage/releasing.md.
+#
+#   preview : show the proposed version and notes in the run summary. Safe from any branch, so run it from
+#             TSDB_dev to see what the next release would contain.
+#   publish : create the GitHub release and its tag (version tags come from here) and update the VERSION file
+#             on a new major version. Only runs from the default branch (master).
 
 on:
-  push:
-    branches:
-      - master
-  pull_request_target:
-    types: [opened, reopened, synchronize]   # the event types the v7 autolabeler documents
-    branches:
-      - master
-  workflow_dispatch:   # run by hand to rebuild the draft, e.g. after publishing a release
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "preview = only show the notes; publish = create the GitHub release and tag"
+        type: choice
+        options:
+          - preview
+          - publish
+        default: preview
+      bump:
+        description: "Override the bump chosen from the commit keywords"
+        type: choice
+        options:
+          - auto
+          - major
+          - minor
+          - patch
+        default: auto
+      version:
+        description: "Optional exact version to release instead, for example 2.0.0 (no leading v)"
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: read
 
 jobs:
-  update_release_draft:
-    if: github.event_name != 'pull_request_target'
-    permissions:
-      contents: write        # create/update the draft release
-      pull-requests: read    # read the merged pull requests
+  release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # create the release and its tag; push the VERSION commit
     steps:
-      - uses: release-drafter/release-drafter@v7
+      - name: Checkout code
+        uses: actions/checkout@v7
         with:
-          config-name: release-drafter.yml
+          fetch-depth: 0   # full history and tags: the notes are built from the commits since the last tag
 
-  auto_label:
-    if: github.event_name == 'pull_request_target'
-    permissions:
-      pull-requests: write   # add labels
-    runs-on: ubuntu-latest
-    steps:
-      - uses: release-drafter/release-drafter/autolabeler@v7
+      - name: Refuse to publish from another branch
+        if: inputs.mode == 'publish' && github.ref_name != github.event.repository.default_branch
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          echo "::error::Publishing is only allowed from ${DEFAULT_BRANCH}; this run used ${REF_NAME}. Use mode 'preview' here."
+          exit 1
+
+      - name: Work out the release
+        id: notes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_BUMP: ${{ inputs.bump }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          ARGS=(--github-output --notes-file release-notes.md)
+          if [ "$INPUT_BUMP" != "auto" ]; then ARGS+=(--bump "$INPUT_BUMP"); fi
+          if [ -n "$INPUT_VERSION" ]; then ARGS+=(--version "$INPUT_VERSION"); fi
+          python3 tools/release_notes.py "${ARGS[@]}"
+
+      - name: Show the notes
+        if: steps.notes.outputs.has_changes == 'true'
+        env:
+          TAG: ${{ steps.notes.outputs.tag }}
+          BUMP: ${{ steps.notes.outputs.bump }}
+          MODE: ${{ inputs.mode }}
+        run: |
+          {
+            echo "## Proposed release ${TAG} (${BUMP} bump), mode: ${MODE}"
+            echo
+            cat release-notes.md
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Nothing to release
+        if: steps.notes.outputs.has_changes != 'true'
+        run: echo "No releasable commits since the last release." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish the release
+        if: inputs.mode == 'publish' && steps.notes.outputs.has_changes == 'true' && github.ref_name == github.event.repository.default_branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.notes.outputs.tag }}
+        run: gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --notes-file release-notes.md
+
+      # A release created with the workflow token does not start other workflows, so the VERSION file
+      # (the version a downloaded source zip reports) is updated here instead of by update-version-file.yml.
+      - name: Decide whether VERSION changes (major releases only)
+        id: version_file
+        if: inputs.mode == 'publish' && steps.notes.outputs.has_changes == 'true' && github.ref_name == github.event.repository.default_branch
+        env:
+          RELEASE_TAG: ${{ steps.notes.outputs.tag }}
+        run: python3 tools/update_version_file.py --tag "$RELEASE_TAG" --github-output
+
+      - name: Commit VERSION
+        if: steps.version_file.outputs.changed == 'true'
+        env:
+          NEW_VERSION: ${{ steps.version_file.outputs.version }}
+          BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add VERSION
+          git commit -m "chore: set VERSION to ${NEW_VERSION} [skip changelog]"
+          git push origin "HEAD:${BRANCH}"

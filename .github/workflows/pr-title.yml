@@ -1,0 +1,30 @@
+name: PR title
+
+# Tells contributors when a pull request title does not start with a release keyword (feat:, fix:, patch:, chore:,
+# docs:, ... or "!" for a breaking change). Pull requests are squash-merged and the title becomes the commit message
+# that tools/release_notes.py reads, so the keyword decides the release-notes section and the version bump.
+# The check fails with an explanation; it only blocks a merge if you make it a required check in the repository
+# settings. It checks out the base branch (trusted code), never the pull request's code, and passes the title in
+# an environment variable rather than into a shell command.
+
+on:
+  pull_request_target:
+    types: [opened, edited, reopened, synchronize]
+    branches:
+      - master
+      - "TSDB*"
+
+permissions:
+  contents: read
+
+jobs:
+  check-title:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Check the title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: python3 tools/check_pr_title.py

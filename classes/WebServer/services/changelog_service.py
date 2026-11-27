@@ -22,10 +22,14 @@ Loads the release history shown on the admin UI's Changelog page
 
 That file is *generated*, not hand-edited: ``tools/generate_changelog.py`` copies the
 published GitHub Releases into it at build time (version tag, date, who released it, the commit,
-and the release-drafter notes split into sections and entries, each with its pull request number,
+and the release notes split into sections and entries, each with its pull request number,
 authors and commit hash). Releases are therefore the single source of truth, and the version
 history on this page is always the version history in git. The file is gitignored and ships
 inside the Docker image, because a running container has neither ``.git`` nor guaranteed network access.
+
+When the build is ahead of the last release (an image built from ``TSDB_dev``), the file also has an
+``"unreleased"`` object: the commits made since that release, grouped like a release, with the version the
+next release is projected to have. The page shows it first, as "Unreleased".
 
 The page is a four-level outline, every level collapsible::
 
@@ -142,6 +146,20 @@ class ChangelogSeries:
 
 
 @dataclass(frozen=True)
+class ChangelogUnreleased:
+    """The commits made since the last release: what the next release will contain."""
+
+    previous_tag: str        # the last release, "" when it does not look like a tag name
+    projected_version: str   # the version the next release will get, for example "1.5.0"
+    bump: str                # "major", "minor" or "patch"; "" when unknown
+    commit: str              # abbreviated hash of the newest commit
+    commit_url: str
+    compare_url: str         # previous release ... newest commit, "" when there is no previous tag
+    sections: tuple[ChangelogSection, ...]
+    entry_count: int
+
+
+@dataclass(frozen=True)
 class Changelog:
     """Everything the Changelog page needs."""
 
@@ -151,6 +169,7 @@ class Changelog:
     build_version: str                      # version recorded when the file was generated, "" if none
     releases: tuple[ChangelogRelease, ...]  # newest version first
     series: tuple[ChangelogSeries, ...]     # the same releases grouped by major version, newest first
+    unreleased: ChangelogUnreleased | None = None  # commits since the last release, when there are any
 
 
 def render_notes(body: str) -> str:
@@ -158,8 +177,8 @@ def render_notes(body: str) -> str:
     Render release-note Markdown to HTML that is safe to place in a page.
 
     Raw HTML in the notes is escaped (it would otherwise be passed through by the Markdown
-    renderer), bare github.com URLs and ``@username`` mentions (contributor credits added by
-    release-drafter) become links, ``javascript:``/``data:``/``vbscript:``
+    renderer), bare github.com URLs and ``@username`` mentions (contributor credits in
+    the notes) become links, ``javascript:``/``data:``/``vbscript:``
     links are neutralized, and every link opens in a new tab without leaking the referrer.
     """
     if not body.strip():
@@ -302,6 +321,31 @@ def _series_label(version: str) -> str:
     return f"{key[0]}.x" if key[0] >= 0 else OTHER_SERIES_LABEL
 
 
+def _parse_unreleased(raw: Any, repository: str) -> ChangelogUnreleased | None:
+    """The optional ``"unreleased"`` object; None when it is absent, empty or not an object."""
+    if not isinstance(raw, dict):
+        return None
+    item: dict[str, Any] = cast(dict[str, Any], raw)
+    sections: tuple[ChangelogSection, ...] = _parse_sections(item.get("sections"), repository, "unreleased.sections")
+    if not sections:
+        return None
+    previous: str = _optional_str(item.get("previous_tag"))
+    previous = previous if _TAG_RE.match(previous) else ""
+    commit: str = _short_sha(item.get("commit"))
+    projected: str = _optional_str(item.get("projected_version"))
+    bump: str = _optional_str(item.get("bump"))
+    return ChangelogUnreleased(
+        previous_tag=previous,
+        projected_version=projected if _SEMVER_RE.match(projected) else "",
+        bump=bump if bump in ("major", "minor", "patch") else "",
+        commit=commit,
+        commit_url=f"{GITHUB}/{repository}/commit/{commit}" if commit else "",
+        compare_url=f"{GITHUB}/{repository}/compare/{previous}...{commit}" if previous and commit else "",
+        sections=sections,
+        entry_count=sum(len(section.entries) for section in sections),
+    )
+
+
 def parse_changelog(data: Any) -> Changelog:
     """Validate the parsed JSON and turn it into a Changelog. Raises ChangelogLoadError with a precise location."""
     if not isinstance(data, dict):
@@ -360,6 +404,7 @@ def parse_changelog(data: Any) -> Changelog:
         build_version=build_version,
         releases=tuple(linked),
         series=series,
+        unreleased=_parse_unreleased(top.get("unreleased"), repository),
     )
 
 

@@ -537,6 +537,7 @@ def test_main_writes_the_file_and_github_outputs(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(gen, "fetch_releases", _releases_returning([_release("v1.0.0")]))
     monkeypatch.setattr(gen, "git_version", _returns("1.0.0+2.gabc"))
     monkeypatch.setattr(gen, "git_commit", _returns("abc123"))
+    monkeypatch.setattr(gen, "build_unreleased", _returns(None))
     assert gen.main(["--output", str(out_file), "--repo", "o/r", "--github-output"]) == 0
     assert parse_changelog(json.loads(out_file.read_text(encoding="utf-8"))).releases[0].tag == "v1.0.0"
     text: str = gh_out.read_text(encoding="utf-8")
@@ -558,6 +559,7 @@ def test_main_fails_cleanly_when_github_is_unreachable(monkeypatch: pytest.Monke
 
 def test_main_dry_run_writes_nothing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     monkeypatch.setattr(gen, "fetch_releases", _releases_returning([_release("v1.0.0")]))
+    monkeypatch.setattr(gen, "build_unreleased", _returns(None))
     out_file: Path = tmp_path / "changelog.json"
     assert gen.main(["--output", str(out_file), "--repo", "o/r", "--dry-run"]) == 0
     assert not out_file.exists()
@@ -629,67 +631,6 @@ def test_update_version_workflow_is_major_only_and_skips_prereleases() -> None:
     assert "types: [published]" in text
     assert "!github.event.release.prerelease" in text
     assert "update_version_file.py" in text
-
-
-# --------------------------------------------------------------------------- Release Drafter v7 files
-def test_release_drafter_config_uses_v7_syntax() -> None:
-    cfg: str = (PROJECT_ROOT / ".github" / "release-drafter.yml").read_text(encoding="utf-8")
-    assert re.search(r"^categories:", cfg, re.MULTILINE)
-    assert "type: pre-exclude" in cfg
-    assert "type: version-resolver" in cfg
-    assert "conventional:" in cfg
-    assert "semver-increment:" in cfg
-    assert re.search(r'^tag-template: "v\$RESOLVED_VERSION"', cfg, re.MULTILINE)
-    assert re.search(r'^tag-prefix: "v"', cfg, re.MULTILINE)
-    # the pre-v7 keys are gone: they moved into `categories` (the `autolabeler:` block stays; see below)
-    for legacy in ("exclude-labels:", "version-resolver:\n"):
-        assert not re.search(rf"^{re.escape(legacy)}", cfg, re.MULTILINE), legacy
-
-
-def _config_section(text: str, start: str, end: str) -> str:
-    """The part of ``text`` from ``start`` up to (not including) ``end``."""
-    begin: int = text.index(start)
-    return text[begin:text.index(end, begin)]
-
-
-def test_release_workflow_has_a_drafter_job_and_a_separate_autolabeler_job() -> None:
-    text: str = (PROJECT_ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
-    assert "release-drafter/release-drafter@v7" in text
-    assert "release-drafter/release-drafter/autolabeler@v7" in text  # v7 labels pull requests with its own action
-    assert re.search(r"^  pull_request_target:\n    types: \[opened, reopened, synchronize\][^\n]*\n    branches:\n      - master", text, re.MULTILINE)
-    assert "if: github.event_name != 'pull_request_target'" in text  # the drafter runs for pushes, never for pull requests
-    assert "if: github.event_name == 'pull_request_target'" in text  # the labeler runs only for pull requests
-    assert "pull-requests: write" in text
-    assert "pull-requests: read" in text
-    assert "contents: write" in text
-
-
-def test_autolabeler_only_adds_labels_the_categories_recognize() -> None:
-    cfg: str = (PROJECT_ROOT / ".github" / "release-drafter.yml").read_text(encoding="utf-8")
-    categories: str = _config_section(cfg, "\ncategories:", "\nautolabeler:")
-    autolabeler: str = _config_section(cfg, "\nautolabeler:", "\n# NOTES FORMAT")
-    recognized: set[str] = {
-        word.strip()
-        for match in re.finditer(r"labels: \[([^\]]*)\]", categories)
-        for word in match.group(1).split(",")
-    }
-    labels: list[str] = re.findall(r"^  - label: '([a-z]+)'", autolabeler, re.MULTILINE)
-    assert labels == ["major", "feature", "fix", "patch", "documentation", "chore"]
-    assert set(labels) <= recognized, set(labels) - recognized
-    assert "BREAKING[ -]CHANGE" in autolabeler  # a breaking change in the description still means a major bump
-
-
-def test_release_drafter_config_produces_the_parsable_entry_format() -> None:
-    cfg: str = (PROJECT_ROOT / ".github" / "release-drafter.yml").read_text(encoding="utf-8")
-    assert re.search(r'^change-template: "\* \$TITLE \(\[#\$NUMBER\]\(\$URL\) by \$AUTHORS\)"', cfg, re.MULTILINE)
-    assert re.search(r'^category-template: "### \$TITLE"', cfg, re.MULTILINE)
-    assert re.search(r"^sort-by: title", cfg, re.MULTILINE)
-    assert re.search(r"^sort-direction: ascending", cfg, re.MULTILINE)
-    assert "**Detailed Changes**" in cfg
-    assert "## v$RESOLVED_VERSION" in cfg
-    # the exact line this template produces is understood by the generator
-    sample: str = "Add thing ([#9](https://github.com/o/r/pull/9) by @alice)"
-    assert gen.parse_entry(sample) == {"title": "Add thing", "number": 9, "authors": ["alice"]}
 
 
 # --------------------------------------------------------------------------- notes format: parsing the release body
@@ -1012,9 +953,8 @@ def test_a_generator_document_loads_through_the_service_end_to_end() -> None:
 
 # --------------------------------------------------------------------------- the rendered, collapsible page
 def _page(doc: dict[str, Any] | None = None, **overrides: Any) -> str:
-    context: dict[str, Any] = _ctx(
-        changelog=parse_changelog(doc or _doc2()), base_version="2.1.0", app_version="2.1.0", **overrides
-    )
+    context: dict[str, Any] = _ctx(changelog=parse_changelog(doc or _doc2()), base_version="2.1.0", app_version="2.1.0")
+    context.update(overrides)
     return _render(**context)
 
 
@@ -1080,103 +1020,189 @@ def test_releases_without_sections_still_show_their_notes() -> None:
     assert "No release notes were provided" in html  # v1.0.0 has neither sections nor a body
 
 
-# --------------------------------------------------------------------------- version bumps, Dependabot and the PR template
-_BUMP_RANK: dict[str, int] = {"patch": 0, "minor": 1, "major": 2}
-_HEADER_RE: re.Pattern[str] = re.compile(r"^(?P<type>[A-Za-z]+)(?:\([^)]*\))?(?P<bang>!)?:\s")
+# --------------------------------------------------------------------------- notes format: every form of an entry
+_ENTRY_CASES: list[tuple[str, dict[str, Any]]] = [
+        (f"Add an Acme register map ([#42]({REPO_URL}/pull/42) by [@alice](https://github.com/alice), `2476c4b`)",
+         {"title": "Add an Acme register map", "number": 42, "authors": ["alice"], "sha": "2476c4b"}),
+        ("Add Bluetooth (by [@BuxtonCalvin](https://github.com/BuxtonCalvin), `dafb50d`)",
+         {"title": "Add Bluetooth", "number": None, "authors": ["BuxtonCalvin"], "sha": "dafb50d"}),
+        ("wip tweak (`f97a7b1`)", {"title": "wip tweak", "number": None, "authors": [], "sha": "f97a7b1"}),
+        (f"bump requests ([#51]({REPO_URL}/pull/51) by [@dependabot[bot]](https://github.com/apps/dependabot), `078ee22`)",
+         {"title": "bump requests", "number": 51, "authors": ["dependabot[bot]"], "sha": "078ee22"}),
+        ("Old style (#7) @alice, @bob", {"title": "Old style", "number": 7, "authors": ["alice", "bob"]}),
+        ("Plain title", {"title": "Plain title", "number": None, "authors": []}),
+        ("Fix (legacy) behavior (by [@x](https://github.com/x), `abcdef1`)",
+         {"title": "Fix (legacy) behavior", "number": None, "authors": ["x"], "sha": "abcdef1"}),
+]
 
 
-def _resolver_blocks(cfg: str) -> list[tuple[str, str]]:
-    """(increment, text) for each ``type: version-resolver`` category of the Release Drafter configuration."""
-    section: str = _config_section(cfg, "\ncategories:", "\nautolabeler:")
-    blocks: list[tuple[str, str]] = []
-    for part in re.split(r"(?m)^  - (?=type: version-resolver)", section)[1:]:
-        match = re.search(r"semver-increment: (\w+)", part)
-        assert match is not None
-        blocks.append((match.group(1), part))
-    return blocks
+@pytest.mark.parametrize(("line", "expected"), _ENTRY_CASES)
+def test_parse_entry_understands_every_form_of_a_note(line: str, expected: dict[str, Any]) -> None:
+    assert gen.parse_entry(line) == expected
 
 
-def _bump_for(cfg: str, title: str, labels: list[str]) -> str:
-    """The version bump the configuration asks for a pull request: every matching resolver counts, highest wins."""
-    header = _HEADER_RE.match(title)
-    title_type: str = header.group("type").lower() if header else ""
-    breaking: bool = bool(header and header.group("bang"))
-    hits: list[str] = []
-    fallback: list[str] = []
-    for increment, block in _resolver_blocks(cfg):
-        if "when:" not in block:
-            fallback.append(increment)  # no `when`: used only if nothing else matches
-            continue
-        types: set[str] = {t.strip() for m in re.finditer(r"types: \[([^\]]*)\]", block) for t in m.group(1).split(",")}
-        types |= set(re.findall(r"^\s+type: (\w+)", block, re.MULTILINE))
-        wanted: set[str] = {w.strip() for m in re.finditer(r"labels: \[([^\]]*)\]", block) for w in m.group(1).split(",")}
-        if (title_type and title_type in types) or (breaking and "breaking: true" in block) or (set(labels) & wanted):
-            hits.append(increment)
-    return max(hits or fallback, key=_BUMP_RANK.__getitem__)
+def test_parse_entry_ignores_an_empty_bullet() -> None:
+    assert gen.parse_entry("   ") is None
+    assert gen.parse_entry("(by [@x](https://github.com/x), `abcdef1`)") is None  # details with no title
 
 
-@pytest.mark.parametrize(
-    ("title", "labels", "expected"),
-    [
-        ("feat: Add a Changelog page", [], "minor"),
-        ("feat(modbus): Add a register map", [], "minor"),
-        ("fix: Reset failure tracking on reconnect", [], "minor"),
-        ("perf: Faster scan", [], "minor"),
-        ("patch: Fix a typo in a log message", [], "patch"),
-        ("chore: Tidy imports", [], "patch"),
-        ("build: Update the Dockerfile", [], "patch"),
-        ("ci: Pin the runner", [], "patch"),
-        ("test: Add a case", [], "patch"),
-        ("refactor: Split the scanner", [], "patch"),
-        ("style: Run ruff format", [], "patch"),
-        ("docs: Update the releasing guide", [], "patch"),
-        ("chore(deps): bump the python-all group with 4 updates", ["dependencies", "python"], "patch"),
-        ("chore(ci): bump actions/checkout from 6 to 7", ["dependencies", "github-actions"], "patch"),
-        ("chore(docker): bump python from 3.12 to 3.13", ["dependencies", "docker"], "patch"),
-        ("Bump requests from 2.31 to 2.32", ["dependencies", "python"], "patch"),  # a Dependabot title without a prefix
-        ("feat!: Rename a setting", [], "major"),
-        ("fix(api)!: Change the payload", [], "major"),
-        ("chore!: Drop Python 3.11", [], "major"),
-        ("breaking: Remove the old endpoint", [], "major"),
-        ("Improve the wording", [], "minor"),  # not in conventional form: never under-bumped
-        ("feat: Add X", ["python"], "minor"),  # an extra label never lowers a feature
-        ("fix: Y", ["patch"], "minor"),  # the title decides; to lower the bump, change the title
-    ],
-)
-def test_title_keywords_choose_the_documented_version_bump(title: str, labels: list[str], expected: str) -> None:
-    cfg: str = (PROJECT_ROOT / ".github" / "release-drafter.yml").read_text(encoding="utf-8")
-    assert _bump_for(cfg, title, labels) == expected
+def test_enrich_skips_entries_that_already_carry_a_hash() -> None:
+    releases: list[dict[str, Any]] = _releases_with(
+        {"title": "Has hash", "number": 1, "authors": ["alice"], "sha": "abcdef0"},
+        {"title": "Needs hash", "number": 2, "authors": []},
+    )
+    calls: list[str] = []
+
+    def fake(url: str, token: str | None) -> dict[str, Any]:
+        calls.append(url)
+        return _fake_pr("1234567", "bob")
+
+    assert gen.enrich_entries("o/r", releases, None, fake) == 1
+    assert calls == ["https://api.github.com/repos/o/r/pulls/2"]
 
 
-def test_patch_keyword_is_listed_under_bug_fixes_and_labeled() -> None:
-    cfg: str = (PROJECT_ROOT / ".github" / "release-drafter.yml").read_text(encoding="utf-8")
-    bug_fixes: str = _config_section(cfg, 'title: "🐛 Bug Fixes"', 'title: "🧰 Maintenance"')
-    assert "types: [fix, perf, patch]" in bug_fixes
-    assert re.search(r"^  - label: 'patch'\n    title:\n      - '/\^patch", cfg, re.MULTILINE)
+# --------------------------------------------------------------------------- commits since the last release ("Unreleased")
+def _make_repo(path: Path) -> None:
+    _git(path, "init", "-q", "-b", "master")
 
 
-def test_dependabot_pull_requests_are_conventional_chores_with_the_dependencies_label() -> None:
-    text: str = (PROJECT_ROOT / ".github" / "dependabot.yml").read_text(encoding="utf-8")
-    prefixes: list[str] = re.findall(r'prefix: "([^"]+)"', text)
-    assert len(prefixes) == text.count("package-ecosystem:") == text.count('- "dependencies"') >= 3
-    assert all(prefix.startswith("chore(") for prefix in prefixes), prefixes  # "chore(deps): ..." asks for a patch bump
+def _commit(path: Path, message: str, email: str = "1+BuxtonCalvin@users.noreply.github.com") -> None:
+    (path / "f.txt").write_text(message + "\n", encoding="utf-8")  # different content every time
+    _git(path, "add", "f.txt")
+    subprocess.run(  # noqa: S603
+        ["git", "-c", "user.name=t", "-c", f"user.email={email}", "commit", "-q", "-m", message],  # noqa: S607
+        cwd=path, check=True, capture_output=True, text=True,
+    )
 
 
-def test_pull_request_template_lists_every_keyword_and_cannot_trigger_a_major_bump_by_itself() -> None:
-    template: str = (PROJECT_ROOT / ".github" / "pull_request_template.md").read_text(encoding="utf-8")
-    for keyword in ("feat:", "fix:", "perf:", "patch:", "chore:", "build:", "ci:", "test:", "refactor:", "style:",
-                    "docs:", "feat!:", "breaking:", "skip-changelog"):
-        assert keyword in template, keyword
-    assert "- [ ] This is a breaking change" in template
-    # the description-matching rules of the autolabeler's `major` label, taken from the configuration
-    cfg: str = (PROJECT_ROOT / ".github" / "release-drafter.yml").read_text(encoding="utf-8")
-    body_section: str = _config_section(cfg, "    body:", "  - label: 'feature'")
-    rules: list[re.Pattern[str]] = [
-        re.compile(pattern, re.IGNORECASE if flags == "i" else 0)
-        for pattern, flags in re.findall(r"^      - '/(.+)/(i?)'", body_section, re.MULTILINE)
-    ]
-    assert len(rules) == 2
-    assert not any(rule.search(template) for rule in rules)  # an untouched template must not label every PR "major"
-    ticked: str = template.replace("- [ ] This is a breaking change", "- [x] This is a breaking change")
-    assert any(rule.search(ticked) for rule in rules)  # ticking the box does
-    assert any(rule.search(ticked.replace("[x]", "[X]")) for rule in rules)
+def test_build_unreleased_lists_the_commits_since_the_last_tag(tmp_path: Path) -> None:
+    if not _git_is_installed():
+        pytest.skip("git is not installed")
+    _make_repo(tmp_path)
+    _commit(tmp_path, "feat: First thing")
+    _git(tmp_path, "tag", "v1.4.2")
+    _commit(tmp_path, "feat: Add Bluetooth functionality")
+    _commit(tmp_path, "patch: Fix a typo in a log message")
+    _commit(tmp_path, "chore: set VERSION to 2.0.0 [skip changelog]")
+    result: dict[str, Any] | None = gen.build_unreleased(tmp_path, "o/r", None, enrich=False)
+    assert result is not None
+    assert result["previous_tag"] == "v1.4.2"
+    assert result["projected_version"] == "1.5.0"  # a feature asks for a minor bump
+    assert result["bump"] == "minor"
+    assert re.fullmatch(r"[0-9a-f]{7}", result["commit"])
+    assert [s["title"] for s in result["sections"]] == ["🚀 Features", "🐛 Bug Fixes"]
+    features: dict[str, Any] = result["sections"][0]["entries"][0]
+    assert features["title"] == "Add Bluetooth functionality"
+    assert features["authors"] == ["BuxtonCalvin"]  # read from the GitHub no-reply address
+    assert re.fullmatch(r"[0-9a-f]{7}", features["sha"])
+
+
+def test_build_unreleased_projects_a_patch_for_routine_work(tmp_path: Path) -> None:
+    if not _git_is_installed():
+        pytest.skip("git is not installed")
+    _make_repo(tmp_path)
+    _commit(tmp_path, "feat: First thing")
+    _git(tmp_path, "tag", "v1.4.2")
+    _commit(tmp_path, "chore(deps): bump requests from 2.31 to 2.32 (#51)", "49699333+dependabot[bot]@users.noreply.github.com")
+    result: dict[str, Any] | None = gen.build_unreleased(tmp_path, "o/r", None, enrich=False)
+    assert result is not None
+    assert result["projected_version"] == "1.4.3"
+    assert result["bump"] == "patch"
+    assert result["sections"][0]["entries"][0]["authors"] == ["dependabot[bot]"]
+    assert result["sections"][0]["entries"][0]["number"] == 51
+
+
+def test_build_unreleased_is_none_without_a_tag_or_without_releasable_commits(tmp_path: Path) -> None:
+    if not _git_is_installed():
+        pytest.skip("git is not installed")
+    _make_repo(tmp_path)
+    _commit(tmp_path, "feat: First thing")
+    assert gen.build_unreleased(tmp_path, "o/r", None, enrich=False) is None  # no release tag yet
+    _git(tmp_path, "tag", "v1.0.0")
+    assert gen.build_unreleased(tmp_path, "o/r", None, enrich=False) is None  # nothing after the tag
+    _commit(tmp_path, "chore: set VERSION to 1.0.0 [skip changelog]")
+    assert gen.build_unreleased(tmp_path, "o/r", None, enrich=False) is None  # only skipped commits after it
+    assert gen.build_unreleased(tmp_path / "missing", "o/r", None, enrich=False) is None  # not a git checkout
+
+
+def test_main_adds_the_unreleased_section_unless_told_not_to(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    unreleased: dict[str, Any] = {
+        "previous_tag": "v1.0.0", "projected_version": "1.1.0", "bump": "minor", "commit": "abcdef0",
+        "sections": [{"title": "Features", "entries": [{"title": "Add X", "number": None, "authors": [], "sha": "abcdef0"}]}],
+    }
+    monkeypatch.setattr(gen, "fetch_releases", _releases_returning([_release("v1.0.0")]))
+    monkeypatch.setattr(gen, "build_unreleased", _returns_value(unreleased))
+    with_file: Path = tmp_path / "with.json"
+    assert gen.main(["--output", str(with_file), "--repo", "o/r"]) == 0
+    saved: dict[str, Any] = json.loads(with_file.read_text(encoding="utf-8"))
+    assert saved["unreleased"]["projected_version"] == "1.1.0"
+    assert parse_changelog(saved).unreleased is not None
+    without_file: Path = tmp_path / "without.json"
+    assert gen.main(["--output", str(without_file), "--repo", "o/r", "--no-unreleased"]) == 0
+    assert "unreleased" not in json.loads(without_file.read_text(encoding="utf-8"))
+
+
+def _returns_value(value: dict[str, Any]) -> Callable[..., dict[str, Any]]:
+    """A stand-in that ignores its arguments and returns ``value``."""
+
+    def build(*_args: object, **_kwargs: object) -> dict[str, Any]:
+        return value
+
+    return build
+
+
+def _doc_with_unreleased(**overrides: Any) -> dict[str, Any]:
+    data: dict[str, Any] = _doc2()
+    data["unreleased"] = {
+        "previous_tag": "v2.1.0", "projected_version": "2.2.0", "bump": "minor", "commit": "0123456789abcdef",
+        "sections": [
+            {"title": "Features", "entries": [{"title": "Add `bluetooth` <b>now</b>", "number": None, "authors": ["alice"], "sha": "dafb50d"}]},
+            {"title": "Bug Fixes", "entries": [{"title": "Fix X", "number": 7, "authors": ["bob"], "sha": "2476c4b"}]},
+        ],
+    }
+    data["unreleased"].update(overrides)
+    return data
+
+
+def test_the_unreleased_section_is_parsed_with_validated_links() -> None:
+    pending = parse_changelog(_doc_with_unreleased()).unreleased
+    assert pending is not None
+    assert pending.previous_tag == "v2.1.0"
+    assert pending.projected_version == "2.2.0"
+    assert pending.bump == "minor"
+    assert pending.commit == "0123456"
+    assert pending.commit_url == f"{REPO_URL}/commit/0123456"
+    assert pending.compare_url == f"{REPO_URL}/compare/v2.1.0...0123456"
+    assert pending.entry_count == 2
+    assert pending.sections[0].entries[0].title_html == "Add <code>bluetooth</code> &lt;b&gt;now&lt;/b&gt;"
+    assert pending.sections[1].entries[0].pr_url == f"{REPO_URL}/pull/7"
+
+
+def test_the_unreleased_section_is_optional_and_rejects_bad_values() -> None:
+    assert parse_changelog(_doc2()).unreleased is None
+    assert parse_changelog(_doc_with_unreleased(sections=[])).unreleased is None  # nothing to show
+    bad = parse_changelog(_doc_with_unreleased(previous_tag='v1"><script>', projected_version="soon", bump="huge", commit="not hex")).unreleased
+    assert bad is not None
+    assert bad.previous_tag == ""
+    assert bad.projected_version == ""
+    assert bad.bump == ""
+    assert bad.commit == ""
+    assert bad.compare_url == ""
+    assert parse_changelog({**_doc2(), "unreleased": "nope"}).unreleased is None
+
+
+def test_page_shows_an_unreleased_card_first_for_a_development_build() -> None:
+    html: str = _page(_doc_with_unreleased(), is_dev_build=True, app_version="2.1.0+2.g0123456")
+    assert html.count("data-unreleased") == 1
+    assert re.search(r"<details class=\"card\" data-unreleased open", html)  # open, because this build is ahead of the release
+    assert html.index("data-unreleased") < html.index("data-series")
+    text: str = _reader_text(html)
+    assert "Unreleased 2 changes, next release 2.2.0 (minor bump)" in text
+    assert "Add bluetooth <b>now</b> (by @alice, dafb50d)" in text
+    assert "Fix X (#7 by @bob, 2476c4b)" in text
+    assert "Detailed changes: v2.1.0...0123456" in text
+    assert "<b>now</b>" not in html  # escaped
+
+
+def test_page_without_unreleased_changes_has_no_unreleased_card() -> None:
+    assert "data-unreleased" not in _page()

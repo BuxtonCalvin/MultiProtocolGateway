@@ -4,8 +4,8 @@ on:
   # push:
     # branches:
       # - master
-  release:
-    types: [published]   # publishing a GitHub Release builds and pushes the image for that version
+  # Run by hand (Actions -> Publish Docker Public Image -> Run workflow). For a clean version tag such as 1.3.0,
+  # publish the release first (Release workflow, mode publish) and run this afterwards.
   workflow_dispatch:
 
 permissions:

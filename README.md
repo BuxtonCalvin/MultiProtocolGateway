@@ -246,7 +246,7 @@ Separate pages manage gateway-wide settings: Read mode and dynamic configuration
 
 ### Changelog
 
-**Global Settings → Changelog** shows the installed version and the release history as a collapsible outline (major series → release → section → entry), with each entry's pull request number, author and commit linked to GitHub. Versions and notes are driven by git: the version is the nearest release tag, and each entry is a published GitHub Release (assembled by release-drafter from merged pull request titles). The history is captured when the Docker image is built. See [`releasing.md`](documentation/usage/releasing.md) for the release procedure, including the step-by-step VS Code workflow.
+**Global Settings → Changelog** shows the installed version and the release history as a collapsible outline (major series → release → section → entry), with each entry's pull request number, author and commit linked to GitHub. On a build that is ahead of the last release it also has an **Unreleased** card listing the changes made since and the version they will get. Versions and notes are driven by git: commit messages (and squash-merged pull request titles) start with a keyword such as `feat:`, `fix:`, `patch:` or `chore:`, which decides the release-notes section and the `MAJOR.MINOR.PATCH` bump. See [`releasing.md`](documentation/usage/releasing.md) for the keywords, your commit-to-release routine in VS Code, how pull requests from other people fit in, and the Release workflow.
 
 ### Log Viewer
 

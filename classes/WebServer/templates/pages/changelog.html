@@ -92,6 +92,58 @@
     <button type="button" id="changelog-collapse" class="btn-secondary text-xs">Collapse all</button>
   </div>
 
+  {% if changelog.unreleased %}
+  {% set pending = changelog.unreleased %}
+  <details class="card" data-unreleased{% if is_dev_build %} open{% endif %}>
+    <summary class="cl-summary">
+      <svg class="cl-chevron surface-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+      </svg>
+      <h2 class="surface-title font-semibold text-base">Unreleased</h2>
+      <span class="surface-muted text-xs">
+        {{ pending.entry_count }} change{{ "" if pending.entry_count == 1 else "s" }}
+        {%- if pending.projected_version %}, next release {{ pending.projected_version }}{% if pending.bump %} ({{ pending.bump }} bump){% endif %}{% endif %}
+      </span>
+    </summary>
+
+    <div class="cl-nest space-y-2">
+      <p class="cl-meta surface-muted text-xs leading-relaxed">
+        Changes made since
+        {% if pending.previous_tag %}<a href="https://github.com/{{ changelog.repository }}/releases/tag/{{ pending.previous_tag }}" target="_blank" rel="noopener">{{ pending.previous_tag }}</a>{% else %}the last release{% endif %}
+        that are not in a published release yet
+        {%- if pending.commit %} · Commit: <a href="{{ pending.commit_url }}" target="_blank" rel="noopener"><code class="font-mono">{{ pending.commit }}</code></a>{% endif %}
+        {%- if pending.compare_url %} · <a href="{{ pending.compare_url }}" target="_blank" rel="noopener">Detailed changes: {{ pending.previous_tag }}...{{ pending.commit }}</a>{% endif %}
+      </p>
+      {% for section in pending.sections %}
+      <details data-section open>
+        <summary class="cl-summary">
+          <svg class="cl-chevron surface-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+          </svg>
+          <h3 class="surface-title font-medium text-sm">{{ section.title }}</h3>
+          <span class="surface-muted text-xs">({{ section.entries | length }})</span>
+        </summary>
+        <ul class="cl-entries surface-muted text-sm leading-relaxed">
+          {% for entry in section.entries %}
+          <li data-entry>
+            {{- entry.title_html | safe }}
+            {%- if entry.number or entry.authors or entry.sha %} (
+              {%- if entry.number %}<a href="{{ entry.pr_url }}" target="_blank" rel="noopener">#{{ entry.number }}</a>{% endif -%}
+              {%- if entry.authors %}{% if entry.number %} {% endif %}by
+                {% for author in entry.authors %}<a href="{{ author.url }}" target="_blank" rel="noopener">@{{ author.login }}</a>{% if not loop.last %}, {% endif %}{% endfor %}
+              {%- endif -%}
+              {%- if entry.sha %}{% if entry.number or entry.authors %}, {% endif %}<a href="{{ entry.commit_url }}" target="_blank" rel="noopener"><code class="font-mono">{{ entry.sha }}</code></a>{% endif -%}
+            )
+            {%- endif %}
+          </li>
+          {% endfor %}
+        </ul>
+      </details>
+      {% endfor %}
+    </div>
+  </details>
+  {% endif %}
+
   {% for series in changelog.series %}
   {% set series_loop = loop %}
   <details class="card" data-series{% if loop.first %} open{% endif %}>

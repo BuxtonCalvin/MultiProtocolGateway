@@ -17,9 +17,10 @@
 
 """Generate ``classes/WebServer/changelog.json`` for the admin UI's Changelog page.
 
-The page shows one entry per *published GitHub Release*. The release notes are the ones
-release-drafter assembled from merged pull requests (see ``.github/release-drafter.yml``),
-so the changelog is driven by git tags and releases and nothing is typed in twice.
+The page shows one entry per *published GitHub Release*. The release notes are the ones the Release
+workflow built from the commits since the previous release (``tools/release_notes.py``: direct commits and
+squash-merged pull requests, read from their keywords), so the changelog is driven by git tags, releases and
+commit messages, and nothing is typed in twice.
 
 A running container has no ``.git`` folder and should not need network access, so this tool
 runs at *build time* (in the Docker workflows, or by hand on a developer machine) and the
@@ -38,11 +39,15 @@ What it records (schema 2)::
                                               "authors": ["alice"], "sha": "def5678"}]}],
                    "body": "the original markdown"}]}
 
-The release body written by release-drafter is parsed into ``sections`` and ``entries`` so the
-page can show the same detail as the notes (title, pull request link, authors) in collapsible
-levels. Release-drafter cannot print a commit hash, so each pull request is looked up through the
-GitHub API to add ``sha`` (the merge commit) and the pull request's author. Use ``--no-enrich`` to
-skip those lookups (offline, or to save API calls).
+The release body written by ``tools/release_notes.py`` is parsed into ``sections`` and ``entries`` so the
+page can show the same detail as the notes (title, pull request link, authors, commit hash) in collapsible
+levels. Notes without hashes (for example ones typed by hand) get them from the GitHub API, one lookup per
+pull request; ``--no-enrich`` skips every API lookup (offline, or to save API calls).
+
+When the checkout is ahead of the last release tag, the document also gets an ``"unreleased"`` object
+(``previous_tag``, ``projected_version``, ``bump``, ``commit`` and ``sections``) listing the commits made
+since, so an image built from ``TSDB_dev`` can show what the next release will contain.
+``--no-unreleased`` leaves it out.
 
 Usage::
 
@@ -71,6 +76,9 @@ from typing import Any, cast
 
 PROJECT_ROOT: Path = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # tools/, for release_notes
+
+import release_notes  # noqa: E402
 
 from defs.app_version import (  # noqa: E402
     BUILD_INFO_PATH,
@@ -106,9 +114,11 @@ _MENTION_RE: re.Pattern[str] = re.compile(
 )
 _HEX_RE: re.Pattern[str] = re.compile(r"^[0-9a-f]{7,40}$")
 _CODE_SHA_RE: re.Pattern[str] = re.compile(r"`(?P<sha>[0-9a-f]{7,40})`")
+# Where an entry's parenthesized details begin: "([#12](url)", "(#12", "(by " or "(`abc1234`".
+_DETAILS_RE: re.Pattern[str] = re.compile(r"\(\s*(?:\[#\d+\]\([^)]*\)|#\d+|by\s|`[0-9a-f]{7,40}`)")
 
 
-class ChangelogGenerationError(RuntimeError):
+class ChangelogGenerationError(release_notes.ReleaseNotesError):
     """The releases could not be fetched or the output could not be written."""
 
 
@@ -225,29 +235,26 @@ def parse_entry(text: str) -> dict[str, Any] | None:
     Split one release-note bullet into ``{"title", "number", "authors"}`` (plus ``"sha"`` when the
     line carries a commit hash in backticks).
 
-    Understands ``Title ([#12](url) by [@alice](url), `abc1234`)`` (the format this project's release
-    notes use), ``Title (#12) @alice`` (earlier notes), ``Title (`abc1234`)`` for a change
-    without a pull request, and a bare ``Title``. Returns None for an empty bullet.
+    The details in parentheses are all optional, so every form this project's notes use is understood:
+    ``Title ([#12](url) by [@alice](url), `abc1234`)`` (a squash-merged pull request),
+    ``Title (by [@alice](url), `abc1234`)`` and ``Title (`abc1234`)`` (a direct commit),
+    ``Title (#12) @alice`` (earlier notes) and a bare ``Title``. Returns None for an empty bullet.
     """
-    reference: re.Match[str] | None = _PR_REF_RE.search(text)
-    if reference is None:
-        title: str = text.strip()
-        trailing: re.Match[str] | None = re.search(r"\s*\(\s*" + _CODE_SHA_RE.pattern + r"\s*\)\s*$", title)
-        entry: dict[str, Any] = {"title": title, "number": None, "authors": []}
-        if trailing is not None:
-            entry["title"] = title[: trailing.start()].strip()
-            entry["sha"] = trailing.group("sha")[:SHORT_SHA_LENGTH]
-        return entry if entry["title"] else None
-    title = text[: reference.start()].strip()
+    details: re.Match[str] | None = _DETAILS_RE.search(text)
+    if details is None:
+        bare: str = text.strip()
+        return {"title": bare, "number": None, "authors": []} if bare else None
+    title: str = text[: details.start()].strip()
     if not title:
         return None
-    tail: str = text[reference.start():]
+    tail: str = text[details.start():]
     authors: list[str] = []
     for mention in _MENTION_RE.finditer(tail):
         login: str = mention.group("linked") or mention.group("plain")
         if login not in authors:
             authors.append(login)
-    number: int = int(reference.group("linked") or reference.group("plain"))
+    reference: re.Match[str] | None = _PR_REF_RE.search(tail)
+    number: int | None = int(reference.group("linked") or reference.group("plain")) if reference else None
     result: dict[str, Any] = {"title": title, "number": number, "authors": authors}
     code_sha: re.Match[str] | None = _CODE_SHA_RE.search(tail)
     if code_sha is not None:
@@ -257,7 +264,7 @@ def parse_entry(text: str) -> dict[str, Any] | None:
 
 def parse_release_body(body: str) -> tuple[str, list[dict[str, Any]]]:
     """
-    Turn release-drafter's Markdown into ``(intro, sections)``.
+    Turn a release's Markdown notes into ``(intro, sections)``.
 
     A heading starts a section, except a heading that is just the version (``## v1.2.0``), which
     is skipped. Bullets become entries of the current section (a bullet before any heading goes
@@ -308,10 +315,10 @@ def enrich_entries(
     get_json: Callable[[str, str | None], Any] | None = None,
 ) -> int:
     """
-    Add ``sha`` (the merge commit) and the pull request author to every entry that has a PR number.
+    Add ``sha`` (the merge commit) and the pull request author to entries that have a PR number but no hash.
 
-    Release-drafter cannot print a commit hash, so each pull request is looked up once through the
-    GitHub API. A failed lookup only leaves that entry without a sha; after
+    Notes written by ``tools/release_notes.py`` already carry hashes and authors; this is for older notes
+    (for example ones written by hand on GitHub). Each pull request is looked up once through the GitHub API. A failed lookup only leaves that entry without a sha; after
     ``MAX_CONSECUTIVE_LOOKUP_FAILURES`` failures in a row (for example the rate limit) the
     remaining lookups are skipped. Returns the number of entries that were enriched.
     """
@@ -323,8 +330,8 @@ def enrich_entries(
         for section in release.get("sections", []):
             for entry in section["entries"]:
                 number: int | None = entry.get("number")
-                if number is None:
-                    continue
+                if number is None or entry.get("sha"):
+                    continue  # no pull request to look up, or the notes already carry the hash
                 if number not in cache:
                     cache[number] = None
                     if failures < MAX_CONSECUTIVE_LOOKUP_FAILURES:
@@ -352,6 +359,44 @@ def enrich_entries(
                     authors.insert(0, login)  # the pull request's author comes first
                 enriched += 1
     return enriched
+
+
+def build_unreleased(
+    root: Path,
+    repository: str,
+    token: str | None,
+    *,
+    enrich: bool,
+    get_json: Callable[[str, str | None], Any] | None = None,
+) -> dict[str, Any] | None:
+    """
+    The changes made since the last release tag, in the structure stored under ``"unreleased"``.
+
+    Uses the same engine as the Release workflow (``tools/release_notes.py``), so the Changelog page of an image
+    built from ``TSDB_dev`` can show what the next release will contain, and which version it will have.
+    Returns None when there is no release tag yet, no git history, or nothing releasable after the last tag.
+    """
+    previous_tag: str | None = release_notes.latest_release_tag(root, "HEAD")
+    if previous_tag is None:
+        return None
+    try:
+        changes: list[release_notes.Change] = release_notes.collect_changes(root, f"{previous_tag}..HEAD")
+    except release_notes.ReleaseNotesError:
+        return None
+    if not changes:
+        return None
+    if enrich:
+        release_notes.enrich_authors(repository, changes, token, get_json or _get_json)
+    bump: str = release_notes.highest_bump(changes) or "minor"
+    previous: release_notes.Version | None = release_notes.parse_stable(previous_tag)
+    head: str = release_notes.run_git(root, ["rev-parse", "HEAD"]) or ""
+    return {
+        "previous_tag": previous_tag,
+        "projected_version": release_notes.format_version(release_notes.next_version(previous, bump)),
+        "bump": bump,
+        "commit": head[:SHORT_SHA_LENGTH],
+        "sections": release_notes.to_json_sections(release_notes.group_changes(changes)),
+    }
 
 
 def docker_safe_tag(version: str) -> str:
@@ -398,6 +443,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--output", type=Path, default=BUILD_INFO_PATH, help="file to write")
     parser.add_argument("--max-releases", type=int, default=200, help="how many releases to keep")
     parser.add_argument("--no-enrich", action="store_true", help="skip the per-pull-request API lookups (no commit hashes)")
+    parser.add_argument("--no-unreleased", action="store_true", help="leave out the section for commits made since the last release")
     parser.add_argument("--dry-run", action="store_true", help="print the document instead of writing it")
     parser.add_argument("--github-output", action="store_true", help="set version/image_tag/commit step outputs")
     return parser.parse_args(argv)
@@ -419,6 +465,10 @@ def main(argv: list[str] | None = None) -> int:
         if not args.no_enrich:
             enriched: int = enrich_entries(args.repo, document["releases"], token)
             _log.info("Looked up %d pull request(s) for commit hashes and authors", enriched)
+        if not args.no_unreleased:
+            unreleased: dict[str, Any] | None = build_unreleased(PROJECT_ROOT, args.repo, token, enrich=not args.no_enrich)
+            if unreleased is not None:
+                document["unreleased"] = unreleased
         text: str = json.dumps(document, indent=2, ensure_ascii=False) + "\n"
         if args.dry_run:
             sys.stdout.write(text)

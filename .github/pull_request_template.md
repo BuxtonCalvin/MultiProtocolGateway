@@ -1,7 +1,8 @@
 <!-- markdownlint-disable MD041 -->
 <!--
-PULL REQUEST TITLE: this decides the release-notes section and the version bump. It appears word for word
-in the release notes, so write it as a sentence a user would understand, after one of these keywords and a colon.
+PULL REQUEST TITLE: this decides the release-notes section and the version bump. Pull requests are squash-merged and
+the title becomes the commit message the release notes are built from, so it appears word for word in them. Start it
+with one of these keywords and a colon, then write a sentence a user would understand.
 The title is not part of this description box; set it in the title field above.
 
   Keyword                                                       Section            Bump (from 1.4.2)
@@ -13,8 +14,9 @@ The title is not part of this description box; set it in the title field above.
   feat!:  fix!:  chore!:  or  breaking:                         Breaking Changes   major  -> 2.0.0
 
 Optional scope: feat(modbus): ...   Example title: feat: Add a Changelog page under Global Settings
-Dependabot titles ("chore(deps): ...") already follow this and need no template.
-Add the label skip-changelog to keep this pull request out of the release notes.
+Add [skip changelog] to the title to leave a change out of the release notes.
+A check on this pull request tells you if the title is missing a keyword. Dependabot titles ("chore(deps): ...")
+already follow this and need no template.
 These comments are not shown on the finished pull request, so you can leave them in.
 -->
 
@@ -32,21 +34,13 @@ These comments are not shown on the finished pull request, so you can leave them
 
 ## Checklist
 
-- [ ] The title starts with one of the keywords above
+- [ ] The title starts with one of the keywords above (add `!` before the colon if this breaks existing behavior)
 - [ ] Tests added or updated, and `pytest` passes
 - [ ] Strict typing, with no new Pylance or pyright errors, and `ruff` is clean
 - [ ] Docstrings are thorough and follow the existing naming conventions
 - [ ] Documentation affected by this change is updated
 - [ ] American spelling is used
 
-## Breaking change
-
-- [ ] This is a breaking change
-
-<!-- Tick the box above if existing settings, files, APIs or behavior stop working. Ticking it marks this
-pull request as a major release. Then describe what breaks and how to migrate: -->
-
 ## Related issues
 
 <!-- For example: Closes #123 -->
-Closes #
