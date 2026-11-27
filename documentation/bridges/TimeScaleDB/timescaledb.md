@@ -254,6 +254,17 @@ Buckets are aligned with `time_bucket(interval, m_time, '<machine timezone>')`, 
 | `enable_rollups` | `true` | Create the rollup views. |
 | `enable_auto_refresh` | `true` | Refresh the views periodically from the bridge. |
 | `auto_refresh_interval` | `21600` | Seconds between refreshes (6 hours). |
+| `stuck_refresh_cancel_after` | `3600` | Seconds a refresh session may run, while another refresh is blocked behind it, before it is cancelled (1 hour). `0` never cancels. |
+
+**Blocked and stuck refreshes.** A view cannot be refreshed while another refresh of the same view is still running. When that happens the bridge skips that view for the cycle, still refreshes all the others, and looks again after 5 minutes instead of waiting the full `auto_refresh_interval`. The log shows a warning for the first two cycles, one error on the third (and again every hour while it lasts) and an info line when the view recovers. The error names what is running in the database, one session per entry, for example:
+
+```text
+Refresh of 'monthly_rollup_narrow' was skipped this cycle (3 in a row): another refresh of the same view is still running. The other views were refreshed. Refresh session(s) running: pid=2902 application_name='Refresh Continuous Aggregate Policy [1012]' state=active wait_event=Lock/relation age=47.0h.
+```
+
+While a view is blocked, any refresh session that has been running longer than `stuck_refresh_cancel_after` is cancelled with `pg_cancel_backend`, and logged as an error with the same details. A session still running at the next check is ended with `pg_terminate_backend`. TimescaleDB's own refresh policy job simply runs again on its schedule. A normal full refresh of the largest view takes minutes, so the 1 hour default leaves a wide margin; set `0` to only report and never cancel. The database user must own the session, belong to the `pg_signal_backend` role, or be a superuser; otherwise the error line says the cancel failed.
+
+If the error says no refresh session is running, the block is not a live session: it is left over from a refresh that was interrupted (for example by restarting the container mid-refresh), and nothing the bridge can safely do clears it. Restarting or upgrading TimescaleDB does. TimescaleDB 2.22.1 fixed interrupted refreshes leaving such state behind.
 
 The bucket sizes and refresh-policy offsets are set in the code, not in `config.cfg`:
 
@@ -1149,6 +1160,8 @@ enable_rollups = True
 # Seconds between rollup refreshes (6 hours)
 auto_refresh_interval = 21600
 enable_auto_refresh = True
+# Seconds a refresh session may block other refreshes before it is cancelled (1 hour; 0 = never cancel)
+stuck_refresh_cancel_after = 3600
 drop_after = 1 year
 
 # stale data settings

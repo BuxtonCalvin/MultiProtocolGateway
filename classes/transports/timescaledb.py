@@ -669,6 +669,11 @@ class TimescaleDBConnectionManager:
             raise
 
 
+# Default for the stuck_refresh_cancel_after setting, in seconds (1 hour).  A full refresh of the largest rollup view takes minutes,
+# and a refresh that blocked every later one lasted 47 hours, so this sits far above the first and far below the second.
+STUCK_REFRESH_CANCEL_AFTER_DEFAULT: int = 3600
+
+
 class RollupPolicy(TypedDict):
     """The hypertable / rollup options the bridge builds from its config
     section in timescaledb.__init__ and shares, by reference, with
@@ -687,7 +692,20 @@ class RollupPolicy(TypedDict):
     auto_refresh_interval: int
     enable_auto_refresh: bool
     enable_rollups: bool
+    stuck_refresh_cancel_after: NotRequired[int]
     retune_timeout_seconds: NotRequired[float]
+
+
+class RefreshSession(TypedDict):
+    """One database session that is running a continuous aggregate refresh, as listed by pg_stat_activity: its process id, the
+    application_name it connected with (TimescaleDB's own refresh policy jobs name themselves, for example
+    "Refresh Continuous Aggregate Policy [1012]"), its state, what it is waiting on ("Lock/relation" or "none") and how many
+    seconds its transaction (else its statement) has been running."""
+    pid: int
+    application_name: str
+    state: str
+    wait_event: str
+    age_seconds: float
 
 
 class StaleTransportState(TypedDict):
@@ -819,6 +837,8 @@ class timescaledb(transport_base):
     enable_rollups: bool = True  # whether to create continuous aggregate rollups on init and start the auto-refresh thread.
     auto_refresh_interval: int = 21600  # seconds (default 6 hours), auto-refresh rollup
     enable_auto_refresh: bool = True  # whether to auto-refresh rollups periodically
+    # SECONDS a refresh session may run, while another refresh is blocked behind it, before MPG cancels it (0 = never cancel).
+    stuck_refresh_cancel_after: int = STUCK_REFRESH_CANCEL_AFTER_DEFAULT
     drop_after: str = "1 year"  # default retention policy for raw data in tables and views, can be overridden by settings SectionProxy
 
     # stale data settings and fields.  Staleness is evaluated per transport (scraper) on each batch that reaches the flush worker.
@@ -880,6 +900,7 @@ class timescaledb(transport_base):
             - rollup_defaults: dict for rollup settings
             - retry_delay_mins (int): Minutes between upstream reconnect requests while data is stale (default: 5)
             - stale_data_timeout (int): Seconds a reading must be unchanged before it is stale and skipped (default: 300 = 5 minutes)
+            - stuck_refresh_cancel_after (int): Seconds a rollup refresh session may run, while another refresh is blocked behind it, before it is cancelled; 0 never cancels (default: 3600 = 1 hour)
             - use_exponential_backoff (bool): Use exponential backoff (default: True)
             - use_utc_timestamp (bool): Use UTC timezone for all timestamps instead of local machine timezone (default: False)
             - username (str): Database username
@@ -975,6 +996,7 @@ class timescaledb(transport_base):
             "auto_refresh_interval": settings.getint("auto_refresh_interval", fallback=self.auto_refresh_interval),
             "enable_auto_refresh": settings.getboolean("enable_auto_refresh", fallback=self.enable_auto_refresh),
             "enable_rollups": settings.getboolean("enable_rollups", fallback=self.enable_rollups),
+            "stuck_refresh_cancel_after": settings.getint("stuck_refresh_cancel_after", fallback=self.stuck_refresh_cancel_after),
         }
 
         # Explicitly set bridge name if not set by user, since this transport doesn't have a device name from an
@@ -6639,6 +6661,7 @@ class RollupManager:
         self.machine_timezone: str = self.rollup_policy["machine_timezone"]
         self.auto_refresh_interval: int = self.rollup_policy["auto_refresh_interval"]
         self.enable_auto_refresh:bool = self.rollup_policy["enable_auto_refresh"]
+        self.stuck_refresh_cancel_after: int = self.rollup_policy.get("stuck_refresh_cancel_after", STUCK_REFRESH_CANCEL_AFTER_DEFAULT)
         self.enable_rollups = bool(self.rollup_policy["enable_rollups"])
         self.migrate_data = bool(self.rollup_policy["migrate_data"])
 
@@ -6688,6 +6711,8 @@ class RollupManager:
         # view_name -> consecutive refresh cycles it was skipped because another refresh of the same view was running.
         # Only touched by the auto-refresh thread; see _note_blocked_refreshes_helper.
         self._blocked_refresh_cycles: dict[str, int] = {}
+        # Process ids of refresh sessions already sent pg_cancel_backend; one still running next cycle is terminated instead.
+        self._cancel_requested_pids: set[int] = set()
 
 
     @property
@@ -8799,9 +8824,14 @@ class RollupManager:
             else:
                 return
 
-    # Consecutive refresh cycles a view may stay blocked by another refresh before it is reported as an error (and then again at
-    # every multiple of this many cycles for as long as it stays blocked).  Earlier cycles are warnings.
+    # Consecutive refresh cycles a view may stay blocked by another refresh before it is reported as an error.  Earlier cycles
+    # are warnings.
     BLOCKED_REFRESH_ALERT_CYCLES: int = 3
+    # After the first error, how many further cycles in a row before it is repeated.
+    BLOCKED_REFRESH_REALERT_CYCLES: int = 12
+    # Seconds to wait before the next refresh cycle while any view is blocked, instead of the whole auto_refresh_interval (6 hours
+    # by default), so a stuck refresh is noticed and dealt with in minutes.
+    BLOCKED_REFRESH_RETRY_SECONDS: float = 300.0
 
     def _refresh_known_views_helper(self, conn: Connection) -> list[str]:
         """
@@ -8836,8 +8866,9 @@ class RollupManager:
     def _note_blocked_refreshes_helper(self, blocked_views: list[str]) -> None:
         """
         Report views that stayed blocked by a concurrent refresh, without logging an error every cycle for a condition that is
-        usually gone by itself: a warning for the first cycles, an error once BLOCKED_REFRESH_ALERT_CYCLES in a row have passed
-        (and again at each multiple of it), and an info line when the view recovers.
+        usually gone by itself: a warning for the first cycles, one error when BLOCKED_REFRESH_ALERT_CYCLES in a row have passed
+        (naming the refresh sessions that are running, if any) and again every BLOCKED_REFRESH_REALERT_CYCLES cycles while it
+        lasts, and an info line when the view recovers.
         """
         for view_name in [name for name in self._blocked_refresh_cycles if name not in blocked_views]:
             cycles: int = self._blocked_refresh_cycles.pop(view_name)
@@ -8850,12 +8881,117 @@ class RollupManager:
                 f"Refresh of '{view_name}' was skipped this cycle ({cycles} in a row): another refresh of the same view is still running. "
                 "The other views were refreshed."
             )
-            if cycles % self.BLOCKED_REFRESH_ALERT_CYCLES == 0:
-                self._log.error(f"{detail} Look for a long-running refresh_continuous_aggregate session in pg_stat_activity.")
-            elif cycles < self.BLOCKED_REFRESH_ALERT_CYCLES:
+            first_alert: int = self.BLOCKED_REFRESH_ALERT_CYCLES
+            if cycles == first_alert or (cycles > first_alert and (cycles - first_alert) % self.BLOCKED_REFRESH_REALERT_CYCLES == 0):
+                self._log.error(f"{detail} {self._describe_refresh_sessions_helper()}")
+            elif cycles < first_alert:
                 self._log.warning(detail)
             else:
                 self._log.debug(detail)
+
+    def _next_refresh_wait_helper(self, blocked_views: list[str]) -> float:
+        """Seconds to wait before the next refresh cycle: the policy's auto_refresh_interval, or BLOCKED_REFRESH_RETRY_SECONDS if
+        that is shorter and a view was blocked this cycle."""
+        wait_time: float = float(self.auto_refresh_interval)
+        if blocked_views:
+            wait_time = min(wait_time, self.BLOCKED_REFRESH_RETRY_SECONDS)
+        return wait_time
+
+    def _fetch_refresh_sessions_helper(self) -> list[RefreshSession]:
+        """
+        List the sessions of this database that are running a continuous aggregate refresh right now, longest-running first.
+
+        Sessions that are idle are left out: a pooled connection keeps showing its last statement, so an idle one that once ran a
+        refresh would otherwise look like a refresh that never ended.  This session itself is left out too.  Sessions the database
+        user may not see (another role's, without pg_read_all_stats) show no statement and so never match.
+        """
+        with self.SessionFactory() as session:
+            rows = session.execute(text("""
+                SELECT pid,
+                       COALESCE(application_name, '') AS application_name,
+                       COALESCE(state, 'unknown') AS state,
+                       COALESCE(wait_event_type || '/' || wait_event, 'none') AS wait_event,
+                       COALESCE(EXTRACT(EPOCH FROM now() - COALESCE(xact_start, query_start)), 0)::float AS age_seconds
+                FROM pg_stat_activity
+                WHERE datname = current_database()
+                  AND pid <> pg_backend_pid()
+                  AND state IS DISTINCT FROM 'idle'
+                  AND query ILIKE '%refresh_continuous_aggregate%'
+                ORDER BY age_seconds DESC
+            """)).mappings().all()
+        return [
+            RefreshSession(
+                pid=int(row["pid"]),
+                application_name=str(row["application_name"]),
+                state=str(row["state"]),
+                wait_event=str(row["wait_event"]),
+                age_seconds=float(row["age_seconds"]),
+            )
+            for row in rows
+        ]
+
+    @staticmethod
+    def _format_refresh_session(refresh_session: RefreshSession) -> str:
+        """One session on one line, for the log: pid, application_name, state, wait event and age."""
+        age: float = refresh_session["age_seconds"]
+        age_text: str = f"{age / 3600:.1f}h" if age >= 3600 else f"{age / 60:.1f}m" if age >= 60 else f"{age:.0f}s"
+        return (
+            f"pid={refresh_session['pid']} application_name='{refresh_session['application_name']}' "
+            f"state={refresh_session['state']} wait_event={refresh_session['wait_event']} age={age_text}"
+        )
+
+    def _describe_refresh_sessions_helper(self) -> str:
+        """
+        What is running in the database that could be blocking a refresh, as text for the end of a log line.  Never raises: if the
+        sessions cannot be listed, that is what the text says.
+        """
+        try:
+            sessions: list[RefreshSession] = self._fetch_refresh_sessions_helper()
+        except SQLAlchemyError as e:
+            return f"The refresh sessions could not be listed from pg_stat_activity: {str(e).splitlines()[0]}"
+        if not sessions:
+            return (
+                "No refresh session is running in the database, so the block is probably left over from an interrupted refresh "
+                "and only a TimescaleDB restart or upgrade clears it."
+            )
+        return "Refresh session(s) running: " + "; ".join(self._format_refresh_session(item) for item in sessions) + "."
+
+    def _cancel_stuck_refreshes_helper(self) -> None:
+        """
+        Cancel a refresh session that has run longer than stuck_refresh_cancel_after seconds, so that it stops blocking the
+        refreshes behind it.  Only called while a view is blocked, so a long refresh that blocks nothing is left alone.
+
+        The first attempt is pg_cancel_backend (the statement is cancelled and the session survives); a session still running
+        on a later cycle is sent pg_terminate_backend.  TimescaleDB's own refresh policy job simply runs again on its schedule.
+        Each attempt is one error line with the session's pid, application_name, state, wait event and age.  A setting of 0 never
+        cancels.  Needs a database user that is the session's owner, a member of pg_signal_backend, or a superuser; without that
+        the error line says the attempt failed.
+        """
+        limit: int = self.stuck_refresh_cancel_after
+        if limit <= 0:
+            return
+        try:
+            sessions: list[RefreshSession] = self._fetch_refresh_sessions_helper()
+        except SQLAlchemyError as e:
+            self._log.warning(f"Could not list refresh sessions to check for a stuck one: {str(e).splitlines()[0]}")
+            return
+        self._cancel_requested_pids &= {item["pid"] for item in sessions}  # forget sessions that have ended
+        for stuck in sessions:
+            if stuck["age_seconds"] < limit:
+                continue
+            terminate: bool = stuck["pid"] in self._cancel_requested_pids
+            statement: str = "SELECT pg_terminate_backend(:pid)" if terminate else "SELECT pg_cancel_backend(:pid)"
+            try:
+                with self.SessionFactory() as session:
+                    sent: bool = bool(session.execute(text(statement), {"pid": stuck["pid"]}).scalar())
+                outcome: str = "sent" if sent else "not sent, the session was already gone"
+            except SQLAlchemyError as e:
+                outcome = f"failed: {str(e).splitlines()[0]}"
+            self._cancel_requested_pids.add(stuck["pid"])
+            self._log.error(
+                f"Stuck refresh session ({self._format_refresh_session(stuck)}) has run longer than stuck_refresh_cancel_after "
+                f"({limit} s) while a refresh is blocked: {'terminate' if terminate else 'cancel'} {outcome}."
+            )
 
     def _reset_session_settings_helper(self, conn: Connection) -> None:
         """
@@ -9190,10 +9326,12 @@ class RollupManager:
                     finally:
                         self._reset_session_settings_helper(conn)  # never leave this loop's lock_timeout on a pooled connection
                 self._note_blocked_refreshes_helper(blocked_views)
+                if blocked_views:
+                    self._cancel_stuck_refreshes_helper()
 
                 # 5. Dynamic Sleep
-                # Use the interval from policy (convert seconds to float for wait)
-                wait_time = float(self.auto_refresh_interval)
+                # Use the interval from policy (convert seconds to float for wait), but look again soon while a view is blocked.
+                wait_time: float = self._next_refresh_wait_helper(blocked_views)
                 if self._stop_refresh_rollup_event.wait(timeout=wait_time):
                     break
 
