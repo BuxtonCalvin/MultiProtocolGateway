@@ -1273,7 +1273,7 @@ class DataAdjustments:
         warnings: list[str] = []
         stripped: str = (text or "").strip()
         if not stripped:
-            return AdjustmentValidation(True, [], [], "")  # noqa: FBT003
+            return AdjustmentValidation(ok = True, errors = [], warnings = [], normalized = "")
 
         parsed: object
         if stripped.startswith("{"):
@@ -1289,17 +1289,17 @@ class DataAdjustments:
             try:
                 parsed = json.loads(stripped, object_pairs_hook=_no_duplicates)
             except ValueError as exc:
-                return AdjustmentValidation(False, [f"Invalid JSON: {exc}"], [], stripped)  # noqa: FBT003
+                return AdjustmentValidation(ok=False, errors=[f"Invalid JSON: {exc}"], warnings=[], normalized=stripped)
         else:
             key_part, separator, value_part = stripped.partition(":")
             if not separator or not key_part.strip():
-                return AdjustmentValidation(False, ["Expected a JSON object such as {\"Offset\": -40} or the shorthand Offset:-40"], [], stripped)  # noqa: FBT003
+                return AdjustmentValidation(ok=False, errors=["Expected a JSON object such as {\"Offset\": -40} or the shorthand Offset:-40"], warnings=[], normalized=stripped)
             try:
                 parsed = {key_part.strip(): json.loads(value_part.strip())}
             except json.JSONDecodeError:
                 parsed = {key_part.strip(): value_part.strip()}
         if not isinstance(parsed, dict):
-            return AdjustmentValidation(False, ["The adjustments must be a JSON object ({...})"], [], stripped)  # noqa: FBT003
+            return AdjustmentValidation(ok=False, errors=["The adjustments must be a JSON object ({...})"], warnings=[], normalized=stripped)
 
         canonical: dict[str, object] = {}
         lowered: dict[str, str] = {name.lower(): name for name in self.KNOWN_ADJUSTMENTS}

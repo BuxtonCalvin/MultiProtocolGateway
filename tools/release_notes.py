@@ -512,7 +512,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         rev_range: str = f"{previous_tag}..{args.ref}" if previous_tag else args.ref
         changes: list[Change] = collect_changes(root, rev_range)
     except ReleaseNotesError as exc:
-        _log.error("release_notes: %s", exc)  # noqa: TRY400
+        _log.error("release_notes: %s", exc)
         return 2
 
     if not changes:

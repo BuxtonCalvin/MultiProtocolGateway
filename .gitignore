@@ -55,5 +55,4 @@ stylelintrc.json
 protocols/migrate_code_maps.py
 node_modules
 package-lock.json
-classes/WebServer/changelog.json
-documentation/usage/releasing.md
+
