@@ -2,6 +2,7 @@ import csv
 import json
 import urllib.request
 from datetime import datetime, timezone
+from html import escape
 from pathlib import Path
 
 SUBDOMAIN: str = "hub"
@@ -13,7 +14,7 @@ API_URL: str = f"https://{HOST}{PATH_PREFIX}{REPO}/"
 
 TOOLS_DIR: Path = Path(__file__).resolve().parent
 CSV_FILE: Path = TOOLS_DIR / "docker-pull-history.csv"
-BADGE_JSON_FILE: Path = TOOLS_DIR / "monthly-pulls-badge.json"
+BADGE_SVG_FILE: Path = TOOLS_DIR / "monthly-pulls-badge.svg"
 FIELDNAMES: list[str] = ["date", "total_pulls", "daily_new_pulls"]
 
 
@@ -68,13 +69,41 @@ def main() -> None:
     )
 
     # Write Shields.io endpoint JSON
-    badge_payload: dict[str, object] = {
-        "schemaVersion": 1,
-        "label": "pulls this month",
-        "message": f"{monthly_total:,}",
-        "color": "blue",
-    }
-    BADGE_JSON_FILE.write_text(json.dumps(badge_payload, indent=2) + "\n", encoding="utf-8")
+    # Generate a self-contained monthly pulls SVG badge
+    badge_label: str = "pulls this month"
+    badge_message: str = f"{monthly_total:,}"
+
+    label_width: int = 112
+    message_width: int = max(45, len(badge_message) * 7 + 12)
+    total_width: int = label_width + message_width
+
+    badge_svg: str = f'''<svg xmlns="http://www.w3.org/2000/svg"
+    width="{total_width}" height="20" role="img"
+    aria-label="{escape(badge_label)}: {escape(badge_message)}">
+      <title>{escape(badge_label)}: {escape(badge_message)}</title>
+      <linearGradient id="b" x2="0" y2="100%">
+        <stop offset="0" stop-color="#bbb" stop-opacity=".1"/>
+        <stop offset="1" stop-opacity=".1"/>
+      </linearGradient>
+      <clipPath id="r">
+        <rect width="{total_width}" height="20" rx="3"/>
+      </clipPath>
+      <g clip-path="url(#r)">
+        <rect width="{label_width}" height="20" fill="#555"/>
+        <rect x="{label_width}" width="{message_width}"
+          height="20" fill="#007ec6"/>
+        <rect width="{total_width}" height="20" fill="url(#b)"/>
+      </g>
+      <g fill="#fff" text-anchor="middle"
+        font-family="Verdana,Geneva,sans-serif" font-size="11">
+        <text x="{label_width / 2}" y="14">{escape(badge_label)}</text>
+        <text x="{label_width + message_width / 2}"
+          y="14">{escape(badge_message)}</text>
+      </g>
+    </svg>
+    '''
+
+    BADGE_SVG_FILE.write_text(badge_svg, encoding="utf-8")
 
     print(f"Logged {today}: {current_pulls} total (+{daily_new} new, {monthly_total} this month)")
 
