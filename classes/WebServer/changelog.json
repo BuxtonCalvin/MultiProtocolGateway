@@ -1,0 +1,138 @@
+{
+  "schema": 2,
+  "generated_at": "2026-11-27T04:13:52+00:00",
+  "repository": "BuxtonCalvin/MultiProtocolGateway",
+  "build": {
+    "version": "1.0.0+14.g423f1e8",
+    "commit": "423f1e8a29a4b7febe9b202b6bcae652eeff47f8"
+  },
+  "releases": [
+    {
+      "tag": "v1.0.0",
+      "version": "1.0.0",
+      "name": "v1.0.0",
+      "published_at": "2026-08-31T01:12:54Z",
+      "prerelease": false,
+      "url": "https://github.com/BuxtonCalvin/MultiProtocolGateway/releases/tag/v1.0.0",
+      "released_by": "github-actions[bot]",
+      "commit": "1bed7d2",
+      "intro": "MPG Initial release",
+      "sections": [],
+      "body": "MPG Initial release\r\n"
+    }
+  ],
+  "unreleased": {
+    "previous_tag": "v1.0.0",
+    "projected_version": "1.1.0",
+    "bump": "minor",
+    "commit": "423f1e8",
+    "sections": [
+      {
+        "title": "🧰 Maintenance",
+        "entries": [
+          {
+            "title": "update Docker Hub pull stats",
+            "number": null,
+            "authors": [
+              "github-actions[bot]"
+            ],
+            "sha": "c4324f0"
+          },
+          {
+            "title": "update Docker Hub pull stats",
+            "number": null,
+            "authors": [
+              "github-actions[bot]"
+            ],
+            "sha": "590481e"
+          }
+        ]
+      },
+      {
+        "title": "🔧 Other Changes",
+        "entries": [
+          {
+            "title": "badge fix",
+            "number": null,
+            "authors": [
+              "BuxtonCalvin"
+            ],
+            "sha": "e4440b8"
+          },
+          {
+            "title": "badge fix",
+            "number": null,
+            "authors": [
+              "BuxtonCalvin"
+            ],
+            "sha": "9da92f5"
+          },
+          {
+            "title": "badge fix",
+            "number": null,
+            "authors": [
+              "BuxtonCalvin"
+            ],
+            "sha": "5ec5b21"
+          },
+          {
+            "title": "badge fix",
+            "number": null,
+            "authors": [
+              "BuxtonCalvin"
+            ],
+            "sha": "57fecbf"
+          },
+          {
+            "title": "badge fixes",
+            "number": null,
+            "authors": [
+              "BuxtonCalvin"
+            ],
+            "sha": "321bf81"
+          },
+          {
+            "title": "fix pull count badge",
+            "number": null,
+            "authors": [
+              "BuxtonCalvin"
+            ],
+            "sha": "95a02dd"
+          },
+          {
+            "title": "git update",
+            "number": null,
+            "authors": [
+              "BuxtonCalvin"
+            ],
+            "sha": "d5aa71e"
+          },
+          {
+            "title": "Monthly Docker Pulls",
+            "number": null,
+            "authors": [
+              "BuxtonCalvin"
+            ],
+            "sha": "220c9ef"
+          },
+          {
+            "title": "release drafter",
+            "number": null,
+            "authors": [
+              "BuxtonCalvin"
+            ],
+            "sha": "bec7ab6"
+          },
+          {
+            "title": "release fixes",
+            "number": null,
+            "authors": [
+              "BuxtonCalvin"
+            ],
+            "sha": "423f1e8"
+          }
+        ]
+      }
+    ]
+  }
+}
