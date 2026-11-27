@@ -13,7 +13,8 @@ import types
 from typing import Any
 
 import pytest
-from sqlalchemy.exc import OperationalError
+from sqlalchemy import Boolean, Column, DateTime, Float, Table
+from sqlalchemy.exc import OperationalError, StatementError
 
 import classes.transports.timescaledb as tsdb
 
@@ -130,6 +131,7 @@ def _payload(device_info_id: int = 0, wide_table_name: str | None = None) -> Any
 
 def test_a_point_whose_device_is_verified_needs_nothing_completed(bridge: Any) -> None:
     bridge._verified_devices.add("inverter_1")
+    bridge._registered_protocols.add("eg4_18kpv")
     assert bridge._needs_identity(_payload(7)) is False
 
 
@@ -160,6 +162,7 @@ def _lookup_returning_nothing(_name: str) -> int:
 
 def test_the_device_is_resolved_through_its_transport_once_the_database_is_back(bridge: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     bridge.tsdb_connected = True
+    bridge._registered_protocols.add("eg4_18kpv")
     bridge._source_transports["inverter_1"] = _transport()
     bridge._protocol_wide_table_map = {"eg4_18kpv": "device_metrics_wide__eg4_18kpv"}
 
@@ -179,6 +182,7 @@ def test_a_point_from_the_backlog_is_resolved_by_transport_name_when_its_transpo
     bridge: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     bridge.tsdb_connected = True
+    bridge._registered_protocols.add("eg4_18kpv")
     monkeypatch.setattr(bridge, "_lookup_device_id", _lookup_returning_5)
     payload: Any = _payload()
     assert bridge._complete_identity(payload) is True
@@ -189,6 +193,7 @@ def test_a_point_from_the_backlog_is_resolved_by_transport_name_when_its_transpo
 
 def test_a_point_stays_queued_when_its_device_cannot_be_resolved(bridge: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     bridge.tsdb_connected = True
+    bridge._registered_protocols.add("eg4_18kpv")
     monkeypatch.setattr(bridge, "_lookup_device_id", _lookup_returning_nothing)
     payload: Any = _payload()
     assert bridge._complete_identity(payload) is False
@@ -201,6 +206,37 @@ def test_a_point_waits_for_its_protocol_schema_to_be_registered(bridge: Any) -> 
     bridge._device_cache["inverter_1"] = 11
     bridge._failed_registrations = _pending_registration("eg4_18kpv")
     assert bridge._complete_identity(_payload()) is False
+
+
+def test_a_point_whose_protocol_is_not_registered_yet_this_session_needs_completing(bridge: Any) -> None:
+    """After a restart a replayed point can reach the flush worker before its protocol's schema is registered (the protocols are
+    registered one after another). Its metric mapping is still empty then, so its values could not be coerced to the wide table's
+    column types: a BOOLEAN column was handed the string '0' and the whole batch was dropped."""
+    bridge._verified_devices.add("inverter_1")
+    assert bridge._needs_identity(_payload(7)) is True
+
+
+def test_a_point_waits_until_its_protocol_is_registered_this_session(bridge: Any) -> None:
+    bridge.tsdb_connected = True
+    bridge._verified_devices.add("inverter_1")
+    bridge._device_cache["inverter_1"] = 11
+    payload: Any = _payload(11, wide_table_name="device_metrics_wide__eg4_18kpv")  # name remembered from an earlier session
+    assert bridge._complete_identity(payload) is False
+    bridge._registered_protocols.add("eg4_18kpv")
+    assert bridge._complete_identity(payload) is True
+
+
+def test_the_flush_worker_keeps_a_replayed_point_whose_protocol_is_not_registered_yet(bridge: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    bridge.migration_in_progress = threading.Event()
+    bridge.tsdb_connected = True
+    bridge._verified_devices.add("inverter_1")
+    bridge._device_cache["inverter_1"] = 11
+    kept: list[Any] = []
+    monkeypatch.setattr(bridge, "_keep_unwritten", kept.append)
+    payload: Any = _payload(11, wide_table_name="device_metrics_wide__eg4_18kpv")
+    payload["backlog_rowid"] = 3
+    assert bridge._flush_one_inner(payload, None) is False
+    assert kept == [payload]
 
 
 def test_the_flush_worker_keeps_a_deferred_point_instead_of_writing_it_while_the_database_is_down(
@@ -397,3 +433,47 @@ def test_with_rollups_disabled_no_rollup_manager_is_created(bridge: Any) -> None
     bridge.rollup_mgr = None
     bridge._init_or_update_rollup_manager("big_protocol")
     assert bridge.rollup_mgr is None
+
+
+# ---------------------------------------------------------------------------
+# a rejected boolean value is traced to its column
+# ---------------------------------------------------------------------------
+
+def test_a_boolean_column_given_a_string_is_named_in_the_write_error(bridge: Any) -> None:
+    table: Table = Table(
+        "device_metrics_wide__mismatch_test", tsdb.Base.metadata,
+        Column("m_time", DateTime),
+        Column("heater_state", Boolean),
+        Column("protection_cell_ov", Boolean),
+        Column("pack_voltage", Float),
+        extend_existing=True,
+    )
+    row: dict[str, Any] = {"heater_state": "0", "protection_cell_ov": False, "pack_voltage": "52.3"}
+    note: str = bridge._describe_boolean_mismatches(row, table.name)
+    assert "heater_state='0'" in note
+    assert "protection_cell_ov" not in note  # a real bool is fine
+    assert "pack_voltage" not in note  # not a BOOLEAN column: PostgreSQL casts the string itself
+
+
+def test_the_boolean_diagnostic_is_empty_when_nothing_is_wrong_or_the_table_is_unknown(bridge: Any) -> None:
+    assert bridge._describe_boolean_mismatches({"heater_state": True}, "device_metrics_wide__no_such_table") == ""
+    assert bridge._describe_boolean_mismatches({"heater_state": "0"}, None) == ""
+    assert bridge._describe_boolean_mismatches({}, "device_metrics_wide__mismatch_test") == ""
+
+
+def test_a_rejected_write_is_reported_without_the_statement_or_parameters(bridge: Any) -> None:
+    original: TypeError = TypeError("Not a boolean value: '0'")
+    wrapped: StatementError = StatementError(
+        "(builtins.TypeError) Not a boolean value: '0'", "INSERT INTO device_metrics_wide__x (a, b, c) VALUES (...)", {"a": "0"}, original,
+    )
+    note: str = bridge._concise_write_error(wrapped)
+    assert note == "TypeError: Not a boolean value: '0'"
+    assert "INSERT" not in note
+
+
+def test_a_write_error_without_a_wrapped_original_is_cut_before_the_statement(bridge: Any) -> None:
+    class _Plain(Exception):
+        pass
+
+    assert bridge._concise_write_error(_Plain("column \"x\" does not exist\n[SQL: INSERT INTO t VALUES (1)]")) == 'column "x" does not exist'
+    assert bridge._concise_write_error(_Plain("")) == "_Plain"

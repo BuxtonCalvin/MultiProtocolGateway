@@ -1731,12 +1731,14 @@ class timescaledb(transport_base):
 
     def _needs_identity(self, data_in: FlushPayload) -> bool:
         """True for a point whose device_info_id has not been confirmed against the database this session, or whose protocol's
-        schema is still waiting to be registered (so its wide table name cannot be known yet)."""
+        schema has not been registered yet this session (failed, or simply not reached yet): until it is, the protocol's metric
+        mapping is empty and the point's values cannot be coerced to the wide table's column types."""
         if not hasattr(self, "_verified_devices"):
             return False  # an instance built without __init__ (as unit tests do) has no device tracking to complete
         name: str = data_in["transport_name"]
+        protocol: str = data_in["protocol"]
         confirmed: bool = name in self._verified_devices or name in self._ids_checked
-        return (not confirmed) or data_in["protocol"] in self._failed_registrations
+        return (not confirmed) or protocol in self._failed_registrations or protocol not in self._registered_protocols
 
     def _complete_identity(self, data_in: FlushPayload) -> bool:
         """
@@ -1748,7 +1750,7 @@ class timescaledb(transport_base):
         protocol: str = data_in["protocol"]
         with self._reconnect_lock:
             connected: bool = self.tsdb_connected
-        if not connected or protocol in self._failed_registrations:
+        if not connected or protocol in self._failed_registrations or protocol not in self._registered_protocols:
             return False
         if name not in self._verified_devices and name not in self._ids_checked:
             if not self._resolve_device_id(name, len(data_in["metrics"])):
@@ -3020,7 +3022,13 @@ class timescaledb(transport_base):
             elif isinstance(e1, SQLAlchemyError):
                 # The database answered and refused this batch (bad value, constraint, missing column...). The
                 # connection is fine, so this is not an outage: no "connection lost" alert, no reconnect.
-                self._log.error(f"Data write rejected by the database (connection is fine); this batch is dropped: {e1}", exc_info=True)
+                # One short line at ERROR: who, which table, the database's own message and (for a boolean) the offending column.
+                # The full statement and traceback, which can run to many kilobytes for a wide table, are kept at DEBUG.
+                self._log.error(
+                    f"Data write rejected by the database (connection is fine); this batch from [{transport_name}] is dropped: "
+                    f"{self._concise_write_error(e1)}{self._describe_boolean_mismatches(wide_data, wide_table_name)}"
+                )
+                self._log.debug(f"Rejected write, full detail: {e1}", exc_info=True)
             else:
                 self._log.error(f"Data write skipped; this batch is dropped: {e1}")
 
@@ -3045,6 +3053,47 @@ class timescaledb(transport_base):
                 self._flush_event.clear()
 
         return False
+
+    @staticmethod
+    def _concise_write_error(exc: BaseException) -> str:
+        """
+        The database's own message for a rejected write, without SQLAlchemy's "[SQL: ...]" and "[parameters: ...]" tail.
+
+        SQLAlchemy puts the whole INSERT (every column of a wide table) into str(exc); the original DBAPI or Python error it
+        wraps (``exc.orig``) carries just the reason, such as "Not a boolean value: '0'" or a PostgreSQL message with its DETAIL.
+        """
+        orig: object = getattr(exc, "orig", None)
+        if orig is not None:
+            return f"{type(orig).__name__}: {str(orig).strip()}"
+        return (str(exc).split("\n[SQL:", maxsplit=1)[0]).strip() or type(exc).__name__
+
+    def _describe_boolean_mismatches(self, wide_data: dict[str, Any], wide_table_name: str | None) -> str:
+        """
+        Names the wide-table columns that made SQLAlchemy reject a row with "Not a boolean value". Its message gives only the
+        value and the statement is cut off in the log, so without this the offending metric cannot be found.
+
+        Returns " [BOOLEAN column(s) given a non-boolean value: a='0', ...]", or "" when there is nothing to report. Diagnostic
+        only: it never raises, so it can never hide the original write error.
+        """
+        if wide_table_name is None or not wide_data:
+            return ""
+        try:
+            table: Table | None = Base.metadata.tables.get(wide_table_name)
+            if table is None:
+                return ""
+            mismatches: list[str] = []
+            for column in table.columns:
+                if not isinstance(column.type, Boolean) or column.key not in wide_data:
+                    continue
+                value: Any = wide_data[column.key]
+                # SQLAlchemy's strict Boolean accepts None, True, False, 0 and 1 (a bool is an int): anything else, such as the string '0', is refused.
+                if value is not None and not (isinstance(value, int) and value in (0, 1)):
+                    mismatches.append(f"{column.key}={value!r}")
+            if not mismatches:
+                return ""
+            return f" [BOOLEAN column(s) given a non-boolean value: {', '.join(mismatches)}]"
+        except Exception:  # noqa: BLE001
+            return ""  # diagnostics must never mask the write error being reported
 
     def _process_raw_metrics(self, datacopy: dict[str, Any], protocol: str) -> tuple[dict[str, Any], dict[str, Any]]:
         try:
@@ -6636,6 +6685,10 @@ class RollupManager:
         # so the refresh loop always runs hourly -> daily -> weekly -> monthly.
         self.known_rollup_views: dict[str, str] = {}
 
+        # view_name -> consecutive refresh cycles it was skipped because another refresh of the same view was running.
+        # Only touched by the auto-refresh thread; see _note_blocked_refreshes_helper.
+        self._blocked_refresh_cycles: dict[str, int] = {}
+
 
     @property
     def tsdb_connected(self) -> bool:
@@ -8746,6 +8799,64 @@ class RollupManager:
             else:
                 return
 
+    # Consecutive refresh cycles a view may stay blocked by another refresh before it is reported as an error (and then again at
+    # every multiple of this many cycles for as long as it stays blocked).  Earlier cycles are warnings.
+    BLOCKED_REFRESH_ALERT_CYCLES: int = 3
+
+    def _refresh_known_views_helper(self, conn: Connection) -> list[str]:
+        """
+        Refresh every registered continuous aggregate once, in registration order, on an AUTOCOMMIT connection.
+
+        A view still blocked by another refresh after _execute_refresh_with_retry gave up is skipped and the rest are refreshed
+        anyway: one stuck view (for example an orphaned refresh left running by a restarted client) must not stop every view
+        after it, wide rollups included, from being refreshed.  Any other error is raised unchanged.
+
+        Returns:
+            The names of the views skipped because another refresh of the same view kept running.
+        """
+        blocked_views: list[str] = []
+        for view_name in list(self.known_rollup_views):
+            if self._stop_refresh_rollup_event.is_set():
+                break
+            if not self._view_exists_conn_helper(conn, view_name):
+                self._log.warning(f"Skipping refresh: '{view_name}' not found.")
+                continue
+            self._log.debug(f"Refreshing continuous aggregate: {view_name}")
+            try:
+                self._execute_refresh_with_retry(
+                    conn, "CALL refresh_continuous_aggregate(CAST(:view AS regclass), NULL, NULL)", {"view": view_name}, view_name
+                )
+            except DBAPIError as e:
+                # Shutdown was requested while waiting to retry: let the caller handle it as before.
+                if self._stop_refresh_rollup_event.is_set() or not self._is_concurrent_refresh_error_helper(e):
+                    raise
+                blocked_views.append(view_name)
+        return blocked_views
+
+    def _note_blocked_refreshes_helper(self, blocked_views: list[str]) -> None:
+        """
+        Report views that stayed blocked by a concurrent refresh, without logging an error every cycle for a condition that is
+        usually gone by itself: a warning for the first cycles, an error once BLOCKED_REFRESH_ALERT_CYCLES in a row have passed
+        (and again at each multiple of it), and an info line when the view recovers.
+        """
+        for view_name in [name for name in self._blocked_refresh_cycles if name not in blocked_views]:
+            cycles: int = self._blocked_refresh_cycles.pop(view_name)
+            self._log.info(f"Refresh of '{view_name}' is no longer blocked (it was blocked for {cycles} cycle(s)).")
+
+        for view_name in blocked_views:
+            cycles = self._blocked_refresh_cycles.get(view_name, 0) + 1
+            self._blocked_refresh_cycles[view_name] = cycles
+            detail: str = (
+                f"Refresh of '{view_name}' was skipped this cycle ({cycles} in a row): another refresh of the same view is still running. "
+                "The other views were refreshed."
+            )
+            if cycles % self.BLOCKED_REFRESH_ALERT_CYCLES == 0:
+                self._log.error(f"{detail} Look for a long-running refresh_continuous_aggregate session in pg_stat_activity.")
+            elif cycles < self.BLOCKED_REFRESH_ALERT_CYCLES:
+                self._log.warning(detail)
+            else:
+                self._log.debug(detail)
+
     def _reset_session_settings_helper(self, conn: Connection) -> None:
         """
         Undo the session-level SET work_mem / lock_timeout applied to an AUTOCOMMIT connection before it goes back to the pool.
@@ -9075,16 +9186,10 @@ class RollupManager:
                     try:
                         # Refresh all registered CAGG views in insertion order
                         # (hourly -> daily -> weekly -> monthly, narrow before wide per protocol).
-                        for view_name in list(self.known_rollup_views):
-                            if not self._view_exists_conn_helper(conn, view_name):
-                                self._log.warning(f"Skipping refresh: '{view_name}' not found.")
-                                continue
-                            self._log.debug(f"Refreshing continuous aggregate: {view_name}")
-                            self._execute_refresh_with_retry(
-                                conn, "CALL refresh_continuous_aggregate(CAST(:view AS regclass), NULL, NULL)", {"view": view_name}, view_name
-                            )
+                        blocked_views: list[str] = self._refresh_known_views_helper(conn)
                     finally:
                         self._reset_session_settings_helper(conn)  # never leave this loop's lock_timeout on a pooled connection
+                self._note_blocked_refreshes_helper(blocked_views)
 
                 # 5. Dynamic Sleep
                 # Use the interval from policy (convert seconds to float for wait)

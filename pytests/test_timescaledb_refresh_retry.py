@@ -106,3 +106,103 @@ def test_shutdown_during_wait_raises_without_further_attempts() -> None:
         _manager(event)._execute_refresh_with_retry(conn, "CALL x()", {}, "v")
     assert conn.calls == 1
     assert len(event.waits) == 1
+
+
+# ---------------------------------------------------------------------------
+# one blocked view must not stop the views after it from being refreshed
+# ---------------------------------------------------------------------------
+
+def _loop_manager(views: list[str], event: threading.Event | None = None) -> Any:
+    rm: Any = _manager(event if event is not None else threading.Event())
+    rm.known_rollup_views = dict.fromkeys(views, "1 hour")
+    rm._blocked_refresh_cycles = {}
+
+    def view_exists(_conn: Any, _view_name: str) -> bool:
+        return True
+
+    rm._view_exists_conn_helper = view_exists
+    return rm
+
+
+def _refuse(rm: Any, blocked: set[str], refreshed: list[str], error: DBAPIError | None = None) -> None:
+    """Make _execute_refresh_with_retry record each view and refuse those in ``blocked``."""
+
+    def fake(_conn: Any, _statement: str, params: dict[str, Any], view_name: str) -> None:
+        refreshed.append(view_name)
+        if view_name in blocked:
+            raise error if error is not None else _error(CONCURRENT)
+
+    rm._execute_refresh_with_retry = fake
+
+
+def test_a_blocked_view_is_skipped_and_the_views_after_it_are_still_refreshed() -> None:
+    rm: Any = _loop_manager(["hourly_rollup_narrow", "monthly_rollup_narrow", "monthly_rollup_wide__eg4_18kpv"])
+    refreshed: list[str] = []
+    _refuse(rm, {"monthly_rollup_narrow"}, refreshed)
+    assert rm._refresh_known_views_helper(object()) == ["monthly_rollup_narrow"]
+    assert refreshed == ["hourly_rollup_narrow", "monthly_rollup_narrow", "monthly_rollup_wide__eg4_18kpv"]
+
+
+def test_no_view_blocked_returns_an_empty_list() -> None:
+    rm: Any = _loop_manager(["a", "b"])
+    refreshed: list[str] = []
+    _refuse(rm, set(), refreshed)
+    assert rm._refresh_known_views_helper(object()) == []
+    assert refreshed == ["a", "b"]
+
+
+def test_an_error_that_is_not_a_concurrent_refresh_still_aborts_the_cycle() -> None:
+    rm: Any = _loop_manager(["a", "b"])
+    refreshed: list[str] = []
+    _refuse(rm, {"a"}, refreshed, error=_error(LOCK_TIMEOUT))
+    with pytest.raises(DBAPIError):
+        rm._refresh_known_views_helper(object())
+    assert refreshed == ["a"]
+
+
+def test_shutdown_during_a_blocked_refresh_is_not_swallowed() -> None:
+    event: threading.Event = threading.Event()
+    rm: Any = _loop_manager(["a", "b"], event)
+    refreshed: list[str] = []
+
+    def fake(_conn: Any, _statement: str, _params: dict[str, Any], view_name: str) -> None:
+        refreshed.append(view_name)
+        event.set()  # what _execute_refresh_with_retry's wait reports when the app is stopping
+        raise _error(CONCURRENT)
+
+    rm._execute_refresh_with_retry = fake
+    with pytest.raises(DBAPIError):
+        rm._refresh_known_views_helper(object())
+    assert refreshed == ["a"]
+
+
+def test_a_view_that_does_not_exist_is_skipped_without_being_reported_as_blocked() -> None:
+    rm: Any = _loop_manager(["a", "b"])
+
+    def view_exists(_conn: Any, view_name: str) -> bool:
+        return view_name != "a"
+
+    rm._view_exists_conn_helper = view_exists
+    refreshed: list[str] = []
+    _refuse(rm, set(), refreshed)
+    assert rm._refresh_known_views_helper(object()) == []
+    assert refreshed == ["b"]
+
+
+def test_blocked_views_warn_first_then_error_at_the_threshold_then_recover(caplog: pytest.LogCaptureFixture) -> None:
+    rm: Any = _loop_manager(["v"])
+    threshold: int = tsdb.RollupManager.BLOCKED_REFRESH_ALERT_CYCLES
+    with caplog.at_level(logging.DEBUG, logger="refresh-retry-test"):
+        for _ in range(threshold):
+            rm._note_blocked_refreshes_helper(["v"])
+        levels: list[int] = [r.levelno for r in caplog.records]
+        assert levels == [logging.WARNING] * (threshold - 1) + [logging.ERROR]
+
+        caplog.clear()
+        rm._note_blocked_refreshes_helper(["v"])  # past the threshold: quiet until the next multiple
+        assert [r.levelno for r in caplog.records] == [logging.DEBUG]
+
+        caplog.clear()
+        rm._note_blocked_refreshes_helper([])
+        assert [r.levelno for r in caplog.records] == [logging.INFO]
+        assert rm._blocked_refresh_cycles == {}
