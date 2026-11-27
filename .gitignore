@@ -58,3 +58,5 @@ node_modules
 package-lock.json
 classes/WebServer/changelog.json
 documentation/usage/releasing.md
+/tools/docker-pull-history.csv
+/tools/monthly-pulls-badge.json

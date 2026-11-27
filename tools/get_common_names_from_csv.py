@@ -35,7 +35,7 @@ with open(common_path, "r") as file:
 
 with open(path, newline="") as csvfile:
     # Create a CSV reader object
-    reader = csv.DictReader(csvfile, delimiter=";") #compensate for openoffice
+    reader: csv.DictReader[str] = csv.DictReader(csvfile, delimiter=";") #compensate for openoffice
 
     # Iterate over each row in the CSV file
     for row in reader:
@@ -47,7 +47,7 @@ with open(path, newline="") as csvfile:
             else:
                 common_names[row["documented name"]] = row["variable name"]
 
-json_str = json.dumps(common_names, indent=1)
+json_str: str = json.dumps(common_names, indent=1)
 
 if not save_path:
     print(json_str)
