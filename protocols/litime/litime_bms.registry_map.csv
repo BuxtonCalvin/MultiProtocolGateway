@@ -1,0 +1,32 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note,ha_device_class,ha_state_class,ha_entity_category
+x13.12,voltage,Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}","command 0x13 (status), offsets into the whole frame; little-endian",voltage,measurement,
+x13.16,cell_1_voltage,Cell 1 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",cells that read 0 V are dropped,voltage,measurement,
+x13.18,cell_2_voltage,Cell 2 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,voltage,measurement,
+x13.20,cell_3_voltage,Cell 3 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,voltage,measurement,
+x13.22,cell_4_voltage,Cell 4 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,voltage,measurement,
+x13.24,cell_5_voltage,Cell 5 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,voltage,measurement,
+x13.26,cell_6_voltage,Cell 6 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,voltage,measurement,
+x13.28,cell_7_voltage,Cell 7 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,voltage,measurement,
+x13.30,cell_8_voltage,Cell 8 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,voltage,measurement,
+x13.32,cell_9_voltage,Cell 9 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,voltage,measurement,
+x13.34,cell_10_voltage,Cell 10 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,voltage,measurement,
+x13.36,cell_11_voltage,Cell 11 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,voltage,measurement,
+x13.38,cell_12_voltage,Cell 12 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,voltage,measurement,
+x13.40,cell_13_voltage,Cell 13 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,voltage,measurement,
+x13.42,cell_14_voltage,Cell 14 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,voltage,measurement,
+x13.44,cell_15_voltage,Cell 15 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,voltage,measurement,
+x13.46,cell_16_voltage,Cell 16 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,voltage,measurement,
+x13.48,current,Current,0.001A,INT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}","positive is charging, negative is discharging",current,measurement,
+x13.52,temperature_1,Temperature 1,1C,SHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",sensors beyond the last that has read non-zero are dropped,temperature,measurement,
+x13.54,temperature_2,Temperature 2,1C,SHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,temperature,measurement,
+x13.56,temperature_3,Temperature 3,1C,SHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,temperature,measurement,
+x13.58,temperature_4,Temperature 4,1C,SHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,temperature,measurement,
+x13.60,temperature_5,Temperature 5,1C,SHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,temperature,measurement,
+x13.62,remaining_capacity,Remaining Capacity,0.01Ah,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,,measurement,
+x13.64,design_capacity,Design Capacity,0.01Ah,UINT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,,,diagnostic
+x13.68,heater,Heater,,UINT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}","0 off, 1 on",,,diagnostic
+x13.76,problem_code,Problem Code,,UINT64,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",bit field of the pack's alarms; 0 is none,,,diagnostic
+x13.84,balancer,Balancer,,UINT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",bit n set: cell n+1 is balancing,,,diagnostic
+x13.90,state_of_charge,State of Charge,%,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,battery,measurement,
+x13.92,state_of_health,State of Health,%,UINT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,,measurement,diagnostic
+x13.96,cycle_count,Cycle Count,,UINT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,,total_increasing,

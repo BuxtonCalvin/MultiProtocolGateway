@@ -46,6 +46,19 @@
     "variable_mask": "",
     "variable_screen": ""
   },
+  "_bluetooth_base": {
+    "$extends": "_serial_base",
+    "--port": "",
+    "--baudrate": "",
+    "bluetooth_address": "",
+    "adapter": "",
+    "timeout": "5.0",
+    "scan_timeout": "10.0",
+    "connect_timeout": "20.0",
+    "service_uuid": "",
+    "notify_uuid": "",
+    "write_uuid": ""
+  },
   "_general": {
     "read_mode": "interleaved"
   },
@@ -352,6 +365,45 @@
     "$extends": "_serial_base",
     "baud": "9600",
     "unit_id": "0"
+  },
+  "serial_bluetooth": {
+    "$extends": "_bluetooth_base",
+    "port": ""
+  },
+  "serial_bluetooth_jbd": {
+    "$extends": "_bluetooth_base",
+    "password": "",
+    "secret": ""
+  },
+  "serial_bluetooth_eg4": {
+    "$extends": "_bluetooth_base",
+    "address": "1"
+  },
+  "serial_bluetooth_pace": {
+    "$extends": "_bluetooth_base"
+  },
+  "serial_bluetooth_jk": {
+    "$extends": "_bluetooth_base"
+  },
+  "serial_bluetooth_modbus": {
+    "$extends": "_bluetooth_base"
+  },
+  "serial_bluetooth_daly": {
+    "$extends": "_bluetooth_base"
+  },
+  "serial_bluetooth_renogy": {
+    "$extends": "_bluetooth_base"
+  },
+  "serial_bluetooth_litime": {
+    "$extends": "_bluetooth_base"
+  },
+  "serial_bluetooth_ant": {
+    "$extends": "_bluetooth_base",
+    "password": "",
+    "secret": ""
+  },
+  "serial_bluetooth_seplos": {
+    "$extends": "_bluetooth_base"
   },
   "enphase_rest": {
     "$extends": "_base",

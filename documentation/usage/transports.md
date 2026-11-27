@@ -18,6 +18,7 @@ A **transport** is MPG's fundamental unit of configuration. Every device you rea
   - [Serial Pylon](#serial-pylon)
   - [Serial VE.Bus](#serial-vebus)
   - [Serial Frame](#serial-frame)
+  - [Serial Bluetooth](#serial-bluetooth)
   - [CAN Bus](#can-bus)
   - [Enphase REST](#enphase-rest)
 - [Bridge Transports](#bridge-transports)
@@ -435,6 +436,45 @@ timeout = 5.0
 | `async_mode` | `false` | Read in a background thread and deliver each frame to the `on_message` callback. The port then belongs to this section; it cannot be shared. |
 
 The port is opened when the transport first connects, so a device that is not plugged in yet does not stop the gateway: the open is retried on every cycle. Writing is only attempted when `write_type` is set to something other than `read`, and the default encoder is a placeholder, so a writing protocol needs its own `_encode_frame()`.
+
+---
+
+### Serial Bluetooth
+
+Reads batteries (and other devices) that stream their data over Bluetooth Low Energy. `serial_bluetooth` is the framing family for them, built on `serial_base` like the other serial transports; each manufacturer has a transport of its own on top of it, because each speaks its own protocol. Install the `bleak` library (it is in `requirements.txt`), and close the manufacturer's phone app first: most batteries accept one connection at a time.
+
+| Transport | Batteries | `protocol_version` |
+| --- | --- | --- |
+| `serial_bluetooth_jbd` | JBD / Xiaoxiang / Overkill Solar and white-labels | `jbd_bms` |
+| `serial_bluetooth_eg4` | EG4 LL, LL-S, LifePower4 | `eg4_ll_s` |
+| `serial_bluetooth_pace` | PACEEX smart BMS | `paceex_bms` |
+| `serial_bluetooth_jk` | JK (Jikong) BMS, JK-PB series | `jk_bms_ble` |
+| `serial_bluetooth_daly` | Daly smart BMS | `daly_bms_d2` or `daly_bms_x81` |
+| `serial_bluetooth_renogy` | Renogy with a BT-1 / BT-2 module | `renogy_bms` |
+| `serial_bluetooth_litime` | LiTime, Redodo, ECO-WORTHY T-series, Starry Sea | `litime_bms` |
+| `serial_bluetooth_ant` | ANT BMS | `ant_bms` |
+| `serial_bluetooth_seplos` | Seplos V2 BMS | `seplos_bms_v2` |
+
+```ini
+[transport.jk_battery]
+transport = serial_bluetooth_jk
+protocol_version = jk_bms_ble
+bluetooth_address = C8:47:80:12:34:56
+read_interval = 15
+```
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `bluetooth_address` | none (required) | The device's MAC address, the UUID macOS shows instead, or `name:<local name>`. `port` is accepted as an alias. |
+| `adapter` | system default | Bluetooth adapter, such as `hci1` on Linux. |
+| `timeout` | `5.0` | Seconds to wait for a response. |
+| `scan_timeout` | `10.0` | Seconds to look for the device before giving up. |
+| `connect_timeout` | `20.0` | Seconds to connect and discover services. |
+| `service_uuid`, `notify_uuid`, `write_uuid` | the protocol's own | Override for a rebranded device that uses different characteristics. |
+| `password` | empty | JBD and ANT only: the battery's connection password, for a locked battery. |
+| `address` | `0` | EG4 only: the Modbus unit id (`1` to `247`; the battery answers on `1`). |
+
+A device that is out of range when the gateway starts does not stop it: it is looked for again on every cycle, and a link that drops is rebuilt on the next read. See [Bluetooth Batteries](../devices/Bluetooth.md) for each protocol, troubleshooting and the known limits.
 
 ---
 

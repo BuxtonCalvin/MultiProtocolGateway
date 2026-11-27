@@ -34,7 +34,7 @@ JBD battery management systems report pack voltage, current, capacity, state of 
 | --- | --- | --- | --- |
 | JBD / Xiaoxiang / Overkill Solar smart BMS with UART, RS232 or RS485 | `jbd_bms` | `serial_jbd` | 9600 |
 
-The Bluetooth interface of these BMS boards is not used. If your pack has only Bluetooth, you need a board with the UART header or an RS485 / RS232 module.
+The Bluetooth interface of these BMS boards is read by the `serial_bluetooth_jbd` transport with the same `jbd_bms` protocol; see [Bluetooth.md](Bluetooth.md). The rest of this guide is about the wired interface.
 
 ---
 

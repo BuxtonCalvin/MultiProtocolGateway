@@ -1,0 +1,46 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note,ha_device_class,ha_state_class,ha_entity_category
+5042,current,Current,0.01A,SHORT,,,,,"positive is charging, negative is discharging",current,measurement,
+5043,voltage,Voltage,0.1V,USHORT,,,,,,voltage,measurement,
+5044,remaining_capacity,Remaining Capacity,0.001Ah,UINT,,,,,milliamp hours,,measurement,
+5046,design_capacity,Design Capacity,0.001Ah,UINT,,,,,milliamp hours,,,diagnostic
+5048,cycle_count,Cycle Count,,USHORT,,,,,,,total_increasing,
+5000,cell_count,Cell Count,,USHORT,,,,,,,,diagnostic
+5001,cell_1_voltage,Cell 1 Voltage,0.1V,USHORT,,,,,tenths of a volt; cells beyond the cell count are dropped,voltage,measurement,
+5002,cell_2_voltage,Cell 2 Voltage,0.1V,USHORT,,,,,,voltage,measurement,
+5003,cell_3_voltage,Cell 3 Voltage,0.1V,USHORT,,,,,,voltage,measurement,
+5004,cell_4_voltage,Cell 4 Voltage,0.1V,USHORT,,,,,,voltage,measurement,
+5005,cell_5_voltage,Cell 5 Voltage,0.1V,USHORT,,,,,,voltage,measurement,
+5006,cell_6_voltage,Cell 6 Voltage,0.1V,USHORT,,,,,,voltage,measurement,
+5007,cell_7_voltage,Cell 7 Voltage,0.1V,USHORT,,,,,,voltage,measurement,
+5008,cell_8_voltage,Cell 8 Voltage,0.1V,USHORT,,,,,,voltage,measurement,
+5009,cell_9_voltage,Cell 9 Voltage,0.1V,USHORT,,,,,,voltage,measurement,
+5010,cell_10_voltage,Cell 10 Voltage,0.1V,USHORT,,,,,,voltage,measurement,
+5011,cell_11_voltage,Cell 11 Voltage,0.1V,USHORT,,,,,,voltage,measurement,
+5012,cell_12_voltage,Cell 12 Voltage,0.1V,USHORT,,,,,,voltage,measurement,
+5013,cell_13_voltage,Cell 13 Voltage,0.1V,USHORT,,,,,,voltage,measurement,
+5014,cell_14_voltage,Cell 14 Voltage,0.1V,USHORT,,,,,,voltage,measurement,
+5015,cell_15_voltage,Cell 15 Voltage,0.1V,USHORT,,,,,,voltage,measurement,
+5016,cell_16_voltage,Cell 16 Voltage,0.1V,USHORT,,,,,,voltage,measurement,
+5017,temperature_count,Temperature Sensor Count,,USHORT,,,,,,,,diagnostic
+5018,temperature_1,Temperature 1,0.1C,SHORT,,,,,sensors beyond the sensor count are dropped,temperature,measurement,
+5019,temperature_2,Temperature 2,0.1C,SHORT,,,,,,temperature,measurement,
+5020,temperature_3,Temperature 3,0.1C,SHORT,,,,,,temperature,measurement,
+5021,temperature_4,Temperature 4,0.1C,SHORT,,,,,,temperature,measurement,
+5022,temperature_5,Temperature 5,0.1C,SHORT,,,,,,temperature,measurement,
+5023,temperature_6,Temperature 6,0.1C,SHORT,,,,,,temperature,measurement,
+5024,temperature_7,Temperature 7,0.1C,SHORT,,,,,,temperature,measurement,
+5025,temperature_8,Temperature 8,0.1C,SHORT,,,,,,temperature,measurement,
+5026,temperature_9,Temperature 9,0.1C,SHORT,,,,,,temperature,measurement,
+5027,temperature_10,Temperature 10,0.1C,SHORT,,,,,,temperature,measurement,
+5028,temperature_11,Temperature 11,0.1C,SHORT,,,,,,temperature,measurement,
+5029,temperature_12,Temperature 12,0.1C,SHORT,,,,,,temperature,measurement,
+5030,temperature_13,Temperature 13,0.1C,SHORT,,,,,,temperature,measurement,
+5031,temperature_14,Temperature 14,0.1C,SHORT,,,,,,temperature,measurement,
+5032,temperature_15,Temperature 15,0.1C,SHORT,,,,,,temperature,measurement,
+5033,temperature_16,Temperature 16,0.1C,SHORT,,,,,,temperature,measurement,
+x13F2.b1,charge_mosfet,Charge MOSFET,,1bit,"{""0"": ""Off"", ""1"": ""On""}",,,,,,,diagnostic
+x13F2.b2,discharge_mosfet,Discharge MOSFET,,1bit,"{""0"": ""Off"", ""1"": ""On""}",,,,,,,diagnostic
+x13F3.b13,heater,Heater,,1bit,"{""0"": ""Off"", ""1"": ""On""}",,,,,,,diagnostic
+5110,serial_number,Serial Number,,ASCII.16,,startup,,,,,,diagnostic
+5122,device_name,Device Name,,ASCII.16,,startup,,,,,,diagnostic
+5130,software_version,Software Version,,ASCII.4,,startup,,,,,,diagnostic

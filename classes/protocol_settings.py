@@ -1990,7 +1990,7 @@ class protocol_settings:
             # never be applied to multi-register addresses like "40_41".
             r"^(?P<register>0?x[0-9a-f]+|\d+)"
             r"(?:\.b(?P<bit_start>\d{1,2})(?:-b?(?P<bit_end>\d{1,2}))?)?"
-            r"(?:\.(?P<byte>\d{1,2}))?$",
+            r"(?:\.(?P<byte>\d{1,3}))?$",
             re.IGNORECASE,
         )
 

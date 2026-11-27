@@ -182,7 +182,7 @@ def test_known_serial_transports() -> None:
     """If this fails you have added a serial transport: good. Add its tests, then update this list."""
     assert serial_pylon in serial_subclasses()
     assert serial_frame_transport in serial_subclasses()
-    assert sorted(c.__name__ for c in serial_subclasses()) == ["serial_frame_transport", "serial_jbd", "serial_jk", "serial_length_transport", "serial_pylon", "serial_vebus", "serial_vedirect"]
+    assert sorted(c.__name__ for c in serial_subclasses()) == ["serial_bluetooth", "serial_bluetooth_ant", "serial_bluetooth_daly", "serial_bluetooth_eg4", "serial_bluetooth_jbd", "serial_bluetooth_jk", "serial_bluetooth_litime", "serial_bluetooth_modbus", "serial_bluetooth_pace", "serial_bluetooth_renogy", "serial_bluetooth_seplos", "serial_frame_transport", "serial_jbd", "serial_jk", "serial_length_transport", "serial_pylon", "serial_vebus", "serial_vedirect"]
 
 
 def test_serial_frame_transport_defaults_keep_its_own_settings() -> None:

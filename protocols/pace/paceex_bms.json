@@ -1,0 +1,7 @@
+{
+  "transport": "serial_bluetooth_pace",
+  "send_holding_register": false,
+  "send_input_register": false,
+  "send_coil_register": false,
+  "send_discrete_register": false
+}

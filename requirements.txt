@@ -3,6 +3,7 @@
 # while still letting pip pick newer releases. Do not use == here.
 aiofiles>=25.1.0              # static file serving
 alembic>=1.20.1               # for database migrations
+bleak>=3.1.0                  # for Bluetooth Low Energy support (used by the serial_bluetooth transports)
 fastapi>=0.165.0              # for building the web server and API
 influxdb>=5.3.2               # InfluxDB v1 client (used by timeshift_service and influxdb_out)
 influxdb3-python>=0.21.0      # InfluxDB v3 client (used by influxdb3_out and timeshift_service)

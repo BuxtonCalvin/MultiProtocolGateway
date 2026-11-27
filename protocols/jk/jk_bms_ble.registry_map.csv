@@ -1,0 +1,100 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note,ha_device_class,ha_state_class,ha_entity_category
+x97.6,model,Model,,ASCII.16,,startup,,,"command 0x97 (device information), type 0x03 frame",,,diagnostic
+x97.22,hardware_version,Hardware Version,,ASCII.8,,startup,,,,,,diagnostic
+x97.30,software_version,Software Version,,ASCII.8,,startup,,,the major number is the firmware generation; 11 and later use this map,,,diagnostic
+x97.46,device_name,Device Name,,ASCII.16,,startup,,,,,,diagnostic
+x97.86,serial_number,Serial Number,,ASCII.8,,startup,,,,,,diagnostic
+x96.6,cell_1_voltage,Cell 1 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}","command 0x96 (status), type 0x02 frame; millivolts; cells that are not in the cell mask are dropped",voltage,measurement,
+x96.8,cell_2_voltage,Cell 2 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,voltage,measurement,
+x96.10,cell_3_voltage,Cell 3 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,voltage,measurement,
+x96.12,cell_4_voltage,Cell 4 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,voltage,measurement,
+x96.14,cell_5_voltage,Cell 5 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,voltage,measurement,
+x96.16,cell_6_voltage,Cell 6 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,voltage,measurement,
+x96.18,cell_7_voltage,Cell 7 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,voltage,measurement,
+x96.20,cell_8_voltage,Cell 8 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,voltage,measurement,
+x96.22,cell_9_voltage,Cell 9 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,voltage,measurement,
+x96.24,cell_10_voltage,Cell 10 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,voltage,measurement,
+x96.26,cell_11_voltage,Cell 11 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,voltage,measurement,
+x96.28,cell_12_voltage,Cell 12 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,voltage,measurement,
+x96.30,cell_13_voltage,Cell 13 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,voltage,measurement,
+x96.32,cell_14_voltage,Cell 14 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,voltage,measurement,
+x96.34,cell_15_voltage,Cell 15 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,voltage,measurement,
+x96.36,cell_16_voltage,Cell 16 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,voltage,measurement,
+x96.38,cell_17_voltage,Cell 17 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,voltage,measurement,
+x96.40,cell_18_voltage,Cell 18 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,voltage,measurement,
+x96.42,cell_19_voltage,Cell 19 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,voltage,measurement,
+x96.44,cell_20_voltage,Cell 20 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,voltage,measurement,
+x96.46,cell_21_voltage,Cell 21 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,voltage,measurement,
+x96.48,cell_22_voltage,Cell 22 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,voltage,measurement,
+x96.50,cell_23_voltage,Cell 23 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,voltage,measurement,
+x96.52,cell_24_voltage,Cell 24 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,voltage,measurement,
+x96.54,cell_25_voltage,Cell 25 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,voltage,measurement,
+x96.56,cell_26_voltage,Cell 26 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,voltage,measurement,
+x96.58,cell_27_voltage,Cell 27 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,voltage,measurement,
+x96.60,cell_28_voltage,Cell 28 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,voltage,measurement,
+x96.62,cell_29_voltage,Cell 29 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,voltage,measurement,
+x96.64,cell_30_voltage,Cell 30 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,voltage,measurement,
+x96.66,cell_31_voltage,Cell 31 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,voltage,measurement,
+x96.68,cell_32_voltage,Cell 32 Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,voltage,measurement,
+x96.70,cell_mask,Cell Mask,,UINT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",bit n set: cell n+1 is present,,,diagnostic
+x96.74,average_cell_voltage,Average Cell Voltage,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,voltage,measurement,
+x96.76,cell_voltage_delta,Cell Voltage Delta,0.001V,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",highest minus lowest cell,voltage,measurement,
+x96.78,max_voltage_cell,Highest Cell Number,,BYTE,,,,,zero based as sent: 0 is cell 1,,,diagnostic
+x96.79,min_voltage_cell,Lowest Cell Number,,BYTE,,,,,zero based as sent: 0 is cell 1,,,diagnostic
+x96.80,cell_1_resistance,Cell 1 Wire Resistance,0.001Ohm,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",milliohms; rows for absent cells are dropped,,,diagnostic
+x96.82,cell_2_resistance,Cell 2 Wire Resistance,0.001Ohm,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,,,diagnostic
+x96.84,cell_3_resistance,Cell 3 Wire Resistance,0.001Ohm,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,,,diagnostic
+x96.86,cell_4_resistance,Cell 4 Wire Resistance,0.001Ohm,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,,,diagnostic
+x96.88,cell_5_resistance,Cell 5 Wire Resistance,0.001Ohm,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,,,diagnostic
+x96.90,cell_6_resistance,Cell 6 Wire Resistance,0.001Ohm,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,,,diagnostic
+x96.92,cell_7_resistance,Cell 7 Wire Resistance,0.001Ohm,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,,,diagnostic
+x96.94,cell_8_resistance,Cell 8 Wire Resistance,0.001Ohm,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,,,diagnostic
+x96.96,cell_9_resistance,Cell 9 Wire Resistance,0.001Ohm,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,,,diagnostic
+x96.98,cell_10_resistance,Cell 10 Wire Resistance,0.001Ohm,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,,,diagnostic
+x96.100,cell_11_resistance,Cell 11 Wire Resistance,0.001Ohm,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,,,diagnostic
+x96.102,cell_12_resistance,Cell 12 Wire Resistance,0.001Ohm,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,,,diagnostic
+x96.104,cell_13_resistance,Cell 13 Wire Resistance,0.001Ohm,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,,,diagnostic
+x96.106,cell_14_resistance,Cell 14 Wire Resistance,0.001Ohm,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,,,diagnostic
+x96.108,cell_15_resistance,Cell 15 Wire Resistance,0.001Ohm,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,,,diagnostic
+x96.110,cell_16_resistance,Cell 16 Wire Resistance,0.001Ohm,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,,,diagnostic
+x96.112,cell_17_resistance,Cell 17 Wire Resistance,0.001Ohm,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,,,diagnostic
+x96.114,cell_18_resistance,Cell 18 Wire Resistance,0.001Ohm,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,,,diagnostic
+x96.116,cell_19_resistance,Cell 19 Wire Resistance,0.001Ohm,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,,,diagnostic
+x96.118,cell_20_resistance,Cell 20 Wire Resistance,0.001Ohm,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,,,diagnostic
+x96.120,cell_21_resistance,Cell 21 Wire Resistance,0.001Ohm,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,,,diagnostic
+x96.122,cell_22_resistance,Cell 22 Wire Resistance,0.001Ohm,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,,,diagnostic
+x96.124,cell_23_resistance,Cell 23 Wire Resistance,0.001Ohm,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,,,diagnostic
+x96.126,cell_24_resistance,Cell 24 Wire Resistance,0.001Ohm,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,,,diagnostic
+x96.128,cell_25_resistance,Cell 25 Wire Resistance,0.001Ohm,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,,,diagnostic
+x96.130,cell_26_resistance,Cell 26 Wire Resistance,0.001Ohm,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,,,diagnostic
+x96.132,cell_27_resistance,Cell 27 Wire Resistance,0.001Ohm,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,,,diagnostic
+x96.134,cell_28_resistance,Cell 28 Wire Resistance,0.001Ohm,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,,,diagnostic
+x96.136,cell_29_resistance,Cell 29 Wire Resistance,0.001Ohm,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,,,diagnostic
+x96.138,cell_30_resistance,Cell 30 Wire Resistance,0.001Ohm,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,,,diagnostic
+x96.140,cell_31_resistance,Cell 31 Wire Resistance,0.001Ohm,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,,,diagnostic
+x96.142,cell_32_resistance,Cell 32 Wire Resistance,0.001Ohm,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,,,diagnostic
+x96.144,mosfet_temperature,MOSFET Temperature,0.1C,SHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",tenths of a degree; a sensor that is not fitted is dropped,temperature,measurement,
+x96.146,wire_resistance_warning,Wire Resistance Warning,,UINT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",bit n set: cell n+1 wire resistance is too high,,,diagnostic
+x96.150,total_voltage,Total Voltage,0.001V,UINT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",millivolts,voltage,measurement,
+x96.158,current,Current,0.001A,INT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}","milliamps; positive is charging, negative is discharging",current,measurement,
+x96.162,battery_temperature_1,Battery Temperature 1,0.1C,SHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,temperature,measurement,
+x96.164,battery_temperature_2,Battery Temperature 2,0.1C,SHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,temperature,measurement,
+x96.166,alarm_flags,Alarm Flags,,UINT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",bit field of the BMS alarms; 0 is none,,,diagnostic
+x96.170,balance_current,Balance Current,0.001A,SHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",milliamps,current,measurement,
+x96.172,balancing_action,Balancing Action,,BYTE,,,,,"0 off, 1 charging balancer, 2 discharging balancer",,,diagnostic
+x96.173,state_of_charge,State of Charge,%,BYTE,,,,,,battery,measurement,
+x96.174,remaining_capacity,Remaining Capacity,0.001Ah,UINT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",milliamp hours,,measurement,
+x96.178,nominal_capacity,Nominal Capacity,0.001Ah,UINT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",milliamp hours,,,diagnostic
+x96.182,cycle_count,Cycle Count,,UINT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",,,total_increasing,
+x96.186,cycle_capacity,Cycle Capacity,0.001Ah,UINT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",total charge delivered over all cycles,,total_increasing,
+x96.190,state_of_health,State of Health,%,BYTE,,,,,,,measurement,diagnostic
+x96.191,precharging,Precharging,,BYTE,,,,,"0 off, 1 on",,,diagnostic
+x96.194,runtime,Total Runtime,s,UINT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",seconds,,,diagnostic
+x96.198,charge_mosfet,Charge MOSFET,,BYTE,,,,,"0 off, 1 on",,,diagnostic
+x96.199,discharge_mosfet,Discharge MOSFET,,BYTE,,,,,"0 off, 1 on",,,diagnostic
+x96.214,temperature_sensor_mask,Temperature Sensor Mask,,BYTE,,,,,bit n set: temperature sensor n is present,,,diagnostic
+x96.215,heating,Heating,,BYTE,,,,,"0 off, 1 on",,,diagnostic
+x96.236,heating_current,Heating Current,0.001A,SHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",milliamps,current,measurement,
+x96.254,mosfet_temperature_2,MOSFET Temperature 2,0.1C,SHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",sensor classified as a MOSFET sensor by aiobmsble; firmware 11 and later,temperature,measurement,
+x96.256,battery_temperature_3,Battery Temperature 3,0.1C,SHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",firmware 14 and later,temperature,measurement,
+x96.258,battery_temperature_4,Battery Temperature 4,0.1C,SHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",firmware 14 and later,temperature,measurement,

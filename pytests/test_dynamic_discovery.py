@@ -33,6 +33,7 @@ from classes.discovery import (
     run_discovery,
     run_probes,
 )
+from classes.discovery.probes import ProbeSpec
 from classes.protocol_settings import (
     Data_Type,
     Registry_Type,
@@ -306,13 +307,13 @@ def test_malformed_probes_are_skipped_without_stopping_the_good_ones() -> None:
         {"anchor": "bad_registry", "address": 1, "prefix": "A", "registry": "nope"},
         "not an object",
     ]
-    probes = parse_probes(raw, logging.getLogger("test"))
+    probes: list[ProbeSpec] = parse_probes(raw, logging.getLogger("test"))
     assert [probe.anchor for probe in probes] == ["ok"] and probes[0].address == 0x9C6C and probes[0].count == 8
 
 
 def test_probe_sets_value_on_match_else_value_on_mismatch_and_nothing_when_unreadable() -> None:
     raw: list[object] = [{"anchor": "legacy", "address": VERSION_ADDRESS, "count": 8, "prefix": "0003", "value": 3}]
-    probes = parse_probes(raw, logging.getLogger("test"))
+    probes: list[ProbeSpec] = parse_probes(raw, logging.getLogger("test"))
     log: logging.Logger = logging.getLogger("test")
     assert run_probes(FakeReader(ascii_words("0003.2519")), probes, log) == {"legacy": 3}
     assert run_probes(FakeReader(ascii_words("0004.0016")), probes, log) == {"legacy": 0}

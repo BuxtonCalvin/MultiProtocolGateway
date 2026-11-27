@@ -1,0 +1,47 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note,ha_device_class,ha_state_class,ha_entity_category
+x0002.1,serial_number,Serial Number,,ASCII.13,,startup,,,command 0x0002; the data starts with the length of the string,,,diagnostic
+x0001.2,software_version,Software Version,,ASCII.21,,startup,,,"command 0x0001; the data starts with a flag byte, then the length of the string",,,diagnostic
+x0001.57,hardware_version,Hardware Version,,ASCII.10,,startup,,,,,,diagnostic
+x0A00.0,stack_pack_count,Pack Count,,BYTE,,,,,"command 0x0A00 (system values for the whole stack), offsets into the reply data; zero on a battery that is not the master",,,diagnostic
+x0A00.1,stack_current,Stack Current,0.01A,INT,,,,,"positive is charging, negative is discharging",current,measurement,
+x0A00.5,stack_voltage,Stack Voltage,0.01V,UINT,,,,,,voltage,measurement,
+x0A00.9,stack_remaining_capacity,Stack Remaining Capacity,0.01Ah,UINT,,,,,,,measurement,
+x0A00.17,stack_design_capacity,Stack Design Capacity,0.01Ah,UINT,,,,,,,,diagnostic
+x0A00.21,stack_state_of_charge,Stack State of Charge,%,BYTE,,,,,,battery,measurement,
+x0A00.22,stack_state_of_health,Stack State of Health,%,BYTE,,,,,,,measurement,diagnostic
+x0A00.23,stack_cycle_count,Stack Cycle Count,,UINT,,,,,,,total_increasing,
+x0A00.37,stack_max_cell_voltage,Highest Cell Voltage,0.001V,USHORT,,,,,the cell number is the byte before,voltage,measurement,
+x0A00.41,stack_min_cell_voltage,Lowest Cell Voltage,0.001V,USHORT,,,,,the cell number is the byte before,voltage,measurement,
+x0A00.45,stack_max_temperature,Highest Cell Temperature,0.1C,USHORT,,,,"{""High_Low"": ""x?(0,65535]->(x-2731)/10""}",tenths of a kelvin,temperature,measurement,
+x0A00.49,stack_min_temperature,Lowest Cell Temperature,0.1C,USHORT,,,,"{""High_Low"": ""x?(0,65535]->(x-2731)/10""}",tenths of a kelvin,temperature,measurement,
+x0A01.1,current,Current,0.01A,SHORT,,,,,"command 0x0A01 (this battery's pack values); positive is charging, negative is discharging",current,measurement,
+x0A01.3,voltage,Voltage,0.01V,USHORT,,,,,,voltage,measurement,
+x0A01.5,remaining_capacity,Remaining Capacity,0.01Ah,USHORT,,,,,,,measurement,
+x0A01.9,design_capacity,Design Capacity,0.01Ah,USHORT,,,,,,,,diagnostic
+x0A01.11,state_of_charge,State of Charge,%,BYTE,,,,,,battery,measurement,
+x0A01.12,state_of_health,State of Health,%,BYTE,,,,,,,measurement,diagnostic
+x0A01.13,cycle_count,Cycle Count,,USHORT,,,,,,,total_increasing,
+x0A02.3,cell_count,Cell Count,,BYTE,,,,,"command 0x0A02; each cell is a 4 byte slot: its voltage, then a second value that is a temperature for the first six slots; rows for cells beyond the count are dropped",,,diagnostic
+x0A02.4,cell_1_voltage,Cell 1 Voltage,0.001V,USHORT,,,,,millivolts,voltage,measurement,
+x0A02.8,cell_2_voltage,Cell 2 Voltage,0.001V,USHORT,,,,,,voltage,measurement,
+x0A02.12,cell_3_voltage,Cell 3 Voltage,0.001V,USHORT,,,,,,voltage,measurement,
+x0A02.16,cell_4_voltage,Cell 4 Voltage,0.001V,USHORT,,,,,,voltage,measurement,
+x0A02.20,cell_5_voltage,Cell 5 Voltage,0.001V,USHORT,,,,,,voltage,measurement,
+x0A02.24,cell_6_voltage,Cell 6 Voltage,0.001V,USHORT,,,,,,voltage,measurement,
+x0A02.28,cell_7_voltage,Cell 7 Voltage,0.001V,USHORT,,,,,,voltage,measurement,
+x0A02.32,cell_8_voltage,Cell 8 Voltage,0.001V,USHORT,,,,,,voltage,measurement,
+x0A02.36,cell_9_voltage,Cell 9 Voltage,0.001V,USHORT,,,,,,voltage,measurement,
+x0A02.40,cell_10_voltage,Cell 10 Voltage,0.001V,USHORT,,,,,,voltage,measurement,
+x0A02.44,cell_11_voltage,Cell 11 Voltage,0.001V,USHORT,,,,,,voltage,measurement,
+x0A02.48,cell_12_voltage,Cell 12 Voltage,0.001V,USHORT,,,,,,voltage,measurement,
+x0A02.52,cell_13_voltage,Cell 13 Voltage,0.001V,USHORT,,,,,,voltage,measurement,
+x0A02.56,cell_14_voltage,Cell 14 Voltage,0.001V,USHORT,,,,,,voltage,measurement,
+x0A02.60,cell_15_voltage,Cell 15 Voltage,0.001V,USHORT,,,,,,voltage,measurement,
+x0A02.64,cell_16_voltage,Cell 16 Voltage,0.001V,USHORT,,,,,,voltage,measurement,
+x0A02.6,cell_temperature_1,Cell Temperature 1,0.1C,USHORT,,,,"{""High_Low"": ""x?(0,65535]->(x-2731)/10""}",tenths of a kelvin; a sensor that is not fitted reports 0 and is dropped,temperature,measurement,
+x0A02.10,cell_temperature_2,Cell Temperature 2,0.1C,USHORT,,,,"{""High_Low"": ""x?(0,65535]->(x-2731)/10""}",,temperature,measurement,
+x0A02.14,cell_temperature_3,Cell Temperature 3,0.1C,USHORT,,,,"{""High_Low"": ""x?(0,65535]->(x-2731)/10""}",,temperature,measurement,
+x0A02.18,cell_temperature_4,Cell Temperature 4,0.1C,USHORT,,,,"{""High_Low"": ""x?(0,65535]->(x-2731)/10""}",,temperature,measurement,
+x0A02.22,mosfet_temperature,MOSFET Temperature,0.1C,USHORT,,,,"{""High_Low"": ""x?(0,65535]->(x-2731)/10""}",,temperature,measurement,
+x0A02.26,ambient_temperature,Ambient Temperature,0.1C,USHORT,,,,"{""High_Low"": ""x?(0,65535]->(x-2731)/10""}",,temperature,measurement,
+x0A03.6,balancing_mask,Balancing Mask,,USHORT,,,,"{""Register_Endian"": ""little_endian_byte_swap-DCBA""}",command 0x0A03; little-endian on the wire; bit n set: cell n+1 is balancing,,,diagnostic
