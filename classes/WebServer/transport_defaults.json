@@ -346,7 +346,8 @@
     "max_overflow": "10",
     "pool_recycle": "3600",
     "pool_size": "5",
-    "auto_update_extensions": "True"
+    "auto_update_extensions": "True",
+    "stuck_refresh_cancel_after": "3600"
   },
   "prometheus_out": {
     "stale_check_interval": "5.0",
