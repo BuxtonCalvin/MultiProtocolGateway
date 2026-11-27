@@ -7,7 +7,7 @@
 [![Ruff](https://img.shields.io/badge/Linter-Ruff-brightgreen?style=flat-square)](https://github.com/charliermarsh/ruff)
 [![CodeQL Status](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/codeql.yml/badge.svg)](https://github.com/BuxtonCalvin/MultiProtocolGateway/actions/workflows/codeql.yml)
 [![Docker Pulls](https://img.shields.io/docker/pulls/buxtoncalvin/multiprotocolgateway?style=flat-square&logo=docker)](https://hub.docker.com/r/buxtoncalvin/multiprotocolgateway)
-[![Pulls This Month](https://img.shields.io/endpoint.svg?url=https%3A%2F%2Fraw.githubusercontent.com%2FBuxtonCalvin%2FMultiProtocolGateway%2Fmaster%2Ftools%2Fmonthly-pulls-badge.json)](https://hub.docker.com/r/buxtoncalvin/multiprotocolgateway)
+[![Pulls This Month](https://img.shields.io/endpoint.svg?url=https%3A%2F%2Fraw.githubusercontent.com%2FBuxtonCalvin%2FMultiProtocolGateway%2Fmaster%2Ftools%2Fmonthly-pulls-badge.json&cacheSeconds=300)](https://hub.docker.com/r/buxtoncalvin/multiprotocolgateway)
 [![Docker Image Size](https://img.shields.io/docker/image-size/buxtoncalvin/multiprotocolgateway/latest?style=flat-square&logo=docker)](https://hub.docker.com/r/buxtoncalvin/multiprotocolgateway)
 
 ---
