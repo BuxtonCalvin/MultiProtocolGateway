@@ -63,6 +63,20 @@
     </div>
 
     <div class="flex items-center justify-between">
+      <dt class="surface-muted text-xs">Startup rollup refresh</dt>
+      <dd class="surface-title text-xs font-medium">
+        {% if health.initial_refresh_running %}
+        <span class="text-dirty">Running in background</span>
+        <span class="surface-muted">(rollup views may lag; avoid Rebuild until it finishes)</span>
+        {% elif health.initial_refresh_running is none %}
+        <span class="surface-muted">Not initialized</span>
+        {% else %}
+        Idle
+        {% endif %}
+      </dd>
+    </div>
+
+    <div class="flex items-center justify-between">
       <dt class="surface-muted text-xs">Backlog buffer</dt>
       <dd class="surface-title text-xs font-mono font-medium">
         {{ health.backlog_count }} / {{ health.max_backlog_size }} pts

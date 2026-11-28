@@ -254,7 +254,15 @@ Buckets are aligned with `time_bucket(interval, m_time, '<machine timezone>')`, 
 | `enable_rollups` | `true` | Create the rollup views. |
 | `enable_auto_refresh` | `true` | Refresh the views periodically from the bridge. |
 | `auto_refresh_interval` | `21600` | Seconds between refreshes (6 hours). |
+| `full_refresh_on_startup` | `false` | `false`: at startup, fully refresh only the rollups whose views were just created or rebuilt. `true`: always fully refresh every rollup at startup (in the background). |
 | `stuck_refresh_cancel_after` | `3600` | Seconds a refresh session may run, while another refresh is blocked behind it, before it is cancelled (1 hour). `0` never cancels. |
+
+**Startup refresh.** A full refresh of a rollup stack can take minutes on a large database (the monthly view is usually the slowest), so it runs only when it is needed, and never on the startup path.
+
+- **When it runs.** At startup the bridge checks each stack (the shared narrow rollups, and each protocol's own rollups). If its views already exist and match the configured buckets, the full refresh is skipped: they are kept current by the periodic refresh and by TimescaleDB's own refresh policies. A stack is fully refreshed when its views were just created or rebuilt (they are empty), when checking or creating them failed, or when `full_refresh_on_startup = true`. The log says `already exist and match config: skipping the startup full refresh` when it is skipped.
+- **Where it runs.** A refresh that is needed is queued and performed one stack after another by a separate thread (`RollupInitialRefreshThread`), so scraping and the web UI start as soon as the views and policies exist, and the flush worker is not paused while it runs. Until it finishes, the rollup views may lag behind the raw tables; raw-table queries are unaffected. The periodic refresh waits for it so the two never refresh the same view at once. The log shows `Initial full refresh of ... rollups queued` and `Background initial rollup refresh (...) finished in ...s`. A refresh that fails is logged, and the periodic refresh covers only each view's recent window afterwards, so use **Refresh Now** or **Force Rebuild** (section 4.6) if older history needs it.
+- **What is skipped.** Changes older than each view's window (3 hours, 3 days, 3 weeks and 3 months for hourly, daily, weekly and monthly) that were never refreshed are not picked up by a skipped startup refresh. A restart used to catch them as a side effect. If you import or backfill old data, use **Refresh Now** or **Force Rebuild**, or set `full_refresh_on_startup = true` to restore the old behavior.
+- **Admin screen.** *Startup rollup refresh* in the Bridge Health panel shows *Running in background* while it is in progress. Avoid **Rebuild Rollup Views** until it reads *Idle*: TimescaleDB refuses two refreshes of the same view at once.
 
 **Blocked and stuck refreshes.** A view cannot be refreshed while another refresh of the same view is still running. When that happens the bridge skips that view for the cycle, still refreshes all the others, and looks again after 5 minutes instead of waiting the full `auto_refresh_interval`. The log shows a warning for the first two cycles, one error on the third (and again every hour while it lasts) and an info line when the view recovers. The error names what is running in the database, one session per entry, for example:
 
@@ -759,6 +767,7 @@ Each panel loads separately, so a slow query in one cannot hold up the others. U
 | Field | Meaning |
 | --- | --- |
 | **Rollup migration** | *In progress* while a rollup rebuild or Delete Columns is running. The flush worker is paused during this time and readings queue in memory. *Idle* when nothing is running. *Not initialized* before the rollup manager exists. |
+| **Startup rollup refresh** | *Running in background* while the startup full refresh is in progress (rollup views may lag; avoid Rebuild until it finishes). *Idle* when nothing is running. *Not initialized* before the rollup manager exists. |
 | **Backlog buffer** | Points currently held in the backlog against `max_backlog_size`, for example `120 / 10000 pts`. *(buffering)* appears when the count is above zero, meaning the database has been unreachable and data is waiting to be replayed. |
 | **Auto-refresh Rollups** | `Every N h` (from `auto_refresh_interval`) or *Disabled*. |
 | **Rollup setup** | How many rollup-enabled protocols have finished setting up their rollup views, for example `2 / 2 protocol(s)`. A lower first number means a protocol's rollup setup has not finished, for example after a failed Delete Columns rebuild. The bridge retries it after its next reconnect. |
@@ -1162,6 +1171,8 @@ auto_refresh_interval = 21600
 enable_auto_refresh = True
 # Seconds a refresh session may block other refreshes before it is cancelled (1 hour; 0 = never cancel)
 stuck_refresh_cancel_after = 3600
+# Always fully refresh every rollup at startup, in the background (False: only newly created or rebuilt rollups)
+full_refresh_on_startup = False
 drop_after = 1 year
 
 # stale data settings

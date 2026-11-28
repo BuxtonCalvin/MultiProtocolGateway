@@ -145,6 +145,8 @@ enable_dynamic_chunk_sizing = true
 enable_rollups = true
 auto_refresh_interval = 21600
 enable_auto_refresh = true
+# always fully refresh every rollup at startup, in the background (false: only newly created or rebuilt rollups)
+full_refresh_on_startup = false
 drop_after = 1 year
 stale_data_timeout = 300
 device_name = TimescaleDB MPG Bridge

@@ -692,6 +692,7 @@ class RollupPolicy(TypedDict):
     auto_refresh_interval: int
     enable_auto_refresh: bool
     enable_rollups: bool
+    full_refresh_on_startup: NotRequired[bool]
     stuck_refresh_cancel_after: NotRequired[int]
     retune_timeout_seconds: NotRequired[float]
 
@@ -706,6 +707,16 @@ class RefreshSession(TypedDict):
     state: str
     wait_event: str
     age_seconds: float
+
+
+class InitialRefreshJob(TypedDict):
+    """One startup full refresh waiting for RollupManager's background worker (see RollupManager._schedule_initial_refresh).
+
+    kind "shared" is the shared narrow stack (every view in RollupManager.known_rollup_views); kind "protocol" is one protocol's
+    own stack, named by protocol_name and wide_table_name (wide_table_name is None for a narrow-only protocol)."""
+    kind: Literal["shared", "protocol"]
+    protocol_name: str | None
+    wide_table_name: str | None
 
 
 class StaleTransportState(TypedDict):
@@ -837,6 +848,9 @@ class timescaledb(transport_base):
     enable_rollups: bool = True  # whether to create continuous aggregate rollups on init and start the auto-refresh thread.
     auto_refresh_interval: int = 21600  # seconds (default 6 hours), auto-refresh rollup
     enable_auto_refresh: bool = True  # whether to auto-refresh rollups periodically
+    # True: every startup queues a background full refresh of every rollup stack (the behavior before this setting existed).
+    # False: a stack is fully refreshed at startup only when its views were just created or rebuilt, or their setup failed.
+    full_refresh_on_startup: bool = False
     # SECONDS a refresh session may run, while another refresh is blocked behind it, before MPG cancels it (0 = never cancel).
     stuck_refresh_cancel_after: int = STUCK_REFRESH_CANCEL_AFTER_DEFAULT
     drop_after: str = "1 year"  # default retention policy for raw data in tables and views, can be overridden by settings SectionProxy
@@ -883,6 +897,7 @@ class timescaledb(transport_base):
             - enable_compression (bool): Enable compression on hypertables at startup (default: True)
             - enable_persistent_storage (bool): Enable disk backlog (default: True)
             - enable_rollups (bool): Enable continuous aggregate rollups (default: True)
+            - full_refresh_on_startup (bool): Always run a full refresh of every rollup at startup, in the background; when False, only stacks whose views were just created or rebuilt are fully refreshed (default: False)
             - enable_dynamic_chunk_sizing (bool): Enable dynamic hypertable chunk sizing (default: True)
             - force_float (bool): Force metric values to float (default: True)
             - host (str): Database host (default: "localhost")
@@ -996,6 +1011,7 @@ class timescaledb(transport_base):
             "auto_refresh_interval": settings.getint("auto_refresh_interval", fallback=self.auto_refresh_interval),
             "enable_auto_refresh": settings.getboolean("enable_auto_refresh", fallback=self.enable_auto_refresh),
             "enable_rollups": settings.getboolean("enable_rollups", fallback=self.enable_rollups),
+            "full_refresh_on_startup": settings.getboolean("full_refresh_on_startup", fallback=self.full_refresh_on_startup),
             "stuck_refresh_cancel_after": settings.getint("stuck_refresh_cancel_after", fallback=self.stuck_refresh_cancel_after),
         }
 
@@ -6714,6 +6730,20 @@ class RollupManager:
         # Process ids of refresh sessions already sent pg_cancel_backend; one still running next cycle is terminated instead.
         self._cancel_requested_pids: set[int] = set()
 
+        # Startup full refreshes run on their own worker thread so that init_bridge (and with it scraping and the web UI) is not
+        # held up by a refresh that can take minutes. _initial_refresh_lock guards the queue and the worker handle;
+        # initial_refresh_idle is set whenever nothing is queued or running, and the auto-refresh loop waits on it so the two
+        # never refresh the same view at once.
+        self._initial_refresh_lock: threading.Lock = threading.Lock()
+        self._initial_refresh_jobs: list[InitialRefreshJob] = []
+        self._initial_refresh_worker: threading.Thread | None = None
+        self.initial_refresh_idle: threading.Event = threading.Event()
+        self.initial_refresh_idle.set()
+        # Stacks (None = the shared narrow stack, else a protocol name) whose views were created or rebuilt during setup and so
+        # hold no data yet. Filled by ensure_rollups / _ensure_cagg_views_for_protocol, consumed by setup_rollup.
+        self._changed_rollup_stacks: set[str | None] = set()
+        self.full_refresh_on_startup: bool = bool(self.rollup_policy.get("full_refresh_on_startup", False))
+
 
     @property
     def tsdb_connected(self) -> bool:
@@ -6825,15 +6855,18 @@ class RollupManager:
         if self.enable_rollups:
             if use_shared_rollup_flow:
                 # 4a
+                shared_setup_failed: bool = False
                 try:
                     self.setup_with_retry(force=force)
                 except Exception as e:
+                    shared_setup_failed = True
                     self._log.error(f"Aggregate Rollup setup failed: {e}")
-                # 4b
+                # 4b: queued for the background worker, not run here -- a full refresh can take minutes.
                 try:
-                    self.refresh_rollups(force_full=True)
+                    if self._startup_refresh_needed_helper(None, shared_setup_failed):
+                        self._schedule_initial_refresh("shared", None, None)
                 except Exception as e:
-                    self._log.error(f"Refresh Rollup failed: {e}")
+                    self._log.error(f"Refresh Rollup could not be scheduled: {e}")
             elif protocol_name is not None:
                 # 4a
                 try:
@@ -6842,13 +6875,15 @@ class RollupManager:
                     self._log.error(f"CAGG view creation failed for protocol '{protocol_name}': {e}")
                     cagg_error = e
 
-                # 4b
+                # 4b: queued for the background worker, not run here, so the flush gate held by add_wide_rollup is released as
+                # soon as the views exist.
                 try:
-                    self._refresh_protocol_rollups_helper(protocol_name, wide_table_name)
+                    if self._startup_refresh_needed_helper(protocol_name, cagg_error is not None):
+                        self._schedule_initial_refresh("protocol", protocol_name, wide_table_name)
                 except Exception as e:
                     self._log.error(
-                        f"Initial rollup refresh failed for '{protocol_name}': {e}"
-                        f" — views exist but data may not be pre-aggregated."
+                        f"Initial rollup refresh could not be scheduled for '{protocol_name}': {e}"
+                        f" — views exist but data may not be pre-aggregated until the next scheduled refresh."
                     )
 
         if cagg_error is not None:
@@ -6856,6 +6891,110 @@ class RollupManager:
             # reconnect/rediscovery path from ever retrying it (it only retries protocols that are not complete).
             msg: str = f"Rollup views could not be created for protocol '{protocol_name}': {cagg_error}"
             raise RuntimeError(msg) from cagg_error
+
+    def _mark_rollup_stack_changed_helper(self, stack: str | None) -> None:
+        """
+        Record that a rollup stack's views were just created or rebuilt, so they hold no data until a full refresh has run.
+
+        Args:
+            stack: None for the shared narrow stack, otherwise the protocol whose own stack changed.
+        """
+        with self._initial_refresh_lock:
+            self._changed_rollup_stacks.add(stack)
+
+    def _startup_refresh_needed_helper(self, stack: str | None, setup_failed: bool) -> bool:
+        """
+        Decide whether a rollup stack needs a startup full refresh, and consume its "changed" mark.
+
+        A full refresh is needed when the stack's views were created or rebuilt during this setup (they are empty), when the
+        setup failed (their state is unknown), or when full_refresh_on_startup is set. Otherwise the views already exist, match
+        the configured buckets, and keep being brought up to date by the periodic refresh and TimescaleDB's own refresh policies, so
+        the full refresh, which can take minutes, is skipped.
+
+        Args:
+            stack: None for the shared narrow stack, otherwise the protocol name.
+            setup_failed: True if creating or checking the stack's views raised.
+
+        Returns:
+            True if the caller should queue the full refresh.
+        """
+        with self._initial_refresh_lock:
+            changed: bool = stack in self._changed_rollup_stacks
+            self._changed_rollup_stacks.discard(stack)
+        if changed or setup_failed or self.full_refresh_on_startup:
+            return True
+        name: str = "shared narrow" if stack is None else repr(stack)
+        msg: str = (
+            f"Rollup views for the {name} stack already exist and match config: skipping the startup full refresh "
+            f"(set full_refresh_on_startup = True to always run it)."
+        )
+        self._log.info(msg)
+        return False
+
+    def _schedule_initial_refresh(self, kind: Literal["shared", "protocol"], protocol_name: str | None, wide_table_name: str | None) -> None:
+        """
+        Queue a startup full refresh and make sure the background worker is running to perform it.
+
+        Returns immediately. A full refresh of the largest view can take minutes, and the callers (setup_rollup, reached from
+        init_bridge) run on the thread that goes on to start scraping and the web UI, so the refresh must not run there. One worker
+        runs every queued job one after another: the continuous aggregates are hierarchical, and TimescaleDB refuses a second
+        refresh of the same view while one is running, so running them in parallel would gain nothing.
+
+        A job identical to one already waiting is dropped (a reconnect re-runs the setup for incomplete protocols).
+
+        Args:
+            kind: "shared" for the shared narrow stack, "protocol" for one protocol's own stack.
+            protocol_name: The protocol whose stack to refresh; None for kind "shared".
+            wide_table_name: The protocol's wide table, or None for a narrow-only protocol and for kind "shared".
+        """
+        job: InitialRefreshJob = {"kind": kind, "protocol_name": protocol_name, "wide_table_name": wide_table_name}
+        with self._initial_refresh_lock:
+            if job in self._initial_refresh_jobs:
+                return
+            self._initial_refresh_jobs.append(job)
+            self.initial_refresh_idle.clear()
+            worker: threading.Thread | None = self._initial_refresh_worker
+            if worker is None or not worker.is_alive():
+                self._initial_refresh_worker = threading.Thread(
+                    target=self._initial_refresh_worker_helper, daemon=True, name="RollupInitialRefreshThread"
+                )
+                self._initial_refresh_worker.start()
+        msg: str = (
+            f"Initial full refresh of the {'shared narrow' if kind == 'shared' else repr(protocol_name)} rollups queued; "
+            f"it runs in the background, so startup continues."
+        )
+        self._log.info(msg)
+
+    def _initial_refresh_worker_helper(self) -> None:
+        """
+        Worker body for RollupInitialRefreshThread: run queued startup full refreshes one at a time until none are left.
+
+        A failing job is logged and does not stop the ones behind it (the periodic refresh retries that view later). The worker
+        stops between jobs once the stop event is set; a refresh already running inside the database cannot be interrupted from
+        here. When the queue is empty the handle is cleared and initial_refresh_idle is set, both under the lock, so a job
+        queued at that moment is never left without a worker.
+        """
+        while True:
+            with self._initial_refresh_lock:
+                if not self._initial_refresh_jobs or self._stop_refresh_rollup_event.is_set():
+                    self._initial_refresh_jobs.clear()
+                    self._initial_refresh_worker = None
+                    self.initial_refresh_idle.set()
+                    return
+                job: InitialRefreshJob = self._initial_refresh_jobs.pop(0)
+
+            started: float = time.perf_counter()
+            try:
+                if job["kind"] == "shared":
+                    self.refresh_rollups(force_full=True)
+                else:
+                    protocol_name: str = job["protocol_name"] or ""
+                    self._refresh_protocol_rollups_helper(protocol_name, job["wide_table_name"])
+                msg: str = f"Background initial rollup refresh ({job['kind']}) finished in {time.perf_counter() - started:.1f}s."
+                self._log.info(msg)
+            except Exception as e:
+                err: str = f"Background initial rollup refresh ({job['kind']}) failed: {e} — the periodic refresh will retry."
+                self._log.error(err)
 
     def start_auto_refresh(self) -> None:
 
@@ -6974,6 +7113,9 @@ class RollupManager:
                 if force and not any_rebuild_needed:
                     self._log.info("Force rebuild requested. Purging all rollups regardless of scan result.")
                     any_rebuild_needed = True
+
+                if any_rebuild_needed or any_missing_views:
+                    self._mark_rollup_stack_changed_helper(None)
 
                 # 3. Purge Phase: Only purge when an existing rollup stack is mismatched
                 if any_rebuild_needed:
@@ -7582,6 +7724,9 @@ class RollupManager:
                     self._log.info(f"Force rebuild requested for protocol '{protocol_name}'. Purging regardless of scan result.")
                     any_rebuild_needed = True
 
+                if any_rebuild_needed or any_missing_views:
+                    self._mark_rollup_stack_changed_helper(protocol_name)
+
                 if any_rebuild_needed:
                     self._log.info(f"Bucket change detected for protocol '{protocol_name}'. Purging protocol rollups for clean rebuild.")
                     self.drop_protocol_rollup(session=session, view_names=[view_name for view_name, _, _, _ in view_specs])
@@ -7677,6 +7822,7 @@ class RollupManager:
         These are shared across all protocols — device_info_id already partitions by device.
         Called at most once per RollupManager lifetime, guarded by _narrow_rollups_created.
         """
+        self._mark_rollup_stack_changed_helper(None)  # views are (re)created here, so they hold no data yet
         granularities: list[tuple[str, str, str]] = [
             ("hourly",  self.hourly_rollup_bucket,  self.hourly_rollup_start),
             ("daily",   self.daily_rollup_bucket,   self.daily_rollup_start),
@@ -8764,7 +8910,9 @@ class RollupManager:
             try:
                 # 1. Define the refresh sequence: Smallest Grain -> Largest Grain
                 # Monthly is independent (from hypertable), so it can go anywhere.
-                for view_name, start_offset in self.known_rollup_views.items():
+                # Iterate a snapshot: the startup refresh runs on a worker thread while init_bridge may still be registering
+                # further views into known_rollup_views.
+                for view_name, start_offset in list(self.known_rollup_views.items()):
                     if self._view_exists_helper(session, view_name):
                         self._refresh_single_rollup_helper(view_name, start_offset, force_full)
                     else:
@@ -9300,6 +9448,14 @@ class RollupManager:
                     self._stop_refresh_rollup_event.wait(timeout=30)
                     continue
 
+                # 2b. Initial Refresh Gatekeeper
+                # The startup full refresh runs on its own thread; TimescaleDB refuses a second refresh of the same view while
+                # one is running, so wait for it instead of colliding with it.
+                if not self.initial_refresh_idle.is_set():
+                    self._log.debug("Refresh skipped: initial full refresh still running.")
+                    self._stop_refresh_rollup_event.wait(timeout=30)
+                    continue
+
                 # 3. Drain Backlog Before Refresh
                 # This ensures late/backlogged data is in the hypertable
                 # so the CAGG refresh includes it.
@@ -9718,6 +9874,7 @@ class TimescaleHealthSnapshot(TypedDict):
     tsdb_connected: bool
     reconnecting: bool
     migration_in_progress: bool | None
+    initial_refresh_running: bool | None
     backlog_count: int
     max_backlog_size: int
     max_backlog_age: int
@@ -11022,6 +11179,9 @@ class BridgeAdminManager:
         migration_in_progress: bool | None = (
             self._bridge.rollup_mgr.migration_in_progress.is_set() if self._bridge.rollup_mgr is not None else None
         )
+        initial_refresh_running: bool | None = (
+            not self._bridge.rollup_mgr.initial_refresh_idle.is_set() if self._bridge.rollup_mgr is not None else None
+        )
         backlog_count: int = (
             len(self._bridge.backlog.backlog_points) if getattr(self._bridge, "backlog", None) is not None else 0
         )
@@ -11083,6 +11243,7 @@ class BridgeAdminManager:
             "tsdb_connected": self._bridge.tsdb_connected,
             "reconnecting": reconnecting,
             "migration_in_progress": migration_in_progress,
+            "initial_refresh_running": initial_refresh_running,
             "backlog_count": backlog_count,
             "max_backlog_size": self._bridge.max_backlog_size,
             "max_backlog_age": self._bridge.max_backlog_age,
