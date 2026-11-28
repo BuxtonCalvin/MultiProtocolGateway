@@ -10,6 +10,8 @@ ABB / FIMER,REACT2 SunSpec,abb_fimer_react2_sunspec,ModBus,https://github.com/Bu
 ABB / FIMER,VSN300 / VSN700 SunSpec,abb_fimer_vsn300_sunspec,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/ABB_Fimer.md
 Accuenergy,Acuvim II / IIR / IIE / IIW power meters,accuenergy_acuvim,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Accuenergy.md
 Acrel,DTSD1352-C three-phase DIN-rail energy meter,acrel_dtsd1352_c,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Acrel.md
+Afore,AF-SL single-phase hybrid inverter (AF3.6K-SL / AF5K-SL),afore_af_sl_hybrid,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Afore.md
+Afore,BNT string inverter (two-MPPT layout),afore_bnt_t4,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Afore.md
 APsystems,ECU SunSpec gateway,apsystems_ecu_sunspec,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/APsystems.md
 Deye / Sunsynk,"Single-phase hybrid inverter (SG01/02/03/04/05LP1, US split-phase SG01LP1-US), core monitoring map",deye_sunsynk,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Deye_Sunsynk.md
 Deye / Sunsynk,"Single-phase hybrid inverter (SG01/02/03/04/05LP1, US split-phase SG01LP1-US), full map",deye_sunsynk_hybrid,ModBus,https://github.com/BuxtonCalvin/MultiProtocolGateway/blob/main/documentation/devices/Deye_Sunsynk.md

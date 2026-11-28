@@ -1,0 +1,26 @@
+{
+  "transport": "modbus_rtu",
+  "baud": 9600,
+  "batch_size": 40,
+  "send_holding_register": false,
+  "send_input_register": true,
+  "send_coil_register": false,
+  "send_discrete_register": false,
+
+  "battery_status_codes": {
+    "4": "Charging",
+    "5": "Discharging",
+    "6": "Standby"
+  },
+
+  "running_status_codes": {
+    "1": "Standby",
+    "2": "Startup",
+    "3": "Grid",
+    "4": "Running, grid disconnected",
+    "5": "Running on generator",
+    "6": "Off grid",
+    "7": "On grid",
+    "10": "On grid"
+  }
+}

@@ -1,0 +1,19 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note,ha_device_class,ha_state_class,ha_entity_category
+"# SOURCES: Afore T4 communication protocol PDF (AFORE_T4.pdf), holding registers 0-15. The same 16 holding registers are read by the Afore BNTxxxKTL-2mppt Solarman definition, so this block is layout-independent.",,,,,,,,,,,,
+"# STATIC: versions, serial number, grid regulation, communication address, language and the grid connection limits change rarely and are read once per connection (startup). Everything is read-only here: the PDF allows writes (FC06), but a wrong grid regulation, limit or address can take the inverter off the grid or off the bus.",,,,,,,,,,,,
+0,dsp_version,DSP Version,,USHORT,,startup,R,,"DSP firmware version, e.g. 0x00C9 = 2.01.",,,diagnostic
+1,hmi_version,HMI Version,,USHORT,,startup,R,,"HMI firmware version, e.g. 0x0065 = 1.01.",,,diagnostic
+2~5,serial_number,Serial Number,,HEX,,startup,R,,"INFERRED: the PDF shows Sn[0]..Sn[15] packed two characters per byte, so the value is read as hexadecimal digits across 4 registers. Compare with the label on the inverter; Sn[14] is documented as reserved.",,,diagnostic
+6,grid_regulation,Grid Regulation,,USHORT,,startup,R,,"Grid safety standard; names in grid_regulation_codes in the protocol JSON. The PDF lists Malaysia as 0x1D, a duplicate of Austria; 0x1E is the unused value between them and is used here.",,,diagnostic
+7.b8,inverter_time_year,Inverter Time Year,,8bit,,,R,"{""Offset"": 2000}","High byte of the first time register: year as an offset from 2000. UNCONFIRMED byte order: the PDF's write table lists year, month, day, hour, minute, second (followed here) but its read table lists the notes in a different order. Read-only here; set the clock on the inverter.",,,diagnostic
+7.b0,inverter_time_month,Inverter Time Month,,8bit,,,R,,Low byte of the first time register.,,,diagnostic
+8.b8,inverter_time_day,Inverter Time Day,,8bit,,,R,,High byte of the second time register.,,,diagnostic
+8.b0,inverter_time_hour,Inverter Time Hour,,8bit,,,R,,Low byte of the second time register.,,,diagnostic
+9.b8,inverter_time_minute,Inverter Time Minute,,8bit,,,R,,High byte of the third time register.,,,diagnostic
+9.b0,inverter_time_second,Inverter Time Second,,8bit,,,R,,Low byte of the third time register.,,,diagnostic
+10,communication_address,Communication Address,,USHORT,1-32,startup,R,,"Modbus slave address, 1-32. Writable in the PDF but read-only here; changing it drops the link.",,,diagnostic
+11,language,Language,,USHORT,0-1,startup,R,,"Display language: 0 English, 1 Chinese.",,,diagnostic
+12,grid_connect_voltage_low,Grid Connect Voltage Low,0.1V,USHORT,,startup,R,,Lower grid voltage limit for connecting; set by the grid regulation.,voltage,,diagnostic
+13,grid_connect_voltage_high,Grid Connect Voltage High,0.1V,USHORT,,startup,R,,Upper grid voltage limit for connecting; set by the grid regulation.,voltage,,diagnostic
+14,grid_connect_frequency_low,Grid Connect Frequency Low,0.01Hz,USHORT,,startup,R,,Lower grid frequency limit for connecting; set by the grid regulation.,frequency,,diagnostic
+15,grid_connect_frequency_high,Grid Connect Frequency High,0.01Hz,USHORT,,startup,R,,Upper grid frequency limit for connecting; set by the grid regulation.,frequency,,diagnostic
