@@ -1,0 +1,27 @@
+register,variable_name,documented_name,unit,data_type,values,read_interval,writable,adjustments,note,ha_device_class,ha_state_class,ha_entity_category
+"# SOURCES: Afore T4 communication protocol PDF (AFORE_T4.pdf, three-MPPT layout) and the Afore BNTxxxKTL-2mppt Solarman definition (StephanJoubert/home_assistant_solarman), which is a working model. Where the two disagree this map follows the Solarman definition: phase voltages and 0.01 A currents.",,,,,,,,,,,,
+"# LAYOUT: this is the two-MPPT layout (input registers 0-26). Three-MPPT models add PV3 voltage and current at 11-12, which moves everything after them up by two; that layout is not covered. 32-bit values are two registers, high word first at the lower address, so they need no endian adjustment.",,,,,,,,,,,,
+"# SERIAL: Modbus RTU over RS-485, 9600 baud, 8N1, FC04 for this map and FC03 for the holding map. Set the inverter's RS485 protocol to Modbus in its menu first. Minimum query period 1 s.",,,,,,,,,,,,
+0,state,State,,16BIT_FLAGS,,,R,,Inverter state flags; names in state_codes in the protocol JSON.,,,diagnostic
+1,grid_voltage_l1,Grid Voltage L1,0.1V,USHORT,,,R,,Documented as the AB line voltage (Uab); the Solarman definition publishes it as the L1 voltage.,voltage,measurement,
+2,grid_voltage_l2,Grid Voltage L2,0.1V,USHORT,,,R,,Documented as the BC line voltage (Ubc); the Solarman definition publishes it as the L2 voltage.,voltage,measurement,
+3,grid_voltage_l3,Grid Voltage L3,0.1V,USHORT,,,R,,Documented as the CA line voltage (Uca); the Solarman definition publishes it as the L3 voltage.,voltage,measurement,
+4,grid_current_l1,Grid Current L1,0.01A,USHORT,,,R,,Phase A current. The PDF lists 0.1 A; the working Solarman definition uses 0.01 A.,current,measurement,
+5,grid_current_l2,Grid Current L2,0.01A,USHORT,,,R,,Phase B current. The PDF lists 0.1 A; the working Solarman definition uses 0.01 A.,current,measurement,
+6,grid_current_l3,Grid Current L3,0.01A,USHORT,,,R,,Phase C current. The PDF lists 0.1 A; the working Solarman definition uses 0.01 A.,current,measurement,
+7,pv1_voltage,PV1 Voltage,0.1V,USHORT,,,R,,PV string 1 voltage.,voltage,measurement,
+8,pv1_current,PV1 Current,0.01A,USHORT,,,R,,PV string 1 current. The PDF lists 0.1 A; the working Solarman definition uses 0.01 A.,current,measurement,
+9,pv2_voltage,PV2 Voltage,0.1V,USHORT,,,R,,PV string 2 voltage.,voltage,measurement,
+10,pv2_current,PV2 Current,0.01A,USHORT,,,R,,PV string 2 current. The PDF lists 0.1 A; the working Solarman definition uses 0.01 A.,current,measurement,
+11,grid_frequency,Grid Frequency,0.1Hz,USHORT,,,R,,Grid frequency.,frequency,measurement,
+12,module_temperature,Module Temperature,0.1°C,USHORT,,,R,,Inverter module temperature. Negative-value encoding is not confirmed; compare with the inverter display.,temperature,measurement,
+13,housing_temperature,Inverter Housing Temperature,0.1°C,USHORT,,,R,,Inverter housing temperature (the Solarman definition calls it the inner temperature). Negative-value encoding is not confirmed.,temperature,measurement,
+14,day_energy,Day Energy,0.001kWh,UINT,,,R,,"Energy generated today, in Wh on the wire. 2 registers 14-15, high word first. The Solarman definition reads only the low word at 15.",energy,total_increasing,
+16,output_power,Output Power,W,UINT,,,R,,"Current generation power. 2 registers 16-17, high word first. The Solarman definition reads only the low word at 17.",power,measurement,
+18,day_run_time,Day Run Time,s,UINT,,,R,,"Cumulative generation time today. 2 registers 18-19, high word first. The Solarman definition reads only the low word at 19.",duration,total_increasing,
+20,total_energy,Total Energy,0.001kWh,UINT,,,R,,"Lifetime energy generated, in Wh on the wire. 2 registers 20-21, high word first (the Solarman definition reads it as a 32-bit value).",energy,total_increasing,
+22,fault_e01,Fault E01,,16BIT_FLAGS,,,R,,Internal fault flags; names in fault_e01_codes in the protocol JSON.,,,diagnostic
+23,fault_e02,Fault E02,,16BIT_FLAGS,,,R,,Protection flags; names in fault_e02_codes in the protocol JSON.,,,diagnostic
+24,fault_e03,Fault E03,,16BIT_FLAGS,,,R,,Protection flags; names in fault_e03_codes in the protocol JSON.,,,diagnostic
+25,fault_e04,Fault E04,,16BIT_FLAGS,,,R,,Protection flags; names in fault_e04_codes in the protocol JSON.,,,diagnostic
+26,fault_e05,Fault E05,,16BIT_FLAGS,,,R,,"Fan, sensor and breaker flags; names in fault_e05_codes in the protocol JSON.",,,diagnostic
