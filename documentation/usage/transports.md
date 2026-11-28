@@ -702,6 +702,7 @@ New registers added to the protocol map are automatically added as new columns o
 | `enable_rollups` | `true` | Create continuous aggregate rollup views. |
 | `enable_auto_refresh` | `true` | Automatically refresh rollup aggregates on a schedule. |
 | `auto_refresh_interval` | `21600` | Seconds between rollup refreshes (default: 6 hours). |
+| `full_refresh_on_startup` | `false` | Always fully refresh every rollup at startup, in the background. When `false`, only rollups whose views were just created or rebuilt are fully refreshed. |
 | `migrate_data` | `true` | Rebuild rollup views when rollup settings change. |
 | `drop_after` | `1 year` | Hypertable data retention period. Older chunks are dropped automatically. |
 

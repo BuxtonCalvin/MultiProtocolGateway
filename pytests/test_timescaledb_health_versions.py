@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Sequence
 
 # These tests deliberately exercise BridgeAdminManager internals with lightweight fakes.
@@ -99,6 +100,31 @@ def test_version_query_failure_does_not_break_the_rest_of_the_snapshot() -> None
     assert snap["protocols_rollup_total"] == 2
 
 
+def _manager_with_rollups(idle: bool) -> Any:
+    mgr: Any = _manager(_Session([], "18.0"))
+    initial_refresh_idle: threading.Event = threading.Event()
+    if idle:
+        initial_refresh_idle.set()
+    mgr._bridge.rollup_mgr = SimpleNamespace(
+        migration_in_progress=threading.Event(), initial_refresh_idle=initial_refresh_idle,
+        enable_auto_refresh=True, auto_refresh_interval=21600,
+    )
+    return mgr
+
+
+def test_snapshot_reports_whether_the_startup_rollup_refresh_is_running() -> None:
+    assert _manager_with_rollups(idle=False).get_health_snapshot()["initial_refresh_running"] is True
+    assert _manager_with_rollups(idle=True).get_health_snapshot()["initial_refresh_running"] is False
+    assert _manager(_Session([], "18.0")).get_health_snapshot()["initial_refresh_running"] is None  # no rollup manager yet
+
+
+def test_template_shows_the_startup_rollup_refresh_state() -> None:
+    assert "Running in background" in _render(_health(initial_refresh_running=True))
+    idle_html: str = _render(_health(initial_refresh_running=False))
+    assert "Startup rollup refresh" in idle_html and "Running in background" not in idle_html
+    assert "Not initialized" in _render(_health(initial_refresh_running=None, migration_in_progress=False))
+
+
 def _render(health: dict[str, Any]) -> str:
     env = Environment(loader=FileSystemLoader(str(TEMPLATES)), autoescape=True)
     return env.get_template("partials/bridge_timescale_health_panel.html").render(health=health)
@@ -106,7 +132,7 @@ def _render(health: dict[str, Any]) -> str:
 
 def _health(**over: Any) -> dict[str, Any]:
     base: dict[str, Any] = {
-        "migration_in_progress": False, "backlog_count": 0, "max_backlog_size": 10000, "enable_auto_refresh": True,
+        "migration_in_progress": False, "initial_refresh_running": False, "backlog_count": 0, "max_backlog_size": 10000, "enable_auto_refresh": True,
         "auto_refresh_interval": 21600, "protocols_rollup_complete": 2, "protocols_rollup_total": 2,
         "auto_update_extensions": False, "postgres_version": "18.0", "extension_versions": [],
     }
